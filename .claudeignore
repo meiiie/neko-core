@@ -1,0 +1,31 @@
+# Keep Claude's navigation clean: ignore build output, caches, models, and run scratch.
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Models / large artifacts
+models/
+*.gguf
+*.bin
+*.safetensors
+
+# Run scratch (never part of the clean repo)
+run-*/
+output-*/
+output/
+traces-*/
+task-runs*/
+eval-runs/
+*.log
+
+# Local secrets / config (also gitignored)
+.env
+.env.*
+**/.neko-core/config.json

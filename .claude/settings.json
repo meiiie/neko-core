@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rtk python -m pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(rtk python -m compileall:*)",
+      "Bash(python -m compileall:*)",
+      "Bash(python -m neko_core:*)",
+      "Bash(rtk git status:*)",
+      "Bash(rtk git diff:*)",
+      "Bash(rtk git log:*)",
+      "Bash(rtk git add:*)",
+      "Bash(rtk git ls-files:*)"
+    ],
+    "deny": [
+      "Edit(**/bang_c/**)",
+      "Write(**/bang_c/**)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.key)",
+      "Read(**/*.pem)",
+      "Read(**/.neko-core/config.json)"
+    ]
+  }
+}
