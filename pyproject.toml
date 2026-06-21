@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neko-core"
+version = "0.1.0"
+description = "A local-first agentic CLI in the spirit of Claude Code / Codex CLI. Config-first, offline-capable."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "The Wiii Lab" }]
+keywords = ["llm", "agent", "cli", "local-first", "offline", "coding-agent"]
+
+# The core is dependency-light on purpose; providers bring their own extras.
+dependencies = []
+
+[project.optional-dependencies]
+local = ["llama-cpp-python>=0.2.0"]
+openai = ["openai>=1.0.0"]
+dev = ["pytest>=7", "ruff>=0.1"]
+
+[project.scripts]
+neko = "neko_core.cli:main"
+neko-core = "neko_core.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

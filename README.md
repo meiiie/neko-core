@@ -1,53 +1,46 @@
+![Neko Core](assets/neko-core-banner.png)
+
 # Neko Core
 
-> A **config-first, offline-first** local LLM inference harness — runs a single **≤5B** model in one self-contained Docker container, engineered to **never score zero**.
+> A **local-first agentic CLI** — a coding & automation assistant in the spirit of **Claude Code** / **Codex CLI**, but **offline-capable** and **config-first**.
 
-**By [The Wiii Lab](https://github.com/meiiie).** Built for **HackAIthon 2026 — Bảng C (Innovator)** by team **Neko Core**, Vietnam Maritime University (VMU).
+**By [The Wiii Lab](https://github.com/meiiie).**
 
 ---
 
 ## What it is
 
-Neko Core packages a single small language model (**Qwen3-4B-Instruct-2507**, ≤5B params) into one **offline, self-contained** runtime: it reads multiple-choice questions from `/data`, lets the model reason, and writes answers to `/output/pred.csv` — with the engineering discipline of a production system.
+One `neko` command: chat with an agent that can **read, edit, run, and search** inside your project — driven by a small open model on your own machine (no API key required), or a hosted model when you want one.
 
-Three ideas drive it:
+- **Local-first / offline-capable** — run e.g. Qwen3-4B locally; hosted models are opt-in.
+- **Config-first** — swap model / provider / policy with an *edit*, not a code change.
+- **Safe by default** — destructive tools behind an approval gate; the agent loop has a hard step cap.
 
-- **Config-first harness.** Strategies (self-consistency, tiered, tool-use, reading, RAG…) are typed, swappable processors selected by a policy gate. Adapting to a rule change is a *data* edit, not a code change.
-- **Choose-by-measurement.** Every "lever" (fine-tune, RAG, tool-use) is built, measured on held-out data, and shipped *only if it provably helps*. We keep the receipts — including what we rejected and why.
-- **Never-zero engineering.** Architecture-portable across every NVIDIA GPU (≥ Pascal) with a CPU fallback, an inviolable output contract, and per-question checkpoint/resume — so a single failure can never zero a whole 2000-question run.
+See [docs/VISION.md](docs/VISION.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Status
 
-🚧 This repository is the home of Neko Core.
+🌱 **Early scaffold.** The CLI skeleton, the config-first loader, and the module interfaces are in place; the agent loop, providers, and tools are being built next.
 
-The competition submission is **frozen** at [`meiiie/bang_c`](https://github.com/meiiie/bang_c) until **2026-06-23**. The cleaned engine source, the `neko` CLI, and the Docker image land here right after submission.
-
-## Quick start *(arrives with the engine)*
+## Quick start
 
 ```bash
-# CLI
-pip install neko-core
-neko run --data ./data --output ./output      # /data/*_test.csv → /output/pred.csv (qid,answer)
+git clone https://github.com/meiiie/neko-core
+cd neko-core
+pip install -e .
+
+neko --version
+neko config        # show the resolved config-first settings
+neko chat          # (scaffold) interactive agentic session
 ```
 
-```bash
-# or the self-contained offline container
-docker run --rm --gpus all \
-  -v "$PWD/data:/data" -v "$PWD/output:/output" \
-  hacamy12345/neko-core:latest
-```
+## Heritage
+
+Neko Core began as a config-first inference harness for **HackAIthon 2026 — Bảng C** (team Neko Core, Vietnam Maritime University). The competition entry stays frozen at [`meiiie/bang_c`](https://github.com/meiiie/bang_c); **this repository is the standalone product** that grows beyond the contest.
 
 ## Team
 
-Team **Neko Core** — Vietnam Maritime University (VMU):
-
-| Name | Role |
-|---|---|
-| Nguyễn Mạnh Hùng | Team lead |
-| Bùi Việt Hoàng | Member |
-| Phạm Thị Minh Hồng | Member |
-| Phạm Thị Thu Thảo | Member |
-| Nghiêm Thị Mỹ Linh | Member |
+Team **Neko Core** — Vietnam Maritime University (VMU): Nguyễn Mạnh Hùng (lead) · Bùi Việt Hoàng · Phạm Thị Minh Hồng · Phạm Thị Thu Thảo · Nghiêm Thị Mỹ Linh
 
 ## License
 
