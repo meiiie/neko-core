@@ -20,6 +20,19 @@ from . import __version__
 from .config import load_config
 from .doctor import collect_checks, render
 from .project import init_project, init_user
+from .registry import (
+    collect_capabilities,
+    evaluate_policy,
+    list_agents,
+    list_commands,
+    render_agent_detail,
+    render_agents,
+    render_capabilities,
+    render_commands,
+    render_policy_report,
+    resolve_agent,
+)
+from .tools import list_tools, render_tool_detail, render_tools, resolve_tool
 
 
 def _load(args):
@@ -63,6 +76,38 @@ def _cmd_init_user(args) -> int:
 def _cmd_init(args) -> int:
     print(init_project(force=args.force).message)
     return 0
+
+
+def _cmd_tools(args) -> int:
+    if args.name:
+        print(render_tool_detail(resolve_tool(args.name)))
+    else:
+        print(render_tools(list_tools()))
+    return 0
+
+
+def _cmd_agents(args) -> int:
+    if args.name:
+        print(render_agent_detail(resolve_agent(args.name)))
+    else:
+        print(render_agents(list_agents()))
+    return 0
+
+
+def _cmd_commands(args) -> int:
+    print(render_commands(list_commands()))
+    return 0
+
+
+def _cmd_capabilities(args) -> int:
+    print(render_capabilities(collect_capabilities(_load(args))))
+    return 0
+
+
+def _cmd_policy(args) -> int:
+    report = evaluate_policy(_load(args))
+    print(render_policy_report(report))
+    return 1 if report.verdict == "fail" else 0
 
 
 def _cmd_chat(args) -> int:
@@ -115,6 +160,27 @@ def build_parser() -> argparse.ArgumentParser:
     init_cmd = sub.add_parser("init", help="scaffold ./.neko-core/config.json (project-local)")
     init_cmd.add_argument("--force", action="store_true", help="overwrite an existing file")
     init_cmd.set_defaults(func=_cmd_init)
+
+    tools = sub.add_parser("tools", help="list tool contracts (safe/gated)")
+    tools.add_argument("name", nargs="?", help="show one tool's full contract")
+    tools.set_defaults(func=_cmd_tools)
+
+    agents = sub.add_parser("agents", help="list agent roles and boundaries")
+    agents.add_argument("name", nargs="?", help="show one agent's full spec")
+    agents.set_defaults(func=_cmd_agents)
+
+    commands = sub.add_parser("commands", help="list the CLI command surface")
+    commands.set_defaults(func=_cmd_commands)
+
+    capabilities = sub.add_parser(
+        "capabilities", parents=[profile_parent], help="list runtime/CLI capabilities"
+    )
+    capabilities.set_defaults(func=_cmd_capabilities)
+
+    policy = sub.add_parser(
+        "policy", parents=[profile_parent], help="audit the safe/gated permission boundary"
+    )
+    policy.set_defaults(func=_cmd_policy)
 
     return parser
 
