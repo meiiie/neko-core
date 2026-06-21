@@ -1,0 +1,43 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- Secrets / local env (never commit) ---
+.env
+.env.*
+*.key
+*.pem
+secrets/
+**/.neko-core/config.json
+
+# --- Models / large artifacts ---
+models/
+*.gguf
+*.bin
+*.safetensors
+
+# --- Neko Core run scratch (kept out of the clean repo) ---
+run-*/
+output-*/
+output/
+traces-*/
+task-runs*/
+eval-runs/
+data/
+*.log
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
