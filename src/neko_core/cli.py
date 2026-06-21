@@ -142,10 +142,36 @@ def _cmd_policy(args) -> int:
 
 def _cmd_chat(args) -> int:
     cfg = _load(args)
-    print("neko chat — interactive agentic session")
-    print(f"  provider={cfg.provider} model={cfg.model or '(unset)'} profile={cfg.profile or 'none'}")
-    print("  [scaffold] the agent loop is not wired yet. See agent.py / docs/ARCHITECTURE.md.")
-    return 0
+    approval = "auto" if args.yolo else cfg.approval
+    agent = Agent(
+        provider=get_provider(cfg),
+        tools=ToolRegistry(root=Path.cwd(), approve=gate_for(approval)),
+        max_steps=cfg.max_steps,
+        on_event=_print_event,
+    )
+    print(
+        f"Neko Core chat - provider={cfg.provider} model={cfg.model or '(unset)'} "
+        f"profile={cfg.profile or 'none'} approval={approval}"
+    )
+    print("Type a task. Commands: /reset (new conversation), /exit. Ctrl-C / Ctrl-D to quit.")
+    while True:
+        try:
+            user = input("\nneko> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if not user:
+            continue
+        if user in {"/exit", "/quit"}:
+            return 0
+        if user == "/reset":
+            agent.messages = []
+            print("(conversation reset)")
+            continue
+        try:
+            print(f"\n{agent.run(user)}")
+        except (ValueError, RuntimeError) as error:
+            print(f"neko: error: {error}", file=sys.stderr)
 
 
 def _cmd_run(args) -> int:
@@ -160,11 +186,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile", default=None, help="named runtime profile (see `neko profiles`)"
     )
 
-    parser = argparse.ArgumentParser(prog="neko", description="Neko Core — local-first agentic CLI.")
+    parser = argparse.ArgumentParser(prog="neko", description="Neko Core - local-first agentic CLI.")
     parser.add_argument("--version", action="version", version=f"neko-core {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     chat = sub.add_parser("chat", parents=[profile_parent], help="interactive agentic session (REPL)")
+    chat.add_argument("--yolo", action="store_true", help="auto-approve gated tools (bounded autonomy)")
     chat.set_defaults(func=_cmd_chat)
 
     run = sub.add_parser("run", parents=[profile_parent], help="one-shot: run a single instruction")
