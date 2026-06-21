@@ -2,7 +2,7 @@
 
 # Neko Core
 
-> A **local-first agentic CLI** — a coding & automation assistant in the spirit of **Claude Code** / **Codex CLI**, but **offline-capable** and **config-first**.
+> A **config-first, local-first agentic CLI**, Claude-Code-patterned — growing into a coding & automation agent in the spirit of **Claude Code** / **Codex CLI**, but **offline-capable**.
 
 **By [The Wiii Lab](https://github.com/meiiie).**
 
@@ -10,17 +10,19 @@
 
 ## What it is
 
-One `neko` command: chat with an agent that can **read, edit, run, and search** inside your project — driven by a small open model on your own machine (no API key required), or a hosted model when you want one.
+Neko Core is a **config-first agentic CLI harness**: model, provider, thresholds, and policy live in *config, not code*. It is provider-agnostic (a small open model on your machine, or any OpenAI-compatible API) and borrows Claude Code's discipline — explicit **agents / tools / commands / capabilities** registries, a runtime/development **policy gate**, run-sessions, and a bounded-autonomous mode.
 
-- **Local-first / offline-capable** — run e.g. Qwen3-4B locally; hosted models are opt-in.
 - **Config-first** — swap model / provider / policy with an *edit*, not a code change.
-- **Safe by default** — destructive tools behind an approval gate; the agent loop has a hard step cap.
+- **Provider-agnostic & offline-capable** — local GGUF (llama.cpp), a local server, or any OpenAI-compatible endpoint.
+- **Safe by default** — explicit tool/agent contracts + a policy gate; bounded autonomy is a *named* state, not hidden behaviour.
 
-See [docs/VISION.md](docs/VISION.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**Direction:** grow this foundation into a full local-first **coding & automation agent** — `neko chat` → read / edit / run / search inside your project.
+
+📖 Start here: **[docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md)** · architecture: **[docs/HARNESS-ARCHITECTURE.md](docs/HARNESS-ARCHITECTURE.md)** · roadmap: **[docs/PORTING.md](docs/PORTING.md)** · vision: **[docs/VISION.md](docs/VISION.md)**
 
 ## Status
 
-🌱 **Early scaffold.** The CLI skeleton, the config-first loader, and the module interfaces are in place; the agent loop, providers, and tools are being built next.
+🌱 **Scaffold + porting.** The mature harness already exists in the heritage repo (`meiiie/bang_c`, package `hackaithon_c`); this repo holds a clean `neko` CLI scaffold plus the docs & roadmap to port and evolve it. See [docs/PORTING.md](docs/PORTING.md).
 
 ## Quick start
 
