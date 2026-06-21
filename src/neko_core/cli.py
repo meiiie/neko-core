@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from . import __version__
+from .agent import Agent
 from .config import load_config
 from .doctor import collect_checks, render
 from .project import init_project, init_user
@@ -32,11 +34,39 @@ from .registry import (
     render_policy_report,
     resolve_agent,
 )
+from .providers import get_provider
+from .tool_runtime import ToolRegistry, gate_for
 from .tools import list_tools, render_tool_detail, render_tools, resolve_tool
 
 
 def _load(args):
     return load_config(profile=getattr(args, "profile", None))
+
+
+def _print_event(kind: str, data) -> None:
+    """Compact, human-readable trace of the agent loop for the CLI."""
+    if kind == "tool_call":
+        args = data.get("arguments") or {}
+        summary = args.get("command") or args.get("path") or args.get("pattern") or ""
+        print(f"  -> {data['name']}({summary})")
+    elif kind == "tool_result":
+        observation = str(data["observation"]).replace("\n", " ")
+        if len(observation) > 200:
+            observation = observation[:200] + "..."
+        print(f"     {observation}")
+    elif kind == "max_steps":
+        print(f"  [stopped: reached max_steps={data}]")
+
+
+def _run_instruction(cfg, instruction: str, *, yolo: bool) -> int:
+    provider = get_provider(cfg)
+    approval = "auto" if yolo else cfg.approval
+    registry = ToolRegistry(root=Path.cwd(), approve=gate_for(approval))
+    agent = Agent(provider=provider, tools=registry, max_steps=cfg.max_steps, on_event=_print_event)
+    answer = agent.run(instruction)
+    print()
+    print(answer)
+    return 0
 
 
 def _cmd_config(args) -> int:
@@ -120,10 +150,7 @@ def _cmd_chat(args) -> int:
 
 def _cmd_run(args) -> int:
     cfg = _load(args)
-    print(f"neko run — one-shot instruction: {args.instruction!r}")
-    print(f"  provider={cfg.provider} model={cfg.model or '(unset)'} profile={cfg.profile or 'none'}")
-    print("  [scaffold] not wired yet. See agent.py / docs/ARCHITECTURE.md.")
-    return 0
+    return _run_instruction(cfg, args.instruction, yolo=args.yolo)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -142,6 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run", parents=[profile_parent], help="one-shot: run a single instruction")
     run.add_argument("instruction", help="the instruction to run")
+    run.add_argument("--yolo", action="store_true", help="auto-approve gated tools (bounded autonomy)")
     run.set_defaults(func=_cmd_run)
 
     config = sub.add_parser("config", parents=[profile_parent], help="show the resolved config")
