@@ -85,6 +85,16 @@ test("disabled tool is hidden from schemas and blocked on execute", async () => 
   expect(await reg.execute("bash", { command: "echo hi" })).toContain("disabled");
 });
 
+test("pre_tool_use hook blocks a tool on non-zero exit, allows on zero", async () => {
+  const blocked = makeReg("auto", () => true).reg;
+  blocked.hooks = { preToolUse: "exit 3" };
+  expect(await blocked.execute("ls", {})).toContain("Blocked by pre_tool_use hook");
+
+  const allowed = makeReg("auto", () => true).reg;
+  allowed.hooks = { preToolUse: "exit 0" };
+  expect(await allowed.execute("ls", {})).not.toContain("Blocked");
+});
+
 test("todo_write records the list on the registry and renders a checklist", async () => {
   const { reg } = makeReg();
   const out = await reg.execute("todo_write", {

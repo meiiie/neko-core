@@ -104,6 +104,7 @@ async function buildAgent(
   const mode = yolo ? "auto" : cfg.mode;
   const hub = await buildMcpHub(cfg.mcpServers);
   const registry = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
+  registry.hooks = cfg.hooks;
   const block = projectContextBlock();
   const systemPrompt = block ? `${DEFAULT_SYSTEM_PROMPT}\n\n${block}` : DEFAULT_SYSTEM_PROMPT;
   const agent = new Agent({

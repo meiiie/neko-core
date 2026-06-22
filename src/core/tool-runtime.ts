@@ -43,6 +43,8 @@ export class ToolRegistry {
   disabled = new Set<string>();
   /** The agent's current todo list (set by the todo_write tool; rendered by the REPL). */
   todos: { content: string; status: string }[] = [];
+  /** Opt-in shell hooks around tool calls (set from config). */
+  hooks?: { preToolUse?: string; postToolUse?: string };
 
   constructor(
     public readonly root: string,
@@ -67,6 +69,17 @@ export class ToolRegistry {
     }
     if (this.disabled.has(name)) {
       return `Tool '${name}' is disabled (enable with /tools ${name}).`;
+    }
+
+    // pre_tool_use hook: a non-zero exit blocks the tool (audit / policy gate).
+    if (this.hooks?.preToolUse) {
+      const r = spawnSync(this.hooks.preToolUse, {
+        shell: true, cwd: this.root, encoding: "utf-8", timeout: 10000,
+        env: { ...process.env, NEKO_TOOL: name, NEKO_ARGS: JSON.stringify(args) },
+      });
+      if (r.status !== 0) {
+        return `Blocked by pre_tool_use hook (exit ${r.status ?? "?"}): ${String(r.stderr || r.stdout || "").trim().slice(0, 200)}`;
+      }
     }
 
     // exit_plan_mode: always asks the user to approve the plan (the plan-review gate).
@@ -115,9 +128,24 @@ export class ToolRegistry {
     }
 
     try {
-      return await DISPATCH[name](this.root, args);
+      const out = await DISPATCH[name](this.root, args);
+      this.runPostHook(name, args, out);
+      return out;
     } catch (error) {
       return `Error: ${(error as Error).message}`;
+    }
+  }
+
+  /** post_tool_use hook: fire-and-observe after a tool runs (logging/formatting; never blocks). */
+  private runPostHook(name: string, args: Record<string, any>, result: string): void {
+    if (!this.hooks?.postToolUse) return;
+    try {
+      spawnSync(this.hooks.postToolUse, {
+        shell: true, cwd: this.root, timeout: 10000,
+        env: { ...process.env, NEKO_TOOL: name, NEKO_ARGS: JSON.stringify(args), NEKO_RESULT: String(result).slice(0, 4000) },
+      });
+    } catch {
+      /* hooks never break the turn */
     }
   }
 }

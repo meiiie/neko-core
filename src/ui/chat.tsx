@@ -105,6 +105,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const registryRef = useRef<ToolRegistry | null>(null);
   if (!registryRef.current) {
     registryRef.current = new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub);
+    registryRef.current.hooks = cfg.hooks;
   }
 
   const agentRef = useRef<Agent | null>(null);
