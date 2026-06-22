@@ -14,7 +14,7 @@ function makeReg(mode: PermissionMode = "auto", prompt: ApprovalGate = () => tru
 test("write then read", async () => {
   const { reg } = makeReg();
   expect(await reg.execute("write_file", { path: "a.txt", content: "hi" })).toContain("Wrote");
-  expect(await reg.execute("read_file", { path: "a.txt" })).toBe("hi");
+  expect(await reg.execute("read_file", { path: "a.txt" })).toContain("hi");
 });
 
 test("read missing", async () => {
@@ -62,14 +62,14 @@ test("plan blocks writes, allows reads", async () => {
   const { root, reg } = makeReg("plan", () => false);
   writeFileSync(join(root, "a.txt"), "yo");
   expect(await reg.execute("write_file", { path: "b.txt", content: "x" })).toContain("plan");
-  expect(await reg.execute("read_file", { path: "a.txt" })).toBe("yo");
+  expect(await reg.execute("read_file", { path: "a.txt" })).toContain("yo");
 });
 
 test("default + deny gate denies gated, allows safe", async () => {
   const { root, reg } = makeReg("default", () => false);
   writeFileSync(join(root, "a.txt"), "yo");
   expect(await reg.execute("write_file", { path: "b.txt", content: "x" })).toContain("Denied");
-  expect(await reg.execute("read_file", { path: "a.txt" })).toBe("yo");
+  expect(await reg.execute("read_file", { path: "a.txt" })).toContain("yo");
 });
 
 test("accept-edits auto-approves edits but prompts bash", async () => {

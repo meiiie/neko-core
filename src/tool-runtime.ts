@@ -118,7 +118,8 @@ function toolReadFile(root: string, args: Record<string, any>): string {
   if (text.length > MAX_READ_CHARS) {
     text = text.slice(0, MAX_READ_CHARS) + `\n... (truncated at ${MAX_READ_CHARS} chars)`;
   }
-  return text;
+  // Line-numbered for reference (the model cites lines; numbers are display-only).
+  return text.split("\n").map((l, i) => `${String(i + 1).padStart(5)}  ${l}`).join("\n");
 }
 
 function toolSearch(root: string, args: Record<string, any>): string {

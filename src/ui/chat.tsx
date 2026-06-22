@@ -42,7 +42,7 @@ export interface Approval {
 const HELP = [
   "Commands:",
   "  /help  /cost  /model  /profiles  /init  /clear  /reset  /exit",
-  "Input: Up/Down history; end a line with \\ to continue (multiline).",
+  "Input: Up/Down history; end a line with \\ to continue (multiline); @path adds a file to context.",
   "Shift+Tab: cycle permission mode (default -> accept-edits -> plan -> auto).",
   "Esc: interrupt a running turn. Ctrl-C: quit.",
 ].join("\n");
@@ -307,12 +307,21 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       }
     }
 
+    // @file mentions: expand @path into file context (read_file is safe).
+    let toSend = text;
+    const mentions = text.match(/@\S+/g);
+    if (mentions) {
+      for (const m of [...new Set(mentions)]) {
+        const p = m.slice(1).replace(/[)\].,;:]+$/, "");
+        if (p) toSend += `\n\n[@${p}]\n${await registryRef.current!.execute("read_file", { path: p })}`;
+      }
+    }
     addLine("user", text);
     setBusy(true);
     const controller = new AbortController();
     controllerRef.current = controller;
     try {
-      const result = await agentRef.current!.run(text, controller.signal);
+      const result = await agentRef.current!.run(toSend, controller.signal);
       const streamed = streamRef.current.trim().length > 0;
       flushStream();
       if (result === "[interrupted]") addLine("info", "(interrupted)");
