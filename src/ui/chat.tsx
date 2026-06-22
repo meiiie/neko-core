@@ -48,6 +48,17 @@ function trunc(s: string, n = 120): string {
   return one.length > n ? one.slice(0, n) + "..." : one;
 }
 
+const SLASH: { name: string; desc: string }[] = [
+  { name: "/help", desc: "show help" },
+  { name: "/cost", desc: "token usage this session" },
+  { name: "/model", desc: "active provider/model/mode" },
+  { name: "/profiles", desc: "list profiles" },
+  { name: "/init", desc: "scaffold ./.neko-core/config.json" },
+  { name: "/clear", desc: "clear transcript + context" },
+  { name: "/reset", desc: "reset conversation context" },
+  { name: "/exit", desc: "quit" },
+];
+
 interface ChatProps {
   profile?: string;
   yolo: boolean;
@@ -320,9 +331,18 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           <Spinner type="line" /> working {elapsed}s - {agentRef.current!.cost.totalTokens} tok - esc to interrupt
         </Text>
       ) : (
-        <Box borderStyle="classic" borderColor="cyan" paddingX={1}>
-          <Text color="cyan">{pendingMulti ? "... " : `[${mode}] > `}</Text>
-          <TextInput value={input} onChange={setInput} onSubmit={onSubmit} placeholder="Type a task, or /help" />
+        <Box flexDirection="column">
+          <Box borderStyle="classic" borderColor="cyan" paddingX={1}>
+            <Text color="cyan">{pendingMulti ? "... " : `[${mode}] > `}</Text>
+            <TextInput value={input} onChange={setInput} onSubmit={onSubmit} placeholder="Type a task, or /help" />
+          </Box>
+          {input.startsWith("/") ? (
+            <Box flexDirection="column" paddingLeft={2}>
+              {SLASH.filter((c) => c.name.startsWith(input.split(/\s+/)[0])).map((c) => (
+                <Text key={c.name} color="gray">{c.name}  - {c.desc}</Text>
+              ))}
+            </Box>
+          ) : null}
         </Box>
       )}
     </Box>

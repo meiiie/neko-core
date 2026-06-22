@@ -79,3 +79,4 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
 
 ## 2026-06-22 — Session 3: UX/UI parity
 - **E1 done** — compared against the local claude-code component surface (App/BaseTextInput/Markdown/Message/FileEditToolDiff/InterruptedByUser...) and reimplemented clean-room: welcome box, bordered input, markdown output, tool bullets, spinner+elapsed, Esc-to-interrupt (AbortSignal), approval box with diff preview. ASCII-safe. Approval gate now passes tool args (for diff). Binary rebuilt + reinstalled.
+- **E2** slash-command autocomplete menu (filtered list under the input when typing /). Verified via headless render + snapshot.

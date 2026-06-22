@@ -64,6 +64,18 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
   unmount();
 });
 
+test("typing '/' shows a slash-command autocomplete menu", async () => {
+  const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+  const { stdin, lastFrame, unmount } = render(<ChatApp yolo provider={provider} />);
+  stdin.write("/c");
+  await tick(60);
+  const out = lastFrame() ?? "";
+  expect(out).toContain("/cost");
+  expect(out).toContain("/clear");
+  expect(out).not.toContain("/exit"); // filtered: doesn't start with /c
+  unmount();
+});
+
 test("ApprovalBox shows an edit diff preview", () => {
   const approval = { toolName: "edit", args: { path: "a.ts", old_string: "const x = 1", new_string: "const x = 2" }, resolve: () => {} };
   const { lastFrame, unmount } = render(<ApprovalBox approval={approval} />);
