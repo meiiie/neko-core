@@ -1,8 +1,10 @@
 ![Neko Core](assets/neko-core-banner.png)
 
-# Neko Core
+# Neko Code
 
-> A **config-first, local-first agentic CLI**, Claude-Code-patterned — growing into a coding & automation agent in the spirit of **Claude Code** / **Codex CLI**, but **offline-capable**.
+> A **local-first terminal coding agent** in the spirit of **Claude Code** / **Codex CLI** —
+> built on **TypeScript + Bun + Ink**, **provider-agnostic**, and **offline-capable**.
+> Engine: **Neko Core**.
 
 **By [The Wiii Lab](https://github.com/meiiie).**
 
@@ -10,39 +12,64 @@
 
 ## What it is
 
-Neko Core is a **config-first agentic CLI harness**: model, provider, thresholds, and policy live in *config, not code*. It is provider-agnostic (a small open model on your machine, or any OpenAI-compatible API) and borrows Claude Code's discipline — explicit **agents / tools / commands / capabilities** registries, a runtime/development **policy gate**, run-sessions, and a bounded-autonomous mode.
+Neko Code drives an agent that **reads, searches, edits, and runs** inside your project, from
+the terminal. It is **config-first** (model / provider / policy live in config, not code) and
+talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI, …) or a **local
+server** (llama.cpp `llama-server`, Ollama), so it works offline.
 
-- **Config-first** — swap model / provider / policy with an *edit*, not a code change.
-- **Provider-agnostic & offline-capable** — local GGUF (llama.cpp), a local server, or any OpenAI-compatible endpoint.
-- **Safe by default** — explicit tool/agent contracts + a policy gate; bounded autonomy is a *named* state, not hidden behaviour.
-
-**Direction:** grow this foundation into a full local-first **coding & automation agent** — `neko chat` → read / edit / run / search inside your project.
-
-📖 Start here: **[docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md)** · architecture: **[docs/HARNESS-ARCHITECTURE.md](docs/HARNESS-ARCHITECTURE.md)** · roadmap: **[docs/PORTING.md](docs/PORTING.md)** · vision: **[docs/VISION.md](docs/VISION.md)**
-
-## Status
-
-🌱 **Scaffold + porting.** The mature harness already exists in the heritage repo (`meiiie/bang_c`, package `hackaithon_c`); this repo holds a clean `neko` CLI scaffold plus the docs & roadmap to port and evolve it. See [docs/PORTING.md](docs/PORTING.md).
+- **Streaming agent loop** — `complete → tool-calls → observe`, capped by `max_steps`, with live
+  token streaming and usage tracking.
+- **Tools** — `read_file` · `search` · `glob` · `ls` (safe) and `write_file` · `edit` · `bash`
+  (approval-gated). Path-taking tools refuse to escape the project root.
+- **Permission modes** — `default` / `accept-edits` / `plan` / `auto`, cycled with **Shift+Tab**
+  (a *named* bounded-autonomy state, audited by `neko policy`).
+- **Ink TUI** — streaming chat with slash commands (`/help`, `/cost`, `/model`, …), input
+  history, and multiline.
+- **Project context** — auto-loads `NEKO.md` / `CLAUDE.md` into the system prompt.
+- **Sessions** — conversations persist; resume with `neko chat --resume`.
+- **MCP** — connect Model Context Protocol servers and use their tools (`neko mcp`).
 
 ## Quick start
+
+Requires [Bun](https://bun.sh).
 
 ```bash
 git clone https://github.com/meiiie/neko-core
 cd neko-core
-pip install -e .
+bun install
 
-neko --version
-neko config        # show the resolved config-first settings
-neko chat          # (scaffold) interactive agentic session
+bun bin/neko.ts init-user      # scaffold ~/.neko-core/config.json (API key + profile)
+# edit ~/.neko-core/config.json: set api_key + model (or use env NEKO_API_KEY)
+bun bin/neko.ts doctor         # check provider/model/key
+bun bin/neko.ts chat           # interactive agentic session
 ```
+
+Build a standalone binary (no Bun needed to run it):
+
+```bash
+bun run build                  # -> dist/neko  (single executable)
+```
+
+### Commands
+
+`neko chat` · `run <task>` · `config` · `doctor` · `profiles` · `init[-user]` ·
+`tools` · `agents` · `commands` · `capabilities` · `policy` · `context` · `sessions` · `mcp`.
+
+`--profile <name>` selects a runtime profile · `--yolo` auto-approves gated tools ·
+`neko chat --resume` continues the latest session.
 
 ## Heritage
 
-Neko Core began as a config-first inference harness for **HackAIthon 2026 — Bảng C** (team Neko Core, Vietnam Maritime University). The competition entry stays frozen at [`meiiie/bang_c`](https://github.com/meiiie/bang_c); **this repository is the standalone product** that grows beyond the contest.
+Neko Code began as a config-first inference harness for **HackAIthon 2026 — Bảng C** (team Neko
+Core, Vietnam Maritime University). The competition entry stays frozen at
+[`meiiie/bang_c`](https://github.com/meiiie/bang_c). The original standalone port was written in
+Python and is preserved as the **spec/reference** under [`reference/python/`](reference/python/);
+the shipping product is this TypeScript build.
 
 ## Team
 
-Team **Neko Core** — Vietnam Maritime University (VMU): Nguyễn Mạnh Hùng (lead) · Bùi Việt Hoàng · Phạm Thị Minh Hồng · Phạm Thị Thu Thảo · Nghiêm Thị Mỹ Linh
+Team **Neko Core** — Vietnam Maritime University (VMU): Nguyễn Mạnh Hùng (lead) · Bùi Việt Hoàng ·
+Phạm Thị Minh Hồng · Phạm Thị Thu Thảo · Nghiêm Thị Mỹ Linh
 
 ## License
 

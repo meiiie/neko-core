@@ -1,6 +1,8 @@
 {
   "permissions": {
     "allow": [
+      "Bash(bun:*)",
+      "Bash(rtk bun:*)",
       "Bash(rtk python -m pytest:*)",
       "Bash(python -m pytest:*)",
       "Bash(rtk python -m compileall:*)",

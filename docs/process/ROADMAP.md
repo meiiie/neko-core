@@ -40,8 +40,8 @@ cost/token tracking · MCP client · single-binary distribution.
 
 ### Phase D — Polish & distribution
 - [x] **D1** `bun test` suite — 44 tests across config, providers, permissions, tools, runtime, registry, agent, context, session. *(all pass; typecheck clean)*
-- [ ] **D2** `bun build --compile` single binary; install script; re-point the `neko` command from the pipx(Python) install to the TS binary.
-- [ ] **D3** Rename pass to **Neko Code** (banner/help/README/CLAUDE.md); merge to `main` (after `/secret-scan` + owner sign-off).
+- [x] **D2** `bun build --compile` single binary (`dist/neko`, react-devtools-core bundled for Ink); re-pointed the `neko` command from the pipx(Python) install to the TS binary in `~/.local/bin`. *(verified: `which neko` → the binary; live `neko run` called a tool)*
+- [x] **D3** Renamed to **Neko Code** (README + CLAUDE.md refreshed for the TS product; engine stays "Neko Core"); secret-scan + merge to `main` + push (owner-approved).
 
 ## Loop rules
 - One milestone per iteration: implement → verify (typecheck + `bun test` + run) → commit → tick here + note in `WORKLOG.md`.
