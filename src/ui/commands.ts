@@ -37,6 +37,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/compact", desc: "summarize the conversation to free context" },
   { name: "/goal", desc: "set an ongoing goal (/goal <text>)" },
   { name: "/loop", desc: "run a task N times (/loop <n> <task>)" },
+  { name: "/auto", desc: "closed loop: work + self-review until done (/auto <goal>)" },
   { name: "/sessions", desc: "list saved sessions here" },
   { name: "/resume", desc: "resume a session (/resume [id])" },
   { name: "/effort", desc: "reasoning effort (/effort low|medium|high|off)" },

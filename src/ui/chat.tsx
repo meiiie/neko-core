@@ -269,7 +269,9 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       addLine("info", rememberNote(text.slice(1)));
       return;
     }
-    if (text.startsWith("/")) {
+    // /auto <goal>: closed-loop — work + self-review until done (bounded). Runs as a busy turn.
+    const loopGoal = /^\/auto\s+([\s\S]+)/.exec(text)?.[1]?.trim() || null;
+    if (text.startsWith("/") && !loopGoal) {
       await runSlashCommand(text, {
         cfg,
         agent: agentRef.current!,
@@ -289,22 +291,24 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       return;
     }
 
-    // @file mentions: expand @path into file context (read_file is safe).
-    let toSend = text;
-    const mentions = text.match(/@\S+/g);
+    // @file mentions: expand @path into file context (read_file is safe). Skipped for /auto.
+    let toSend = loopGoal ?? text;
+    const mentions = loopGoal ? null : text.match(/@\S+/g);
     if (mentions) {
       for (const m of [...new Set(mentions)]) {
         const p = m.slice(1).replace(/[)\].,;:]+$/, "");
         if (p) toSend += `\n\n[@${p}]\n${await registryRef.current!.execute("read_file", { path: p })}`;
       }
     }
-    addLine("user", text);
+    addLine("user", loopGoal ? `/auto ${loopGoal}` : text);
     verbRef.current = VERBS[Math.floor(Math.random() * VERBS.length)];
     setBusy(true);
     const controller = new AbortController();
     controllerRef.current = controller;
     try {
-      const result = await agentRef.current!.run(toSend, controller.signal);
+      const result = loopGoal
+        ? await agentRef.current!.runUntilDone(loopGoal, { signal: controller.signal })
+        : await agentRef.current!.run(toSend, controller.signal);
       const streamed = streamRef.current.trim().length > 0;
       flushStream();
       if (result === "[interrupted]") addLine("info", "(interrupted)");

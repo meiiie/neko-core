@@ -96,6 +96,25 @@ export class Agent {
     return summary;
   }
 
+  /** Closed-loop runner (agent-looping, "closed" variant): do the goal, then self-review against
+   * a high bar and fix gaps, repeating until the model replies DONE or maxIters is hit. Bounded +
+   * an eval each pass = autonomous without becoming a slop machine. Honors the abort signal. */
+  async runUntilDone(goal: string, opts: { maxIters?: number; signal?: AbortSignal } = {}): Promise<string> {
+    const maxIters = Math.max(1, Math.min(opts.maxIters ?? 6, 20));
+    let out = await this.run(goal, opts.signal);
+    for (let i = 1; i < maxIters; i++) {
+      if (opts.signal?.aborted || out === "[interrupted]") return out;
+      out = await this.run(
+        `CLOSED-LOOP REVIEW (pass ${i + 1}/${maxIters}). Goal: "${goal}".\n` +
+          `Critically check the work so far against the goal and a high quality bar. If it is FULLY ` +
+          `met, reply with exactly "DONE" and nothing else. Otherwise, fix what's missing now.`,
+        opts.signal,
+      );
+      if (/^\s*done[.!]?\s*$/i.test(out)) break;
+    }
+    return out;
+  }
+
   /** Keep one live system message (right after the base prompt) holding env + project context,
    * refreshed each turn — so a mid-session model switch or NEKO.md edit is reflected at once. */
   private refreshDynamicContext(): void {

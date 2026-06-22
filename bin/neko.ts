@@ -39,18 +39,20 @@ interface Args {
   force: boolean;
   yolo: boolean;
   resume: boolean;
+  loop: boolean;
   version: boolean;
   help: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
   const tokens: string[] = [];
-  const args: Args = { positionals: [], force: false, yolo: false, resume: false, version: false, help: false };
+  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, version: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--profile") args.profile = argv[++i];
     else if (a === "--force") args.force = true;
     else if (a === "--yolo") args.yolo = true;
+    else if (a === "--loop") args.loop = true;
     else if (a === "--resume") args.resume = true;
     else if (a === "--version" || a === "-v") args.version = true;
     else if (a === "--help" || a === "-h") args.help = true;
@@ -159,6 +161,7 @@ Commands:
 Options:
   --profile <name>   named runtime profile (see 'neko profiles')
   --yolo             auto-approve gated tools (bounded autonomy)
+  --loop             run "run" as a closed loop: work + self-review until done
   --resume           (chat) resume the latest session for this directory
   --version          print version`;
 
@@ -267,7 +270,7 @@ async function cmdRun(args: Args): Promise<number> {
     process.stdout.write(t);
   });
   try {
-    const answer = await agent.run(instruction);
+    const answer = args.loop ? await agent.runUntilDone(instruction) : await agent.run(instruction);
     process.stdout.write("\n");
     if (streamed === 0 && answer.trim()) console.log(answer); // synthetic/non-streamed result
     console.log(`[${agent.cost.summary()}]`);

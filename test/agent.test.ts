@@ -66,6 +66,24 @@ test("compact replaces the conversation with [system, summary]", async () => {
   expect(agent.messages[1].content).toContain("SUMMARY HERE");
 });
 
+test("runUntilDone iterates until the model replies DONE, and caps", async () => {
+  const done = new Agent({
+    provider: new ScriptedProvider([
+      { content: "did work", tool_calls: [] }, // goal
+      { content: "fixed more", tool_calls: [] }, // review 1
+      { content: "DONE", tool_calls: [] }, // review 2 -> stop
+    ]) as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  expect(await done.runUntilDone("do X", { maxIters: 6 })).toBe("DONE");
+
+  const capped = new Agent({
+    provider: { complete: async () => ({ content: "still working", tool_calls: [] }) } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  expect(await capped.runUntilDone("do X", { maxIters: 3 })).toBe("still working"); // never DONE -> cap
+});
+
 test("max_steps cap fires", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ag-"));
   const loop = { content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "missing" } }] };
