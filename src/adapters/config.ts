@@ -104,8 +104,8 @@ export class NekoConfig {
     return this.approval === "auto" ? "auto" : "default";
   }
 
-  /** Declared MCP servers (stdio): name -> { command, args?, env? }. */
-  get mcpServers(): Record<string, { command: string; args?: string[]; env?: Record<string, string> }> {
+  /** Declared MCP servers: name -> stdio {command,args?,env?} OR remote {url, type?:http|sse, headers?}. */
+  get mcpServers(): Record<string, { command?: string; args?: string[]; env?: Record<string, string>; type?: "stdio" | "http" | "sse"; url?: string; headers?: Record<string, string> }> {
     const raw = this.data.mcp_servers;
     return raw && typeof raw === "object" ? raw : {};
   }

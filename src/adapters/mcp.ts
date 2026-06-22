@@ -5,32 +5,54 @@
  * and spawns nothing.
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 import { VERSION } from "../shared/version.ts";
 
+/** A local (stdio: command+args) or remote (url: http/sse) MCP server. */
 export interface McpServerConfig {
-  command: string;
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  type?: "stdio" | "http" | "sse";
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+function makeTransport(cfg: McpServerConfig): { transport: any; type: string } {
+  if (cfg.url) {
+    const url = new URL(cfg.url);
+    const init = cfg.headers ? { requestInit: { headers: cfg.headers } } : undefined;
+    return cfg.type === "sse"
+      ? { transport: new SSEClientTransport(url, init), type: "sse" }
+      : { transport: new StreamableHTTPClientTransport(url, init), type: "http" };
+  }
+  return {
+    transport: new StdioClientTransport({
+      command: cfg.command ?? "",
+      args: cfg.args ?? [],
+      env: { ...process.env, ...(cfg.env ?? {}) } as Record<string, string>,
+    }),
+    type: "stdio",
+  };
 }
 
 export class McpHub {
   private clients = new Map<string, Client>();
   private toolMap = new Map<string, { server: string; tool: string }>();
   private specs: any[] = [];
+  private meta = new Map<string, { type: string; tools: number; resources: number; prompts: number }>();
 
   async connectAll(servers: Record<string, McpServerConfig>): Promise<void> {
     for (const [name, cfg] of Object.entries(servers ?? {})) {
       try {
         const client = new Client({ name: "neko-code", version: VERSION }, { capabilities: {} });
-        const transport = new StdioClientTransport({
-          command: cfg.command,
-          args: cfg.args ?? [],
-          env: { ...process.env, ...(cfg.env ?? {}) } as Record<string, string>,
-        });
+        const { transport, type } = makeTransport(cfg);
         await client.connect(transport);
         const res: any = await client.listTools();
+        let tools = 0;
         for (const tool of res.tools ?? []) {
           const prefixed = `mcp__${name}__${tool.name}`;
           this.toolMap.set(prefixed, { server: name, tool: tool.name });
@@ -42,7 +64,14 @@ export class McpHub {
               parameters: tool.inputSchema ?? { type: "object", properties: {} },
             },
           });
+          tools++;
         }
+        // Resources + prompts are part of "full MCP"; count them (best-effort) for visibility.
+        let resources = 0;
+        let prompts = 0;
+        try { resources = ((await client.listResources()) as any).resources?.length ?? 0; } catch { /* server may not support */ }
+        try { prompts = ((await client.listPrompts()) as any).prompts?.length ?? 0; } catch { /* server may not support */ }
+        this.meta.set(name, { type, tools, resources, prompts });
         this.clients.set(name, client);
       } catch (error) {
         console.error(`neko: MCP server '${name}' failed to connect: ${(error as Error).message}`);
@@ -52,6 +81,10 @@ export class McpHub {
 
   get serverNames(): string[] {
     return [...this.clients.keys()];
+  }
+
+  serverInfo(name: string): { type: string; tools: number; resources: number; prompts: number } | undefined {
+    return this.meta.get(name);
   }
 
   toolSchemas(): any[] {
@@ -97,7 +130,12 @@ export function renderMcp(hub: McpHub): string {
   if (!hub.serverNames.length) {
     return "No MCP servers connected.";
   }
-  const lines = [`Neko Code MCP — ${hub.serverNames.length} server(s): ${hub.serverNames.join(", ")}`, "Tools:"];
+  const lines = [`Neko Code MCP — ${hub.serverNames.length} server(s):`];
+  for (const name of hub.serverNames) {
+    const m = hub.serverInfo(name);
+    lines.push(`  ${name} [${m?.type ?? "?"}] — ${m?.tools ?? 0} tools, ${m?.resources ?? 0} resources, ${m?.prompts ?? 0} prompts`);
+  }
+  lines.push("Tools:");
   for (const name of hub.toolNames()) lines.push(`  ${name}`);
   return lines.join("\n");
 }
