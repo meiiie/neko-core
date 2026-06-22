@@ -59,6 +59,24 @@ export class Agent {
     this.onDelta = opts.onDelta;
   }
 
+  /** Summarize the conversation and replace it with the summary, freeing context. */
+  async compact(): Promise<string> {
+    const convo = this.messages
+      .filter((m) => m.role !== "system")
+      .map((m) => `${m.role}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`)
+      .join("\n")
+      .slice(0, 16000);
+    const res = await this.provider.complete([
+      { role: "system", content: "Summarize the conversation below concisely: the task, key decisions, files changed, and the current state. Be brief." },
+      { role: "user", content: convo },
+    ]);
+    this.cost.add(res.usage);
+    const summary = res.content ?? "";
+    const sys = this.messages.find((m) => m.role === "system");
+    this.messages = [...(sys ? [sys] : []), { role: "user", content: `[Summary of earlier conversation]\n${summary}` }];
+    return summary;
+  }
+
   /** Append text to the system prompt (used by /skill). Seeds the base prompt if needed. */
   appendSystem(text: string): void {
     const sys = this.messages.find((m) => m.role === "system");

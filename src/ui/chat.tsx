@@ -68,6 +68,7 @@ const SLASH: { name: string; desc: string }[] = [
   { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
   { name: "/init", desc: "scaffold ./.neko-core/config.json" },
   { name: "/clear", desc: "clear transcript + context" },
+  { name: "/compact", desc: "summarize the conversation to free context" },
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
 ];
@@ -304,6 +305,18 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           agentRef.current!.messages = [];
           setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
           return;
+        case "/compact": {
+          setBusy(true);
+          try {
+            await agentRef.current!.compact();
+            addLine("info", "(context compacted)");
+          } catch (error) {
+            addLine("info", `error: ${error instanceof Error ? error.message : error}`);
+          } finally {
+            setBusy(false);
+          }
+          return;
+        }
         case "/reset":
           agentRef.current!.messages = [];
           addLine("info", "(conversation reset)");
@@ -416,7 +429,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     <Box flexDirection="column">
       <Static items={lines}>{renderLine}</Static>
 
-      {stream ? <Text>{stream}</Text> : null}
+      {stream ? <Markdown text={stream} /> : null}
 
       {todos.length ? (
         <Box flexDirection="column" marginTop={1}>
