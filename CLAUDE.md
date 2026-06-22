@@ -32,6 +32,8 @@ enforced by `test/architecture.test.ts`).
 - **`bang_c` is FROZEN** (sibling `E:\Sach\Sua\bang_c`). Read to learn; never edit.
 - **Clean-room only.** The local `claude-code` tree is studied for patterns/UX, **never copied**
   into this public repo. Learn ideas ✅, copy proprietary code ❌.
+- **Reference clones** live in `../neko-refs/` (sibling, untracked — e.g. Goose). Study them
+  clean-room for ideas; never copy code in.
 - **Secrets never committed/printed.** Key via env (`NEKO_API_KEY` / `OPENAI_API_KEY` /
   `NVIDIA_API_KEY`) or gitignored `~/.neko-core/config.json`. Run `/secret-scan` before any push.
 - **Config-first.** A new model/endpoint is a profile, not a code change.

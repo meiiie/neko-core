@@ -84,6 +84,35 @@ test("runUntilDone iterates until the model replies DONE, and caps", async () =>
   expect(await capped.runUntilDone("do X", { maxIters: 3 })).toBe("still working"); // never DONE -> cap
 });
 
+test("concurrency-safe tool calls in one turn run in parallel", async () => {
+  class SlowTools {
+    active = 0;
+    maxActive = 0;
+    schemas() { return []; }
+    async execute(name: string) {
+      this.active++;
+      this.maxActive = Math.max(this.maxActive, this.active);
+      await new Promise((r) => setTimeout(r, 25));
+      this.active--;
+      return `ran ${name}`;
+    }
+  }
+  const tools = new SlowTools();
+  const agent = new Agent({
+    provider: new ScriptedProvider([
+      { content: null, tool_calls: [
+        { id: "1", name: "read_file", arguments: {} },
+        { id: "2", name: "search", arguments: {} },
+        { id: "3", name: "glob", arguments: {} },
+      ] },
+      { content: "done", tool_calls: [] },
+    ]) as any,
+    tools: tools as any,
+  });
+  await agent.run("go");
+  expect(tools.maxActive).toBeGreaterThan(1); // overlapped => ran in parallel
+});
+
 test("max_steps cap fires", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ag-"));
   const loop = { content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "missing" } }] };

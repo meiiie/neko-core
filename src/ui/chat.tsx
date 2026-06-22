@@ -97,9 +97,13 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     setStream("");
   };
 
+  // Serialized so concurrent (parallel sub-agent) tool calls prompt one at a time, not at once.
+  const gateChain = useRef<Promise<unknown>>(Promise.resolve());
   const gate = (toolName: string, args: Record<string, any>): boolean | Promise<boolean> => {
     if (alwaysApproved.current.has(toolName)) return true;
-    return new Promise<boolean>((resolve) => setApproval({ toolName, args, resolve }));
+    const next = gateChain.current.then(() => new Promise<boolean>((resolve) => setApproval({ toolName, args, resolve })));
+    gateChain.current = next.catch(() => undefined);
+    return next;
   };
 
   const registryRef = useRef<ToolRegistry | null>(null);

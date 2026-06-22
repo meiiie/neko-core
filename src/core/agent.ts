@@ -41,6 +41,10 @@ export const DEFAULT_SYSTEM_PROMPT =
   "Inspect before you edit; make the smallest change that works; verify by running tests or bash. " +
   "Be concise - no filler. When the task is done, give a short summary and stop calling tools.";
 
+// Tools safe to run concurrently in one turn: read-only inspection + sub-agent tasks (the
+// "fleet"). Mutating tools (write_file/edit/bash) are excluded so they stay ordered + gated.
+const CONCURRENCY_SAFE = new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "task"]);
+
 // onEvent(kind, data): kind in {"tool_call", "tool_result", "final", "max_steps"}.
 export type EventHook = (kind: string, data: any) => void;
 
@@ -169,16 +173,26 @@ export class Agent {
       }
 
       this.messages.push(assistantToolMessage(response.content, toolCalls));
-      for (const call of toolCalls) {
-        if (signal?.aborted) return "[interrupted]"; // stop promptly between tools on Esc
-        this.emit("tool_call", call);
-        const observation = await this.tools.execute(call.name, call.arguments);
-        this.emit("tool_result", { call, observation });
-        this.messages.push({
-          role: "tool",
-          tool_call_id: call.id || call.name,
-          content: observation,
+      if (signal?.aborted) return "[interrupted]";
+
+      // Fleet fan-out: if every call in this batch is concurrency-safe (read-only or a sub-agent
+      // task), run them in parallel; results are recorded in call order. Anything that mutates
+      // the workspace (write/edit/bash) stays sequential to preserve order + approval prompts.
+      if (toolCalls.length > 1 && toolCalls.every((c) => CONCURRENCY_SAFE.has(c.name))) {
+        toolCalls.forEach((call) => this.emit("tool_call", call));
+        const observations = await Promise.all(toolCalls.map((call) => this.tools.execute(call.name, call.arguments)));
+        toolCalls.forEach((call, i) => {
+          this.emit("tool_result", { call, observation: observations[i] });
+          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: observations[i] });
         });
+      } else {
+        for (const call of toolCalls) {
+          if (signal?.aborted) return "[interrupted]"; // stop promptly between tools on Esc
+          this.emit("tool_call", call);
+          const observation = await this.tools.execute(call.name, call.arguments);
+          this.emit("tool_result", { call, observation });
+          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: observation });
+        }
       }
     }
 
