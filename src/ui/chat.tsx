@@ -68,6 +68,29 @@ function fmtTok(n: number): string {
   return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
 }
 
+/** "16 hours ago" / "1 week ago" — for the /resume picker. */
+function relativeTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (!then) return "";
+  const s = Math.max(0, (Date.now() - then) / 1000);
+  const m = s / 60, h = m / 60, d = h / 24, w = d / 7, mo = d / 30, y = d / 365;
+  const ago = (n: number, u: string) => `${Math.floor(n)} ${u}${Math.floor(n) > 1 ? "s" : ""} ago`;
+  if (s < 60) return "just now";
+  if (m < 60) return ago(m, "min");
+  if (h < 24) return ago(h, "hour");
+  if (d < 7) return ago(d, "day");
+  if (w < 5) return ago(w, "week");
+  if (mo < 12) return ago(mo, "month");
+  return ago(y, "year");
+}
+
+/** Up to 8 sessions around the selected index (so a long list scrolls). */
+function pickerWindow(p: { list: Session[]; index: number }): { s: Session; i: number }[] {
+  const N = 8;
+  const start = Math.max(0, Math.min(p.index - 3, Math.max(0, p.list.length - N)));
+  return p.list.slice(start, start + N).map((s, k) => ({ s, i: start + k }));
+}
+
 const SPINNER_ORANGE = "#e6932e";
 const SPINNER_SHIMMER = "#ffd9a0";
 // Pulse glyph: dot -> star -> sparkle and back. Plain "*" (not ✳, which renders as an
@@ -179,6 +202,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const [queued, setQueued] = useState(0);
   const [step, setStep] = useState(0);
   const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
+  const [picker, setPicker] = useState<{ list: Session[]; index: number } | null>(null);
 
   const addLine = (kind: LineKind, text: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
@@ -242,6 +266,14 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     });
   };
 
+  // Load a session's history into the live agent (used by /resume and the picker).
+  const resumeInto = (target: Session) => {
+    agentRef.current!.messages = [...target.messages];
+    sessionIdRef.current = target.id;
+    createdAtRef.current = target.createdAt;
+    addLine("info", `(resumed ${target.id} - ${target.messages.length} messages; context restored)`);
+  };
+
   // Elapsed timer while a turn runs.
   useEffect(() => {
     if (!busy) return;
@@ -292,6 +324,23 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     { isActive: busy && approval === null },
   );
 
+  // /resume picker: ↑/↓ to move, Enter to resume, Esc to cancel.
+  useInput(
+    (_char, key) => {
+      if (!picker) return;
+      if (key.upArrow) setPicker({ ...picker, index: Math.max(0, picker.index - 1) });
+      else if (key.downArrow) setPicker({ ...picker, index: Math.min(picker.list.length - 1, picker.index + 1) });
+      else if (key.return) {
+        resumeInto(picker.list[picker.index]);
+        setPicker(null);
+      } else if (key.escape) {
+        setPicker(null);
+        addLine("info", "(resume cancelled)");
+      }
+    },
+    { isActive: picker !== null },
+  );
+
   // History (Up/Down) + Shift+Tab mode cycling, while the input box shows.
   useInput(
     (_char, key) => {
@@ -315,7 +364,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         }
       }
     },
-    { isActive: !busy && approval === null },
+    { isActive: !busy && approval === null && picker === null },
   );
 
   const handle = async (text: string) => {
@@ -450,16 +499,15 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         }
         case "/resume": {
           const arg = text.split(/\s+/)[1];
-          const target = arg
-            ? loadSession(arg)
-            : listSessions().find((s) => s.cwd === process.cwd() && s.id !== sessionIdRef.current);
-          if (!target) {
-            addLine("info", arg ? `no session '${arg}'` : "no earlier session here - /sessions to list");
+          if (arg) {
+            const target = loadSession(arg);
+            if (!target) addLine("info", `no session '${arg}'`);
+            else resumeInto(target);
             return;
           }
-          agentRef.current!.messages = [...target.messages];
-          sessionIdRef.current = target.id;
-          addLine("info", `(resumed ${target.id} - ${target.messages.length} messages; context restored)`);
+          const list = listSessions().filter((s) => s.cwd === process.cwd());
+          if (!list.length) addLine("info", "no saved sessions here - /sessions to list");
+          else setPicker({ list, index: 0 }); // interactive picker (↑/↓ · Enter · Esc)
           return;
         }
         case "/effort": {
@@ -625,7 +673,23 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         </Box>
       ) : null}
 
-      {approval ? (
+      {picker ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="cyan">Resume session ({picker.index + 1} of {picker.list.length})</Text>
+          <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
+          {pickerWindow(picker).map(({ s, i }) => (
+            <Box key={s.id} flexDirection="column">
+              <Text color={i === picker.index ? "cyan" : undefined} bold={i === picker.index}>
+                {i === picker.index ? "> " : "  "}
+                {sessionTitle(s)}
+              </Text>
+              <Text dimColor>    {relativeTime(s.updatedAt)} · {s.messages.length} messages</Text>
+            </Box>
+          ))}
+          <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
+          <Text dimColor>↑/↓ select · Enter resume · Esc cancel</Text>
+        </Box>
+      ) : approval ? (
         <ApprovalBox approval={approval} />
       ) : (
         <Box flexDirection="column">
