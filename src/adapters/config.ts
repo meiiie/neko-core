@@ -65,7 +65,14 @@ export class NekoConfig {
   get maxSteps(): number { return Math.max(1, Number(this.data.max_steps ?? 20)); }
   get temperature(): number { return Number(this.data.temperature ?? 0); }
   get maxTokens(): number { return Number(this.data.max_tokens ?? 2048); }
-  get contextWindow(): number { return Number(this.data.context_window ?? 131072); }
+  /** Context window for the ACTIVE model: per-model `model_context[<id>]` wins, else the global
+   * `context_window`, else a safe default. Per-model so `/model` switching stays accurate. */
+  get contextWindow(): number {
+    const perModel = this.data.model_context;
+    const m = this.model;
+    if (perModel && typeof perModel === "object" && m && perModel[m] != null) return Number(perModel[m]);
+    return Number(this.data.context_window ?? 131072);
+  }
   /** Reasoning effort (low|medium|high) sent as `reasoning_effort`; "" = omit (default). */
   get effort(): string { return String(this.data.reasoning_effort ?? "").trim().toLowerCase(); }
   /** Shell hooks run around tool calls (opt-in). `pre_tool_use` can block (non-zero exit). */

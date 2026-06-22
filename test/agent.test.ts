@@ -50,6 +50,22 @@ test("dynamicContext is injected and refreshed each turn (no staleness on model 
   expect(agent.messages.filter((m: any) => m.role === "system" && m.dynamic).length).toBe(1);
 });
 
+test("compact replaces the conversation with [system, summary]", async () => {
+  const agent = new Agent({
+    provider: new ScriptedProvider([{ content: "SUMMARY HERE", tool_calls: [] }]) as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "a" },
+    { role: "assistant", content: "b" },
+  ];
+  await agent.compact();
+  expect(agent.messages.map((m: any) => m.role)).toEqual(["system", "user"]);
+  expect(agent.messages[0].content).toBe("base"); // base system kept
+  expect(agent.messages[1].content).toContain("SUMMARY HERE");
+});
+
 test("max_steps cap fires", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ag-"));
   const loop = { content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "missing" } }] };

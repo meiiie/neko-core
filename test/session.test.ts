@@ -3,7 +3,20 @@ import { rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { listSessions, loadSession, newSessionId, saveSession } from "../src/adapters/session.ts";
+import { latestSession, listSessions, loadSession, newSessionId, saveSession } from "../src/adapters/session.ts";
+
+test("sessions are isolated per folder (latestSession filters by cwd)", () => {
+  const a = newSessionId();
+  const b = `${a}-b`;
+  saveSession({ id: a, createdAt: new Date().toISOString(), updatedAt: "", cwd: "/tmp/neko-folder-A", model: "m", messages: [{ role: "user", content: "in A" }] });
+  saveSession({ id: b, createdAt: new Date().toISOString(), updatedAt: "", cwd: "/tmp/neko-folder-B", model: "m", messages: [{ role: "user", content: "in B" }] });
+  try {
+    expect(latestSession("/tmp/neko-folder-A")?.id).toBe(a);
+    expect(latestSession("/tmp/neko-folder-B")?.id).toBe(b);
+  } finally {
+    for (const id of [a, b]) rmSync(join(homedir(), ".neko-core", "sessions", `${id}.json`), { force: true });
+  }
+});
 
 test("save / load / list round-trip", () => {
   const id = newSessionId();

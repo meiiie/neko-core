@@ -78,3 +78,12 @@ test("mode derives from approval; NEKO_MODE overrides", () => {
   process.env.NEKO_MODE = "plan";
   expect(loadConfig({ path: tmpConfig({}) }).mode).toBe("plan");
 });
+
+test("contextWindow is per-model (model_context wins over the global default)", () => {
+  const cfg = loadConfig({
+    path: tmpConfig({ model: "big-model", context_window: 100000, model_context: { "big-model": 262144 } }),
+  });
+  expect(cfg.contextWindow).toBe(262144); // matches the active model
+  const other = loadConfig({ path: tmpConfig({ model: "small-model", context_window: 100000, model_context: { "big-model": 262144 } }) });
+  expect(other.contextWindow).toBe(100000); // falls back to the global window
+});
