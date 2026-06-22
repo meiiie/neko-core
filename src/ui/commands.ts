@@ -5,6 +5,7 @@
  */
 import type { Agent } from "../core/agent.ts";
 import type { NekoConfig } from "../adapters/config.ts";
+import { rememberNote, renderContext } from "../adapters/context.ts";
 import { initProject } from "../adapters/project.ts";
 import { listModels } from "../adapters/providers.ts";
 import { listSessions, loadSession, renameSession, sessionTitle, type Session } from "../adapters/session.ts";
@@ -40,6 +41,8 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/resume", desc: "resume a session (/resume [id])" },
   { name: "/effort", desc: "reasoning effort (/effort low|medium|high|off)" },
   { name: "/context", desc: "context window usage" },
+  { name: "/memory", desc: "show NEKO.md memory/context files" },
+  { name: "/remember", desc: "save a note to NEKO.md (or start a line with #)" },
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
 ];
@@ -228,6 +231,15 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       const pct = Math.max(0, Math.round((100 * (win - used)) / win));
       return addLine("info", `context: ~${used} / ${win} tokens (${pct}% free; auto-compacts past 85%)`);
     }
+    case "/remember": {
+      const rest = input.slice("/remember".length).trim();
+      const userScope = rest.startsWith("--user");
+      const note = userScope ? rest.slice("--user".length).trim() : rest;
+      if (!note) return addLine("info", "usage: /remember [--user] <note>   (or just start a line with #)");
+      return addLine("info", rememberNote(note, userScope ? "user" : "project"));
+    }
+    case "/memory":
+      return addLine("info", renderContext() + "\n(edit NEKO.md for project memory, ~/.neko-core/NEKO.md for global; or use /remember / #note)");
     default:
       return addLine("info", `unknown command ${cmd} - try /help`);
   }

@@ -20,7 +20,7 @@ import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
 import { loadConfig } from "../adapters/config.ts";
-import { projectContextBlock } from "../adapters/context.ts";
+import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
@@ -118,12 +118,16 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
 
   const agentRef = useRef<Agent | null>(null);
   if (!agentRef.current) {
-    const block = projectContextBlock();
+    const systemPrompt = [
+      DEFAULT_SYSTEM_PROMPT,
+      environmentBlock({ model: cfg.model, provider: cfg.provider }),
+      projectContextBlock(),
+    ].filter(Boolean).join("\n\n");
     agentRef.current = new Agent({
       provider: provider ?? getProvider(cfg),
       tools: registryRef.current,
       maxSteps: cfg.maxSteps,
-      systemPrompt: block ? `${DEFAULT_SYSTEM_PROMPT}\n\n${block}` : DEFAULT_SYSTEM_PROMPT,
+      systemPrompt,
       onDelta: (t) => {
         streamRef.current += t;
         setStream((s) => s + t);
@@ -252,6 +256,10 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   );
 
   const handle = async (text: string) => {
+    if (text.startsWith("#")) {
+      addLine("info", rememberNote(text.slice(1)));
+      return;
+    }
     if (text.startsWith("/")) {
       await runSlashCommand(text, {
         cfg,

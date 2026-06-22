@@ -4,8 +4,9 @@
  * current directory up to the repo root, plus a global `~/.neko-core/NEKO.md`. The collected
  * text is prepended to the agent's system prompt so it knows the project's conventions.
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir, platform, release } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 const CONTEXT_NAMES = ["NEKO.md", "CLAUDE.md"];
@@ -64,6 +65,51 @@ export function renderContext(cwd?: string): string {
     return "No project context found (looked for NEKO.md / CLAUDE.md up to the repo root, plus ~/.neko-core/NEKO.md).";
   }
   return ["Neko Code context files:", ...files.map((f) => `- ${f.path} (${f.text.length} chars)`)].join("\n");
+}
+
+function git(cwd: string, args: string[]): string {
+  try {
+    const r = spawnSync("git", args, { cwd, encoding: "utf-8", timeout: 2000 });
+    return r.status === 0 ? r.stdout.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/** The agent's situational awareness: where it is, when, what it runs on. Goes in the prompt. */
+export function environmentBlock(info: { model?: string; provider?: string } = {}, cwd: string = process.cwd()): string {
+  const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const dirty = branch ? git(cwd, ["status", "--porcelain"]).split("\n").filter(Boolean).length : 0;
+  const lines = [
+    `Working directory: ${cwd}`,
+    `Platform: ${platform()} ${release()}`,
+    `Date: ${new Date().toISOString().slice(0, 10)}`,
+    `Git: ${branch ? `${branch}${dirty ? ` (${dirty} uncommitted change${dirty > 1 ? "s" : ""})` : " (clean)"}` : "not a git repo"}`,
+  ];
+  if (info.model) lines.push(`Model: ${info.model}${info.provider ? ` (${info.provider})` : ""}`);
+  return `<env>\n${lines.join("\n")}\n</env>`;
+}
+
+/** Append a note under a "## Memory" section of NEKO.md (project) or ~/.neko-core/NEKO.md (user). */
+export function rememberNote(text: string, scope: "project" | "user" = "project"): string {
+  const note = text.trim();
+  if (!note) return "nothing to remember";
+  const file = scope === "user" ? join(homedir(), ".neko-core", "NEKO.md") : join(process.cwd(), "NEKO.md");
+  let body = "";
+  try {
+    if (existsSync(file)) body = readFileSync(file, "utf-8");
+  } catch {
+    /* start fresh */
+  }
+  const line = `- ${note}`;
+  if (/^##\s*Memory/im.test(body)) {
+    body = body.replace(/(^##\s*Memory[^\n]*\n)/im, `$1${line}\n`);
+  } else {
+    body = `${body.trimEnd()}\n\n## Memory\n${line}\n`.trimStart();
+  }
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, body, "utf-8");
+  return `Remembered in ${scope === "user" ? "~/.neko-core/NEKO.md" : "NEKO.md"}`;
 }
 
 /** Directories from the repo root (or home) down to cwd (outermost first). */

@@ -30,8 +30,35 @@ export function initUser(force = false): string {
   return write(join(homedir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), USER_TEMPLATE, force);
 }
 
+function nekoMdTemplate(name: string): string {
+  return `# ${name} — notes for Neko
+
+What this project is, how to run it, and the conventions Neko should follow. Neko loads this
+file (and any NEKO.md up to the repo root, plus ~/.neko-core/NEKO.md) into its context.
+
+## Commands
+- build:
+- test:
+
+## Conventions
+-
+
+## Memory
+`;
+}
+
 export function initProject(force = false): string {
-  return write(join(process.cwd(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), PROJECT_TEMPLATE, force);
+  const cfgMsg = write(join(process.cwd(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), PROJECT_TEMPLATE, force);
+  const nekoMd = join(process.cwd(), "NEKO.md");
+  let mdMsg: string;
+  if (existsSync(nekoMd) && !force) {
+    mdMsg = `NEKO.md kept: ${nekoMd}`;
+  } else {
+    const name = process.cwd().replace(/\\/g, "/").split("/").pop() || "project";
+    writeFileSync(nekoMd, nekoMdTemplate(name), "utf-8");
+    mdMsg = `NEKO.md ready: ${nekoMd}`;
+  }
+  return `${cfgMsg}\n${mdMsg}`;
 }
 
 function write(target: string, template: unknown, force: boolean): string {

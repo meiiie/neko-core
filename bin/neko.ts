@@ -9,7 +9,7 @@ import { createInterface } from "node:readline/promises";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent.ts";
 import { loadConfig, type NekoConfig } from "../src/adapters/config.ts";
-import { projectContextBlock, renderContext } from "../src/adapters/context.ts";
+import { environmentBlock, projectContextBlock, renderContext } from "../src/adapters/context.ts";
 import { collectChecks, render } from "../src/adapters/doctor.ts";
 import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
@@ -110,8 +110,11 @@ async function buildAgent(
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
     return await new Agent({ provider: getProvider(cfg), tools: subReg, maxSteps: cfg.maxSteps }).run(prompt, signal);
   };
-  const block = projectContextBlock();
-  const systemPrompt = block ? `${DEFAULT_SYSTEM_PROMPT}\n\n${block}` : DEFAULT_SYSTEM_PROMPT;
+  const systemPrompt = [
+    DEFAULT_SYSTEM_PROMPT,
+    environmentBlock({ model: cfg.model, provider: cfg.provider }),
+    projectContextBlock(),
+  ].filter(Boolean).join("\n\n");
   const agent = new Agent({
     provider: getProvider(cfg),
     tools: registry,
