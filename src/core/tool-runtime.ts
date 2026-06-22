@@ -107,7 +107,7 @@ export class ToolRegistry {
     }
 
     try {
-      return DISPATCH[name](this.root, args);
+      return await DISPATCH[name](this.root, args);
     } catch (error) {
       return `Error: ${(error as Error).message}`;
     }
@@ -303,7 +303,7 @@ function describe(name: string, args: Record<string, any>): string {
   return name;
 }
 
-const DISPATCH: Record<string, (root: string, args: Record<string, any>) => string> = {
+const DISPATCH: Record<string, (root: string, args: Record<string, any>) => string | Promise<string>> = {
   read_file: toolReadFile,
   search: toolSearch,
   glob: toolGlob,
@@ -311,4 +311,61 @@ const DISPATCH: Record<string, (root: string, args: Record<string, any>) => stri
   write_file: toolWriteFile,
   edit: toolEdit,
   bash: toolBash,
+  web_search: toolWebSearch,
+  web_fetch: toolWebFetch,
 };
+
+const WEB_HEADERS = { "User-Agent": "Mozilla/5.0 (NekoCore)" };
+
+function stripTags(s: string): string {
+  return s
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Search the web via DuckDuckGo's HTML endpoint (no API key). Best-effort markup parse. */
+async function toolWebSearch(_root: string, args: Record<string, any>): Promise<string> {
+  const query = requireArg(args, "query");
+  let html: string;
+  try {
+    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query), {
+      headers: WEB_HEADERS,
+      signal: AbortSignal.timeout(15000),
+    });
+    html = await res.text();
+  } catch (error) {
+    return `Error: web search failed: ${(error as Error).message}`;
+  }
+  const titles = [...html.matchAll(/class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
+  const snippets = [...html.matchAll(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g)].map((m) => stripTags(m[1]));
+  const out: string[] = [];
+  for (let i = 0; i < titles.length && i < 6; i++) {
+    let url = titles[i][1];
+    const uddg = /[?&]uddg=([^&]+)/.exec(url);
+    if (uddg) url = decodeURIComponent(uddg[1]);
+    out.push(`${i + 1}. ${stripTags(titles[i][2])}\n   ${url}${snippets[i] ? `\n   ${snippets[i]}` : ""}`);
+  }
+  return out.length ? out.join("\n") : "No results.";
+}
+
+/** Fetch a URL and return readable text (scripts/styles/tags stripped). */
+async function toolWebFetch(_root: string, args: Record<string, any>): Promise<string> {
+  const url = requireArg(args, "url");
+  if (!/^https?:\/\//i.test(url)) return "Error: url must start with http:// or https://";
+  let text: string;
+  let contentType: string;
+  try {
+    const res = await fetch(url, { headers: WEB_HEADERS, signal: AbortSignal.timeout(20000) });
+    contentType = res.headers.get("content-type") ?? "";
+    text = await res.text();
+  } catch (error) {
+    return `Error: fetch failed: ${(error as Error).message}`;
+  }
+  if (contentType.includes("html")) {
+    text = stripTags(text.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ""));
+  }
+  return text.length > MAX_READ_CHARS ? text.slice(0, MAX_READ_CHARS) + "\n... (truncated)" : text;
+}

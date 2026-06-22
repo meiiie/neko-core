@@ -18,7 +18,7 @@ import { projectContextBlock } from "../adapters/context.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { initProject } from "../adapters/project.ts";
-import { getProvider, type Provider } from "../adapters/providers.ts";
+import { getProvider, listModels, type Provider } from "../adapters/providers.ts";
 import { latestSession, listSessions, loadSession, newSessionId, saveSession, sessionTitle, type Session } from "../adapters/session.ts";
 import { ToolRegistry } from "../core/tool-runtime.ts";
 import { listSkills, loadSkill } from "../adapters/skills.ts";
@@ -113,7 +113,7 @@ function ThinkingLine(props: { verb: string; elapsed: number; tokens: number; st
 const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
   { name: "/cost", desc: "token usage this session" },
-  { name: "/model", desc: "active provider/model/mode" },
+  { name: "/model", desc: "show / list / switch model (/model list · /model <id>)" },
   { name: "/profiles", desc: "list profiles" },
   { name: "/tools", desc: "list / toggle tools (/tools bash)" },
   { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
@@ -332,9 +332,28 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         case "/cost":
           addLine("info", agentRef.current!.cost.summary());
           return;
-        case "/model":
-          addLine("info", `provider=${cfg.provider} model=${cfg.model || "(unset)"} profile=${cfg.profile ?? "none"} mode=${mode}`);
+        case "/model": {
+          const arg = text.slice("/model".length).trim();
+          if (!arg) {
+            addLine("info", `provider=${cfg.provider} model=${cfg.model || "(unset)"} profile=${cfg.profile ?? "none"} mode=${mode}  ·  /model list  ·  /model <id>`);
+            return;
+          }
+          if (arg === "list") {
+            setBusy(true);
+            try {
+              const models = await listModels(cfg);
+              addLine("info", models.length ? "models:\n" + models.map((m) => `  ${m === cfg.model ? "* " : "  "}${m}`).join("\n") : "no models returned");
+            } catch (error) {
+              addLine("info", `error listing models: ${error instanceof Error ? error.message : error}`);
+            } finally {
+              setBusy(false);
+            }
+            return;
+          }
+          cfg.data.model = arg;
+          addLine("info", `model -> ${arg}`);
           return;
+        }
         case "/profiles":
           addLine("info", "profiles: " + Object.keys(cfg.profiles).sort().join(", "));
           return;

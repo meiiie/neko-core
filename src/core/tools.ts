@@ -104,6 +104,20 @@ export const TOOL_SPECS: ToolSpec[] = [
     },
     required: ["todos"],
   },
+  {
+    name: "web_search",
+    permission: SAFE,
+    summary: "Search the web (DuckDuckGo) and return the top results (title + url + snippet).",
+    parameters: { query: { type: "string", description: "Search query." } },
+    required: ["query"],
+  },
+  {
+    name: "web_fetch",
+    permission: SAFE,
+    summary: "Fetch a URL and return its readable text (HTML stripped).",
+    parameters: { url: { type: "string", description: "Absolute http(s) URL." } },
+    required: ["url"],
+  },
 ];
 
 export function listTools(): ToolSpec[] {
@@ -120,13 +134,15 @@ const TOOL_LABELS: Record<string, string> = {
   ls: "List",
   bash: "Bash",
   todo_write: "Update Todos",
+  web_search: "WebSearch",
+  web_fetch: "Fetch",
 };
 
 /** A compact "Label(primary-arg)" for a tool call, e.g. `Read(src/app.ts)` or `Bash(bun test)`. */
 export function describeToolCall(name: string, args: Record<string, any>): string {
   const label = TOOL_LABELS[name] ?? name;
   const a = args ?? {};
-  const primary = a.path ?? a.command ?? a.query ?? a.pattern ?? "";
+  const primary = a.path ?? a.command ?? a.query ?? a.url ?? a.pattern ?? "";
   const s = String(primary).replace(/\s+/g, " ").trim();
   const shown = s.length > 80 ? s.slice(0, 80) + "…" : s;
   return shown ? `${label}(${shown})` : label;

@@ -8,6 +8,8 @@ test("describeToolCall uses Claude-style labels + primary arg", () => {
   expect(describeToolCall("bash", { command: "bun test" })).toBe("Bash(bun test)");
   expect(describeToolCall("ls", {})).toBe("List");
   expect(describeToolCall("todo_write", { todos: [] })).toBe("Update Todos");
+  expect(describeToolCall("web_search", { query: "x" })).toBe("WebSearch(x)");
+  expect(describeToolCall("web_fetch", { url: "http://x.io" })).toBe("Fetch(http://x.io)");
 });
 
 test("schema shape", () => {
@@ -20,6 +22,7 @@ test("schema shape", () => {
 test("tool order", () => {
   expect(toolSchemas().map((t: any) => t.function.name)).toEqual([
     "read_file", "search", "glob", "ls", "write_file", "edit", "bash", "todo_write",
+    "web_search", "web_fetch",
   ]);
 });
 

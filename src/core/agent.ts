@@ -26,7 +26,8 @@ export const DEFAULT_SYSTEM_PROMPT =
   "space?' -> call bash with a command like `wmic logicaldisk get size,freespace,caption`, then " +
   "report the numbers.)\n" +
   "Tools: read_file, search, glob, ls inspect the project; write_file and edit change files; bash " +
-  "runs shell commands.\n" +
+  "runs shell commands; web_search and web_fetch reach the INTERNET. You CAN search the web - use " +
+  "web_search (then web_fetch a result) rather than saying you have no internet access.\n" +
   "Prefer `edit` for small changes (exact unique string replace) over rewriting whole files.\n" +
   "read_file output is line-numbered for reference only - never include the line-number prefix in " +
   "edits.\n" +

@@ -23,6 +23,17 @@ export function getProvider(config: NekoConfig): Provider {
   );
 }
 
+/** List model ids the endpoint offers (OpenAI-compatible GET /models). Used by `/model list`. */
+export async function listModels(config: NekoConfig): Promise<string[]> {
+  const res = await fetch(`${config.baseUrl}/models`, {
+    headers: { Authorization: `Bearer ${config.apiKey}` },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return ((data?.data ?? []) as any[]).map((m) => m?.id).filter(Boolean).sort();
+}
+
 export class OpenAICompatProvider implements Provider {
   constructor(private readonly cfg: NekoConfig) {}
 
