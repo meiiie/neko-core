@@ -29,11 +29,24 @@ resolved the name collision with the heritage CLI (heritage stays reachable as `
 **Fixed REPL resilience:** survives any turn failure (prints the error, stays at the
 prompt), clear API-error messages, EOF / non-TTY diagnostics instead of silent exit.
 
-### Open decisions
-- **Language / runtime for the product going forward** — Python (current) vs TypeScript
-  (Node/Bun) vs Go vs Rust. Evaluated on merits, no sunk-cost (project is still small).
-  Recommendation pending owner sign-off (see the session's analysis).
+### Decision — language/runtime: **TypeScript + Bun + Ink** (owner, 2026-06-22)
+Evaluated on merits (no sunk-cost; project still small). TS is the proven stack for this
+product category (Claude Code, Gemini CLI, opencode all TS+Ink), MCP reference SDK is TS,
+Bun compiles to a native binary (drops the Node-runtime dependency), and the team already
+ships TS (wiii-desktop). "Offline-first" needs only a local OpenAI-compatible server
+(llama-server/Ollama) — no in-process inference, so no Python advantage. Go/Rust are
+reserved for LATER if zero-dependency single-binary distribution becomes the main pain
+(the Codex/Goose path). The Python build is kept as the spec under `reference/python/`.
 
-### Next
-- Finalize the tech-stack decision.
-- Then: nicer REPL (e.g. `prompt_toolkit`) and/or port the MCQ showcase + README refresh.
+## 2026-06-22 — Session 2: TypeScript rewrite (branch `feat/ts-rewrite`)
+- Restructured: Python moved to `reference/python/`; TS project at root (Bun, `src/`, `bin/`).
+- **TS Step 1 done** — config-first overlay + profiles + env + key-via-env/JSON
+  (`src/config.ts`), `openai_compat` provider over `fetch` with retry/backoff + clear error
+  parsing (`src/providers.ts`), `doctor`/`init-user`/`init` + the `neko` CLI dispatch
+  (`bin/neko.ts`). Typecheck clean; reads the SAME `~/.neko-core/config.json` as Python, so
+  the live NVIDIA profile works unchanged; key shows `set`, never the value.
+
+### Next (TS)
+- Step 2: tools + registry + policy. Step 3: agent loop + `neko run`. Step 4: chat REPL (Ink).
+  Step 5: `bun test`. Step 6: `bun build --compile` binary + re-point the `neko` command from
+  the pipx(Python) install to the TS binary; refresh README/CLAUDE.md for the TS stack.
