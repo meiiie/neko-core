@@ -120,6 +120,8 @@ const SLASH: { name: string; desc: string }[] = [
   { name: "/init", desc: "scaffold ./.neko-core/config.json" },
   { name: "/clear", desc: "clear transcript + context" },
   { name: "/compact", desc: "summarize the conversation to free context" },
+  { name: "/goal", desc: "set an ongoing goal (/goal <text>)" },
+  { name: "/loop", desc: "run a task N times (/loop <n> <task>)" },
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
 ];
@@ -370,6 +372,34 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           agentRef.current!.messages = [];
           setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
           return;
+        case "/goal": {
+          const goal = text.slice("/goal".length).trim();
+          if (!goal) {
+            addLine("info", "usage: /goal <text>  (keeps the agent focused on a goal)");
+            return;
+          }
+          agentRef.current!.appendSystem(`Ongoing goal (keep working toward it every turn): ${goal}`);
+          addLine("info", `goal set: ${goal}`);
+          return;
+        }
+        case "/loop": {
+          const m = text.match(/^\/loop\s+(\d+)\s+([\s\S]+)$/);
+          if (!m) {
+            addLine("info", "usage: /loop <count> <task>  (runs the task N times)");
+            return;
+          }
+          const n = Math.min(20, Math.max(1, parseInt(m[1], 10)));
+          const task = m[2].trim();
+          for (let i = 0; i < n; i++) queueRef.current.push(task);
+          setQueued(queueRef.current.length);
+          addLine("info", `looping '${trunc(task, 60)}' x${n}`);
+          if (!busy) {
+            const first = queueRef.current.shift();
+            setQueued(queueRef.current.length);
+            if (first !== undefined) void handle(first);
+          }
+          return;
+        }
         case "/compact": {
           setBusy(true);
           try {
@@ -412,6 +442,11 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       flushStream();
       if (result === "[interrupted]") addLine("info", "(interrupted)");
       else if (!streamed && result.trim()) addLine("assistant", result); // non-streaming provider
+      // Auto-compact when the context window is nearly full (Claude-style).
+      if (result !== "[interrupted]" && agentRef.current!.cost.lastPrompt > 0.85 * cfg.contextWindow) {
+        addLine("info", "(context nearly full - auto-compacting)");
+        await agentRef.current!.compact();
+      }
     } catch (error) {
       flushStream();
       addLine("info", `error: ${error instanceof Error ? error.message : error}`);
