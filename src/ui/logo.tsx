@@ -1,8 +1,15 @@
-import { Text } from "ink";
+import { Box, Text } from "ink";
 
-// Cat mark from the banner (ハ‥マ style: peak, dots, dash, triangle). Recolor via COLOR.
+// Classic ASCII cat mascot (3 lines align with the version/model/path block). Recolor via COLOR.
 const COLOR = "#e6932e";
+const CAT = [" /\\_/\\ ", "( o.o )", " > ^ < "];
 
 export function Logo() {
-  return <Text color={COLOR}>/\··─▽</Text>;
+  return (
+    <Box flexDirection="column">
+      {CAT.map((row, i) => (
+        <Text key={i} color={COLOR}>{row}</Text>
+      ))}
+    </Box>
+  );
 }
