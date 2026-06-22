@@ -17,7 +17,7 @@ import { projectContextBlock } from "../context.ts";
 import { buildMcpHub, type McpHub } from "../mcp.ts";
 import { nextMode, type PermissionMode } from "../permissions.ts";
 import { initProject } from "../project.ts";
-import { getProvider } from "../providers.ts";
+import { getProvider, type Provider } from "../providers.ts";
 import { latestSession, newSessionId, saveSession, type Session } from "../session.ts";
 import { ToolRegistry } from "../tool-runtime.ts";
 import { VERSION } from "../version.ts";
@@ -29,7 +29,7 @@ interface Line {
   kind: LineKind;
   text: string;
 }
-interface Approval {
+export interface Approval {
   toolName: string;
   args: Record<string, any>;
   resolve: (ok: boolean) => void;
@@ -53,9 +53,10 @@ interface ChatProps {
   yolo: boolean;
   resume?: boolean;
   mcpHub?: McpHub;
+  provider?: Provider; // injected in tests; production uses getProvider(cfg)
 }
 
-function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) {
   const { exit } = useApp();
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
@@ -113,7 +114,7 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
   if (!agentRef.current) {
     const block = projectContextBlock();
     agentRef.current = new Agent({
-      provider: getProvider(cfg),
+      provider: provider ?? getProvider(cfg),
       tools: registryRef.current,
       maxSteps: cfg.maxSteps,
       systemPrompt: block ? `${DEFAULT_SYSTEM_PROMPT}\n\n${block}` : DEFAULT_SYSTEM_PROMPT,
@@ -328,7 +329,7 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
   );
 }
 
-function ApprovalBox({ approval }: { approval: Approval }) {
+export function ApprovalBox({ approval }: { approval: Approval }) {
   const { toolName, args } = approval;
   const preview: any[] = [];
   if (toolName === "bash") {
