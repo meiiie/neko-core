@@ -17,6 +17,7 @@ export interface Session {
   messages: any[];
   branch?: string; // git branch at last save
   bytes?: number; // approx content size (messages JSON length)
+  title?: string; // user-set name (overrides the first-message title)
 }
 
 function sessionsDir(): string {
@@ -80,8 +81,19 @@ export function latestSession(cwd: string): Session | null {
 }
 
 export function sessionTitle(session: Session): string {
+  if (session.title) return session.title;
   const firstUser = session.messages.find((m) => m.role === "user");
   return firstUser ? String(firstUser.content).replace(/\s+/g, " ").slice(0, 60) : "(no messages)";
+}
+
+/** Rename a session (sets a title override); preserves updatedAt so it doesn't jump the list. */
+export function renameSession(id: string, title: string): void {
+  const path = join(sessionsDir(), `${id}.json`);
+  if (!existsSync(path)) return;
+  const s = loadSession(id);
+  if (!s) return;
+  s.title = title.trim() || undefined;
+  writeFileSync(path, JSON.stringify(s, null, 2), "utf-8");
 }
 
 export function renderSessions(): string {

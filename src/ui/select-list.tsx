@@ -19,6 +19,7 @@ export interface Overlay {
   onSelect: (item: SelectItem) => void;
   onCtrlA?: () => void; // optional secondary action (e.g. /resume "all projects")
   ctrlAHint?: string;
+  onRename?: (item: SelectItem, newName: string) => void; // Ctrl+R rename
 }
 
 export function SelectList(props: {
@@ -30,11 +31,13 @@ export function SelectList(props: {
   search?: boolean; // type-to-filter (default on)
   onCtrlA?: () => void;
   ctrlAHint?: string;
+  onRename?: (item: SelectItem, newName: string) => void;
 }) {
-  const { title, items, onSelect, onCancel, cols, search = true, onCtrlA, ctrlAHint } = props;
+  const { title, items, onSelect, onCancel, cols, search = true, onCtrlA, ctrlAHint, onRename } = props;
   const [index, setIndex] = useState(0);
   const [query, setQuery] = useState("");
   const [showPreview, setShowPreview] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null); // rename buffer; null = not renaming
 
   const filtered = query
     ? items.filter((it) => (it.label + " " + (it.detail ?? "")).toLowerCase().includes(query.toLowerCase()))
@@ -42,6 +45,17 @@ export function SelectList(props: {
   const idx = Math.min(index, Math.max(0, filtered.length - 1));
 
   useInput((input, key) => {
+    // Rename mode owns the keyboard until Enter/Esc.
+    if (renaming !== null) {
+      if (key.return) {
+        if (filtered[idx] && onRename) onRename(filtered[idx], renaming);
+        return setRenaming(null);
+      }
+      if (key.escape) return setRenaming(null);
+      if (key.backspace || key.delete) return setRenaming((r) => [...(r ?? "")].slice(0, -1).join(""));
+      if (input && !key.ctrl && !key.meta && !key.tab) return setRenaming((r) => (r ?? "") + input);
+      return;
+    }
     if (key.escape) return onCancel();
     if (key.return) {
       if (filtered[idx]) onSelect(filtered[idx]);
@@ -51,6 +65,7 @@ export function SelectList(props: {
     if (key.downArrow) return setIndex(Math.min(filtered.length - 1, idx + 1));
     if (input === " ") return setShowPreview((p) => !p); // Space toggles the preview panel
     if (onCtrlA && key.ctrl && (input === "a" || input === "\x01")) return onCtrlA();
+    if (onRename && key.ctrl && (input === "r" || input === "\x12")) return setRenaming(filtered[idx]?.label ?? "");
     if (search) {
       if (key.backspace || key.delete) {
         setQuery((q) => [...q].slice(0, -1).join(""));
@@ -71,7 +86,9 @@ export function SelectList(props: {
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text color="cyan">{title} ({filtered.length ? idx + 1 : 0} of {filtered.length})</Text>
-      {search ? (
+      {renaming !== null ? (
+        <Text>  rename: <Text color="cyan">{renaming}</Text><Text inverse> </Text></Text>
+      ) : search ? (
         <Text dimColor>  {query ? `search: ${query}` : "search… (type to filter)"}</Text>
       ) : null}
       <Text dimColor>{rule}</Text>
@@ -97,7 +114,9 @@ export function SelectList(props: {
         </Box>
       ) : null}
       <Text dimColor>
-        ↑/↓ select · Enter confirm · Space preview{onCtrlA ? ` · Ctrl+A ${ctrlAHint ?? "more"}` : ""} · Esc cancel{search ? " · type to filter" : ""}
+        {renaming !== null
+          ? "Enter save · Esc cancel rename"
+          : `↑/↓ select · Enter confirm · Space preview${onCtrlA ? ` · Ctrl+A ${ctrlAHint ?? "more"}` : ""}${onRename ? " · Ctrl+R rename" : ""} · Esc cancel${search ? " · type to filter" : ""}`}
       </Text>
     </Box>
   );

@@ -362,6 +362,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           onSelect={overlay.onSelect}
           onCtrlA={overlay.onCtrlA}
           ctrlAHint={overlay.ctrlAHint}
+          onRename={overlay.onRename}
           onCancel={() => {
             setOverlay(null);
             addLine("info", "(cancelled)");

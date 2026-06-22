@@ -7,7 +7,7 @@ import type { Agent } from "../core/agent.ts";
 import type { NekoConfig } from "../adapters/config.ts";
 import { initProject } from "../adapters/project.ts";
 import { listModels } from "../adapters/providers.ts";
-import { listSessions, loadSession, sessionTitle, type Session } from "../adapters/session.ts";
+import { listSessions, loadSession, renameSession, sessionTitle, type Session } from "../adapters/session.ts";
 import { listSkills, loadSkill } from "../adapters/skills.ts";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { listTools } from "../core/tools.ts";
@@ -71,6 +71,10 @@ function openResumePicker(ctx: CommandCtx, scope: "cwd" | "all"): void {
     title: scope === "all" ? "Resume session (all projects)" : "Resume session",
     ctrlAHint: scope === "all" ? "this project" : "all projects",
     onCtrlA: () => openResumePicker(ctx, scope === "cwd" ? "all" : "cwd"),
+    onRename: (it, name) => {
+      renameSession(it.id, name);
+      openResumePicker(ctx, scope); // refresh the list with the new title
+    },
     items: list.map((s) => ({
       id: s.id,
       label: sessionTitle(s),
