@@ -34,6 +34,22 @@ test("loop runs tools then finishes", async () => {
   ]);
 });
 
+test("dynamicContext is injected and refreshed each turn (no staleness on model switch)", async () => {
+  let model = "m1";
+  const agent = new Agent({
+    provider: new ScriptedProvider([{ content: "ok", tool_calls: [] }, { content: "ok2", tool_calls: [] }]) as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    dynamicContext: () => `<env>model: ${model}</env>`,
+  });
+  const dyn = () => agent.messages.find((m: any) => m.role === "system" && m.dynamic);
+  await agent.run("hi");
+  expect(dyn().content).toContain("model: m1");
+  model = "m2"; // user switches model mid-session
+  await agent.run("again");
+  expect(dyn().content).toContain("model: m2"); // refreshed, not stale
+  expect(agent.messages.filter((m: any) => m.role === "system" && m.dynamic).length).toBe(1);
+});
+
 test("max_steps cap fires", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ag-"));
   const loop = { content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "missing" } }] };

@@ -25,7 +25,7 @@ export function loadProjectContext(cwd: string = process.cwd()): ContextFile[] {
   const add = (filePath: string, label: string) => {
     try {
       if (!existsSync(filePath) || !statSync(filePath).isFile()) return;
-      let text = readFileSync(filePath, "utf-8").trim();
+      let text = expandImports(readFileSync(filePath, "utf-8").trim(), dirname(filePath));
       if (!text) return;
       if (text.length > MAX_FILE_CHARS) text = text.slice(0, MAX_FILE_CHARS) + "\n... (truncated)";
       if (total + text.length > MAX_TOTAL_CHARS) return;
@@ -65,6 +65,21 @@ export function renderContext(cwd?: string): string {
     return "No project context found (looked for NEKO.md / CLAUDE.md up to the repo root, plus ~/.neko-core/NEKO.md).";
   }
   return ["Neko Code context files:", ...files.map((f) => `- ${f.path} (${f.text.length} chars)`)].join("\n");
+}
+
+/** Expand `@path.ext` references inline (Claude-style imports), depth-limited + cycle-guarded. */
+function expandImports(text: string, baseDir: string, depth = 0, seen: Set<string> = new Set()): string {
+  if (depth > 3) return text;
+  return text.replace(/@([\w./-]+\.\w+)/g, (whole, rel) => {
+    const p = resolve(baseDir, rel);
+    if (seen.has(p) || !existsSync(p)) return whole;
+    seen.add(p);
+    try {
+      return expandImports(readFileSync(p, "utf-8").trim(), dirname(p), depth + 1, seen);
+    } catch {
+      return whole;
+    }
+  });
 }
 
 function git(cwd: string, args: string[]): string {

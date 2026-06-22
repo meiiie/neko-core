@@ -15,6 +15,15 @@ test("loads NEKO.md from the project root", () => {
   expect(files.some((f) => f.text.includes("hello project context"))).toBe(true);
 });
 
+test("expands @import references inline", () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-imp-"));
+  mkdirSync(join(root, ".git"));
+  writeFileSync(join(root, "shared.md"), "SHARED RULES");
+  writeFileSync(join(root, "NEKO.md"), "Project. See @shared.md");
+  const files = loadProjectContext(root);
+  expect(files.some((f) => f.text.includes("SHARED RULES"))).toBe(true);
+});
+
 test("environmentBlock reports the working directory + model", () => {
   const env = environmentBlock({ model: "m1", provider: "p1" });
   expect(env).toContain("Working directory:");

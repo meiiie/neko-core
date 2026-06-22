@@ -118,16 +118,16 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
 
   const agentRef = useRef<Agent | null>(null);
   if (!agentRef.current) {
-    const systemPrompt = [
-      DEFAULT_SYSTEM_PROMPT,
-      environmentBlock({ model: cfg.model, provider: cfg.provider }),
-      projectContextBlock(),
-    ].filter(Boolean).join("\n\n");
     agentRef.current = new Agent({
       provider: provider ?? getProvider(cfg),
       tools: registryRef.current,
       maxSteps: cfg.maxSteps,
-      systemPrompt,
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
+      dynamicContext: () =>
+        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock()]
+          .filter(Boolean)
+          .join("\n\n"),
       onDelta: (t) => {
         streamRef.current += t;
         setStream((s) => s + t);

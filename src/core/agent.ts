@@ -52,6 +52,9 @@ export interface AgentOptions {
   onEvent?: EventHook;
   /** When set, assistant content is streamed chunk-by-chunk as it arrives. */
   onDelta?: DeltaHook;
+  /** Re-evaluated before every turn (env + project context), so model/cwd/git/NEKO.md stay
+   * current even if the user switches model or edits memory mid-session. */
+  dynamicContext?: () => string;
 }
 
 export class Agent {
@@ -61,6 +64,7 @@ export class Agent {
   private readonly systemPrompt: string;
   private readonly onEvent?: EventHook;
   private readonly onDelta?: DeltaHook;
+  private readonly dynamicContext?: () => string;
   readonly cost = new CostTracker();
   messages: any[] = [];
 
@@ -71,6 +75,7 @@ export class Agent {
     this.systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.onEvent = opts.onEvent;
     this.onDelta = opts.onDelta;
+    this.dynamicContext = opts.dynamicContext;
   }
 
   /** Summarize the conversation and replace it with the summary, freeing context. */
@@ -91,6 +96,23 @@ export class Agent {
     return summary;
   }
 
+  /** Keep one live system message (right after the base prompt) holding env + project context,
+   * refreshed each turn — so a mid-session model switch or NEKO.md edit is reflected at once. */
+  private refreshDynamicContext(): void {
+    if (!this.dynamicContext) return;
+    const text = this.dynamicContext();
+    const existing = this.messages.find((m) => m.role === "system" && m.dynamic);
+    if (!text) {
+      if (existing) this.messages = this.messages.filter((m) => m !== existing);
+      return;
+    }
+    if (existing) existing.content = text;
+    else {
+      const baseIdx = this.messages.findIndex((m) => m.role === "system");
+      this.messages.splice(baseIdx + 1, 0, { role: "system", content: text, dynamic: true });
+    }
+  }
+
   /** Append text to the system prompt (used by /skill). Seeds the base prompt if needed. */
   appendSystem(text: string): void {
     const sys = this.messages.find((m) => m.role === "system");
@@ -104,6 +126,7 @@ export class Agent {
     if (!this.messages.length) {
       this.messages.push({ role: "system", content: this.systemPrompt });
     }
+    this.refreshDynamicContext();
     this.messages.push({ role: "user", content: instruction });
 
     for (let step = 0; step < this.maxSteps; step++) {

@@ -110,16 +110,15 @@ async function buildAgent(
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
     return await new Agent({ provider: getProvider(cfg), tools: subReg, maxSteps: cfg.maxSteps }).run(prompt, signal);
   };
-  const systemPrompt = [
-    DEFAULT_SYSTEM_PROMPT,
-    environmentBlock({ model: cfg.model, provider: cfg.provider }),
-    projectContextBlock(),
-  ].filter(Boolean).join("\n\n");
   const agent = new Agent({
     provider: getProvider(cfg),
     tools: registry,
     maxSteps: cfg.maxSteps,
-    systemPrompt,
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    dynamicContext: () =>
+      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock()]
+        .filter(Boolean)
+        .join("\n\n"),
     onEvent: printEvent,
     onDelta,
   });
