@@ -3,8 +3,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { type ApprovalGate, ToolRegistry } from "../src/tool-runtime.ts";
-import type { PermissionMode } from "../src/permissions.ts";
+import { type ApprovalGate, ToolRegistry } from "../src/core/tool-runtime.ts";
+import type { PermissionMode } from "../src/core/permissions.ts";
 
 function makeReg(mode: PermissionMode = "auto", prompt: ApprovalGate = () => true) {
   const root = mkdtempSync(join(tmpdir(), "neko-tr-"));

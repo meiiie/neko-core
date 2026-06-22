@@ -7,7 +7,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-import { VERSION } from "./version.ts";
+import { VERSION } from "../shared/version.ts";
 
 export interface McpServerConfig {
   command: string;

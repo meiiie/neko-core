@@ -3,7 +3,7 @@
  * agents / commands / capabilities registries + a policy audit of the safe/gated boundary.
  */
 import type { NekoConfig } from "./config.ts";
-import { GATED, listTools, SAFE } from "./tools.ts";
+import { GATED, listTools, SAFE } from "../core/tools.ts";
 
 export const READ_ONLY = "read-only";
 export const READ_WRITE = "read-write";

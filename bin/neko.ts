@@ -7,16 +7,16 @@
  */
 import { createInterface } from "node:readline/promises";
 
-import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/agent.ts";
-import { loadConfig, type NekoConfig } from "../src/config.ts";
-import { projectContextBlock, renderContext } from "../src/context.ts";
-import { collectChecks, render } from "../src/doctor.ts";
-import { buildMcpHub, renderMcp } from "../src/mcp.ts";
-import { getProvider } from "../src/providers.ts";
-import { initProject, initUser } from "../src/project.ts";
-import { renderSessions } from "../src/session.ts";
-import { renderSkills } from "../src/skills.ts";
-import { ToolRegistry } from "../src/tool-runtime.ts";
+import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent.ts";
+import { loadConfig, type NekoConfig } from "../src/adapters/config.ts";
+import { projectContextBlock, renderContext } from "../src/adapters/context.ts";
+import { collectChecks, render } from "../src/adapters/doctor.ts";
+import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
+import { getProvider } from "../src/adapters/providers.ts";
+import { initProject, initUser } from "../src/adapters/project.ts";
+import { renderSessions } from "../src/adapters/session.ts";
+import { renderSkills } from "../src/adapters/skills.ts";
+import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import {
   collectCapabilities,
   evaluatePolicy,
@@ -28,9 +28,9 @@ import {
   renderCommands,
   renderPolicyReport,
   resolveAgent,
-} from "../src/registry.ts";
-import { listTools, renderToolDetail, renderTools, resolveTool } from "../src/tools.ts";
-import { VERSION } from "../src/version.ts";
+} from "../src/adapters/registry.ts";
+import { listTools, renderToolDetail, renderTools, resolveTool } from "../src/core/tools.ts";
+import { VERSION } from "../src/shared/version.ts";
 
 interface Args {
   command?: string;

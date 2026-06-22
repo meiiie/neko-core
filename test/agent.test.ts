@@ -3,8 +3,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Agent } from "../src/agent.ts";
-import { ToolRegistry } from "../src/tool-runtime.ts";
+import { Agent } from "../src/core/agent.ts";
+import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 class ScriptedProvider {
   index = 0;

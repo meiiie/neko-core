@@ -10,7 +10,7 @@
  * Tool observations (errors + denials) are fed back so the model adapts rather than crash.
  */
 import { CostTracker } from "./cost.ts";
-import type { DeltaHook, Provider, ToolCall } from "./providers.ts";
+import type { DeltaHook, Provider, ToolCall } from "./ports.ts";
 import type { ToolRegistry } from "./tool-runtime.ts";
 
 export const DEFAULT_SYSTEM_PROMPT =

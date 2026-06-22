@@ -7,26 +7,11 @@
  * provider in the TS build (that lives only in the Python reference).
  */
 import type { NekoConfig } from "./config.ts";
-import type { Usage } from "./cost.ts";
+import type { Usage } from "../core/cost.ts";
+import type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
-export interface ToolCall {
-  id: string;
-  name: string;
-  arguments: Record<string, any>;
-}
-
-export interface ProviderResponse {
-  content: string | null;
-  tool_calls: ToolCall[];
-  usage?: Usage;
-}
-
-/** onDelta, when supplied, streams assistant content chunks as they arrive (SSE). */
-export type DeltaHook = (text: string) => void;
-
-export interface Provider {
-  complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal): Promise<ProviderResponse>;
-}
+// Re-export the port types so callers can keep importing them from the provider adapter.
+export type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 

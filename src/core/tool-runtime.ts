@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
-import type { McpHub } from "./mcp.ts";
+import type { McpTools } from "./ports.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
 import { resolveTool, toolSchemas } from "./tools.ts";
 
@@ -48,7 +48,7 @@ export class ToolRegistry {
     public readonly root: string,
     mode: PermissionMode = "default",
     public prompt: ApprovalGate = denyAll,
-    public mcp?: McpHub,
+    public mcp?: McpTools,
   ) {
     this.mode = mode;
   }

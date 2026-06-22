@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadProjectContext } from "../src/context.ts";
+import { loadProjectContext } from "../src/adapters/context.ts";
 
 test("loads NEKO.md from the project root", () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ctx-"));

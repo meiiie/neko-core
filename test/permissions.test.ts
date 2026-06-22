@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { decide, nextMode } from "../src/permissions.ts";
-import { resolveTool } from "../src/tools.ts";
+import { decide, nextMode } from "../src/core/permissions.ts";
+import { resolveTool } from "../src/core/tools.ts";
 
 const read = resolveTool("read_file");
 const write = resolveTool("write_file");

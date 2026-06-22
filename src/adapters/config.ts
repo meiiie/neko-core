@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { isMode, type PermissionMode } from "./permissions.ts";
+import { isMode, type PermissionMode } from "../core/permissions.ts";
 
 export const LOCAL_CONFIG_DIR = ".neko-core";
 export const LOCAL_CONFIG_NAME = "config.json";

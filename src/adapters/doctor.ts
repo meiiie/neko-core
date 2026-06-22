@@ -3,7 +3,7 @@
  * (provider, model, endpoint, key presence) WITHOUT calling the model.
  */
 import type { NekoConfig } from "./config.ts";
-import { VERSION } from "./version.ts";
+import { VERSION } from "../shared/version.ts";
 
 export interface Check {
   status: "ok" | "warn";

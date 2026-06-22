@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { NekoConfig } from "../src/config.ts";
-import { getProvider, OpenAICompatProvider, parseOpenAIMessage } from "../src/providers.ts";
+import { NekoConfig } from "../src/adapters/config.ts";
+import { getProvider, OpenAICompatProvider, parseOpenAIMessage } from "../src/adapters/providers.ts";
 
 function cfg(provider: string) {
   return new NekoConfig({ provider }, null, {}, "");

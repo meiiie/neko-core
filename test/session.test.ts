@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { listSessions, loadSession, newSessionId, saveSession } from "../src/session.ts";
+import { listSessions, loadSession, newSessionId, saveSession } from "../src/adapters/session.ts";
 
 test("save / load / list round-trip", () => {
   const id = newSessionId();

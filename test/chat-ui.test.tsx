@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 
-import type { Provider, ProviderResponse } from "../src/providers.ts";
+import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
 
 const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));

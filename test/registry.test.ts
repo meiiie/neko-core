@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { NekoConfig } from "../src/config.ts";
-import { evaluatePolicy } from "../src/registry.ts";
+import { NekoConfig } from "../src/adapters/config.ts";
+import { evaluatePolicy } from "../src/adapters/registry.ts";
 
 function cfg(mode = "default") {
   return new NekoConfig({ mode }, null, {}, "");

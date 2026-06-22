@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 
-import { Agent } from "../src/agent.ts";
-import { OpenAICompatProvider, type Provider, type ProviderResponse } from "../src/providers.ts";
-import { ToolRegistry } from "../src/tool-runtime.ts";
+import { Agent } from "../src/core/agent.ts";
+import { OpenAICompatProvider, type Provider, type ProviderResponse } from "../src/adapters/providers.ts";
+import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 test("provider aborts immediately on a pre-aborted signal (no fetch, no retry)", async () => {
   const cfg: any = {

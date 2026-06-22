@@ -7,19 +7,25 @@ Working rules: `docs/process/RULES.md`.
 
 ## Codebase map (`src/`, run by Bun)
 
-| Module | Role |
+Ports & Adapters — dependencies point inward (`docs/process/ARCHITECTURE.md`,
+enforced by `test/architecture.test.ts`).
+
+| Layer / Module | Role |
 |---|---|
-| `config.ts` | Config-first loader: overlay (built-in → `~/.neko-core` → `./.neko-core` → profile → `NEKO_*` env) + profiles. Key read on demand, never stored/printed. |
-| `providers.ts` | One `complete(messages, tools, onDelta?)` contract; `openai_compat` over `fetch` with SSE streaming + retry. |
-| `tools.ts` · `tool-runtime.ts` | Tool contracts (safe: read_file/search/glob/ls · gated: write_file/edit/bash) + executable runtime; path-escape refused. |
-| `permissions.ts` | Permission modes: default / accept-edits / plan / auto. |
-| `registry.ts` | agents / commands / capabilities + the `policy` audit. |
-| `agent.ts` | The agent loop (`complete → tool_calls → observe`, `max_steps`) + cost tracking. |
-| `context.ts` · `session.ts` · `mcp.ts` · `cost.ts` | Project context (NEKO.md/CLAUDE.md) · conversation persistence/resume · MCP client · token usage. |
-| `doctor.ts` · `project.ts` | `neko doctor` diagnostics · `init`/`init-user` scaffolds. |
-| `ui/chat.tsx` | The Ink (React) TUI REPL — streaming, tool lines, approval, slash commands, Shift+Tab modes. |
+| **`core/`** (pure domain) | |
+| `core/ports.ts` | The interfaces core depends on: `Provider` (LLM), `McpTools`, plus `ToolCall`/`ProviderResponse`/`DeltaHook`. |
+| `core/agent.ts` | The agent loop (`complete → tool_calls → observe`, `max_steps`) + cost; `compact()`; `appendSystem()`. |
+| `core/tools.ts` · `core/tool-runtime.ts` | Tool contracts (safe: read_file/search/glob/ls/todo_write · gated: write_file/edit/bash) + `describeToolCall` + executable `ToolRegistry`; path-escape refused. |
+| `core/permissions.ts` · `core/cost.ts` | Permission modes (default/accept-edits/plan/auto) · token usage. |
+| **`adapters/`** (edge) | |
+| `adapters/providers.ts` | `openai_compat` over `fetch`: SSE streaming, retry, abort (implements `Provider`). |
+| `adapters/config.ts` | Config-first loader: overlay (built-in → `~/.neko-core` → `./.neko-core` → profile → `NEKO_*`) + profiles. Key read on demand, never stored/printed. |
+| `adapters/mcp.ts` · `adapters/session.ts` · `adapters/context.ts` · `adapters/skills.ts` | MCP client · session persistence/resume · project context (NEKO.md/CLAUDE.md) · `.md` skills. |
+| `adapters/registry.ts` · `adapters/doctor.ts` · `adapters/project.ts` | capabilities + `policy` audit · `doctor` diagnostics · `init` scaffolds. |
+| **`shared/`** | `version.ts` (leaf). |
+| **`ui/`** | `ui/chat.tsx` — Ink REPL (streaming markdown, tool lines, approval, thinking line, slash commands, modes). |
 | `bin/neko.ts` | The `neko` CLI entry point. |
-| `reference/python/` | The Python **spec/reference** (the original port). Not shipped; read it, don't depend on it. |
+| `reference/python/` | The Python **spec/reference** (original port). Not shipped; read it, don't depend on it. |
 
 ## Critical gotchas
 
