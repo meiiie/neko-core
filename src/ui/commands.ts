@@ -62,6 +62,35 @@ export interface CommandCtx {
   exit: () => void;
 }
 
+/** Open the resume picker for a scope; Ctrl+A flips between this project and all projects. */
+function openResumePicker(ctx: CommandCtx, scope: "cwd" | "all"): void {
+  const all = listSessions();
+  const list = scope === "cwd" ? all.filter((s) => s.cwd === process.cwd()) : all;
+  if (!list.length) return ctx.addLine("info", "no saved sessions here - Ctrl+A shows all projects");
+  ctx.setOverlay({
+    title: scope === "all" ? "Resume session (all projects)" : "Resume session",
+    ctrlAHint: scope === "all" ? "this project" : "all projects",
+    onCtrlA: () => openResumePicker(ctx, scope === "cwd" ? "all" : "cwd"),
+    items: list.map((s) => ({
+      id: s.id,
+      label: sessionTitle(s),
+      detail: `${relativeTime(s.updatedAt)} · ${s.messages.length} msgs` +
+        (s.branch ? ` · ${s.branch}` : "") + (s.bytes ? ` · ${fmtBytes(s.bytes)}` : "") +
+        (scope === "all" ? ` · ${s.cwd.replace(/\\/g, "/").split("/").pop()}` : ""),
+      preview: s.messages
+        .filter((m: any) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+        .slice(-4)
+        .map((m: any) => (m.role === "user" ? "> " : "  ") + trunc(String(m.content), 100))
+        .join("\n"),
+    })),
+    onSelect: (it) => {
+      ctx.setOverlay(null);
+      const target = loadSession(it.id);
+      if (target) ctx.resumeInto(target);
+    },
+  });
+}
+
 /** Run a "/..." command. Returns when done; the caller returns from its turn afterwards. */
 export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<void> {
   const { cfg, agent, addLine } = ctx;
@@ -179,27 +208,8 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         else ctx.resumeInto(target);
         return;
       }
-      const list = listSessions().filter((s) => s.cwd === process.cwd());
-      if (!list.length) return addLine("info", "no saved sessions here - /sessions to list");
-      return ctx.setOverlay({
-        title: "Resume session",
-        items: list.map((s) => ({
-          id: s.id,
-          label: sessionTitle(s),
-          detail: `${relativeTime(s.updatedAt)} · ${s.messages.length} msgs` +
-            (s.branch ? ` · ${s.branch}` : "") + (s.bytes ? ` · ${fmtBytes(s.bytes)}` : ""),
-          preview: s.messages
-            .filter((m: any) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
-            .slice(-4)
-            .map((m: any) => (m.role === "user" ? "> " : "  ") + trunc(String(m.content), 100))
-            .join("\n"),
-        })),
-        onSelect: (it) => {
-          ctx.setOverlay(null);
-          const target = loadSession(it.id);
-          if (target) ctx.resumeInto(target);
-        },
-      });
+      if (!listSessions().length) return addLine("info", "no saved sessions yet");
+      return openResumePicker(ctx, "cwd");
     }
     case "/effort": {
       const lvl = input.split(/\s+/)[1]?.toLowerCase();

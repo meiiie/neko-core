@@ -17,6 +17,8 @@ export interface Overlay {
   title: string;
   items: SelectItem[];
   onSelect: (item: SelectItem) => void;
+  onCtrlA?: () => void; // optional secondary action (e.g. /resume "all projects")
+  ctrlAHint?: string;
 }
 
 export function SelectList(props: {
@@ -26,8 +28,10 @@ export function SelectList(props: {
   onCancel: () => void;
   cols: number;
   search?: boolean; // type-to-filter (default on)
+  onCtrlA?: () => void;
+  ctrlAHint?: string;
 }) {
-  const { title, items, onSelect, onCancel, cols, search = true } = props;
+  const { title, items, onSelect, onCancel, cols, search = true, onCtrlA, ctrlAHint } = props;
   const [index, setIndex] = useState(0);
   const [query, setQuery] = useState("");
   const [showPreview, setShowPreview] = useState(false);
@@ -46,6 +50,7 @@ export function SelectList(props: {
     if (key.upArrow) return setIndex(Math.max(0, idx - 1));
     if (key.downArrow) return setIndex(Math.min(filtered.length - 1, idx + 1));
     if (input === " ") return setShowPreview((p) => !p); // Space toggles the preview panel
+    if (onCtrlA && key.ctrl && (input === "a" || input === "\x01")) return onCtrlA();
     if (search) {
       if (key.backspace || key.delete) {
         setQuery((q) => [...q].slice(0, -1).join(""));
@@ -91,7 +96,9 @@ export function SelectList(props: {
           <Text dimColor>{rule}</Text>
         </Box>
       ) : null}
-      <Text dimColor>↑/↓ select · Enter confirm · Space preview · Esc cancel{search ? " · type to filter" : ""}</Text>
+      <Text dimColor>
+        ↑/↓ select · Enter confirm · Space preview{onCtrlA ? ` · Ctrl+A ${ctrlAHint ?? "more"}` : ""} · Esc cancel{search ? " · type to filter" : ""}
+      </Text>
     </Box>
   );
 }

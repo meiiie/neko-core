@@ -360,6 +360,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           items={overlay.items}
           cols={cols}
           onSelect={overlay.onSelect}
+          onCtrlA={overlay.onCtrlA}
+          ctrlAHint={overlay.ctrlAHint}
           onCancel={() => {
             setOverlay(null);
             addLine("info", "(cancelled)");
