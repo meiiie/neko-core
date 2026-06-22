@@ -9,7 +9,8 @@
  * The maxSteps cap is load-bearing: an agent without one can loop forever and burn money.
  * Tool observations (errors + denials) are fed back so the model adapts rather than crash.
  */
-import type { Provider, ToolCall } from "./providers.ts";
+import { CostTracker } from "./cost.ts";
+import type { DeltaHook, Provider, ToolCall } from "./providers.ts";
 import type { ToolRegistry } from "./tool-runtime.ts";
 import { toolSchemas } from "./tools.ts";
 
@@ -30,6 +31,8 @@ export interface AgentOptions {
   maxSteps?: number;
   systemPrompt?: string;
   onEvent?: EventHook;
+  /** When set, assistant content is streamed chunk-by-chunk as it arrives. */
+  onDelta?: DeltaHook;
 }
 
 export class Agent {
@@ -38,6 +41,8 @@ export class Agent {
   private readonly maxSteps: number;
   private readonly systemPrompt: string;
   private readonly onEvent?: EventHook;
+  private readonly onDelta?: DeltaHook;
+  readonly cost = new CostTracker();
   messages: any[] = [];
 
   constructor(opts: AgentOptions) {
@@ -46,6 +51,7 @@ export class Agent {
     this.maxSteps = opts.maxSteps ?? 20;
     this.systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.onEvent = opts.onEvent;
+    this.onDelta = opts.onDelta;
   }
 
   /** Run the loop until the model is done or maxSteps is hit. Returns the final text. */
@@ -56,7 +62,8 @@ export class Agent {
     this.messages.push({ role: "user", content: instruction });
 
     for (let step = 0; step < this.maxSteps; step++) {
-      const response = await this.provider.complete(this.messages, toolSchemas());
+      const response = await this.provider.complete(this.messages, toolSchemas(), this.onDelta);
+      this.cost.add(response.usage);
       const toolCalls = response.tool_calls ?? [];
 
       if (!toolCalls.length) {

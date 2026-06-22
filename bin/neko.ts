@@ -71,7 +71,7 @@ function printEvent(kind: string, data: any): void {
   if (kind === "tool_call") {
     const a = data.arguments ?? {};
     const summary = a.command ?? a.path ?? a.pattern ?? "";
-    console.log(`  -> ${data.name}(${summary})`);
+    console.log(`\n  -> ${data.name}(${summary})`);
   } else if (kind === "tool_result") {
     let obs = String(data.observation).replace(/\n/g, " ");
     if (obs.length > 200) obs = obs.slice(0, 200) + "...";
@@ -81,10 +81,16 @@ function printEvent(kind: string, data: any): void {
   }
 }
 
-function buildAgent(cfg: NekoConfig, yolo: boolean): Agent {
+function buildAgent(cfg: NekoConfig, yolo: boolean, onDelta?: (t: string) => void): Agent {
   const approval = yolo ? "auto" : cfg.approval;
   const registry = new ToolRegistry(process.cwd(), gateFor(approval, promptApprove));
-  return new Agent({ provider: getProvider(cfg), tools: registry, maxSteps: cfg.maxSteps, onEvent: printEvent });
+  return new Agent({
+    provider: getProvider(cfg),
+    tools: registry,
+    maxSteps: cfg.maxSteps,
+    onEvent: printEvent,
+    onDelta,
+  });
 }
 
 const HELP = `Neko Core ${VERSION} - local-first agentic CLI.
@@ -180,9 +186,15 @@ async function cmdRun(args: Args): Promise<number> {
     console.error("neko: error: run needs an instruction, e.g. neko run \"add a test for X\"");
     return 2;
   }
-  const agent = buildAgent(load(args), args.yolo);
+  let streamed = 0;
+  const agent = buildAgent(load(args), args.yolo, (t) => {
+    streamed += t.length;
+    process.stdout.write(t);
+  });
   const answer = await agent.run(instruction);
-  console.log("\n" + answer);
+  process.stdout.write("\n");
+  if (streamed === 0 && answer.trim()) console.log(answer); // synthetic/non-streamed result
+  console.log(`[${agent.cost.summary()}]`);
   return 0;
 }
 

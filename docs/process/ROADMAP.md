@@ -26,7 +26,7 @@ cost/token tracking · MCP client · single-binary distribution.
 - [x] **A1** Tools + registry + policy (read_file/search safe, write_file/bash gated; OpenAI schema). *(done — typecheck clean; `neko tools/agents/commands/capabilities/policy` work; tool runtime smoke: read/search/write/bash, path-escape refused, denial returns a string, safe-under-deny)*
 - [x] **A2** Agent loop + `neko run` (complete → tool_calls → observe, `max_steps`; interactive approval + `--yolo`). *(done — typecheck clean; live `neko run --yolo` on NVIDIA called read_file and answered correctly)*
 - [x] **A3** Real coding tool set: `edit` (exact unique string replace, gated), `glob` (Bun.Glob), `ls` (safe); `search` is the scoped grep. *(done — typecheck clean, policy PASS; smoke: edit unique/not-found/ambiguous, glob, ls)*
-- [ ] **A4** Streaming responses (SSE) + token/cost tracking (per turn + session total).
+- [x] **A4** Streaming responses (SSE) + token tracking (`src/cost.ts`; per-call usage accumulated). *(done — live `neko run` streams tokens via SSE and prints `tokens: in/out/total`. $-cost left to a future per-model price config.)*
 
 ### Phase B — UX (the Ink TUI = "Neko Code")
 - [ ] **B1** Ink chat REPL: streaming render, tool-call/diff display, approval prompts (yes / yes-always / no), spinner, markdown.

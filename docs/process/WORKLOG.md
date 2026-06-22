@@ -60,3 +60,4 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
 - D1 tests; D2 single binary + re-point `neko`; D3 rename to Neko Code + merge.
 
 - **A3 done** — coding tool set: `edit` (unique string replace, gated), `glob` (Bun.Glob), `ls` (safe). 7 tools total; coder/explorer agents + policy updated.
+- **A4 done** — SSE streaming in the provider (`complete(.., onDelta)`) + token tracking (`src/cost.ts`). `neko run` streams the answer live and prints a token usage line.
