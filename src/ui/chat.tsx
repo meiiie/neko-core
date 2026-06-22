@@ -158,7 +158,12 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           const a = data.arguments ?? {};
           addLine("tool_call", `${data.name}(${trunc(a.command ?? a.path ?? a.pattern ?? "", 80)})`);
         } else if (kind === "tool_result") {
-          addLine("tool_result", trunc(data.observation, 160));
+          const obs = String(data.observation)
+            .split("\n")
+            .slice(0, 8)
+            .map((l) => (l.length > 200 ? l.slice(0, 200) + "…" : l))
+            .join("\n");
+          addLine("tool_result", obs);
           setTodos([...registryRef.current!.todos]); // reflect todo_write changes
         } else if (kind === "step") {
           setStep(data);
@@ -386,8 +391,22 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         );
       case "tool_call":
         return <Text key={line.id}><Text color="green">● </Text>{line.text}</Text>;
-      case "tool_result":
-        return <Text key={line.id} dimColor>{"  ⎿ "}{line.text}</Text>;
+      case "tool_result": {
+        const resultLines = line.text.split("\n");
+        return (
+          <Box key={line.id} flexDirection="column">
+            {resultLines.map((l, i) => {
+              const add = l.startsWith("+");
+              const del = l.startsWith("-");
+              return (
+                <Text key={i} color={add ? "green" : del ? "red" : undefined} dimColor={!add && !del}>
+                  {(i === 0 ? "  ⎿ " : "     ") + l}
+                </Text>
+              );
+            })}
+          </Box>
+        );
+      }
       default:
         return <Text key={line.id} color="gray">{line.text}</Text>;
     }

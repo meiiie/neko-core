@@ -209,7 +209,14 @@ function toolWriteFile(root: string, args: Record<string, any>): string {
   const path = resolveInRoot(root, raw);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, String(content), "utf-8");
-  return `Wrote ${String(content).length} chars to ${raw}`;
+  return `Wrote ${raw} (${String(content).split("\n").length} lines)`;
+}
+
+/** First line of a string, truncated, with an ellipsis if it spans more lines. */
+function firstLine(s: string): string {
+  const lines = String(s).split("\n");
+  const head = lines[0].length > 120 ? lines[0].slice(0, 120) + "…" : lines[0];
+  return lines.length > 1 ? head + " …" : head;
 }
 
 function toolEdit(root: string, args: Record<string, any>): string {
@@ -229,7 +236,7 @@ function toolEdit(root: string, args: Record<string, any>): string {
   // Function replacement avoids `$` patterns in new_string being interpreted.
   text = text.replace(String(oldStr), () => String(newStr));
   writeFileSync(path, text, "utf-8");
-  return `Edited ${raw} (1 replacement)`;
+  return `Edited ${raw}\n- ${firstLine(String(oldStr))}\n+ ${firstLine(String(newStr))}`;
 }
 
 function toolBash(root: string, args: Record<string, any>): string {

@@ -22,6 +22,8 @@ export const DEFAULT_SYSTEM_PROMPT =
   "line-number prefix in edit/write content.\n" +
   "For multi-step tasks, call todo_write to plan and track progress (keep exactly one item " +
   "in_progress); update it as you go.\n" +
+  "Find code with search/glob before assuming; verify your change by running tests or bash. " +
+  "Be concise - no filler.\n" +
   "Work in small steps: inspect before you edit, make the smallest change that solves the task, " +
   "and verify your work. When the task is done, reply with a short summary and stop calling tools.";
 
