@@ -15,8 +15,9 @@ import type { McpHub } from "./mcp.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
 import { resolveTool, toolSchemas } from "./tools.ts";
 
-/** An approval gate: given (toolName, human-readable action) -> approve? (may be async) */
-export type ApprovalGate = (toolName: string, action: string) => boolean | Promise<boolean>;
+/** An approval gate: given (toolName, the tool's args) -> approve? (may be async).
+ * Receiving args lets a UI render a preview/diff before approving. */
+export type ApprovalGate = (toolName: string, args: Record<string, any>) => boolean | Promise<boolean>;
 
 const MAX_READ_CHARS = 100_000;
 const MAX_SEARCH_MATCHES = 200;
@@ -62,7 +63,7 @@ export class ToolRegistry {
     if (this.mcp?.has(name)) {
       const decision = this.mode === "auto" ? "allow" : this.mode === "plan" ? "deny" : "prompt";
       if (decision === "deny") return `Blocked: ${name} (MCP) is not allowed in 'plan' mode.`;
-      if (decision === "prompt" && !(await this.prompt(name, `mcp ${name}`))) {
+      if (decision === "prompt" && !(await this.prompt(name, args))) {
         return `Denied by user: ${name}`;
       }
       try {
@@ -83,11 +84,8 @@ export class ToolRegistry {
     if (decision === "deny") {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
     }
-    if (decision === "prompt") {
-      const action = describe(name, args);
-      if (!(await this.prompt(name, action))) {
-        return `Denied by user: ${name} (${action})`;
-      }
+    if (decision === "prompt" && !(await this.prompt(name, args))) {
+      return `Denied by user: ${name} (${describe(name, args)})`;
     }
 
     try {

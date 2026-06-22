@@ -1,15 +1,15 @@
 /**
  * `neko chat` — the Ink (React-for-terminal) REPL. The "Neko Code" UX surface.
  *
- * Clean-room reimplementation of the terminal-coding-agent UX pattern: streaming render,
- * interleaved tool-call lines, inline approval prompt, thinking spinner, slash commands,
- * input history (up/down), and multiline (trailing `\` continuation). Reuses one Agent
- * across turns for conversation memory.
+ * Clean-room reimplementation of the terminal-coding-agent UX (welcome box, markdown
+ * streaming, tool-call lines, inline approval with a diff preview, spinner + elapsed,
+ * Esc-to-interrupt, slash commands, history, multiline, Shift+Tab modes). Reuses one Agent
+ * for conversation memory. Kept ASCII-safe so it renders on any Windows console codepage.
  */
 import { Box, render, Static, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
 import TextInput from "ink-text-input";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../agent.ts";
 import { loadConfig } from "../config.ts";
@@ -21,8 +21,9 @@ import { getProvider } from "../providers.ts";
 import { latestSession, newSessionId, saveSession, type Session } from "../session.ts";
 import { ToolRegistry } from "../tool-runtime.ts";
 import { VERSION } from "../version.ts";
+import { Markdown } from "./markdown.tsx";
 
-type LineKind = "user" | "assistant" | "tool" | "info";
+type LineKind = "welcome" | "user" | "assistant" | "tool_call" | "tool_result" | "info";
 interface Line {
   id: number;
   kind: LineKind;
@@ -30,26 +31,22 @@ interface Line {
 }
 interface Approval {
   toolName: string;
-  action: string;
+  args: Record<string, any>;
   resolve: (ok: boolean) => void;
 }
 
-const COLOR: Record<LineKind, string> = { user: "cyan", assistant: "white", tool: "gray", info: "gray" };
-const PREFIX: Record<LineKind, string> = { user: "› ", assistant: "", tool: "  ", info: "" };
-
 const HELP = [
   "Commands:",
-  "  /help            show this help",
-  "  /cost            show token usage this session",
-  "  /model           show the active provider/model/profile",
-  "  /profiles        list configured profiles",
-  "  /init            scaffold ./.neko-core/config.json",
-  "  /clear           clear the transcript + conversation context",
-  "  /reset           clear conversation context (keep transcript)",
-  "  /exit            quit (also Ctrl-C)",
-  "Input: ↑/↓ history · end a line with \\ to continue (multiline).",
-  "Shift+Tab: cycle permission mode (default → accept-edits → plan → auto).",
+  "  /help  /cost  /model  /profiles  /init  /clear  /reset  /exit",
+  "Input: Up/Down history; end a line with \\ to continue (multiline).",
+  "Shift+Tab: cycle permission mode (default -> accept-edits -> plan -> auto).",
+  "Esc: interrupt a running turn. Ctrl-C: quit.",
 ].join("\n");
+
+function trunc(s: string, n = 120): string {
+  const one = String(s).replace(/\s+/g, " ");
+  return one.length > n ? one.slice(0, n) + "..." : one;
+}
 
 interface ChatProps {
   profile?: string;
@@ -67,26 +64,21 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
   const historyRef = useRef<string[]>([]);
   const historyPos = useRef(0);
   const multilineRef = useRef("");
+  const controllerRef = useRef<AbortController | null>(null);
+  const startRef = useRef(0);
   const resumedRef = useRef<Session | null>(resume ? latestSession(process.cwd()) : null);
   const sessionIdRef = useRef(resumedRef.current?.id ?? newSessionId());
   const createdAtRef = useRef(resumedRef.current?.createdAt ?? new Date().toISOString());
 
   const [lines, setLines] = useState<Line[]>(() => {
-    const banner: Line = {
-      id: idRef.current++,
-      kind: "info",
-      text:
-        `Neko Code ${VERSION}  provider=${cfg.provider} model=${cfg.model || "(unset)"} ` +
-        `profile=${cfg.profile ?? "none"} mode=${yolo ? "auto" : cfg.mode}\n` +
-        "Type a task, or /help for commands. Shift+Tab cycles permission mode.",
-    };
-    if (!resumedRef.current) return [banner];
+    const welcome: Line = { id: idRef.current++, kind: "welcome", text: "" };
+    if (!resumedRef.current) return [welcome];
     return [
-      banner,
+      welcome,
       {
         id: idRef.current++,
         kind: "info",
-        text: `(resumed session ${resumedRef.current.id} — ${resumedRef.current.messages.length} messages)`,
+        text: `(resumed session ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)`,
       },
     ];
   });
@@ -96,6 +88,7 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
   const [approval, setApproval] = useState<Approval | null>(null);
   const [pendingMulti, setPendingMulti] = useState(false);
   const [mode, setMode] = useState<PermissionMode>(yolo ? "auto" : cfg.mode);
+  const [elapsed, setElapsed] = useState(0);
 
   const addLine = (kind: LineKind, text: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
@@ -106,9 +99,9 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
     setStream("");
   };
 
-  const gate = (toolName: string, action: string): boolean | Promise<boolean> => {
+  const gate = (toolName: string, args: Record<string, any>): boolean | Promise<boolean> => {
     if (alwaysApproved.current.has(toolName)) return true;
-    return new Promise<boolean>((resolve) => setApproval({ toolName, action, resolve }));
+    return new Promise<boolean>((resolve) => setApproval({ toolName, args, resolve }));
   };
 
   const registryRef = useRef<ToolRegistry | null>(null);
@@ -132,11 +125,9 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
         if (kind === "tool_call") {
           flushStream();
           const a = data.arguments ?? {};
-          addLine("tool", `→ ${data.name}(${a.command ?? a.path ?? a.pattern ?? ""})`);
+          addLine("tool_call", `${data.name}(${trunc(a.command ?? a.path ?? a.pattern ?? "", 80)})`);
         } else if (kind === "tool_result") {
-          let obs = String(data.observation).replace(/\s+/g, " ");
-          if (obs.length > 160) obs = obs.slice(0, 160) + "…";
-          addLine("tool", `  ${obs}`);
+          addLine("tool_result", trunc(data.observation, 160));
         }
       },
     });
@@ -154,7 +145,16 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
     });
   };
 
-  // Approval keys (y / a=always / n), active only while an approval is pending.
+  // Elapsed timer while a turn runs.
+  useEffect(() => {
+    if (!busy) return;
+    startRef.current = Date.now();
+    setElapsed(0);
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
+
+  // Approval keys.
   useInput(
     (char, key) => {
       if (!approval) return;
@@ -174,7 +174,15 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
     { isActive: approval !== null },
   );
 
-  // History navigation (↑/↓) + Shift+Tab mode cycling, active while the input box shows.
+  // Esc interrupts a running turn.
+  useInput(
+    (_char, key) => {
+      if (key.escape) controllerRef.current?.abort();
+    },
+    { isActive: busy && approval === null },
+  );
+
+  // History (Up/Down) + Shift+Tab mode cycling, while the input box shows.
   useInput(
     (_char, key) => {
       if (key.tab && key.shift) {
@@ -215,11 +223,7 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
           addLine("info", agentRef.current!.cost.summary());
           return;
         case "/model":
-          addLine(
-            "info",
-            `provider=${cfg.provider} model=${cfg.model || "(unset)"} profile=${cfg.profile ?? "none"} ` +
-              "(switch with --profile NAME at launch, or edit ~/.neko-core/config.json)",
-          );
+          addLine("info", `provider=${cfg.provider} model=${cfg.model || "(unset)"} profile=${cfg.profile ?? "none"} mode=${mode}`);
           return;
         case "/profiles":
           addLine("info", "profiles: " + Object.keys(cfg.profiles).sort().join(", "));
@@ -236,28 +240,31 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
           addLine("info", "(conversation reset)");
           return;
         default:
-          addLine("info", `unknown command ${cmd} — try /help`);
+          addLine("info", `unknown command ${cmd} - try /help`);
           return;
       }
     }
 
     addLine("user", text);
     setBusy(true);
+    const controller = new AbortController();
+    controllerRef.current = controller;
     try {
-      await agentRef.current!.run(text);
+      const result = await agentRef.current!.run(text, controller.signal);
       flushStream();
+      if (result === "[interrupted]") addLine("info", "(interrupted)");
     } catch (error) {
       flushStream();
       addLine("info", `error: ${error instanceof Error ? error.message : error}`);
     } finally {
       setBusy(false);
-      persist(); // save the conversation after each turn
+      controllerRef.current = null;
+      persist();
     }
   };
 
   const onSubmit = (value: string) => {
     setInput("");
-    // Multiline: a trailing backslash continues input on the next line.
     if (value.endsWith("\\")) {
       multilineRef.current += value.slice(0, -1) + "\n";
       setPendingMulti(true);
@@ -272,32 +279,76 @@ function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
     void handle(text);
   };
 
+  const renderLine = (line: Line) => {
+    switch (line.kind) {
+      case "welcome":
+        return (
+          <Box key={line.id} borderStyle="classic" borderColor="magenta" paddingX={1} flexDirection="column" marginBottom={1}>
+            <Text bold>Neko Code {VERSION}</Text>
+            <Text color="gray">provider={cfg.provider} model={cfg.model || "(unset)"} profile={cfg.profile ?? "none"} mode={yolo ? "auto" : cfg.mode}</Text>
+            <Text color="gray">/help for commands - Shift+Tab modes - Esc interrupt - Ctrl-C quit</Text>
+          </Box>
+        );
+      case "user":
+        return <Text key={line.id} color="cyan">{"> "}{line.text}</Text>;
+      case "assistant":
+        return (
+          <Box key={line.id} flexDirection="column">
+            <Markdown text={line.text} />
+          </Box>
+        );
+      case "tool_call":
+        return <Text key={line.id}><Text color="green">{"* "}</Text>{line.text}</Text>;
+      case "tool_result":
+        return <Text key={line.id} color="gray">{"    "}{line.text}</Text>;
+      default:
+        return <Text key={line.id} color="gray">{line.text}</Text>;
+    }
+  };
+
   return (
     <Box flexDirection="column">
-      <Static items={lines}>
-        {(line) => (
-          <Text key={line.id} color={COLOR[line.kind]}>
-            {PREFIX[line.kind]}
-            {line.text}
-          </Text>
-        )}
-      </Static>
+      <Static items={lines}>{renderLine}</Static>
+
       {stream ? <Text>{stream}</Text> : null}
-      {busy && !approval ? (
-        <Text color="gray">
-          <Spinner type="dots" /> thinking…
-        </Text>
-      ) : null}
+
       {approval ? (
-        <Text color="yellow">
-          approve {approval.toolName}: {approval.action}?  [y]es / [a]lways / [n]o
+        <ApprovalBox approval={approval} />
+      ) : busy ? (
+        <Text color="gray">
+          <Spinner type="line" /> working {elapsed}s - {agentRef.current!.cost.totalTokens} tok - esc to interrupt
         </Text>
       ) : (
-        <Box>
-          <Text color="cyan">{pendingMulti ? "…> " : `neko [${mode}]> `}</Text>
-          <TextInput value={input} onChange={setInput} onSubmit={onSubmit} />
+        <Box borderStyle="classic" borderColor="cyan" paddingX={1}>
+          <Text color="cyan">{pendingMulti ? "... " : `[${mode}] > `}</Text>
+          <TextInput value={input} onChange={setInput} onSubmit={onSubmit} placeholder="Type a task, or /help" />
         </Box>
       )}
+    </Box>
+  );
+}
+
+function ApprovalBox({ approval }: { approval: Approval }) {
+  const { toolName, args } = approval;
+  const preview: any[] = [];
+  if (toolName === "bash") {
+    preview.push(<Text key="c" color="white">{"$ "}{trunc(args.command, 200)}</Text>);
+  } else if (toolName === "write_file") {
+    const content = String(args.content ?? "");
+    preview.push(<Text key="p" color="gray">write {args.path} ({content.length} chars)</Text>);
+    content.split("\n").slice(0, 8).forEach((l, i) => preview.push(<Text key={`l${i}`} color="green">{"+ "}{l}</Text>));
+  } else if (toolName === "edit") {
+    preview.push(<Text key="p" color="gray">edit {args.path}</Text>);
+    preview.push(<Text key="o" color="red">{"- "}{trunc(args.old_string, 160)}</Text>);
+    preview.push(<Text key="n" color="green">{"+ "}{trunc(args.new_string, 160)}</Text>);
+  } else {
+    preview.push(<Text key="a" color="gray">{trunc(JSON.stringify(args), 200)}</Text>);
+  }
+  return (
+    <Box borderStyle="classic" borderColor="yellow" paddingX={1} flexDirection="column">
+      <Text bold color="yellow">Approve {toolName}?</Text>
+      {preview}
+      <Text color="gray">[y]es   [a]lways allow {toolName}   [n]o / Esc</Text>
     </Box>
   );
 }

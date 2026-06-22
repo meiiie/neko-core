@@ -49,3 +49,10 @@ cost/token tracking · MCP client · single-binary distribution.
 - Stop the loop and ask the owner when: a milestone needs a product/architecture decision,
   a live action would spend real money beyond a tiny smoke call, or anything outward-facing
   (push to public / publish) is required.
+
+## Post-1.0 — UX/UI parity pass (clean-room vs claude-code)
+- [x] **E1** Ink UX overhaul: welcome box, bordered input box, **markdown rendering** of
+  assistant output (`src/ui/markdown.tsx`), `*`/indented tool-call lines, spinner + elapsed
+  status, **Esc-to-interrupt** (AbortSignal through provider+agent), and a bordered approval
+  box with an **edit/write diff preview**. ASCII-safe (classic borders, line spinner) for any
+  Windows console. *(typecheck + 45 tests incl. headless Markdown render; binary rebuilt)*

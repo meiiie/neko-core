@@ -59,10 +59,11 @@ function load(args: Args): NekoConfig {
 }
 
 /** Interactive approval gate for the CLI (one-shot readline per gated tool). */
-async function promptApprove(toolName: string, action: string): Promise<boolean> {
+async function promptApprove(toolName: string, args: Record<string, any>): Promise<boolean> {
+  const action = args.command ? `run: ${args.command}` : args.path ? `${toolName} ${args.path}` : toolName;
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = (await rl.question(`\n[approval] ${toolName}: ${action}\nApprove? [y/N] `)).trim().toLowerCase();
+    const answer = (await rl.question(`\n[approval] ${action}\nApprove? [y/N] `)).trim().toLowerCase();
     return answer === "y" || answer === "yes";
   } catch {
     return false;

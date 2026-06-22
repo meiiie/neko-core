@@ -25,7 +25,7 @@ export interface ProviderResponse {
 export type DeltaHook = (text: string) => void;
 
 export interface Provider {
-  complete(messages: any[], tools?: any[], onDelta?: DeltaHook): Promise<ProviderResponse>;
+  complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal): Promise<ProviderResponse>;
 }
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -41,7 +41,7 @@ export function getProvider(config: NekoConfig): Provider {
 export class OpenAICompatProvider implements Provider {
   constructor(private readonly cfg: NekoConfig) {}
 
-  async complete(messages: any[], tools?: any[], onDelta?: DeltaHook): Promise<ProviderResponse> {
+  async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal): Promise<ProviderResponse> {
     if (!this.cfg.baseUrl) {
       throw new Error("openai_compat needs a base_url (set base_url or pick a --profile).");
     }
@@ -73,11 +73,12 @@ export class OpenAICompatProvider implements Provider {
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.cfg.maxRetries; attempt++) {
       try {
+        const timeout = AbortSignal.timeout(this.cfg.timeoutSeconds * 1000);
         const res = await fetch(url, {
           method: "POST",
           headers,
           body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(this.cfg.timeoutSeconds * 1000),
+          signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
         });
         if (res.ok) {
           // Once the response is OK we commit to it (no mid-stream retry).

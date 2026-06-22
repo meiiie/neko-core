@@ -53,15 +53,23 @@ export class Agent {
     this.onDelta = opts.onDelta;
   }
 
-  /** Run the loop until the model is done or maxSteps is hit. Returns the final text. */
-  async run(instruction: string): Promise<string> {
+  /** Run the loop until the model is done or maxSteps is hit. Returns the final text.
+   * Pass an AbortSignal to support Esc-to-interrupt (stops cleanly between/within steps). */
+  async run(instruction: string, signal?: AbortSignal): Promise<string> {
     if (!this.messages.length) {
       this.messages.push({ role: "system", content: this.systemPrompt });
     }
     this.messages.push({ role: "user", content: instruction });
 
     for (let step = 0; step < this.maxSteps; step++) {
-      const response = await this.provider.complete(this.messages, this.tools.schemas(), this.onDelta);
+      if (signal?.aborted) return "[interrupted]";
+      let response;
+      try {
+        response = await this.provider.complete(this.messages, this.tools.schemas(), this.onDelta, signal);
+      } catch (error) {
+        if (signal?.aborted) return "[interrupted]";
+        throw error;
+      }
       this.cost.add(response.usage);
       const toolCalls = response.tool_calls ?? [];
 
