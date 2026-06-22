@@ -19,7 +19,7 @@ import { buildMcpHub, type McpHub } from "../mcp.ts";
 import { nextMode, type PermissionMode } from "../permissions.ts";
 import { initProject } from "../project.ts";
 import { getProvider, type Provider } from "../providers.ts";
-import { latestSession, newSessionId, saveSession, type Session } from "../session.ts";
+import { latestSession, listSessions, loadSession, newSessionId, saveSession, sessionTitle, type Session } from "../session.ts";
 import { ToolRegistry } from "../tool-runtime.ts";
 import { listSkills, loadSkill } from "../skills.ts";
 import { listTools } from "../tools.ts";
@@ -122,6 +122,10 @@ const SLASH: { name: string; desc: string }[] = [
   { name: "/compact", desc: "summarize the conversation to free context" },
   { name: "/goal", desc: "set an ongoing goal (/goal <text>)" },
   { name: "/loop", desc: "run a task N times (/loop <n> <task>)" },
+  { name: "/sessions", desc: "list saved sessions here" },
+  { name: "/resume", desc: "resume a session (/resume [id])" },
+  { name: "/effort", desc: "reasoning effort (/effort low|medium|high|off)" },
+  { name: "/context", desc: "context window usage" },
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
 ];
@@ -416,6 +420,48 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           agentRef.current!.messages = [];
           addLine("info", "(conversation reset)");
           return;
+        case "/sessions": {
+          const mine = listSessions().filter((s) => s.cwd === process.cwd());
+          addLine(
+            "info",
+            mine.length
+              ? "sessions (newest first):\n" + mine.slice(0, 10).map((s) => `  ${s.id}  "${sessionTitle(s)}"`).join("\n")
+              : "no saved sessions for this directory",
+          );
+          return;
+        }
+        case "/resume": {
+          const arg = text.split(/\s+/)[1];
+          const target = arg
+            ? loadSession(arg)
+            : listSessions().find((s) => s.cwd === process.cwd() && s.id !== sessionIdRef.current);
+          if (!target) {
+            addLine("info", arg ? `no session '${arg}'` : "no earlier session here - /sessions to list");
+            return;
+          }
+          agentRef.current!.messages = [...target.messages];
+          sessionIdRef.current = target.id;
+          addLine("info", `(resumed ${target.id} - ${target.messages.length} messages; context restored)`);
+          return;
+        }
+        case "/effort": {
+          const lvl = text.split(/\s+/)[1]?.toLowerCase();
+          if (!lvl) {
+            addLine("info", `effort: ${cfg.effort || "off"} (use /effort low|medium|high|off)`);
+            return;
+          }
+          if (lvl === "off") delete cfg.data.reasoning_effort;
+          else cfg.data.reasoning_effort = lvl;
+          addLine("info", `effort -> ${cfg.effort || "off"}`);
+          return;
+        }
+        case "/context": {
+          const win = cfg.contextWindow;
+          const used = agentRef.current!.cost.lastPrompt;
+          const pct = Math.max(0, Math.round((100 * (win - used)) / win));
+          addLine("info", `context: ~${used} / ${win} tokens (${pct}% free; auto-compacts past 85%)`);
+          return;
+        }
         default:
           addLine("info", `unknown command ${cmd} - try /help`);
           return;

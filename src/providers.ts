@@ -66,6 +66,7 @@ export class OpenAICompatProvider implements Provider {
     };
     if (stream) payload.stream_options = { include_usage: true };
     if (tools && tools.length) payload.tools = tools;
+    if (this.cfg.effort) payload.reasoning_effort = this.cfg.effort; // only when set via /effort
 
     const url = `${this.cfg.baseUrl}/chat/completions`;
     const headers = { Authorization: `Bearer ${key}`, "Content-Type": "application/json" };

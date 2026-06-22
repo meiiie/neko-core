@@ -66,6 +66,8 @@ export class NekoConfig {
   get temperature(): number { return Number(this.data.temperature ?? 0); }
   get maxTokens(): number { return Number(this.data.max_tokens ?? 2048); }
   get contextWindow(): number { return Number(this.data.context_window ?? 131072); }
+  /** Reasoning effort (low|medium|high) sent as `reasoning_effort`; "" = omit (default). */
+  get effort(): string { return String(this.data.reasoning_effort ?? "").trim().toLowerCase(); }
   get timeoutSeconds(): number { return Number(this.data.timeout_seconds ?? 120); }
   get maxRetries(): number { return Math.max(0, Number(this.data.max_retries ?? 4)); }
   get retryBaseDelaySeconds(): number { return Number(this.data.retry_base_delay_seconds ?? 1.5); }
