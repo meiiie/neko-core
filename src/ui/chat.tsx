@@ -70,10 +70,12 @@ function fmtTok(n: number): string {
 
 const SPINNER_ORANGE = "#e6932e";
 const SPINNER_SHIMMER = "#ffd9a0";
-const SPINNER_STARS = ["✳", "✶", "✷", "✦"];
+// Pulse glyph: dot -> star -> sparkle and back. Plain "*" (not ✳, which renders as an
+// emoji on Windows — same swap claude-code makes for non-darwin).
+const SPINNER_FRAMES = ["·", "✢", "*", "✶", "✻", "✽", "✻", "✶", "*", "✢"];
 
-/** Claude-style thinking line: twinkling star + a verb with a shimmer band sweeping across
- * it, then dim meta in parens. Self-animated (own 80ms clock; unmounts when idle). */
+/** Claude-style thinking line: a pulsing star (fixed-width, no text shift) + a verb with a
+ * shimmer band sweeping across it, then dim meta in parens. Self-animated (own 80ms clock). */
 function ThinkingLine(props: { verb: string; elapsed: number; tokens: number; step: number; queued: number }) {
   const { verb, elapsed, tokens, step, queued } = props;
   const [frame, setFrame] = useState(0);
@@ -85,7 +87,7 @@ function ThinkingLine(props: { verb: string; elapsed: number; tokens: number; st
   const chars = [...(verb + "…")];
   const cycle = chars.length + 12; // word width + a gap, so the shimmer pauses between sweeps
   const glimmer = chars.length + 6 - (frame % cycle); // bright band index, sweeps right -> left
-  const star = SPINNER_STARS[frame % SPINNER_STARS.length];
+  const star = SPINNER_FRAMES[Math.floor(frame / 2) % SPINNER_FRAMES.length];
   const meta =
     `${elapsed}s` +
     (step > 1 ? ` · step ${step}` : "") +
@@ -94,13 +96,17 @@ function ThinkingLine(props: { verb: string; elapsed: number; tokens: number; st
     " · esc to interrupt";
 
   return (
-    <Text>
-      <Text color={SPINNER_ORANGE}>{star}</Text>{" "}
-      {chars.map((c, i) => (
-        <Text key={i} color={Math.abs(i - glimmer) <= 1 ? SPINNER_SHIMMER : SPINNER_ORANGE}>{c}</Text>
-      ))}{" "}
-      <Text color="#9a9a9a">({meta})</Text>
-    </Text>
+    <Box flexDirection="row">
+      <Box width={2}>
+        <Text color={SPINNER_ORANGE}>{star}</Text>
+      </Box>
+      <Text>
+        {chars.map((c, i) => (
+          <Text key={i} color={Math.abs(i - glimmer) <= 1 ? SPINNER_SHIMMER : SPINNER_ORANGE}>{c}</Text>
+        ))}{" "}
+        <Text color="#9a9a9a">({meta})</Text>
+      </Text>
+    </Box>
   );
 }
 
@@ -508,6 +514,18 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         </Box>
       ) : null}
 
+      {busy && !approval ? (
+        <Box marginTop={1}>
+          <ThinkingLine
+            verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}
+            elapsed={elapsed}
+            tokens={agentRef.current!.cost.totalTokens}
+            step={step}
+            queued={queued}
+          />
+        </Box>
+      ) : null}
+
       {approval ? (
         <ApprovalBox approval={approval} />
       ) : (
@@ -531,26 +549,14 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
             </Box>
           ) : (
             <Box justifyContent="space-between">
-              {busy ? (
-                <ThinkingLine
-                  verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}
-                  elapsed={elapsed}
-                  tokens={agentRef.current!.cost.totalTokens}
-                  step={step}
-                  queued={queued}
-                />
-              ) : (
-                <Text>
-                  <Text color={MODE_COLOR[mode]}>{mode}</Text>
-                  <Text dimColor> · shift+tab to cycle</Text>
-                </Text>
-              )}
-              {!busy && (
-                <Text color="#9a9a9a">
-                  {(cfg.model || "").split("/").pop()} · {agentRef.current!.cost.totalTokens} tok ·{" "}
-                  {Math.max(0, Math.round((100 * (cfg.contextWindow - agentRef.current!.cost.lastPrompt)) / cfg.contextWindow))}% ctx
-                </Text>
-              )}
+              <Text>
+                <Text color={MODE_COLOR[mode]}>{mode}</Text>
+                <Text dimColor> · shift+tab to cycle</Text>
+              </Text>
+              <Text color="#9a9a9a">
+                {(cfg.model || "").split("/").pop()} · {agentRef.current!.cost.totalTokens} tok ·{" "}
+                {Math.max(0, Math.round((100 * (cfg.contextWindow - agentRef.current!.cost.lastPrompt)) / cfg.contextWindow))}% ctx
+              </Text>
             </Box>
           )}
         </Box>
