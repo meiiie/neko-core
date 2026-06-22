@@ -10,6 +10,7 @@ import { Box, render, Static, Text, useApp, useInput, useStdout } from "ink";
 import { useEffect, useRef, useState } from "react";
 
 import { Logo } from "./logo.tsx";
+import { SelectList, type SelectItem } from "./select-list.tsx";
 import { TextInput } from "./text-input.tsx";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
@@ -84,12 +85,6 @@ function relativeTime(iso: string): string {
   return ago(y, "year");
 }
 
-/** Up to 8 sessions around the selected index (so a long list scrolls). */
-function pickerWindow(p: { list: Session[]; index: number }): { s: Session; i: number }[] {
-  const N = 8;
-  const start = Math.max(0, Math.min(p.index - 3, Math.max(0, p.list.length - N)));
-  return p.list.slice(start, start + N).map((s, k) => ({ s, i: start + k }));
-}
 
 const SPINNER_ORANGE = "#e6932e";
 const SPINNER_SHIMMER = "#ffd9a0";
@@ -202,7 +197,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const [queued, setQueued] = useState(0);
   const [step, setStep] = useState(0);
   const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
-  const [picker, setPicker] = useState<{ list: Session[]; index: number } | null>(null);
+  const [overlay, setOverlay] = useState<{ title: string; items: SelectItem[]; onSelect: (it: SelectItem) => void } | null>(null);
 
   const addLine = (kind: LineKind, text: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
@@ -324,23 +319,6 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     { isActive: busy && approval === null },
   );
 
-  // /resume picker: ↑/↓ to move, Enter to resume, Esc to cancel.
-  useInput(
-    (_char, key) => {
-      if (!picker) return;
-      if (key.upArrow) setPicker({ ...picker, index: Math.max(0, picker.index - 1) });
-      else if (key.downArrow) setPicker({ ...picker, index: Math.min(picker.list.length - 1, picker.index + 1) });
-      else if (key.return) {
-        resumeInto(picker.list[picker.index]);
-        setPicker(null);
-      } else if (key.escape) {
-        setPicker(null);
-        addLine("info", "(resume cancelled)");
-      }
-    },
-    { isActive: picker !== null },
-  );
-
   // History (Up/Down) + Shift+Tab mode cycling, while the input box shows.
   useInput(
     (_char, key) => {
@@ -364,7 +342,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         }
       }
     },
-    { isActive: !busy && approval === null && picker === null },
+    { isActive: !busy && approval === null && overlay === null },
   );
 
   const handle = async (text: string) => {
@@ -383,24 +361,32 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           return;
         case "/model": {
           const arg = text.slice("/model".length).trim();
-          if (!arg) {
-            addLine("info", `provider=${cfg.provider} model=${cfg.model || "(unset)"} profile=${cfg.profile ?? "none"} mode=${mode}  ·  /model list  ·  /model <id>`);
+          if (arg && arg !== "list") {
+            cfg.data.model = arg;
+            addLine("info", `model -> ${arg}`);
             return;
           }
-          if (arg === "list") {
-            setBusy(true);
-            try {
-              const models = await listModels(cfg);
-              addLine("info", models.length ? "models:\n" + models.map((m) => `  ${m === cfg.model ? "* " : "  "}${m}`).join("\n") : "no models returned");
-            } catch (error) {
-              addLine("info", `error listing models: ${error instanceof Error ? error.message : error}`);
-            } finally {
-              setBusy(false);
+          setBusy(true);
+          try {
+            const models = await listModels(cfg);
+            setBusy(false);
+            if (!models.length) {
+              addLine("info", "no models returned by the endpoint");
+              return;
             }
-            return;
+            setOverlay({
+              title: "Select model",
+              items: models.map((m) => ({ id: m, label: m, detail: m === cfg.model ? "(current)" : undefined })),
+              onSelect: (it) => {
+                setOverlay(null);
+                cfg.data.model = it.id;
+                addLine("info", `model -> ${it.id}`);
+              },
+            });
+          } catch (error) {
+            setBusy(false);
+            addLine("info", `error listing models: ${error instanceof Error ? error.message : error}`);
           }
-          cfg.data.model = arg;
-          addLine("info", `model -> ${arg}`);
           return;
         }
         case "/profiles":
@@ -506,8 +492,19 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
             return;
           }
           const list = listSessions().filter((s) => s.cwd === process.cwd());
-          if (!list.length) addLine("info", "no saved sessions here - /sessions to list");
-          else setPicker({ list, index: 0 }); // interactive picker (↑/↓ · Enter · Esc)
+          if (!list.length) {
+            addLine("info", "no saved sessions here - /sessions to list");
+            return;
+          }
+          setOverlay({
+            title: "Resume session",
+            items: list.map((s) => ({ id: s.id, label: sessionTitle(s), detail: `${relativeTime(s.updatedAt)} · ${s.messages.length} messages` })),
+            onSelect: (it) => {
+              setOverlay(null);
+              const target = loadSession(it.id);
+              if (target) resumeInto(target);
+            },
+          });
           return;
         }
         case "/effort": {
@@ -673,22 +670,17 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         </Box>
       ) : null}
 
-      {picker ? (
-        <Box flexDirection="column" marginTop={1}>
-          <Text color="cyan">Resume session ({picker.index + 1} of {picker.list.length})</Text>
-          <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
-          {pickerWindow(picker).map(({ s, i }) => (
-            <Box key={s.id} flexDirection="column">
-              <Text color={i === picker.index ? "cyan" : undefined} bold={i === picker.index}>
-                {i === picker.index ? "> " : "  "}
-                {sessionTitle(s)}
-              </Text>
-              <Text dimColor>    {relativeTime(s.updatedAt)} · {s.messages.length} messages</Text>
-            </Box>
-          ))}
-          <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
-          <Text dimColor>↑/↓ select · Enter resume · Esc cancel</Text>
-        </Box>
+      {overlay ? (
+        <SelectList
+          title={overlay.title}
+          items={overlay.items}
+          cols={cols}
+          onSelect={overlay.onSelect}
+          onCancel={() => {
+            setOverlay(null);
+            addLine("info", "(cancelled)");
+          }}
+        />
       ) : approval ? (
         <ApprovalBox approval={approval} />
       ) : (
