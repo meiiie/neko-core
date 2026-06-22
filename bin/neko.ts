@@ -38,19 +38,27 @@ interface Args {
   force: boolean;
   yolo: boolean;
   resume: boolean;
+  version: boolean;
+  help: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { positionals: [], force: false, yolo: false, resume: false };
-  args.command = argv[0];
-  for (let i = 1; i < argv.length; i++) {
+  const tokens: string[] = [];
+  const args: Args = { positionals: [], force: false, yolo: false, resume: false, version: false, help: false };
+  for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--profile") args.profile = argv[++i];
     else if (a === "--force") args.force = true;
     else if (a === "--yolo") args.yolo = true;
     else if (a === "--resume") args.resume = true;
-    else args.positionals.push(a);
+    else if (a === "--version" || a === "-v") args.version = true;
+    else if (a === "--help" || a === "-h") args.help = true;
+    else if (a.startsWith("-")) { /* ignore unknown flags */ }
+    else tokens.push(a);
   }
+  // The first bare word is the command; the rest are positionals (e.g. the run instruction).
+  args.command = tokens[0];
+  args.positionals = tokens.slice(1);
   return args;
 }
 
@@ -108,9 +116,10 @@ async function buildAgent(
   return { agent, close: () => hub.close() };
 }
 
-const HELP = `Neko Core ${VERSION} - local-first agentic CLI.
+const HELP = `Neko Code ${VERSION} - local-first agentic CLI.
 
-Usage: neko <command> [options]
+Usage: neko [command] [options]
+  Run 'neko' with no command (or 'neko code' / 'neko core') to start the session.
 
 Commands:
   config        show the resolved config-first settings
@@ -126,7 +135,7 @@ Commands:
   context       show the project context files (NEKO.md / CLAUDE.md) loaded
   sessions      list saved chat sessions
   mcp           list configured MCP servers and their tools
-  chat          interactive agentic session (REPL)
+  chat          interactive session (default - same as bare 'neko' / 'neko code')
   run <task>    one-shot: run a single instruction
 
 Options:
@@ -249,13 +258,22 @@ async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const cmd = args.command;
 
-  if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "help") {
+  if (args.version || cmd === "version") {
+    console.log(`neko-core ${VERSION}`);
+    return 0;
+  }
+  if (args.help || cmd === "help") {
     console.log(HELP);
     return 0;
   }
-  if (cmd === "--version" || cmd === "-v" || cmd === "version") {
-    console.log(`neko-core ${VERSION}`);
-    return 0;
+  // Activation: bare `neko` (or `neko code` / `neko core`) starts the interactive session.
+  if (!cmd || cmd === "chat" || cmd === "code" || cmd === "core") {
+    try {
+      return await cmdChat(args);
+    } catch (error) {
+      console.error(`neko: error: ${error instanceof Error ? error.message : error}`);
+      return 1;
+    }
   }
 
   try {
@@ -273,7 +291,6 @@ async function main(): Promise<number> {
       case "context": return cmdContext();
       case "sessions": return cmdSessions();
       case "mcp": return await cmdMcp(args);
-      case "chat": return await cmdChat(args);
       case "run": return await cmdRun(args);
       default:
         console.error(`neko: error: unknown command '${cmd}'. Run 'neko --help'.`);

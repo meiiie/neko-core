@@ -38,25 +38,25 @@ git clone https://github.com/meiiie/neko-core
 cd neko-core
 bun install
 
-bun bin/neko.ts init-user      # scaffold ~/.neko-core/config.json (API key + profile)
+bun run build                  # -> dist/neko  (single standalone executable; no Bun to run it)
+# put dist/neko on your PATH, then:
+
+neko init-user                 # scaffold ~/.neko-core/config.json (API key + profile)
 # edit ~/.neko-core/config.json: set api_key + model (or use env NEKO_API_KEY)
-bun bin/neko.ts doctor         # check provider/model/key
-bun bin/neko.ts chat           # interactive agentic session
+neko doctor                    # check provider/model/key
+neko                           # start the interactive session  (also: neko code / neko core)
 ```
 
-Build a standalone binary (no Bun needed to run it):
-
-```bash
-bun run build                  # -> dist/neko  (single executable)
-```
+During development you can run it via Bun without building: `bun bin/neko.ts doctor`, `bun bin/neko.ts` (chat).
 
 ### Commands
 
-`neko chat` · `run <task>` · `config` · `doctor` · `profiles` · `init[-user]` ·
+`neko` (session, default) · `run <task>` · `config` · `doctor` · `profiles` · `init[-user]` ·
 `tools` · `agents` · `commands` · `capabilities` · `policy` · `context` · `sessions` · `mcp`.
 
+Bare `neko` (or `neko code` / `neko core`) starts the interactive session.
 `--profile <name>` selects a runtime profile · `--yolo` auto-approves gated tools ·
-`neko chat --resume` continues the latest session.
+`neko --resume` continues the latest session.
 
 ## Heritage
 

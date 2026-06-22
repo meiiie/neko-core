@@ -376,7 +376,7 @@ export function ApprovalBox({ approval }: { approval: Approval }) {
 
 export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean }): Promise<void> {
   if (!process.stdin.isTTY) {
-    console.error('neko chat needs an interactive terminal (TTY). Use `neko run "<task>"` for one-shot.');
+    console.error('neko needs an interactive terminal (TTY) for the session. Use `neko run "<task>"` for one-shot.');
     return;
   }
   const cfg = loadConfig({ profile: opts.profile });
