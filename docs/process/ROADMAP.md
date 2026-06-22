@@ -39,7 +39,7 @@ cost/token tracking · MCP client · single-binary distribution.
 - [x] **C3** MCP client (`src/mcp.ts`): connects to stdio MCP servers from config (`mcp_servers`), exposes their tools as `mcp__<server>__<tool>` (gated by permission mode), `neko mcp` lists them. Safe by default (no servers = no-op). *(verified LIVE against a local echo MCP server: connect/list/call round-trip; typecheck clean)*
 
 ### Phase D — Polish & distribution
-- [ ] **D1** Full `bun test` suite parity with the Python reference + new features.
+- [x] **D1** `bun test` suite — 44 tests across config, providers, permissions, tools, runtime, registry, agent, context, session. *(all pass; typecheck clean)*
 - [ ] **D2** `bun build --compile` single binary; install script; re-point the `neko` command from the pipx(Python) install to the TS binary.
 - [ ] **D3** Rename pass to **Neko Code** (banner/help/README/CLAUDE.md); merge to `main` (after `/secret-scan` + owner sign-off).
 
