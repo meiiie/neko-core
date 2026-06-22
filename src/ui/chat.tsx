@@ -9,9 +9,13 @@
 import { Box, render, Static, Text, useApp, useInput, useStdout } from "ink";
 import { useEffect, useRef, useState } from "react";
 
-import { Logo } from "./logo.tsx";
+import { ApprovalBox, type Approval } from "./approval-box.tsx";
+import { fmtBytes, relativeTime, trunc } from "./format.ts";
+import { Markdown } from "./markdown.tsx";
 import { SelectList, type SelectItem } from "./select-list.tsx";
 import { TextInput } from "./text-input.tsx";
+import { ThinkingLine, VERBS } from "./thinking-line.tsx";
+import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
 import { loadConfig } from "../adapters/config.ts";
@@ -24,20 +28,8 @@ import { latestSession, listSessions, loadSession, newSessionId, saveSession, se
 import { ToolRegistry } from "../core/tool-runtime.ts";
 import { listSkills, loadSkill } from "../adapters/skills.ts";
 import { describeToolCall, listTools } from "../core/tools.ts";
-import { VERSION } from "../shared/version.ts";
-import { Markdown } from "./markdown.tsx";
 
-type LineKind = "welcome" | "user" | "assistant" | "tool_call" | "tool_result" | "info";
-interface Line {
-  id: number;
-  kind: LineKind;
-  text: string;
-}
-export interface Approval {
-  toolName: string;
-  args: Record<string, any>;
-  resolve: (ok: boolean) => void;
-}
+export { ApprovalBox, type Approval }; // re-exported for tests
 
 const HELP = [
   "Commands:",
@@ -47,90 +39,12 @@ const HELP = [
   "Esc: interrupt a running turn. Ctrl-C: quit.",
 ].join("\n");
 
-function trunc(s: string, n = 120): string {
-  const one = String(s).replace(/\s+/g, " ");
-  return one.length > n ? one.slice(0, n) + "..." : one;
-}
-
 const MODE_COLOR: Record<PermissionMode, string> = {
   default: "gray",
   "accept-edits": "yellow",
   plan: "blue",
   auto: "red",
 };
-
-// Playful "thinking" verbs (one picked per turn), Claude-style.
-const VERBS = [
-  "Thinking", "Pondering", "Cogitating", "Pouncing", "Prowling", "Noodling",
-  "Brewing", "Crunching", "Whisking", "Scheming", "Mulling", "Computing",
-];
-
-function fmtTok(n: number): string {
-  return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
-}
-
-function fmtBytes(n: number): string {
-  return n < 1024 ? `${n}B` : n < 1048576 ? `${(n / 1024).toFixed(1)}KB` : `${(n / 1048576).toFixed(1)}MB`;
-}
-
-/** "16 hours ago" / "1 week ago" — for the /resume picker. */
-function relativeTime(iso: string): string {
-  const then = Date.parse(iso);
-  if (!then) return "";
-  const s = Math.max(0, (Date.now() - then) / 1000);
-  const m = s / 60, h = m / 60, d = h / 24, w = d / 7, mo = d / 30, y = d / 365;
-  const ago = (n: number, u: string) => `${Math.floor(n)} ${u}${Math.floor(n) > 1 ? "s" : ""} ago`;
-  if (s < 60) return "just now";
-  if (m < 60) return ago(m, "min");
-  if (h < 24) return ago(h, "hour");
-  if (d < 7) return ago(d, "day");
-  if (w < 5) return ago(w, "week");
-  if (mo < 12) return ago(mo, "month");
-  return ago(y, "year");
-}
-
-
-const SPINNER_ORANGE = "#e6932e";
-const SPINNER_SHIMMER = "#ffd9a0";
-// Pulse glyph: dot -> star -> sparkle and back. Plain "*" (not ✳, which renders as an
-// emoji on Windows — same swap claude-code makes for non-darwin).
-const SPINNER_FRAMES = ["·", "✢", "*", "✶", "✻", "✽", "✻", "✶", "*", "✢"];
-
-/** Claude-style thinking line: a pulsing star (fixed-width, no text shift) + a verb with a
- * shimmer band sweeping across it, then dim meta in parens. Self-animated (own 80ms clock). */
-function ThinkingLine(props: { verb: string; elapsed: number; tokens: number; step: number; queued: number }) {
-  const { verb, elapsed, tokens, step, queued } = props;
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setFrame((f) => (f + 1) % 100000), 80);
-    return () => clearInterval(id);
-  }, []);
-
-  const chars = [...(verb + "…")];
-  const cycle = chars.length + 12; // word width + a gap, so the shimmer pauses between sweeps
-  const glimmer = chars.length + 6 - (frame % cycle); // bright band index, sweeps right -> left
-  const star = SPINNER_FRAMES[Math.floor(frame / 2) % SPINNER_FRAMES.length];
-  const meta =
-    `${elapsed}s` +
-    (step > 1 ? ` · step ${step}` : "") +
-    ` · ${fmtTok(tokens)} tok` +
-    (queued > 0 ? ` · ${queued} queued` : "") +
-    " · esc to interrupt";
-
-  return (
-    <Box flexDirection="row">
-      <Box width={2}>
-        <Text color={SPINNER_ORANGE}>{star}</Text>
-      </Box>
-      <Text>
-        {chars.map((c, i) => (
-          <Text key={i} color={Math.abs(i - glimmer) <= 1 ? SPINNER_SHIMMER : SPINNER_ORANGE}>{c}</Text>
-        ))}{" "}
-        <Text color="#9a9a9a">({meta})</Text>
-      </Text>
-    </Box>
-  );
-}
 
 const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
@@ -601,58 +515,9 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     void handle(text);
   };
 
-  const renderLine = (line: Line) => {
-    switch (line.kind) {
-      case "welcome":
-        return (
-          <Box key={line.id} marginBottom={1}>
-            <Logo />
-            <Box flexDirection="column" marginLeft={2}>
-              <Text>
-                <Text bold color="white">Neko Code</Text> <Text color="#9a9a9a">v{VERSION}</Text>
-              </Text>
-              <Text color="#9a9a9a">
-                <Text color="white">{(cfg.model || "no model").split("/").pop()}</Text>
-                {" · "}{cfg.provider}{" · "}{cfg.profile ?? "no profile"}
-              </Text>
-              <Text color="#9a9a9a">{process.cwd()}</Text>
-            </Box>
-          </Box>
-        );
-      case "user":
-        return <Text key={line.id} color="cyan">{"> "}{line.text}</Text>;
-      case "assistant":
-        return (
-          <Box key={line.id} flexDirection="column" marginTop={1} marginBottom={1}>
-            <Markdown text={line.text} />
-          </Box>
-        );
-      case "tool_call":
-        return <Text key={line.id}><Text color="green">● </Text>{line.text}</Text>;
-      case "tool_result": {
-        const resultLines = line.text.split("\n");
-        return (
-          <Box key={line.id} flexDirection="column">
-            {resultLines.map((l, i) => {
-              const add = l.startsWith("+");
-              const del = l.startsWith("-");
-              return (
-                <Text key={i} color={add ? "green" : del ? "red" : undefined} dimColor={!add && !del}>
-                  {(i === 0 ? "  ⎿ " : "     ") + l}
-                </Text>
-              );
-            })}
-          </Box>
-        );
-      }
-      default:
-        return <Text key={line.id} color="gray">{line.text}</Text>;
-    }
-  };
-
   return (
     <Box flexDirection="column">
-      <Static items={lines}>{renderLine}</Static>
+      <Static items={lines}>{(line) => <TranscriptLine key={line.id} line={line} cfg={cfg} />}</Static>
 
       {stream ? <Markdown text={stream} /> : null}
 
@@ -725,31 +590,6 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           )}
         </Box>
       )}
-    </Box>
-  );
-}
-
-export function ApprovalBox({ approval }: { approval: Approval }) {
-  const { toolName, args } = approval;
-  const preview: any[] = [];
-  if (toolName === "bash") {
-    preview.push(<Text key="c" color="white">{"$ "}{trunc(args.command, 200)}</Text>);
-  } else if (toolName === "write_file") {
-    const content = String(args.content ?? "");
-    preview.push(<Text key="p" color="gray">write {args.path} ({content.length} chars)</Text>);
-    content.split("\n").slice(0, 8).forEach((l, i) => preview.push(<Text key={`l${i}`} color="green">{"+ "}{l}</Text>));
-  } else if (toolName === "edit") {
-    preview.push(<Text key="p" color="gray">edit {args.path}</Text>);
-    preview.push(<Text key="o" color="red">{"- "}{trunc(args.old_string, 160)}</Text>);
-    preview.push(<Text key="n" color="green">{"+ "}{trunc(args.new_string, 160)}</Text>);
-  } else {
-    preview.push(<Text key="a" color="gray">{trunc(JSON.stringify(args), 200)}</Text>);
-  }
-  return (
-    <Box borderStyle="classic" borderColor="yellow" paddingX={1} flexDirection="column">
-      <Text bold color="yellow">Approve {toolName}?</Text>
-      {preview}
-      <Text color="gray">[y]es   [a]lways allow {toolName}   [n]o / Esc</Text>
     </Box>
   );
 }
