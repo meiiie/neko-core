@@ -76,6 +76,34 @@ test("typing '/' shows a slash-command autocomplete menu", async () => {
   unmount();
 });
 
+test("input typed while busy is queued, then drained", async () => {
+  // First turn takes a moment; a second submit during it should queue.
+  class SlowMock implements Provider {
+    i = 0;
+    async complete(): Promise<ProviderResponse> {
+      this.i++;
+      if (this.i === 1) {
+        await new Promise((r) => setTimeout(r, 250));
+        return { content: "first", tool_calls: [] };
+      }
+      return { content: "second", tool_calls: [] };
+    }
+  }
+  const { stdin, frames, unmount } = render(<ChatApp yolo provider={new SlowMock()} />);
+  stdin.write("task one");
+  await tick(30);
+  stdin.write("\r"); // submit -> turn 1 in flight (250ms)
+  await tick(60);
+  stdin.write("task two");
+  await tick(20);
+  stdin.write("\r"); // submitted while busy -> queued
+  await tick(500);
+  const all = frames.join("\n");
+  expect(all).toContain("queued:"); // queue indicator appeared
+  expect(all).toContain("second"); // queued task ran after the first
+  unmount();
+});
+
 test("ApprovalBox shows an edit diff preview", () => {
   const approval = { toolName: "edit", args: { path: "a.ts", old_string: "const x = 1", new_string: "const x = 2" }, resolve: () => {} };
   const { lastFrame, unmount } = render(<ApprovalBox approval={approval} />);

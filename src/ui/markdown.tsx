@@ -6,6 +6,29 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 
+import { highlightLine } from "./highlight.tsx";
+
+function splitRow(line: string): string[] {
+  return line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+}
+
+function pad(s: string, width: number): string {
+  return s + " ".repeat(Math.max(0, width - s.length));
+}
+
+function renderTable(header: string[], rows: string[][], key: number): ReactNode {
+  const widths = header.map((h, c) => Math.max(h.length, ...rows.map((r) => (r[c] ?? "").length)));
+  return (
+    <Box key={key} flexDirection="column">
+      <Text bold>{header.map((h, c) => pad(h, widths[c])).join("  ")}</Text>
+      <Text color="gray">{widths.map((w) => "-".repeat(w)).join("  ")}</Text>
+      {rows.map((r, ri) => (
+        <Text key={ri}>{header.map((_, c) => pad(r[c] ?? "", widths[c])).join("  ")}</Text>
+      ))}
+    </Box>
+  );
+}
+
 function inline(s: string): ReactNode[] {
   const out: ReactNode[] = [];
   const re = /(\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*)/g;
@@ -43,10 +66,25 @@ export function Markdown({ text }: { text: string }): ReactNode {
       blocks.push(
         <Box key={key++} flexDirection="column" paddingLeft={2}>
           {code.map((c, j) => (
-            <Text key={j} color="gray">{c.length ? c : " "}</Text>
+            <Text key={j}>{c.length ? highlightLine(c) : " "}</Text>
           ))}
         </Box>,
       );
+      continue;
+    }
+
+    // Table: a "| ... |" header row followed by a "|---|---|" separator.
+    const isRow = (l: string) => /^\s*\|.*\|\s*$/.test(l);
+    const isSep = (l: string) => l.includes("-") && /^\s*\|?[\s:|-]+\|?\s*$/.test(l);
+    if (isRow(line) && i + 1 < lines.length && isSep(lines[i + 1])) {
+      const header = splitRow(line);
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && isRow(lines[i])) {
+        rows.push(splitRow(lines[i]));
+        i++;
+      }
+      blocks.push(renderTable(header, rows, key++));
       continue;
     }
 

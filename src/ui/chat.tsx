@@ -76,6 +76,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const historyRef = useRef<string[]>([]);
   const historyPos = useRef(0);
   const multilineRef = useRef("");
+  const queueRef = useRef<string[]>([]);
   const controllerRef = useRef<AbortController | null>(null);
   const startRef = useRef(0);
   const resumedRef = useRef<Session | null>(resume ? latestSession(process.cwd()) : null);
@@ -101,6 +102,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const [pendingMulti, setPendingMulti] = useState(false);
   const [mode, setMode] = useState<PermissionMode>(yolo ? "auto" : cfg.mode);
   const [elapsed, setElapsed] = useState(0);
+  const [queued, setQueued] = useState(0);
 
   const addLine = (kind: LineKind, text: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
@@ -263,8 +265,10 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     controllerRef.current = controller;
     try {
       const result = await agentRef.current!.run(text, controller.signal);
+      const streamed = streamRef.current.trim().length > 0;
       flushStream();
       if (result === "[interrupted]") addLine("info", "(interrupted)");
+      else if (!streamed && result.trim()) addLine("assistant", result); // non-streaming provider
     } catch (error) {
       flushStream();
       addLine("info", `error: ${error instanceof Error ? error.message : error}`);
@@ -272,6 +276,9 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       setBusy(false);
       controllerRef.current = null;
       persist();
+      const next = queueRef.current.shift();
+      setQueued(queueRef.current.length);
+      if (next !== undefined) void handle(next); // drain queued input
     }
   };
 
@@ -285,9 +292,16 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     const text = (multilineRef.current + value).trim();
     multilineRef.current = "";
     setPendingMulti(false);
-    if (!text || busy) return;
+    if (!text) return;
     historyRef.current.push(text);
     historyPos.current = historyRef.current.length;
+    if (busy) {
+      // Queue input typed while a turn is running; drained when it finishes.
+      queueRef.current.push(text);
+      setQueued(queueRef.current.length);
+      addLine("info", `queued: ${trunc(text, 60)}`);
+      return;
+    }
     void handle(text);
   };
 
@@ -324,17 +338,20 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
 
       {stream ? <Text>{stream}</Text> : null}
 
+      {busy && !approval ? (
+        <Text color="gray">
+          <Spinner type="line" /> working {elapsed}s - {agentRef.current!.cost.totalTokens} tok
+          {queued > 0 ? ` - ${queued} queued` : ""} - esc to interrupt
+        </Text>
+      ) : null}
+
       {approval ? (
         <ApprovalBox approval={approval} />
-      ) : busy ? (
-        <Text color="gray">
-          <Spinner type="line" /> working {elapsed}s - {agentRef.current!.cost.totalTokens} tok - esc to interrupt
-        </Text>
       ) : (
         <Box flexDirection="column">
-          <Box borderStyle="classic" borderColor="cyan" paddingX={1}>
+          <Box borderStyle="classic" borderColor={busy ? "gray" : "cyan"} paddingX={1}>
             <Text color="cyan">{pendingMulti ? "... " : `[${mode}] > `}</Text>
-            <TextInput value={input} onChange={setInput} onSubmit={onSubmit} placeholder="Type a task, or /help" />
+            <TextInput value={input} onChange={setInput} onSubmit={onSubmit} placeholder={busy ? "type to queue..." : "Type a task, or /help"} />
           </Box>
           {input.startsWith("/") ? (
             <Box flexDirection="column" paddingLeft={2}>

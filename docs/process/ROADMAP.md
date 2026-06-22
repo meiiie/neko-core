@@ -56,3 +56,6 @@ cost/token tracking · MCP client · single-binary distribution.
   status, **Esc-to-interrupt** (AbortSignal through provider+agent), and a bordered approval
   box with an **edit/write diff preview**. ASCII-safe (classic borders, line spinner) for any
   Windows console. *(typecheck + 45 tests incl. headless Markdown render; binary rebuilt)*
+- [x] **E4** Syntax-highlighted code blocks (`src/ui/highlight.tsx`; tokenized Ink Text segments, not raw ANSI).
+- [x] **E5** Markdown tables (aligned columns) in the renderer.
+- [x] **E6** Input queue while busy (type-ahead, drained after each turn) + render of non-streaming finals.
