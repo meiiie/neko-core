@@ -10,6 +10,7 @@ import { Box, render, Static, Text, useApp, useInput, useStdout } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
 
+import { Logo } from "./logo.tsx";
 import { TextInput } from "./text-input.tsx";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../agent.ts";
@@ -319,15 +320,12 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     switch (line.kind) {
       case "welcome":
         return (
-          <Box key={line.id} marginBottom={1}>
-            <Text color="magenta">{" /\\_/\\ \n( o.o )\n  > ^ <"}</Text>
-            <Box flexDirection="column" marginLeft={2}>
-              <Text>
-                <Text bold>Neko Code</Text> <Text dimColor>v{VERSION}</Text>
-              </Text>
-              <Text dimColor>{cfg.model || "(no model)"} · {cfg.provider} · {cfg.profile ?? "no profile"}</Text>
-              <Text dimColor>{process.cwd()}</Text>
-            </Box>
+          <Box key={line.id} flexDirection="column" marginBottom={1}>
+            <Logo />
+            <Text dimColor>
+              v{VERSION} · {cfg.model || "(no model)"} · {cfg.provider} · {cfg.profile ?? "no profile"}
+            </Text>
+            <Text dimColor>{process.cwd()}</Text>
           </Box>
         );
       case "user":
