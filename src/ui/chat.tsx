@@ -415,10 +415,13 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
             <Logo />
             <Box flexDirection="column" marginLeft={2}>
               <Text>
-                <Text bold>Neko Code</Text> <Text dimColor>v{VERSION}</Text>
+                <Text bold color="white">Neko Code</Text> <Text color="#9a9a9a">v{VERSION}</Text>
               </Text>
-              <Text dimColor>{(cfg.model || "no model").split("/").pop()} · {cfg.provider} · {cfg.profile ?? "no profile"}</Text>
-              <Text dimColor>{process.cwd()}</Text>
+              <Text color="#9a9a9a">
+                <Text color="white">{(cfg.model || "no model").split("/").pop()}</Text>
+                {" · "}{cfg.provider}{" · "}{cfg.profile ?? "no profile"}
+              </Text>
+              <Text color="#9a9a9a">{process.cwd()}</Text>
             </Box>
           </Box>
         );
