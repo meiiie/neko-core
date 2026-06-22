@@ -14,6 +14,7 @@ export class CostTracker {
   completionTokens = 0;
   totalTokens = 0;
   calls = 0;
+  lastPrompt = 0; // last call's prompt size ~= current context usage
 
   add(usage?: Usage): void {
     if (!usage) return;
@@ -22,6 +23,7 @@ export class CostTracker {
     this.promptTokens += prompt;
     this.completionTokens += completion;
     this.totalTokens += usage.total_tokens ?? prompt + completion;
+    if (usage.prompt_tokens !== undefined) this.lastPrompt = usage.prompt_tokens;
     this.calls += 1;
   }
 

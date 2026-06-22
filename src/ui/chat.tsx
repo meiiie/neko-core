@@ -194,6 +194,19 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     return () => clearInterval(timer);
   }, [busy]);
 
+  // Ctrl-C twice to exit (always active).
+  const ctrlC = useRef(false);
+  useInput((input, key) => {
+    if (key.ctrl && input === "c") {
+      if (ctrlC.current) return exit();
+      ctrlC.current = true;
+      addLine("info", "(press Ctrl-C again to exit)");
+      setTimeout(() => {
+        ctrlC.current = false;
+      }, 2000);
+    }
+  });
+
   // Approval keys.
   useInput(
     (char, key) => {
@@ -472,7 +485,10 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
               ) : (
                 <Text color={MODE_COLOR[mode]}>{mode} · shift+tab to cycle</Text>
               )}
-              <Text dimColor>{(cfg.model || "").split("/").pop()} · {agentRef.current!.cost.totalTokens} tok</Text>
+              <Text dimColor>
+                {(cfg.model || "").split("/").pop()} · {agentRef.current!.cost.totalTokens} tok ·{" "}
+                {Math.max(0, Math.round((100 * (cfg.contextWindow - agentRef.current!.cost.lastPrompt)) / cfg.contextWindow))}% ctx
+              </Text>
             </Box>
           )}
         </Box>
@@ -513,7 +529,9 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   }
   const cfg = loadConfig({ profile: opts.profile });
   const hub = await buildMcpHub(cfg.mcpServers);
-  const app = render(<ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} mcpHub={hub} />);
+  const app = render(<ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} mcpHub={hub} />, {
+    exitOnCtrlC: false, // we require a double Ctrl-C
+  });
   try {
     await app.waitUntilExit();
   } finally {

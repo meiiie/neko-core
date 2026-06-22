@@ -9,7 +9,7 @@ karpathy + ponytail. Tick as shipped (each verified + committed).
 - [x] **P4** edit/write diff shown in the transcript (colored, multi-line)
 - [x] **P5** /compact — summarize the conversation to free context
 - [x] **P6** streaming markdown (render formatted as it streams)
-- [ ] **P7** context-left indicator in the status bar
-- [ ] **P8** Ctrl-C twice to exit; Ctrl-O to expand a truncated tool result
+- [x] **P7** context-left indicator in the status bar
+- [x] **P8** (Ctrl-C twice; Ctrl-O skipped) Ctrl-C twice to exit; Ctrl-O to expand a truncated tool result
 - [~] **P9** (skipped — the model can call edit repeatedly; YAGNI) multiedit (several edits in one call)
 - [x] **P10** richer system prompt / tool descriptions (closer to Claude's)
