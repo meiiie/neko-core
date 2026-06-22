@@ -119,6 +119,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const [elapsed, setElapsed] = useState(0);
   const [queued, setQueued] = useState(0);
   const [step, setStep] = useState(0);
+  const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
 
   const addLine = (kind: LineKind, text: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
@@ -158,6 +159,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           addLine("tool_call", `${data.name}(${trunc(a.command ?? a.path ?? a.pattern ?? "", 80)})`);
         } else if (kind === "tool_result") {
           addLine("tool_result", trunc(data.observation, 160));
+          setTodos([...registryRef.current!.todos]); // reflect todo_write changes
         } else if (kind === "step") {
           setStep(data);
         }
@@ -396,6 +398,17 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       <Static items={lines}>{renderLine}</Static>
 
       {stream ? <Text>{stream}</Text> : null}
+
+      {todos.length ? (
+        <Box flexDirection="column" marginTop={1}>
+          {todos.map((t, i) => (
+            <Text key={i} color={t.status === "completed" ? "green" : t.status === "in_progress" ? "yellow" : "gray"}>
+              {t.status === "completed" ? " [x] " : t.status === "in_progress" ? " [~] " : " [ ] "}
+              {t.content}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
 
       {approval ? (
         <ApprovalBox approval={approval} />

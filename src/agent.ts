@@ -20,6 +20,8 @@ export const DEFAULT_SYSTEM_PROMPT =
   "Prefer `edit` for small changes (exact unique string replace) over rewriting whole files.\n" +
   "read_file output is prefixed with line numbers for reference only - never include the " +
   "line-number prefix in edit/write content.\n" +
+  "For multi-step tasks, call todo_write to plan and track progress (keep exactly one item " +
+  "in_progress); update it as you go.\n" +
   "Work in small steps: inspect before you edit, make the smallest change that solves the task, " +
   "and verify your work. When the task is done, reply with a short summary and stop calling tools.";
 

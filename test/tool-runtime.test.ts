@@ -84,3 +84,13 @@ test("disabled tool is hidden from schemas and blocked on execute", async () => 
   expect(reg.schemas().map((s: any) => s.function.name)).not.toContain("bash");
   expect(await reg.execute("bash", { command: "echo hi" })).toContain("disabled");
 });
+
+test("todo_write records the list on the registry and renders a checklist", async () => {
+  const { reg } = makeReg();
+  const out = await reg.execute("todo_write", {
+    todos: [{ content: "scan", status: "completed" }, { content: "fix", status: "in_progress" }],
+  });
+  expect(out).toContain("[x] scan");
+  expect(out).toContain("[~] fix");
+  expect(reg.todos.length).toBe(2);
+});

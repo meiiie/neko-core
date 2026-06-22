@@ -5,7 +5,7 @@ karpathy + ponytail. Tick as shipped (each verified + committed).
 
 - [x] **P1** read_file line numbers (cat -n style) + system-prompt note
 - [x] **P2** @file mentions in chat (expand @path to file context)
-- [ ] **P3** todo system: `todo_write` tool + checklist rendering (signature Claude feature)
+- [x] **P3** todo system: `todo_write` tool + checklist rendering (signature Claude feature)
 - [ ] **P4** edit/write diff shown in the transcript (colored, multi-line)
 - [ ] **P5** /compact — summarize the conversation to free context
 - [ ] **P6** streaming markdown (render formatted as it streams)

@@ -15,7 +15,7 @@ export interface ToolSpec {
   name: string;
   permission: typeof SAFE | typeof GATED;
   summary: string;
-  parameters: Record<string, { type: string; description: string }>;
+  parameters: Record<string, any>; // JSON-schema properties (type/description, plus items/enum)
   required: string[];
 }
 
@@ -83,6 +83,26 @@ export const TOOL_SPECS: ToolSpec[] = [
     summary: "Run a shell command in the project root (approval-gated).",
     parameters: { command: { type: "string", description: "The shell command to run." } },
     required: ["command"],
+  },
+  {
+    name: "todo_write",
+    permission: SAFE,
+    summary: "Record/update the task todo list. Use it to plan multi-step work and track progress.",
+    parameters: {
+      todos: {
+        type: "array",
+        description: "The full todo list (replaces the previous one).",
+        items: {
+          type: "object",
+          properties: {
+            content: { type: "string", description: "Task description." },
+            status: { type: "string", enum: ["pending", "in_progress", "completed"], description: "Task status." },
+          },
+          required: ["content", "status"],
+        },
+      },
+    },
+    required: ["todos"],
   },
 ];
 

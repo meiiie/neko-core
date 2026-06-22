@@ -11,7 +11,7 @@ test("schema shape", () => {
 
 test("tool order", () => {
   expect(toolSchemas().map((t: any) => t.function.name)).toEqual([
-    "read_file", "search", "glob", "ls", "write_file", "edit", "bash",
+    "read_file", "search", "glob", "ls", "write_file", "edit", "bash", "todo_write",
   ]);
 });
 

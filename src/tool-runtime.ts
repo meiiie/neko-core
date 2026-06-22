@@ -41,6 +41,8 @@ export class ToolRegistry {
   mode: PermissionMode;
   /** Built-in tools turned off at runtime (via `/tools <name>` in chat). */
   disabled = new Set<string>();
+  /** The agent's current todo list (set by the todo_write tool; rendered by the REPL). */
+  todos: { content: string; status: string }[] = [];
 
   constructor(
     public readonly root: string,
@@ -65,6 +67,14 @@ export class ToolRegistry {
     }
     if (this.disabled.has(name)) {
       return `Tool '${name}' is disabled (enable with /tools ${name}).`;
+    }
+
+    // todo_write: safe, no approval — record the plan for the REPL to render.
+    if (name === "todo_write") {
+      this.todos = Array.isArray(args.todos)
+        ? args.todos.map((t: any) => ({ content: String(t?.content ?? ""), status: String(t?.status ?? "pending") }))
+        : [];
+      return renderTodos(this.todos);
     }
 
     // MCP tools: their effects are unknown, so treat them as gated (mode-governed).
@@ -271,6 +281,12 @@ function* walkFiles(base: string): Generator<string> {
       yield join(base, entry.name);
     }
   }
+}
+
+function renderTodos(todos: { content: string; status: string }[]): string {
+  if (!todos.length) return "(todos cleared)";
+  const mark = (s: string) => (s === "completed" ? "[x]" : s === "in_progress" ? "[~]" : "[ ]");
+  return "Todos:\n" + todos.map((t) => `${mark(t.status)} ${t.content}`).join("\n");
 }
 
 function describe(name: string, args: Record<string, any>): string {
