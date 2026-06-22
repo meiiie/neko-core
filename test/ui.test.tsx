@@ -61,3 +61,11 @@ test("Markdown highlights code while preserving the text", () => {
   const { lastFrame } = render(<Markdown text={'```\nconst x = "hi"; // note\n```'} />);
   expect(lastFrame() ?? "").toContain('const x = "hi"; // note');
 });
+
+test("Markdown renders blockquotes and link text", () => {
+  const { lastFrame } = render(<Markdown text={"> a quote\nsee [the docs](http://x.io)"} />);
+  const out = lastFrame() ?? "";
+  expect(out).toContain("a quote");
+  expect(out).toContain("the docs"); // link text shown
+  expect(out).not.toContain("http://x.io"); // url hidden
+});

@@ -39,6 +39,8 @@ export const denyAll: ApprovalGate = () => false;
  */
 export class ToolRegistry {
   mode: PermissionMode;
+  /** Built-in tools turned off at runtime (via `/tools <name>` in chat). */
+  disabled = new Set<string>();
 
   constructor(
     public readonly root: string,
@@ -49,14 +51,20 @@ export class ToolRegistry {
     this.mode = mode;
   }
 
-  /** All tool schemas shown to the model: built-in + connected MCP tools. */
+  /** All tool schemas shown to the model: enabled built-in + connected MCP tools. */
   schemas(): any[] {
-    return [...toolSchemas(), ...(this.mcp?.toolSchemas() ?? [])];
+    return [
+      ...toolSchemas().filter((s) => !this.disabled.has(s.function.name)),
+      ...(this.mcp?.toolSchemas() ?? []),
+    ];
   }
 
   async execute(name: string, args: Record<string, any>): Promise<string> {
     if (typeof args !== "object" || args === null) {
       return `Error: arguments for ${name} must be an object`;
+    }
+    if (this.disabled.has(name)) {
+      return `Tool '${name}' is disabled (enable with /tools ${name}).`;
     }
 
     // MCP tools: their effects are unknown, so treat them as gated (mode-governed).

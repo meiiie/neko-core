@@ -22,6 +22,8 @@ import { initProject } from "../project.ts";
 import { getProvider, type Provider } from "../providers.ts";
 import { latestSession, newSessionId, saveSession, type Session } from "../session.ts";
 import { ToolRegistry } from "../tool-runtime.ts";
+import { listSkills, loadSkill } from "../skills.ts";
+import { listTools } from "../tools.ts";
 import { VERSION } from "../version.ts";
 import { Markdown } from "./markdown.tsx";
 
@@ -62,6 +64,8 @@ const SLASH: { name: string; desc: string }[] = [
   { name: "/cost", desc: "token usage this session" },
   { name: "/model", desc: "active provider/model/mode" },
   { name: "/profiles", desc: "list profiles" },
+  { name: "/tools", desc: "list / toggle tools (/tools bash)" },
+  { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
   { name: "/init", desc: "scaffold ./.neko-core/config.json" },
   { name: "/clear", desc: "clear transcript + context" },
   { name: "/reset", desc: "reset conversation context" },
@@ -114,6 +118,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const [mode, setMode] = useState<PermissionMode>(yolo ? "auto" : cfg.mode);
   const [elapsed, setElapsed] = useState(0);
   const [queued, setQueued] = useState(0);
+  const [step, setStep] = useState(0);
 
   const addLine = (kind: LineKind, text: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
@@ -153,6 +158,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           addLine("tool_call", `${data.name}(${trunc(a.command ?? a.path ?? a.pattern ?? "", 80)})`);
         } else if (kind === "tool_result") {
           addLine("tool_result", trunc(data.observation, 160));
+        } else if (kind === "step") {
+          setStep(data);
         }
       },
     });
@@ -253,9 +260,39 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         case "/profiles":
           addLine("info", "profiles: " + Object.keys(cfg.profiles).sort().join(", "));
           return;
+        case "/tools": {
+          const reg = registryRef.current!;
+          const arg = text.split(/\s+/)[1];
+          if (arg) {
+            if (reg.disabled.has(arg)) reg.disabled.delete(arg);
+            else reg.disabled.add(arg);
+            addLine("info", `${arg} -> ${reg.disabled.has(arg) ? "off" : "on"}`);
+          } else {
+            addLine("info", "tools: " + listTools().map((t) => `${t.name}[${reg.disabled.has(t.name) ? "off" : "on"}]`).join("  "));
+          }
+          return;
+        }
         case "/init":
           addLine("info", initProject());
           return;
+        case "/skills":
+          addLine("info", "skills: " + (listSkills().map((s) => s.name).join(", ") || "(none in ~/.neko-core/skills)"));
+          return;
+        case "/skill": {
+          const name = text.split(/\s+/)[1];
+          if (!name) {
+            addLine("info", "usage: /skill <name>  ·  /skills to list");
+            return;
+          }
+          const skill = loadSkill(name);
+          if (!skill) {
+            addLine("info", `unknown skill '${name}' - /skills to list`);
+            return;
+          }
+          agentRef.current!.appendSystem(`# Skill: ${skill.name}\n${skill.body}`);
+          addLine("info", `loaded skill: ${skill.name}`);
+          return;
+        }
         case "/clear":
           agentRef.current!.messages = [];
           setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
@@ -375,7 +412,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
             <Box justifyContent="space-between">
               {busy ? (
                 <Text color="gray">
-                  <Spinner type="line" /> working {elapsed}s{queued > 0 ? ` · ${queued} queued` : ""} · esc to interrupt
+                  <Spinner type="line" /> working {elapsed}s{step > 1 ? ` · step ${step}` : ""}
+                  {queued > 0 ? ` · ${queued} queued` : ""} · esc to interrupt
                 </Text>
               ) : (
                 <Text color={MODE_COLOR[mode]}>{mode} · shift+tab to cycle</Text>

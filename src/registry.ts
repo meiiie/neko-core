@@ -100,6 +100,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "policy", group: "registry", summary: "Audit the safe/gated permission boundary.", example: "neko policy" },
   { name: "context", group: "registry", summary: "Show the project context (NEKO.md / CLAUDE.md) loaded.", example: "neko context" },
   { name: "sessions", group: "config", summary: "List saved chat sessions.", example: "neko sessions" },
+  { name: "skills", group: "registry", summary: "List available skills (~/.neko-core/skills).", example: "neko skills" },
   { name: "mcp", group: "registry", summary: "List configured MCP servers and their tools.", example: "neko mcp" },
 ];
 

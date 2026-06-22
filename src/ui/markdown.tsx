@@ -31,7 +31,7 @@ function renderTable(header: string[], rows: string[][], key: number): ReactNode
 
 function inline(s: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /(\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*)/g;
+  const re = /(\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*|\[([^\]]+)\]\(([^)]+)\))/g;
   let last = 0;
   let key = 0;
   let m: RegExpExecArray | null;
@@ -40,6 +40,7 @@ function inline(s: string): ReactNode[] {
     if (m[2] !== undefined) out.push(<Text key={key++} bold>{m[2]}</Text>);
     else if (m[3] !== undefined) out.push(<Text key={key++} color="yellow">{m[3]}</Text>);
     else if (m[4] !== undefined) out.push(<Text key={key++} italic>{m[4]}</Text>);
+    else if (m[5] !== undefined) out.push(<Text key={key++} color="cyan" underline>{m[5]}</Text>); // [text](url) -> text
     last = m.index + m[0].length;
   }
   if (last < s.length) out.push(s.slice(last));
@@ -91,6 +92,13 @@ export function Markdown({ text }: { text: string }): ReactNode {
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
       blocks.push(<Text key={key++} bold color="cyan">{heading[2]}</Text>);
+      i++;
+      continue;
+    }
+
+    const quote = line.match(/^>\s?(.*)$/);
+    if (quote) {
+      blocks.push(<Text key={key++} color="gray" italic>{"│ "}{inline(quote[1])}</Text>);
       i++;
       continue;
     }

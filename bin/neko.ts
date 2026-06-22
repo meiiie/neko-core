@@ -15,6 +15,7 @@ import { buildMcpHub, renderMcp } from "../src/mcp.ts";
 import { getProvider } from "../src/providers.ts";
 import { initProject, initUser } from "../src/project.ts";
 import { renderSessions } from "../src/session.ts";
+import { renderSkills } from "../src/skills.ts";
 import { ToolRegistry } from "../src/tool-runtime.ts";
 import {
   collectCapabilities,
@@ -134,6 +135,7 @@ Commands:
   policy        audit the safe/gated permission boundary
   context       show the project context files (NEKO.md / CLAUDE.md) loaded
   sessions      list saved chat sessions
+  skills        list available skills (~/.neko-core/skills)
   mcp           list configured MCP servers and their tools
   chat          interactive session (default - same as bare 'neko' / 'neko code')
   run <task>    one-shot: run a single instruction
@@ -219,6 +221,11 @@ function cmdSessions(): number {
   return 0;
 }
 
+function cmdSkills(): number {
+  console.log(renderSkills());
+  return 0;
+}
+
 async function cmdMcp(args: Args): Promise<number> {
   const cfg = load(args);
   if (!Object.keys(cfg.mcpServers).length) {
@@ -290,6 +297,7 @@ async function main(): Promise<number> {
       case "policy": return cmdPolicy(args);
       case "context": return cmdContext();
       case "sessions": return cmdSessions();
+      case "skills": return cmdSkills();
       case "mcp": return await cmdMcp(args);
       case "run": return await cmdRun(args);
       default:

@@ -94,3 +94,9 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
 - **Vietnamese fix v2**: root cause was stale-closure in the controlled input (IME sends backspace+char back-to-back; both read the stale value -> 'moọi'). Now value lives in a ref, mutated synchronously. Test reproduces 'mọ' not 'moọ'.
 - **Logo**: cat now matches the banner glyph (/\··~▽, ハ‥マ style) inline with the title.
 - **Micro-UX**: tool calls show a green ● bullet + dim ⎿ result; assistant messages get vertical breathing room.
+
+## 2026-06-22 — Session 6: features (markdown/loop/tools/skills)
+- **Markdown**: blockquotes (│) + links ([text](url) -> text). 
+- **Loop**: agent emits step N; chat status shows 'step N'.
+- **Tool mgmt**: ToolRegistry.disabled; chat /tools lists, /tools <name> toggles (hidden from schemas + blocked).
+- **Skill system**: src/skills.ts loads *.md from ~/.neko-core/skills + ./.neko-core/skills; neko skills, chat /skills + /skill <name> (injects into system prompt via Agent.appendSystem). Example skill: ~/.neko-core/skills/concise.md.

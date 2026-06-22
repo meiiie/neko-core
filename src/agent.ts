@@ -53,6 +53,13 @@ export class Agent {
     this.onDelta = opts.onDelta;
   }
 
+  /** Append text to the system prompt (used by /skill). Seeds the base prompt if needed. */
+  appendSystem(text: string): void {
+    const sys = this.messages.find((m) => m.role === "system");
+    if (sys) sys.content += "\n\n" + text;
+    else this.messages.unshift({ role: "system", content: this.systemPrompt + "\n\n" + text });
+  }
+
   /** Run the loop until the model is done or maxSteps is hit. Returns the final text.
    * Pass an AbortSignal to support Esc-to-interrupt (stops cleanly between/within steps). */
   async run(instruction: string, signal?: AbortSignal): Promise<string> {
@@ -62,6 +69,7 @@ export class Agent {
     this.messages.push({ role: "user", content: instruction });
 
     for (let step = 0; step < this.maxSteps; step++) {
+      this.emit("step", step + 1);
       if (signal?.aborted) return "[interrupted]";
       let response;
       try {

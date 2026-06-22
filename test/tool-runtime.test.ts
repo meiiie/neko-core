@@ -77,3 +77,10 @@ test("accept-edits auto-approves edits but prompts bash", async () => {
   expect(await reg.execute("write_file", { path: "b.txt", content: "x" })).toContain("Wrote");
   expect(await reg.execute("bash", { command: "echo no" })).toContain("Denied");
 });
+
+test("disabled tool is hidden from schemas and blocked on execute", async () => {
+  const { reg } = makeReg();
+  reg.disabled.add("bash");
+  expect(reg.schemas().map((s: any) => s.function.name)).not.toContain("bash");
+  expect(await reg.execute("bash", { command: "echo hi" })).toContain("disabled");
+});
