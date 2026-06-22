@@ -1,6 +1,6 @@
 import { Text } from "ink";
 
-// Small mascot: a cool cat with shades. Recolor here (any Ink color / hex).
+// Cat mascot in the style of the banner glyph (ハ‥マ). Recolor here (any Ink color / hex).
 export function Logo() {
-  return <Text color="#e6932e">{" /\\_/\\ \n( ■_■ )\n  > ^ < "}</Text>;
+  return <Text color="#e6932e">/\··~▽</Text>;
 }

@@ -1,9 +1,13 @@
 /**
- * Minimal Ink-native text input. Replaces ink-text-input, which mangled Vietnamese / IME
- * input (combining marks + backspace-insert sequences). We append the decoded keypress and
- * NFC-normalize, using codepoint-safe ops so multi-byte chars never split.
+ * Minimal Ink-native text input. Replaces ink-text-input (mangled Vietnamese/IME).
+ *
+ * Vietnamese IME (Telex/Unikey) composes a toned vowel by sending backspace + the new char
+ * back-to-back. With a captured `value` prop those two events both read the STALE value
+ * (no re-render between them) -> "mọi" became "moọi". Fix: keep the live value in a ref and
+ * mutate it synchronously, so each keypress sees the latest. NFC + codepoint-safe.
  */
 import { Text, useInput } from "ink";
+import { useRef } from "react";
 
 export function TextInput(props: {
   value: string;
@@ -12,15 +16,22 @@ export function TextInput(props: {
   placeholder?: string;
 }) {
   const { value, onChange, onSubmit, placeholder } = props;
+  const ref = useRef(value);
+  ref.current = value; // resync to the prop each render (parent owns it between keystrokes)
+
   useInput((input, key) => {
-    if (key.return) return onSubmit(value);
-    if (key.backspace || key.delete) return onChange([...value].slice(0, -1).join("")); // drop last codepoint
-    // Skip keys handled elsewhere (history / mode-cycle / interrupt); insert anything else.
+    if (key.return) return onSubmit(ref.current);
+    if (key.backspace || key.delete) {
+      ref.current = [...ref.current].slice(0, -1).join("");
+      return onChange(ref.current);
+    }
     if (input && !key.ctrl && !key.meta && !key.tab && !key.escape &&
         !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow) {
-      onChange((value + input).normalize("NFC"));
+      ref.current = (ref.current + input).normalize("NFC");
+      onChange(ref.current);
     }
   });
+
   return (
     <Text>
       {value ? value : <Text dimColor>{placeholder ?? ""}</Text>}

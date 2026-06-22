@@ -320,29 +320,26 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     switch (line.kind) {
       case "welcome":
         return (
-          <Box key={line.id} marginBottom={1}>
-            <Logo />
-            <Box flexDirection="column" marginLeft={2}>
-              <Text>
-                <Text bold>Neko Code</Text> <Text dimColor>v{VERSION}</Text>
-              </Text>
-              <Text dimColor>{(cfg.model || "no model").split("/").pop()} · {cfg.provider} · {cfg.profile ?? "no profile"}</Text>
-              <Text dimColor>{process.cwd()}</Text>
-            </Box>
+          <Box key={line.id} flexDirection="column" marginBottom={1}>
+            <Text>
+              <Logo />  <Text bold>Neko Code</Text> <Text dimColor>v{VERSION}</Text>
+            </Text>
+            <Text dimColor>{(cfg.model || "no model").split("/").pop()} · {cfg.provider} · {cfg.profile ?? "no profile"}</Text>
+            <Text dimColor>{process.cwd()}</Text>
           </Box>
         );
       case "user":
         return <Text key={line.id} color="cyan">{"> "}{line.text}</Text>;
       case "assistant":
         return (
-          <Box key={line.id} flexDirection="column">
+          <Box key={line.id} flexDirection="column" marginTop={1} marginBottom={1}>
             <Markdown text={line.text} />
           </Box>
         );
       case "tool_call":
-        return <Text key={line.id}><Text color="green">{"* "}</Text>{line.text}</Text>;
+        return <Text key={line.id}><Text color="green">● </Text>{line.text}</Text>;
       case "tool_result":
-        return <Text key={line.id} color="gray">{"    "}{line.text}</Text>;
+        return <Text key={line.id} dimColor>{"  ⎿ "}{line.text}</Text>;
       default:
         return <Text key={line.id} color="gray">{line.text}</Text>;
     }

@@ -24,6 +24,23 @@ test("TextInput appends a multibyte Vietnamese char as one codepoint (the old bu
   unmount();
 });
 
+test("IME backspace+insert composes (no stale-closure duplication: 'mọ' not 'moọ')", async () => {
+  const DEL = String.fromCharCode(127); // backspace
+  const oDotBelow = String.fromCharCode(0x1ecd); // "ọ"
+  let val = "";
+  function Wrap() {
+    const [v, setV] = useState("mo");
+    val = v;
+    return <TextInput value={v} onChange={setV} onSubmit={() => {}} />;
+  }
+  const { stdin, unmount } = render(<Wrap />);
+  stdin.write(DEL); // IME deletes "o" -> "m"
+  stdin.write(oDotBelow); // ...then inserts the toned vowel, back-to-back
+  await tick();
+  expect(val).toBe("m" + oDotBelow); // "mọ"
+  unmount();
+});
+
 test("Markdown renders headings, bold, inline code, bullets, fences", () => {
   const { lastFrame } = render(<Markdown text={"# Title\n- **bold** and `code`\n\n```\nblock\n```"} />);
   const out = lastFrame() ?? "";
