@@ -1,7 +1,28 @@
 import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
+import { useState } from "react";
 
 import { Markdown } from "../src/ui/markdown.tsx";
+import { TextInput } from "../src/ui/text-input.tsx";
+
+const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+
+test("TextInput appends a multibyte Vietnamese char as one codepoint (the old bug split it)", async () => {
+  let val = "";
+  function Wrap() {
+    const [v, setV] = useState("");
+    val = v;
+    return <TextInput value={v} onChange={setV} onSubmit={() => {}} />;
+  }
+  const { stdin, unmount } = render(<Wrap />);
+  stdin.write("ch");
+  await tick();
+  stdin.write("ệ"); // precomposed U+1EC7
+  await tick();
+  expect(val).toBe("chệ");
+  expect([...val].length).toBe(3); // 3 codepoints, not split/duplicated
+  unmount();
+});
 
 test("Markdown renders headings, bold, inline code, bullets, fences", () => {
   const { lastFrame } = render(<Markdown text={"# Title\n- **bold** and `code`\n\n```\nblock\n```"} />);

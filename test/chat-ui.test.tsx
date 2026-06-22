@@ -18,12 +18,13 @@ class MockProvider implements Provider {
   }
 }
 
-test("welcome box + input box render on start", () => {
+test("header + input + status bar render on start", () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
   const { lastFrame, unmount } = render(<ChatApp yolo provider={provider} />);
   const out = lastFrame() ?? "";
   expect(out).toContain("Neko Code");
-  expect(out).toContain("[auto] >"); // bordered input prompt shows the mode
+  expect(out).toContain("auto"); // mode shown in the bottom status bar
+  expect(out).toContain("shift+tab"); // status bar hint
   unmount();
 });
 

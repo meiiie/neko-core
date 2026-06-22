@@ -6,10 +6,11 @@
  * Esc-to-interrupt, slash commands, history, multiline, Shift+Tab modes). Reuses one Agent
  * for conversation memory. Kept ASCII-safe so it renders on any Windows console codepage.
  */
-import { Box, render, Static, Text, useApp, useInput } from "ink";
+import { Box, render, Static, Text, useApp, useInput, useStdout } from "ink";
 import Spinner from "ink-spinner";
-import TextInput from "ink-text-input";
 import { useEffect, useRef, useState } from "react";
+
+import { TextInput } from "./text-input.tsx";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../agent.ts";
 import { loadConfig } from "../config.ts";
@@ -48,6 +49,13 @@ function trunc(s: string, n = 120): string {
   return one.length > n ? one.slice(0, n) + "..." : one;
 }
 
+const MODE_COLOR: Record<PermissionMode, string> = {
+  default: "gray",
+  "accept-edits": "yellow",
+  plan: "blue",
+  auto: "red",
+};
+
 const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
   { name: "/cost", desc: "token usage this session" },
@@ -69,6 +77,8 @@ interface ChatProps {
 
 export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) {
   const { exit } = useApp();
+  const { stdout } = useStdout();
+  const cols = stdout?.columns ?? 80;
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
   const streamRef = useRef("");
@@ -309,10 +319,15 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     switch (line.kind) {
       case "welcome":
         return (
-          <Box key={line.id} borderStyle="classic" borderColor="magenta" paddingX={1} flexDirection="column" marginBottom={1}>
-            <Text bold>Neko Code {VERSION}</Text>
-            <Text color="gray">provider={cfg.provider} model={cfg.model || "(unset)"} profile={cfg.profile ?? "none"} mode={yolo ? "auto" : cfg.mode}</Text>
-            <Text color="gray">/help for commands - Shift+Tab modes - Esc interrupt - Ctrl-C quit</Text>
+          <Box key={line.id} marginBottom={1}>
+            <Text color="magenta">{" /\\_/\\ \n( o.o )\n  > ^ <"}</Text>
+            <Box flexDirection="column" marginLeft={2}>
+              <Text>
+                <Text bold>Neko Code</Text> <Text dimColor>v{VERSION}</Text>
+              </Text>
+              <Text dimColor>{cfg.model || "(no model)"} · {cfg.provider} · {cfg.profile ?? "no profile"}</Text>
+              <Text dimColor>{process.cwd()}</Text>
+            </Box>
           </Box>
         );
       case "user":
@@ -338,28 +353,38 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
 
       {stream ? <Text>{stream}</Text> : null}
 
-      {busy && !approval ? (
-        <Text color="gray">
-          <Spinner type="line" /> working {elapsed}s - {agentRef.current!.cost.totalTokens} tok
-          {queued > 0 ? ` - ${queued} queued` : ""} - esc to interrupt
-        </Text>
-      ) : null}
-
       {approval ? (
         <ApprovalBox approval={approval} />
       ) : (
-        <Box flexDirection="column">
-          <Box borderStyle="classic" borderColor={busy ? "gray" : "cyan"} paddingX={1}>
-            <Text color="cyan">{pendingMulti ? "... " : `[${mode}] > `}</Text>
-            <TextInput value={input} onChange={setInput} onSubmit={onSubmit} placeholder={busy ? "type to queue..." : "Type a task, or /help"} />
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
+          <Box>
+            <Text color={busy ? "gray" : "cyan"}>{pendingMulti ? "... " : "> "}</Text>
+            <TextInput
+              value={input}
+              onChange={setInput}
+              onSubmit={onSubmit}
+              placeholder={busy ? "type to queue while it works..." : 'Try: "explain src/agent.ts"   or   /help'}
+            />
           </Box>
           {input.startsWith("/") ? (
             <Box flexDirection="column" paddingLeft={2}>
               {SLASH.filter((c) => c.name.startsWith(input.split(/\s+/)[0])).map((c) => (
-                <Text key={c.name} color="gray">{c.name}  - {c.desc}</Text>
+                <Text key={c.name} color="gray">{c.name}  <Text dimColor>{c.desc}</Text></Text>
               ))}
             </Box>
-          ) : null}
+          ) : (
+            <Box justifyContent="space-between">
+              {busy ? (
+                <Text color="gray">
+                  <Spinner type="line" /> working {elapsed}s{queued > 0 ? ` · ${queued} queued` : ""} · esc to interrupt
+                </Text>
+              ) : (
+                <Text color={MODE_COLOR[mode]}>{mode} · shift+tab to cycle</Text>
+              )}
+              <Text dimColor>{(cfg.model || "").split("/").pop()} · {agentRef.current!.cost.totalTokens} tok</Text>
+            </Box>
+          )}
         </Box>
       )}
     </Box>

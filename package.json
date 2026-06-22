@@ -27,7 +27,6 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ink": "^7.1.0",
     "ink-spinner": "^5.0.0",
-    "ink-text-input": "^6.0.0",
     "react": "^19.2.7",
     "react-devtools-core": "^7.0.1"
   }
