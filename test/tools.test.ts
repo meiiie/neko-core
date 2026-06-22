@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 
-import { GATED, resolveTool, SAFE, toOpenAISchema, toolSchemas } from "../src/tools.ts";
+import { describeToolCall, GATED, resolveTool, SAFE, toOpenAISchema, toolSchemas } from "../src/tools.ts";
+
+test("describeToolCall uses Claude-style labels + primary arg", () => {
+  expect(describeToolCall("read_file", { path: "src/a.ts" })).toBe("Read(src/a.ts)");
+  expect(describeToolCall("edit", { path: "a.ts" })).toBe("Update(a.ts)");
+  expect(describeToolCall("bash", { command: "bun test" })).toBe("Bash(bun test)");
+  expect(describeToolCall("ls", {})).toBe("List");
+  expect(describeToolCall("todo_write", { todos: [] })).toBe("Update Todos");
+});
 
 test("schema shape", () => {
   const s = toOpenAISchema(resolveTool("read_file"));

@@ -110,6 +110,28 @@ export function listTools(): ToolSpec[] {
   return TOOL_SPECS;
 }
 
+/** Human-facing verb for each tool in the transcript (Claude-style: Read/Update/Search...). */
+const TOOL_LABELS: Record<string, string> = {
+  read_file: "Read",
+  write_file: "Write",
+  edit: "Update",
+  search: "Search",
+  glob: "Glob",
+  ls: "List",
+  bash: "Bash",
+  todo_write: "Update Todos",
+};
+
+/** A compact "Label(primary-arg)" for a tool call, e.g. `Read(src/app.ts)` or `Bash(bun test)`. */
+export function describeToolCall(name: string, args: Record<string, any>): string {
+  const label = TOOL_LABELS[name] ?? name;
+  const a = args ?? {};
+  const primary = a.path ?? a.command ?? a.query ?? a.pattern ?? "";
+  const s = String(primary).replace(/\s+/g, " ").trim();
+  const shown = s.length > 80 ? s.slice(0, 80) + "…" : s;
+  return shown ? `${label}(${shown})` : label;
+}
+
 export function resolveTool(name: string): ToolSpec {
   const spec = TOOL_SPECS.find((t) => t.name === name);
   if (!spec) {

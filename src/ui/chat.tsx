@@ -22,7 +22,7 @@ import { getProvider, type Provider } from "../providers.ts";
 import { latestSession, listSessions, loadSession, newSessionId, saveSession, sessionTitle, type Session } from "../session.ts";
 import { ToolRegistry } from "../tool-runtime.ts";
 import { listSkills, loadSkill } from "../skills.ts";
-import { listTools } from "../tools.ts";
+import { describeToolCall, listTools } from "../tools.ts";
 import { VERSION } from "../version.ts";
 import { Markdown } from "./markdown.tsx";
 
@@ -214,8 +214,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       onEvent: (kind, data) => {
         if (kind === "tool_call") {
           flushStream();
-          const a = data.arguments ?? {};
-          addLine("tool_call", `${data.name}(${trunc(a.command ?? a.path ?? a.pattern ?? "", 80)})`);
+          addLine("tool_call", describeToolCall(data.name, data.arguments));
         } else if (kind === "tool_result") {
           const obs = String(data.observation)
             .split("\n")

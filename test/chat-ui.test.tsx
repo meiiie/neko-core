@@ -40,7 +40,7 @@ test("auto mode: a safe tool call + markdown answer render end-to-end", async ()
   await tick(250);
   const all = frames.join("\n");
   expect(all).toContain("> look around"); // user line
-  expect(all).toContain("ls("); // tool-call line
+  expect(all).toContain("List"); // tool-call line (Claude-style label for ls)
   expect(all).toContain("Done listing"); // markdown-rendered assistant answer
   unmount();
 });

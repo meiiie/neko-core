@@ -23,6 +23,28 @@ running journal of what was done and why.
 - **`bang_c` is FROZEN.** Read it to port; never edit it. Drop MCQ/contest cruft
   (`rag_*`, `tiered_*`, `rubric`, `profiling`, `pred.csv`).
 
+## Architecture (see `ARCHITECTURE.md`)
+- **Ports & Adapters, dependencies point inward.** Core (`agent`, `tools`, `tool-runtime`,
+  `permissions`, `cost`, `registry`) depends only on *interfaces* (`Provider`, `ToolRegistry`,
+  `ApprovalGate`) — **never** on `ui/` or a UI framework. Enforced by `test/architecture.test.ts`.
+- **Adapters at the edge.** Anything that touches the outside world (HTTP, MCP, disk, config)
+  is an adapter; swap a backend by adding an adapter, not by editing the core.
+- **Extend by the seams.** New tool → `tools.ts` + `tool-runtime.ts`. New backend → a profile
+  (config) or a new `Provider`. New command → a `case` in `chat.tsx`. New skill → a `.md` file.
+
+## Code laws
+- **Clean code, lazy by default (ponytail).** Stop at the first rung that works; no
+  speculative abstraction, no config for a constant, no interface with one impl. Deletion
+  over addition. Shortest working diff wins.
+- **One responsibility per module; small files.** If a file does two jobs, split it. Match the
+  surrounding style; don't reformat untouched code.
+- **TypeScript stays strict** (`tsc --noEmit` clean — no `any` leaks at boundaries, no `// @ts-ignore`
+  without a reason).
+- **Validate at trust boundaries; never swallow data-loss errors.** Tool args, config JSON, API
+  responses, and path-escapes are checked; secrets are read on demand, never stored/printed.
+- **One runnable check per non-trivial logic** (a branch, loop, parser, money/security/abort
+  path). Trivial one-liners need none.
+
 ## Safety
 - **Secrets never committed or printed.** Key via env (`NEKO_API_KEY` / `OPENAI_API_KEY` /
   `NVIDIA_API_KEY`) or the gitignored `~/.neko-core/config.json`. Run `/secret-scan` before
@@ -31,4 +53,5 @@ running journal of what was done and why.
 
 ## Tooling
 - Prefix shell commands with `rtk` (the token-saving wrapper).
-- Verify loop: `pytest -q` · `compileall src` · `neko doctor` · `neko policy`.
+- Verify loop (before every commit): `bun run typecheck` · `bun test` · `bun bin/neko.ts doctor`
+  · `bun bin/neko.ts policy` · `bun run build`.
