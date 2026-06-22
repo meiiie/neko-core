@@ -92,6 +92,13 @@ test("task delegates to the subagent callback (and reports when unavailable)", a
   expect(await reg.execute("task", { description: "x", prompt: "do y" })).toBe("sub did: do y");
 });
 
+test("catastrophic bash is refused even in auto mode (seatbelt)", async () => {
+  const { reg } = makeReg("auto", () => true); // auto would otherwise auto-approve bash
+  expect(await reg.execute("bash", { command: "rm -rf /" })).toContain("Refused"); // never runs
+  expect(await reg.execute("bash", { command: "rm -rf ~" })).toContain("Refused");
+  expect(await reg.execute("bash", { command: "echo hello" })).not.toContain("Refused"); // safe runs
+});
+
 test("pre_tool_use hook blocks a tool on non-zero exit, allows on zero", async () => {
   const blocked = makeReg("auto", () => true).reg;
   blocked.hooks = { preToolUse: "exit 3" };

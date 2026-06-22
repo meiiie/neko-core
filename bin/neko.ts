@@ -105,6 +105,7 @@ async function buildAgent(
   const hub = await buildMcpHub(cfg.mcpServers);
   const registry = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
   registry.hooks = cfg.hooks;
+  registry.allowDangerousBash = cfg.allowDangerousBash;
   registry.subagent = async (prompt, signal) => {
     const subReg = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent

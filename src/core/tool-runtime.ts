@@ -47,6 +47,8 @@ export class ToolRegistry {
   hooks?: { preToolUse?: string; postToolUse?: string };
   /** Spawns an isolated sub-agent (set by the host); enables the `task` tool. */
   subagent?: (prompt: string, signal?: AbortSignal) => Promise<string>;
+  /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
+  allowDangerousBash = false;
 
   constructor(
     public readonly root: string,
@@ -82,6 +84,13 @@ export class ToolRegistry {
       if (r.status !== 0) {
         return `Blocked by pre_tool_use hook (exit ${r.status ?? "?"}): ${String(r.stderr || r.stdout || "").trim().slice(0, 200)}`;
       }
+    }
+
+    // Seatbelt: refuse clearly catastrophic bash even in auto mode (not a full sandbox - a
+    // last-resort guard against accidents / prompt injection). Override: allow_dangerous_bash.
+    if (name === "bash" && !this.allowDangerousBash) {
+      const danger = dangerousCommand(String(args.command ?? ""));
+      if (danger) return `Refused: '${danger}' is blocked as catastrophic. Set "allow_dangerous_bash": true in config to override.`;
     }
 
     // task: delegate to an isolated sub-agent (its own context + tools); return its result.
@@ -338,6 +347,21 @@ function* walkFiles(base: string): Generator<string> {
       yield join(base, entry.name);
     }
   }
+}
+
+/** Conservative catastrophic-command detector (clearest data/disk-destroying forms only). */
+function dangerousCommand(command: string): string | null {
+  const c = String(command).replace(/\s+/g, " ").trim();
+  if (/\brm\b/.test(c) && /-[a-z]*r/i.test(c) && /-[a-z]*f/i.test(c) && /\s(\/|\/\*|~|\$HOME)(\s|$)/.test(c)) {
+    return "recursive force-delete of / or home";
+  }
+  if (/\bdd\b.*\bof=\/dev\//i.test(c)) return "dd to a raw device";
+  if (/\bmkfs(\.\w+)?\b/i.test(c)) return "filesystem format (mkfs)";
+  if (/:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/.test(c)) return "fork bomb";
+  if (/\bformat\s+[a-z]:/i.test(c)) return "Windows drive format";
+  if (/\b(rd|rmdir|del)\b\s+\/s\b.*\b[a-z]:\\?($|\s)/i.test(c)) return "recursive delete of a Windows drive";
+  if (/>\s*\/dev\/(sd|nvme|disk)/i.test(c)) return "overwrite a disk device";
+  return null;
 }
 
 function renderTodos(todos: { content: string; status: string }[]): string {

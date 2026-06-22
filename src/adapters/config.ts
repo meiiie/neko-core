@@ -75,6 +75,9 @@ export class NekoConfig {
   }
   /** Reasoning effort (low|medium|high) sent as `reasoning_effort`; "" = omit (default). */
   get effort(): string { return String(this.data.reasoning_effort ?? "").trim().toLowerCase(); }
+  /** When true, the catastrophic-bash seatbelt is disabled (default false). */
+  get allowDangerousBash(): boolean { return Boolean(this.data.allow_dangerous_bash); }
+
   /** Shell hooks run around tool calls (opt-in). `pre_tool_use` can block (non-zero exit). */
   get hooks(): { preToolUse?: string; postToolUse?: string } {
     const h = this.data.hooks;
