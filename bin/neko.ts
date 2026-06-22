@@ -7,8 +7,9 @@
  */
 import { createInterface } from "node:readline/promises";
 
-import { Agent } from "../src/agent.ts";
+import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/agent.ts";
 import { loadConfig, type NekoConfig } from "../src/config.ts";
+import { projectContextBlock, renderContext } from "../src/context.ts";
 import { collectChecks, render } from "../src/doctor.ts";
 import { getProvider } from "../src/providers.ts";
 import { initProject, initUser } from "../src/project.ts";
@@ -84,10 +85,13 @@ function printEvent(kind: string, data: any): void {
 function buildAgent(cfg: NekoConfig, yolo: boolean, onDelta?: (t: string) => void): Agent {
   const mode = yolo ? "auto" : cfg.mode;
   const registry = new ToolRegistry(process.cwd(), mode, promptApprove);
+  const block = projectContextBlock();
+  const systemPrompt = block ? `${DEFAULT_SYSTEM_PROMPT}\n\n${block}` : DEFAULT_SYSTEM_PROMPT;
   return new Agent({
     provider: getProvider(cfg),
     tools: registry,
     maxSteps: cfg.maxSteps,
+    systemPrompt,
     onEvent: printEvent,
     onDelta,
   });
@@ -108,6 +112,7 @@ Commands:
   commands      list the CLI command surface
   capabilities  list runtime/CLI capabilities
   policy        audit the safe/gated permission boundary
+  context       show the project context files (NEKO.md / CLAUDE.md) loaded
   chat          interactive agentic session (REPL)        [coming next]
   run <task>    one-shot: run a single instruction         [coming next]
 
@@ -173,6 +178,11 @@ function cmdPolicy(args: Args): number {
   return report.verdict === "fail" ? 1 : 0;
 }
 
+function cmdContext(): number {
+  console.log(renderContext());
+  return 0;
+}
+
 async function cmdChat(args: Args): Promise<number> {
   // Lazy import: keep Ink/React out of the startup path for non-chat commands.
   const { runChat } = await import("../src/ui/chat.tsx");
@@ -223,6 +233,7 @@ async function main(): Promise<number> {
       case "commands": return cmdCommands();
       case "capabilities": return cmdCapabilities(args);
       case "policy": return cmdPolicy(args);
+      case "context": return cmdContext();
       case "chat": return await cmdChat(args);
       case "run": return await cmdRun(args);
       default:

@@ -11,8 +11,9 @@ import Spinner from "ink-spinner";
 import TextInput from "ink-text-input";
 import { useRef, useState } from "react";
 
-import { Agent } from "../agent.ts";
+import { Agent, DEFAULT_SYSTEM_PROMPT } from "../agent.ts";
 import { loadConfig } from "../config.ts";
+import { projectContextBlock } from "../context.ts";
 import { nextMode, type PermissionMode } from "../permissions.ts";
 import { initProject } from "../project.ts";
 import { getProvider } from "../providers.ts";
@@ -101,10 +102,12 @@ function ChatApp({ profile, yolo }: ChatProps) {
 
   const agentRef = useRef<Agent | null>(null);
   if (!agentRef.current) {
+    const block = projectContextBlock();
     agentRef.current = new Agent({
       provider: getProvider(cfg),
       tools: registryRef.current,
       maxSteps: cfg.maxSteps,
+      systemPrompt: block ? `${DEFAULT_SYSTEM_PROMPT}\n\n${block}` : DEFAULT_SYSTEM_PROMPT,
       onDelta: (t) => {
         streamRef.current += t;
         setStream((s) => s + t);

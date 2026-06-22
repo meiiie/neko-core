@@ -34,7 +34,7 @@ cost/token tracking · MCP client · single-binary distribution.
 - [x] **B3** Permission modes (`src/permissions.ts`): default / accept-edits / plan / auto; Shift+Tab cycles in chat; surfaced in doctor/capabilities/policy; `NEKO_MODE` override. *(verified: plan denies writes, accept-edits auto-approves edits but prompts bash, auto allows all; typecheck clean)*
 
 ### Phase C — Project intelligence
-- [ ] **C1** Project context: load `NEKO.md` / `CLAUDE.md` (+ subdir, additive) into the system prompt.
+- [x] **C1** Project context (`src/context.ts`): loads `NEKO.md` / `CLAUDE.md` from cwd up to the repo root + `~/.neko-core/NEKO.md`, additive, capped; prepended to the system prompt. `neko context` lists them. *(verified: finds repo CLAUDE.md, walks up from nested dirs; typecheck clean)*
 - [ ] **C2** Conversation persistence + `neko --resume` / sessions (history on disk).
 - [ ] **C3** MCP client: connect to MCP servers (`@modelcontextprotocol/sdk`) and expose their tools to the loop.
 
