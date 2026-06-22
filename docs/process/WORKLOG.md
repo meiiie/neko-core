@@ -58,3 +58,5 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
 - A2 agent loop + `neko run`; A3 real tool set (edit/glob/ls); A4 streaming + cost.
 - B1 Ink chat REPL; B2 slash commands; B3 permission modes. C1-C3 project context / resume / MCP.
 - D1 tests; D2 single binary + re-point `neko`; D3 rename to Neko Code + merge.
+
+- **A3 done** — coding tool set: `edit` (unique string replace, gated), `glob` (Bun.Glob), `ls` (safe). 7 tools total; coder/explorer agents + policy updated.

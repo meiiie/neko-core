@@ -38,6 +38,25 @@ export const TOOL_SPECS: ToolSpec[] = [
     required: ["pattern"],
   },
   {
+    name: "glob",
+    permission: SAFE,
+    summary: "Find files by glob pattern (e.g. src/**/*.ts).",
+    parameters: {
+      pattern: { type: "string", description: "Glob pattern, e.g. **/*.ts." },
+      path: { type: "string", description: "Base directory to search (default: project root)." },
+    },
+    required: ["pattern"],
+  },
+  {
+    name: "ls",
+    permission: SAFE,
+    summary: "List the entries of a directory.",
+    parameters: {
+      path: { type: "string", description: "Directory to list (default: project root)." },
+    },
+    required: [],
+  },
+  {
     name: "write_file",
     permission: GATED,
     summary: "Create or overwrite a file with new contents (approval-gated).",
@@ -46,6 +65,17 @@ export const TOOL_SPECS: ToolSpec[] = [
       content: { type: "string", description: "The full new file contents." },
     },
     required: ["path", "content"],
+  },
+  {
+    name: "edit",
+    permission: GATED,
+    summary: "Replace one exact occurrence of a string in a file (approval-gated).",
+    parameters: {
+      path: { type: "string", description: "File path to edit." },
+      old_string: { type: "string", description: "Exact text to replace (must occur exactly once)." },
+      new_string: { type: "string", description: "Replacement text." },
+    },
+    required: ["path", "old_string", "new_string"],
   },
   {
     name: "bash",

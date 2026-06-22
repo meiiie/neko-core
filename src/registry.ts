@@ -24,7 +24,7 @@ export const AGENTS: AgentSpec[] = [
     name: "coder",
     access: READ_WRITE,
     summary: "Drives the agent loop: reads, searches, edits, and runs to complete a task.",
-    tools: ["read_file", "search", "write_file", "bash"],
+    tools: ["read_file", "search", "glob", "ls", "write_file", "edit", "bash"],
     reads: ["project files"],
     writes: ["project files", "shell side effects"],
     handoff: "Applies changes behind the approval gate; reports what it changed.",
@@ -33,7 +33,7 @@ export const AGENTS: AgentSpec[] = [
     name: "explorer",
     access: READ_ONLY,
     summary: "Read-only mapper: locates code and summarizes structure for the coder.",
-    tools: ["read_file", "search"],
+    tools: ["read_file", "search", "glob", "ls"],
     reads: ["project files"],
     writes: [],
     handoff: "Returns a map/excerpts; never mutates the workspace.",
@@ -126,8 +126,8 @@ export function collectCapabilities(config: NekoConfig): Capability[] {
   return [
     { name: "agent_loop", klass: "agent", status: "enabled", detail: `complete -> tool-calls -> observe, capped at max_steps=${config.maxSteps}` },
     { name: "model_completion", klass: "agent", status: "enabled", detail: `${config.provider}: ${config.model || "(model unset)"}` },
-    { name: "file_read", klass: "tool", status: "enabled", detail: "read_file + search (safe, no approval)" },
-    { name: "file_write", klass: "tool", status: "enabled", detail: "write_file (gated: needs approval)" },
+    { name: "file_read", klass: "tool", status: "enabled", detail: "read_file + search + glob + ls (safe, no approval)" },
+    { name: "file_write", klass: "tool", status: "enabled", detail: "write_file + edit (gated: needs approval)" },
     { name: "shell", klass: "tool", status: "enabled", detail: "bash (gated: needs approval)" },
     { name: "approval_gate", klass: "agent", status: "enabled", detail: `mode=${config.approval}` },
     { name: "bounded_autopilot", klass: "agent", status: auto ? "enabled" : "disabled", detail: "approval=auto (--yolo): gated tools run without prompting; a named state, not hidden" },
@@ -152,8 +152,8 @@ export interface PolicyReport {
   findings: PolicyFinding[];
 }
 
-const MUST_BE_GATED = new Set(["write_file", "bash"]);
-const MUST_BE_SAFE = new Set(["read_file", "search"]);
+const MUST_BE_GATED = new Set(["write_file", "edit", "bash"]);
+const MUST_BE_SAFE = new Set(["read_file", "search", "glob", "ls"]);
 
 export function evaluatePolicy(config: NekoConfig): PolicyReport {
   const tools = listTools();

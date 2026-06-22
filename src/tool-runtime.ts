@@ -18,6 +18,7 @@ export type ApprovalGate = (toolName: string, action: string) => boolean | Promi
 
 const MAX_READ_CHARS = 100_000;
 const MAX_SEARCH_MATCHES = 200;
+const MAX_LIST = 200;
 const MAX_OUTPUT_CHARS = 20_000;
 const BASH_TIMEOUT_MS = 60_000;
 const IGNORE_DIRS = new Set([
@@ -114,6 +115,43 @@ function toolSearch(root: string, args: Record<string, any>): string {
   return matches.length ? matches.join("\n") : "(no matches)";
 }
 
+function toolGlob(root: string, args: Record<string, any>): string {
+  const pattern = requireArg(args, "pattern");
+  const base = resolveInRoot(root, args.path || ".");
+  const rootResolved = resolve(root);
+  const results: string[] = [];
+  try {
+    const glob = new Bun.Glob(pattern);
+    for (const rel of glob.scanSync({ cwd: base, onlyFiles: true })) {
+      const abs = resolve(base, rel);
+      const relToRoot = relative(rootResolved, abs).split(sep).join("/");
+      if (relToRoot.split("/").some((seg) => IGNORE_DIRS.has(seg))) continue;
+      results.push(relToRoot);
+      if (results.length >= MAX_LIST) {
+        results.push(`... (truncated at ${MAX_LIST})`);
+        break;
+      }
+    }
+  } catch (error) {
+    return `Error: ${(error as Error).message}`;
+  }
+  return results.length ? results.sort().join("\n") : "(no files)";
+}
+
+function toolLs(root: string, args: Record<string, any>): string {
+  const raw = args.path || ".";
+  const path = resolveInRoot(root, raw);
+  if (!existsSync(path)) return `Error: no such directory: ${raw}`;
+  if (!statSync(path).isDirectory()) return `Error: not a directory: ${raw}`;
+  const entries = readdirSync(path, { withFileTypes: true })
+    .filter((e) => !IGNORE_DIRS.has(e.name))
+    .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
+    .sort();
+  let out = entries.slice(0, MAX_LIST).join("\n") || "(empty)";
+  if (entries.length > MAX_LIST) out += `\n... (${entries.length - MAX_LIST} more)`;
+  return out;
+}
+
 function toolWriteFile(root: string, args: Record<string, any>): string {
   const raw = requireArg(args, "path");
   const content = args.content;
@@ -122,6 +160,26 @@ function toolWriteFile(root: string, args: Record<string, any>): string {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, String(content), "utf-8");
   return `Wrote ${String(content).length} chars to ${raw}`;
+}
+
+function toolEdit(root: string, args: Record<string, any>): string {
+  const raw = requireArg(args, "path");
+  const oldStr = args.old_string;
+  const newStr = args.new_string;
+  if (oldStr === undefined || oldStr === null) throw new Error("missing required argument: old_string");
+  if (newStr === undefined || newStr === null) throw new Error("missing required argument: new_string");
+  const path = resolveInRoot(root, raw);
+  if (!existsSync(path)) return `Error: no such file: ${raw}`;
+  let text = readFileSync(path, "utf-8");
+  const occurrences = text.split(String(oldStr)).length - 1;
+  if (occurrences === 0) return `Error: old_string not found in ${raw}`;
+  if (occurrences > 1) {
+    return `Error: old_string occurs ${occurrences} times in ${raw} (must be unique; add more surrounding context)`;
+  }
+  // Function replacement avoids `$` patterns in new_string being interpreted.
+  text = text.replace(String(oldStr), () => String(newStr));
+  writeFileSync(path, text, "utf-8");
+  return `Edited ${raw} (1 replacement)`;
 }
 
 function toolBash(root: string, args: Record<string, any>): string {
@@ -177,6 +235,7 @@ function* walkFiles(base: string): Generator<string> {
 
 function describe(name: string, args: Record<string, any>): string {
   if (name === "write_file") return `write ${args.path ?? "?"}`;
+  if (name === "edit") return `edit ${args.path ?? "?"}`;
   if (name === "bash") return `run: ${args.command ?? "?"}`;
   return name;
 }
@@ -184,6 +243,9 @@ function describe(name: string, args: Record<string, any>): string {
 const DISPATCH: Record<string, (root: string, args: Record<string, any>) => string> = {
   read_file: toolReadFile,
   search: toolSearch,
+  glob: toolGlob,
+  ls: toolLs,
   write_file: toolWriteFile,
+  edit: toolEdit,
   bash: toolBash,
 };
