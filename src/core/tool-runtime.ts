@@ -45,6 +45,8 @@ export class ToolRegistry {
   todos: { content: string; status: string }[] = [];
   /** Opt-in shell hooks around tool calls (set from config). */
   hooks?: { preToolUse?: string; postToolUse?: string };
+  /** Spawns an isolated sub-agent (set by the host); enables the `task` tool. */
+  subagent?: (prompt: string, signal?: AbortSignal) => Promise<string>;
 
   constructor(
     public readonly root: string,
@@ -79,6 +81,18 @@ export class ToolRegistry {
       });
       if (r.status !== 0) {
         return `Blocked by pre_tool_use hook (exit ${r.status ?? "?"}): ${String(r.stderr || r.stdout || "").trim().slice(0, 200)}`;
+      }
+    }
+
+    // task: delegate to an isolated sub-agent (its own context + tools); return its result.
+    if (name === "task") {
+      if (!this.subagent) return "Sub-agents are not available in this context.";
+      const prompt = String(args.prompt ?? args.description ?? "");
+      if (!prompt) return "Error: task needs a 'prompt'.";
+      try {
+        return await this.subagent(prompt);
+      } catch (error) {
+        return `Sub-agent error: ${(error as Error).message}`;
       }
     }
 

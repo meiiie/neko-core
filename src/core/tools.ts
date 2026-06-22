@@ -125,6 +125,16 @@ export const TOOL_SPECS: ToolSpec[] = [
     parameters: { plan: { type: "string", description: "The plan to implement, as concise markdown." } },
     required: ["plan"],
   },
+  {
+    name: "task",
+    permission: SAFE,
+    summary: "Delegate a self-contained subtask to a fresh sub-agent (isolated context); it returns a result. Use it to research or do focused work without cluttering this conversation.",
+    parameters: {
+      description: { type: "string", description: "Short (3-5 word) task label." },
+      prompt: { type: "string", description: "The full instruction for the sub-agent." },
+    },
+    required: ["description", "prompt"],
+  },
 ];
 
 export function listTools(): ToolSpec[] {
@@ -144,13 +154,14 @@ const TOOL_LABELS: Record<string, string> = {
   web_search: "WebSearch",
   web_fetch: "Fetch",
   exit_plan_mode: "Plan",
+  task: "Task",
 };
 
 /** A compact "Label(primary-arg)" for a tool call, e.g. `Read(src/app.ts)` or `Bash(bun test)`. */
 export function describeToolCall(name: string, args: Record<string, any>): string {
   const label = TOOL_LABELS[name] ?? name;
   const a = args ?? {};
-  const primary = a.path ?? a.command ?? a.query ?? a.url ?? a.pattern ?? "";
+  const primary = a.path ?? a.command ?? a.query ?? a.url ?? a.pattern ?? a.description ?? "";
   const s = String(primary).replace(/\s+/g, " ").trim();
   const shown = s.length > 80 ? s.slice(0, 80) + "…" : s;
   return shown ? `${label}(${shown})` : label;

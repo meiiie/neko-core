@@ -85,6 +85,13 @@ test("disabled tool is hidden from schemas and blocked on execute", async () => 
   expect(await reg.execute("bash", { command: "echo hi" })).toContain("disabled");
 });
 
+test("task delegates to the subagent callback (and reports when unavailable)", async () => {
+  const { reg } = makeReg();
+  expect(await reg.execute("task", { description: "x", prompt: "do y" })).toContain("not available");
+  reg.subagent = async (prompt) => `sub did: ${prompt}`;
+  expect(await reg.execute("task", { description: "x", prompt: "do y" })).toBe("sub did: do y");
+});
+
 test("pre_tool_use hook blocks a tool on non-zero exit, allows on zero", async () => {
   const blocked = makeReg("auto", () => true).reg;
   blocked.hooks = { preToolUse: "exit 3" };

@@ -106,6 +106,14 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   if (!registryRef.current) {
     registryRef.current = new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub);
     registryRef.current.hooks = cfg.hooks;
+    // Sub-agents: the `task` tool spawns a fresh, isolated agent (depth 1 — its registry has no
+    // subagent), inheriting the parent's mode/approval/hooks so its tool use is gated the same.
+    registryRef.current.subagent = async (prompt, signal) => {
+      const parent = registryRef.current!;
+      const subReg = new ToolRegistry(process.cwd(), parent.mode, parent.prompt, mcpHub);
+      subReg.hooks = parent.hooks;
+      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, maxSteps: cfg.maxSteps }).run(prompt, signal);
+    };
   }
 
   const agentRef = useRef<Agent | null>(null);

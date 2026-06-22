@@ -105,6 +105,11 @@ async function buildAgent(
   const hub = await buildMcpHub(cfg.mcpServers);
   const registry = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
   registry.hooks = cfg.hooks;
+  registry.subagent = async (prompt, signal) => {
+    const subReg = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
+    subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
+    return await new Agent({ provider: getProvider(cfg), tools: subReg, maxSteps: cfg.maxSteps }).run(prompt, signal);
+  };
   const block = projectContextBlock();
   const systemPrompt = block ? `${DEFAULT_SYSTEM_PROMPT}\n\n${block}` : DEFAULT_SYSTEM_PROMPT;
   const agent = new Agent({
