@@ -122,15 +122,16 @@ export interface Capability {
 }
 
 export function collectCapabilities(config: NekoConfig): Capability[] {
-  const auto = config.approval === "auto";
+  const auto = config.mode === "auto";
   return [
     { name: "agent_loop", klass: "agent", status: "enabled", detail: `complete -> tool-calls -> observe, capped at max_steps=${config.maxSteps}` },
     { name: "model_completion", klass: "agent", status: "enabled", detail: `${config.provider}: ${config.model || "(model unset)"}` },
     { name: "file_read", klass: "tool", status: "enabled", detail: "read_file + search + glob + ls (safe, no approval)" },
     { name: "file_write", klass: "tool", status: "enabled", detail: "write_file + edit (gated: needs approval)" },
     { name: "shell", klass: "tool", status: "enabled", detail: "bash (gated: needs approval)" },
-    { name: "approval_gate", klass: "agent", status: "enabled", detail: `mode=${config.approval}` },
-    { name: "bounded_autopilot", klass: "agent", status: auto ? "enabled" : "disabled", detail: "approval=auto (--yolo): gated tools run without prompting; a named state, not hidden" },
+    { name: "permission_modes", klass: "agent", status: "enabled", detail: "default / accept-edits / plan / auto (Shift+Tab to cycle in chat)" },
+    { name: "approval_gate", klass: "agent", status: "enabled", detail: `mode=${config.mode}` },
+    { name: "bounded_autopilot", klass: "agent", status: auto ? "enabled" : "disabled", detail: "mode=auto (--yolo): gated tools run without prompting; a named state, not hidden" },
     { name: "introspection", klass: "cli", status: "enabled", detail: "tools/agents/commands/capabilities/policy registries" },
   ];
 }
@@ -186,8 +187,8 @@ export function evaluatePolicy(config: NekoConfig): PolicyReport {
     }
   }
 
-  if (config.approval === "auto") {
-    findings.push({ severity: "warn", code: "bounded_autonomy_on", subject: "approval", message: "approval=auto (--yolo): gated tools run without prompting. Named state, not hidden." });
+  if (config.mode === "auto") {
+    findings.push({ severity: "warn", code: "bounded_autonomy_on", subject: "mode", message: "mode=auto (--yolo): gated tools run without prompting. Named state, not hidden." });
   }
 
   const verdict = findings.some((f) => f.severity === "fail")

@@ -31,7 +31,7 @@ cost/token tracking · MCP client · single-binary distribution.
 ### Phase B — UX (the Ink TUI = "Neko Code")
 - [x] **B1** Ink chat REPL (`src/ui/chat.tsx`): streaming render, interleaved tool-call lines, inline approval prompt (y/a/n), thinking spinner, one Agent across turns, `/reset`/`/exit`. *(typecheck clean; module imports under Bun; non-TTY guard degrades to a hint. Full interactive render pending the owner's terminal.)*
 - [x] **B2** Slash commands (`/help` `/cost` `/model` `/profiles` `/init` `/clear` `/reset` `/exit`), input history (↑/↓), multiline (trailing `\` continuation). *(typecheck clean; module imports under Bun)*
-- [ ] **B3** Permission modes (default / accept-edits / plan / yolo) cycled like Claude Code; surfaced in `neko policy`.
+- [x] **B3** Permission modes (`src/permissions.ts`): default / accept-edits / plan / auto; Shift+Tab cycles in chat; surfaced in doctor/capabilities/policy; `NEKO_MODE` override. *(verified: plan denies writes, accept-edits auto-approves edits but prompts bash, auto allows all; typecheck clean)*
 
 ### Phase C — Project intelligence
 - [ ] **C1** Project context: load `NEKO.md` / `CLAUDE.md` (+ subdir, additive) into the system prompt.

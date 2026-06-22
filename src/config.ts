@@ -16,6 +16,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { isMode, type PermissionMode } from "./permissions.ts";
+
 export const LOCAL_CONFIG_DIR = ".neko-core";
 export const LOCAL_CONFIG_NAME = "config.json";
 
@@ -70,6 +72,13 @@ export class NekoConfig {
   get approval(): "prompt" | "auto" {
     const v = String(this.data.approval ?? "prompt").trim().toLowerCase();
     return v === "auto" ? "auto" : "prompt";
+  }
+
+  /** Permission mode: explicit `mode` in config, else derived from legacy `approval`. */
+  get mode(): PermissionMode {
+    const raw = String(this.data.mode ?? "").trim().toLowerCase();
+    if (isMode(raw)) return raw;
+    return this.approval === "auto" ? "auto" : "default";
   }
 
   /** Read on demand; NEVER stored in `data` (so it can't leak via `neko config`). */

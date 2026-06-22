@@ -13,6 +13,7 @@ import { useRef, useState } from "react";
 
 import { Agent } from "../agent.ts";
 import { loadConfig } from "../config.ts";
+import { nextMode, type PermissionMode } from "../permissions.ts";
 import { initProject } from "../project.ts";
 import { getProvider } from "../providers.ts";
 import { ToolRegistry } from "../tool-runtime.ts";
@@ -43,7 +44,8 @@ const HELP = [
   "  /clear           clear the transcript + conversation context",
   "  /reset           clear conversation context (keep transcript)",
   "  /exit            quit (also Ctrl-C)",
-  "Input: ↑/↓ history · end a line with \\ to continue on the next line (multiline).",
+  "Input: ↑/↓ history · end a line with \\ to continue (multiline).",
+  "Shift+Tab: cycle permission mode (default → accept-edits → plan → auto).",
 ].join("\n");
 
 interface ChatProps {
@@ -67,8 +69,8 @@ function ChatApp({ profile, yolo }: ChatProps) {
       kind: "info",
       text:
         `Neko Code ${VERSION}  provider=${cfg.provider} model=${cfg.model || "(unset)"} ` +
-        `profile=${cfg.profile ?? "none"} approval=${yolo ? "auto" : cfg.approval}\n` +
-        "Type a task, or /help for commands.",
+        `profile=${cfg.profile ?? "none"} mode=${yolo ? "auto" : cfg.mode}\n` +
+        "Type a task, or /help for commands. Shift+Tab cycles permission mode.",
     },
   ]);
   const [stream, setStream] = useState("");
@@ -76,6 +78,7 @@ function ChatApp({ profile, yolo }: ChatProps) {
   const [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [pendingMulti, setPendingMulti] = useState(false);
+  const [mode, setMode] = useState<PermissionMode>(yolo ? "auto" : cfg.mode);
 
   const addLine = (kind: LineKind, text: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
@@ -87,15 +90,20 @@ function ChatApp({ profile, yolo }: ChatProps) {
   };
 
   const gate = (toolName: string, action: string): boolean | Promise<boolean> => {
-    if (yolo || alwaysApproved.current.has(toolName)) return true;
+    if (alwaysApproved.current.has(toolName)) return true;
     return new Promise<boolean>((resolve) => setApproval({ toolName, action, resolve }));
   };
+
+  const registryRef = useRef<ToolRegistry | null>(null);
+  if (!registryRef.current) {
+    registryRef.current = new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate);
+  }
 
   const agentRef = useRef<Agent | null>(null);
   if (!agentRef.current) {
     agentRef.current = new Agent({
       provider: getProvider(cfg),
-      tools: new ToolRegistry(process.cwd(), gate),
+      tools: registryRef.current,
       maxSteps: cfg.maxSteps,
       onDelta: (t) => {
         streamRef.current += t;
@@ -135,9 +143,15 @@ function ChatApp({ profile, yolo }: ChatProps) {
     { isActive: approval !== null },
   );
 
-  // History navigation (↑/↓), active only while the input box is showing.
+  // History navigation (↑/↓) + Shift+Tab mode cycling, active while the input box shows.
   useInput(
     (_char, key) => {
+      if (key.tab && key.shift) {
+        const nm = nextMode(registryRef.current!.mode);
+        registryRef.current!.mode = nm;
+        setMode(nm);
+        return;
+      }
       const h = historyRef.current;
       if (key.upArrow && historyPos.current > 0) {
         historyPos.current -= 1;
@@ -248,7 +262,7 @@ function ChatApp({ profile, yolo }: ChatProps) {
         </Text>
       ) : (
         <Box>
-          <Text color="cyan">{pendingMulti ? "…> " : "neko> "}</Text>
+          <Text color="cyan">{pendingMulti ? "…> " : `neko [${mode}]> `}</Text>
           <TextInput value={input} onChange={setInput} onSubmit={onSubmit} />
         </Box>
       )}

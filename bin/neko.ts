@@ -12,7 +12,7 @@ import { loadConfig, type NekoConfig } from "../src/config.ts";
 import { collectChecks, render } from "../src/doctor.ts";
 import { getProvider } from "../src/providers.ts";
 import { initProject, initUser } from "../src/project.ts";
-import { gateFor, ToolRegistry } from "../src/tool-runtime.ts";
+import { ToolRegistry } from "../src/tool-runtime.ts";
 import {
   collectCapabilities,
   evaluatePolicy,
@@ -82,8 +82,8 @@ function printEvent(kind: string, data: any): void {
 }
 
 function buildAgent(cfg: NekoConfig, yolo: boolean, onDelta?: (t: string) => void): Agent {
-  const approval = yolo ? "auto" : cfg.approval;
-  const registry = new ToolRegistry(process.cwd(), gateFor(approval, promptApprove));
+  const mode = yolo ? "auto" : cfg.mode;
+  const registry = new ToolRegistry(process.cwd(), mode, promptApprove);
   return new Agent({
     provider: getProvider(cfg),
     tools: registry,

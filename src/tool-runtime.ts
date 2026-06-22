@@ -11,7 +11,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
-import { GATED, resolveTool } from "./tools.ts";
+import { decide, type PermissionMode } from "./permissions.ts";
+import { resolveTool } from "./tools.ts";
 
 /** An approval gate: given (toolName, human-readable action) -> approve? (may be async) */
 export type ApprovalGate = (toolName: string, action: string) => boolean | Promise<boolean>;
@@ -29,17 +30,21 @@ const IGNORE_DIRS = new Set([
 export const autoApprove: ApprovalGate = () => true;
 export const denyAll: ApprovalGate = () => false;
 
-export function gateFor(approval: "prompt" | "auto", prompt: ApprovalGate = denyAll): ApprovalGate {
-  // approval=auto (--yolo) auto-approves; otherwise use the supplied interactive prompt
-  // (the REPL wires a real one; defaults to denyAll for non-interactive safety).
-  return approval === "auto" ? autoApprove : prompt;
-}
-
+/**
+ * Executes tool calls under a permission `mode`. A gated tool's decision comes from the
+ * mode: allow (auto), prompt (ask the interactive gate), or deny (e.g. plan mode). `mode`
+ * is mutable so a REPL can cycle it (Shift+Tab) at runtime.
+ */
 export class ToolRegistry {
+  mode: PermissionMode;
+
   constructor(
     public readonly root: string,
-    public readonly approve: ApprovalGate = autoApprove,
-  ) {}
+    mode: PermissionMode = "default",
+    public prompt: ApprovalGate = denyAll,
+  ) {
+    this.mode = mode;
+  }
 
   async execute(name: string, args: Record<string, any>): Promise<string> {
     let spec;
@@ -51,12 +56,18 @@ export class ToolRegistry {
     if (typeof args !== "object" || args === null) {
       return `Error: arguments for ${name} must be an object`;
     }
-    if (spec.permission === GATED) {
+
+    const decision = decide(this.mode, spec);
+    if (decision === "deny") {
+      return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
+    }
+    if (decision === "prompt") {
       const action = describe(name, args);
-      if (!(await this.approve(name, action))) {
+      if (!(await this.prompt(name, action))) {
         return `Denied by user: ${name} (${action})`;
       }
     }
+
     try {
       return DISPATCH[name](this.root, args);
     } catch (error) {
