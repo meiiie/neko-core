@@ -267,6 +267,8 @@ async function cmdMcp(args: Args): Promise<number> {
   if (!Object.keys(cfg.mcpServers).length) {
     console.log("No MCP servers configured. Add `mcp_servers` to ~/.neko-core/config.json, e.g.:");
     console.log('  "mcp_servers": { "fs": { "command": "bunx", "args": ["@modelcontextprotocol/server-filesystem", "."] } }');
+    console.log("  For a real browser (JS pages / bot-protected), add a browser MCP - see docs/process/WEB.md:");
+    console.log('  "mcp_servers": { "browser": { "command": "bunx", "args": ["@playwright/mcp@latest"] } }');
     return 0;
   }
   const hub = await buildMcpHub(cfg.mcpServers);
