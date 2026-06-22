@@ -12,8 +12,9 @@ license = { text = "MIT" }
 authors = [{ name = "The Wiii Lab" }]
 keywords = ["llm", "agent", "cli", "local-first", "offline", "coding-agent"]
 
-# The core is dependency-light on purpose; providers bring their own extras.
-dependencies = []
+# Light footprint: the default OpenAI-compatible provider needs requests; the heavy
+# local-GGUF deps stay in the [local] extra.
+dependencies = ["requests>=2.25"]
 
 [project.optional-dependencies]
 local = ["llama-cpp-python>=0.2.0"]
