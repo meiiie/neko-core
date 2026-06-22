@@ -320,12 +320,15 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     switch (line.kind) {
       case "welcome":
         return (
-          <Box key={line.id} flexDirection="column" marginBottom={1}>
+          <Box key={line.id} marginBottom={1}>
             <Logo />
-            <Text dimColor>
-              v{VERSION} · {cfg.model || "(no model)"} · {cfg.provider} · {cfg.profile ?? "no profile"}
-            </Text>
-            <Text dimColor>{process.cwd()}</Text>
+            <Box flexDirection="column" marginLeft={2}>
+              <Text>
+                <Text bold>Neko Code</Text> <Text dimColor>v{VERSION}</Text>
+              </Text>
+              <Text dimColor>{(cfg.model || "no model").split("/").pop()} · {cfg.provider} · {cfg.profile ?? "no profile"}</Text>
+              <Text dimColor>{process.cwd()}</Text>
+            </Box>
           </Box>
         );
       case "user":
