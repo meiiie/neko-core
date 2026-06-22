@@ -8,6 +8,7 @@ import type { NekoConfig } from "../adapters/config.ts";
 import { rememberNote, renderContext } from "../adapters/context.ts";
 import { initProject } from "../adapters/project.ts";
 import { listModels } from "../adapters/providers.ts";
+import { fillRecipe, listRecipes, loadRecipe } from "../adapters/recipes.ts";
 import { listSessions, loadSession, renameSession, sessionTitle, type Session } from "../adapters/session.ts";
 import { listSkills, loadSkill } from "../adapters/skills.ts";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
@@ -44,6 +45,8 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/context", desc: "context window usage" },
   { name: "/memory", desc: "show NEKO.md memory/context files" },
   { name: "/remember", desc: "save a note to NEKO.md (or start a line with #)" },
+  { name: "/recipe", desc: "run a saved recipe (/recipe <name> [args])" },
+  { name: "/recipes", desc: "list saved recipes" },
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
 ];
@@ -241,6 +244,18 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     }
     case "/memory":
       return addLine("info", renderContext() + "\n(edit NEKO.md for project memory, ~/.neko-core/NEKO.md for global; or use /remember / #note)");
+    case "/recipes":
+      return addLine("info", "recipes: " + (listRecipes().map((r) => r.name).join(", ") || "(none in ~/.neko-core/recipes)"));
+    case "/recipe": {
+      const rest = input.slice("/recipe".length).trim();
+      const name = rest.split(/\s+/)[0];
+      if (!name) return addLine("info", "usage: /recipe <name> [args]  ·  /recipes to list");
+      const r = loadRecipe(name);
+      if (!r) return addLine("info", `unknown recipe '${name}' - /recipes to list`);
+      addLine("info", `running recipe: ${name}`);
+      ctx.runText(fillRecipe(r.body, rest.slice(name.length).trim())); // runs as a turn
+      return;
+    }
     default:
       return addLine("info", `unknown command ${cmd} - try /help`);
   }

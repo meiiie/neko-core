@@ -15,6 +15,7 @@ import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
 import { initProject, initUser } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
+import { renderRecipes } from "../src/adapters/recipes.ts";
 import { renderSkills } from "../src/adapters/skills.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import {
@@ -154,6 +155,7 @@ Commands:
   context       show the project context files (NEKO.md / CLAUDE.md) loaded
   sessions      list saved chat sessions
   skills        list available skills (~/.neko-core/skills)
+  recipes       list runnable recipes (~/.neko-core/recipes)
   mcp           list configured MCP servers and their tools
   chat          interactive session (default - same as bare 'neko' / 'neko code')
   run <task>    one-shot: run a single instruction
@@ -240,6 +242,11 @@ function cmdSessions(): number {
   return 0;
 }
 
+function cmdRecipes(): number {
+  console.log(renderRecipes());
+  return 0;
+}
+
 function cmdSkills(): number {
   console.log(renderSkills());
   return 0;
@@ -317,6 +324,7 @@ async function main(): Promise<number> {
       case "context": return cmdContext();
       case "sessions": return cmdSessions();
       case "skills": return cmdSkills();
+      case "recipes": return cmdRecipes();
       case "mcp": return await cmdMcp(args);
       case "run": return await cmdRun(args);
       default:
