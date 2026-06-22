@@ -10,9 +10,10 @@ import { Box, render, Static, Text, useApp, useInput, useStdout } from "ink";
 import { useEffect, useRef, useState } from "react";
 
 import { ApprovalBox, type Approval } from "./approval-box.tsx";
-import { fmtBytes, relativeTime, trunc } from "./format.ts";
+import { runSlashCommand, SLASH } from "./commands.ts";
+import { trunc } from "./format.ts";
 import { Markdown } from "./markdown.tsx";
-import { SelectList, type SelectItem } from "./select-list.tsx";
+import { SelectList, type Overlay } from "./select-list.tsx";
 import { TextInput } from "./text-input.tsx";
 import { ThinkingLine, VERBS } from "./thinking-line.tsx";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
@@ -22,22 +23,12 @@ import { loadConfig } from "../adapters/config.ts";
 import { projectContextBlock } from "../adapters/context.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
-import { initProject } from "../adapters/project.ts";
-import { getProvider, listModels, type Provider } from "../adapters/providers.ts";
-import { latestSession, listSessions, loadSession, newSessionId, saveSession, sessionTitle, type Session } from "../adapters/session.ts";
+import { getProvider, type Provider } from "../adapters/providers.ts";
+import { latestSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
 import { ToolRegistry } from "../core/tool-runtime.ts";
-import { listSkills, loadSkill } from "../adapters/skills.ts";
-import { describeToolCall, listTools } from "../core/tools.ts";
+import { describeToolCall } from "../core/tools.ts";
 
 export { ApprovalBox, type Approval }; // re-exported for tests
-
-const HELP = [
-  "Commands:",
-  "  /help  /cost  /model  /profiles  /init  /clear  /reset  /exit",
-  "Input: Up/Down history; end a line with \\ to continue (multiline); @path adds a file to context.",
-  "Shift+Tab: cycle permission mode (default -> accept-edits -> plan -> auto).",
-  "Esc: interrupt a running turn. Ctrl-C: quit.",
-].join("\n");
 
 const MODE_COLOR: Record<PermissionMode, string> = {
   default: "gray",
@@ -45,26 +36,6 @@ const MODE_COLOR: Record<PermissionMode, string> = {
   plan: "blue",
   auto: "red",
 };
-
-const SLASH: { name: string; desc: string }[] = [
-  { name: "/help", desc: "show help" },
-  { name: "/cost", desc: "token usage this session" },
-  { name: "/model", desc: "show / list / switch model (/model list · /model <id>)" },
-  { name: "/profiles", desc: "list profiles" },
-  { name: "/tools", desc: "list / toggle tools (/tools bash)" },
-  { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
-  { name: "/init", desc: "scaffold ./.neko-core/config.json" },
-  { name: "/clear", desc: "clear transcript + context" },
-  { name: "/compact", desc: "summarize the conversation to free context" },
-  { name: "/goal", desc: "set an ongoing goal (/goal <text>)" },
-  { name: "/loop", desc: "run a task N times (/loop <n> <task>)" },
-  { name: "/sessions", desc: "list saved sessions here" },
-  { name: "/resume", desc: "resume a session (/resume [id])" },
-  { name: "/effort", desc: "reasoning effort (/effort low|medium|high|off)" },
-  { name: "/context", desc: "context window usage" },
-  { name: "/reset", desc: "reset conversation context" },
-  { name: "/exit", desc: "quit" },
-];
 
 interface ChatProps {
   profile?: string;
@@ -115,7 +86,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const [queued, setQueued] = useState(0);
   const [step, setStep] = useState(0);
   const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
-  const [overlay, setOverlay] = useState<{ title: string; items: SelectItem[]; onSelect: (it: SelectItem) => void } | null>(null);
+  const [overlay, setOverlay] = useState<Overlay | null>(null);
 
   const addLine = (kind: LineKind, text: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
@@ -265,193 +236,23 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
 
   const handle = async (text: string) => {
     if (text.startsWith("/")) {
-      const cmd = text.split(/\s+/)[0];
-      switch (cmd) {
-        case "/exit":
-        case "/quit":
-          exit();
-          return;
-        case "/help":
-          addLine("info", HELP);
-          return;
-        case "/cost":
-          addLine("info", agentRef.current!.cost.summary());
-          return;
-        case "/model": {
-          const arg = text.slice("/model".length).trim();
-          if (arg && arg !== "list") {
-            cfg.data.model = arg;
-            addLine("info", `model -> ${arg}`);
-            return;
-          }
-          setBusy(true);
-          try {
-            const models = await listModels(cfg);
-            setBusy(false);
-            if (!models.length) {
-              addLine("info", "no models returned by the endpoint");
-              return;
-            }
-            setOverlay({
-              title: "Select model",
-              items: models.map((m) => ({ id: m, label: m, detail: m === cfg.model ? "(current)" : undefined })),
-              onSelect: (it) => {
-                setOverlay(null);
-                cfg.data.model = it.id;
-                addLine("info", `model -> ${it.id}`);
-              },
-            });
-          } catch (error) {
-            setBusy(false);
-            addLine("info", `error listing models: ${error instanceof Error ? error.message : error}`);
-          }
-          return;
-        }
-        case "/profiles":
-          addLine("info", "profiles: " + Object.keys(cfg.profiles).sort().join(", "));
-          return;
-        case "/tools": {
-          const reg = registryRef.current!;
-          const arg = text.split(/\s+/)[1];
-          if (arg) {
-            if (reg.disabled.has(arg)) reg.disabled.delete(arg);
-            else reg.disabled.add(arg);
-            addLine("info", `${arg} -> ${reg.disabled.has(arg) ? "off" : "on"}`);
-          } else {
-            addLine("info", "tools: " + listTools().map((t) => `${t.name}[${reg.disabled.has(t.name) ? "off" : "on"}]`).join("  "));
-          }
-          return;
-        }
-        case "/init":
-          addLine("info", initProject());
-          return;
-        case "/skills":
-          addLine("info", "skills: " + (listSkills().map((s) => s.name).join(", ") || "(none in ~/.neko-core/skills)"));
-          return;
-        case "/skill": {
-          const name = text.split(/\s+/)[1];
-          if (!name) {
-            addLine("info", "usage: /skill <name>  ·  /skills to list");
-            return;
-          }
-          const skill = loadSkill(name);
-          if (!skill) {
-            addLine("info", `unknown skill '${name}' - /skills to list`);
-            return;
-          }
-          agentRef.current!.appendSystem(`# Skill: ${skill.name}\n${skill.body}`);
-          addLine("info", `loaded skill: ${skill.name}`);
-          return;
-        }
-        case "/clear":
-          agentRef.current!.messages = [];
-          setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
-          return;
-        case "/goal": {
-          const goal = text.slice("/goal".length).trim();
-          if (!goal) {
-            addLine("info", "usage: /goal <text>  (keeps the agent focused on a goal)");
-            return;
-          }
-          agentRef.current!.appendSystem(`Ongoing goal (keep working toward it every turn): ${goal}`);
-          addLine("info", `goal set: ${goal}`);
-          return;
-        }
-        case "/loop": {
-          const m = text.match(/^\/loop\s+(\d+)\s+([\s\S]+)$/);
-          if (!m) {
-            addLine("info", "usage: /loop <count> <task>  (runs the task N times)");
-            return;
-          }
-          const n = Math.min(20, Math.max(1, parseInt(m[1], 10)));
-          const task = m[2].trim();
-          for (let i = 0; i < n; i++) queueRef.current.push(task);
-          setQueued(queueRef.current.length);
-          addLine("info", `looping '${trunc(task, 60)}' x${n}`);
-          if (!busy) {
-            const first = queueRef.current.shift();
-            setQueued(queueRef.current.length);
-            if (first !== undefined) void handle(first);
-          }
-          return;
-        }
-        case "/compact": {
-          setBusy(true);
-          try {
-            await agentRef.current!.compact();
-            addLine("info", "(context compacted)");
-          } catch (error) {
-            addLine("info", `error: ${error instanceof Error ? error.message : error}`);
-          } finally {
-            setBusy(false);
-          }
-          return;
-        }
-        case "/reset":
-          agentRef.current!.messages = [];
-          addLine("info", "(conversation reset)");
-          return;
-        case "/sessions": {
-          const mine = listSessions().filter((s) => s.cwd === process.cwd());
-          addLine(
-            "info",
-            mine.length
-              ? "sessions (newest first):\n" + mine.slice(0, 10).map((s) => `  ${s.id}  "${sessionTitle(s)}"`).join("\n")
-              : "no saved sessions for this directory",
-          );
-          return;
-        }
-        case "/resume": {
-          const arg = text.split(/\s+/)[1];
-          if (arg) {
-            const target = loadSession(arg);
-            if (!target) addLine("info", `no session '${arg}'`);
-            else resumeInto(target);
-            return;
-          }
-          const list = listSessions().filter((s) => s.cwd === process.cwd());
-          if (!list.length) {
-            addLine("info", "no saved sessions here - /sessions to list");
-            return;
-          }
-          setOverlay({
-            title: "Resume session",
-            items: list.map((s) => ({
-              id: s.id,
-              label: sessionTitle(s),
-              detail: `${relativeTime(s.updatedAt)} · ${s.messages.length} msgs` +
-                (s.branch ? ` · ${s.branch}` : "") + (s.bytes ? ` · ${fmtBytes(s.bytes)}` : ""),
-            })),
-            onSelect: (it) => {
-              setOverlay(null);
-              const target = loadSession(it.id);
-              if (target) resumeInto(target);
-            },
-          });
-          return;
-        }
-        case "/effort": {
-          const lvl = text.split(/\s+/)[1]?.toLowerCase();
-          if (!lvl) {
-            addLine("info", `effort: ${cfg.effort || "off"} (use /effort low|medium|high|off)`);
-            return;
-          }
-          if (lvl === "off") delete cfg.data.reasoning_effort;
-          else cfg.data.reasoning_effort = lvl;
-          addLine("info", `effort -> ${cfg.effort || "off"}`);
-          return;
-        }
-        case "/context": {
-          const win = cfg.contextWindow;
-          const used = agentRef.current!.cost.lastPrompt;
-          const pct = Math.max(0, Math.round((100 * (win - used)) / win));
-          addLine("info", `context: ~${used} / ${win} tokens (${pct}% free; auto-compacts past 85%)`);
-          return;
-        }
-        default:
-          addLine("info", `unknown command ${cmd} - try /help`);
-          return;
-      }
+      await runSlashCommand(text, {
+        cfg,
+        agent: agentRef.current!,
+        registry: registryRef.current!,
+        busy,
+        queue: queueRef.current,
+        addLine,
+        setLines,
+        nextId: () => idRef.current++,
+        setOverlay,
+        setBusy,
+        setQueued,
+        resumeInto,
+        runText: handle,
+        exit,
+      });
+      return;
     }
 
     // @file mentions: expand @path into file context (read_file is safe).

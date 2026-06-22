@@ -23,7 +23,7 @@ enforced by `test/architecture.test.ts`).
 | `adapters/mcp.ts` · `adapters/session.ts` · `adapters/context.ts` · `adapters/skills.ts` | MCP client · session persistence/resume · project context (NEKO.md/CLAUDE.md) · `.md` skills. |
 | `adapters/registry.ts` · `adapters/doctor.ts` · `adapters/project.ts` | capabilities + `policy` audit · `doctor` diagnostics · `init` scaffolds. |
 | **`shared/`** | `version.ts` (leaf). |
-| **`ui/`** | `ui/chat.tsx` — Ink REPL (streaming markdown, tool lines, approval, thinking line, slash commands, modes). |
+| **`ui/`** | Ink REPL, split by concern: `chat.tsx` (lifecycle + turn loop + render), `commands.ts` (slash commands + `runSlashCommand`), `transcript.tsx` (line renderer), `select-list.tsx` (reusable picker), `thinking-line.tsx`, `approval-box.tsx`, `markdown.tsx`, `highlight.tsx`, `logo.tsx`, `text-input.tsx`, `format.ts`. |
 | `bin/neko.ts` | The `neko` CLI entry point. |
 | `reference/python/` | The Python **spec/reference** (original port). Not shipped; read it, don't depend on it. |
 

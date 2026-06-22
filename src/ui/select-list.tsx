@@ -11,6 +11,13 @@ export interface SelectItem {
   detail?: string;
 }
 
+/** A pending picker overlay (drives <SelectList>). */
+export interface Overlay {
+  title: string;
+  items: SelectItem[];
+  onSelect: (item: SelectItem) => void;
+}
+
 export function SelectList(props: {
   title: string;
   items: SelectItem[];
