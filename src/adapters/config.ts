@@ -78,6 +78,9 @@ export class NekoConfig {
   /** When true, the catastrophic-bash seatbelt is disabled (default false). */
   get allowDangerousBash(): boolean { return Boolean(this.data.allow_dangerous_bash); }
 
+  /** When true, auto-approved mutating tools get a model "is this safe?" review first. */
+  get adversarialCheck(): boolean { return Boolean(this.data.adversarial_check); }
+
   /** Shell hooks run around tool calls (opt-in). `pre_tool_use` can block (non-zero exit). */
   get hooks(): { preToolUse?: string; postToolUse?: string } {
     const h = this.data.hooks;

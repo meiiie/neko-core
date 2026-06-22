@@ -13,7 +13,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { McpTools } from "./ports.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
-import { resolveTool, toolSchemas } from "./tools.ts";
+import { GATED, resolveTool, toolSchemas } from "./tools.ts";
 
 /** An approval gate: given (toolName, the tool's args) -> approve? (may be async).
  * Receiving args lets a UI render a preview/diff before approving. */
@@ -49,6 +49,8 @@ export class ToolRegistry {
   subagent?: (prompt: string, signal?: AbortSignal) => Promise<string>;
   /** One-shot model call (set by the host); lets web_fetch extract per a prompt (Claude-style). */
   summarize?: (instruction: string, content: string) => Promise<string>;
+  /** Opt-in adversarial review of auto-approved mutating actions (set by the host). */
+  checkAction?: (toolName: string, args: Record<string, any>) => Promise<{ ok: boolean; reason: string }>;
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
 
@@ -165,6 +167,12 @@ export class ToolRegistry {
     }
     if (decision === "prompt" && !(await this.prompt(name, args))) {
       return `Denied by user: ${name} (${describe(name, args)})`;
+    }
+    // Adversarial review: when a mutating tool is auto-approved (no human in the loop), a model
+    // pass vets it for prompt injection / destructive intent before it runs.
+    if (decision === "allow" && spec.permission === GATED && this.checkAction) {
+      const v = await this.checkAction(name, args);
+      if (!v.ok) return `Blocked by adversarial check: ${v.reason || "looks unsafe"}`;
     }
 
     try {

@@ -92,6 +92,15 @@ test("task delegates to the subagent callback (and reports when unavailable)", a
   expect(await reg.execute("task", { description: "x", prompt: "do y" })).toBe("sub did: do y");
 });
 
+test("adversarial check blocks an auto-approved mutating tool when it flags unsafe", async () => {
+  const { reg } = makeReg("auto", () => true);
+  reg.checkAction = async () => ({ ok: false, reason: "looks like exfiltration" });
+  expect(await reg.execute("write_file", { path: "x.txt", content: "data" })).toContain("Blocked by adversarial check");
+  expect(await reg.execute("read_file", { path: "x.txt" })).not.toContain("adversarial"); // read-only not checked
+  reg.checkAction = async () => ({ ok: true, reason: "SAFE" });
+  expect(await reg.execute("write_file", { path: "y.txt", content: "ok" })).toContain("Wrote");
+});
+
 test("catastrophic bash is refused even in auto mode (seatbelt)", async () => {
   const { reg } = makeReg("auto", () => true); // auto would otherwise auto-approve bash
   expect(await reg.execute("bash", { command: "rm -rf /" })).toContain("Refused"); // never runs
