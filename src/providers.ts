@@ -72,6 +72,8 @@ export class OpenAICompatProvider implements Provider {
 
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.cfg.maxRetries; attempt++) {
+      // User interrupt (Esc): stop immediately, never retry.
+      if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
       try {
         const timeout = AbortSignal.timeout(this.cfg.timeoutSeconds * 1000);
         const res = await fetch(url, {
@@ -88,16 +90,19 @@ export class OpenAICompatProvider implements Provider {
         const body = await res.text().catch(() => "");
         if (RETRYABLE_STATUS.has(res.status) && attempt < this.cfg.maxRetries) {
           lastError = new Error(`HTTP ${res.status}`);
-          await sleep(this.retryDelayMs(attempt));
+          await sleep(this.retryDelayMs(attempt), signal);
           continue;
         }
         throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
       } catch (error) {
+        // A user interrupt must propagate at once - it is not a retryable failure.
+        // (Distinguish it from the per-attempt timeout, which leaves `signal` un-aborted.)
+        if (signal?.aborted) throw error;
         lastError = error;
         // Retry network/timeout errors; do NOT retry our own deliberate HTTP errors.
         const isHttp = error instanceof Error && error.message.startsWith("HTTP ");
         if (isHttp || attempt >= this.cfg.maxRetries) break;
-        await sleep(this.retryDelayMs(attempt));
+        await sleep(this.retryDelayMs(attempt), signal);
       }
     }
     throw new Error(`openai_compat completion failed: ${messageOf(lastError)}`);
@@ -200,8 +205,20 @@ async function* sseLines(res: Response): AsyncGenerator<string> {
   if (tail) yield tail;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Sleep that rejects immediately if the signal aborts, so a retry backoff is interruptible. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new DOMException("Aborted by user", "AbortError"));
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        reject(new DOMException("Aborted by user", "AbortError"));
+      },
+      { once: true },
+    );
+  });
 }
 
 function messageOf(error: unknown): string {

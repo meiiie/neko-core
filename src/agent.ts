@@ -122,6 +122,7 @@ export class Agent {
 
       this.messages.push(assistantToolMessage(response.content, toolCalls));
       for (const call of toolCalls) {
+        if (signal?.aborted) return "[interrupted]"; // stop promptly between tools on Esc
         this.emit("tool_call", call);
         const observation = await this.tools.execute(call.name, call.arguments);
         this.emit("tool_result", { call, observation });
