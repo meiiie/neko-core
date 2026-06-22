@@ -13,7 +13,7 @@ import { environmentBlock, projectContextBlock, renderContext } from "../src/ada
 import { collectChecks, render } from "../src/adapters/doctor.ts";
 import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
-import { initProject, initUser } from "../src/adapters/project.ts";
+import { addMcpServer, initProject, initUser, removeMcpServer } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
 import { renderSkills } from "../src/adapters/skills.ts";
@@ -263,6 +263,27 @@ function cmdSkills(): number {
 }
 
 async function cmdMcp(args: Args): Promise<number> {
+  const sub = args.positionals[0];
+  if (sub === "add") {
+    const [, name, target, ...rest] = args.positionals;
+    if (!name || !target) {
+      console.error('usage: neko mcp add <name> <command-or-url> [args...]   (url -> remote http/sse; else stdio)');
+      return 2;
+    }
+    const server = /^https?:\/\//.test(target) ? { url: target } : { command: target, args: rest };
+    console.log(addMcpServer(name, server));
+    return 0;
+  }
+  if (sub === "remove" || sub === "rm") {
+    const name = args.positionals[1];
+    if (!name) {
+      console.error("usage: neko mcp remove <name>");
+      return 2;
+    }
+    console.log(removeMcpServer(name));
+    return 0;
+  }
+
   const cfg = load(args);
   if (!Object.keys(cfg.mcpServers).length) {
     console.log("No MCP servers configured. Add `mcp_servers` to ~/.neko-core/config.json, e.g.:");

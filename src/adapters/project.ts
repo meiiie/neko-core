@@ -3,11 +3,45 @@
  * claude.json-style ~/.neko-core/config.json; `neko init` writes a project-local
  * ./.neko-core/config.json. Neither is committed (both gitignored). Env vars override.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME } from "./config.ts";
+
+const userConfigPath = () => join(homedir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME);
+
+/** Add/replace an MCP server in the user config (~/.neko-core/config.json). */
+export function addMcpServer(name: string, server: Record<string, any>): string {
+  const path = userConfigPath();
+  let data: Record<string, any> = {};
+  try {
+    if (existsSync(path)) data = JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    /* start fresh */
+  }
+  data.mcp_servers = data.mcp_servers ?? {};
+  data.mcp_servers[name] = server;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(data, null, 2) + "\n", "utf-8");
+  return `Added MCP server '${name}' to ${path}. Run \`neko mcp\` to verify.`;
+}
+
+/** Remove an MCP server from the user config. */
+export function removeMcpServer(name: string): string {
+  const path = userConfigPath();
+  if (!existsSync(path)) return "no user config (~/.neko-core/config.json)";
+  let data: Record<string, any>;
+  try {
+    data = JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return "could not read user config";
+  }
+  if (!data.mcp_servers?.[name]) return `no MCP server '${name}'`;
+  delete data.mcp_servers[name];
+  writeFileSync(path, JSON.stringify(data, null, 2) + "\n", "utf-8");
+  return `Removed MCP server '${name}'`;
+}
 
 const USER_TEMPLATE = {
   _comment:
