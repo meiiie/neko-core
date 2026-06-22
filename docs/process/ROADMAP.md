@@ -24,7 +24,7 @@ cost/token tracking · MCP client · single-binary distribution.
 ### Phase A — Agentic core
 - [x] **A0** TS Step 1: config-first + `openai_compat` provider + doctor + CLI skeleton. *(done)*
 - [x] **A1** Tools + registry + policy (read_file/search safe, write_file/bash gated; OpenAI schema). *(done — typecheck clean; `neko tools/agents/commands/capabilities/policy` work; tool runtime smoke: read/search/write/bash, path-escape refused, denial returns a string, safe-under-deny)*
-- [ ] **A2** Agent loop + `neko run` (complete → tool_calls → observe, `max_steps`, abort). → verify: live `neko run` on NVIDIA calls a tool and answers.
+- [x] **A2** Agent loop + `neko run` (complete → tool_calls → observe, `max_steps`; interactive approval + `--yolo`). *(done — typecheck clean; live `neko run --yolo` on NVIDIA called read_file and answered correctly)*
 - [ ] **A3** Real coding tool set: `edit` (exact string replace), `glob`, `ls`, scoped `grep`; per-tool approval. → verify: edit a file end-to-end.
 - [ ] **A4** Streaming responses (SSE) + token/cost tracking (per turn + session total).
 

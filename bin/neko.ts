@@ -5,9 +5,14 @@
  * Commands: config · doctor · profiles · init-user · init · chat · run
  * (chat/run are wired in later TS steps; config-first, offline-capable.)
  */
+import { createInterface } from "node:readline/promises";
+
+import { Agent } from "../src/agent.ts";
 import { loadConfig, type NekoConfig } from "../src/config.ts";
 import { collectChecks, render } from "../src/doctor.ts";
+import { getProvider } from "../src/providers.ts";
 import { initProject, initUser } from "../src/project.ts";
+import { gateFor, ToolRegistry } from "../src/tool-runtime.ts";
 import {
   collectCapabilities,
   evaluatePolicy,
@@ -46,6 +51,40 @@ function parseArgs(argv: string[]): Args {
 
 function load(args: Args): NekoConfig {
   return loadConfig({ profile: args.profile });
+}
+
+/** Interactive approval gate for the CLI (one-shot readline per gated tool). */
+async function promptApprove(toolName: string, action: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question(`\n[approval] ${toolName}: ${action}\nApprove? [y/N] `)).trim().toLowerCase();
+    return answer === "y" || answer === "yes";
+  } catch {
+    return false;
+  } finally {
+    rl.close();
+  }
+}
+
+/** Compact, human-readable trace of the agent loop. */
+function printEvent(kind: string, data: any): void {
+  if (kind === "tool_call") {
+    const a = data.arguments ?? {};
+    const summary = a.command ?? a.path ?? a.pattern ?? "";
+    console.log(`  -> ${data.name}(${summary})`);
+  } else if (kind === "tool_result") {
+    let obs = String(data.observation).replace(/\n/g, " ");
+    if (obs.length > 200) obs = obs.slice(0, 200) + "...";
+    console.log(`     ${obs}`);
+  } else if (kind === "max_steps") {
+    console.log(`  [stopped: reached max_steps=${data}]`);
+  }
+}
+
+function buildAgent(cfg: NekoConfig, yolo: boolean): Agent {
+  const approval = yolo ? "auto" : cfg.approval;
+  const registry = new ToolRegistry(process.cwd(), gateFor(approval, promptApprove));
+  return new Agent({ provider: getProvider(cfg), tools: registry, maxSteps: cfg.maxSteps, onEvent: printEvent });
 }
 
 const HELP = `Neko Core ${VERSION} - local-first agentic CLI.
@@ -135,15 +174,19 @@ function cmdChat(args: Args): number {
   return 0;
 }
 
-function cmdRun(args: Args): number {
-  const cfg = load(args);
-  console.log(`neko run - instruction: ${JSON.stringify(args.positionals.join(" "))}`);
-  console.log(`  provider=${cfg.provider} model=${cfg.model || "(unset)"} profile=${cfg.profile ?? "none"}`);
-  console.log("  [scaffold] the agent loop lands in the next TS step.");
+async function cmdRun(args: Args): Promise<number> {
+  const instruction = args.positionals.join(" ").trim();
+  if (!instruction) {
+    console.error("neko: error: run needs an instruction, e.g. neko run \"add a test for X\"");
+    return 2;
+  }
+  const agent = buildAgent(load(args), args.yolo);
+  const answer = await agent.run(instruction);
+  console.log("\n" + answer);
   return 0;
 }
 
-function main(): number {
+async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const cmd = args.command;
 
@@ -169,7 +212,7 @@ function main(): number {
       case "capabilities": return cmdCapabilities(args);
       case "policy": return cmdPolicy(args);
       case "chat": return cmdChat(args);
-      case "run": return cmdRun(args);
+      case "run": return await cmdRun(args);
       default:
         console.error(`neko: error: unknown command '${cmd}'. Run 'neko --help'.`);
         return 2;
@@ -180,4 +223,4 @@ function main(): number {
   }
 }
 
-process.exit(main());
+process.exit(await main());
