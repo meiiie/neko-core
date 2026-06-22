@@ -173,10 +173,10 @@ function cmdPolicy(args: Args): number {
   return report.verdict === "fail" ? 1 : 0;
 }
 
-function cmdChat(args: Args): number {
-  const cfg = load(args);
-  console.log(`neko chat - provider=${cfg.provider} model=${cfg.model || "(unset)"} profile=${cfg.profile ?? "none"}`);
-  console.log("  [scaffold] the agent loop + Ink REPL land in the next TS steps.");
+async function cmdChat(args: Args): Promise<number> {
+  // Lazy import: keep Ink/React out of the startup path for non-chat commands.
+  const { runChat } = await import("../src/ui/chat.tsx");
+  await runChat({ profile: args.profile, yolo: args.yolo });
   return 0;
 }
 
@@ -223,7 +223,7 @@ async function main(): Promise<number> {
       case "commands": return cmdCommands();
       case "capabilities": return cmdCapabilities(args);
       case "policy": return cmdPolicy(args);
-      case "chat": return cmdChat(args);
+      case "chat": return await cmdChat(args);
       case "run": return await cmdRun(args);
       default:
         console.error(`neko: error: unknown command '${cmd}'. Run 'neko --help'.`);

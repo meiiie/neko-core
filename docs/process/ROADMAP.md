@@ -29,7 +29,7 @@ cost/token tracking · MCP client · single-binary distribution.
 - [x] **A4** Streaming responses (SSE) + token tracking (`src/cost.ts`; per-call usage accumulated). *(done — live `neko run` streams tokens via SSE and prints `tokens: in/out/total`. $-cost left to a future per-model price config.)*
 
 ### Phase B — UX (the Ink TUI = "Neko Code")
-- [ ] **B1** Ink chat REPL: streaming render, tool-call/diff display, approval prompts (yes / yes-always / no), spinner, markdown.
+- [x] **B1** Ink chat REPL (`src/ui/chat.tsx`): streaming render, interleaved tool-call lines, inline approval prompt (y/a/n), thinking spinner, one Agent across turns, `/reset`/`/exit`. *(typecheck clean; module imports under Bun; non-TTY guard degrades to a hint. Full interactive render pending the owner's terminal.)*
 - [ ] **B2** Slash commands (`/help`, `/clear`, `/model`, `/init`, `/cost`, `/exit`), input history, multiline.
 - [ ] **B3** Permission modes (default / accept-edits / plan / yolo) cycled like Claude Code; surfaced in `neko policy`.
 
