@@ -1,6 +1,15 @@
-import { Text } from "ink";
+import { Box, Text } from "ink";
 
-// Cat mascot in the style of the banner glyph (ハ‥マ). Recolor here (any Ink color / hex).
+// Small pixel-cat mascot (orange half-blocks; eyes/nose are gaps). Recolor via COLOR.
+const COLOR = "#e6932e";
+const CAT = ["█▄   ▄█", "██▀█▀██", "███▀███", "▀█████▀"];
+
 export function Logo() {
-  return <Text color="#e6932e">/\··~▽</Text>;
+  return (
+    <Box flexDirection="column">
+      {CAT.map((row, i) => (
+        <Text key={i} color={COLOR}>{row}</Text>
+      ))}
+    </Box>
+  );
 }

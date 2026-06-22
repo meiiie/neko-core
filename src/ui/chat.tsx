@@ -399,12 +399,15 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     switch (line.kind) {
       case "welcome":
         return (
-          <Box key={line.id} flexDirection="column" marginBottom={1}>
-            <Text>
-              <Logo />  <Text bold>Neko Code</Text> <Text dimColor>v{VERSION}</Text>
-            </Text>
-            <Text dimColor>{(cfg.model || "no model").split("/").pop()} · {cfg.provider} · {cfg.profile ?? "no profile"}</Text>
-            <Text dimColor>{process.cwd()}</Text>
+          <Box key={line.id} marginBottom={1}>
+            <Logo />
+            <Box flexDirection="column" marginLeft={2}>
+              <Text>
+                <Text bold>Neko Code</Text> <Text dimColor>v{VERSION}</Text>
+              </Text>
+              <Text dimColor>{(cfg.model || "no model").split("/").pop()} · {cfg.provider} · {cfg.profile ?? "no profile"}</Text>
+              <Text dimColor>{process.cwd()}</Text>
+            </Box>
           </Box>
         );
       case "user":
@@ -469,6 +472,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
               placeholder={busy ? "type to queue while it works..." : 'Try: "explain src/agent.ts"   or   /help'}
             />
           </Box>
+          <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
           {input.startsWith("/") ? (
             <Box flexDirection="column" paddingLeft={2}>
               {SLASH.filter((c) => c.name.startsWith(input.split(/\s+/)[0])).map((c) => (
