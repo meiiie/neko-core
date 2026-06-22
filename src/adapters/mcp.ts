@@ -44,6 +44,7 @@ export class McpHub {
   private toolMap = new Map<string, { server: string; tool: string }>();
   private specs: any[] = [];
   private meta = new Map<string, { type: string; tools: number; resources: number; prompts: number }>();
+  private resourceTools = new Map<string, string>(); // synthetic mcp__<server>__read_resource -> server
 
   async connectAll(servers: Record<string, McpServerConfig>): Promise<void> {
     for (const [name, cfg] of Object.entries(servers ?? {})) {
@@ -66,12 +67,24 @@ export class McpHub {
           });
           tools++;
         }
-        // Resources + prompts are part of "full MCP"; count them (best-effort) for visibility.
-        let resources = 0;
+        // Resources are part of full MCP: expose a synthetic read_resource tool the agent can use.
+        let resourceList: any[] = [];
+        try { resourceList = ((await client.listResources()) as any).resources ?? []; } catch { /* unsupported */ }
+        if (resourceList.length) {
+          const rt = `mcp__${name}__read_resource`;
+          this.resourceTools.set(rt, name);
+          this.specs.push({
+            type: "function",
+            function: {
+              name: rt,
+              description: `Read a resource from MCP server '${name}'. Available URIs: ${resourceList.slice(0, 25).map((r: any) => r.uri).join(", ")}`,
+              parameters: { type: "object", properties: { uri: { type: "string", description: "The resource URI to read." } }, required: ["uri"] },
+            },
+          });
+        }
         let prompts = 0;
-        try { resources = ((await client.listResources()) as any).resources?.length ?? 0; } catch { /* server may not support */ }
-        try { prompts = ((await client.listPrompts()) as any).prompts?.length ?? 0; } catch { /* server may not support */ }
-        this.meta.set(name, { type, tools, resources, prompts });
+        try { prompts = ((await client.listPrompts()) as any).prompts?.length ?? 0; } catch { /* unsupported */ }
+        this.meta.set(name, { type, tools, resources: resourceList.length, prompts });
         this.clients.set(name, client);
       } catch (error) {
         console.error(`neko: MCP server '${name}' failed to connect: ${(error as Error).message}`);
@@ -92,14 +105,26 @@ export class McpHub {
   }
 
   toolNames(): string[] {
-    return [...this.toolMap.keys()];
+    return [...this.toolMap.keys(), ...this.resourceTools.keys()];
   }
 
   has(name: string): boolean {
-    return this.toolMap.has(name);
+    return this.toolMap.has(name) || this.resourceTools.has(name);
   }
 
   async call(name: string, args: Record<string, any>): Promise<string> {
+    // Synthetic resource reader (mcp__<server>__read_resource).
+    const resourceServer = this.resourceTools.get(name);
+    if (resourceServer) {
+      const client = this.clients.get(resourceServer)!;
+      try {
+        const res: any = await client.readResource({ uri: String(args.uri ?? "") });
+        const parts = (res.contents ?? []).map((c: any) => (c?.text != null ? c.text : c?.uri ?? JSON.stringify(c)));
+        return parts.join("\n") || "(empty resource)";
+      } catch (error) {
+        return `Error reading resource: ${(error as Error).message}`;
+      }
+    }
     const ref = this.toolMap.get(name);
     if (!ref) return `Error: unknown MCP tool ${name}`;
     const client = this.clients.get(ref.server)!;
