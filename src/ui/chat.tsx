@@ -458,7 +458,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       {approval ? (
         <ApprovalBox approval={approval} />
       ) : (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column">
           <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
           <Box>
             <Text color={busy ? "gray" : "cyan"}>{pendingMulti ? "... " : "> "}</Text>
@@ -483,7 +483,10 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
                   {queued > 0 ? ` · ${queued} queued` : ""} · esc to interrupt
                 </Text>
               ) : (
-                <Text color={MODE_COLOR[mode]}>{mode} · shift+tab to cycle</Text>
+                <Text>
+                  <Text color={MODE_COLOR[mode]}>{mode}</Text>
+                  <Text dimColor> · shift+tab to cycle</Text>
+                </Text>
               )}
               <Text dimColor>
                 {(cfg.model || "").split("/").pop()} · {agentRef.current!.cost.totalTokens} tok ·{" "}
