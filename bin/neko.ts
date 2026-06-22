@@ -13,6 +13,7 @@ import { projectContextBlock, renderContext } from "../src/context.ts";
 import { collectChecks, render } from "../src/doctor.ts";
 import { getProvider } from "../src/providers.ts";
 import { initProject, initUser } from "../src/project.ts";
+import { renderSessions } from "../src/session.ts";
 import { ToolRegistry } from "../src/tool-runtime.ts";
 import {
   collectCapabilities,
@@ -35,16 +36,18 @@ interface Args {
   profile?: string;
   force: boolean;
   yolo: boolean;
+  resume: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { positionals: [], force: false, yolo: false };
+  const args: Args = { positionals: [], force: false, yolo: false, resume: false };
   args.command = argv[0];
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--profile") args.profile = argv[++i];
     else if (a === "--force") args.force = true;
     else if (a === "--yolo") args.yolo = true;
+    else if (a === "--resume") args.resume = true;
     else args.positionals.push(a);
   }
   return args;
@@ -113,12 +116,14 @@ Commands:
   capabilities  list runtime/CLI capabilities
   policy        audit the safe/gated permission boundary
   context       show the project context files (NEKO.md / CLAUDE.md) loaded
-  chat          interactive agentic session (REPL)        [coming next]
-  run <task>    one-shot: run a single instruction         [coming next]
+  sessions      list saved chat sessions
+  chat          interactive agentic session (REPL)
+  run <task>    one-shot: run a single instruction
 
 Options:
   --profile <name>   named runtime profile (see 'neko profiles')
   --yolo             auto-approve gated tools (bounded autonomy)
+  --resume           (chat) resume the latest session for this directory
   --version          print version`;
 
 function cmdConfig(args: Args): number {
@@ -186,7 +191,12 @@ function cmdContext(): number {
 async function cmdChat(args: Args): Promise<number> {
   // Lazy import: keep Ink/React out of the startup path for non-chat commands.
   const { runChat } = await import("../src/ui/chat.tsx");
-  await runChat({ profile: args.profile, yolo: args.yolo });
+  await runChat({ profile: args.profile, yolo: args.yolo, resume: args.resume });
+  return 0;
+}
+
+function cmdSessions(): number {
+  console.log(renderSessions());
   return 0;
 }
 
@@ -234,6 +244,7 @@ async function main(): Promise<number> {
       case "capabilities": return cmdCapabilities(args);
       case "policy": return cmdPolicy(args);
       case "context": return cmdContext();
+      case "sessions": return cmdSessions();
       case "chat": return await cmdChat(args);
       case "run": return await cmdRun(args);
       default:

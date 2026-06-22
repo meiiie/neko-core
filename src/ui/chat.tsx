@@ -17,6 +17,7 @@ import { projectContextBlock } from "../context.ts";
 import { nextMode, type PermissionMode } from "../permissions.ts";
 import { initProject } from "../project.ts";
 import { getProvider } from "../providers.ts";
+import { latestSession, newSessionId, saveSession, type Session } from "../session.ts";
 import { ToolRegistry } from "../tool-runtime.ts";
 import { VERSION } from "../version.ts";
 
@@ -52,28 +53,41 @@ const HELP = [
 interface ChatProps {
   profile?: string;
   yolo: boolean;
+  resume?: boolean;
 }
 
-function ChatApp({ profile, yolo }: ChatProps) {
+function ChatApp({ profile, yolo, resume }: ChatProps) {
   const { exit } = useApp();
   const cfg = useRef(loadConfig({ profile })).current;
-  const idRef = useRef(1);
+  const idRef = useRef(0);
   const streamRef = useRef("");
   const alwaysApproved = useRef<Set<string>>(new Set());
   const historyRef = useRef<string[]>([]);
   const historyPos = useRef(0);
   const multilineRef = useRef("");
+  const resumedRef = useRef<Session | null>(resume ? latestSession(process.cwd()) : null);
+  const sessionIdRef = useRef(resumedRef.current?.id ?? newSessionId());
+  const createdAtRef = useRef(resumedRef.current?.createdAt ?? new Date().toISOString());
 
-  const [lines, setLines] = useState<Line[]>(() => [
-    {
-      id: 0,
+  const [lines, setLines] = useState<Line[]>(() => {
+    const banner: Line = {
+      id: idRef.current++,
       kind: "info",
       text:
         `Neko Code ${VERSION}  provider=${cfg.provider} model=${cfg.model || "(unset)"} ` +
         `profile=${cfg.profile ?? "none"} mode=${yolo ? "auto" : cfg.mode}\n` +
         "Type a task, or /help for commands. Shift+Tab cycles permission mode.",
-    },
-  ]);
+    };
+    if (!resumedRef.current) return [banner];
+    return [
+      banner,
+      {
+        id: idRef.current++,
+        kind: "info",
+        text: `(resumed session ${resumedRef.current.id} — ${resumedRef.current.messages.length} messages)`,
+      },
+    ];
+  });
   const [stream, setStream] = useState("");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -124,7 +138,19 @@ function ChatApp({ profile, yolo }: ChatProps) {
         }
       },
     });
+    if (resumedRef.current) agentRef.current.messages = [...resumedRef.current.messages];
   }
+
+  const persist = () => {
+    saveSession({
+      id: sessionIdRef.current,
+      createdAt: createdAtRef.current,
+      updatedAt: new Date().toISOString(),
+      cwd: process.cwd(),
+      model: cfg.model,
+      messages: agentRef.current!.messages,
+    });
+  };
 
   // Approval keys (y / a=always / n), active only while an approval is pending.
   useInput(
@@ -223,6 +249,7 @@ function ChatApp({ profile, yolo }: ChatProps) {
       addLine("info", `error: ${error instanceof Error ? error.message : error}`);
     } finally {
       setBusy(false);
+      persist(); // save the conversation after each turn
     }
   };
 
@@ -273,11 +300,11 @@ function ChatApp({ profile, yolo }: ChatProps) {
   );
 }
 
-export async function runChat(opts: { profile?: string; yolo: boolean }): Promise<void> {
+export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean }): Promise<void> {
   if (!process.stdin.isTTY) {
     console.error('neko chat needs an interactive terminal (TTY). Use `neko run "<task>"` for one-shot.');
     return;
   }
-  const app = render(<ChatApp profile={opts.profile} yolo={opts.yolo} />);
+  const app = render(<ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} />);
   await app.waitUntilExit();
 }

@@ -99,6 +99,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "capabilities", group: "registry", summary: "List runtime/CLI capabilities.", example: "neko capabilities" },
   { name: "policy", group: "registry", summary: "Audit the safe/gated permission boundary.", example: "neko policy" },
   { name: "context", group: "registry", summary: "Show the project context (NEKO.md / CLAUDE.md) loaded.", example: "neko context" },
+  { name: "sessions", group: "config", summary: "List saved chat sessions.", example: "neko sessions" },
 ];
 
 export function listCommands(): CommandSpec[] {

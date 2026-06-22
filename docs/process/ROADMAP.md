@@ -35,7 +35,7 @@ cost/token tracking · MCP client · single-binary distribution.
 
 ### Phase C — Project intelligence
 - [x] **C1** Project context (`src/context.ts`): loads `NEKO.md` / `CLAUDE.md` from cwd up to the repo root + `~/.neko-core/NEKO.md`, additive, capped; prepended to the system prompt. `neko context` lists them. *(verified: finds repo CLAUDE.md, walks up from nested dirs; typecheck clean)*
-- [ ] **C2** Conversation persistence + `neko --resume` / sessions (history on disk).
+- [x] **C2** Conversation persistence (`src/session.ts`): chat saves after each turn to `~/.neko-core/sessions/` (keyed by cwd); `neko chat --resume` reloads the latest for this dir; `neko sessions` lists them. *(verified: save/load/latest/list round-trip; typecheck clean)*
 - [ ] **C3** MCP client: connect to MCP servers (`@modelcontextprotocol/sdk`) and expose their tools to the loop.
 
 ### Phase D — Polish & distribution
