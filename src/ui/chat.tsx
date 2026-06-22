@@ -14,6 +14,7 @@ import { useRef, useState } from "react";
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../agent.ts";
 import { loadConfig } from "../config.ts";
 import { projectContextBlock } from "../context.ts";
+import { buildMcpHub, type McpHub } from "../mcp.ts";
 import { nextMode, type PermissionMode } from "../permissions.ts";
 import { initProject } from "../project.ts";
 import { getProvider } from "../providers.ts";
@@ -54,9 +55,10 @@ interface ChatProps {
   profile?: string;
   yolo: boolean;
   resume?: boolean;
+  mcpHub?: McpHub;
 }
 
-function ChatApp({ profile, yolo, resume }: ChatProps) {
+function ChatApp({ profile, yolo, resume, mcpHub }: ChatProps) {
   const { exit } = useApp();
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
@@ -111,7 +113,7 @@ function ChatApp({ profile, yolo, resume }: ChatProps) {
 
   const registryRef = useRef<ToolRegistry | null>(null);
   if (!registryRef.current) {
-    registryRef.current = new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate);
+    registryRef.current = new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub);
   }
 
   const agentRef = useRef<Agent | null>(null);
@@ -305,6 +307,12 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     console.error('neko chat needs an interactive terminal (TTY). Use `neko run "<task>"` for one-shot.');
     return;
   }
-  const app = render(<ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} />);
-  await app.waitUntilExit();
+  const cfg = loadConfig({ profile: opts.profile });
+  const hub = await buildMcpHub(cfg.mcpServers);
+  const app = render(<ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} mcpHub={hub} />);
+  try {
+    await app.waitUntilExit();
+  } finally {
+    await hub.close();
+  }
 }

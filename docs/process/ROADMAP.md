@@ -36,7 +36,7 @@ cost/token tracking · MCP client · single-binary distribution.
 ### Phase C — Project intelligence
 - [x] **C1** Project context (`src/context.ts`): loads `NEKO.md` / `CLAUDE.md` from cwd up to the repo root + `~/.neko-core/NEKO.md`, additive, capped; prepended to the system prompt. `neko context` lists them. *(verified: finds repo CLAUDE.md, walks up from nested dirs; typecheck clean)*
 - [x] **C2** Conversation persistence (`src/session.ts`): chat saves after each turn to `~/.neko-core/sessions/` (keyed by cwd); `neko chat --resume` reloads the latest for this dir; `neko sessions` lists them. *(verified: save/load/latest/list round-trip; typecheck clean)*
-- [ ] **C3** MCP client: connect to MCP servers (`@modelcontextprotocol/sdk`) and expose their tools to the loop.
+- [x] **C3** MCP client (`src/mcp.ts`): connects to stdio MCP servers from config (`mcp_servers`), exposes their tools as `mcp__<server>__<tool>` (gated by permission mode), `neko mcp` lists them. Safe by default (no servers = no-op). *(verified LIVE against a local echo MCP server: connect/list/call round-trip; typecheck clean)*
 
 ### Phase D — Polish & distribution
 - [ ] **D1** Full `bun test` suite parity with the Python reference + new features.

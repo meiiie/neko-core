@@ -11,8 +11,9 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
+import type { McpHub } from "./mcp.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
-import { resolveTool } from "./tools.ts";
+import { resolveTool, toolSchemas } from "./tools.ts";
 
 /** An approval gate: given (toolName, human-readable action) -> approve? (may be async) */
 export type ApprovalGate = (toolName: string, action: string) => boolean | Promise<boolean>;
@@ -42,19 +43,40 @@ export class ToolRegistry {
     public readonly root: string,
     mode: PermissionMode = "default",
     public prompt: ApprovalGate = denyAll,
+    public mcp?: McpHub,
   ) {
     this.mode = mode;
   }
 
+  /** All tool schemas shown to the model: built-in + connected MCP tools. */
+  schemas(): any[] {
+    return [...toolSchemas(), ...(this.mcp?.toolSchemas() ?? [])];
+  }
+
   async execute(name: string, args: Record<string, any>): Promise<string> {
+    if (typeof args !== "object" || args === null) {
+      return `Error: arguments for ${name} must be an object`;
+    }
+
+    // MCP tools: their effects are unknown, so treat them as gated (mode-governed).
+    if (this.mcp?.has(name)) {
+      const decision = this.mode === "auto" ? "allow" : this.mode === "plan" ? "deny" : "prompt";
+      if (decision === "deny") return `Blocked: ${name} (MCP) is not allowed in 'plan' mode.`;
+      if (decision === "prompt" && !(await this.prompt(name, `mcp ${name}`))) {
+        return `Denied by user: ${name}`;
+      }
+      try {
+        return await this.mcp.call(name, args);
+      } catch (error) {
+        return `Error: ${(error as Error).message}`;
+      }
+    }
+
     let spec;
     try {
       spec = resolveTool(name);
     } catch (error) {
       return `Error: ${(error as Error).message}`;
-    }
-    if (typeof args !== "object" || args === null) {
-      return `Error: arguments for ${name} must be an object`;
     }
 
     const decision = decide(this.mode, spec);

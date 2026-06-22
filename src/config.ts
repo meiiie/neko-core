@@ -39,6 +39,7 @@ export const DEFAULTS: Record<string, any> = {
   retry_base_delay_seconds: 1.5,
   retry_max_delay_seconds: 30,
   approval: "prompt", // prompt | auto (--yolo flips gated tools to auto)
+  mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
   active_profile: null,
   profiles: {
     // A new model/endpoint is a data edit, not a code change. "Offline" = point a
@@ -79,6 +80,12 @@ export class NekoConfig {
     const raw = String(this.data.mode ?? "").trim().toLowerCase();
     if (isMode(raw)) return raw;
     return this.approval === "auto" ? "auto" : "default";
+  }
+
+  /** Declared MCP servers (stdio): name -> { command, args?, env? }. */
+  get mcpServers(): Record<string, { command: string; args?: string[]; env?: Record<string, string> }> {
+    const raw = this.data.mcp_servers;
+    return raw && typeof raw === "object" ? raw : {};
   }
 
   /** Read on demand; NEVER stored in `data` (so it can't leak via `neko config`). */

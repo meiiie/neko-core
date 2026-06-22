@@ -11,6 +11,7 @@ import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/agent.ts";
 import { loadConfig, type NekoConfig } from "../src/config.ts";
 import { projectContextBlock, renderContext } from "../src/context.ts";
 import { collectChecks, render } from "../src/doctor.ts";
+import { buildMcpHub, renderMcp } from "../src/mcp.ts";
 import { getProvider } from "../src/providers.ts";
 import { initProject, initUser } from "../src/project.ts";
 import { renderSessions } from "../src/session.ts";
@@ -85,12 +86,17 @@ function printEvent(kind: string, data: any): void {
   }
 }
 
-function buildAgent(cfg: NekoConfig, yolo: boolean, onDelta?: (t: string) => void): Agent {
+async function buildAgent(
+  cfg: NekoConfig,
+  yolo: boolean,
+  onDelta?: (t: string) => void,
+): Promise<{ agent: Agent; close: () => Promise<void> }> {
   const mode = yolo ? "auto" : cfg.mode;
-  const registry = new ToolRegistry(process.cwd(), mode, promptApprove);
+  const hub = await buildMcpHub(cfg.mcpServers);
+  const registry = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
   const block = projectContextBlock();
   const systemPrompt = block ? `${DEFAULT_SYSTEM_PROMPT}\n\n${block}` : DEFAULT_SYSTEM_PROMPT;
-  return new Agent({
+  const agent = new Agent({
     provider: getProvider(cfg),
     tools: registry,
     maxSteps: cfg.maxSteps,
@@ -98,6 +104,7 @@ function buildAgent(cfg: NekoConfig, yolo: boolean, onDelta?: (t: string) => voi
     onEvent: printEvent,
     onDelta,
   });
+  return { agent, close: () => hub.close() };
 }
 
 const HELP = `Neko Core ${VERSION} - local-first agentic CLI.
@@ -117,6 +124,7 @@ Commands:
   policy        audit the safe/gated permission boundary
   context       show the project context files (NEKO.md / CLAUDE.md) loaded
   sessions      list saved chat sessions
+  mcp           list configured MCP servers and their tools
   chat          interactive agentic session (REPL)
   run <task>    one-shot: run a single instruction
 
@@ -132,7 +140,8 @@ function cmdConfig(args: Args): number {
   console.log(`  profile = ${cfg.profile ?? "(none)"}`);
   for (const key of Object.keys(cfg.data).sort()) {
     if (key.startsWith("_")) continue; // skip _comment/_hint annotations
-    console.log(`  ${key} = ${cfg.data[key]}`);
+    const value = cfg.data[key];
+    console.log(`  ${key} = ${value && typeof value === "object" ? JSON.stringify(value) : value}`);
   }
   // The API key is a secret - only ever report presence, never the value.
   console.log(`  api_key = ${cfg.apiKey ? "set" : "missing"}`);
@@ -200,6 +209,19 @@ function cmdSessions(): number {
   return 0;
 }
 
+async function cmdMcp(args: Args): Promise<number> {
+  const cfg = load(args);
+  if (!Object.keys(cfg.mcpServers).length) {
+    console.log("No MCP servers configured. Add `mcp_servers` to ~/.neko-core/config.json, e.g.:");
+    console.log('  "mcp_servers": { "fs": { "command": "bunx", "args": ["@modelcontextprotocol/server-filesystem", "."] } }');
+    return 0;
+  }
+  const hub = await buildMcpHub(cfg.mcpServers);
+  console.log(renderMcp(hub));
+  await hub.close();
+  return 0;
+}
+
 async function cmdRun(args: Args): Promise<number> {
   const instruction = args.positionals.join(" ").trim();
   if (!instruction) {
@@ -207,14 +229,18 @@ async function cmdRun(args: Args): Promise<number> {
     return 2;
   }
   let streamed = 0;
-  const agent = buildAgent(load(args), args.yolo, (t) => {
+  const { agent, close } = await buildAgent(load(args), args.yolo, (t) => {
     streamed += t.length;
     process.stdout.write(t);
   });
-  const answer = await agent.run(instruction);
-  process.stdout.write("\n");
-  if (streamed === 0 && answer.trim()) console.log(answer); // synthetic/non-streamed result
-  console.log(`[${agent.cost.summary()}]`);
+  try {
+    const answer = await agent.run(instruction);
+    process.stdout.write("\n");
+    if (streamed === 0 && answer.trim()) console.log(answer); // synthetic/non-streamed result
+    console.log(`[${agent.cost.summary()}]`);
+  } finally {
+    await close();
+  }
   return 0;
 }
 
@@ -245,6 +271,7 @@ async function main(): Promise<number> {
       case "policy": return cmdPolicy(args);
       case "context": return cmdContext();
       case "sessions": return cmdSessions();
+      case "mcp": return await cmdMcp(args);
       case "chat": return await cmdChat(args);
       case "run": return await cmdRun(args);
       default:

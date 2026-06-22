@@ -12,7 +12,6 @@
 import { CostTracker } from "./cost.ts";
 import type { DeltaHook, Provider, ToolCall } from "./providers.ts";
 import type { ToolRegistry } from "./tool-runtime.ts";
-import { toolSchemas } from "./tools.ts";
 
 export const DEFAULT_SYSTEM_PROMPT =
   "You are Neko Code, a local-first coding agent. Complete the user's task by calling tools.\n" +
@@ -62,7 +61,7 @@ export class Agent {
     this.messages.push({ role: "user", content: instruction });
 
     for (let step = 0; step < this.maxSteps; step++) {
-      const response = await this.provider.complete(this.messages, toolSchemas(), this.onDelta);
+      const response = await this.provider.complete(this.messages, this.tools.schemas(), this.onDelta);
       this.cost.add(response.usage);
       const toolCalls = response.tool_calls ?? [];
 
