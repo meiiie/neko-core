@@ -59,6 +59,16 @@ const MODE_COLOR: Record<PermissionMode, string> = {
   auto: "red",
 };
 
+// Playful "thinking" verbs (one picked per turn), Claude-style.
+const VERBS = [
+  "Thinking", "Pondering", "Cogitating", "Pouncing", "Prowling", "Noodling",
+  "Brewing", "Crunching", "Whisking", "Scheming", "Mulling", "Computing",
+];
+
+function fmtTok(n: number): string {
+  return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
+}
+
 const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
   { name: "/cost", desc: "token usage this session" },
@@ -94,6 +104,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const multilineRef = useRef("");
   const queueRef = useRef<string[]>([]);
   const controllerRef = useRef<AbortController | null>(null);
+  const verbRef = useRef(VERBS[0]); // playful "thinking" verb, repicked each turn
   const startRef = useRef(0);
   const resumedRef = useRef<Session | null>(resume ? latestSession(process.cwd()) : null);
   const sessionIdRef = useRef(resumedRef.current?.id ?? newSessionId());
@@ -350,6 +361,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       }
     }
     addLine("user", text);
+    verbRef.current = VERBS[Math.floor(Math.random() * VERBS.length)];
     setBusy(true);
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -483,7 +495,9 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
             <Box justifyContent="space-between">
               {busy ? (
                 <Text color="gray">
-                  <Spinner type="line" /> working {elapsed}s{step > 1 ? ` · step ${step}` : ""}
+                  <Text color="magenta"><Spinner type="dots" /></Text>{" "}
+                  {todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}…{" "}
+                  {elapsed}s{step > 1 ? ` · step ${step}` : ""} · {fmtTok(agentRef.current!.cost.totalTokens)} tok
                   {queued > 0 ? ` · ${queued} queued` : ""} · esc to interrupt
                 </Text>
               ) : (

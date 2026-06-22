@@ -32,10 +32,21 @@ export function TextInput(props: {
     }
   });
 
+  // Caret sits at the end of the typed value; when empty it sits at the START, before the
+  // dim placeholder (so the cursor block isn't pushed to the end of the hint text).
   return (
     <Text>
-      {value ? value : <Text dimColor>{placeholder ?? ""}</Text>}
-      <Text inverse> </Text>
+      {value ? (
+        <>
+          {value}
+          <Text inverse> </Text>
+        </>
+      ) : (
+        <>
+          <Text inverse> </Text>
+          <Text dimColor>{placeholder ?? ""}</Text>
+        </>
+      )}
     </Text>
   );
 }
