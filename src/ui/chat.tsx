@@ -69,6 +69,10 @@ function fmtTok(n: number): string {
   return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
 }
 
+function fmtBytes(n: number): string {
+  return n < 1024 ? `${n}B` : n < 1048576 ? `${(n / 1024).toFixed(1)}KB` : `${(n / 1048576).toFixed(1)}MB`;
+}
+
 /** "16 hours ago" / "1 week ago" — for the /resume picker. */
 function relativeTime(iso: string): string {
   const then = Date.parse(iso);
@@ -498,7 +502,12 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           }
           setOverlay({
             title: "Resume session",
-            items: list.map((s) => ({ id: s.id, label: sessionTitle(s), detail: `${relativeTime(s.updatedAt)} · ${s.messages.length} messages` })),
+            items: list.map((s) => ({
+              id: s.id,
+              label: sessionTitle(s),
+              detail: `${relativeTime(s.updatedAt)} · ${s.messages.length} msgs` +
+                (s.branch ? ` · ${s.branch}` : "") + (s.bytes ? ` · ${fmtBytes(s.bytes)}` : ""),
+            })),
             onSelect: (it) => {
               setOverlay(null);
               const target = loadSession(it.id);
