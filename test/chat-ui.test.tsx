@@ -65,6 +65,24 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
   unmount();
 });
 
+test("plan mode: exit_plan_mode shows the plan, 'y' proceeds", async () => {
+  const provider = new MockProvider([
+    { content: null, tool_calls: [{ id: "p", name: "exit_plan_mode", arguments: { plan: "## Plan\n1. do X" } }] },
+    { content: "Implemented.", tool_calls: [] },
+  ]);
+  const { stdin, lastFrame, frames, unmount } = render(<ChatApp yolo={false} provider={provider} />);
+  stdin.write("plan it");
+  await tick(20);
+  stdin.write("\r");
+  await tick(200);
+  expect(lastFrame() ?? "").toContain("Ready to code?"); // plan review box
+  expect(lastFrame() ?? "").toContain("do X"); // plan content rendered
+  stdin.write("y"); // approve -> proceed
+  await tick(200);
+  expect(frames.join("\n")).toContain("Implemented."); // agent continued after approval
+  unmount();
+});
+
 test("typing '/' shows a slash-command autocomplete menu", async () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
   const { stdin, lastFrame, unmount } = render(<ChatApp yolo provider={provider} />);

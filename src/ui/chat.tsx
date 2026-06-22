@@ -185,7 +185,15 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     (char, key) => {
       if (!approval) return;
       const c = char.toLowerCase();
+      // Approving a plan exits plan mode into accept-edits so the agent can implement it.
+      const approvePlan = () => {
+        if (approval.toolName === "exit_plan_mode" && registryRef.current!.mode === "plan") {
+          registryRef.current!.mode = "accept-edits";
+          setMode("accept-edits");
+        }
+      };
       if (c === "y") {
+        approvePlan();
         approval.resolve(true);
         setApproval(null);
       } else if (c === "a") {

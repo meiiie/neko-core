@@ -118,6 +118,13 @@ export const TOOL_SPECS: ToolSpec[] = [
     parameters: { url: { type: "string", description: "Absolute http(s) URL." } },
     required: ["url"],
   },
+  {
+    name: "exit_plan_mode",
+    permission: SAFE,
+    summary: "In plan mode, present your implementation plan for the user to approve before you edit anything.",
+    parameters: { plan: { type: "string", description: "The plan to implement, as concise markdown." } },
+    required: ["plan"],
+  },
 ];
 
 export function listTools(): ToolSpec[] {
@@ -136,6 +143,7 @@ const TOOL_LABELS: Record<string, string> = {
   todo_write: "Update Todos",
   web_search: "WebSearch",
   web_fetch: "Fetch",
+  exit_plan_mode: "Plan",
 };
 
 /** A compact "Label(primary-arg)" for a tool call, e.g. `Read(src/app.ts)` or `Bash(bun test)`. */

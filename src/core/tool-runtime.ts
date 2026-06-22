@@ -69,6 +69,14 @@ export class ToolRegistry {
       return `Tool '${name}' is disabled (enable with /tools ${name}).`;
     }
 
+    // exit_plan_mode: always asks the user to approve the plan (the plan-review gate).
+    if (name === "exit_plan_mode") {
+      const ok = await this.prompt(name, args);
+      return ok
+        ? "Plan approved by the user. Implement it now."
+        : "The user did NOT approve the plan. Ask what to change, then call exit_plan_mode again with a revised plan.";
+    }
+
     // todo_write: safe, no approval — record the plan for the REPL to render.
     if (name === "todo_write") {
       this.todos = Array.isArray(args.todos)

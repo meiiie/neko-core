@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 
 import { trunc } from "./format.ts";
+import { Markdown } from "./markdown.tsx";
 
 export interface Approval {
   toolName: string;
@@ -8,9 +9,21 @@ export interface Approval {
   resolve: (ok: boolean) => void;
 }
 
-/** Inline consent box for a gated tool, with a preview (command / write / diff). */
+/** Inline consent box for a gated tool, with a preview (command / write / diff / plan). */
 export function ApprovalBox({ approval }: { approval: Approval }) {
   const { toolName, args } = approval;
+
+  // Plan review (exit_plan_mode) gets its own, richer box.
+  if (toolName === "exit_plan_mode") {
+    return (
+      <Box borderStyle="round" borderColor="blue" paddingX={1} flexDirection="column">
+        <Text bold color="blue">Ready to code?</Text>
+        <Markdown text={String(args.plan ?? "")} />
+        <Text color="gray">[y] proceed (accept-edits)   [n] keep planning / Esc</Text>
+      </Box>
+    );
+  }
+
   const preview: any[] = [];
   if (toolName === "bash") {
     preview.push(<Text key="c" color="white">{"$ "}{trunc(args.command, 200)}</Text>);
