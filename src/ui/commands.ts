@@ -188,6 +188,11 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
           label: sessionTitle(s),
           detail: `${relativeTime(s.updatedAt)} · ${s.messages.length} msgs` +
             (s.branch ? ` · ${s.branch}` : "") + (s.bytes ? ` · ${fmtBytes(s.bytes)}` : ""),
+          preview: s.messages
+            .filter((m: any) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+            .slice(-4)
+            .map((m: any) => (m.role === "user" ? "> " : "  ") + trunc(String(m.content), 100))
+            .join("\n"),
         })),
         onSelect: (it) => {
           ctx.setOverlay(null);

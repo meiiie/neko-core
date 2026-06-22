@@ -9,6 +9,7 @@ export interface SelectItem {
   id: string;
   label: string;
   detail?: string;
+  preview?: string; // shown in a panel when Space is pressed
 }
 
 /** A pending picker overlay (drives <SelectList>). */
@@ -29,6 +30,7 @@ export function SelectList(props: {
   const { title, items, onSelect, onCancel, cols, search = true } = props;
   const [index, setIndex] = useState(0);
   const [query, setQuery] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
 
   const filtered = query
     ? items.filter((it) => (it.label + " " + (it.detail ?? "")).toLowerCase().includes(query.toLowerCase()))
@@ -43,6 +45,7 @@ export function SelectList(props: {
     }
     if (key.upArrow) return setIndex(Math.max(0, idx - 1));
     if (key.downArrow) return setIndex(Math.min(filtered.length - 1, idx + 1));
+    if (input === " ") return setShowPreview((p) => !p); // Space toggles the preview panel
     if (search) {
       if (key.backspace || key.delete) {
         setQuery((q) => [...q].slice(0, -1).join(""));
@@ -80,7 +83,15 @@ export function SelectList(props: {
         );
       })}
       <Text dimColor>{rule}</Text>
-      <Text dimColor>↑/↓ select · Enter confirm · Esc cancel{search ? " · type to filter" : ""}</Text>
+      {showPreview && filtered[idx]?.preview ? (
+        <Box flexDirection="column" marginBottom={1}>
+          {filtered[idx].preview!.split("\n").slice(0, 12).map((l, i) => (
+            <Text key={i} dimColor>{l}</Text>
+          ))}
+          <Text dimColor>{rule}</Text>
+        </Box>
+      ) : null}
+      <Text dimColor>↑/↓ select · Enter confirm · Space preview · Esc cancel{search ? " · type to filter" : ""}</Text>
     </Box>
   );
 }
