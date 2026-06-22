@@ -1,0 +1,132 @@
+#!/usr/bin/env bun
+/**
+ * `neko` command-line entry point (TypeScript / Bun).
+ *
+ * Commands: config · doctor · profiles · init-user · init · chat · run
+ * (chat/run are wired in later TS steps; config-first, offline-capable.)
+ */
+import { loadConfig, type NekoConfig } from "../src/config.ts";
+import { collectChecks, render } from "../src/doctor.ts";
+import { initProject, initUser } from "../src/project.ts";
+import { VERSION } from "../src/version.ts";
+
+interface Args {
+  command?: string;
+  positionals: string[];
+  profile?: string;
+  force: boolean;
+  yolo: boolean;
+}
+
+function parseArgs(argv: string[]): Args {
+  const args: Args = { positionals: [], force: false, yolo: false };
+  args.command = argv[0];
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--profile") args.profile = argv[++i];
+    else if (a === "--force") args.force = true;
+    else if (a === "--yolo") args.yolo = true;
+    else args.positionals.push(a);
+  }
+  return args;
+}
+
+function load(args: Args): NekoConfig {
+  return loadConfig({ profile: args.profile });
+}
+
+const HELP = `Neko Core ${VERSION} - local-first agentic CLI.
+
+Usage: neko <command> [options]
+
+Commands:
+  config        show the resolved config-first settings
+  doctor        read-only diagnostics (provider/model/key)
+  profiles      list the named runtime profiles
+  init-user     scaffold ~/.neko-core/config.json
+  init          scaffold ./.neko-core/config.json (project-local)
+  chat          interactive agentic session (REPL)        [coming next]
+  run <task>    one-shot: run a single instruction         [coming next]
+
+Options:
+  --profile <name>   named runtime profile (see 'neko profiles')
+  --yolo             auto-approve gated tools (bounded autonomy)
+  --version          print version`;
+
+function cmdConfig(args: Args): number {
+  const cfg = load(args);
+  console.log("Resolved Neko Core config:");
+  console.log(`  profile = ${cfg.profile ?? "(none)"}`);
+  for (const key of Object.keys(cfg.data).sort()) {
+    if (key.startsWith("_")) continue; // skip _comment/_hint annotations
+    console.log(`  ${key} = ${cfg.data[key]}`);
+  }
+  // The API key is a secret - only ever report presence, never the value.
+  console.log(`  api_key = ${cfg.apiKey ? "set" : "missing"}`);
+  return 0;
+}
+
+function cmdDoctor(args: Args): number {
+  console.log(render(collectChecks(load(args))));
+  return 0;
+}
+
+function cmdProfiles(args: Args): number {
+  const cfg = load(args);
+  console.log("Profiles (select with --profile NAME, NEKO_PROFILE, or active_profile):");
+  for (const name of Object.keys(cfg.profiles).sort()) {
+    const p = cfg.profiles[name];
+    const mark = name === cfg.profile ? "*" : " ";
+    console.log(` ${mark} ${name}: provider=${p.provider ?? "?"} base_url=${p.base_url ?? "-"} model=${p.model || "-"}`);
+  }
+  return 0;
+}
+
+function cmdChat(args: Args): number {
+  const cfg = load(args);
+  console.log(`neko chat - provider=${cfg.provider} model=${cfg.model || "(unset)"} profile=${cfg.profile ?? "none"}`);
+  console.log("  [scaffold] the agent loop + Ink REPL land in the next TS steps.");
+  return 0;
+}
+
+function cmdRun(args: Args): number {
+  const cfg = load(args);
+  console.log(`neko run - instruction: ${JSON.stringify(args.positionals.join(" "))}`);
+  console.log(`  provider=${cfg.provider} model=${cfg.model || "(unset)"} profile=${cfg.profile ?? "none"}`);
+  console.log("  [scaffold] the agent loop lands in the next TS step.");
+  return 0;
+}
+
+function main(): number {
+  const args = parseArgs(process.argv.slice(2));
+  const cmd = args.command;
+
+  if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "help") {
+    console.log(HELP);
+    return 0;
+  }
+  if (cmd === "--version" || cmd === "-v" || cmd === "version") {
+    console.log(`neko-core ${VERSION}`);
+    return 0;
+  }
+
+  try {
+    switch (cmd) {
+      case "config": return cmdConfig(args);
+      case "doctor": return cmdDoctor(args);
+      case "profiles": return cmdProfiles(args);
+      case "init-user": console.log(initUser(args.force)); return 0;
+      case "init": console.log(initProject(args.force)); return 0;
+      case "chat": return cmdChat(args);
+      case "run": return cmdRun(args);
+      default:
+        console.error(`neko: error: unknown command '${cmd}'. Run 'neko --help'.`);
+        return 2;
+    }
+  } catch (error) {
+    console.error(`neko: error: ${error instanceof Error ? error.message : error}`);
+    return 1;
+  }
+}
+
+process.exit(main());

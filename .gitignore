@@ -1,3 +1,8 @@
+# --- Node / TypeScript / Bun ---
+node_modules/
+dist/
+*.tsbuildinfo
+
 # --- Python ---
 __pycache__/
 *.py[cod]

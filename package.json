@@ -1,0 +1,23 @@
+{
+  "name": "neko-core",
+  "version": "0.1.0",
+  "description": "A local-first agentic CLI in the spirit of Claude Code / Codex CLI. Config-first, offline-capable.",
+  "type": "module",
+  "license": "MIT",
+  "author": "The Wiii Lab",
+  "keywords": ["llm", "agent", "cli", "local-first", "offline", "coding-agent"],
+  "bin": {
+    "neko": "bin/neko.ts",
+    "neko-core": "bin/neko.ts"
+  },
+  "scripts": {
+    "neko": "bun bin/neko.ts",
+    "build": "bun build --compile --outfile dist/neko bin/neko.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}

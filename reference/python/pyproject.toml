@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "neko-core"
+name = "neko-core-reference"
 version = "0.1.0"
-description = "A local-first agentic CLI in the spirit of Claude Code / Codex CLI. Config-first, offline-capable."
+description = "Reference (spec) implementation of Neko Core in Python. The product is the TypeScript build at the repo root; this is kept as the design reference."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -26,8 +26,8 @@ neko = "neko_core.cli:main"
 neko-core = "neko_core.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["."]
 testpaths = ["tests"]
