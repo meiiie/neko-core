@@ -115,6 +115,14 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       subReg.hooks = parent.hooks;
       return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, maxSteps: cfg.maxSteps }).run(prompt, signal);
     };
+    // web_fetch's optional extractor: one model pass over the fetched page (Claude-style).
+    registryRef.current.summarize = async (instruction, content) => {
+      const res = await (provider ?? getProvider(cfg)).complete([
+        { role: "system", content: "Extract exactly what the user asks from the web page below. Be concise; quote facts; say if not found." },
+        { role: "user", content: `${instruction}\n\n<page>\n${content.slice(0, 60000)}\n</page>` },
+      ]);
+      return res.content ?? "(no answer)";
+    };
   }
 
   const agentRef = useRef<Agent | null>(null);

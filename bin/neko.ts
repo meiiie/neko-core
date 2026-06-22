@@ -111,6 +111,13 @@ async function buildAgent(
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
     return await new Agent({ provider: getProvider(cfg), tools: subReg, maxSteps: cfg.maxSteps }).run(prompt, signal);
   };
+  registry.summarize = async (instruction, content) => {
+    const res = await getProvider(cfg).complete([
+      { role: "system", content: "Extract exactly what the user asks from the web page below. Be concise; quote facts; say if not found." },
+      { role: "user", content: `${instruction}\n\n<page>\n${content.slice(0, 60000)}\n</page>` },
+    ]);
+    return res.content ?? "(no answer)";
+  };
   const agent = new Agent({
     provider: getProvider(cfg),
     tools: registry,

@@ -114,8 +114,11 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "web_fetch",
     permission: SAFE,
-    summary: "Fetch a URL and return its readable text (HTML stripped).",
-    parameters: { url: { type: "string", description: "Absolute http(s) URL." } },
+    summary: "Fetch a URL (HTML stripped to text). With `prompt`, a fast pass extracts just what you asked, instead of returning the whole page.",
+    parameters: {
+      url: { type: "string", description: "Absolute http(s) URL." },
+      prompt: { type: "string", description: "Optional: what to extract from the page." },
+    },
     required: ["url"],
   },
   {

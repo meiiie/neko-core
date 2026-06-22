@@ -47,6 +47,8 @@ export class ToolRegistry {
   hooks?: { preToolUse?: string; postToolUse?: string };
   /** Spawns an isolated sub-agent (set by the host); enables the `task` tool. */
   subagent?: (prompt: string, signal?: AbortSignal) => Promise<string>;
+  /** One-shot model call (set by the host); lets web_fetch extract per a prompt (Claude-style). */
+  summarize?: (instruction: string, content: string) => Promise<string>;
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
 
@@ -91,6 +93,21 @@ export class ToolRegistry {
     if (name === "bash" && !this.allowDangerousBash) {
       const danger = dangerousCommand(String(args.command ?? ""));
       if (danger) return `Refused: '${danger}' is blocked as catastrophic. Set "allow_dangerous_bash": true in config to override.`;
+    }
+
+    // web_fetch: fetch the page, then (if a prompt + summarizer are available) extract just what
+    // was asked via a single model pass — instead of dumping the whole page into context.
+    if (name === "web_fetch") {
+      const raw = await toolWebFetch(this.root, args);
+      const prompt = String(args.prompt ?? "");
+      if (prompt && this.summarize && !raw.startsWith("Error")) {
+        try {
+          return await this.summarize(prompt, raw);
+        } catch {
+          return raw;
+        }
+      }
+      return raw;
     }
 
     // task: delegate to an isolated sub-agent (its own context + tools); return its result.
@@ -386,7 +403,7 @@ const DISPATCH: Record<string, (root: string, args: Record<string, any>) => stri
   edit: toolEdit,
   bash: toolBash,
   web_search: toolWebSearch,
-  web_fetch: toolWebFetch,
+  // web_fetch is handled in execute() (it may post-process with a summarizer).
 };
 
 const WEB_HEADERS = { "User-Agent": "Mozilla/5.0 (NekoCore)" };
