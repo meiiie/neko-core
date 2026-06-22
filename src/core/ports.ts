@@ -29,4 +29,7 @@ export interface McpTools {
   toolSchemas(): any[];
   has(name: string): boolean;
   call(name: string, args: Record<string, any>): Promise<string>;
+  /** MCP prompts (optional): list templates and render one to text. */
+  promptList?(): { server: string; name: string }[];
+  getPrompt?(server: string, name: string, args: Record<string, any>): Promise<string>;
 }

@@ -47,6 +47,8 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/remember", desc: "save a note to NEKO.md (or start a line with #)" },
   { name: "/recipe", desc: "run a saved recipe (/recipe <name> [args])" },
   { name: "/recipes", desc: "list saved recipes" },
+  { name: "/mcp", desc: "list connected MCP tools + prompts" },
+  { name: "/mcp-prompt", desc: "run an MCP prompt (/mcp-prompt <server> <name> [k=v])" },
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
 ];
@@ -244,6 +246,30 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     }
     case "/memory":
       return addLine("info", renderContext() + "\n(edit NEKO.md for project memory, ~/.neko-core/NEKO.md for global; or use /remember / #note)");
+    case "/mcp": {
+      const mcp = ctx.registry.mcp;
+      if (!mcp) return addLine("info", "no MCP servers connected (configure mcp_servers / neko mcp add)");
+      const tools = mcp.toolSchemas().map((s: any) => s.function.name);
+      const prompts = mcp.promptList?.() ?? [];
+      return addLine(
+        "info",
+        `MCP tools: ${tools.join(", ") || "(none)"}\nMCP prompts: ${prompts.map((p) => `${p.server}:${p.name}`).join(", ") || "(none)"}`,
+      );
+    }
+    case "/mcp-prompt": {
+      const [, server, name, ...rest] = input.split(/\s+/);
+      const mcp = ctx.registry.mcp;
+      if (!server || !name) return addLine("info", "usage: /mcp-prompt <server> <name> [key=val ...]  ·  /mcp to list");
+      if (!mcp?.getPrompt) return addLine("info", "no MCP prompts available");
+      const promptArgs: Record<string, string> = {};
+      for (const kv of rest) {
+        const i = kv.indexOf("=");
+        if (i > 0) promptArgs[kv.slice(0, i)] = kv.slice(i + 1);
+      }
+      addLine("info", `running MCP prompt ${server}:${name}`);
+      ctx.runText(await mcp.getPrompt(server, name, promptArgs));
+      return;
+    }
     case "/recipes":
       return addLine("info", "recipes: " + (listRecipes().map((r) => r.name).join(", ") || "(none in ~/.neko-core/recipes)"));
     case "/recipe": {

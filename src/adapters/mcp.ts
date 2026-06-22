@@ -45,6 +45,7 @@ export class McpHub {
   private specs: any[] = [];
   private meta = new Map<string, { type: string; tools: number; resources: number; prompts: number }>();
   private resourceTools = new Map<string, string>(); // synthetic mcp__<server>__read_resource -> server
+  private prompts = new Map<string, string[]>(); // server -> prompt names
 
   async connectAll(servers: Record<string, McpServerConfig>): Promise<void> {
     for (const [name, cfg] of Object.entries(servers ?? {})) {
@@ -82,9 +83,10 @@ export class McpHub {
             },
           });
         }
-        let prompts = 0;
-        try { prompts = ((await client.listPrompts()) as any).prompts?.length ?? 0; } catch { /* unsupported */ }
-        this.meta.set(name, { type, tools, resources: resourceList.length, prompts });
+        let promptNames: string[] = [];
+        try { promptNames = (((await client.listPrompts()) as any).prompts ?? []).map((p: any) => p.name); } catch { /* unsupported */ }
+        if (promptNames.length) this.prompts.set(name, promptNames);
+        this.meta.set(name, { type, tools, resources: resourceList.length, prompts: promptNames.length });
         this.clients.set(name, client);
       } catch (error) {
         console.error(`neko: MCP server '${name}' failed to connect: ${(error as Error).message}`);
@@ -133,6 +135,25 @@ export class McpHub {
     return parts.join("\n") || "(no content)";
   }
 
+  promptList(): { server: string; name: string }[] {
+    const out: { server: string; name: string }[] = [];
+    for (const [server, names] of this.prompts) for (const name of names) out.push({ server, name });
+    return out;
+  }
+
+  async getPrompt(server: string, name: string, args: Record<string, any>): Promise<string> {
+    const client = this.clients.get(server);
+    if (!client) return `Error: no MCP server '${server}'`;
+    try {
+      const res: any = await client.getPrompt({ name, arguments: args });
+      return (res.messages ?? [])
+        .map((m: any) => (typeof m.content === "string" ? m.content : m.content?.text ?? JSON.stringify(m.content)))
+        .join("\n\n");
+    } catch (error) {
+      return `Error getting prompt: ${(error as Error).message}`;
+    }
+  }
+
   async close(): Promise<void> {
     for (const client of this.clients.values()) {
       try {
@@ -162,5 +183,10 @@ export function renderMcp(hub: McpHub): string {
   }
   lines.push("Tools:");
   for (const name of hub.toolNames()) lines.push(`  ${name}`);
+  const prompts = hub.promptList();
+  if (prompts.length) {
+    lines.push("Prompts:");
+    for (const p of prompts) lines.push(`  ${p.server}:${p.name}`);
+  }
   return lines.join("\n");
 }
