@@ -46,7 +46,15 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
   (`bin/neko.ts`). Typecheck clean; reads the SAME `~/.neko-core/config.json` as Python, so
   the live NVIDIA profile works unchanged; key shows `set`, never the value.
 
-### Next (TS)
-- Step 2: tools + registry + policy. Step 3: agent loop + `neko run`. Step 4: chat REPL (Ink).
-  Step 5: `bun test`. Step 6: `bun build --compile` binary + re-point the `neko` command from
-  the pipx(Python) install to the TS binary; refresh README/CLAUDE.md for the TS stack.
+- **Runtime confirmed: Bun + TS + Ink** (owner). Rust reserved for later (Codex path) —
+  Ink TUI + MCP Tier-1 are TS-native, Bun already gives single-binary + fast startup.
+- Studying the local `claude-code` (claude-js) tree as a **clean-room reference** for
+  UX/UI + logic only (never copy). Goal defined in `ROADMAP.md`.
+- **A1 done** — tools + registry + policy in TS (`src/tools.ts`, `src/tool-runtime.ts`,
+  `src/registry.ts`); `neko tools/agents/commands/capabilities/policy` wired. Tool runtime
+  verified (read/search/write/bash, path-escape refused, denial-as-string, safe-under-deny).
+
+### Next (TS) — see ROADMAP.md
+- A2 agent loop + `neko run`; A3 real tool set (edit/glob/ls); A4 streaming + cost.
+- B1 Ink chat REPL; B2 slash commands; B3 permission modes. C1-C3 project context / resume / MCP.
+- D1 tests; D2 single binary + re-point `neko`; D3 rename to Neko Code + merge.

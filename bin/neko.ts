@@ -8,6 +8,19 @@
 import { loadConfig, type NekoConfig } from "../src/config.ts";
 import { collectChecks, render } from "../src/doctor.ts";
 import { initProject, initUser } from "../src/project.ts";
+import {
+  collectCapabilities,
+  evaluatePolicy,
+  listAgents,
+  listCommands,
+  renderAgentDetail,
+  renderAgents,
+  renderCapabilities,
+  renderCommands,
+  renderPolicyReport,
+  resolveAgent,
+} from "../src/registry.ts";
+import { listTools, renderToolDetail, renderTools, resolveTool } from "../src/tools.ts";
 import { VERSION } from "../src/version.ts";
 
 interface Args {
@@ -45,6 +58,11 @@ Commands:
   profiles      list the named runtime profiles
   init-user     scaffold ~/.neko-core/config.json
   init          scaffold ./.neko-core/config.json (project-local)
+  tools         list tool contracts (safe/gated)
+  agents        list agent roles and boundaries
+  commands      list the CLI command surface
+  capabilities  list runtime/CLI capabilities
+  policy        audit the safe/gated permission boundary
   chat          interactive agentic session (REPL)        [coming next]
   run <task>    one-shot: run a single instruction         [coming next]
 
@@ -82,6 +100,34 @@ function cmdProfiles(args: Args): number {
   return 0;
 }
 
+function cmdTools(args: Args): number {
+  const name = args.positionals[0];
+  console.log(name ? renderToolDetail(resolveTool(name)) : renderTools(listTools()));
+  return 0;
+}
+
+function cmdAgents(args: Args): number {
+  const name = args.positionals[0];
+  console.log(name ? renderAgentDetail(resolveAgent(name)) : renderAgents(listAgents()));
+  return 0;
+}
+
+function cmdCommands(): number {
+  console.log(renderCommands(listCommands()));
+  return 0;
+}
+
+function cmdCapabilities(args: Args): number {
+  console.log(renderCapabilities(collectCapabilities(load(args))));
+  return 0;
+}
+
+function cmdPolicy(args: Args): number {
+  const report = evaluatePolicy(load(args));
+  console.log(renderPolicyReport(report));
+  return report.verdict === "fail" ? 1 : 0;
+}
+
 function cmdChat(args: Args): number {
   const cfg = load(args);
   console.log(`neko chat - provider=${cfg.provider} model=${cfg.model || "(unset)"} profile=${cfg.profile ?? "none"}`);
@@ -117,6 +163,11 @@ function main(): number {
       case "profiles": return cmdProfiles(args);
       case "init-user": console.log(initUser(args.force)); return 0;
       case "init": console.log(initProject(args.force)); return 0;
+      case "tools": return cmdTools(args);
+      case "agents": return cmdAgents(args);
+      case "commands": return cmdCommands();
+      case "capabilities": return cmdCapabilities(args);
+      case "policy": return cmdPolicy(args);
       case "chat": return cmdChat(args);
       case "run": return cmdRun(args);
       default:
