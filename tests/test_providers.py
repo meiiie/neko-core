@@ -49,6 +49,17 @@ def test_parse_tool_calls():
     assert out["tool_calls"][0] == {"id": "c1", "name": "read_file", "arguments": {"path": "a.txt"}}
 
 
+def test_parse_error_object_raises_clear_runtimeerror():
+    data = {"error": {"message": "model not found"}}
+    with pytest.raises(RuntimeError, match="model not found"):
+        _parse_openai_message(data)
+
+
+def test_parse_missing_choices_raises_runtimeerror():
+    with pytest.raises(RuntimeError):
+        _parse_openai_message({"object": "error"})
+
+
 def test_parse_bad_arguments_kept_raw():
     data = {
         "choices": [

@@ -155,8 +155,18 @@ class LocalLlamaProvider:
 
 
 def _parse_openai_message(data: dict) -> dict:
-    """Normalize an OpenAI-style response into the provider contract."""
-    message = data["choices"][0]["message"]
+    """Normalize an OpenAI-style response into the provider contract.
+
+    Raise a clear RuntimeError (not a raw KeyError) when the endpoint returns an
+    error object or an unexpected shape — so the CLI shows the API's message and the
+    chat REPL can stay alive instead of crashing.
+    """
+    choices = data.get("choices") if isinstance(data, dict) else None
+    if not choices:
+        error = data.get("error") if isinstance(data, dict) else None
+        detail = error.get("message") if isinstance(error, dict) else (error or data)
+        raise RuntimeError(f"unexpected API response: {str(detail)[:300]}")
+    message = choices[0].get("message") or {}
     tool_calls = []
     for call in message.get("tool_calls") or []:
         fn = call.get("function", {})

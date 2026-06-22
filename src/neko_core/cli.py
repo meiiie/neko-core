@@ -154,10 +154,21 @@ def _cmd_chat(args) -> int:
         f"profile={cfg.profile or 'none'} approval={approval}"
     )
     print("Type a task. Commands: /reset (new conversation), /exit. Ctrl-C / Ctrl-D to quit.")
+    if not sys.stdin.isatty():
+        print("(note: stdin is not an interactive terminal; pipe a task or use `neko run \"<task>\"`)")
+    turns = 0
     while True:
         try:
             user = input("\nneko> ").strip()
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
+            if turns == 0:
+                print(
+                    "\n(no input received - stdin reached end-of-file. Run `neko chat` in an "
+                    "interactive terminal, or use `neko run \"<task>\"`.)"
+                )
+            print()
+            return 0
+        except KeyboardInterrupt:
             print()
             return 0
         if not user:
@@ -168,9 +179,12 @@ def _cmd_chat(args) -> int:
             agent.messages = []
             print("(conversation reset)")
             continue
+        turns += 1
         try:
             print(f"\n{agent.run(user)}")
-        except (ValueError, RuntimeError) as error:
+        except KeyboardInterrupt:
+            print("\n(interrupted - back to prompt)")
+        except Exception as error:  # keep the REPL alive on ANY turn failure
             print(f"neko: error: {error}", file=sys.stderr)
 
 
