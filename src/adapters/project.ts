@@ -13,12 +13,22 @@ const userConfigPath = () => join(homedir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME
 
 function readUserConfig(): Record<string, any> {
   const path = userConfigPath();
+  if (!existsSync(path)) return {};
+  // A parse failure must NOT silently become {} here: every caller writes this back, so that would
+  // overwrite a (recoverable) malformed config and destroy the user's api_key / mcp_servers. Throw
+  // instead, so the writer aborts and the file is left intact for the user to fix.
   try {
-    if (existsSync(path)) return JSON.parse(readFileSync(path, "utf-8"));
-  } catch {
-    /* start fresh */
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch (e) {
+    throw new Error(`~/.neko-core/config.json has invalid JSON - fix it before changing settings (${(e as Error).message})`);
   }
-  return {};
+}
+
+/** Read-modify-write that aborts (never overwrites) if the existing config is malformed. */
+function updateUserConfig(mutate: (data: Record<string, any>) => void): void {
+  const data = readUserConfig();
+  mutate(data);
+  writeUserConfig(data);
 }
 
 function writeUserConfig(data: Record<string, any>): void {
@@ -29,65 +39,65 @@ function writeUserConfig(data: Record<string, any>): void {
 
 /** Save the API key to ~/.neko-core/config.json (used by /login). */
 export function setApiKey(key: string): string {
-  const data = readUserConfig();
-  data.api_key = key.trim();
-  writeUserConfig(data);
-  return "API key saved to ~/.neko-core/config.json";
+  try {
+    updateUserConfig((d) => { d.api_key = key.trim(); });
+    return "API key saved to ~/.neko-core/config.json";
+  } catch (e) {
+    return (e as Error).message;
+  }
 }
 
 /** Persist the chosen model so the NEXT session (and new folders) start with it too. */
 export function setModel(model: string): void {
-  const data = readUserConfig();
-  data.model = model.trim();
-  writeUserConfig(data);
+  updateUserConfig((d) => { d.model = model.trim(); });
 }
 
 /** Persist the chosen reasoning effort across sessions ("" / off clears it). */
 export function setEffort(effort: string): void {
-  const data = readUserConfig();
-  if (effort && effort !== "off") data.reasoning_effort = effort;
-  else delete data.reasoning_effort;
-  writeUserConfig(data);
+  updateUserConfig((d) => {
+    if (effort && effort !== "off") d.reasoning_effort = effort;
+    else delete d.reasoning_effort;
+  });
 }
 
 /** Remove the saved API key (used by /logout). Env keys are cleared by the caller. */
 export function clearApiKey(): string {
-  const data = readUserConfig();
-  if (!data.api_key) return "no saved API key in ~/.neko-core/config.json";
-  delete data.api_key;
-  writeUserConfig(data);
-  return "API key removed from ~/.neko-core/config.json";
+  try {
+    const data = readUserConfig();
+    if (!data.api_key) return "no saved API key in ~/.neko-core/config.json";
+    delete data.api_key;
+    writeUserConfig(data);
+    return "API key removed from ~/.neko-core/config.json";
+  } catch (e) {
+    return (e as Error).message;
+  }
 }
 
 /** Add/replace an MCP server in the user config (~/.neko-core/config.json). */
 export function addMcpServer(name: string, server: Record<string, any>): string {
-  const path = userConfigPath();
-  let data: Record<string, any> = {};
   try {
-    if (existsSync(path)) data = JSON.parse(readFileSync(path, "utf-8"));
-  } catch {
-    /* start fresh */
+    updateUserConfig((d) => {
+      d.mcp_servers = d.mcp_servers ?? {};
+      d.mcp_servers[name] = server;
+    });
+    return `Added MCP server '${name}' to ${userConfigPath()}. Run \`neko mcp\` to verify.`;
+  } catch (e) {
+    return (e as Error).message;
   }
-  data.mcp_servers = data.mcp_servers ?? {};
-  data.mcp_servers[name] = server;
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(data, null, 2) + "\n", "utf-8");
-  return `Added MCP server '${name}' to ${path}. Run \`neko mcp\` to verify.`;
 }
 
 /** Remove an MCP server from the user config. */
 export function removeMcpServer(name: string): string {
-  const path = userConfigPath();
-  if (!existsSync(path)) return "no user config (~/.neko-core/config.json)";
+  if (!existsSync(userConfigPath())) return "no user config (~/.neko-core/config.json)";
   let data: Record<string, any>;
   try {
-    data = JSON.parse(readFileSync(path, "utf-8"));
-  } catch {
-    return "could not read user config";
+    data = readUserConfig();
+  } catch (e) {
+    return (e as Error).message;
   }
   if (!data.mcp_servers?.[name]) return `no MCP server '${name}'`;
   delete data.mcp_servers[name];
-  writeFileSync(path, JSON.stringify(data, null, 2) + "\n", "utf-8");
+  writeUserConfig(data);
   return `Removed MCP server '${name}'`;
 }
 
