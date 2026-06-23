@@ -5,7 +5,7 @@ import { VERSION } from "../shared/version.ts";
 import { Logo } from "./logo.tsx";
 import { Markdown } from "./markdown.tsx";
 
-export type LineKind = "welcome" | "user" | "assistant" | "tool_call" | "tool_result" | "info";
+export type LineKind = "welcome" | "user" | "assistant" | "tool_call" | "tool_result" | "tool_result_full" | "info";
 export interface Line {
   id: number;
   kind: LineKind;
@@ -42,21 +42,34 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
     case "tool_call":
       return <Text><Text color="green">● </Text>{line.text}</Text>;
     case "tool_result": {
-      const lines = line.text.split("\n");
+      const all = line.text.split("\n");
+      const COLLAPSE = 8;
+      const hidden = all.length - COLLAPSE;
+      const shown = hidden > 0 ? all.slice(0, COLLAPSE) : all;
       return (
         <Box flexDirection="column">
-          {lines.map((l, i) => {
+          {shown.map((l, i) => {
             const add = l.startsWith("+");
             const del = l.startsWith("-");
+            const disp = l.length > 200 ? l.slice(0, 200) + "…" : l;
             return (
               <Text key={i} color={add ? "green" : del ? "red" : undefined} dimColor={!add && !del}>
-                {(i === 0 ? "  ⎿ " : "     ") + l}
+                {(i === 0 ? "  ⎿ " : "     ") + disp}
               </Text>
             );
           })}
+          {hidden > 0 ? <Text dimColor>{`     … +${hidden} lines (ctrl+o to expand)`}</Text> : null}
         </Box>
       );
     }
+    case "tool_result_full":
+      return (
+        <Box flexDirection="column">
+          {line.text.split("\n").map((l, i) => (
+            <Text key={i} dimColor>{(i === 0 ? "  ⎿ " : "     ") + l}</Text>
+          ))}
+        </Box>
+      );
     default:
       return <Text color="gray">{line.text}</Text>;
   }

@@ -24,7 +24,7 @@ export const HELP = [
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
   "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line.",
-  "Keys: Shift+Tab cycle mode · Up/Down history · Alt+V paste image · Ctrl+L clear screen.",
+  "Keys: Shift+Tab cycle mode · Up/Down history · Alt+V paste image · Ctrl+O expand last output · Ctrl+L clear screen.",
   "Esc: clear input (idle) or interrupt a running turn. Ctrl+C: clear input, then again to quit.",
 ].join("\n");
 

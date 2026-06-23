@@ -164,11 +164,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           flushStream();
           addLine("tool_call", describeToolCall(data.name, data.arguments));
         } else if (kind === "tool_result") {
-          const obs = String(data.observation)
-            .split("\n")
-            .slice(0, 8)
-            .map((l) => (l.length > 200 ? l.slice(0, 200) + "…" : l))
-            .join("\n");
+          // Store the full result (capped); TranscriptLine collapses the display, Ctrl+O expands it.
+          const obs = String(data.observation).split("\n").slice(0, 400).join("\n");
           addLine("tool_result", obs);
           setTodos([...registryRef.current!.todos]); // reflect todo_write changes
         } else if (kind === "step") {
@@ -235,6 +232,12 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       return;
     }
     if (approval || overlay) return; // let their own handlers own the rest of the keys
+    if (key.ctrl && char === "o") { // expand: re-print the most recent collapsed tool output in full
+      const last = [...lines].reverse().find((l) => l.kind === "tool_result" && l.text.split("\n").length > 8);
+      if (last) addLine("tool_result_full", last.text);
+      else addLine("info", "nothing to expand");
+      return;
+    }
     if (key.meta && char === "v") return pasteImage();
     if (key.ctrl && char === "u") return setInput("");
     if (key.ctrl && char === "l") return setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
