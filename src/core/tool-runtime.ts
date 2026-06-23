@@ -147,6 +147,11 @@ export class ToolRegistry {
       if (decision === "prompt" && !(await this.prompt(name, args))) {
         return `Denied by user: ${name}`;
       }
+      // Auto-approved + adversarial review on: vet the call (MCP tools are a prime injection vector).
+      if (decision === "allow" && this.checkAction) {
+        const v = await this.checkAction(name, args);
+        if (!v.ok) return `Blocked by adversarial check: ${v.reason || "looks unsafe"}`;
+      }
       try {
         return await this.mcp.call(name, args);
       } catch (error) {

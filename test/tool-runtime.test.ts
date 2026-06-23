@@ -117,6 +117,19 @@ test("adversarial check blocks an auto-approved mutating tool when it flags unsa
   expect(await reg.execute("write_file", { path: "y.txt", content: "ok" })).toContain("Wrote");
 });
 
+test("adversarial check also vets auto-approved MCP tools", async () => {
+  const { reg } = makeReg("auto", () => true);
+  reg.mcp = {
+    toolSchemas: () => [],
+    has: (n: string) => n === "mcp__x__do",
+    call: async () => "ran mcp",
+  };
+  reg.checkAction = async () => ({ ok: false, reason: "injection" });
+  expect(await reg.execute("mcp__x__do", {})).toContain("Blocked by adversarial check");
+  reg.checkAction = async () => ({ ok: true, reason: "SAFE" });
+  expect(await reg.execute("mcp__x__do", {})).toBe("ran mcp");
+});
+
 test("catastrophic bash is refused even in auto mode (seatbelt)", async () => {
   const { reg } = makeReg("auto", () => true); // auto would otherwise auto-approve bash
   expect(await reg.execute("bash", { command: "rm -rf /" })).toContain("Refused"); // never runs
