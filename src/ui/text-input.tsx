@@ -38,6 +38,16 @@ export function TextInput(props: {
     if (key.rightArrow) { cur.current = Math.min(chars.length, cur.current + 1); return rerender(); }
     if (key.ctrl && input === "a") { cur.current = 0; return rerender(); } // home
     if (key.ctrl && input === "e") { cur.current = chars.length; return rerender(); } // end
+    if (key.ctrl && input === "w") { // delete the word before the cursor
+      let j = cur.current;
+      while (j > 0 && chars[j - 1] === " ") j--;
+      while (j > 0 && chars[j - 1] !== " ") j--;
+      chars.splice(j, cur.current - j);
+      cur.current = j;
+      ref.current = chars.join("");
+      onChange(ref.current);
+      return;
+    }
     if (key.backspace || key.delete) {
       if (cur.current > 0) {
         chars.splice(cur.current - 1, 1);

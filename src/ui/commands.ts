@@ -20,10 +20,12 @@ import type { Line, LineKind } from "./transcript.tsx";
 export const HELP = [
   "Commands:",
   "  /help /cost /model /profiles /tools /skill(s) /init /clear /compact /reset /exit",
-  "  /goal <text> · /loop <n> <task> · /sessions · /resume · /effort · /context",
-  "Input: Up/Down history; end a line with \\ to continue (multiline); @path adds a file to context.",
-  "Shift+Tab: cycle permission mode (default -> accept-edits -> plan -> auto).",
-  "Esc: interrupt a running turn (or close a picker). Ctrl-C twice: quit.",
+  "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /effort · /context",
+  "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /login · /logout",
+  "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
+  "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line.",
+  "Keys: Shift+Tab cycle mode · Up/Down history · Alt+V paste image · Ctrl+L clear screen.",
+  "Esc: clear input (idle) or interrupt a running turn. Ctrl+C: clear input, then again to quit.",
 ].join("\n");
 
 export const SLASH: { name: string; desc: string }[] = [
