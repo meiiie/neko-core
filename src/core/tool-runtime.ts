@@ -57,6 +57,10 @@ export class ToolRegistry {
   /** Opt-in OS sandbox for bash (fs read-only except cwd). Set from config by the host. */
   sandboxBash = false;
   sandboxAllowNetwork = false;
+  /** Web-search backend (set from config). searxng_url -> self-hosted metasearch; else Tavily (env
+   * key) -> agent search; else DuckDuckGo (free, zero-config). `searchBackend` forces one. */
+  searxngUrl = "";
+  searchBackend = ""; // "" = auto-pick by what's configured
   /** Bash commands moved to the background (Ctrl+B); output keeps accumulating. Read via /bashes. */
   backgrounds: { id: string; command: string; output: string; done: boolean; code?: number | null }[] = [];
   private bgCounter = 0;
@@ -190,6 +194,11 @@ export class ToolRegistry {
     if (name === "bash" && !this.allowDangerousBash) {
       const danger = dangerousCommand(String(args.command ?? ""));
       if (danger) return `Refused: '${danger}' is blocked as catastrophic. Set "allow_dangerous_bash": true in config to override.`;
+    }
+
+    // web_search: pick the best configured backend (SearXNG > Tavily > DuckDuckGo).
+    if (name === "web_search") {
+      return webSearch(String(args.query ?? ""), { searxngUrl: this.searxngUrl, backend: this.searchBackend });
     }
 
     // web_fetch: fetch the page, then (if a prompt + summarizer are available) extract just what
@@ -567,11 +576,54 @@ const DISPATCH: Record<string, (root: string, args: Record<string, any>) => stri
   edit: toolEdit,
   multi_edit: toolMultiEdit,
   // bash is handled by ToolRegistry.runBash (needs instance state for Ctrl+B backgrounding).
-  web_search: toolWebSearch,
-  // web_fetch is handled in execute() (it may post-process with a summarizer).
+  // web_search + web_fetch are handled in execute() (need backend config / a summarizer).
 };
 
 const WEB_HEADERS = { "User-Agent": "Mozilla/5.0 (NekoCore)" };
+
+interface SearchResult { title: string; url: string; snippet: string; }
+
+const fmtResults = (rs: SearchResult[]): string =>
+  rs.length ? rs.slice(0, 8).map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ""}`).join("\n") : "No results.";
+
+/** web_search dispatcher: SearXNG (self-hosted metasearch) > Tavily (agent search, env key) >
+ * DuckDuckGo (free, zero-config). Falls back to DuckDuckGo if the chosen backend errors. */
+async function webSearch(query: string, opts: { searxngUrl: string; backend: string }): Promise<string> {
+  if (!query.trim()) return "Error: missing required argument: query";
+  const tavilyKey = process.env.TAVILY_API_KEY || "";
+  const pick = opts.backend || (opts.searxngUrl ? "searxng" : tavilyKey ? "tavily" : "duckduckgo");
+  try {
+    if (pick === "searxng" && opts.searxngUrl) return fmtResults(await searxngSearch(query, opts.searxngUrl));
+    if (pick === "tavily" && tavilyKey) return fmtResults(await tavilySearch(query, tavilyKey));
+  } catch (error) {
+    // fall through to the free engine below, noting why
+    const note = `(${pick} failed: ${(error as Error).message}; using DuckDuckGo)\n`;
+    try { return note + fmtResults(await ddgSearch(query)); } catch (e) { return `Error: web search failed: ${(e as Error).message}`; }
+  }
+  try { return fmtResults(await ddgSearch(query)); } catch (e) { return `Error: web search failed: ${(e as Error).message}`; }
+}
+
+/** SearXNG JSON API (self-hosted metasearch; aggregates Google/Bing/DDG/... — free, unlimited). */
+async function searxngSearch(query: string, base: string): Promise<SearchResult[]> {
+  const url = base.replace(/\/+$/, "") + "/search?format=json&q=" + encodeURIComponent(query);
+  const res = await fetch(url, { headers: WEB_HEADERS, signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data: any = await res.json();
+  return (data.results ?? []).map((r: any) => ({ title: String(r.title ?? ""), url: String(r.url ?? ""), snippet: stripTags(String(r.content ?? "")) }));
+}
+
+/** Tavily — search built for agents (ranked, clean snippets). Key via TAVILY_API_KEY (never stored). */
+async function tavilySearch(query: string, key: string): Promise<SearchResult[]> {
+  const res = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...WEB_HEADERS },
+    body: JSON.stringify({ api_key: key, query, max_results: 8 }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data: any = await res.json();
+  return (data.results ?? []).map((r: any) => ({ title: String(r.title ?? ""), url: String(r.url ?? ""), snippet: stripTags(String(r.content ?? "")) }));
+}
 
 function stripTags(s: string): string {
   return s
@@ -584,29 +636,21 @@ function stripTags(s: string): string {
     .trim();
 }
 
-/** Search the web via DuckDuckGo's HTML endpoint (no API key). Best-effort markup parse. */
-async function toolWebSearch(_root: string, args: Record<string, any>): Promise<string> {
-  const query = requireArg(args, "query");
-  let html: string;
-  try {
-    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query), {
-      headers: WEB_HEADERS,
-      signal: AbortSignal.timeout(15000),
-    });
-    html = await res.text();
-  } catch (error) {
-    return `Error: web search failed: ${(error as Error).message}`;
-  }
+/** DuckDuckGo HTML endpoint (no API key, zero-config). Best-effort markup parse. */
+async function ddgSearch(query: string): Promise<SearchResult[]> {
+  const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query), {
+    headers: WEB_HEADERS,
+    signal: AbortSignal.timeout(15000),
+  });
+  const html = await res.text();
   const titles = [...html.matchAll(/class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
   const snippets = [...html.matchAll(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g)].map((m) => stripTags(m[1]));
-  const out: string[] = [];
-  for (let i = 0; i < titles.length && i < 6; i++) {
-    let url = titles[i][1];
+  return titles.slice(0, 8).map((t, i) => {
+    let url = t[1];
     const uddg = /[?&]uddg=([^&]+)/.exec(url);
     if (uddg) url = decodeURIComponent(uddg[1]);
-    out.push(`${i + 1}. ${stripTags(titles[i][2])}\n   ${url}${snippets[i] ? `\n   ${snippets[i]}` : ""}`);
-  }
-  return out.length ? out.join("\n") : "No results.";
+    return { title: stripTags(t[2]), url, snippet: snippets[i] ?? "" };
+  });
 }
 
 /** Fetch a URL and return readable text (scripts/styles/tags stripped). */
@@ -623,7 +667,16 @@ async function toolWebFetch(_root: string, args: Record<string, any>): Promise<s
     return `Error: fetch failed: ${(error as Error).message}`;
   }
   if (contentType.includes("html")) {
-    text = stripTags(text.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ""));
+    text = stripTags(readableHtml(text));
   }
   return text.length > MAX_READ_CHARS ? text.slice(0, MAX_READ_CHARS) + "\n... (truncated)" : text;
+}
+
+/** Light readability: drop scripts/chrome, prefer the main article so the model reads content,
+ * not nav/ads/footers. Heuristic (no DOM) — good enough for an LLM, cheap enough for a CLI. */
+function readableHtml(html: string): string {
+  const h = html.replace(/<(script|style|noscript|svg|template|head)\b[\s\S]*?<\/\1>/gi, "");
+  const main = /<(article|main)\b[^>]*>([\s\S]*?)<\/\1>/i.exec(h); // prefer the main content region
+  if (main && main[2].length > 200) return main[2];
+  return h.replace(/<(nav|header|footer|aside|form)\b[\s\S]*?<\/\1>/gi, " "); // else drop obvious chrome
 }

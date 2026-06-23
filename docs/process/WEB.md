@@ -3,12 +3,34 @@
 Two layers, simplest first.
 
 ## 1. Built-in (no setup, no API key)
-- **`web_search`** — DuckDuckGo HTML; returns top results (title · url · snippet).
-- **`web_fetch`** — fetches a URL, strips HTML to text. With a `prompt`, a single fast model pass
-  extracts just what you asked (Claude-style) instead of dumping the whole page.
+- **`web_search`** — pluggable backend, auto-picked: **SearXNG** (if `searxng_url` set) → **Tavily**
+  (if `TAVILY_API_KEY` set) → **DuckDuckGo** (default, zero-config). Falls back to DuckDuckGo if the
+  chosen backend errors. `neko doctor` shows the active one.
+- **`web_fetch`** — fetches a URL, runs a light readability pass (keeps `<article>`/`<main>`, drops
+  nav/footer/scripts) and strips to text. With a `prompt`, a single fast model pass extracts just
+  what you asked (Claude-style) instead of dumping the whole page.
 
 Good for: docs, articles, plain pages, quick lookups. Limits: no JavaScript rendering, and
-bot-protected / logged-in sites will block a plain fetch.
+bot-protected / logged-in sites will block a plain fetch (see §2 for those).
+
+### Upgrading web_search to SOTA — free, self-hosted (SearXNG)
+[browser-search](https://github.com/Johell1NS/browser-search)'s core idea is **SearXNG** — a
+metasearch engine that aggregates Google/Bing/DDG/… into one JSON API, free and unlimited. Run one
+(Docker) and point Neko at it — no key, no per-source rate limits:
+
+```json
+// ~/.neko-core/config.json
+{ "searxng_url": "http://localhost:8080" }
+```
+
+Or use **Tavily** (search built for agents) with a free key, env-only (never stored):
+`export TAVILY_API_KEY=tvly-...`. Force a backend with `"search_backend": "searxng" | "tavily" |
+"duckduckgo"`.
+
+The rest of browser-search (Camofox / CloakBrowser for anti-bot, JS-heavy pages) is **browser
+automation** — that's §2's job. browser-search ships as a `SKILL.md`, so you can drop it straight
+into `~/.neko-core/skills/` (Neko loads `.md` skills) and run its Docker tools yourself; Neko needs
+no code for that.
 
 ## 2. Real browser (JS pages, bot-protected, logged-in) — via MCP
 For "real-world" web like ds4-agent (a real, non-headless Chrome that looks human and runs JS),

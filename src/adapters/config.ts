@@ -99,6 +99,11 @@ export class NekoConfig {
   /** Allow network inside the sandbox (default false = block egress). */
   get sandboxNetwork(): boolean { return Boolean(this.data.sandbox_network); }
 
+  /** Self-hosted SearXNG base URL for web_search metasearch ("" = off). */
+  get searxngUrl(): string { return String(this.data.searxng_url ?? ""); }
+  /** Force a web_search backend ("searxng" | "tavily" | "duckduckgo"); "" = auto-pick. */
+  get searchBackend(): string { return String(this.data.search_backend ?? ""); }
+
   /** When true, auto-approved mutating tools get a model "is this safe?" review first. */
   get adversarialCheck(): boolean { return Boolean(this.data.adversarial_check); }
 

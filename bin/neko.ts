@@ -117,9 +117,13 @@ async function buildAgent(
   registry.allowDangerousBash = cfg.allowDangerousBash;
   registry.sandboxBash = cfg.sandbox;
   registry.sandboxAllowNetwork = cfg.sandboxNetwork;
+  registry.searxngUrl = cfg.searxngUrl;
+  registry.searchBackend = cfg.searchBackend;
   registry.subagent = async (prompt, type) => {
     const subReg = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
+    subReg.searxngUrl = cfg.searxngUrl;
+    subReg.searchBackend = cfg.searchBackend;
     const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT;
     return await new Agent({ provider: getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps }).run(prompt);
   };

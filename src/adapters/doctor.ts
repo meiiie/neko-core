@@ -33,6 +33,11 @@ export function collectChecks(config: NekoConfig): Check[] {
           : `on (${detectSandbox()})`
         : `off (available: ${detectSandbox()})`,
     },
+    {
+      status: "ok",
+      name: "web_search",
+      detail: config.searchBackend || (config.searxngUrl ? "searxng" : process.env.TAVILY_API_KEY ? "tavily" : "duckduckgo (set searxng_url or TAVILY_API_KEY for SOTA)"),
+    },
     { status: config.baseUrl ? "ok" : "warn", name: "base_url", detail: config.baseUrl || "(unset)" },
     {
       status: config.apiKey || config.isLocalEndpoint ? "ok" : "warn",
