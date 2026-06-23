@@ -5,9 +5,13 @@
  * back-to-back. With a captured `value` prop those two events both read the STALE value
  * (no re-render between them) -> "mọi" became "moọi". Fix: keep the live value in a ref and
  * mutate it synchronously, so each keypress sees the latest. NFC + codepoint-safe.
+ *
+ * Cursor: a codepoint index (also a ref, for the same IME reason). Left/Right move it, Ctrl+A/
+ * Ctrl+E jump to start/end, and typing/backspace act at the cursor. Cursor-only moves bump a
+ * tick to force a re-render (the value didn't change, so onChange wouldn't).
  */
 import { Text, useInput } from "ink";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
 export function TextInput(props: {
   value: string;
@@ -17,38 +21,59 @@ export function TextInput(props: {
   mask?: boolean; // render bullets (for secrets like /login)
 }) {
   const { value, onChange, onSubmit, placeholder, mask } = props;
-  const shown = mask ? "•".repeat([...value].length) : value;
   const ref = useRef(value);
-  ref.current = value; // resync to the prop each render (parent owns it between keystrokes)
+  const cur = useRef([...value].length);
+  // External change (history nav, clear): adopt it and put the cursor at the end.
+  if (value !== ref.current) {
+    ref.current = value;
+    cur.current = [...value].length;
+  }
+  const [, setTick] = useState(0);
+  const rerender = () => setTick((t) => t + 1);
 
   useInput((input, key) => {
     if (key.return) return onSubmit(ref.current);
+    const chars = [...ref.current];
+    if (key.leftArrow) { cur.current = Math.max(0, cur.current - 1); return rerender(); }
+    if (key.rightArrow) { cur.current = Math.min(chars.length, cur.current + 1); return rerender(); }
+    if (key.ctrl && input === "a") { cur.current = 0; return rerender(); } // home
+    if (key.ctrl && input === "e") { cur.current = chars.length; return rerender(); } // end
     if (key.backspace || key.delete) {
-      ref.current = [...ref.current].slice(0, -1).join("");
-      return onChange(ref.current);
+      if (cur.current > 0) {
+        chars.splice(cur.current - 1, 1);
+        cur.current -= 1;
+        ref.current = chars.join("");
+        onChange(ref.current);
+      }
+      return;
     }
     if (input && !key.ctrl && !key.meta && !key.tab && !key.escape &&
         !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow) {
-      ref.current = (ref.current + input).normalize("NFC");
+      const ins = [...input];
+      chars.splice(cur.current, 0, ...ins);
+      cur.current += ins.length;
+      ref.current = chars.join("").normalize("NFC");
       onChange(ref.current);
     }
   });
 
-  // Caret sits at the end of the typed value; when empty it sits at the START, before the
-  // dim placeholder (so the cursor block isn't pushed to the end of the hint text).
+  // Render the caret (inverse block) at the cursor; when empty it sits before the placeholder.
+  const cps = [...value];
+  const shown = mask ? cps.map(() => "•") : cps;
+  if (cps.length === 0) {
+    return (
+      <Text>
+        <Text inverse> </Text>
+        <Text dimColor>{placeholder ?? ""}</Text>
+      </Text>
+    );
+  }
+  const i = Math.min(cur.current, cps.length);
   return (
     <Text>
-      {value ? (
-        <>
-          {shown}
-          <Text inverse> </Text>
-        </>
-      ) : (
-        <>
-          <Text inverse> </Text>
-          <Text dimColor>{placeholder ?? ""}</Text>
-        </>
-      )}
+      {shown.slice(0, i).join("")}
+      <Text inverse>{shown[i] ?? " "}</Text>
+      {shown.slice(i + 1).join("")}
     </Text>
   );
 }
