@@ -88,10 +88,14 @@ export class OpenAICompatProvider implements Provider {
         const body = await res.text().catch(() => "");
         if (RETRYABLE_STATUS.has(res.status) && attempt < this.cfg.maxRetries) {
           lastError = new Error(`HTTP ${res.status}`);
-          await sleep(this.retryDelayMs(attempt), signal);
+          // Honor Retry-After (429/503) when the server sends it; else exponential backoff.
+          const ra = res.headers.get("retry-after");
+          const waitMs = ra ? this.retryAfterMs(ra) : this.retryDelayMs(attempt);
+          await sleep(waitMs, signal);
           continue;
         }
-        throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
+        const hint = res.status === 429 ? " (rate limited - slow down or raise max_retries)" : "";
+        throw new Error(`HTTP ${res.status}${hint}: ${body.slice(0, 300)}`);
       } catch (error) {
         // A user interrupt must propagate at once - it is not a retryable failure.
         // (Distinguish it from the per-attempt timeout, which leaves `signal` un-aborted.)
@@ -109,6 +113,16 @@ export class OpenAICompatProvider implements Provider {
   private retryDelayMs(attempt: number): number {
     const seconds = Math.min(this.cfg.retryMaxDelaySeconds, this.cfg.retryBaseDelaySeconds * 2 ** attempt);
     return seconds * 1000;
+  }
+
+  /** Parse a Retry-After header (delta-seconds or HTTP date), capped at retryMaxDelaySeconds. */
+  private retryAfterMs(header: string): number {
+    const capMs = this.cfg.retryMaxDelaySeconds * 1000;
+    const secs = Number(header);
+    if (!Number.isNaN(secs)) return Math.min(Math.max(0, secs * 1000), capMs);
+    const when = Date.parse(header);
+    if (!Number.isNaN(when)) return Math.min(Math.max(0, when - Date.now()), capMs);
+    return Math.min(1000, capMs);
   }
 }
 
