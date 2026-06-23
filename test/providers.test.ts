@@ -11,6 +11,44 @@ test("factory returns OpenAICompatProvider", () => {
   expect(getProvider(cfg("openai_compat"))).toBeInstanceOf(OpenAICompatProvider);
 });
 
+function netCfg(offlineSeconds: number) {
+  // localhost -> no api key required; tiny delays so the test is fast.
+  return new NekoConfig(
+    { provider: "openai_compat", base_url: "http://localhost:9/v1", model: "m", retry_base_delay_seconds: 0.01, retry_max_delay_seconds: 0.01, offline_retry_seconds: offlineSeconds },
+    null, {}, "",
+  );
+}
+
+test("network-resilient: keeps retrying a dropped connection, then resumes", async () => {
+  const orig = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    if (calls < 3) throw new TypeError("fetch failed"); // offline twice (laptop asleep)
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: {} }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as any;
+  try {
+    const res = await new OpenAICompatProvider(netCfg(5)).complete([{ role: "user", content: "hi" }]);
+    expect(res.content).toBe("ok");
+    expect(calls).toBe(3); // failed twice while offline, succeeded on reconnect
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("network-resilient: gives up once the offline budget is exhausted", async () => {
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async () => { throw new TypeError("fetch failed"); }) as any; // never comes back
+  try {
+    await new OpenAICompatProvider(netCfg(0)).complete([{ role: "user", content: "hi" }]);
+    throw new Error("should have thrown");
+  } catch (e) {
+    expect(String((e as Error).message)).toContain("completion failed");
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 test("factory unknown provider throws", () => {
   expect(() => getProvider(cfg("nope"))).toThrow();
 });

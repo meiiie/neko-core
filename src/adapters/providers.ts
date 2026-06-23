@@ -68,50 +68,49 @@ export class OpenAICompatProvider implements Provider {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (key) headers.Authorization = `Bearer ${key}`; // local servers need no auth
 
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= this.cfg.maxRetries; attempt++) {
-      // User interrupt (Esc): stop immediately, never retry.
-      if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
+    // HTTP errors (429/5xx) retry a bounded number of times. A LOST CONNECTION (fetch throws -
+    // offline, laptop asleep) is different: keep waiting for the network to return, up to the
+    // offline budget, so the turn resumes "as if it never paused" when you reopen with Wi-Fi.
+    const offlineDeadline = Date.now() + this.cfg.offlineRetrySeconds * 1000;
+    let httpAttempt = 0;
+    let netAttempt = 0;
+    for (;;) {
+      if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError"); // Esc: stop now
+      let res: Response;
       try {
         const timeout = AbortSignal.timeout(this.cfg.timeoutSeconds * 1000);
-        const res = await fetch(url, {
+        res = await fetch(url, {
           method: "POST",
           headers,
           body: JSON.stringify(payload),
           signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
         });
-        if (res.ok) {
-          // Once the response is OK we commit to it (no mid-stream retry).
-          return stream ? await parseStream(res, onDelta!) : parseOpenAIMessage(await res.json());
-        }
-
-        const body = await res.text().catch(() => "");
-        if (RETRYABLE_STATUS.has(res.status) && attempt < this.cfg.maxRetries) {
-          lastError = new Error(`HTTP ${res.status}`);
-          // Honor Retry-After (429/503) when the server sends it; else exponential backoff.
-          const ra = res.headers.get("retry-after");
-          const waitMs = ra ? this.retryAfterMs(ra) : this.retryDelayMs(attempt);
-          // Surface the wait so a 429 backoff doesn't look like a silent hang.
-          const label = res.status === 429 ? "rate limited" : `HTTP ${res.status}`;
-          onDelta?.(`(${label} - retrying in ${Math.round(waitMs / 1000)}s, attempt ${attempt + 1}/${this.cfg.maxRetries})`, "reasoning");
-          await sleep(waitMs, signal);
-          continue;
-        }
-        const hint = res.status === 429 ? " (rate limited - slow down or raise max_retries)" : "";
-        throw new Error(`HTTP ${res.status}${hint}: ${body.slice(0, 300)}`);
       } catch (error) {
-        // A user interrupt must propagate at once - it is not a retryable failure.
-        // (Distinguish it from the per-attempt timeout, which leaves `signal` un-aborted.)
-        if (signal?.aborted) throw error;
-        lastError = error;
-        // Retry network/timeout errors; do NOT retry our own deliberate HTTP errors.
-        const isHttp = error instanceof Error && error.message.startsWith("HTTP ");
-        if (isHttp || attempt >= this.cfg.maxRetries) break;
-        onDelta?.(`(network/timeout - retrying, attempt ${attempt + 1}/${this.cfg.maxRetries})`, "reasoning");
-        await sleep(this.retryDelayMs(attempt), signal);
+        if (signal?.aborted) throw error; // user interrupt, not a network blip
+        if (Date.now() >= offlineDeadline) throw new Error(`openai_compat completion failed: ${messageOf(error)}`);
+        netAttempt++;
+        onDelta?.("(offline - waiting for the network to come back, retrying...)", "reasoning");
+        await sleep(this.retryDelayMs(Math.min(netAttempt - 1, 4)), signal);
+        continue;
       }
+      if (res.ok) {
+        // Once the response is OK we commit to it (no mid-stream retry).
+        return stream ? await parseStream(res, onDelta!) : parseOpenAIMessage(await res.json());
+      }
+      const body = await res.text().catch(() => "");
+      if (RETRYABLE_STATUS.has(res.status) && httpAttempt < this.cfg.maxRetries) {
+        httpAttempt++;
+        // Honor Retry-After (429/503) when the server sends it; else exponential backoff.
+        const ra = res.headers.get("retry-after");
+        const waitMs = ra ? this.retryAfterMs(ra) : this.retryDelayMs(httpAttempt - 1);
+        const label = res.status === 429 ? "rate limited" : `HTTP ${res.status}`;
+        onDelta?.(`(${label} - retrying in ${Math.round(waitMs / 1000)}s, attempt ${httpAttempt}/${this.cfg.maxRetries})`, "reasoning");
+        await sleep(waitMs, signal);
+        continue;
+      }
+      const hint = res.status === 429 ? " (rate limited - slow down or raise max_retries)" : "";
+      throw new Error(`HTTP ${res.status}${hint}: ${body.slice(0, 300)}`);
     }
-    throw new Error(`openai_compat completion failed: ${messageOf(lastError)}`);
   }
 
   private retryDelayMs(attempt: number): number {

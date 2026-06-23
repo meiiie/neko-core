@@ -38,6 +38,7 @@ export const DEFAULTS: Record<string, any> = {
   max_retries: 4,
   retry_base_delay_seconds: 1.5,
   retry_max_delay_seconds: 30,
+  offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
   approval: "prompt", // prompt | auto (--yolo flips gated tools to auto)
   mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
   active_profile: null,
@@ -111,6 +112,8 @@ export class NekoConfig {
   get maxRetries(): number { return Math.max(0, Number(this.data.max_retries ?? 4)); }
   get retryBaseDelaySeconds(): number { return Number(this.data.retry_base_delay_seconds ?? 1.5); }
   get retryMaxDelaySeconds(): number { return Number(this.data.retry_max_delay_seconds ?? 30); }
+  /** How long to keep retrying a dropped connection (offline / laptop asleep) before giving up. */
+  get offlineRetrySeconds(): number { return Math.max(0, Number(this.data.offline_retry_seconds ?? 1800)); }
 
   get approval(): "prompt" | "auto" {
     const v = String(this.data.approval ?? "prompt").trim().toLowerCase();
