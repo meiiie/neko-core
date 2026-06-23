@@ -249,6 +249,7 @@ export class Agent {
         this.onDelta,
         signal,
       );
+      this.cost.add(wrap.usage); // the wrap-up call costs tokens too — count it
       const final = wrap.content?.trim() || `[stopped: reached max_steps=${this.maxSteps}]`;
       this.messages.push({ role: "assistant", content: final });
       this.emit("final", final);
