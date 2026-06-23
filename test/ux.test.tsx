@@ -6,6 +6,10 @@ import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { ChatApp } from "../src/ui/chat.tsx";
 import { ThinkingLine } from "../src/ui/thinking-line.tsx";
 import { ApprovalBox } from "../src/ui/approval-box.tsx";
+import { TranscriptLine } from "../src/ui/transcript.tsx";
+import { NekoConfig } from "../src/adapters/config.ts";
+
+const CFG = new NekoConfig({}, null, {}, "");
 
 const tick = (ms = 90) => new Promise((r) => setTimeout(r, ms));
 const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
@@ -102,6 +106,35 @@ test("/help lists the command set", async () => {
   c.stdin.write("\r");
   await tick(60);
   expect(strip(c.frames.join("\n"))).toContain("Commands:");
+  c.unmount();
+});
+
+test("error lines render with a visible marker (not a dim info line)", () => {
+  const f = strip(render(<TranscriptLine line={{ id: 1, kind: "error", text: "HTTP 500" }} cfg={CFG} />).lastFrame());
+  expect(f).toContain("✗ HTTP 500");
+});
+
+test("expanded tool result keeps the diff +/- lines", () => {
+  const diff = "Edited f.ts  (+1 -1)\n-    3  old();\n+    3  new();";
+  const f = strip(render(<TranscriptLine line={{ id: 1, kind: "tool_result_full", text: diff }} cfg={CFG} />).lastFrame());
+  expect(f).toContain("- ");
+  expect(f).toContain("old();");
+  expect(f).toContain("new();");
+});
+
+test("write_file approval previews size + a '+N more lines' hint", () => {
+  const content = Array.from({ length: 20 }, (_, i) => `line${i}`).join("\n");
+  const f = strip(render(<ApprovalBox approval={{ toolName: "write_file", args: { path: "x.html", content }, resolve: () => {} }} />).lastFrame());
+  expect(f).toContain("20 lines");
+  expect(f).toContain("+12 more lines");
+});
+
+test("typing '/' caps the command list with a '+N more' hint", async () => {
+  const c = render(<ChatApp yolo provider={new Echo()} />);
+  await tick();
+  c.stdin.write("/");
+  await tick(50);
+  expect(strip(c.lastFrame())).toMatch(/\+\d+ more/);
   c.unmount();
 });
 

@@ -5,7 +5,7 @@ import { VERSION } from "../shared/version.ts";
 import { Logo } from "./logo.tsx";
 import { Markdown } from "./markdown.tsx";
 
-export type LineKind = "welcome" | "user" | "assistant" | "tool_call" | "tool_result" | "tool_result_full" | "info";
+export type LineKind = "welcome" | "user" | "assistant" | "tool_call" | "tool_result" | "tool_result_full" | "info" | "error";
 export interface Line {
   id: number;
   kind: LineKind;
@@ -50,6 +50,7 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
         return <Text dimColor>{`  ⎿ ${line.summary}${more ? " (ctrl+o to expand)" : ""}`}</Text>;
       }
       const all = line.text.split("\n");
+      const isError = /^(Error|Blocked|Denied|Refused)/.test(all[0] ?? "");
       const COLLAPSE = 8;
       const hidden = all.length - COLLAPSE;
       const shown = hidden > 0 ? all.slice(0, COLLAPSE) : all;
@@ -60,7 +61,7 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
             const del = l.startsWith("-");
             const disp = l.length > 200 ? l.slice(0, 200) + "…" : l;
             return (
-              <Text key={i} color={add ? "green" : del ? "red" : undefined} dimColor={!add && !del}>
+              <Text key={i} color={isError ? "red" : add ? "green" : del ? "red" : undefined} dimColor={!isError && !add && !del}>
                 {(i === 0 ? "  ⎿ " : "     ") + disp}
               </Text>
             );
@@ -83,6 +84,8 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
           })}
         </Box>
       );
+    case "error":
+      return <Text color="red">{"✗ "}{line.text}</Text>;
     default:
       return <Text color="gray">{line.text}</Text>;
   }

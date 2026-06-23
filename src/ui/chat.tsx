@@ -494,7 +494,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       else {
         if (!streamed && result.trim()) addLine("assistant", result); // non-streaming provider
         const secs = Math.round((Date.now() - turnStart) / 1000);
-        addLine("info", `${verbRef.current} for ${fmtDuration(secs)} · ${fmtTok(agentRef.current!.cost.lastCompletion)} out`);
+        // Whole-turn tokens (matches what the spinner counted up to), not just the last step's output.
+        const turnTokens = Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current);
+        addLine("info", `${verbRef.current} for ${fmtDuration(secs)} · ${fmtTok(turnTokens)} tokens`);
       }
       // Auto-compact when the context window is nearly full (Claude-style).
       if (result !== "[interrupted]" && agentRef.current!.cost.lastPrompt > 0.85 * cfg.contextWindow) {
@@ -503,7 +505,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
     } catch (error) {
       flushStream();
-      addLine("info", `error: ${error instanceof Error ? error.message : error}`);
+      addLine("error", `${error instanceof Error ? error.message : error}`);
     } finally {
       setBusy(false);
       controllerRef.current = null;
