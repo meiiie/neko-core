@@ -48,20 +48,25 @@ export class McpHub {
   private meta = new Map<string, { type: string; tools: number; resources: number; prompts: number }>();
   private resourceTools = new Map<string, string>(); // synthetic mcp__<server>__read_resource -> server
   private prompts = new Map<string, string[]>(); // server -> prompt names
+  private configs = new Map<string, McpServerConfig>(); // kept so a dead server can be reconnected
+
+  /** Create + connect one client (oauth or transport). Shared by connectAll and reconnect. */
+  private async makeClient(name: string, cfg: McpServerConfig): Promise<{ client: Client; type: string }> {
+    const client = new Client({ name: "neko-code", version: VERSION }, { capabilities: {} });
+    if (cfg.oauth && cfg.url) {
+      await connectWithOAuth(client, name, cfg.url);
+      return { client, type: "http+oauth" };
+    }
+    const made = makeTransport(cfg);
+    await client.connect(made.transport);
+    return { client, type: made.type };
+  }
 
   async connectAll(servers: Record<string, McpServerConfig>): Promise<void> {
     for (const [name, cfg] of Object.entries(servers ?? {})) {
       try {
-        const client = new Client({ name: "neko-code", version: VERSION }, { capabilities: {} });
-        let type: string;
-        if (cfg.oauth && cfg.url) {
-          await connectWithOAuth(client, name, cfg.url); // interactive browser login if needed
-          type = "http+oauth";
-        } else {
-          const made = makeTransport(cfg);
-          await client.connect(made.transport);
-          type = made.type;
-        }
+        this.configs.set(name, cfg);
+        const { client, type } = await this.makeClient(name, cfg);
         const res: any = await client.listTools();
         let tools = 0;
         for (const tool of res.tools ?? []) {
@@ -138,8 +143,25 @@ export class McpHub {
     }
     const ref = this.toolMap.get(name);
     if (!ref) return `Error: unknown MCP tool ${name}`;
-    const client = this.clients.get(ref.server)!;
-    const res: any = await client.callTool({ name: ref.tool, arguments: args });
+    try {
+      return await this.invoke(ref.server, ref.tool, args);
+    } catch (error) {
+      // The server may have died; reconnect once from its stored config and retry.
+      const cfg = this.configs.get(ref.server);
+      if (!cfg) return `Error: ${(error as Error).message}`;
+      try {
+        const { client } = await this.makeClient(ref.server, cfg);
+        this.clients.set(ref.server, client);
+        return await this.invoke(ref.server, ref.tool, args);
+      } catch (retry) {
+        return `Error: ${ref.server} unavailable (reconnect failed): ${(retry as Error).message}`;
+      }
+    }
+  }
+
+  private async invoke(server: string, tool: string, args: Record<string, any>): Promise<string> {
+    const client = this.clients.get(server)!;
+    const res: any = await client.callTool({ name: tool, arguments: args });
     const parts = (res.content ?? []).map((c: any) => (c?.type === "text" ? c.text : JSON.stringify(c)));
     return parts.join("\n") || "(no content)";
   }
