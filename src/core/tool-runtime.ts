@@ -403,17 +403,15 @@ function toolWriteFile(root: string, args: Record<string, any>): string {
 /** A Claude-style unified diff: context lines (plain), removed (-), added (+) with a header. */
 function editDiff(path: string, origLines: string[], startLine: number, removed: string[], added: string[]): string {
   const ctx = 2;
-  const before = origLines.slice(Math.max(0, startLine - ctx), startLine);
+  const num = (i: number) => String(i + 1).padStart(4); // 1-based line number, right-aligned
+  const out = [`Edited ${path}  (+${added.length} -${removed.length})`];
+  const beforeStart = Math.max(0, startLine - ctx);
+  origLines.slice(beforeStart, startLine).forEach((l, i) => out.push(`  ${num(beforeStart + i)}  ${l}`)); // context
+  removed.slice(0, 16).forEach((l, i) => out.push(`- ${num(startLine + i)}  ${l}`)); // removed (red)
+  added.slice(0, 16).forEach((l, i) => out.push(`+ ${num(startLine + i)}  ${l}`)); // added (green)
   const afterStart = startLine + removed.length;
-  const after = origLines.slice(afterStart, afterStart + ctx);
-  const cap = (arr: string[], sign: string) => arr.slice(0, 16).map((l) => `${sign} ${l}`);
-  return [
-    `Edited ${path}  (+${added.length} -${removed.length})`,
-    ...before.map((l) => `  ${l}`),
-    ...cap(removed, "-"),
-    ...cap(added, "+"),
-    ...after.map((l) => `  ${l}`),
-  ].join("\n");
+  origLines.slice(afterStart, afterStart + ctx).forEach((l, i) => out.push(`  ${num(afterStart + i)}  ${l}`));
+  return out.join("\n");
 }
 
 function toolEdit(root: string, args: Record<string, any>): string {
