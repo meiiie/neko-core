@@ -50,20 +50,32 @@ test("dynamicContext is injected and refreshed each turn (no staleness on model 
   expect(agent.messages.filter((m: any) => m.role === "system" && m.dynamic).length).toBe(1);
 });
 
-test("compact replaces the conversation with [system, summary]", async () => {
+test("compact keeps system + recent turns verbatim and summarizes the older ones", async () => {
   const agent = new Agent({
     provider: new ScriptedProvider([{ content: "SUMMARY HERE", tool_calls: [] }]) as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
   agent.messages = [
     { role: "system", content: "base" },
-    { role: "user", content: "a" },
-    { role: "assistant", content: "b" },
+    { role: "user", content: "OLD1" }, // older than the tail -> summarized
+    { role: "assistant", content: "a1" },
+    { role: "user", content: "OLD2" },
+    { role: "assistant", content: "a2" },
+    { role: "user", content: "m3" },
+    { role: "assistant", content: "a3" },
+    { role: "user", content: "m4" },
+    { role: "assistant", content: "a4" },
+    { role: "user", content: "m5" },
+    { role: "assistant", content: "a5" },
+    { role: "user", content: "RECENT" }, // within the kept tail (KEEP_TAIL=8)
+    { role: "assistant", content: "ra" },
   ];
   await agent.compact();
-  expect(agent.messages.map((m: any) => m.role)).toEqual(["system", "user"]);
-  expect(agent.messages[0].content).toBe("base"); // base system kept
-  expect(agent.messages[1].content).toContain("SUMMARY HERE");
+  const contents = agent.messages.map((m: any) => String(m.content));
+  expect(agent.messages[0].content).toBe("base"); // system kept
+  expect(contents.some((c) => c.includes("SUMMARY HERE"))).toBe(true); // older turns summarized
+  expect(contents).toContain("RECENT"); // recent turn kept verbatim
+  expect(contents).not.toContain("OLD1"); // oldest turn folded into the summary
 });
 
 test("runUntilDone iterates until the model replies DONE, and caps", async () => {

@@ -84,19 +84,29 @@ export class Agent {
 
   /** Summarize the conversation and replace it with the summary, freeing context. */
   async compact(): Promise<string> {
-    const convo = this.messages
-      .filter((m) => m.role !== "system")
+    const sys = this.messages.filter((m) => m.role === "system"); // keep system + dynamic context
+    const convo = this.messages.filter((m) => m.role !== "system");
+
+    // Keep the most recent turns verbatim; only summarize what's older. Snap the boundary back to
+    // a user message so we never orphan a tool result from its assistant tool_call.
+    const KEEP_TAIL = 8;
+    let cut = Math.max(0, convo.length - KEEP_TAIL);
+    while (cut > 0 && convo[cut].role !== "user") cut--;
+    const head = convo.slice(0, cut);
+    const tail = convo.slice(cut);
+    if (!head.length) return ""; // nothing old enough to compact
+
+    const text = head
       .map((m) => `${m.role}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`)
       .join("\n")
-      .slice(0, 16000);
+      .slice(0, 40000);
     const res = await this.provider.complete([
       { role: "system", content: "Summarize the conversation below concisely: the task, key decisions, files changed, and the current state. Be brief." },
-      { role: "user", content: convo },
+      { role: "user", content: text },
     ]);
     this.cost.add(res.usage);
     const summary = res.content ?? "";
-    const sys = this.messages.find((m) => m.role === "system");
-    this.messages = [...(sys ? [sys] : []), { role: "user", content: `[Summary of earlier conversation]\n${summary}` }];
+    this.messages = [...sys, { role: "user", content: `[Summary of earlier conversation]\n${summary}` }, ...tail];
     return summary;
   }
 
