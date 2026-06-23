@@ -123,6 +123,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [step, setStep] = useState(0);
   const [reasoning, setReasoning] = useState(""); // live model thinking (shown while busy, then cleared)
   const reasoningRef = useRef("");
+  const toolStreamRef = useRef(""); // streamed tool-call args this turn (counted, not displayed)
   const turnTokensStartRef = useRef(0); // cost.totalTokens at turn start -> spinner shows this turn only
   const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
@@ -138,6 +139,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     streamRef.current = "";
     setStream("");
     reasoningRef.current = ""; // thinking is transient: it vanishes once the step produces output
+    toolStreamRef.current = "";
     setReasoning("");
   };
 
@@ -200,6 +202,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (kind === "reasoning") {
           reasoningRef.current += t;
           setReasoning(reasoningRef.current);
+          return;
+        }
+        if (kind === "tool") {
+          toolStreamRef.current += t; // counted in the live meter (a big write_file generating), not shown
           return;
         }
         streamRef.current += t;
@@ -567,12 +573,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           <ThinkingLine
             verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}
             elapsed={elapsed}
-            tokens={
-              // Counted tokens from completed steps this turn, PLUS a live estimate of what's
-              // streaming now (~4 chars/token) — so the meter counts up instead of sitting at 0
-              // until the call finishes.
+            tokens={0}
+            // Re-read every 80ms frame: counted tokens from completed steps this turn + a live
+            // ~4-chars/token estimate of whatever is streaming NOW (content, reasoning, or a big
+            // tool-call's args) — so the meter counts up even while a large write_file generates.
+            liveTokens={() =>
               Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current) +
-              Math.ceil((streamRef.current.length + reasoningRef.current.length) / 4)
+              Math.ceil((streamRef.current.length + reasoningRef.current.length + toolStreamRef.current.length) / 4)
             }
             step={step}
             queued={queued}

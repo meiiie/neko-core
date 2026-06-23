@@ -162,6 +162,7 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
   let reasoning = "";
   let usage: Usage | undefined;
   const acc: { id: string; name: string; argString: string }[] = [];
+  const announced = new Set<number>(); // tool calls whose name we've already surfaced
 
   for await (const line of sseLines(res)) {
     if (!line.startsWith("data:")) continue;
@@ -189,8 +190,14 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
       const i = tc.index ?? 0;
       acc[i] ??= { id: "", name: "", argString: "" };
       if (tc.id) acc[i].id = tc.id;
-      if (tc.function?.name) acc[i].name = tc.function.name;
-      if (tc.function?.arguments) acc[i].argString += tc.function.arguments;
+      if (tc.function?.name) {
+        acc[i].name = tc.function.name;
+        if (!announced.has(i)) { announced.add(i); onDelta(`preparing ${tc.function.name}...`, "reasoning"); } // show activity early
+      }
+      if (tc.function?.arguments) {
+        acc[i].argString += tc.function.arguments;
+        onDelta(tc.function.arguments, "tool"); // count a big tool-call's args in the live token meter
+      }
     }
   }
 

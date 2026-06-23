@@ -108,7 +108,7 @@ function printEvent(kind: string, data: any): void {
 async function buildAgent(
   cfg: NekoConfig,
   yolo: boolean,
-  onDelta?: (t: string) => void,
+  onDelta?: (t: string, kind?: string) => void,
 ): Promise<{ agent: Agent; close: () => Promise<void> }> {
   const mode = yolo ? "auto" : cfg.mode;
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny });
@@ -332,7 +332,8 @@ async function cmdRun(args: Args): Promise<number> {
     return 2;
   }
   let streamed = 0;
-  const { agent, close } = await buildAgent(load(args), args.yolo, (t) => {
+  const { agent, close } = await buildAgent(load(args), args.yolo, (t, kind) => {
+    if (kind === "reasoning" || kind === "tool") return; // CLI prints only the final content
     streamed += t.length;
     process.stdout.write(t);
   });
