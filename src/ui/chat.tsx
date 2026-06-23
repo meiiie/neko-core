@@ -30,7 +30,7 @@ import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
 import { latestSession, loadSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
-import { ToolRegistry } from "../core/tool-runtime.ts";
+import { ToolRegistry, todosContextBlock } from "../core/tool-runtime.ts";
 import { describeToolCall } from "../core/tools.ts";
 
 export { ApprovalBox, type Approval }; // re-exported for tests
@@ -195,7 +195,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>
-        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock()]
+        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), todosContextBlock(registryRef.current!.todos)]
           .filter(Boolean)
           .join("\n\n"),
       onDelta: (t, kind) => {

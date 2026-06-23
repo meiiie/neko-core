@@ -540,6 +540,12 @@ function renderTodos(todos: { content: string; status: string }[]): string {
   return "Todos:\n" + todos.map((t) => `${mark(t.status)} ${t.content}`).join("\n");
 }
 
+/** The active todo list as a context block ("" if none) — re-injected each turn so it survives
+ * compaction (structured note-taking: the plan stays in front of the model on long tasks). */
+export function todosContextBlock(todos: { content: string; status: string }[]): string {
+  return todos.length ? `Current plan (todos):\n${renderTodos(todos)}` : "";
+}
+
 function describe(name: string, args: Record<string, any>): string {
   if (name === "write_file") return `write ${args.path ?? "?"}`;
   if (name === "edit") return `edit ${args.path ?? "?"}`;

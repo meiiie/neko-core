@@ -18,7 +18,7 @@ import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setA
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
 import { renderSkills } from "../src/adapters/skills.ts";
-import { ToolRegistry } from "../src/core/tool-runtime.ts";
+import { ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
 import {
   collectCapabilities,
   evaluatePolicy,
@@ -144,7 +144,7 @@ async function buildAgent(
     maxSteps: cfg.maxSteps,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     dynamicContext: () =>
-      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock()]
+      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), todosContextBlock(registry.todos)]
         .filter(Boolean)
         .join("\n\n"),
     onEvent: printEvent,
