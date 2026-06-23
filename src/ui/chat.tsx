@@ -24,6 +24,7 @@ import { loadConfig } from "../adapters/config.ts";
 import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
 import { readClipboardImage } from "../adapters/clipboard.ts";
 import { clearApiKey, setApiKey } from "../adapters/project.ts";
+import { startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
@@ -67,6 +68,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const [cols, setCols] = useState(stdout?.columns ?? 80);
   const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
   const [started, setStarted] = useState(false); // once a turn has run, drop the input placeholder
+  const rcRef = useRef<RemoteControl | null>(null);
+  const [rcOn, setRcOn] = useState(false);
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
   const streamRef = useRef("");
@@ -220,6 +223,9 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     addLine("info", `(resumed ${target.id} - ${target.messages.length} messages; context restored)`);
   };
 
+  // Stop the remote-control server when the app exits.
+  useEffect(() => () => rcRef.current?.stop(), []);
+
   // Re-layout on terminal resize. Ink only clears the screen when the width DECREASES; enlarging
   // re-renders on top of the old frame -> duplicated input box. So on resize we wipe the screen and
   // bump the <Static> key, which makes Ink reset fullStaticOutput and re-emit the transcript fresh.
@@ -356,6 +362,24 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     }
     if (text === "/paste") {
       pasteImage();
+      return;
+    }
+    if (text === "/rc" || text === "/remote-control") {
+      if (rcRef.current) {
+        rcRef.current.stop();
+        rcRef.current = null;
+        setRcOn(false);
+        addLine("info", "remote control off");
+      } else {
+        const rc = startRemoteControl(async (msg) => {
+          if (controllerRef.current) return "(neko is busy - try again when idle)";
+          await handle(msg);
+          return agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content ?? "(no reply)";
+        });
+        rcRef.current = rc;
+        setRcOn(true);
+        addLine("info", `remote control on (local only): ${rc.url}\n  curl -s "${rc.url}/message?token=${rc.token}" -d '{"message":"hi"}'`);
+      }
       return;
     }
     if (text === "/login") {
@@ -559,6 +583,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
               <Text>
                 <Text color={MODE_COLOR[mode]}>{mode}</Text>
                 <Text dimColor> · shift+tab to cycle</Text>
+                {rcOn ? <Text color="magenta"> · /rc active</Text> : null}
               </Text>
               {(() => {
                 const cost = agentRef.current!.cost;
