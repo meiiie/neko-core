@@ -33,7 +33,7 @@ export const DEFAULTS: Record<string, any> = {
   base_url: "https://integrate.api.nvidia.com/v1",
   max_steps: 40,
   temperature: 0,
-  max_tokens: 2048,
+  max_tokens: 8192, // headroom so a large file write isn't truncated mid-tool-call (was 2048)
   timeout_seconds: 120,
   max_retries: 4,
   retry_base_delay_seconds: 1.5,
@@ -80,7 +80,7 @@ export class NekoConfig {
   }
   get maxSteps(): number { return Math.max(1, Number(this.data.max_steps ?? 40)); }
   get temperature(): number { return Number(this.data.temperature ?? 0); }
-  get maxTokens(): number { return Number(this.data.max_tokens ?? 2048); }
+  get maxTokens(): number { return Number(this.data.max_tokens ?? 8192); }
   /** Context window for the ACTIVE model: per-model `model_context[<id>]` wins, else the global
    * `context_window`, else a safe default. Per-model so `/model` switching stays accurate. */
   get contextWindow(): number {

@@ -57,9 +57,9 @@ export class OpenAICompatProvider implements Provider {
       model: this.cfg.model,
       messages,
       temperature: this.cfg.temperature,
-      max_tokens: this.cfg.maxTokens,
       stream,
     };
+    if (this.cfg.maxTokens > 0) payload.max_tokens = this.cfg.maxTokens; // 0 -> omit (model's full budget)
     if (stream) payload.stream_options = { include_usage: true };
     if (tools && tools.length) payload.tools = tools;
     if (this.cfg.effort) payload.reasoning_effort = this.cfg.effort; // only when set via /effort
