@@ -27,6 +27,7 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
             <Text color="#9a9a9a">
               <Text color="white">{(cfg.model || "no model").split("/").pop()}</Text>
               {" · "}{cfg.provider}{" · "}{cfg.profile ?? "no profile"}
+              {cfg.effort ? ` · ${cfg.effort} effort` : ""}
             </Text>
             <Text color="#9a9a9a">{process.cwd()}</Text>
           </Box>

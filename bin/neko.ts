@@ -40,6 +40,7 @@ interface Args {
   force: boolean;
   yolo: boolean;
   resume: boolean;
+  resumeId?: string;
   loop: boolean;
   version: boolean;
   help: boolean;
@@ -54,7 +55,11 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--force") args.force = true;
     else if (a === "--yolo") args.yolo = true;
     else if (a === "--loop") args.loop = true;
-    else if (a === "--resume") args.resume = true;
+    else if (a === "--resume") {
+      args.resume = true;
+      const next = argv[i + 1];
+      if (next && !next.startsWith("-")) args.resumeId = argv[++i]; // `--resume <id>` resumes that session
+    }
     else if (a === "--version" || a === "-v") args.version = true;
     else if (a === "--help" || a === "-h") args.help = true;
     else if (a.startsWith("-")) { /* ignore unknown flags */ }
@@ -175,7 +180,7 @@ Options:
   --profile <name>   named runtime profile (see 'neko profiles')
   --yolo             auto-approve gated tools (bounded autonomy)
   --loop             run "run" as a closed loop: work + self-review until done
-  --resume           (chat) resume the latest session for this directory
+  --resume [id]      (chat) resume a session by id, or the latest for this directory
   --version          print version`;
 
 function cmdConfig(args: Args): number {
@@ -244,7 +249,7 @@ function cmdContext(): number {
 async function cmdChat(args: Args): Promise<number> {
   // Lazy import: keep Ink/React out of the startup path for non-chat commands.
   const { runChat } = await import("../src/ui/chat.tsx");
-  await runChat({ profile: args.profile, yolo: args.yolo, resume: args.resume });
+  await runChat({ profile: args.profile, yolo: args.yolo, resume: args.resume, resumeId: args.resumeId });
   return 0;
 }
 

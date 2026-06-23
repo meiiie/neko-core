@@ -28,7 +28,7 @@ import { startRemoteControl, type RemoteControl } from "../adapters/remote-contr
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
-import { latestSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
+import { latestSession, loadSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
 import { ToolRegistry } from "../core/tool-runtime.ts";
 import { describeToolCall } from "../core/tools.ts";
 
@@ -45,6 +45,8 @@ interface ChatProps {
   profile?: string;
   yolo: boolean;
   resume?: boolean;
+  resumedSession?: Session | null; // resolved by runChat (by id or latest)
+  sessionId?: string;
   mcpHub?: McpHub;
   provider?: Provider; // injected in tests; production uses getProvider(cfg)
 }
@@ -62,7 +64,7 @@ function resultSummary(name: string | undefined, obs: string): string | undefine
   }
 }
 
-export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider }: ChatProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [cols, setCols] = useState(stdout?.columns ?? 80);
@@ -81,8 +83,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const controllerRef = useRef<AbortController | null>(null);
   const verbRef = useRef(VERBS[0]); // playful "thinking" verb, repicked each turn
   const startRef = useRef(0);
-  const resumedRef = useRef<Session | null>(resume ? latestSession(process.cwd()) : null);
-  const sessionIdRef = useRef(resumedRef.current?.id ?? newSessionId());
+  const resumedRef = useRef<Session | null>(resumedSession ?? (resume ? latestSession(process.cwd()) : null));
+  const sessionIdRef = useRef(sessionId ?? resumedRef.current?.id ?? newSessionId());
   const createdAtRef = useRef(resumedRef.current?.createdAt ?? new Date().toISOString());
 
   const [lines, setLines] = useState<Line[]>(() => {
@@ -605,19 +607,25 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   );
 }
 
-export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean }): Promise<void> {
+export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean; resumeId?: string }): Promise<void> {
   if (!process.stdin.isTTY) {
     console.error('neko needs an interactive terminal (TTY) for the session. Use `neko run "<task>"` for one-shot.');
     return;
   }
+  const resumed = opts.resumeId ? loadSession(opts.resumeId) : opts.resume ? latestSession(process.cwd()) : null;
+  if (opts.resumeId && !resumed) console.error(`neko: no session '${opts.resumeId}' - starting fresh.`);
+  const id = resumed?.id ?? newSessionId();
   const cfg = loadConfig({ profile: opts.profile });
   const hub = await buildMcpHub(cfg.mcpServers);
-  const app = render(<ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} mcpHub={hub} />, {
-    exitOnCtrlC: false, // we require a double Ctrl-C
-  });
+  const app = render(
+    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} />,
+    { exitOnCtrlC: false }, // we require a double Ctrl-C
+  );
   try {
     await app.waitUntilExit();
   } finally {
     await hub.close();
+    // Claude-style: tell the user how to pick this exact session back up.
+    console.log(`\nResume this session with:\n  neko --resume ${id}\n`);
   }
 }
