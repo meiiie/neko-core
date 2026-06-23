@@ -49,6 +49,16 @@ export class McpHub {
   private resourceTools = new Map<string, string>(); // synthetic mcp__<server>__read_resource -> server
   private prompts = new Map<string, string[]>(); // server -> prompt names
   private configs = new Map<string, McpServerConfig>(); // kept so a dead server can be reconnected
+  constructor(private filter: { allow?: string[]; deny?: string[] } = {}) {}
+
+  /** Tool passes the allow/deny filters (patterns match server / tool / "server__tool" / "*"). */
+  private allowed(server: string, tool: string): boolean {
+    const m = (p: string) => p === "*" || p === server || p === tool || p === `${server}__${tool}` || p === `mcp__${server}__${tool}`;
+    const allow = this.filter.allow ?? [];
+    const deny = this.filter.deny ?? [];
+    if (allow.length && !allow.some(m)) return false;
+    return !deny.some(m);
+  }
 
   /** Create + connect one client (oauth or transport). Shared by connectAll and reconnect. */
   private async makeClient(name: string, cfg: McpServerConfig): Promise<{ client: Client; type: string }> {
@@ -70,6 +80,7 @@ export class McpHub {
         const res: any = await client.listTools();
         let tools = 0;
         for (const tool of res.tools ?? []) {
+          if (!this.allowed(name, tool.name)) continue; // mcp_allow/mcp_deny filter
           const prefixed = `mcp__${name}__${tool.name}`;
           this.toolMap.set(prefixed, { server: name, tool: tool.name });
           this.specs.push({
@@ -197,8 +208,11 @@ export class McpHub {
   }
 }
 
-export async function buildMcpHub(servers: Record<string, McpServerConfig>): Promise<McpHub> {
-  const hub = new McpHub();
+export async function buildMcpHub(
+  servers: Record<string, McpServerConfig>,
+  filter: { allow?: string[]; deny?: string[] } = {},
+): Promise<McpHub> {
+  const hub = new McpHub(filter);
   await hub.connectAll(servers);
   return hub;
 }

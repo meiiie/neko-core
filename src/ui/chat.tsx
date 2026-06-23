@@ -616,7 +616,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   if (opts.resumeId && !resumed) console.error(`neko: no session '${opts.resumeId}' - starting fresh.`);
   const id = resumed?.id ?? newSessionId();
   const cfg = loadConfig({ profile: opts.profile });
-  const hub = await buildMcpHub(cfg.mcpServers);
+  const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny });
   const app = render(
     <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} />,
     { exitOnCtrlC: false }, // we require a double Ctrl-C

@@ -96,6 +96,11 @@ export class NekoConfig {
   /** When true, auto-approved mutating tools get a model "is this safe?" review first. */
   get adversarialCheck(): boolean { return Boolean(this.data.adversarial_check); }
 
+  /** Optional MCP tool filters: if mcp_allow is set, only those load; mcp_deny always excludes.
+   * Patterns match a server name, a bare tool name, "server__tool", or "*". */
+  get mcpAllow(): string[] { return Array.isArray(this.data.mcp_allow) ? this.data.mcp_allow.map(String) : []; }
+  get mcpDeny(): string[] { return Array.isArray(this.data.mcp_deny) ? this.data.mcp_deny.map(String) : []; }
+
   /** Shell hooks run around tool calls (opt-in). `pre_tool_use` can block (non-zero exit). */
   get hooks(): { preToolUse?: string; postToolUse?: string } {
     const h = this.data.hooks;
@@ -169,6 +174,13 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
   if (selected) merged = mergeDeep(merged, profiles[selected]);
   for (const overlay of overlays) merged = mergeDeep(merged, overlay);
 
+  // `.mcp.json` (Claude-style project MCP file): merge its `mcpServers` map. ./.mcp.json (project)
+  // wins over ~/.mcp.json, both layered onto config's `mcp_servers`.
+  if (!opts.path) {
+    const fromMcpJson = { ...readMcpJson(join(homedir(), ".mcp.json")), ...readMcpJson(join(process.cwd(), ".mcp.json")) };
+    if (Object.keys(fromMcpJson).length) merged.mcp_servers = { ...(merged.mcp_servers ?? {}), ...fromMcpJson };
+  }
+
   // Pull the file-provided key out before building the printable dict (never printed).
   const apiKeyFromFile = String(merged.api_key ?? "");
   delete merged.api_key;
@@ -204,6 +216,18 @@ function readOverlay(path: string): Record<string, any> {
     throw new Error(`Config ${path} must be a JSON object`);
   }
   return parsed as Record<string, any>;
+}
+
+/** Read a Claude-style `.mcp.json` and return its `mcpServers` map ({} if absent/invalid). */
+function readMcpJson(path: string): Record<string, any> {
+  if (!existsSync(path)) return {};
+  try {
+    const data = JSON.parse(readFileSync(path, "utf-8"));
+    const servers = data?.mcpServers ?? data?.mcp_servers;
+    return servers && typeof servers === "object" ? servers : {};
+  } catch {
+    return {};
+  }
 }
 
 function mergeDeep(base: Record<string, any>, overlay: Record<string, any>): Record<string, any> {

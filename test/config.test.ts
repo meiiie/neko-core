@@ -24,6 +24,13 @@ test("isLocalEndpoint detects local model servers (no key needed)", () => {
   expect(loadConfig({ path: tmpConfig({ base_url: "https://integrate.api.nvidia.com/v1" }) }).isLocalEndpoint).toBe(false);
 });
 
+test("mcp_allow / mcp_deny parse to string arrays", () => {
+  const cfg = loadConfig({ path: tmpConfig({ mcp_allow: ["fs"], mcp_deny: ["fs__delete", "danger"] }) });
+  expect(cfg.mcpAllow).toEqual(["fs"]);
+  expect(cfg.mcpDeny).toEqual(["fs__delete", "danger"]);
+  expect(loadConfig({ path: tmpConfig({}) }).mcpAllow).toEqual([]); // absent -> empty
+});
+
 test("defaults when overlay missing", () => {
   const cfg = loadConfig({ path: join(tmpdir(), "neko-missing-xyz.json") });
   expect(cfg.provider).toBe("openai_compat");

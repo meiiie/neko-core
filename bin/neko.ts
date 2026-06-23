@@ -110,7 +110,7 @@ async function buildAgent(
   onDelta?: (t: string) => void,
 ): Promise<{ agent: Agent; close: () => Promise<void> }> {
   const mode = yolo ? "auto" : cfg.mode;
-  const hub = await buildMcpHub(cfg.mcpServers);
+  const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny });
   const registry = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
   registry.hooks = cfg.hooks;
   registry.allowDangerousBash = cfg.allowDangerousBash;
