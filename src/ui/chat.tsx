@@ -567,7 +567,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           <ThinkingLine
             verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}
             elapsed={elapsed}
-            tokens={Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current)}
+            tokens={
+              // Counted tokens from completed steps this turn, PLUS a live estimate of what's
+              // streaming now (~4 chars/token) — so the meter counts up instead of sitting at 0
+              // until the call finishes.
+              Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current) +
+              Math.ceil((streamRef.current.length + reasoningRef.current.length) / 4)
+            }
             step={step}
             queued={queued}
             effort={cfg.effort}
