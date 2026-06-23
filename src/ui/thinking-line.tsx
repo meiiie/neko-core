@@ -17,8 +17,8 @@ const FRAMES = ["·", "✢", "*", "✶", "✻", "✽", "✻", "✶", "*", "✢"]
 
 /** A pulsing star (fixed-width, no text shift) + a verb with a shimmer band sweeping across it,
  * then dim meta in parens. Self-animated (own 80ms clock; unmounts when idle). */
-export function ThinkingLine(props: { verb: string; elapsed: number; tokens: number; step: number; queued: number }) {
-  const { verb, elapsed, tokens, step, queued } = props;
+export function ThinkingLine(props: { verb: string; elapsed: number; tokens: number; step: number; queued: number; effort?: string }) {
+  const { verb, elapsed, tokens, step, queued, effort } = props;
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setFrame((f) => (f + 1) % 100000), 80);
@@ -31,6 +31,7 @@ export function ThinkingLine(props: { verb: string; elapsed: number; tokens: num
   const star = FRAMES[Math.floor(frame / 2) % FRAMES.length];
   const meta =
     `${elapsed}s` +
+    (effort ? ` · ${effort} effort` : "") +
     (step > 1 ? ` · step ${step}` : "") +
     ` · ${fmtTok(tokens)} tok` +
     (queued > 0 ? ` · ${queued} queued` : "") +

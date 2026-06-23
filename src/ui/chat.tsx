@@ -369,7 +369,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     const imgs = pastedRef.current; // consume any staged pasted images
     pastedRef.current = [];
     setPastedCount(0);
-    addLine("user", (loopGoal ? `/auto ${loopGoal}` : text) + (imgs.length ? `  [${imgs.length} image]` : ""));
+    addLine("user", loopGoal ? `/auto ${loopGoal}` : text);
+    if (imgs.length) addLine("info", `  ⎿ ${imgs.length} image${imgs.length > 1 ? "s" : ""} attached`);
     verbRef.current = VERBS[Math.floor(Math.random() * VERBS.length)];
     setBusy(true);
     const controller = new AbortController();
@@ -460,6 +461,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
             tokens={agentRef.current!.cost.totalTokens}
             step={step}
             queued={queued}
+            effort={cfg.effort}
           />
         </Box>
       ) : null}
