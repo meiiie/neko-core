@@ -577,7 +577,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     <Box flexDirection="column">
       <Static key={resizeKey} items={lines}>{(line) => <TranscriptLine key={line.id} line={line} cfg={cfg} />}</Static>
 
-      {stream ? <Markdown text={stream} /> : null}
+      {/* Same margins as the committed assistant line (transcript.tsx) so the text doesn't jump a row
+          when streaming finishes and flushStream moves it into <Static>. */}
+      {stream ? (
+        <Box flexDirection="column" marginTop={1} marginBottom={1}>
+          <Markdown text={stream} />
+        </Box>
+      ) : null}
 
       {todos.length ? (
         <Box flexDirection="column" marginTop={1}>
