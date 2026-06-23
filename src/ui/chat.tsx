@@ -65,6 +65,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [cols, setCols] = useState(stdout?.columns ?? 80);
+  const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
   const streamRef = useRef("");
@@ -218,10 +219,16 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     addLine("info", `(resumed ${target.id} - ${target.messages.length} messages; context restored)`);
   };
 
-  // Re-layout on terminal resize (otherwise dividers/widths break immediately on zoom).
+  // Re-layout on terminal resize. Ink only clears the screen when the width DECREASES; enlarging
+  // re-renders on top of the old frame -> duplicated input box. So on resize we wipe the screen and
+  // bump the <Static> key, which makes Ink reset fullStaticOutput and re-emit the transcript fresh.
   useEffect(() => {
     if (!stdout) return;
-    const onResize = () => setCols(stdout.columns ?? 80);
+    const onResize = () => {
+      setCols(stdout.columns ?? 80);
+      setResizeKey((k) => k + 1);
+      stdout.write("\x1b[2J\x1b[3J\x1b[H"); // clear screen + scrollback + home
+    };
     stdout.on("resize", onResize);
     return () => void stdout.off("resize", onResize);
   }, [stdout]);
@@ -466,7 +473,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
 
   return (
     <Box flexDirection="column">
-      <Static items={lines}>{(line) => <TranscriptLine key={line.id} line={line} cfg={cfg} />}</Static>
+      <Static key={resizeKey} items={lines}>{(line) => <TranscriptLine key={line.id} line={line} cfg={cfg} />}</Static>
 
       {stream ? <Markdown text={stream} /> : null}
 
