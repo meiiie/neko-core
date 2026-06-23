@@ -48,6 +48,19 @@ interface ChatProps {
   provider?: Provider; // injected in tests; production uses getProvider(cfg)
 }
 
+/** A 1-line collapse summary for read-type tool results (Claude-style); full stays under Ctrl+O. */
+function resultSummary(name: string | undefined, obs: string): string | undefined {
+  if (/^(Error|Blocked|Denied)/.test(obs)) return undefined; // show errors in full
+  const n = obs.split("\n").filter((l) => l.trim()).length;
+  switch (name) {
+    case "read_file": return `Read ${n} line${n === 1 ? "" : "s"}`;
+    case "search": return `Found ${n} match${n === 1 ? "" : "es"}`;
+    case "glob": return `${n} file${n === 1 ? "" : "s"}`;
+    case "ls": return `${n} item${n === 1 ? "" : "s"}`;
+    default: return undefined; // edit/write diffs, bash output, web_* shown as-is
+  }
+}
+
 export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -92,8 +105,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const pastedRef = useRef<string[]>([]); // staged image data: URLs for the next turn
   const [pastedCount, setPastedCount] = useState(0);
 
-  const addLine = (kind: LineKind, text: string) =>
-    setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
+  const addLine = (kind: LineKind, text: string, summary?: string) =>
+    setLines((prev) => [...prev, { id: idRef.current++, kind, text, summary }]);
 
   const flushStream = () => {
     if (streamRef.current.trim()) addLine("assistant", streamRef.current.trimEnd());
@@ -164,9 +177,10 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
           flushStream();
           addLine("tool_call", describeToolCall(data.name, data.arguments));
         } else if (kind === "tool_result") {
-          // Store the full result (capped); TranscriptLine collapses the display, Ctrl+O expands it.
+          // Store the full result (capped) for Ctrl+O; read-type tools get a 1-line summary
+          // (Claude-style), keeping the full output one keystroke away.
           const obs = String(data.observation).split("\n").slice(0, 400).join("\n");
-          addLine("tool_result", obs);
+          addLine("tool_result", obs, resultSummary(data.call?.name, obs));
           setTodos([...registryRef.current!.todos]); // reflect todo_write changes
         } else if (kind === "step") {
           setStep(data);

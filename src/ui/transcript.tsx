@@ -10,6 +10,7 @@ export interface Line {
   id: number;
   kind: LineKind;
   text: string;
+  summary?: string; // 1-line collapse for read-type tool results (full is under Ctrl+O)
 }
 
 /** Render one transcript line. The `key` is set by the caller's <Static> map. */
@@ -42,6 +43,11 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
     case "tool_call":
       return <Text><Text color="green">● </Text>{line.text}</Text>;
     case "tool_result": {
+      // Read-type tools collapse to a 1-line summary; full output is under Ctrl+O.
+      if (line.summary) {
+        const more = line.text.split("\n").length > 1;
+        return <Text dimColor>{`  ⎿ ${line.summary}${more ? " (ctrl+o to expand)" : ""}`}</Text>;
+      }
       const all = line.text.split("\n");
       const COLLAPSE = 8;
       const hidden = all.length - COLLAPSE;

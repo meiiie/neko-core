@@ -19,6 +19,14 @@ test("markdown table renders bold cells, decodes entities and <br>", () => {
   expect(out).toContain("Cửa hàng"); // &#224; -> à
 });
 
+test("tool_result with a summary collapses to one line", () => {
+  const text = Array.from({ length: 45 }, (_, i) => `${i}`).join("\n");
+  const out = strip(render(<TranscriptLine line={{ id: 1, kind: "tool_result", text, summary: "Read 45 lines" }} cfg={{} as any} />).lastFrame());
+  expect(out).toContain("Read 45 lines");
+  expect(out).toContain("ctrl+o to expand");
+  expect(out).not.toContain("\n0\n"); // not showing the raw lines
+});
+
 test("tool_result collapses past 8 lines with a ctrl+o hint", () => {
   const text = Array.from({ length: 12 }, (_, i) => `line${i}`).join("\n");
   const out = strip(render(<TranscriptLine line={{ id: 1, kind: "tool_result", text }} cfg={{} as any} />).lastFrame());
