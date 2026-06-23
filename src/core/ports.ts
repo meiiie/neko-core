@@ -14,7 +14,7 @@ export interface ProviderResponse {
   content: string | null;
   tool_calls: ToolCall[];
   usage?: Usage;
-  reasoning?: string; // the model's thinking, when the endpoint returns reasoning_content
+  reasoning?: string; // the model's thinking (reasoning_content field or <think> tags in content)
 }
 
 /** onDelta streams chunks as they arrive (SSE). kind="reasoning" is the model's live thinking;
