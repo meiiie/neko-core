@@ -35,7 +35,7 @@ test("header + input + status bar render on start", () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
   const { lastFrame, unmount } = render(<ChatApp yolo provider={provider} />);
   const out = lastFrame() ?? "";
-  expect(out).toContain("0.1.0"); // version line under the logo
+  expect(out).toContain("0.2.0"); // version line under the logo
   expect(out).toContain("auto"); // mode shown in the bottom status bar
   expect(out).toContain("shift+tab"); // status bar hint
   unmount();
