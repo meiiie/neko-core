@@ -96,6 +96,19 @@ test("runUntilDone iterates until the model replies DONE, and caps", async () =>
   expect(await capped.runUntilDone("do X", { maxIters: 3 })).toBe("still working"); // never DONE -> cap
 });
 
+test("run attaches images as OpenAI vision content", async () => {
+  let seen: any;
+  const agent = new Agent({
+    provider: { complete: async (msgs: any[]) => { seen = msgs[msgs.length - 1]; return { content: "ok", tool_calls: [] }; } } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  await agent.run("what is this?", undefined, ["data:image/png;base64,AAAA"]);
+  expect(Array.isArray(seen.content)).toBe(true);
+  expect(seen.content[0]).toEqual({ type: "text", text: "what is this?" });
+  expect(seen.content[1].type).toBe("image_url");
+  expect(seen.content[1].image_url.url).toContain("base64,AAAA");
+});
+
 test("concurrency-safe tool calls in one turn run in parallel", async () => {
   class SlowTools {
     active = 0;

@@ -154,13 +154,17 @@ export class Agent {
   }
 
   /** Run the loop until the model is done or maxSteps is hit. Returns the final text.
-   * Pass an AbortSignal to support Esc-to-interrupt (stops cleanly between/within steps). */
-  async run(instruction: string, signal?: AbortSignal): Promise<string> {
+   * Pass an AbortSignal to support Esc-to-interrupt (stops cleanly between/within steps).
+   * `images` (data: URLs) attach as OpenAI vision content — used by paste-image (needs a vision model). */
+  async run(instruction: string, signal?: AbortSignal, images?: string[]): Promise<string> {
     if (!this.messages.length) {
       this.messages.push({ role: "system", content: this.systemPrompt });
     }
     this.refreshDynamicContext();
-    this.messages.push({ role: "user", content: instruction });
+    const content = images && images.length
+      ? [{ type: "text", text: instruction }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))]
+      : instruction;
+    this.messages.push({ role: "user", content });
 
     for (let step = 0; step < this.maxSteps; step++) {
       this.emit("step", step + 1);

@@ -49,6 +49,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/recipes", desc: "list saved recipes" },
   { name: "/mcp", desc: "list connected MCP tools + prompts" },
   { name: "/mcp-prompt", desc: "run an MCP prompt (/mcp-prompt <server> <name> [k=v])" },
+  { name: "/paste", desc: "attach an image from the clipboard (or Alt+V)" },
   { name: "/login", desc: "enter + save your API key" },
   { name: "/logout", desc: "remove the saved API key" },
   { name: "/reset", desc: "reset conversation context" },

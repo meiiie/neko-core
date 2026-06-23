@@ -8,6 +8,7 @@
  */
 import { Box, render, Static, Text, useApp, useInput, useStdout } from "ink";
 import { useEffect, useRef, useState } from "react";
+import { readFileSync } from "node:fs";
 
 import { ApprovalBox, type Approval } from "./approval-box.tsx";
 import { runSlashCommand, SLASH } from "./commands.ts";
@@ -21,6 +22,7 @@ import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
 import { loadConfig } from "../adapters/config.ts";
 import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
+import { readClipboardImage } from "../adapters/clipboard.ts";
 import { clearApiKey, setApiKey } from "../adapters/project.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
@@ -87,6 +89,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [awaitingKey, setAwaitingKey] = useState(false); // /login: next submit is the API key
+  const pastedRef = useRef<string[]>([]); // staged image data: URLs for the next turn
+  const [pastedCount, setPastedCount] = useState(0);
 
   const addLine = (kind: LineKind, text: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
@@ -203,8 +207,22 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     return () => clearInterval(timer);
   }, [busy]);
 
+  // Paste an image off the clipboard (Alt+V / /paste). Staged for the next turn; needs a vision model.
+  const pasteImage = () => {
+    const path = readClipboardImage();
+    if (!path) return addLine("info", "no image in the clipboard");
+    try {
+      pastedRef.current.push(`data:image/png;base64,${readFileSync(path).toString("base64")}`);
+      setPastedCount(pastedRef.current.length);
+      addLine("info", `image attached (${pastedRef.current.length}) - needs a vision-capable model to be read`);
+    } catch {
+      addLine("info", "could not read the pasted image");
+    }
+  };
+
   // Global hotkeys. Ctrl+C: interrupt a running turn; else clear a non-empty input; else
-  // double-press exits. Ctrl+U clears the line, Ctrl+L clears the screen, Esc clears input when idle.
+  // double-press exits. Ctrl+U clears the line, Ctrl+L clears the screen, Esc clears input when idle,
+  // Alt+V pastes a clipboard image.
   const ctrlC = useRef(false);
   useInput((char, key) => {
     if (key.ctrl && char === "c") {
@@ -217,6 +235,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       return;
     }
     if (approval || overlay) return; // let their own handlers own the rest of the keys
+    if (key.meta && char === "v") return pasteImage();
     if (key.ctrl && char === "u") return setInput("");
     if (key.ctrl && char === "l") return setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
     if (key.escape && !busy && input) return setInput("");
@@ -289,6 +308,10 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       addLine("info", rememberNote(text.slice(1)));
       return;
     }
+    if (text === "/paste") {
+      pasteImage();
+      return;
+    }
     if (text === "/login") {
       setAwaitingKey(true);
       addLine("info", "Paste your API key, then Enter (input hidden). /logout to remove it.");
@@ -332,7 +355,10 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         if (p) toSend += `\n\n[@${p}]\n${await registryRef.current!.execute("read_file", { path: p })}`;
       }
     }
-    addLine("user", loopGoal ? `/auto ${loopGoal}` : text);
+    const imgs = pastedRef.current; // consume any staged pasted images
+    pastedRef.current = [];
+    setPastedCount(0);
+    addLine("user", (loopGoal ? `/auto ${loopGoal}` : text) + (imgs.length ? `  [${imgs.length} image]` : ""));
     verbRef.current = VERBS[Math.floor(Math.random() * VERBS.length)];
     setBusy(true);
     const controller = new AbortController();
@@ -340,7 +366,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     try {
       const result = loopGoal
         ? await agentRef.current!.runUntilDone(loopGoal, { signal: controller.signal })
-        : await agentRef.current!.run(toSend, controller.signal);
+        : await agentRef.current!.run(toSend, controller.signal, imgs.length ? imgs : undefined);
       const streamed = streamRef.current.trim().length > 0;
       flushStream();
       if (result === "[interrupted]") addLine("info", "(interrupted)");
@@ -445,6 +471,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         <ApprovalBox approval={approval} />
       ) : (
         <Box flexDirection="column">
+          {pastedCount > 0 ? <Text color="magenta">  [{pastedCount} image attached - will send with your next message]</Text> : null}
           <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
           <Box>
             <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{awaitingKey ? "key> " : pendingMulti ? "... " : "> "}</Text>
