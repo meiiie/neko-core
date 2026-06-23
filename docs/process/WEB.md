@@ -85,3 +85,35 @@ both auth styles above — so it connects to all of them.
 Then `neko mcp` lists its tools (search/read/list files) and the agent can use them. (Drive needs
 your Google credentials — that setup is the server's, not Neko's; the connection itself is verified
 the same way as the deepwiki/server-everything servers Neko already talks to.)
+
+## Facebook / Meta (Pages, Messenger, Ads, Instagram)
+**Yes — Neko connects to Facebook via MCP, no Neko code.** Mature community servers cover it; pick by
+scope:
+- [HagaiHen/facebook-mcp-server](https://github.com/HagaiHen/facebook-mcp-server) — Pages: post,
+  comment moderation, insights, messaging (30+ tools, stdio).
+- [oliverames/meta-mcp-server](https://github.com/oliverames/meta-mcp-server) — 200+ tools (Pages,
+  Instagram, Threads, Ads, Commerce, Insights).
+- [pipeboard-co/meta-ads-mcp](https://github.com/pipeboard-co/meta-ads-mcp) — Meta/Facebook Ads.
+
+Get a `FACEBOOK_ACCESS_TOKEN` (+ `FACEBOOK_PAGE_ID`) from
+[developers.facebook.com/tools/explorer](https://developers.facebook.com/tools/explorer), then add to
+`~/.neko-core/config.json` — stdio command + env (Neko passes `env` through to the server):
+
+```json
+{
+  "mcp_servers": {
+    "facebook": {
+      "command": "uv",
+      "args": ["run", "--with", "mcp[cli]", "--with", "requests", "mcp", "run", "/path/to/facebook-mcp-server/server.py"],
+      "env": { "FACEBOOK_ACCESS_TOKEN": "EAAB...", "FACEBOOK_PAGE_ID": "1234567890" }
+    }
+  }
+}
+```
+
+`neko mcp` then lists `mcp__facebook__post_to_facebook`, `…__get_post_impressions`,
+`…__filter_negative_comments`, etc., and the agent calls them like any other tool. The token is the
+server's secret (kept in the gitignored user config / env), never Neko's — same trust model as the
+Drive/GitHub servers above. The MCP wiring itself is the exact path verified against
+`server-everything` (connect → list → call). Designing a custom server is unnecessary; if you ever
+need one, it's just a stdio MCP exposing Graph-API tools — drop it in the same `mcp_servers` block.
