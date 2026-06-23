@@ -220,7 +220,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         }
       },
     });
-    if (resumedRef.current) agentRef.current.messages = [...resumedRef.current.messages];
+    if (resumedRef.current) {
+      agentRef.current.messages = [...resumedRef.current.messages];
+      agentRef.current.refreshSystemPrompt(); // apply the current prompt to the resumed session
+    }
   }
 
   const persist = () => {
@@ -238,6 +241,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // chat thread — you see the whole prior conversation, not just a note).
   const resumeInto = (target: Session) => {
     agentRef.current!.messages = [...target.messages];
+    agentRef.current!.refreshSystemPrompt(); // apply the current prompt to the resumed session
     sessionIdRef.current = target.id;
     createdAtRef.current = target.createdAt;
     const replay: Line[] = [{ id: idRef.current++, kind: "welcome", text: "" }];

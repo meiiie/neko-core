@@ -168,6 +168,13 @@ export class Agent {
     }
   }
 
+  /** Replace the base system message with the current systemPrompt — so prompt improvements apply
+   * to a RESUMED session (whose saved messages bake in whatever prompt was current when it ran). */
+  refreshSystemPrompt(): void {
+    const sys = this.messages.find((m) => m.role === "system" && !m.dynamic);
+    if (sys) sys.content = this.systemPrompt;
+  }
+
   /** Append text to the system prompt (used by /skill). Seeds the base prompt if needed. */
   appendSystem(text: string): void {
     const sys = this.messages.find((m) => m.role === "system");

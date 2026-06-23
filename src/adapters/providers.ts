@@ -91,6 +91,9 @@ export class OpenAICompatProvider implements Provider {
           // Honor Retry-After (429/503) when the server sends it; else exponential backoff.
           const ra = res.headers.get("retry-after");
           const waitMs = ra ? this.retryAfterMs(ra) : this.retryDelayMs(attempt);
+          // Surface the wait so a 429 backoff doesn't look like a silent hang.
+          const label = res.status === 429 ? "rate limited" : `HTTP ${res.status}`;
+          onDelta?.(`(${label} - retrying in ${Math.round(waitMs / 1000)}s, attempt ${attempt + 1}/${this.cfg.maxRetries})`, "reasoning");
           await sleep(waitMs, signal);
           continue;
         }
@@ -104,6 +107,7 @@ export class OpenAICompatProvider implements Provider {
         // Retry network/timeout errors; do NOT retry our own deliberate HTTP errors.
         const isHttp = error instanceof Error && error.message.startsWith("HTTP ");
         if (isHttp || attempt >= this.cfg.maxRetries) break;
+        onDelta?.(`(network/timeout - retrying, attempt ${attempt + 1}/${this.cfg.maxRetries})`, "reasoning");
         await sleep(this.retryDelayMs(attempt), signal);
       }
     }

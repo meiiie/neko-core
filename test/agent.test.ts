@@ -78,6 +78,21 @@ test("compact keeps system + recent turns verbatim and summarizes the older ones
   expect(contents).not.toContain("OLD1"); // oldest turn folded into the summary
 });
 
+test("refreshSystemPrompt updates a resumed session's base system message", () => {
+  const agent = new Agent({
+    provider: { complete: async () => ({ content: "x", tool_calls: [] }) } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    systemPrompt: "NEW PROMPT",
+  });
+  agent.messages = [
+    { role: "system", content: "OLD SAVED PROMPT" }, // as if loaded from a session
+    { role: "user", content: "hi" },
+  ];
+  agent.refreshSystemPrompt();
+  expect(agent.messages[0].content).toBe("NEW PROMPT"); // base system swapped to the current prompt
+  expect(agent.messages[1].content).toBe("hi"); // conversation untouched
+});
+
 test("rewind drops the last user turn from context", () => {
   const agent = new Agent({
     provider: { complete: async () => ({ content: "x", tool_calls: [] }) } as any,
