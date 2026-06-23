@@ -136,12 +136,13 @@ export function parseOpenAIMessage(data: any): ProviderResponse {
     }
     toolCalls.push({ id: call.id ?? "", name: fn.name ?? "", arguments: args });
   }
-  return { content: message.content ?? null, tool_calls: toolCalls, usage: data.usage };
+  return { content: message.content ?? null, tool_calls: toolCalls, usage: data.usage, reasoning: message.reasoning_content ?? message.reasoning ?? undefined };
 }
 
 /** Parse a streamed (SSE) chat completion, calling onDelta for each content chunk. */
 async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderResponse> {
   let content = "";
+  let reasoning = "";
   let usage: Usage | undefined;
   const acc: { id: string; name: string; argString: string }[] = [];
 
@@ -162,6 +163,11 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
       content += delta.content;
       onDelta(delta.content);
     }
+    const r = delta.reasoning_content ?? delta.reasoning;
+    if (r) {
+      reasoning += r;
+      onDelta(r, "reasoning");
+    }
     for (const tc of delta.tool_calls ?? []) {
       const i = tc.index ?? 0;
       acc[i] ??= { id: "", name: "", argString: "" };
@@ -180,7 +186,7 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
     }
     return { id: t.id, name: t.name, arguments: args };
   });
-  return { content: content || null, tool_calls: toolCalls, usage };
+  return { content: content || null, tool_calls: toolCalls, usage, reasoning: reasoning || undefined };
 }
 
 /** Yield non-empty lines from an SSE response body. */

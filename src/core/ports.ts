@@ -14,10 +14,11 @@ export interface ProviderResponse {
   content: string | null;
   tool_calls: ToolCall[];
   usage?: Usage;
+  reasoning?: string; // the model's thinking, when the endpoint returns reasoning_content
 }
 
-/** onDelta, when supplied, streams assistant content chunks as they arrive (SSE). */
-export type DeltaHook = (text: string) => void;
+/** onDelta streams chunks as they arrive (SSE). kind="reasoning" is the model's live thinking. */
+export type DeltaHook = (text: string, kind?: "content" | "reasoning") => void;
 
 /** The LLM port. One method; `OpenAICompatProvider` is the adapter. */
 export interface Provider {

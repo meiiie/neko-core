@@ -99,6 +99,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const [elapsed, setElapsed] = useState(0);
   const [queued, setQueued] = useState(0);
   const [step, setStep] = useState(0);
+  const [reasoning, setReasoning] = useState(""); // live model thinking (shown while busy, then cleared)
+  const reasoningRef = useRef("");
   const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [awaitingKey, setAwaitingKey] = useState(false); // /login: next submit is the API key
@@ -112,6 +114,8 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     if (streamRef.current.trim()) addLine("assistant", streamRef.current.trimEnd());
     streamRef.current = "";
     setStream("");
+    reasoningRef.current = ""; // thinking is transient: it vanishes once the step produces output
+    setReasoning("");
   };
 
   // Serialized so concurrent (parallel sub-agent) tool calls prompt one at a time, not at once.
@@ -168,7 +172,12 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock()]
           .filter(Boolean)
           .join("\n\n"),
-      onDelta: (t) => {
+      onDelta: (t, kind) => {
+        if (kind === "reasoning") {
+          reasoningRef.current += t;
+          setReasoning(reasoningRef.current);
+          return;
+        }
         streamRef.current += t;
         setStream((s) => s + t);
       },
@@ -463,6 +472,14 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
               {t.status === "completed" ? " [x] " : t.status === "in_progress" ? " [~] " : " [ ] "}
               {t.content}
             </Text>
+          ))}
+        </Box>
+      ) : null}
+
+      {busy && !approval && reasoning.trim() ? (
+        <Box flexDirection="column" marginTop={1}>
+          {reasoning.trim().split("\n").slice(-6).map((l, i) => (
+            <Text key={i} color="gray" italic>{"  " + (l.length > cols - 4 ? l.slice(0, cols - 5) + "…" : l)}</Text>
           ))}
         </Box>
       ) : null}
