@@ -70,7 +70,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     if (resumedRef.current) {
       out.push({ id: idRef.current++, kind: "info", text: `(resumed session ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)` });
     }
-    if (!cfg.apiKey) {
+    if (!cfg.apiKey && !cfg.isLocalEndpoint) {
       out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
     }
     return out;

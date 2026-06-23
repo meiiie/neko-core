@@ -18,6 +18,12 @@ function tmpConfig(data: any): string {
   return path;
 }
 
+test("isLocalEndpoint detects local model servers (no key needed)", () => {
+  expect(loadConfig({ path: tmpConfig({ base_url: "http://localhost:11434/v1" }) }).isLocalEndpoint).toBe(true);
+  expect(loadConfig({ path: tmpConfig({ base_url: "http://127.0.0.1:8080/v1" }) }).isLocalEndpoint).toBe(true);
+  expect(loadConfig({ path: tmpConfig({ base_url: "https://integrate.api.nvidia.com/v1" }) }).isLocalEndpoint).toBe(false);
+});
+
 test("defaults when overlay missing", () => {
   const cfg = loadConfig({ path: join(tmpdir(), "neko-missing-xyz.json") });
   expect(cfg.provider).toBe("openai_compat");

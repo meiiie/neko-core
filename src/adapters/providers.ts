@@ -25,10 +25,9 @@ export function getProvider(config: NekoConfig): Provider {
 
 /** List model ids the endpoint offers (OpenAI-compatible GET /models). Used by `/model list`. */
 export async function listModels(config: NekoConfig): Promise<string[]> {
-  const res = await fetch(`${config.baseUrl}/models`, {
-    headers: { Authorization: `Bearer ${config.apiKey}` },
-    signal: AbortSignal.timeout(15000),
-  });
+  const headers: Record<string, string> = {};
+  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+  const res = await fetch(`${config.baseUrl}/models`, { headers, signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   return ((data?.data ?? []) as any[]).map((m) => m?.id).filter(Boolean).sort();
@@ -45,10 +44,11 @@ export class OpenAICompatProvider implements Provider {
       throw new Error("openai_compat needs a model (set model or pick a --profile).");
     }
     const key = this.cfg.apiKey;
-    if (!key) {
+    if (!key && !this.cfg.isLocalEndpoint) {
       throw new Error(
         "No API key. Set NEKO_API_KEY (or OPENAI_API_KEY / NVIDIA_API_KEY), or add " +
-          '"api_key" to ~/.neko-core/config.json (run `neko init-user`).',
+          '"api_key" to ~/.neko-core/config.json (run `neko init-user`). ' +
+          "For a local model (Ollama/llama.cpp) no key is needed - point base_url at it.",
       );
     }
 
@@ -65,7 +65,8 @@ export class OpenAICompatProvider implements Provider {
     if (this.cfg.effort) payload.reasoning_effort = this.cfg.effort; // only when set via /effort
 
     const url = `${this.cfg.baseUrl}/chat/completions`;
-    const headers = { Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (key) headers.Authorization = `Bearer ${key}`; // local servers need no auth
 
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.cfg.maxRetries; attempt++) {

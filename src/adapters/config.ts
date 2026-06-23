@@ -46,6 +46,8 @@ export const DEFAULTS: Record<string, any> = {
     // profile at a local OpenAI-compatible server (llama-server :8080, Ollama :11434).
     nvidia: { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "" },
     openai: { provider: "openai_compat", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+    ollama: { provider: "openai_compat", base_url: "http://localhost:11434/v1", model: "llama3.2" },
+    lmstudio: { provider: "openai_compat", base_url: "http://localhost:1234/v1", model: "local-model" },
     local: { provider: "openai_compat", base_url: "http://127.0.0.1:8080/v1", model: "local-model" },
   },
 };
@@ -62,6 +64,10 @@ export class NekoConfig {
   get provider(): string { return String(this.data.provider ?? "openai_compat"); }
   get model(): string { return String(this.data.model ?? "").trim(); }
   get baseUrl(): string { return String(this.data.base_url ?? "").replace(/\/+$/, ""); }
+  /** A local model server (Ollama/llama.cpp/LM Studio/vLLM) — no API key required. */
+  get isLocalEndpoint(): boolean {
+    return /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)(:|\/|$)/i.test(this.baseUrl);
+  }
   get maxSteps(): number { return Math.max(1, Number(this.data.max_steps ?? 20)); }
   get temperature(): number { return Number(this.data.temperature ?? 0); }
   get maxTokens(): number { return Number(this.data.max_tokens ?? 2048); }
@@ -134,10 +140,11 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
       ];
   const filesMerged = overlays.reduce((acc, o) => mergeDeep(acc, o), {} as Record<string, any>);
 
-  const profiles: Record<string, Profile> =
-    filesMerged.profiles && typeof filesMerged.profiles === "object"
-      ? structuredClone(filesMerged.profiles)
-      : structuredClone(DEFAULTS.profiles);
+  // Built-in profiles are always available; files may add or override individual ones (merge, not replace).
+  const profiles: Record<string, Profile> = mergeDeep(
+    structuredClone(DEFAULTS.profiles),
+    filesMerged.profiles && typeof filesMerged.profiles === "object" ? filesMerged.profiles : {},
+  );
 
   // Profile selection: explicit arg > NEKO_PROFILE > files' active_profile > built-in default.
   const selected =

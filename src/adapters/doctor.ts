@@ -25,9 +25,9 @@ export function collectChecks(config: NekoConfig): Check[] {
     { status: "ok", name: "mode", detail: config.mode },
     { status: config.baseUrl ? "ok" : "warn", name: "base_url", detail: config.baseUrl || "(unset)" },
     {
-      status: config.apiKey ? "ok" : "warn",
+      status: config.apiKey || config.isLocalEndpoint ? "ok" : "warn",
       name: "api_key",
-      detail: config.apiKey ? "set" : "missing - set NEKO_API_KEY or run `neko init-user`",
+      detail: config.apiKey ? "set" : config.isLocalEndpoint ? "not needed (local endpoint)" : "missing - set NEKO_API_KEY or run `neko init-user`",
     },
   ];
 }
