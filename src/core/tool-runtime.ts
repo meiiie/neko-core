@@ -313,12 +313,27 @@ function toolEdit(root: string, args: Record<string, any>): string {
   if (!existsSync(path)) return `Error: no such file: ${raw}`;
   let text = readFileSync(path, "utf-8");
   const occurrences = text.split(String(oldStr)).length - 1;
-  if (occurrences === 0) return `Error: old_string not found in ${raw}`;
-  if (occurrences > 1) {
+  if (occurrences === 1) {
+    // Function replacement avoids `$` patterns in new_string being interpreted.
+    text = text.replace(String(oldStr), () => String(newStr));
+  } else if (occurrences > 1) {
     return `Error: old_string occurs ${occurrences} times in ${raw} (must be unique; add more surrounding context)`;
+  } else {
+    // Exact match failed (often indentation/trailing-whitespace drift): retry by matching lines
+    // ignoring leading/trailing whitespace. Must still be unique. new_string replaces verbatim.
+    const fileLines = text.split("\n");
+    const oldLines = String(oldStr).split("\n");
+    const oldTrim = oldLines.map((l) => l.trim());
+    let at = -1;
+    let count = 0;
+    for (let i = 0; i + oldLines.length <= fileLines.length; i++) {
+      if (oldLines.every((_, j) => fileLines[i + j].trim() === oldTrim[j])) { count++; at = i; }
+    }
+    if (count === 0) return `Error: old_string not found in ${raw}`;
+    if (count > 1) return `Error: old_string matches ${count} places in ${raw} (add more surrounding context)`;
+    fileLines.splice(at, oldLines.length, ...String(newStr).split("\n"));
+    text = fileLines.join("\n");
   }
-  // Function replacement avoids `$` patterns in new_string being interpreted.
-  text = text.replace(String(oldStr), () => String(newStr));
   writeFileSync(path, text, "utf-8");
   return `Edited ${raw}\n- ${firstLine(String(oldStr))}\n+ ${firstLine(String(newStr))}`;
 }

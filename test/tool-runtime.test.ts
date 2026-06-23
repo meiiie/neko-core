@@ -17,6 +17,22 @@ test("write then read", async () => {
   expect(await reg.execute("read_file", { path: "a.txt" })).toContain("hi");
 });
 
+test("edit falls back to a whitespace-tolerant line match", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "code.ts"), "function f() {\nconst x = 1;\n}\n"); // file line: no indent
+  // old_string has MORE indent than the file -> exact fails, line-trimmed match succeeds.
+  const out = await reg.execute("edit", { path: "code.ts", old_string: "    const x = 1;", new_string: "    const x = 2;" });
+  expect(out).toContain("Edited");
+  expect(await reg.execute("read_file", { path: "code.ts" })).toContain("const x = 2;");
+});
+
+test("edit reports an ambiguous whitespace match instead of guessing", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "d.ts"), "a();\na();\n"); // two lines, no indent
+  // old_string with extra indent -> exact 0, but trims to match BOTH lines -> refuse.
+  expect(await reg.execute("edit", { path: "d.ts", old_string: "    a();", new_string: "b();" })).toContain("matches 2 places");
+});
+
 test("read missing", async () => {
   const { reg } = makeReg();
   expect(await reg.execute("read_file", { path: "x" })).toContain("no such file");
