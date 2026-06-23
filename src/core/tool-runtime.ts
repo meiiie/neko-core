@@ -364,6 +364,31 @@ function toolEdit(root: string, args: Record<string, any>): string {
   return editDiff(raw, origLines, startLine, removed, newLines);
 }
 
+/** Apply several exact-match edits to one file, in order, atomically (writes only if all succeed). */
+function toolMultiEdit(root: string, args: Record<string, any>): string {
+  const raw = requireArg(args, "path");
+  const edits = args.edits;
+  if (!Array.isArray(edits) || edits.length === 0) return "Error: multi_edit needs a non-empty 'edits' array";
+  const path = resolveInRoot(root, raw);
+  if (!existsSync(path)) return `Error: no such file: ${raw}`;
+  let text = readFileSync(path, "utf-8");
+  let added = 0;
+  let removed = 0;
+  for (let k = 0; k < edits.length; k++) {
+    const oldStr = String(edits[k]?.old_string ?? "");
+    const newStr = String(edits[k]?.new_string ?? "");
+    if (!oldStr) return `Error: edit ${k + 1} is missing old_string (no change written)`;
+    const occ = text.split(oldStr).length - 1;
+    if (occ === 0) return `Error: edit ${k + 1}: old_string not found (no change written)`;
+    if (occ > 1) return `Error: edit ${k + 1}: old_string occurs ${occ} times, not unique (no change written)`;
+    text = text.replace(oldStr, () => newStr);
+    removed += oldStr.split("\n").length;
+    added += newStr.split("\n").length;
+  }
+  writeFileSync(path, text, "utf-8");
+  return `Edited ${raw}  (${edits.length} edits, +${added} -${removed})`;
+}
+
 function toolBash(root: string, args: Record<string, any>): string {
   const command = requireArg(args, "command");
   const result = spawnSync(command, {
@@ -450,6 +475,7 @@ const DISPATCH: Record<string, (root: string, args: Record<string, any>) => stri
   ls: toolLs,
   write_file: toolWriteFile,
   edit: toolEdit,
+  multi_edit: toolMultiEdit,
   bash: toolBash,
   web_search: toolWebSearch,
   // web_fetch is handled in execute() (it may post-process with a summarizer).

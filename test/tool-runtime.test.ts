@@ -37,6 +37,31 @@ test("edit returns a unified diff (context, -removed, +added)", async () => {
   expect(out).toContain("  b();"); // context line (2-space prefix -> dim)
 });
 
+test("multi_edit applies several edits atomically", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "m.ts"), "let a = 1;\nlet b = 2;\nlet c = 3;\n");
+  const out = await reg.execute("multi_edit", {
+    path: "m.ts",
+    edits: [
+      { old_string: "a = 1", new_string: "a = 10" },
+      { old_string: "c = 3", new_string: "c = 30" },
+    ],
+  });
+  expect(out).toContain("2 edits");
+  const after = await reg.execute("read_file", { path: "m.ts" });
+  expect(after).toContain("a = 10");
+  expect(after).toContain("c = 30");
+
+  // atomic: a failing edit writes nothing
+  writeFileSync(join(root, "n.ts"), "x = 1;\n");
+  const fail = await reg.execute("multi_edit", {
+    path: "n.ts",
+    edits: [{ old_string: "x = 1", new_string: "x = 2" }, { old_string: "NOPE", new_string: "y" }],
+  });
+  expect(fail).toContain("not found");
+  expect(await reg.execute("read_file", { path: "n.ts" })).toContain("x = 1;"); // unchanged
+});
+
 test("edit reports an ambiguous whitespace match instead of guessing", async () => {
   const { root, reg } = makeReg();
   writeFileSync(join(root, "d.ts"), "a();\na();\n"); // two lines, no indent

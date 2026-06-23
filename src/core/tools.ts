@@ -78,6 +78,26 @@ export const TOOL_SPECS: ToolSpec[] = [
     required: ["path", "old_string", "new_string"],
   },
   {
+    name: "multi_edit",
+    permission: GATED,
+    summary: "Apply several exact-match edits to one file atomically (all-or-nothing, approval-gated).",
+    parameters: {
+      path: { type: "string", description: "File path to edit." },
+      edits: {
+        type: "array",
+        description: "Edits applied in order; each old_string must occur exactly once at its turn.",
+        items: {
+          type: "object",
+          properties: {
+            old_string: { type: "string", description: "Exact text to replace." },
+            new_string: { type: "string", description: "Replacement text." },
+          },
+        },
+      },
+    },
+    required: ["path", "edits"],
+  },
+  {
     name: "bash",
     permission: GATED,
     summary: "Run a shell command in the project root (approval-gated).",
@@ -149,6 +169,7 @@ const TOOL_LABELS: Record<string, string> = {
   read_file: "Read",
   write_file: "Write",
   edit: "Update",
+  multi_edit: "Update",
   search: "Search",
   glob: "Glob",
   ls: "List",
