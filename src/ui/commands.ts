@@ -54,6 +54,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/paste", desc: "attach an image from the clipboard (or Alt+V)" },
   { name: "/login", desc: "enter + save your API key" },
   { name: "/logout", desc: "remove the saved API key" },
+  { name: "/rewind", desc: "undo the last turn (restore context; files unchanged)" },
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
 ];
@@ -174,6 +175,8 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/clear":
       agent.messages = [];
       return ctx.setLines([{ id: ctx.nextId(), kind: "info", text: "(cleared)" }]);
+    case "/rewind":
+      return addLine("info", agent.rewind() ? "(rewound the last turn - context restored to before it; files on disk are unchanged)" : "nothing to rewind");
     case "/goal": {
       const goal = input.slice("/goal".length).trim();
       if (!goal) return addLine("info", "usage: /goal <text>  (keeps the agent focused on a goal)");

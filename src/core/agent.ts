@@ -110,6 +110,18 @@ export class Agent {
     return summary;
   }
 
+  /** Conversation undo: drop the last user turn (and the assistant response after it) from context.
+   * Returns false if there's nothing to rewind. Note: this restores CONTEXT, not files on disk. */
+  rewind(): boolean {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      if (this.messages[i].role === "user") {
+        this.messages.splice(i);
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Closed-loop runner (agent-looping, "closed" variant): do the goal, then self-review against
    * a high bar and fix gaps, repeating until the model replies DONE or maxIters is hit. Bounded +
    * an eval each pass = autonomous without becoming a slop machine. Honors the abort signal. */

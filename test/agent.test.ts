@@ -78,6 +78,25 @@ test("compact keeps system + recent turns verbatim and summarizes the older ones
   expect(contents).not.toContain("OLD1"); // oldest turn folded into the summary
 });
 
+test("rewind drops the last user turn from context", () => {
+  const agent = new Agent({
+    provider: { complete: async () => ({ content: "x", tool_calls: [] }) } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  agent.messages = [
+    { role: "system", content: "s" },
+    { role: "user", content: "first" },
+    { role: "assistant", content: "a1" },
+    { role: "user", content: "second" },
+    { role: "assistant", content: "a2" },
+  ];
+  expect(agent.rewind()).toBe(true);
+  expect(agent.messages.map((m: any) => m.content)).toEqual(["s", "first", "a1"]); // last turn gone
+  expect(agent.rewind()).toBe(true);
+  expect(agent.messages.map((m: any) => m.role)).toEqual(["system"]); // back to just system
+  expect(agent.rewind()).toBe(false); // nothing left to rewind
+});
+
 test("runUntilDone iterates until the model replies DONE, and caps", async () => {
   const done = new Agent({
     provider: new ScriptedProvider([
