@@ -149,7 +149,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         });
       } catch (error) {
         ctx.setBusy(false);
-        addLine("info", `error listing models: ${error instanceof Error ? error.message : error}`);
+        addLine("error", `listing models: ${error instanceof Error ? error.message : error}`);
       }
       return;
     }
@@ -219,7 +219,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         await agent.compact();
         addLine("info", "(context compacted)");
       } catch (error) {
-        addLine("info", `error: ${error instanceof Error ? error.message : error}`);
+        addLine("error", `${error instanceof Error ? error.message : error}`);
       } finally {
         ctx.setBusy(false);
       }
