@@ -155,6 +155,7 @@ export const TOOL_SPECS: ToolSpec[] = [
     parameters: {
       description: { type: "string", description: "Short (3-5 word) task label." },
       prompt: { type: "string", description: "The full instruction for the sub-agent." },
+      subagent_type: { type: "string", description: "Optional named agent type (see the available subagent types in context) to give the sub-agent a specialized role." },
     },
     required: ["description", "prompt"],
   },

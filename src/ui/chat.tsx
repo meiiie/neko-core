@@ -21,6 +21,7 @@ import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
 import { loadConfig } from "../adapters/config.ts";
+import { agentsContextBlock, loadAgent } from "../adapters/agents.ts";
 import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
 import { readClipboardImage } from "../adapters/clipboard.ts";
 import { clearApiKey, setApiKey } from "../adapters/project.ts";
@@ -141,11 +142,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     registryRef.current.allowDangerousBash = cfg.allowDangerousBash;
     // Sub-agents: the `task` tool spawns a fresh, isolated agent (depth 1 — its registry has no
     // subagent), inheriting the parent's mode/approval/hooks so its tool use is gated the same.
-    registryRef.current.subagent = async (prompt, signal) => {
+    registryRef.current.subagent = async (prompt, type) => {
       const parent = registryRef.current!;
       const subReg = new ToolRegistry(process.cwd(), parent.mode, parent.prompt, mcpHub);
       subReg.hooks = parent.hooks;
-      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, maxSteps: cfg.maxSteps }).run(prompt, signal);
+      const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT; // named agent role, else default
+      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps }).run(prompt);
     };
     // web_fetch's optional extractor: one model pass over the fetched page (Claude-style).
     registryRef.current.summarize = async (instruction, content) => {
@@ -176,7 +178,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>
-        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock()]
+        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock()]
           .filter(Boolean)
           .join("\n\n"),
       onDelta: (t, kind) => {

@@ -46,7 +46,7 @@ export class ToolRegistry {
   /** Opt-in shell hooks around tool calls (set from config). */
   hooks?: { preToolUse?: string; postToolUse?: string };
   /** Spawns an isolated sub-agent (set by the host); enables the `task` tool. */
-  subagent?: (prompt: string, signal?: AbortSignal) => Promise<string>;
+  subagent?: (prompt: string, type?: string) => Promise<string>;
   /** One-shot model call (set by the host); lets web_fetch extract per a prompt (Claude-style). */
   summarize?: (instruction: string, content: string) => Promise<string>;
   /** Opt-in adversarial review of auto-approved mutating actions (set by the host). */
@@ -208,7 +208,7 @@ export class ToolRegistry {
       const prompt = String(args.prompt ?? args.description ?? "");
       if (!prompt) return "Error: task needs a 'prompt'.";
       try {
-        return await this.subagent(prompt);
+        return await this.subagent(prompt, args.subagent_type ? String(args.subagent_type) : undefined);
       } catch (error) {
         return `Sub-agent error: ${(error as Error).message}`;
       }

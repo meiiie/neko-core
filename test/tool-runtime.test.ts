@@ -179,6 +179,15 @@ test("checkpoint/restore reverts this turn's file edits (and deletes new files)"
   expect(await reg.execute("read_file", { path: "new.ts" })).toContain("no such file"); // deleted
 });
 
+test("task forwards subagent_type to the sub-agent", async () => {
+  const { reg } = makeReg("auto", () => true);
+  let gotType: string | undefined = "UNSET";
+  reg.subagent = async (prompt, type) => { gotType = type; return `ran: ${prompt}`; };
+  const out = await reg.execute("task", { description: "x", prompt: "do it", subagent_type: "reviewer" });
+  expect(out).toBe("ran: do it");
+  expect(gotType).toBe("reviewer");
+});
+
 test("bash returns exit code + output", async () => {
   const { reg } = makeReg("auto", () => true);
   const out = await reg.execute("bash", { command: "echo hello" });

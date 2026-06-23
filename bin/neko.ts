@@ -9,6 +9,7 @@ import { createInterface } from "node:readline/promises";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent.ts";
 import { loadConfig, type NekoConfig } from "../src/adapters/config.ts";
+import { agentsContextBlock, loadAgent } from "../src/adapters/agents.ts";
 import { environmentBlock, projectContextBlock, renderContext } from "../src/adapters/context.ts";
 import { collectChecks, render } from "../src/adapters/doctor.ts";
 import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
@@ -114,10 +115,11 @@ async function buildAgent(
   const registry = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
   registry.hooks = cfg.hooks;
   registry.allowDangerousBash = cfg.allowDangerousBash;
-  registry.subagent = async (prompt, signal) => {
+  registry.subagent = async (prompt, type) => {
     const subReg = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
-    return await new Agent({ provider: getProvider(cfg), tools: subReg, maxSteps: cfg.maxSteps }).run(prompt, signal);
+    const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT;
+    return await new Agent({ provider: getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps }).run(prompt);
   };
   registry.summarize = async (instruction, content) => {
     const res = await getProvider(cfg).complete([
@@ -142,7 +144,7 @@ async function buildAgent(
     maxSteps: cfg.maxSteps,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     dynamicContext: () =>
-      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock()]
+      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock()]
         .filter(Boolean)
         .join("\n\n"),
     onEvent: printEvent,
