@@ -115,6 +115,8 @@ async function buildAgent(
   const registry = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
   registry.hooks = cfg.hooks;
   registry.allowDangerousBash = cfg.allowDangerousBash;
+  registry.sandboxBash = cfg.sandbox;
+  registry.sandboxAllowNetwork = cfg.sandboxNetwork;
   registry.subagent = async (prompt, type) => {
     const subReg = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent

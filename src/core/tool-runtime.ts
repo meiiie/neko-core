@@ -13,6 +13,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { McpTools } from "./ports.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
+import { wrapBash } from "./sandbox.ts";
 import { GATED, resolveTool, toolSchemas } from "./tools.ts";
 
 /** An approval gate: given (toolName, the tool's args) -> approve? (may be async).
@@ -53,6 +54,9 @@ export class ToolRegistry {
   checkAction?: (toolName: string, args: Record<string, any>) => Promise<{ ok: boolean; reason: string }>;
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
+  /** Opt-in OS sandbox for bash (fs read-only except cwd). Set from config by the host. */
+  sandboxBash = false;
+  sandboxAllowNetwork = false;
   /** Bash commands moved to the background (Ctrl+B); output keeps accumulating. Read via /bashes. */
   backgrounds: { id: string; command: string; output: string; done: boolean; code?: number | null }[] = [];
   private bgCounter = 0;
@@ -118,7 +122,8 @@ export class ToolRegistry {
   /** Run a shell command. Resolves on exit/timeout, OR early (kept running) if Ctrl+B detaches it. */
   private async runBash(args: Record<string, any>): Promise<string> {
     const command = requireArg(args, "command");
-    const child = spawn(command, { shell: true, cwd: this.root });
+    const sb = wrapBash(command, this.root, { enabled: this.sandboxBash, allowNetwork: this.sandboxAllowNetwork });
+    const child = spawn(sb.file, sb.args, { shell: sb.shell, cwd: this.root });
     let output = "";
     const onData = (d: any) => { output += d.toString(); };
     child.stdout?.on("data", onData);

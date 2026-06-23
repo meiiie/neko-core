@@ -157,6 +157,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     registryRef.current = new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub);
     registryRef.current.hooks = cfg.hooks;
     registryRef.current.allowDangerousBash = cfg.allowDangerousBash;
+    registryRef.current.sandboxBash = cfg.sandbox;
+    registryRef.current.sandboxAllowNetwork = cfg.sandboxNetwork;
     // Sub-agents: the `task` tool spawns a fresh, isolated agent (depth 1 — its registry has no
     // subagent), inheriting the parent's mode/approval/hooks so its tool use is gated the same.
     registryRef.current.subagent = async (prompt, type) => {

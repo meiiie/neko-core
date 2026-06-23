@@ -94,6 +94,11 @@ export class NekoConfig {
   /** When true, the catastrophic-bash seatbelt is disabled (default false). */
   get allowDangerousBash(): boolean { return Boolean(this.data.allow_dangerous_bash); }
 
+  /** When true, run bash in an OS sandbox (fs read-only except cwd) where available. */
+  get sandbox(): boolean { return Boolean(this.data.sandbox); }
+  /** Allow network inside the sandbox (default false = block egress). */
+  get sandboxNetwork(): boolean { return Boolean(this.data.sandbox_network); }
+
   /** When true, auto-approved mutating tools get a model "is this safe?" review first. */
   get adversarialCheck(): boolean { return Boolean(this.data.adversarial_check); }
 

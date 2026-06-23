@@ -3,6 +3,7 @@
  * (provider, model, endpoint, key presence) WITHOUT calling the model.
  */
 import type { NekoConfig } from "./config.ts";
+import { detectSandbox } from "../core/sandbox.ts";
 import { VERSION } from "../shared/version.ts";
 
 export interface Check {
@@ -23,6 +24,15 @@ export function collectChecks(config: NekoConfig): Check[] {
     },
     { status: "ok", name: "max_steps", detail: String(config.maxSteps) },
     { status: "ok", name: "mode", detail: config.mode },
+    {
+      status: config.sandbox && detectSandbox() === "none" ? "warn" : "ok",
+      name: "bash_sandbox",
+      detail: config.sandbox
+        ? detectSandbox() === "none"
+          ? "requested but unavailable on this OS - seatbelt + gate still apply"
+          : `on (${detectSandbox()})`
+        : `off (available: ${detectSandbox()})`,
+    },
     { status: config.baseUrl ? "ok" : "warn", name: "base_url", detail: config.baseUrl || "(unset)" },
     {
       status: config.apiKey || config.isLocalEndpoint ? "ok" : "warn",
