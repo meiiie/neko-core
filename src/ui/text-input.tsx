@@ -14,8 +14,10 @@ export function TextInput(props: {
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
   placeholder?: string;
+  mask?: boolean; // render bullets (for secrets like /login)
 }) {
-  const { value, onChange, onSubmit, placeholder } = props;
+  const { value, onChange, onSubmit, placeholder, mask } = props;
+  const shown = mask ? "•".repeat([...value].length) : value;
   const ref = useRef(value);
   ref.current = value; // resync to the prop each render (parent owns it between keystrokes)
 
@@ -38,7 +40,7 @@ export function TextInput(props: {
     <Text>
       {value ? (
         <>
-          {value}
+          {shown}
           <Text inverse> </Text>
         </>
       ) : (

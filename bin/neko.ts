@@ -13,7 +13,7 @@ import { environmentBlock, projectContextBlock, renderContext } from "../src/ada
 import { collectChecks, render } from "../src/adapters/doctor.ts";
 import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
-import { addMcpServer, initProject, initUser, removeMcpServer } from "../src/adapters/project.ts";
+import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
 import { renderSkills } from "../src/adapters/skills.ts";
@@ -166,6 +166,7 @@ Commands:
   sessions      list saved chat sessions
   skills        list available skills (~/.neko-core/skills)
   recipes       list runnable recipes (~/.neko-core/recipes)
+  login         save an API key (neko login <key>, or pipe it); logout removes it
   mcp           list configured MCP servers and their tools
   chat          interactive session (default - same as bare 'neko' / 'neko code')
   run <task>    one-shot: run a single instruction
@@ -254,6 +255,22 @@ function cmdSessions(): number {
 
 function cmdRecipes(): number {
   console.log(renderRecipes());
+  return 0;
+}
+
+async function cmdLogin(args: Args): Promise<number> {
+  let key = args.positionals[0] ?? "";
+  if (!key && !process.stdin.isTTY) key = (await Bun.stdin.text()).trim(); // piped
+  if (!key) {
+    console.error("usage: neko login <key>   (or: echo $KEY | neko login)   — or run `neko` and type /login");
+    return 2;
+  }
+  console.log(setApiKey(key));
+  return 0;
+}
+
+function cmdLogout(): number {
+  console.log(clearApiKey());
   return 0;
 }
 
@@ -360,6 +377,8 @@ async function main(): Promise<number> {
       case "sessions": return cmdSessions();
       case "skills": return cmdSkills();
       case "recipes": return cmdRecipes();
+      case "login": return await cmdLogin(args);
+      case "logout": return cmdLogout();
       case "mcp": return await cmdMcp(args);
       case "run": return await cmdRun(args);
       default:

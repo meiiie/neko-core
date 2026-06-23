@@ -11,6 +11,39 @@ import { LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME } from "./config.ts";
 
 const userConfigPath = () => join(homedir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME);
 
+function readUserConfig(): Record<string, any> {
+  const path = userConfigPath();
+  try {
+    if (existsSync(path)) return JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    /* start fresh */
+  }
+  return {};
+}
+
+function writeUserConfig(data: Record<string, any>): void {
+  const path = userConfigPath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(data, null, 2) + "\n", "utf-8");
+}
+
+/** Save the API key to ~/.neko-core/config.json (used by /login). */
+export function setApiKey(key: string): string {
+  const data = readUserConfig();
+  data.api_key = key.trim();
+  writeUserConfig(data);
+  return "API key saved to ~/.neko-core/config.json";
+}
+
+/** Remove the saved API key (used by /logout). Env keys are cleared by the caller. */
+export function clearApiKey(): string {
+  const data = readUserConfig();
+  if (!data.api_key) return "no saved API key in ~/.neko-core/config.json";
+  delete data.api_key;
+  writeUserConfig(data);
+  return "API key removed from ~/.neko-core/config.json";
+}
+
 /** Add/replace an MCP server in the user config (~/.neko-core/config.json). */
 export function addMcpServer(name: string, server: Record<string, any>): string {
   const path = userConfigPath();

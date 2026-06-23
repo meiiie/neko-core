@@ -122,27 +122,36 @@ export class NekoConfig {
 }
 
 export function loadConfig(opts: { path?: string; profile?: string } = {}): NekoConfig {
-  let merged: Record<string, any> = structuredClone(DEFAULTS);
-  if (opts.path) {
-    merged = mergeDeep(merged, readOverlay(opts.path));
-  } else {
-    merged = mergeDeep(merged, readOverlay(join(homedir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)));
-    merged = mergeDeep(merged, readOverlay(join(process.cwd(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)));
-  }
+  // Config files, lowest precedence first. `./neko.json` (project root) is the easy, discoverable
+  // settings file (claude.json / codex style); keep secrets out of it (api_key -> ~/.neko-core or env).
+  const overlays: Record<string, any>[] = opts.path
+    ? [readOverlay(opts.path)]
+    : [
+        readOverlay(join(homedir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)),
+        readOverlay(join(homedir(), "neko.json")),
+        readOverlay(join(process.cwd(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)),
+        readOverlay(join(process.cwd(), "neko.json")),
+      ];
+  const filesMerged = overlays.reduce((acc, o) => mergeDeep(acc, o), {} as Record<string, any>);
 
   const profiles: Record<string, Profile> =
-    merged.profiles && typeof merged.profiles === "object" ? structuredClone(merged.profiles) : {};
+    filesMerged.profiles && typeof filesMerged.profiles === "object"
+      ? structuredClone(filesMerged.profiles)
+      : structuredClone(DEFAULTS.profiles);
 
-  // Profile selection precedence: explicit arg > NEKO_PROFILE > config active_profile.
+  // Profile selection: explicit arg > NEKO_PROFILE > files' active_profile > built-in default.
   const selected =
-    (opts.profile || process.env.NEKO_PROFILE?.trim() || merged.active_profile || "").trim() || null;
-  if (selected) {
-    if (!(selected in profiles)) {
-      const available = Object.keys(profiles).sort().join(", ") || "none";
-      throw new Error(`Unknown profile '${selected}'. Available: ${available}`);
-    }
-    merged = mergeDeep(merged, profiles[selected]);
+    (opts.profile || process.env.NEKO_PROFILE?.trim() || filesMerged.active_profile || DEFAULTS.active_profile || "").trim() || null;
+  if (selected && !(selected in profiles)) {
+    const available = Object.keys(profiles).sort().join(", ") || "none";
+    throw new Error(`Unknown profile '${selected}'. Available: ${available}`);
   }
+
+  // Precedence: built-in defaults -> profile PRESET -> config files -> NEKO_* env. So an explicit
+  // file (e.g. ./neko.json with a local base_url) overrides the profile, not the other way round.
+  let merged: Record<string, any> = structuredClone(DEFAULTS);
+  if (selected) merged = mergeDeep(merged, profiles[selected]);
+  for (const overlay of overlays) merged = mergeDeep(merged, overlay);
 
   // Pull the file-provided key out before building the printable dict (never printed).
   const apiKeyFromFile = String(merged.api_key ?? "");

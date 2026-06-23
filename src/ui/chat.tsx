@@ -21,6 +21,7 @@ import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
 import { loadConfig } from "../adapters/config.ts";
 import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
+import { clearApiKey, setApiKey } from "../adapters/project.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
@@ -65,16 +66,14 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const createdAtRef = useRef(resumedRef.current?.createdAt ?? new Date().toISOString());
 
   const [lines, setLines] = useState<Line[]>(() => {
-    const welcome: Line = { id: idRef.current++, kind: "welcome", text: "" };
-    if (!resumedRef.current) return [welcome];
-    return [
-      welcome,
-      {
-        id: idRef.current++,
-        kind: "info",
-        text: `(resumed session ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)`,
-      },
-    ];
+    const out: Line[] = [{ id: idRef.current++, kind: "welcome", text: "" }];
+    if (resumedRef.current) {
+      out.push({ id: idRef.current++, kind: "info", text: `(resumed session ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)` });
+    }
+    if (!cfg.apiKey) {
+      out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
+    }
+    return out;
   });
   const [stream, setStream] = useState("");
   const [input, setInput] = useState("");
@@ -87,6 +86,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const [step, setStep] = useState(0);
   const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [awaitingKey, setAwaitingKey] = useState(false); // /login: next submit is the API key
 
   const addLine = (kind: LineKind, text: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text }]);
@@ -283,6 +283,18 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       addLine("info", rememberNote(text.slice(1)));
       return;
     }
+    if (text === "/login") {
+      setAwaitingKey(true);
+      addLine("info", "Paste your API key, then Enter (input hidden). /logout to remove it.");
+      return;
+    }
+    if (text === "/logout") {
+      delete process.env.NEKO_API_KEY;
+      delete process.env.OPENAI_API_KEY;
+      delete process.env.NVIDIA_API_KEY;
+      addLine("info", clearApiKey());
+      return;
+    }
     // /auto <goal>: closed-loop — work + self-review until done (bounded). Runs as a busy turn.
     const loopGoal = /^\/auto\s+([\s\S]+)/.exec(text)?.[1]?.trim() || null;
     if (text.startsWith("/") && !loopGoal) {
@@ -347,6 +359,18 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
 
   const onSubmit = (value: string) => {
     setInput("");
+    // /login key capture: save it, never echo or store in history, don't run a turn.
+    if (awaitingKey) {
+      setAwaitingKey(false);
+      const key = value.trim();
+      if (key) {
+        process.env.NEKO_API_KEY = key; // live for this session
+        addLine("info", setApiKey(key)); // persisted
+      } else {
+        addLine("info", "(login cancelled)");
+      }
+      return;
+    }
     if (value.endsWith("\\")) {
       multilineRef.current += value.slice(0, -1) + "\n";
       setPendingMulti(true);
@@ -417,12 +441,13 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
         <Box flexDirection="column">
           <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
           <Box>
-            <Text color={busy ? "gray" : "cyan"}>{pendingMulti ? "... " : "> "}</Text>
+            <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{awaitingKey ? "key> " : pendingMulti ? "... " : "> "}</Text>
             <TextInput
               value={input}
               onChange={setInput}
               onSubmit={onSubmit}
-              placeholder={busy ? "type to queue while it works..." : 'Try: "explain src/agent.ts"   or   /help'}
+              mask={awaitingKey}
+              placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : 'Try: "explain src/agent.ts"   or   /help'}
             />
           </Box>
           <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
