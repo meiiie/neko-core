@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 
 import { ApprovalBox, type Approval } from "./approval-box.tsx";
 import { runSlashCommand, SLASH } from "./commands.ts";
-import { ctxPercent, fmtTok, trunc } from "./format.ts";
+import { ctxPercent, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TextInput } from "./text-input.tsx";
@@ -66,6 +66,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
   const { stdout } = useStdout();
   const [cols, setCols] = useState(stdout?.columns ?? 80);
   const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
+  const [started, setStarted] = useState(false); // once a turn has run, drop the input placeholder
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
   const streamRef = useRef("");
@@ -406,7 +407,9 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     addLine("user", loopGoal ? `/auto ${loopGoal}` : text);
     if (imgs.length) addLine("info", `  ⎿ ${imgs.length} image${imgs.length > 1 ? "s" : ""} attached`);
     verbRef.current = VERBS[Math.floor(Math.random() * VERBS.length)];
+    setStarted(true); // conversation begun -> drop the input placeholder hint
     registryRef.current!.clearCheckpoint(); // start a fresh file checkpoint for this turn (/rewind)
+    const turnStart = Date.now();
     setBusy(true);
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -417,7 +420,11 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       const streamed = streamRef.current.trim().length > 0;
       flushStream();
       if (result === "[interrupted]") addLine("info", "(interrupted)");
-      else if (!streamed && result.trim()) addLine("assistant", result); // non-streaming provider
+      else {
+        if (!streamed && result.trim()) addLine("assistant", result); // non-streaming provider
+        const secs = Math.round((Date.now() - turnStart) / 1000);
+        addLine("info", `${verbRef.current} for ${fmtDuration(secs)} · ${fmtTok(agentRef.current!.cost.lastCompletion)} out`);
+      }
       // Auto-compact when the context window is nearly full (Claude-style).
       if (result !== "[interrupted]" && agentRef.current!.cost.lastPrompt > 0.85 * cfg.contextWindow) {
         addLine("info", "(context nearly full - auto-compacting)");
@@ -537,7 +544,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
               onChange={setInput}
               onSubmit={onSubmit}
               mask={awaitingKey}
-              placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : 'Try: "explain src/agent.ts"   or   /help'}
+              placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
             />
           </Box>
           <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>

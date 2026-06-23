@@ -14,6 +14,15 @@ export function ctxPercent(used: number, window: number): number {
   return Math.min(100, Math.max(0, Math.round((100 * used) / Math.max(1, window))));
 }
 
+/** "29s" / "6m 6s" / "1h 2m" — for the post-turn run-time line. */
+export function fmtDuration(s: number): string {
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 ? `${m}m ${s % 60}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
+}
+
 export function fmtBytes(n: number): string {
   return n < 1024 ? `${n}B` : n < 1048576 ? `${(n / 1024).toFixed(1)}KB` : `${(n / 1048576).toFixed(1)}MB`;
 }
