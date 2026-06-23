@@ -84,9 +84,14 @@ export function memoryTool(args: Record<string, any>): string {
 export function memoryIndexBlock(): string {
   const m = listMemories();
   if (!m.length) return "";
+  // ponytail: cap the per-turn index so a large memory store can't bloat context; the agent can
+  // still `memory search` the rest. 50 lines of names+summaries is plenty for recall.
+  const CAP = 50;
+  const lines = m.slice(0, CAP).map((x) => `- ${x.name}: ${x.summary}`);
+  if (m.length > CAP) lines.push(`- … +${m.length - CAP} more (use \`memory search\`)`);
   return (
     "Saved memories (read/update with the `memory` tool; recall relevant ones before you work, " +
     "and record durable facts/preferences/learnings you'll want next session):\n" +
-    m.map((x) => `- ${x.name}: ${x.summary}`).join("\n")
+    lines.join("\n")
   );
 }
