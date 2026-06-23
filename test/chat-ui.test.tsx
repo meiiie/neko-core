@@ -71,7 +71,7 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
   expect(lastFrame() ?? "").toContain("Approve bash?"); // approval box appeared
   expect(lastFrame() ?? "").toContain("$ echo hi"); // command preview
   stdin.write("y"); // approve
-  await tick(250);
+  await tick(600); // async bash: spawn + close + the next provider call
   const all = frames.join("\n");
   expect(all).toContain("(exit 0)"); // tool ran after approval
   expect(all).toContain("Finished"); // final answer

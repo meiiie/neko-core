@@ -34,7 +34,7 @@ test("mcp_allow / mcp_deny parse to string arrays", () => {
 test("defaults when overlay missing", () => {
   const cfg = loadConfig({ path: join(tmpdir(), "neko-missing-xyz.json") });
   expect(cfg.provider).toBe("openai_compat");
-  expect(cfg.maxSteps).toBe(20);
+  expect(cfg.maxSteps).toBe(40);
   expect(cfg.profile).toBeNull();
 });
 
