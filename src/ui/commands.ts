@@ -8,6 +8,7 @@ import type { NekoConfig } from "../adapters/config.ts";
 import { rememberNote, renderContext } from "../adapters/context.ts";
 import { initProject } from "../adapters/project.ts";
 import { listModels } from "../adapters/providers.ts";
+import { setEffort, setModel } from "../adapters/project.ts";
 import { fillRecipe, listRecipes, loadRecipe } from "../adapters/recipes.ts";
 import { listSessions, loadSession, renameSession, sessionTitle, type Session } from "../adapters/session.ts";
 import { listSkills, loadSkill } from "../adapters/skills.ts";
@@ -128,6 +129,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       const arg = input.slice("/model".length).trim();
       if (arg && arg !== "list") {
         cfg.data.model = arg;
+        setModel(arg); // remember it for the next session/folder too
         return addLine("info", `model -> ${arg}`);
       }
       ctx.setBusy(true);
@@ -141,6 +143,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
           onSelect: (it) => {
             ctx.setOverlay(null);
             cfg.data.model = it.id;
+            setModel(it.id); // persist across sessions
             addLine("info", `model -> ${it.id}`);
           },
         });
@@ -245,11 +248,25 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return openResumePicker(ctx, "cwd");
     }
     case "/effort": {
-      const lvl = input.split(/\s+/)[1]?.toLowerCase();
-      if (!lvl) return addLine("info", `effort: ${cfg.effort || "off"} (use /effort low|medium|high|off)`);
-      if (lvl === "off") delete cfg.data.reasoning_effort;
-      else cfg.data.reasoning_effort = lvl;
-      return addLine("info", `effort -> ${cfg.effort || "off"}`);
+      const arg = input.split(/\s+/)[1]?.toLowerCase();
+      const apply = (lvl: string) => {
+        if (lvl === "off") delete cfg.data.reasoning_effort;
+        else cfg.data.reasoning_effort = lvl;
+        setEffort(lvl); // persist across sessions
+        addLine("info", `effort -> ${cfg.effort || "off"}`);
+      };
+      if (arg) return apply(arg); // /effort high
+      // No arg -> interactive picker (Faster -> Smarter), Claude-style.
+      const levels = ["off", "low", "medium", "high", "xhigh", "max"];
+      ctx.setOverlay({
+        title: "Reasoning effort  (Faster -> Smarter)",
+        items: levels.map((l) => ({ id: l, label: l, detail: l === (cfg.effort || "off") ? "(current)" : undefined })),
+        onSelect: (it) => {
+          ctx.setOverlay(null);
+          apply(it.id);
+        },
+      });
+      return;
     }
     case "/context": {
       const win = cfg.contextWindow;

@@ -35,6 +35,21 @@ export function setApiKey(key: string): string {
   return "API key saved to ~/.neko-core/config.json";
 }
 
+/** Persist the chosen model so the NEXT session (and new folders) start with it too. */
+export function setModel(model: string): void {
+  const data = readUserConfig();
+  data.model = model.trim();
+  writeUserConfig(data);
+}
+
+/** Persist the chosen reasoning effort across sessions ("" / off clears it). */
+export function setEffort(effort: string): void {
+  const data = readUserConfig();
+  if (effort && effort !== "off") data.reasoning_effort = effort;
+  else delete data.reasoning_effort;
+  writeUserConfig(data);
+}
+
 /** Remove the saved API key (used by /logout). Env keys are cleared by the caller. */
 export function clearApiKey(): string {
   const data = readUserConfig();

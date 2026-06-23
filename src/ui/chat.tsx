@@ -52,6 +52,13 @@ interface ChatProps {
   provider?: Provider; // injected in tests; production uses getProvider(cfg)
 }
 
+/** Flatten a message's content (string or vision-array) to display text. */
+function contentToText(c: any): string {
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) return c.map((p) => (p?.text ?? (p?.type === "image_url" ? "[image]" : ""))).join("");
+  return String(c ?? "");
+}
+
 /** A 1-line collapse summary for read-type tool results (Claude-style); full stays under Ctrl+O. */
 function resultSummary(name: string | undefined, obs: string): string | undefined {
   if (/^(Error|Blocked|Denied)/.test(obs)) return undefined; // show errors in full
@@ -91,7 +98,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [lines, setLines] = useState<Line[]>(() => {
     const out: Line[] = [{ id: idRef.current++, kind: "welcome", text: "" }];
     if (resumedRef.current) {
-      out.push({ id: idRef.current++, kind: "info", text: `(resumed session ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)` });
+      // Replay the prior conversation so it looks exactly like before you quit (Claude-style),
+      // not just a "(resumed N messages)" note. Show user + assistant turns; skip system/tool noise.
+      for (const m of resumedRef.current.messages) {
+        const text = contentToText(m.content);
+        if (m.role === "user" && text.trim()) out.push({ id: idRef.current++, kind: "user", text });
+        else if (m.role === "assistant" && text.trim()) out.push({ id: idRef.current++, kind: "assistant", text });
+      }
+      out.push({ id: idRef.current++, kind: "info", text: `(resumed ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)` });
     }
     if (!cfg.apiKey && !cfg.isLocalEndpoint) {
       out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
@@ -109,6 +123,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [step, setStep] = useState(0);
   const [reasoning, setReasoning] = useState(""); // live model thinking (shown while busy, then cleared)
   const reasoningRef = useRef("");
+  const turnTokensStartRef = useRef(0); // cost.totalTokens at turn start -> spinner shows this turn only
   const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [awaitingKey, setAwaitingKey] = useState(false); // /login: next submit is the API key
@@ -438,6 +453,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setStarted(true); // conversation begun -> drop the input placeholder hint
     registryRef.current!.clearCheckpoint(); // start a fresh file checkpoint for this turn (/rewind)
     const turnStart = Date.now();
+    turnTokensStartRef.current = agentRef.current!.cost.totalTokens; // baseline -> show THIS turn's tokens
     setBusy(true);
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -536,7 +552,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           <ThinkingLine
             verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}
             elapsed={elapsed}
-            tokens={agentRef.current!.cost.totalTokens}
+            tokens={Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current)}
             step={step}
             queued={queued}
             effort={cfg.effort}
@@ -596,8 +612,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 return (
                   <Text color="#9a9a9a">
                     {(cfg.model || "").split("/").pop()} · <Text color={ctxColor}>{pct}% ctx</Text>
-                    <Text dimColor> ({fmtTok(cost.lastPrompt)}/{fmtTok(cfg.contextWindow)})</Text>
-                    {" · "}↑{fmtTok(cost.lastPrompt)} ↓{fmtTok(cost.lastCompletion)} · {fmtTok(cost.totalTokens)} tok
                   </Text>
                 );
               })()}

@@ -18,6 +18,19 @@ class MockProvider implements Provider {
   }
 }
 
+test("resume re-renders the prior conversation", () => {
+  const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+  const resumed = {
+    id: "s1", createdAt: "", updatedAt: "", cwd: process.cwd(), model: "m",
+    messages: [{ role: "user", content: "hello before" }, { role: "assistant", content: "earlier reply" }],
+  };
+  const { lastFrame, unmount } = render(<ChatApp yolo provider={provider} resumedSession={resumed as any} sessionId="s1" />);
+  const out = lastFrame() ?? "";
+  expect(out).toContain("hello before"); // prior user turn replayed
+  expect(out).toContain("earlier reply"); // prior assistant turn replayed
+  unmount();
+});
+
 test("header + input + status bar render on start", () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
   const { lastFrame, unmount } = render(<ChatApp yolo provider={provider} />);
