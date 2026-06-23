@@ -46,6 +46,15 @@ export const DEFAULTS: Record<string, any> = {
     // profile at a local OpenAI-compatible server (llama-server :8080, Ollama :11434).
     nvidia: { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "" },
     openai: { provider: "openai_compat", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+    // Most hosted providers are OpenAI-compatible -> a profile, not new code. Set your model with /model.
+    groq: { provider: "openai_compat", base_url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+    deepseek: { provider: "openai_compat", base_url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+    mistral: { provider: "openai_compat", base_url: "https://api.mistral.ai/v1", model: "mistral-large-latest" },
+    together: { provider: "openai_compat", base_url: "https://api.together.xyz/v1", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
+    fireworks: { provider: "openai_compat", base_url: "https://api.fireworks.ai/inference/v1", model: "accounts/fireworks/models/llama-v3p3-70b-instruct" },
+    xai: { provider: "openai_compat", base_url: "https://api.x.ai/v1", model: "grok-2-latest" },
+    openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "" },
+    // Local servers (no API key needed):
     ollama: { provider: "openai_compat", base_url: "http://localhost:11434/v1", model: "llama3.2" },
     lmstudio: { provider: "openai_compat", base_url: "http://localhost:1234/v1", model: "local-model" },
     local: { provider: "openai_compat", base_url: "http://127.0.0.1:8080/v1", model: "local-model" },
