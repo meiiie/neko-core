@@ -307,6 +307,7 @@ async function cmdMcp(args: Args): Promise<number> {
     console.log('  "mcp_servers": { "fs": { "command": "bunx", "args": ["@modelcontextprotocol/server-filesystem", "."] } }');
     console.log("  Remote (hosted) MCP over HTTP/SSE:");
     console.log('  "mcp_servers": { "deepwiki": { "url": "https://mcp.deepwiki.com/mcp" } }');
+    console.log('  Auth: static token -> "headers": {"Authorization": "Bearer ..."}   |   browser login -> "oauth": true');
     console.log("  For a real browser (JS pages / bot-protected), add a browser MCP - see docs/process/WEB.md:");
     console.log('  "mcp_servers": { "browser": { "command": "bunx", "args": ["@playwright/mcp@latest"] } }');
     return 0;

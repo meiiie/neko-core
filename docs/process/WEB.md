@@ -33,3 +33,16 @@ you started with `--remote-debugging-port`).
 **Why not bake Playwright into Neko's core?** It's a heavy dependency + a ~150MB browser, can't be
 verified headlessly, and would break the standalone single binary. MCP is the clean seam (Goose,
 Claude Code, and others all do browser this way). Built-in `web_*` covers the simple 90%.
+
+## Authenticated MCP servers
+- **Static token / API key** (works today): add `headers`:
+  ```json
+  "github": { "url": "https://api.githubcopilot.com/mcp/", "headers": { "Authorization": "Bearer ghp_..." } }
+  ```
+- **Browser login (OAuth 2.1)** for servers that require it: set `"oauth": true`:
+  ```json
+  "linear": { "url": "https://mcp.linear.app/mcp", "oauth": true }
+  ```
+  On first connect Neko opens your browser, captures the redirect on `http://localhost:41789/callback`,
+  and stores tokens (with refresh) under `~/.neko-core/mcp-auth/<server>/` — dynamic client
+  registration + PKCE via the MCP SDK. The browser-login step runs on your machine.

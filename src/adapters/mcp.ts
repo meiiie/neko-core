@@ -10,6 +10,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 import { VERSION } from "../shared/version.ts";
+import { connectWithOAuth } from "./mcp-oauth.ts";
 
 /** A local (stdio: command+args) or remote (url: http/sse) MCP server. */
 export interface McpServerConfig {
@@ -19,6 +20,7 @@ export interface McpServerConfig {
   type?: "stdio" | "http" | "sse";
   url?: string;
   headers?: Record<string, string>;
+  oauth?: boolean; // interactive OAuth login for a protected remote server
 }
 
 function makeTransport(cfg: McpServerConfig): { transport: any; type: string } {
@@ -51,8 +53,15 @@ export class McpHub {
     for (const [name, cfg] of Object.entries(servers ?? {})) {
       try {
         const client = new Client({ name: "neko-code", version: VERSION }, { capabilities: {} });
-        const { transport, type } = makeTransport(cfg);
-        await client.connect(transport);
+        let type: string;
+        if (cfg.oauth && cfg.url) {
+          await connectWithOAuth(client, name, cfg.url); // interactive browser login if needed
+          type = "http+oauth";
+        } else {
+          const made = makeTransport(cfg);
+          await client.connect(made.transport);
+          type = made.type;
+        }
         const res: any = await client.listTools();
         let tools = 0;
         for (const tool of res.tools ?? []) {

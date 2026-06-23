@@ -105,7 +105,7 @@ export class NekoConfig {
   }
 
   /** Declared MCP servers: name -> stdio {command,args?,env?} OR remote {url, type?:http|sse, headers?}. */
-  get mcpServers(): Record<string, { command?: string; args?: string[]; env?: Record<string, string>; type?: "stdio" | "http" | "sse"; url?: string; headers?: Record<string, string> }> {
+  get mcpServers(): Record<string, { command?: string; args?: string[]; env?: Record<string, string>; type?: "stdio" | "http" | "sse"; url?: string; headers?: Record<string, string>; oauth?: boolean }> {
     const raw = this.data.mcp_servers;
     return raw && typeof raw === "object" ? raw : {};
   }
