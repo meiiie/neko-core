@@ -157,6 +157,16 @@ test("concurrency-safe tool calls in one turn run in parallel", async () => {
   expect(tools.maxActive).toBeGreaterThan(1); // overlapped => ran in parallel
 });
 
+test("loop guard stops re-running an identical tool call", async () => {
+  let execs = 0;
+  const tools = { schemas: () => [], execute: async () => { execs++; return "err"; } };
+  const provider = { complete: async () => ({ content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "p" } }] }) };
+  const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 6 });
+  await agent.run("go");
+  expect(execs).toBeLessThan(6); // guarded after the 3rd identical call, not executed every step
+  expect(agent.messages.some((m: any) => String(m.content).includes("loop guard"))).toBe(true);
+});
+
 test("max_steps cap fires", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ag-"));
   const loop = { content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "missing" } }] };

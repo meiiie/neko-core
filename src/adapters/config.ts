@@ -31,7 +31,7 @@ export const DEFAULTS: Record<string, any> = {
   provider: "openai_compat",
   model: "",
   base_url: "https://integrate.api.nvidia.com/v1",
-  max_steps: 20,
+  max_steps: 40,
   temperature: 0,
   max_tokens: 2048,
   timeout_seconds: 120,
@@ -77,7 +77,7 @@ export class NekoConfig {
   get isLocalEndpoint(): boolean {
     return /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)(:|\/|$)/i.test(this.baseUrl);
   }
-  get maxSteps(): number { return Math.max(1, Number(this.data.max_steps ?? 20)); }
+  get maxSteps(): number { return Math.max(1, Number(this.data.max_steps ?? 40)); }
   get temperature(): number { return Number(this.data.temperature ?? 0); }
   get maxTokens(): number { return Number(this.data.max_tokens ?? 2048); }
   /** Context window for the ACTIVE model: per-model `model_context[<id>]` wins, else the global

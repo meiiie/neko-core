@@ -178,6 +178,8 @@ export class Agent {
       : instruction;
     this.messages.push({ role: "user", content });
 
+    let lastSig = ""; // loop guard: detect the model repeating the same tool call (a stuck loop)
+    let repeats = 0;
     for (let step = 0; step < this.maxSteps; step++) {
       this.emit("step", step + 1);
       if (signal?.aborted) return "[interrupted]";
@@ -205,6 +207,7 @@ export class Agent {
       // task), run them in parallel; results are recorded in call order. Anything that mutates
       // the workspace (write/edit/bash) stays sequential to preserve order + approval prompts.
       if (toolCalls.length > 1 && toolCalls.every((c) => CONCURRENCY_SAFE.has(c.name))) {
+        lastSig = ""; // a parallel fan-out breaks any single-call repeat chain
         toolCalls.forEach((call) => this.emit("tool_call", call));
         const observations = await Promise.all(toolCalls.map((call) => this.tools.execute(call.name, call.arguments)));
         toolCalls.forEach((call, i) => {
@@ -215,15 +218,37 @@ export class Agent {
         for (const call of toolCalls) {
           if (signal?.aborted) return "[interrupted]"; // stop promptly between tools on Esc
           this.emit("tool_call", call);
-          const observation = await this.tools.execute(call.name, call.arguments);
+          // Loop guard: if the model makes the SAME call 3x in a row, it's stuck — nudge instead of
+          // re-running it, so it changes approach or finishes (prevents lag/chaos/spinning).
+          const sig = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
+          repeats = sig === lastSig ? repeats + 1 : 0;
+          lastSig = sig;
+          const observation = repeats >= 2
+            ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
+            : await this.tools.execute(call.name, call.arguments);
           this.emit("tool_result", { call, observation });
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: observation });
         }
       }
     }
 
+    // Step limit reached: instead of an abrupt stop, ask for one tool-less wrap-up so the user gets
+    // a useful summary of what was done and what remains (don't leave the task half-narrated).
     this.emit("max_steps", this.maxSteps);
-    return `[stopped: reached max_steps=${this.maxSteps}]`;
+    try {
+      const wrap = await this.provider.complete(
+        [...this.messages, { role: "user", content: `Step limit (${this.maxSteps}) reached. Stop calling tools and concisely summarize what you did and what's left.` }],
+        undefined,
+        this.onDelta,
+        signal,
+      );
+      const final = wrap.content?.trim() || `[stopped: reached max_steps=${this.maxSteps}]`;
+      this.messages.push({ role: "assistant", content: final });
+      this.emit("final", final);
+      return final;
+    } catch {
+      return `[stopped: reached max_steps=${this.maxSteps}]`;
+    }
   }
 
   private emit(kind: string, data: any): void {
