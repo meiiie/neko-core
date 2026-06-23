@@ -11,14 +11,14 @@ const tick = (ms = 90) => new Promise((r) => setTimeout(r, ms));
 const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
 
 class Echo implements Provider {
-  async complete(_m: any, _t: any, onDelta?: (t: string, k?: string) => void): Promise<ProviderResponse> {
+  async complete(_m: any, _t: any, onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
     onDelta?.("hello");
     return { content: "hello", tool_calls: [], usage: { prompt_tokens: 1000, completion_tokens: 10, total_tokens: 1010 } };
   }
 }
 
 class Reasoner implements Provider {
-  async complete(_m: any, _t: any, onDelta?: (t: string, k?: string) => void): Promise<ProviderResponse> {
+  async complete(_m: any, _t: any, onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
     onDelta?.("let me think hard", "reasoning");
     await tick(60);
     onDelta?.("the answer");
