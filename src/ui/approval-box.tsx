@@ -29,8 +29,10 @@ export function ApprovalBox({ approval }: { approval: Approval }) {
     preview.push(<Text key="c" color="white">{"$ "}{trunc(args.command, 200)}</Text>);
   } else if (toolName === "write_file") {
     const content = String(args.content ?? "");
-    preview.push(<Text key="p" color="gray">write {args.path} ({content.length} chars)</Text>);
-    content.split("\n").slice(0, 8).forEach((l, i) => preview.push(<Text key={`l${i}`} color="green">{"+ "}{l}</Text>));
+    const lines = content.split("\n");
+    preview.push(<Text key="p" color="gray">write {args.path} ({lines.length} lines, {content.length} chars)</Text>);
+    lines.slice(0, 8).forEach((l, i) => preview.push(<Text key={`l${i}`} color="green">{"+ "}{l}</Text>));
+    if (lines.length > 8) preview.push(<Text key="more" dimColor>{`  … +${lines.length - 8} more lines`}</Text>);
   } else if (toolName === "edit") {
     preview.push(<Text key="p" color="gray">edit {args.path}</Text>);
     preview.push(<Text key="o" color="red">{"- "}{trunc(args.old_string, 160)}</Text>);
@@ -39,7 +41,7 @@ export function ApprovalBox({ approval }: { approval: Approval }) {
     preview.push(<Text key="a" color="gray">{trunc(JSON.stringify(args), 200)}</Text>);
   }
   return (
-    <Box borderStyle="classic" borderColor="yellow" paddingX={1} flexDirection="column">
+    <Box borderStyle="round" borderColor="yellow" paddingX={1} flexDirection="column">
       <Text bold color="yellow">Approve {toolName}?</Text>
       {preview}
       <Text color="gray">[y]es   [a]lways allow {toolName}   [n]o / Esc</Text>

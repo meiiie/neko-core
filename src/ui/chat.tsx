@@ -324,7 +324,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     if (approval || overlay) return; // let their own handlers own the rest of the keys
     if (key.ctrl && char === "o") { // expand: re-print the most recent collapsed tool output in full
-      const last = [...lines].reverse().find((l) => l.kind === "tool_result" && l.text.split("\n").length > 8);
+      // Match the collapse logic in TranscriptLine: summarized reads collapse at >1 line, plain
+      // results at >8 — so the "(ctrl+o to expand)" hint and this finder never disagree.
+      const last = [...lines].reverse().find(
+        (l) => l.kind === "tool_result" && l.text.split("\n").length > (l.summary ? 1 : 8),
+      );
       if (last) addLine("tool_result_full", last.text);
       else addLine("info", "nothing to expand");
       return;
@@ -622,13 +626,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             />
           </Box>
           <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
-          {input.startsWith("/") ? (
-            <Box flexDirection="column" paddingLeft={2}>
-              {SLASH.filter((c) => c.name.startsWith(input.split(/\s+/)[0])).map((c) => (
-                <Text key={c.name} color="gray">{c.name}  <Text dimColor>{c.desc}</Text></Text>
-              ))}
-            </Box>
-          ) : (
+          {input.startsWith("/") ? (() => {
+            const matches = SLASH.filter((c) => c.name.startsWith(input.split(/\s+/)[0]));
+            const CAP = 10; // don't flood the screen when "/" matches everything
+            return (
+              <Box flexDirection="column" paddingLeft={2}>
+                {matches.slice(0, CAP).map((c) => (
+                  <Text key={c.name} color="gray">{c.name}  <Text dimColor>{c.desc}</Text></Text>
+                ))}
+                {matches.length > CAP ? <Text dimColor>{`  … +${matches.length - CAP} more (keep typing to filter)`}</Text> : null}
+              </Box>
+            );
+          })() : (
             <Box justifyContent="space-between">
               <Text>
                 <Text color={MODE_COLOR[mode]}>{mode}</Text>

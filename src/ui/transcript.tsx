@@ -72,9 +72,15 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
     case "tool_result_full":
       return (
         <Box flexDirection="column">
-          {line.text.split("\n").map((l, i) => (
-            <Text key={i} dimColor>{(i === 0 ? "  ⎿ " : "     ") + l}</Text>
-          ))}
+          {line.text.split("\n").map((l, i) => {
+            const add = l.startsWith("+");
+            const del = l.startsWith("-");
+            return (
+              <Text key={i} color={add ? "green" : del ? "red" : undefined} dimColor={!add && !del}>
+                {(i === 0 ? "  ⎿ " : "     ") + l}
+              </Text>
+            );
+          })}
         </Box>
       );
     default:
