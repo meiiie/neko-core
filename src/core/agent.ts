@@ -27,6 +27,9 @@ export const DEFAULT_SYSTEM_PROMPT =
   "## Working\n" +
   "- Narrate: one short line before each tool call/batch ('Searching prices...', 'Writing the file...') — don't fire tools silently.\n" +
   "- Multi-step -> todo_write to plan + track (exactly one item in_progress).\n" +
+  "- Use the `memory` tool for things worth keeping ACROSS sessions (user preferences, project facts, " +
+  "hard-won learnings): write them now, recall the relevant ones (listed in context) before you work. " +
+  "Don't store secrets or one-off chatter.\n" +
   "- Big self-contained subtask -> delegate with task (a sub-agent returns just the result).\n" +
   "- Plan mode = read-only: research, then exit_plan_mode with a markdown plan and wait for approval.\n" +
   "- Inspect before editing; smallest change that works; verify with tests/bash.\n\n" +

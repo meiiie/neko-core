@@ -13,3 +13,15 @@ karpathy + ponytail. Tick as shipped (each verified + committed).
 - [x] **P8** (Ctrl-C twice; Ctrl-O skipped) Ctrl-C twice to exit; Ctrl-O to expand a truncated tool result
 - [~] **P9** (skipped — the model can call edit repeatedly; YAGNI) multiedit (several edits in one call)
 - [x] **P10** richer system prompt / tool descriptions (closer to Claude's)
+- [x] **P11** agent-managed **memory tool** (SOTA 2026): `memory` (list/read/write/delete/search) over
+      `~/.neko-core/memory/*.md`, index injected each turn for JIT recall across sessions. File-based
+      like Anthropic's memory tool — no vector DB (needs embeddings; over-engineering for a local CLI).
+      Verified: agent writes a memory in one session, recalls it in a fresh process.
+
+## SOTA tier (June 2026) — where Neko stands
+- **Lifecycle**: SOTA-class — sessions, resume-with-replay, checkpoints/rewind, sticky model/effort.
+- **Context**: SOTA-aligned — compaction (keep-tail + clip + summary), todo-persist, JIT via glob/grep,
+  auto-compact, sub-agents ("context is precious" + just-in-time retrieval).
+- **Memory**: SOTA-tier via P11 (agent-managed file memory + JIT recall). Deliberately NOT building
+  vector-DB retrieval / "dreaming" — those need an embedding model/API and contradict the local
+  single-binary identity; the file+grep design is Anthropic's own memory-tool approach.

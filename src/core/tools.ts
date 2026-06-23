@@ -159,6 +159,18 @@ export const TOOL_SPECS: ToolSpec[] = [
     },
     required: ["description", "prompt"],
   },
+  {
+    name: "memory",
+    permission: SAFE,
+    summary: "Your persistent cross-session memory (~/.neko-core/memory/*.md). list | read | write | delete | search. Record durable facts/preferences/learnings; recall relevant ones before working.",
+    parameters: {
+      action: { type: "string", enum: ["list", "read", "write", "delete", "search"], description: "What to do." },
+      name: { type: "string", description: "Memory file name (for read/write/delete)." },
+      content: { type: "string", description: "Content to store (for write)." },
+      query: { type: "string", description: "Text to find across memories (for search)." },
+    },
+    required: ["action"],
+  },
 ];
 
 export function listTools(): ToolSpec[] {
@@ -180,13 +192,16 @@ const TOOL_LABELS: Record<string, string> = {
   web_fetch: "Fetch",
   exit_plan_mode: "Plan",
   task: "Task",
+  memory: "Memory",
 };
 
 /** A compact "Label(primary-arg)" for a tool call, e.g. `Read(src/app.ts)` or `Bash(bun test)`. */
 export function describeToolCall(name: string, args: Record<string, any>): string {
   const label = TOOL_LABELS[name] ?? name;
   const a = args ?? {};
-  const primary = a.path ?? a.command ?? a.query ?? a.url ?? a.pattern ?? a.description ?? "";
+  const primary = name === "memory"
+    ? [a.action, a.name ?? a.query].filter(Boolean).join(" ")
+    : (a.path ?? a.command ?? a.query ?? a.url ?? a.pattern ?? a.description ?? "");
   const s = String(primary).replace(/\s+/g, " ").trim();
   const shown = s.length > 80 ? s.slice(0, 80) + "…" : s;
   return shown ? `${label}(${shown})` : label;

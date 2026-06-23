@@ -18,6 +18,7 @@ import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setA
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
 import { renderSkills } from "../src/adapters/skills.ts";
+import { memoryIndexBlock } from "../src/core/memory.ts";
 import { ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
 import {
   collectCapabilities,
@@ -31,7 +32,7 @@ import {
   renderPolicyReport,
   resolveAgent,
 } from "../src/adapters/registry.ts";
-import { listTools, renderToolDetail, renderTools, resolveTool } from "../src/core/tools.ts";
+import { describeToolCall, listTools, renderToolDetail, renderTools, resolveTool } from "../src/core/tools.ts";
 import { VERSION } from "../src/shared/version.ts";
 
 interface Args {
@@ -93,9 +94,7 @@ async function promptApprove(toolName: string, args: Record<string, any>): Promi
 /** Compact, human-readable trace of the agent loop. */
 function printEvent(kind: string, data: any): void {
   if (kind === "tool_call") {
-    const a = data.arguments ?? {};
-    const summary = a.command ?? a.path ?? a.pattern ?? "";
-    console.log(`\n  -> ${data.name}(${summary})`);
+    console.log(`\n  -> ${describeToolCall(data.name, data.arguments)}`);
   } else if (kind === "tool_result") {
     let obs = String(data.observation).replace(/\n/g, " ");
     if (obs.length > 200) obs = obs.slice(0, 200) + "...";
@@ -150,7 +149,7 @@ async function buildAgent(
     maxSteps: cfg.maxSteps,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     dynamicContext: () =>
-      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), todosContextBlock(registry.todos)]
+      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), memoryIndexBlock(), todosContextBlock(registry.todos)]
         .filter(Boolean)
         .join("\n\n"),
     onEvent: printEvent,
