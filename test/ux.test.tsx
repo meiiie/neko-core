@@ -13,6 +13,14 @@ const CFG = new NekoConfig({}, null, {}, "");
 
 const tick = (ms = 90) => new Promise((r) => setTimeout(r, ms));
 const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+/** Poll the render until any frame matches — robust against streaming throttle / event-loop timing. */
+async function until(c: { frames: string[] }, pred: (allFrames: string) => boolean, ms = 1500): Promise<boolean> {
+  for (let waited = 0; waited < ms; waited += 25) {
+    if (pred(strip(c.frames.join("\n")))) return true;
+    await tick(25);
+  }
+  return pred(strip(c.frames.join("\n")));
+}
 
 class Echo implements Provider {
   async complete(_m: any, _t: any, onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
@@ -58,11 +66,9 @@ test("reasoning shows live while busy, clears when done", async () => {
   c.stdin.write("go");
   await tick(20);
   c.stdin.write("\r");
-  await tick(35);
-  expect(strip(c.frames.join("\n"))).toContain("let me think hard"); // shown mid-turn
-  await tick(250);
-  expect(strip(c.lastFrame())).not.toContain("let me think hard"); // gone when done
-  expect(strip(c.lastFrame())).toContain("the answer");
+  expect(await until(c, (f) => f.includes("let me think hard"))).toBe(true); // shown mid-turn
+  expect(await until(c, (f) => f.includes("the answer"))).toBe(true); // final answer lands
+  expect(strip(c.lastFrame())).not.toContain("let me think hard"); // thinking cleared when done
   c.unmount();
 });
 
@@ -73,8 +79,7 @@ test("post-turn run-time line + placeholder drops after first turn", async () =>
   c.stdin.write("hi");
   await tick(20);
   c.stdin.write("\r");
-  await tick(250);
-  expect(strip(c.frames.join("\n"))).toMatch(/for \d+s/); // completion line
+  expect(await until(c, (f) => /for \d+s/.test(f))).toBe(true); // completion line appears
   expect(strip(c.lastFrame())).not.toContain("Try:"); // placeholder gone
   c.unmount();
 });

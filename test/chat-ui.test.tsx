@@ -122,17 +122,18 @@ test("input typed while busy is queued, then drained", async () => {
     }
   }
   const { stdin, frames, unmount } = render(<ChatApp yolo provider={new SlowMock()} />);
+  const seen = (s: string) => frames.join("\n").replace(/\x1b\[[0-9;]*m/g, "").includes(s);
+  const until = async (pred: () => boolean, ms = 2500) => { for (let w = 0; w < ms && !pred(); w += 20) await tick(20); return pred(); };
+
   stdin.write("task one");
-  await tick(30);
-  stdin.write("\r"); // submit -> turn 1 in flight (250ms)
-  await tick(60);
+  await tick(20);
+  stdin.write("\r");
+  expect(await until(() => seen("esc to interrupt"))).toBe(true); // turn 1 is in flight (busy) — deterministic
   stdin.write("task two");
   await tick(20);
-  stdin.write("\r"); // submitted while busy -> queued
-  await tick(500);
-  const all = frames.join("\n");
-  expect(all).toContain("queued:"); // queue indicator appeared
-  expect(all).toContain("second"); // queued task ran after the first
+  stdin.write("\r"); // submitted while busy -> must queue
+  expect(await until(() => seen("queued:"))).toBe(true); // queue indicator appeared
+  expect(await until(() => seen("second"))).toBe(true); // queued task drained + ran after the first
   unmount();
 });
 

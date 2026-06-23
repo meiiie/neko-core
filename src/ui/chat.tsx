@@ -84,6 +84,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
   const streamRef = useRef("");
+  const lastPumpRef = useRef(0); // throttle stream re-renders (leading-edge, no timer)
+  const busyRef = useRef(false); // mirrors `busy` for closures (onSubmit's queue decision) — no stale read
   const alwaysApproved = useRef<Set<string>>(new Set());
   const historyRef = useRef<string[]>([]);
   const historyPos = useRef(0);
@@ -134,6 +136,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   const addLine = (kind: LineKind, text: string, summary?: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text, summary }]);
+
+  // Throttle live re-renders to ~25fps (leading-edge, no timer): deltas accumulate in refs, the
+  // screen syncs at most every ~40ms. Streaming a long reply re-parses markdown a few times a second
+  // instead of once per token — smooth, no flicker, far less CPU. Any final tokens within the last
+  // window land when flushStream commits the assistant line, so nothing is lost.
+  const STREAM_MS = 40;
+  const maybePump = () => {
+    if (Date.now() - lastPumpRef.current < STREAM_MS) return;
+    lastPumpRef.current = Date.now();
+    setStream(streamRef.current);
+    setReasoning(reasoningRef.current);
+  };
 
   const flushStream = () => {
     if (streamRef.current.trim()) addLine("assistant", streamRef.current.trimEnd());
@@ -208,7 +222,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       onDelta: (t, kind) => {
         if (kind === "reasoning") {
           reasoningRef.current += t;
-          setReasoning(reasoningRef.current);
+          maybePump();
           return;
         }
         if (kind === "tool") {
@@ -216,7 +230,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
         streamRef.current += t;
-        setStream((s) => s + t);
+        maybePump();
       },
       onEvent: (kind, data) => {
         if (kind === "tool_call") {
@@ -271,6 +285,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   };
 
   // Stop the remote-control server when the app exits.
+  useEffect(() => { busyRef.current = busy; }, [busy]); // keep the ref in lockstep with the state
   useEffect(() => () => rcRef.current?.stop(), []);
 
   // Re-layout on terminal resize. Ink only clears the screen when the width DECREASES; enlarging
@@ -486,6 +501,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     registryRef.current!.clearCheckpoint(); // start a fresh file checkpoint for this turn (/rewind)
     const turnStart = Date.now();
     turnTokensStartRef.current = agentRef.current!.cost.totalTokens; // baseline -> show THIS turn's tokens
+    busyRef.current = true; // sync now so a keystroke landing this instant queues (not just after render)
     setBusy(true);
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -512,6 +528,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       flushStream();
       addLine("error", `${error instanceof Error ? error.message : error}`);
     } finally {
+      busyRef.current = false;
       setBusy(false);
       controllerRef.current = null;
       persist();
@@ -546,7 +563,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (!text) return;
     historyRef.current.push(text);
     historyPos.current = historyRef.current.length;
-    if (busy) {
+    if (busyRef.current) {
       // Queue input typed while a turn is running; drained when it finishes.
       queueRef.current.push(text);
       setQueued(queueRef.current.length);
