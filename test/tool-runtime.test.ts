@@ -166,6 +166,19 @@ test("adversarial check also vets auto-approved MCP tools", async () => {
   expect(await reg.execute("mcp__x__do", {})).toBe("ran mcp");
 });
 
+test("checkpoint/restore reverts this turn's file edits (and deletes new files)", async () => {
+  const { root, reg } = makeReg("auto", () => true);
+  writeFileSync(join(root, "keep.ts"), "original\n");
+  reg.clearCheckpoint();
+  await reg.execute("edit", { path: "keep.ts", old_string: "original", new_string: "changed" });
+  await reg.execute("write_file", { path: "new.ts", content: "brand new" });
+  expect(await reg.execute("read_file", { path: "keep.ts" })).toContain("changed");
+  const reverted = reg.restoreCheckpoint();
+  expect(reverted).toBe(2);
+  expect(await reg.execute("read_file", { path: "keep.ts" })).toContain("original"); // restored
+  expect(await reg.execute("read_file", { path: "new.ts" })).toContain("no such file"); // deleted
+});
+
 test("bash returns exit code + output", async () => {
   const { reg } = makeReg("auto", () => true);
   const out = await reg.execute("bash", { command: "echo hello" });

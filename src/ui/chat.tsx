@@ -399,6 +399,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     addLine("user", loopGoal ? `/auto ${loopGoal}` : text);
     if (imgs.length) addLine("info", `  ⎿ ${imgs.length} image${imgs.length > 1 ? "s" : ""} attached`);
     verbRef.current = VERBS[Math.floor(Math.random() * VERBS.length)];
+    registryRef.current!.clearCheckpoint(); // start a fresh file checkpoint for this turn (/rewind)
     setBusy(true);
     const controller = new AbortController();
     controllerRef.current = controller;

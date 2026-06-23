@@ -8,7 +8,7 @@
  * tool never crashes the agent loop. Path-taking tools refuse to escape the project root.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { McpTools } from "./ports.ts";
@@ -57,6 +57,8 @@ export class ToolRegistry {
   backgrounds: { id: string; command: string; output: string; done: boolean; code?: number | null }[] = [];
   private bgCounter = 0;
   private detachCurrent: (() => void) | null = null;
+  /** Pre-images of files touched since the last checkpoint, so /rewind can restore the disk. */
+  private fileSnapshots = new Map<string, string | null>();
 
   constructor(
     public readonly root: string,
@@ -70,6 +72,40 @@ export class ToolRegistry {
   /** True while a foreground bash command is running (so the REPL can show the Ctrl+B hint). */
   bashRunning(): boolean {
     return this.detachCurrent !== null;
+  }
+
+  /** Start a fresh file checkpoint (call at the start of a turn). */
+  clearCheckpoint(): void {
+    this.fileSnapshots.clear();
+  }
+
+  /** Record a file's current content (once) before it's mutated this turn. */
+  private snapshotFile(absPath: string): void {
+    if (this.fileSnapshots.has(absPath)) return;
+    try {
+      this.fileSnapshots.set(absPath, existsSync(absPath) ? readFileSync(absPath, "utf-8") : null);
+    } catch {
+      /* unreadable -> skip */
+    }
+  }
+
+  /** Restore files to their pre-checkpoint state (undo this turn's write/edit/multi_edit). Returns count. */
+  restoreCheckpoint(): number {
+    let n = 0;
+    for (const [path, content] of this.fileSnapshots) {
+      try {
+        if (content === null) {
+          if (existsSync(path)) { rmSync(path); n++; }
+        } else {
+          writeFileSync(path, content, "utf-8");
+          n++;
+        }
+      } catch {
+        /* skip */
+      }
+    }
+    this.fileSnapshots.clear();
+    return n;
   }
 
   /** Ctrl+B: move the currently-running bash command to the background. Returns false if none runs. */
@@ -234,6 +270,10 @@ export class ToolRegistry {
       if (!v.ok) return `Blocked by adversarial check: ${v.reason || "looks unsafe"}`;
     }
 
+    // Snapshot the target before a structured mutation so /rewind can restore it.
+    if ((name === "write_file" || name === "edit" || name === "multi_edit") && args.path) {
+      this.snapshotFile(resolveInRoot(this.root, String(args.path)));
+    }
     try {
       const out = name === "bash" ? await this.runBash(args) : await DISPATCH[name](this.root, args);
       this.runPostHook(name, args, out);

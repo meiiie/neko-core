@@ -54,7 +54,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/paste", desc: "attach an image from the clipboard (or Alt+V)" },
   { name: "/login", desc: "enter + save your API key" },
   { name: "/logout", desc: "remove the saved API key" },
-  { name: "/rewind", desc: "undo the last turn (restore context; files unchanged)" },
+  { name: "/rewind", desc: "undo the last turn (restore context + revert this turn's file edits)" },
   { name: "/bashes", desc: "list background bash tasks (Ctrl+B to background a running one)" },
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
@@ -176,8 +176,12 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/clear":
       agent.messages = [];
       return ctx.setLines([{ id: ctx.nextId(), kind: "info", text: "(cleared)" }]);
-    case "/rewind":
-      return addLine("info", agent.rewind() ? "(rewound the last turn - context restored to before it; files on disk are unchanged)" : "nothing to rewind");
+    case "/rewind": {
+      const undone = agent.rewind();
+      const files = ctx.registry.restoreCheckpoint();
+      if (!undone && !files) return addLine("info", "nothing to rewind");
+      return addLine("info", `(rewound last turn - context restored${files ? `, ${files} file(s) reverted` : ""})`);
+    }
     case "/bashes": {
       const bg = ctx.registry.backgrounds;
       if (!bg.length) return addLine("info", "no background tasks (Ctrl+B moves a running bash to the background)");
