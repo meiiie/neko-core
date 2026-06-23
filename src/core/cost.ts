@@ -15,6 +15,7 @@ export class CostTracker {
   totalTokens = 0;
   calls = 0;
   lastPrompt = 0; // last call's prompt size ~= current context usage
+  lastCompletion = 0; // last call's output size (this turn's reply)
 
   add(usage?: Usage): void {
     if (!usage) return;
@@ -24,10 +25,14 @@ export class CostTracker {
     this.completionTokens += completion;
     this.totalTokens += usage.total_tokens ?? prompt + completion;
     if (usage.prompt_tokens !== undefined) this.lastPrompt = usage.prompt_tokens;
+    if (usage.completion_tokens !== undefined) this.lastCompletion = completion;
     this.calls += 1;
   }
 
   summary(): string {
-    return `tokens: ${this.totalTokens} (in ${this.promptTokens} / out ${this.completionTokens}) over ${this.calls} call(s)`;
+    return (
+      `tokens: ${this.totalTokens} total (in ${this.promptTokens} / out ${this.completionTokens}) over ${this.calls} call(s); ` +
+      `last turn: ${this.lastPrompt} in / ${this.lastCompletion} out`
+    );
   }
 }

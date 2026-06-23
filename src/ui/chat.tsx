@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApprovalBox, type Approval } from "./approval-box.tsx";
 import { runSlashCommand, SLASH } from "./commands.ts";
-import { trunc } from "./format.ts";
+import { ctxPercent, fmtTok, trunc } from "./format.ts";
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TextInput } from "./text-input.tsx";
@@ -203,17 +203,23 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     return () => clearInterval(timer);
   }, [busy]);
 
-  // Ctrl-C twice to exit (always active).
+  // Global hotkeys. Ctrl+C: interrupt a running turn; else clear a non-empty input; else
+  // double-press exits. Ctrl+U clears the line, Ctrl+L clears the screen, Esc clears input when idle.
   const ctrlC = useRef(false);
-  useInput((input, key) => {
-    if (key.ctrl && input === "c") {
+  useInput((char, key) => {
+    if (key.ctrl && char === "c") {
+      if (busy) return controllerRef.current?.abort();
+      if (input) { setInput(""); ctrlC.current = false; return; }
       if (ctrlC.current) return exit();
       ctrlC.current = true;
       addLine("info", "(press Ctrl-C again to exit)");
-      setTimeout(() => {
-        ctrlC.current = false;
-      }, 2000);
+      setTimeout(() => { ctrlC.current = false; }, 2000);
+      return;
     }
+    if (approval || overlay) return; // let their own handlers own the rest of the keys
+    if (key.ctrl && char === "u") return setInput("");
+    if (key.ctrl && char === "l") return setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
+    if (key.escape && !busy && input) return setInput("");
   });
 
   // Approval keys.
@@ -463,10 +469,18 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
                 <Text color={MODE_COLOR[mode]}>{mode}</Text>
                 <Text dimColor> · shift+tab to cycle</Text>
               </Text>
-              <Text color="#9a9a9a">
-                {(cfg.model || "").split("/").pop()} · {agentRef.current!.cost.totalTokens} tok ·{" "}
-                {Math.max(0, Math.round((100 * (cfg.contextWindow - agentRef.current!.cost.lastPrompt)) / cfg.contextWindow))}% ctx
-              </Text>
+              {(() => {
+                const cost = agentRef.current!.cost;
+                const pct = ctxPercent(cost.lastPrompt, cfg.contextWindow);
+                const ctxColor = pct >= 85 ? "red" : pct >= 60 ? "yellow" : "#9a9a9a";
+                return (
+                  <Text color="#9a9a9a">
+                    {(cfg.model || "").split("/").pop()} · <Text color={ctxColor}>{pct}% ctx</Text>
+                    <Text dimColor> ({fmtTok(cost.lastPrompt)}/{fmtTok(cfg.contextWindow)})</Text>
+                    {" · "}↑{fmtTok(cost.lastPrompt)} ↓{fmtTok(cost.lastCompletion)} · {fmtTok(cost.totalTokens)} tok
+                  </Text>
+                );
+              })()}
             </Box>
           )}
         </Box>

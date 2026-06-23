@@ -9,6 +9,11 @@ export function fmtTok(n: number): string {
   return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
 }
 
+/** Percent of the context window used (0-100), clamped. */
+export function ctxPercent(used: number, window: number): number {
+  return Math.min(100, Math.max(0, Math.round((100 * used) / Math.max(1, window))));
+}
+
 export function fmtBytes(n: number): string {
   return n < 1024 ? `${n}B` : n < 1048576 ? `${(n / 1024).toFixed(1)}KB` : `${(n / 1048576).toFixed(1)}MB`;
 }

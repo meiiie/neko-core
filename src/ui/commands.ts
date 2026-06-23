@@ -236,8 +236,11 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/context": {
       const win = cfg.contextWindow;
       const used = agent.cost.lastPrompt;
-      const pct = Math.max(0, Math.round((100 * (win - used)) / win));
-      return addLine("info", `context: ~${used} / ${win} tokens (${pct}% free; auto-compacts past 85%)`);
+      const pct = Math.min(100, Math.max(0, Math.round((100 * used) / win)));
+      return addLine(
+        "info",
+        `context: ${used} / ${win} tokens used (${pct}%; auto-compacts past 85%) · last turn ${agent.cost.lastPrompt} in / ${agent.cost.lastCompletion} out`,
+      );
     }
     case "/remember": {
       const rest = input.slice("/remember".length).trim();
