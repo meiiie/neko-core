@@ -28,6 +28,22 @@ test("inserts at the cursor after moving left", async () => {
   c.unmount();
 });
 
+test("a multi-line paste inserts without submitting early", async () => {
+  let submitted: string | null = null;
+  let last = "";
+  function H2() {
+    const [v, setV] = useState("");
+    last = v;
+    return <TextInput value={v} onChange={setV} onSubmit={(x) => (submitted = x)} />;
+  }
+  const c = render(<H2 />);
+  c.stdin.write("foo();\nbar();"); // one paste chunk with a newline
+  await tick();
+  expect(submitted).toBeNull(); // did NOT submit on the embedded newline
+  expect(last).toBe("foo();\nbar();");
+  c.unmount();
+});
+
 test("end-typing stays codepoint/NFC correct (IME path)", async () => {
   let out = "";
   const c = render(<Harness cb={(v) => (out = v)} />);

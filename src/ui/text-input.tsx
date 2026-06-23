@@ -32,7 +32,10 @@ export function TextInput(props: {
   const rerender = () => setTick((t) => t + 1);
 
   useInput((input, key) => {
-    if (key.return) return onSubmit(ref.current);
+    // Ink delivers a paste as one call with the whole string; if it carries a line break, treat it
+    // as a paste (insert, don't submit) rather than an Enter.
+    const isPaste = input.length > 1 && /[\r\n]/.test(input);
+    if (key.return && !isPaste) return onSubmit(ref.current);
     const chars = [...ref.current];
     if (key.leftArrow) { cur.current = Math.max(0, cur.current - 1); return rerender(); }
     if (key.rightArrow) { cur.current = Math.min(chars.length, cur.current + 1); return rerender(); }
@@ -59,7 +62,7 @@ export function TextInput(props: {
     }
     if (input && !key.ctrl && !key.meta && !key.tab && !key.escape &&
         !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow) {
-      const ins = [...input];
+      const ins = [...(isPaste ? input.replace(/\r\n?/g, "\n") : input)];
       chars.splice(cur.current, 0, ...ins);
       cur.current += ins.length;
       ref.current = chars.join("").normalize("NFC");
