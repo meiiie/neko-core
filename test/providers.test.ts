@@ -1,11 +1,35 @@
 import { expect, test } from "bun:test";
 
 import { NekoConfig } from "../src/adapters/config.ts";
-import { getProvider, OpenAICompatProvider, parseOpenAIMessage } from "../src/adapters/providers.ts";
+import { getProvider, makeThinkSplitter, OpenAICompatProvider, parseOpenAIMessage } from "../src/adapters/providers.ts";
 
 function cfg(provider: string) {
   return new NekoConfig({ provider }, null, {}, "");
 }
+
+test("think splitter routes <think> to reasoning, even split across stream chunks", () => {
+  let content = "", reasoning = "";
+  const s = makeThinkSplitter((c) => (content += c), (r) => (reasoning += r));
+  for (const ch of ["Hello <thi", "nk>secret rea", "soning</thi", "nk> the ", "answer"]) s.push(ch);
+  s.flush();
+  expect(reasoning).toBe("secret reasoning");
+  expect(content).toBe("Hello  the answer"); // think block removed from the answer
+});
+
+test("plain content (no think tags) streams through untouched", () => {
+  let content = "", reasoning = "";
+  const s = makeThinkSplitter((c) => (content += c), (r) => (reasoning += r));
+  for (const ch of ["just ", "a normal ", "answer"]) s.push(ch);
+  s.flush();
+  expect(content).toBe("just a normal answer");
+  expect(reasoning).toBe("");
+});
+
+test("parseOpenAIMessage extracts <think> from a non-streamed body", () => {
+  const r = parseOpenAIMessage({ choices: [{ message: { content: "<think>weighing options</think>The answer is 42." } }] });
+  expect(r.content).toBe("The answer is 42.");
+  expect(r.reasoning).toBe("weighing options");
+});
 
 test("factory returns OpenAICompatProvider", () => {
   expect(getProvider(cfg("openai_compat"))).toBeInstanceOf(OpenAICompatProvider);

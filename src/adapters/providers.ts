@@ -153,7 +153,52 @@ export function parseOpenAIMessage(data: any): ProviderResponse {
     }
     toolCalls.push({ id: call.id ?? "", name: fn.name ?? "", arguments: args });
   }
-  return { content: message.content ?? null, tool_calls: toolCalls, usage: data.usage, reasoning: message.reasoning_content ?? message.reasoning ?? undefined };
+  // Reasoning comes either as a dedicated field OR embedded as <think>..</think> in content.
+  const split = splitThink(message.content);
+  const fieldReasoning = message.reasoning_content ?? message.reasoning ?? "";
+  const reasoning = [fieldReasoning, split.reasoning].filter(Boolean).join("\n") || undefined;
+  return { content: split.content, tool_calls: toolCalls, usage: data.usage, reasoning };
+}
+
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
+
+/** Streaming splitter that routes <think>...</think> EMBEDDED IN CONTENT to the reasoning channel.
+ * Many open reasoning models (DeepSeek-R1, QwQ, local thinking models) stream thinking inside content
+ * tags instead of the reasoning_content field — without this it would leak into the answer. Holds a
+ * small tail so a tag split across SSE deltas is still recognized. */
+export function makeThinkSplitter(onContent: (s: string) => void, onReasoning: (s: string) => void) {
+  let inThink = false;
+  let buf = "";
+  const emit = (s: string) => { if (s) (inThink ? onReasoning : onContent)(s); };
+  const partialTail = (s: string): number => {
+    const tag = inThink ? THINK_CLOSE : THINK_OPEN;
+    for (let k = Math.min(tag.length - 1, s.length); k > 0; k--) if (tag.startsWith(s.slice(s.length - k))) return k;
+    return 0;
+  };
+  return {
+    push(chunk: string) {
+      buf += chunk;
+      for (;;) {
+        const idx = buf.indexOf(inThink ? THINK_CLOSE : THINK_OPEN);
+        if (idx === -1) break;
+        emit(buf.slice(0, idx));
+        buf = buf.slice(idx + (inThink ? THINK_CLOSE : THINK_OPEN).length);
+        inThink = !inThink;
+      }
+      const keep = partialTail(buf);
+      if (buf.length > keep) { emit(buf.slice(0, buf.length - keep)); buf = buf.slice(buf.length - keep); }
+    },
+    flush() { emit(buf); buf = ""; },
+  };
+}
+
+/** Pull <think>...</think> out of a non-streamed message body into reasoning. */
+function splitThink(text: string | null | undefined): { content: string | null; reasoning: string } {
+  if (!text) return { content: text ?? null, reasoning: "" };
+  let reasoning = "";
+  const content = text.replace(/<think>([\s\S]*?)<\/think>/g, (_m, t) => { reasoning += t; return ""; });
+  return { content: content.trim() || null, reasoning };
 }
 
 /** Parse a streamed (SSE) chat completion, calling onDelta for each content chunk. */
@@ -163,6 +208,10 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
   let usage: Usage | undefined;
   const acc: { id: string; name: string; argString: string }[] = [];
   const announced = new Set<number>(); // tool calls whose name we've already surfaced
+  const think = makeThinkSplitter(
+    (s) => { content += s; onDelta(s); },
+    (s) => { reasoning += s; onDelta(s, "reasoning"); },
+  );
 
   for await (const line of sseLines(res)) {
     if (!line.startsWith("data:")) continue;
@@ -177,10 +226,7 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
     if (chunk.usage) usage = chunk.usage;
     const delta = chunk.choices?.[0]?.delta;
     if (!delta) continue;
-    if (delta.content) {
-      content += delta.content;
-      onDelta(delta.content);
-    }
+    if (delta.content) think.push(delta.content); // routes <think>..</think> -> reasoning, rest -> content
     const r = delta.reasoning_content ?? delta.reasoning;
     if (r) {
       reasoning += r;
@@ -200,6 +246,7 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
       }
     }
   }
+  think.flush(); // emit any buffered tail (e.g. trailing content with no closing tag)
 
   const toolCalls: ToolCall[] = acc.filter(Boolean).map((t) => {
     let args: Record<string, any>;
