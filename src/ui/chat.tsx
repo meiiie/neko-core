@@ -262,6 +262,10 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       setTimeout(() => { ctrlC.current = false; }, 2000);
       return;
     }
+    if (key.ctrl && char === "b") { // move a running bash command to the background
+      if (registryRef.current?.detachRunningBash()) addLine("info", "(bash moved to background - /bashes to check)");
+      return;
+    }
     if (approval || overlay) return; // let their own handlers own the rest of the keys
     if (key.ctrl && char === "o") { // expand: re-print the most recent collapsed tool output in full
       const last = [...lines].reverse().find((l) => l.kind === "tool_result" && l.text.split("\n").length > 8);
@@ -485,7 +489,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
       ) : null}
 
       {busy && !approval ? (
-        <Box marginTop={1}>
+        <Box marginTop={1} flexDirection="column">
           <ThinkingLine
             verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}
             elapsed={elapsed}
@@ -494,6 +498,7 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
             queued={queued}
             effort={cfg.effort}
           />
+          {registryRef.current?.bashRunning() ? <Text dimColor>{"  (ctrl+b to run in background)"}</Text> : null}
         </Box>
       ) : null}
 

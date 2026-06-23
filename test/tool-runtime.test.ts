@@ -166,6 +166,24 @@ test("adversarial check also vets auto-approved MCP tools", async () => {
   expect(await reg.execute("mcp__x__do", {})).toBe("ran mcp");
 });
 
+test("bash returns exit code + output", async () => {
+  const { reg } = makeReg("auto", () => true);
+  const out = await reg.execute("bash", { command: "echo hello" });
+  expect(out).toContain("hello");
+  expect(out).toContain("exit 0");
+});
+
+test("Ctrl+B moves a running bash command to the background", async () => {
+  const { reg } = makeReg("auto", () => true);
+  const p = reg.execute("bash", { command: 'node -e "setTimeout(function(){},600)"' });
+  await new Promise((r) => setTimeout(r, 150));
+  expect(reg.detachRunningBash()).toBe(true); // a bash is running -> detached
+  const out = await p;
+  expect(out).toContain("background");
+  expect(reg.backgrounds.length).toBe(1);
+  expect(reg.detachRunningBash()).toBe(false); // nothing running now
+});
+
 test("catastrophic bash is refused even in auto mode (seatbelt)", async () => {
   const { reg } = makeReg("auto", () => true); // auto would otherwise auto-approve bash
   expect(await reg.execute("bash", { command: "rm -rf /" })).toContain("Refused"); // never runs

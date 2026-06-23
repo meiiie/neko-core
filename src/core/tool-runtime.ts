@@ -7,7 +7,7 @@
  * Each tool returns a STRING observation (errors + denials included) so a failed or denied
  * tool never crashes the agent loop. Path-taking tools refuse to escape the project root.
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -53,6 +53,10 @@ export class ToolRegistry {
   checkAction?: (toolName: string, args: Record<string, any>) => Promise<{ ok: boolean; reason: string }>;
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
+  /** Bash commands moved to the background (Ctrl+B); output keeps accumulating. Read via /bashes. */
+  backgrounds: { id: string; command: string; output: string; done: boolean; code?: number | null }[] = [];
+  private bgCounter = 0;
+  private detachCurrent: (() => void) | null = null;
 
   constructor(
     public readonly root: string,
@@ -61,6 +65,56 @@ export class ToolRegistry {
     public mcp?: McpTools,
   ) {
     this.mode = mode;
+  }
+
+  /** True while a foreground bash command is running (so the REPL can show the Ctrl+B hint). */
+  bashRunning(): boolean {
+    return this.detachCurrent !== null;
+  }
+
+  /** Ctrl+B: move the currently-running bash command to the background. Returns false if none runs. */
+  detachRunningBash(): boolean {
+    if (!this.detachCurrent) return false;
+    this.detachCurrent();
+    return true;
+  }
+
+  /** Run a shell command. Resolves on exit/timeout, OR early (kept running) if Ctrl+B detaches it. */
+  private async runBash(args: Record<string, any>): Promise<string> {
+    const command = requireArg(args, "command");
+    const child = spawn(command, { shell: true, cwd: this.root });
+    let output = "";
+    const onData = (d: any) => { output += d.toString(); };
+    child.stdout?.on("data", onData);
+    child.stderr?.on("data", onData);
+
+    let detach!: () => void;
+    const outcome = await Promise.race([
+      new Promise<{ kind: "exit"; code: number | null }>((res) => child.on("close", (code) => res({ kind: "exit", code }))),
+      new Promise<{ kind: "error"; err: Error }>((res) => child.on("error", (err) => res({ kind: "error", err }))),
+      new Promise<{ kind: "timeout" }>((res) => setTimeout(() => res({ kind: "timeout" }), BASH_TIMEOUT_MS)),
+      new Promise<{ kind: "detach" }>((res) => { detach = () => res({ kind: "detach" }); this.detachCurrent = detach; }),
+    ]);
+    this.detachCurrent = null;
+
+    if (outcome.kind === "error") return `Error: ${outcome.err.message}`;
+    if (outcome.kind === "timeout") {
+      try { child.kill(); } catch { /* already gone */ }
+      return `(timed out after ${BASH_TIMEOUT_MS}ms)\n${capOutput(output)}`.trimEnd();
+    }
+    if (outcome.kind === "detach") {
+      const id = `bg${++this.bgCounter}`;
+      const bg = { id, command, output, done: false, code: undefined as number | null | undefined };
+      // Keep accumulating into the background record (the same `output` string is snapshotted; rebind).
+      child.stdout?.removeListener("data", onData);
+      child.stderr?.removeListener("data", onData);
+      child.stdout?.on("data", (d: any) => { bg.output += d.toString(); });
+      child.stderr?.on("data", (d: any) => { bg.output += d.toString(); });
+      child.on("close", (code) => { bg.done = true; bg.code = code; });
+      this.backgrounds.push(bg);
+      return `Running in background [${id}]: ${command}\nCheck output with /bashes.`;
+    }
+    return `(exit ${outcome.code ?? "?"})\n${capOutput(output)}`.trimEnd();
   }
 
   /** All tool schemas shown to the model: enabled built-in + connected MCP tools. */
@@ -181,7 +235,7 @@ export class ToolRegistry {
     }
 
     try {
-      const out = await DISPATCH[name](this.root, args);
+      const out = name === "bash" ? await this.runBash(args) : await DISPATCH[name](this.root, args);
       this.runPostHook(name, args, out);
       return out;
     } catch (error) {
@@ -389,21 +443,8 @@ function toolMultiEdit(root: string, args: Record<string, any>): string {
   return `Edited ${raw}  (${edits.length} edits, +${added} -${removed})`;
 }
 
-function toolBash(root: string, args: Record<string, any>): string {
-  const command = requireArg(args, "command");
-  const result = spawnSync(command, {
-    shell: true,
-    cwd: root,
-    encoding: "utf-8",
-    timeout: BASH_TIMEOUT_MS,
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  if (result.error) throw result.error;
-  let output = (result.stdout || "") + (result.stderr || "");
-  if (output.length > MAX_OUTPUT_CHARS) {
-    output = output.slice(0, MAX_OUTPUT_CHARS) + `\n... (truncated at ${MAX_OUTPUT_CHARS} chars)`;
-  }
-  return `(exit ${result.status ?? "?"})\n${output}`.trimEnd();
+function capOutput(s: string): string {
+  return s.length > MAX_OUTPUT_CHARS ? s.slice(0, MAX_OUTPUT_CHARS) + `\n... (truncated at ${MAX_OUTPUT_CHARS} chars)` : s;
 }
 
 function requireArg(args: Record<string, any>, key: string): string {
@@ -476,7 +517,7 @@ const DISPATCH: Record<string, (root: string, args: Record<string, any>) => stri
   write_file: toolWriteFile,
   edit: toolEdit,
   multi_edit: toolMultiEdit,
-  bash: toolBash,
+  // bash is handled by ToolRegistry.runBash (needs instance state for Ctrl+B backgrounding).
   web_search: toolWebSearch,
   // web_fetch is handled in execute() (it may post-process with a summarizer).
 };

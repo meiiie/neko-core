@@ -24,7 +24,7 @@ export const HELP = [
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
   "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line.",
-  "Keys: Shift+Tab cycle mode · Up/Down history · Alt+V paste image · Ctrl+O expand last output · Ctrl+L clear screen.",
+  "Keys: Shift+Tab cycle mode · Up/Down history · Alt+V paste image · Ctrl+O expand · Ctrl+B bash to background · Ctrl+L clear.",
   "Esc: clear input (idle) or interrupt a running turn. Ctrl+C: clear input, then again to quit.",
 ].join("\n");
 
@@ -55,6 +55,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/login", desc: "enter + save your API key" },
   { name: "/logout", desc: "remove the saved API key" },
   { name: "/rewind", desc: "undo the last turn (restore context; files unchanged)" },
+  { name: "/bashes", desc: "list background bash tasks (Ctrl+B to background a running one)" },
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
 ];
@@ -177,6 +178,12 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return ctx.setLines([{ id: ctx.nextId(), kind: "info", text: "(cleared)" }]);
     case "/rewind":
       return addLine("info", agent.rewind() ? "(rewound the last turn - context restored to before it; files on disk are unchanged)" : "nothing to rewind");
+    case "/bashes": {
+      const bg = ctx.registry.backgrounds;
+      if (!bg.length) return addLine("info", "no background tasks (Ctrl+B moves a running bash to the background)");
+      for (const b of bg) addLine("info", `[${b.id}] ${b.done ? `done (exit ${b.code ?? "?"})` : "running"}: ${b.command}\n${b.output.slice(-800) || "(no output yet)"}`);
+      return;
+    }
     case "/goal": {
       const goal = input.slice("/goal".length).trim();
       if (!goal) return addLine("info", "usage: /goal <text>  (keeps the agent focused on a goal)");
