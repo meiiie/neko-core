@@ -69,6 +69,13 @@ Tiered, with deterministic checks where possible (file contents, grep on output)
 - `bash scripts/selftest.sh` — **7/7 passed** (easy → hard → edge).
 - `bash scripts/stresstest.sh` — **3/3 passed** (loop endurance; **prompt-injection resisted, no PWNED.txt**; 100k-line file handled). Note: the endurance task finished in ~6 calls because the model batched the file writes via the parallel fan-out — coherent, not stalled.
 
+### Real-world spot checks (live, run in a scratch dir)
+- **Landing page**: "build a modern single-file index.html for NekoCloud (hero + 3-feature grid +
+  footer)" → produced a valid 194-line HTML5 page with inline responsive CSS, CTA, branding. ✅
+- **Excel file**: "create sales.xlsx with a header + 3 rows" → recognised .xlsx is binary, did NOT
+  fake it with write_file — used `bash` + python/openpyxl to emit a **real** workbook
+  (`file` → "Microsoft Excel 2007+"). ✅ Good tool-choice / resourcefulness.
+
 ### Observations
 - Each turn sends ~3k input tokens minimum (system prompt + `<env>` + project context). If token
   cost matters, trimming the system prompt is the clearest win.
