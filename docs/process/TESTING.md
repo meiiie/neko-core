@@ -33,7 +33,7 @@ bun bin/neko.ts policy       # safe/gated tool-boundary audit
 | File | Covers |
 |---|---|
 | chat-ui.test | header/status bar, **resume replays conversation**, tool line, approval box + `y`, plan box, queue, slash menu |
-| ux.test | status bar (mode + ctx%), **ThinkingLine effort + per-turn tokens**, **edit diff preview** (-/+), **live reasoning** (shows then clears), **post-turn run-time line**, **placeholder drops after 1st turn**, **Ctrl+C clears input** |
+| ux.test (9) | status bar (mode + ctx%), **ThinkingLine effort + per-turn tokens**, **edit diff preview** (-/+), **live reasoning** (shows then clears), **post-turn run-time line**, **placeholder drops after 1st turn**, **Ctrl+C clears input**, **Shift+Tab mode cycle**, **slash autocomplete**, **/help** |
 | markdown.test | table renders bold cells + decodes entities/`<br>`; tool-result collapse + ctrl+o hint; 1-line read summary |
 | text-input.test | cursor insert (Left + type), IME/NFC end-typing, multi-line paste (no early submit) |
 | ui.test | logo/markdown/highlight primitives |
@@ -56,7 +56,7 @@ Tiered, with deterministic checks where possible (file contents, grep on output)
 
 **2026-06-23** (profile: nvidia / qwen3-next-80b-a3b-instruct)
 - `bun run typecheck` — clean.
-- `bun test` — **107 passed, 0 failed** (19 files); re-run ×3, stable (de-flaked the async-bash approval test).
+- `bun test` — **110 passed, 0 failed** (19 files); re-run ×3, stable (de-flaked the async-bash approval test).
 - `bun bin/neko.ts policy` — PASS.
 - `bash scripts/selftest.sh` — **7/7 passed** (easy → hard → edge).
 

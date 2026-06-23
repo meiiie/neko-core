@@ -75,6 +75,36 @@ test("post-turn run-time line + placeholder drops after first turn", async () =>
   c.unmount();
 });
 
+test("Shift+Tab cycles the permission mode (auto -> default)", async () => {
+  const c = render(<ChatApp yolo provider={new Echo()} />);
+  await tick();
+  expect(strip(c.lastFrame())).toContain("auto");
+  c.stdin.write("\x1b[Z"); // Shift+Tab
+  await tick(50);
+  expect(strip(c.lastFrame())).toContain("default");
+  c.unmount();
+});
+
+test("slash menu autocompletes as you type", async () => {
+  const c = render(<ChatApp yolo provider={new Echo()} />);
+  await tick();
+  c.stdin.write("/mod");
+  await tick(50);
+  expect(strip(c.lastFrame())).toContain("/model");
+  c.unmount();
+});
+
+test("/help lists the command set", async () => {
+  const c = render(<ChatApp yolo provider={new Echo()} />);
+  await tick();
+  c.stdin.write("/help");
+  await tick(20);
+  c.stdin.write("\r");
+  await tick(60);
+  expect(strip(c.frames.join("\n"))).toContain("Commands:");
+  c.unmount();
+});
+
 test("Ctrl+C clears a non-empty input (does not exit)", async () => {
   const c = render(<ChatApp yolo provider={new Echo()} />);
   await tick();
