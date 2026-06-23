@@ -26,6 +26,17 @@ test("edit falls back to a whitespace-tolerant line match", async () => {
   expect(await reg.execute("read_file", { path: "code.ts" })).toContain("const x = 2;");
 });
 
+test("edit returns a unified diff (context, -removed, +added)", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "f.ts"), "a();\nb();\nc();\nd();\n");
+  const out = await reg.execute("edit", { path: "f.ts", old_string: "c();", new_string: "C1();\nC2();" });
+  expect(out).toContain("Edited f.ts");
+  expect(out).toContain("(+2 -1)");
+  expect(out).toContain("- c();");
+  expect(out).toContain("+ C1();");
+  expect(out).toContain("  b();"); // context line (2-space prefix -> dim)
+});
+
 test("edit reports an ambiguous whitespace match instead of guessing", async () => {
   const { root, reg } = makeReg();
   writeFileSync(join(root, "d.ts"), "a();\na();\n"); // two lines, no indent

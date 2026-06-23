@@ -296,16 +296,30 @@ function toolWriteFile(root: string, args: Record<string, any>): string {
   const content = args.content;
   if (content === undefined || content === null) throw new Error("missing required argument: content");
   const path = resolveInRoot(root, raw);
+  const existed = existsSync(path);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, String(content), "utf-8");
-  return `Wrote ${raw} (${String(content).split("\n").length} lines)`;
+  const lines = String(content).split("\n");
+  return [
+    `Wrote ${raw}  (${existed ? "overwrote, " : ""}+${lines.length})`,
+    ...lines.slice(0, 16).map((l) => `+ ${l}`),
+  ].join("\n");
 }
 
-/** First line of a string, truncated, with an ellipsis if it spans more lines. */
-function firstLine(s: string): string {
-  const lines = String(s).split("\n");
-  const head = lines[0].length > 120 ? lines[0].slice(0, 120) + "…" : lines[0];
-  return lines.length > 1 ? head + " …" : head;
+/** A Claude-style unified diff: context lines (plain), removed (-), added (+) with a header. */
+function editDiff(path: string, origLines: string[], startLine: number, removed: string[], added: string[]): string {
+  const ctx = 2;
+  const before = origLines.slice(Math.max(0, startLine - ctx), startLine);
+  const afterStart = startLine + removed.length;
+  const after = origLines.slice(afterStart, afterStart + ctx);
+  const cap = (arr: string[], sign: string) => arr.slice(0, 16).map((l) => `${sign} ${l}`);
+  return [
+    `Edited ${path}  (+${added.length} -${removed.length})`,
+    ...before.map((l) => `  ${l}`),
+    ...cap(removed, "-"),
+    ...cap(added, "+"),
+    ...after.map((l) => `  ${l}`),
+  ].join("\n");
 }
 
 function toolEdit(root: string, args: Record<string, any>): string {
@@ -317,30 +331,37 @@ function toolEdit(root: string, args: Record<string, any>): string {
   const path = resolveInRoot(root, raw);
   if (!existsSync(path)) return `Error: no such file: ${raw}`;
   let text = readFileSync(path, "utf-8");
+  const origLines = text.split("\n");
+  const oldLines = String(oldStr).split("\n");
+  const newLines = String(newStr).split("\n");
+  let startLine: number;
+  let removed = oldLines;
   const occurrences = text.split(String(oldStr)).length - 1;
   if (occurrences === 1) {
-    // Function replacement avoids `$` patterns in new_string being interpreted.
-    text = text.replace(String(oldStr), () => String(newStr));
+    const idx = text.indexOf(String(oldStr));
+    startLine = text.slice(0, idx).split("\n").length - 1;
+    text = text.slice(0, idx) + String(newStr) + text.slice(idx + String(oldStr).length);
   } else if (occurrences > 1) {
     return `Error: old_string occurs ${occurrences} times in ${raw} (must be unique; add more surrounding context)`;
   } else {
     // Exact match failed (often indentation/trailing-whitespace drift): retry by matching lines
     // ignoring leading/trailing whitespace. Must still be unique. new_string replaces verbatim.
-    const fileLines = text.split("\n");
-    const oldLines = String(oldStr).split("\n");
     const oldTrim = oldLines.map((l) => l.trim());
     let at = -1;
     let count = 0;
-    for (let i = 0; i + oldLines.length <= fileLines.length; i++) {
-      if (oldLines.every((_, j) => fileLines[i + j].trim() === oldTrim[j])) { count++; at = i; }
+    for (let i = 0; i + oldLines.length <= origLines.length; i++) {
+      if (oldLines.every((_, j) => origLines[i + j].trim() === oldTrim[j])) { count++; at = i; }
     }
     if (count === 0) return `Error: old_string not found in ${raw}`;
     if (count > 1) return `Error: old_string matches ${count} places in ${raw} (add more surrounding context)`;
-    fileLines.splice(at, oldLines.length, ...String(newStr).split("\n"));
-    text = fileLines.join("\n");
+    startLine = at;
+    removed = origLines.slice(at, at + oldLines.length); // the actual file lines (real whitespace)
+    const next = [...origLines];
+    next.splice(at, oldLines.length, ...newLines);
+    text = next.join("\n");
   }
   writeFileSync(path, text, "utf-8");
-  return `Edited ${raw}\n- ${firstLine(String(oldStr))}\n+ ${firstLine(String(newStr))}`;
+  return editDiff(raw, origLines, startLine, removed, newLines);
 }
 
 function toolBash(root: string, args: Record<string, any>): string {

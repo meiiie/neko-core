@@ -51,7 +51,7 @@ interface ChatProps {
 export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const cols = stdout?.columns ?? 80;
+  const [cols, setCols] = useState(stdout?.columns ?? 80);
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
   const streamRef = useRef("");
@@ -194,6 +194,14 @@ export function ChatApp({ profile, yolo, resume, mcpHub, provider }: ChatProps) 
     createdAtRef.current = target.createdAt;
     addLine("info", `(resumed ${target.id} - ${target.messages.length} messages; context restored)`);
   };
+
+  // Re-layout on terminal resize (otherwise dividers/widths break immediately on zoom).
+  useEffect(() => {
+    if (!stdout) return;
+    const onResize = () => setCols(stdout.columns ?? 80);
+    stdout.on("resize", onResize);
+    return () => void stdout.off("resize", onResize);
+  }, [stdout]);
 
   // Elapsed timer while a turn runs.
   useEffect(() => {
