@@ -36,6 +36,7 @@ function makeTransport(cfg: McpServerConfig): { transport: any; type: string } {
       command: cfg.command ?? "",
       args: cfg.args ?? [],
       env: { ...process.env, ...(cfg.env ?? {}) } as Record<string, string>,
+      stderr: "ignore", // keep MCP servers' banners/logs (e.g. RiveMCP trial notice) off the TUI
     }),
     type: "stdio",
   };

@@ -234,12 +234,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     });
   };
 
-  // Load a session's history into the live agent (used by /resume and the picker).
+  // Load a session's history into the live agent AND replay it into the transcript (like opening a
+  // chat thread — you see the whole prior conversation, not just a note).
   const resumeInto = (target: Session) => {
     agentRef.current!.messages = [...target.messages];
     sessionIdRef.current = target.id;
     createdAtRef.current = target.createdAt;
-    addLine("info", `(resumed ${target.id} - ${target.messages.length} messages; context restored)`);
+    const replay: Line[] = [{ id: idRef.current++, kind: "welcome", text: "" }];
+    for (const m of target.messages) {
+      const text = contentToText(m.content);
+      if (m.role === "user" && text.trim()) replay.push({ id: idRef.current++, kind: "user", text });
+      else if (m.role === "assistant" && text.trim()) replay.push({ id: idRef.current++, kind: "assistant", text });
+    }
+    replay.push({ id: idRef.current++, kind: "info", text: `(resumed ${target.id} - ${target.messages.length} messages)` });
+    stdout?.write("\x1b[2J\x1b[3J\x1b[H"); // wipe the old screen so the thread doesn't duplicate
+    setResizeKey((k) => k + 1); // remount <Static> -> re-emit only the replayed thread
+    setLines(replay);
+    setStarted(true);
   };
 
   // Stop the remote-control server when the app exits.

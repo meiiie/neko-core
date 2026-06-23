@@ -38,7 +38,11 @@ export const DEFAULT_SYSTEM_PROMPT =
   "For a big, self-contained subtask (deep research, a focused investigation), delegate it with " +
   "the task tool — a fresh sub-agent handles it and returns just the result, keeping this " +
   "conversation uncluttered.\n" +
-  "Inspect before you edit; make the smallest change that works; verify by running tests or bash. " +
+  "Inspect before you edit; make the smallest change that works; verify by running tests or bash.\n" +
+  "For anything time-sensitive ('today', 'current', 'latest', a price, who holds an office, recent " +
+  "events), do NOT answer from your training knowledge - it has a cutoff and may be stale. Search " +
+  "the web, prefer reputable/primary sources, cross-check more than one, and cite them. If sources " +
+  "conflict or look speculative/fictional, say so rather than presenting a guess as fact.\n" +
   "Be concise - no filler. When the task is done, give a short summary and stop calling tools.";
 
 // Tools safe to run concurrently in one turn: read-only inspection + sub-agent tasks (the
