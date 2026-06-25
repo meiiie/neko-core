@@ -9,8 +9,16 @@ $dest  = Join-Path $dir 'neko.exe'
 $url   = "https://github.com/$repo/releases/latest/download/$asset"
 
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-Write-Host "neko: downloading $asset ..."
-Invoke-WebRequest -Uri $url -OutFile $dest
+Write-Host "neko: downloading $asset (~100 MB) ..."
+# Prefer curl.exe (ships with Windows 10 1803+): full-speed download. Invoke-WebRequest's progress
+# bar cripples large downloads (10-40x slower in Windows PowerShell), so disable it on the fallback.
+if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+  & curl.exe -fSL --retry 3 -o $dest $url
+  if ($LASTEXITCODE -ne 0) { throw "download failed (curl exit $LASTEXITCODE)" }
+} else {
+  $ProgressPreference = 'SilentlyContinue'
+  Invoke-WebRequest -Uri $url -OutFile $dest
+}
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($userPath -notlike "*$dir*") {
