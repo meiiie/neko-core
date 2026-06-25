@@ -395,6 +395,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     { isActive: busy && approval === null },
   );
 
+  // Slash-command menu: navigable suggestions. Up/Down highlight, Tab completes — so the arrows
+  // drive the menu instead of falling through to history and rewinding the half-typed command.
+  const SLASH_CAP = 10;
+  const slashOpen = input.startsWith("/") && !busy && approval === null && overlay === null;
+  const slashMatches = slashOpen ? SLASH.filter((c) => c.name.startsWith(input.split(/\s+/)[0])) : [];
+  const [slashSel, setSlashSel] = useState(0);
+  useEffect(() => { setSlashSel(0); }, [slashOpen ? input.split(/\s+/)[0] : ""]); // reset highlight when the command token changes
+
   // History (Up/Down) + Shift+Tab mode cycling, while the input box shows.
   useInput(
     (_char, key) => {
@@ -403,6 +411,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         registryRef.current!.mode = nm;
         setMode(nm);
         return;
+      }
+      // Slash menu open: arrows highlight a suggestion, Tab completes it — keep history out of it.
+      if (slashOpen && slashMatches.length) {
+        const cap = Math.min(slashMatches.length, SLASH_CAP);
+        if (key.upArrow) { setSlashSel((i) => (i - 1 + cap) % cap); return; }
+        if (key.downArrow) { setSlashSel((i) => (i + 1) % cap); return; }
+        if (key.tab) {
+          const chosen = slashMatches[Math.min(slashSel, cap - 1)];
+          if (chosen) setInput(chosen.name + " ");
+          return;
+        }
       }
       const h = historyRef.current;
       if (key.upArrow && historyPos.current > 0) {
@@ -656,18 +675,19 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             />
           </Box>
           <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
-          {input.startsWith("/") ? (() => {
-            const matches = SLASH.filter((c) => c.name.startsWith(input.split(/\s+/)[0]));
-            const CAP = 10; // don't flood the screen when "/" matches everything
-            return (
-              <Box flexDirection="column" paddingLeft={2}>
-                {matches.slice(0, CAP).map((c) => (
-                  <Text key={c.name} color="gray">{c.name}  <Text dimColor>{c.desc}</Text></Text>
-                ))}
-                {matches.length > CAP ? <Text dimColor>{`  … +${matches.length - CAP} more (keep typing to filter)`}</Text> : null}
-              </Box>
-            );
-          })() : (
+          {slashMatches.length ? (
+            <Box flexDirection="column" paddingLeft={2}>
+              {slashMatches.slice(0, SLASH_CAP).map((c, i) => (
+                <Text key={c.name} color={i === slashSel ? "cyan" : "gray"}>
+                  {i === slashSel ? "> " : "  "}{c.name}  <Text dimColor>{c.desc}</Text>
+                </Text>
+              ))}
+              <Text dimColor>
+                {"  up/down to select, tab to complete"}
+                {slashMatches.length > SLASH_CAP ? `   (+${slashMatches.length - SLASH_CAP} more, keep typing)` : ""}
+              </Text>
+            </Box>
+          ) : (
             <Box justifyContent="space-between">
               <Text>
                 <Text color={MODE_COLOR[mode]}>{mode}</Text>

@@ -41,6 +41,25 @@ test("header + input + status bar render on start", () => {
   unmount();
 });
 
+test("slash menu: Down navigates suggestions instead of rewinding the prompt; Tab completes", async () => {
+  const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+  const { lastFrame, stdin, unmount } = render(<ChatApp yolo provider={provider} />);
+  await tick();
+  stdin.write("/"); // open the slash menu
+  await tick();
+  expect(lastFrame() ?? "").toContain("up/down to select, tab to complete"); // menu open
+  stdin.write("[B"); // Down arrow — must move the highlight, NOT clear/rewind the input
+  await tick();
+  // If Down had fallen through to history it would have cleared the input -> menu (and its hint) gone.
+  expect(lastFrame() ?? "").toContain("up/down to select, tab to complete"); // still open => prompt intact
+  stdin.write("h"); // narrow to /help-ish, then complete with Tab
+  await tick();
+  stdin.write("\t");
+  await tick();
+  expect(lastFrame() ?? "").toMatch(/\/h\w+/); // a full command name was filled into the prompt
+  unmount();
+});
+
 test("auto mode: a safe tool call + markdown answer render end-to-end", async () => {
   const provider = new MockProvider([
     { content: null, tool_calls: [{ id: "c1", name: "ls", arguments: {} }] },
