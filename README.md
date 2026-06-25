@@ -29,25 +29,39 @@ server** (llama.cpp `llama-server`, Ollama), so it works offline.
 - **Sessions** — conversations persist; resume with `neko chat --resume`.
 - **MCP** — connect Model Context Protocol servers and use their tools (`neko mcp`).
 
-## Quick start
+## Install
 
-Requires [Bun](https://bun.sh).
+**One line — no Bun required.** Downloads a standalone binary from the latest
+[release](https://github.com/meiiie/neko-core/releases):
 
 ```bash
-git clone https://github.com/meiiie/neko-core
-cd neko-core
-bun install
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh | sh
+```
 
-bun run build                  # -> dist/neko  (single standalone executable; no Bun to run it)
-# put dist/neko on your PATH, then:
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/meiiie/neko-core/main/install.ps1 | iex
+```
 
+Then set up your key and go:
+
+```bash
 neko init-user                 # scaffold ~/.neko-core/config.json (API key + profile)
 # edit ~/.neko-core/config.json: set api_key + model (or use env NEKO_API_KEY)
 neko doctor                    # check provider/model/key
 neko                           # start the interactive session  (also: neko code / neko core)
 ```
 
-During development you can run it via Bun without building: `bun bin/neko.ts doctor`, `bun bin/neko.ts` (chat).
+### From source (development) — requires [Bun](https://bun.sh)
+
+```bash
+git clone https://github.com/meiiie/neko-core
+cd neko-core
+bun install
+bun run build                  # -> dist/neko  (single standalone executable; no Bun to run it)
+bun bin/neko.ts doctor         # or run directly via Bun, no build needed
+```
 
 ### Commands
 

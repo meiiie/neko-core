@@ -1,0 +1,37 @@
+name: release
+
+# Build standalone, Bun-free binaries for every OS on a version tag, and attach
+# them to a GitHub Release. Users then install with one line (see install.sh / install.ps1).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: bun-linux-x64,    asset: neko-linux-x64 }
+          - { os: ubuntu-latest,  target: bun-linux-arm64,  asset: neko-linux-arm64 }
+          - { os: macos-latest,   target: bun-darwin-arm64, asset: neko-macos-arm64 }
+          - { os: macos-13,       target: bun-darwin-x64,   asset: neko-macos-x64 }
+          - { os: windows-latest, target: bun-windows-x64,  asset: neko-windows-x64.exe }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: compile
+        run: bun build --compile --target=${{ matrix.target }} --outfile ${{ matrix.asset }} bin/neko.ts
+      - name: attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
+          generate_release_notes: true
