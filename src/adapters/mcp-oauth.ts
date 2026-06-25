@@ -10,14 +10,14 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 
 function authDir(server: string): string {
-  return join(homedir(), ".neko-core", "mcp-auth", server.replace(/[^a-z0-9_-]/gi, "_"));
+  return join(homeDir(), ".neko-core", "mcp-auth", server.replace(/[^a-z0-9_-]/gi, "_"));
 }
 
 export function openBrowser(url: string): void {

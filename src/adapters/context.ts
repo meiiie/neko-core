@@ -6,7 +6,8 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { homedir, platform, release } from "node:os";
+import { platform, release } from "node:os";
+import { homeDir } from "../shared/home.ts";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 const CONTEXT_NAMES = ["NEKO.md", "CLAUDE.md"];
@@ -37,7 +38,7 @@ export function loadProjectContext(cwd: string = process.cwd()): ContextFile[] {
   };
 
   // Global user context first (least specific).
-  add(join(homedir(), ".neko-core", "NEKO.md"), "~/.neko-core/NEKO.md");
+  add(join(homeDir(), ".neko-core", "NEKO.md"), "~/.neko-core/NEKO.md");
 
   // Project context: outermost dir first, cwd last (most specific wins by being last).
   for (const dir of ancestorDirs(cwd)) {
@@ -109,7 +110,7 @@ export function environmentBlock(info: { model?: string; provider?: string } = {
 export function rememberNote(text: string, scope: "project" | "user" = "project"): string {
   const note = text.trim();
   if (!note) return "nothing to remember";
-  const file = scope === "user" ? join(homedir(), ".neko-core", "NEKO.md") : join(process.cwd(), "NEKO.md");
+  const file = scope === "user" ? join(homeDir(), ".neko-core", "NEKO.md") : join(process.cwd(), "NEKO.md");
   let body = "";
   try {
     if (existsSync(file)) body = readFileSync(file, "utf-8");
@@ -130,7 +131,7 @@ export function rememberNote(text: string, scope: "project" | "user" = "project"
 /** Directories from the repo root (or home) down to cwd (outermost first). */
 function ancestorDirs(start: string): string[] {
   const dirs: string[] = [];
-  const home = homedir();
+  const home = homeDir();
   let cur = resolve(start);
   for (;;) {
     dirs.push(cur);

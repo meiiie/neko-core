@@ -4,7 +4,7 @@
  * prompt run as a turn, with $ARGUMENTS and $1..$n substituted. Save a workflow once, replay it.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 
 export interface Recipe {
@@ -14,7 +14,7 @@ export interface Recipe {
 }
 
 function recipeDirs(): string[] {
-  return [join(homedir(), ".neko-core", "recipes"), join(process.cwd(), ".neko-core", "recipes")];
+  return [join(homeDir(), ".neko-core", "recipes"), join(process.cwd(), ".neko-core", "recipes")];
 }
 
 function parse(file: string): Recipe | null {

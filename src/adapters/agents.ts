@@ -5,7 +5,7 @@
  * that prompt. Available types are injected into context so the model knows what it can delegate to.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 
 export interface AgentDef {
@@ -15,7 +15,7 @@ export interface AgentDef {
 }
 
 function agentDirs(): string[] {
-  return [join(homedir(), ".neko-core", "agents"), join(process.cwd(), ".neko-core", "agents")];
+  return [join(homeDir(), ".neko-core", "agents"), join(process.cwd(), ".neko-core", "agents")];
 }
 
 function parse(file: string): AgentDef | null {

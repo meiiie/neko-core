@@ -13,7 +13,7 @@
  * ~/.neko-core/config.json "api_key" field — never stored in the printable `data`.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 
 import { isMode, type PermissionMode } from "../core/permissions.ts";
@@ -160,8 +160,8 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
   const overlays: Record<string, any>[] = opts.path
     ? [readOverlay(opts.path)]
     : [
-        readOverlay(join(homedir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)),
-        readOverlay(join(homedir(), "neko.json")),
+        readOverlay(join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)),
+        readOverlay(join(homeDir(), "neko.json")),
         readOverlay(join(process.cwd(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)),
         readOverlay(join(process.cwd(), "neko.json")),
       ];
@@ -190,7 +190,7 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
   // `.mcp.json` (Claude-style project MCP file): merge its `mcpServers` map. ./.mcp.json (project)
   // wins over ~/.mcp.json, both layered onto config's `mcp_servers`.
   if (!opts.path) {
-    const fromMcpJson = { ...readMcpJson(join(homedir(), ".mcp.json")), ...readMcpJson(join(process.cwd(), ".mcp.json")) };
+    const fromMcpJson = { ...readMcpJson(join(homeDir(), ".mcp.json")), ...readMcpJson(join(process.cwd(), ".mcp.json")) };
     if (Object.keys(fromMcpJson).length) merged.mcp_servers = { ...(merged.mcp_servers ?? {}), ...fromMcpJson };
   }
 

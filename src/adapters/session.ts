@@ -5,7 +5,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 
 export interface Session {
@@ -21,7 +21,7 @@ export interface Session {
 }
 
 function sessionsDir(): string {
-  return join(homedir(), ".neko-core", "sessions");
+  return join(homeDir(), ".neko-core", "sessions");
 }
 
 /** Current git branch for a directory, or "" if not a repo. */

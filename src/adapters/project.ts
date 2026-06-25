@@ -4,12 +4,12 @@
  * ./.neko-core/config.json. Neither is committed (both gitignored). Env vars override.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeDir } from "../shared/home.ts";
 import { dirname, join } from "node:path";
 
 import { LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME } from "./config.ts";
 
-const userConfigPath = () => join(homedir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME);
+const userConfigPath = () => join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME);
 
 function readUserConfig(): Record<string, any> {
   const path = userConfigPath();
@@ -119,7 +119,7 @@ const PROJECT_TEMPLATE = {
 };
 
 export function initUser(force = false): string {
-  return write(join(homedir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), USER_TEMPLATE, force);
+  return write(join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), USER_TEMPLATE, force);
 }
 
 function nekoMdTemplate(name: string): string {

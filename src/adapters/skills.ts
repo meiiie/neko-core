@@ -4,7 +4,7 @@
  * in chat injects the skill body into the system prompt so the model follows it.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 
 export interface Skill {
@@ -14,7 +14,7 @@ export interface Skill {
 }
 
 function skillDirs(): string[] {
-  return [join(homedir(), ".neko-core", "skills"), join(process.cwd(), ".neko-core", "skills")];
+  return [join(homeDir(), ".neko-core", "skills"), join(process.cwd(), ".neko-core", "skills")];
 }
 
 function parse(file: string): Skill | null {

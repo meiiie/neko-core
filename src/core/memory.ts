@@ -5,15 +5,11 @@
  * knows what it remembers; it reads/searches the relevant ones itself. Pure + node-only (stays core).
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 
 function memDir(): string {
-  // Respect USERPROFILE/HOME before os.homedir() so the dir is overridable (and testable on Linux,
-  // where homedir() reads the passwd entry and ignores $HOME). USERPROFILE first so a Windows
-  // msys-style HOME ("/c/...") never mangles the path. Resolves to the real home in production.
-  const home = process.env.USERPROFILE || process.env.HOME || homedir();
-  return join(home, ".neko-core", "memory");
+  return join(homeDir(), ".neko-core", "memory");
 }
 
 /** Confine a name to the memory dir: basename only, .md, no path escape. */
