@@ -456,14 +456,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setRcOn(false);
         addLine("info", "remote control off");
       } else {
-        const rc = startRemoteControl(async (msg) => {
-          if (controllerRef.current) return "(neko is busy - try again when idle)";
-          await handle(msg);
-          return agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content ?? "(no reply)";
-        });
-        rcRef.current = rc;
-        setRcOn(true);
-        addLine("info", `remote control on (local only): ${rc.url}\n  curl -s "${rc.url}/message?token=${rc.token}" -d '{"message":"hi"}'`);
+        try {
+          const rc = await startRemoteControl(async (msg) => {
+            if (controllerRef.current) return "(neko is busy - try again when idle)";
+            await handle(msg);
+            return agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content ?? "(no reply)";
+          });
+          rcRef.current = rc;
+          setRcOn(true);
+          addLine("info", `remote control on (local only): ${rc.url}\n  curl -s "${rc.url}/message?token=${rc.token}" -d '{"message":"hi"}'`);
+        } catch (e) {
+          addLine("error", `remote control failed to start: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
       return;
     }

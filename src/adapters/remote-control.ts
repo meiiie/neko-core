@@ -15,7 +15,12 @@ export interface RemoteControl {
   stop: () => void;
 }
 
-export function startRemoteControl(onMessage: (text: string) => Promise<string>, port = 4517): RemoteControl {
+const MAX_PORT_HOPS = 10;
+
+export async function startRemoteControl(
+  onMessage: (text: string) => Promise<string>,
+  port = 4517,
+): Promise<RemoteControl> {
   const token = randomUUID();
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
@@ -28,16 +33,41 @@ export function startRemoteControl(onMessage: (text: string) => Promise<string>,
       let body = "";
       req.on("data", (c) => (body += c));
       req.on("end", async () => {
-        let text = body;
-        try { text = JSON.parse(body).message ?? body; } catch { /* treat body as raw text */ }
-        const reply = await onMessage(String(text));
-        res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ reply }));
+        try {
+          let text = body;
+          try { text = JSON.parse(body).message ?? body; } catch { /* treat body as raw text */ }
+          const reply = await onMessage(String(text));
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ reply }));
+        } catch (e) {
+          // A failing agent turn must not hang the client (or bubble an unhandled rejection).
+          res.statusCode = 500;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+        }
       });
       return;
     }
     res.end(`Neko remote control active. POST /message?token=${token}  {"message":"..."}`);
   });
-  server.listen(port, "127.0.0.1");
-  return { url: `http://127.0.0.1:${port}`, token, stop: () => server.close() };
+
+  // Bind to loopback, hopping to the next port if one is busy (a stale server from a crashed
+  // session, or another Neko) instead of crashing on an unhandled EADDRINUSE 'error' event.
+  const bound = await new Promise<number>((resolve, reject) => {
+    let p = port;
+    const attempt = () => {
+      const onErr = (e: NodeJS.ErrnoException) => {
+        server.removeListener("error", onErr);
+        if (e.code === "EADDRINUSE" && p < port + MAX_PORT_HOPS) { p += 1; attempt(); }
+        else reject(e);
+      };
+      server.once("error", onErr);
+      server.listen(p, "127.0.0.1", () => { server.removeListener("error", onErr); resolve(p); });
+    };
+    attempt();
+  });
+  // Keep a permanent handler so a late socket error can never throw an unhandled 'error' event.
+  server.on("error", () => { /* swallow post-bind socket errors */ });
+
+  return { url: `http://127.0.0.1:${bound}`, token, stop: () => server.close() };
 }
