@@ -9,7 +9,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 function memDir(): string {
-  return join(homedir(), ".neko-core", "memory");
+  // Respect USERPROFILE/HOME before os.homedir() so the dir is overridable (and testable on Linux,
+  // where homedir() reads the passwd entry and ignores $HOME). USERPROFILE first so a Windows
+  // msys-style HOME ("/c/...") never mangles the path. Resolves to the real home in production.
+  const home = process.env.USERPROFILE || process.env.HOME || homedir();
+  return join(home, ".neko-core", "memory");
 }
 
 /** Confine a name to the memory dir: basename only, .md, no path escape. */
