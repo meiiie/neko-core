@@ -34,20 +34,23 @@ test("loop runs tools then finishes", async () => {
   ]);
 });
 
-test("dynamicContext is injected and refreshed each turn (no staleness on model switch)", async () => {
+test("dynamicContext is merged into the ONE system message and refreshed each turn (no staleness, one system msg)", async () => {
   let model = "m1";
   const agent = new Agent({
     provider: new ScriptedProvider([{ content: "ok", tool_calls: [] }, { content: "ok2", tool_calls: [] }]) as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
     dynamicContext: () => `<env>model: ${model}</env>`,
   });
-  const dyn = () => agent.messages.find((m: any) => m.role === "system" && m.dynamic);
+  const sys = () => agent.messages.find((m: any) => m.role === "system");
   await agent.run("hi");
-  expect(dyn().content).toContain("model: m1");
+  expect(sys().content).toContain("model: m1");
+  // Exactly ONE system message: a second system message breaks tool-calling on Llama/Mistral templates.
+  expect(agent.messages.filter((m: any) => m.role === "system").length).toBe(1);
   model = "m2"; // user switches model mid-session
   await agent.run("again");
-  expect(dyn().content).toContain("model: m2"); // refreshed, not stale
-  expect(agent.messages.filter((m: any) => m.role === "system" && m.dynamic).length).toBe(1);
+  expect(sys().content).toContain("model: m2"); // refreshed, not stale
+  expect(sys().content).not.toContain("model: m1"); // old context stripped, not accumulated
+  expect(agent.messages.filter((m: any) => m.role === "system").length).toBe(1); // still one
 });
 
 test("compact keeps system + recent turns verbatim and summarizes the older ones", async () => {

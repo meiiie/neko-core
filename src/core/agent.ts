@@ -67,6 +67,10 @@ export class Agent {
   private readonly dynamicContext?: () => string;
   readonly cost = new CostTracker();
   messages: any[] = [];
+  /** The single system message is `<base prompt>` + DYN_MARK + `<live session context>`.
+   * One system message only: some chat templates (Llama/Mistral on vLLM) suppress tool-calling
+   * when a SECOND system message is present, so session context is merged in, never split out. */
+  private static readonly DYN_MARK = "\n\n<session-context>\n";
 
   constructor(opts: AgentOptions) {
     this.provider = opts.provider;
@@ -144,35 +148,38 @@ export class Agent {
     return out;
   }
 
-  /** Keep one live system message (right after the base prompt) holding env + project context,
-   * refreshed each turn — so a mid-session model switch or NEKO.md edit is reflected at once. */
+  /** Refresh the live session context (env + project + memory + todos) held INSIDE the single base
+   * system message — so a mid-session model switch or NEKO.md edit is reflected at once, without ever
+   * emitting a second system message (which breaks tool-calling on some templates). */
   private refreshDynamicContext(): void {
     if (!this.dynamicContext) return;
+    this.messages = this.messages.filter((m) => !m.dynamic); // migrate legacy two-system sessions
+    const sys = this.messages.find((m) => m.role === "system");
+    if (!sys || typeof sys.content !== "string") return;
+    const base = sys.content.split(Agent.DYN_MARK)[0];
     const text = this.dynamicContext();
-    const existing = this.messages.find((m) => m.role === "system" && m.dynamic);
-    if (!text) {
-      if (existing) this.messages = this.messages.filter((m) => m !== existing);
-      return;
-    }
-    if (existing) existing.content = text;
-    else {
-      const baseIdx = this.messages.findIndex((m) => m.role === "system");
-      this.messages.splice(baseIdx + 1, 0, { role: "system", content: text, dynamic: true });
-    }
+    sys.content = text ? `${base}${Agent.DYN_MARK}${text}` : base;
   }
 
   /** Replace the base system message with the current systemPrompt — so prompt improvements apply
    * to a RESUMED session (whose saved messages bake in whatever prompt was current when it ran). */
   refreshSystemPrompt(): void {
-    const sys = this.messages.find((m) => m.role === "system" && !m.dynamic);
-    if (sys) sys.content = this.systemPrompt;
+    const sys = this.messages.find((m) => m.role === "system");
+    if (!sys || typeof sys.content !== "string") return;
+    const dyn = sys.content.split(Agent.DYN_MARK)[1]; // preserve any live session-context tail
+    sys.content = this.systemPrompt + (dyn !== undefined ? Agent.DYN_MARK + dyn : "");
   }
 
-  /** Append text to the system prompt (used by /skill). Seeds the base prompt if needed. */
+  /** Append text to the base system prompt (used by /skill). Inserted before the live session-context
+   * tail so the next refresh doesn't strip it. Seeds the base prompt if there's no system message. */
   appendSystem(text: string): void {
     const sys = this.messages.find((m) => m.role === "system");
-    if (sys) sys.content += "\n\n" + text;
-    else this.messages.unshift({ role: "system", content: this.systemPrompt + "\n\n" + text });
+    if (!sys || typeof sys.content !== "string") {
+      this.messages.unshift({ role: "system", content: this.systemPrompt + "\n\n" + text });
+      return;
+    }
+    const [base, dyn] = sys.content.split(Agent.DYN_MARK);
+    sys.content = `${base}\n\n${text}` + (dyn !== undefined ? Agent.DYN_MARK + dyn : "");
   }
 
   /** Run the loop until the model is done or maxSteps is hit. Returns the final text.
