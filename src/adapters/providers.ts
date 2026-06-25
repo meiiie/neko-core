@@ -34,6 +34,10 @@ export async function listModels(config: NekoConfig): Promise<string[]> {
 }
 
 export class OpenAICompatProvider implements Provider {
+  /** Models whose endpoint rejected `reasoning_effort` (HTTP 400/422). We then omit the field for
+   * that model for the rest of the session, so a configured effort degrades gracefully instead of
+   * hard-failing — and any value (low..high, 'max', future tiers) still passes through where supported. */
+  private readonly effortUnsupported = new Set<string>();
   constructor(private readonly cfg: NekoConfig) {}
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal): Promise<ProviderResponse> {
@@ -62,7 +66,7 @@ export class OpenAICompatProvider implements Provider {
     if (this.cfg.maxTokens > 0) payload.max_tokens = this.cfg.maxTokens; // 0 -> omit (model's full budget)
     if (stream) payload.stream_options = { include_usage: true };
     if (tools && tools.length) payload.tools = tools;
-    if (this.cfg.effort) payload.reasoning_effort = this.cfg.effort; // only when set via /effort
+    if (this.cfg.effort && !this.effortUnsupported.has(this.cfg.model)) payload.reasoning_effort = this.cfg.effort;
 
     const url = `${this.cfg.baseUrl}/chat/completions`;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -106,6 +110,15 @@ export class OpenAICompatProvider implements Provider {
         const label = res.status === 429 ? "rate limited" : `HTTP ${res.status}`;
         onDelta?.(`(${label} - retrying in ${Math.round(waitMs / 1000)}s, attempt ${httpAttempt}/${this.cfg.maxRetries})`, "reasoning");
         await sleep(waitMs, signal);
+        continue;
+      }
+      // Self-heal: some endpoints reject `reasoning_effort` (the field, or a value they don't accept -
+      // e.g. NVIDIA's vLLM takes only low/medium/high, not 'max'). If that's the sole problem, drop the
+      // field once and retry, so a configured effort works where supported and degrades where it isn't.
+      if ((res.status === 400 || res.status === 422) && payload.reasoning_effort !== undefined && /reasoning_effort/i.test(body)) {
+        this.effortUnsupported.add(this.cfg.model);
+        delete payload.reasoning_effort;
+        onDelta?.("(this endpoint rejected reasoning_effort - retrying without it)", "reasoning");
         continue;
       }
       const hint = res.status === 429 ? " (rate limited - slow down or raise max_retries)" : "";

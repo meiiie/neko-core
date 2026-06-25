@@ -73,6 +73,34 @@ test("network-resilient: gives up once the offline budget is exhausted", async (
   }
 });
 
+test("self-heals when an endpoint rejects reasoning_effort: drops the field, retries, remembers", async () => {
+  const orig = globalThis.fetch;
+  const sentEffort: (string | undefined)[] = [];
+  globalThis.fetch = (async (_url: string, init: any) => {
+    const sent = JSON.parse(init.body);
+    sentEffort.push(sent.reasoning_effort);
+    if (sent.reasoning_effort !== undefined) {
+      // vLLM-style validation error naming the offending field
+      return new Response(JSON.stringify({ error: { message: "validation: 'reasoning_effort' Input should be 'low','medium' or 'high'" } }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: {} }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as any;
+  try {
+    const c = new NekoConfig({ provider: "openai_compat", base_url: "http://x/v1", model: "m", reasoning_effort: "max" }, null, {}, "k");
+    const provider = new OpenAICompatProvider(c);
+    const res = await provider.complete([{ role: "user", content: "hi" }]);
+    expect(res.content).toBe("ok");
+    expect(sentEffort[0]).toBe("max");     // first try sends the configured value (pass-through)
+    expect(sentEffort[1]).toBeUndefined(); // self-healed: retried without the field
+    // remembered for the model: a second call omits the field up front (no wasted 400)
+    sentEffort.length = 0;
+    await provider.complete([{ role: "user", content: "again" }]);
+    expect(sentEffort[0]).toBeUndefined();
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 test("factory unknown provider throws", () => {
   expect(() => getProvider(cfg("nope"))).toThrow();
 });
