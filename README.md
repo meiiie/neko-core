@@ -36,13 +36,16 @@ server** (llama.cpp `llama-server`, Ollama), so it works offline.
 
 ```bash
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh | sh
+curl -fsSL https://neko.holilihu.online/install.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/meiiie/neko-core/main/install.ps1 | iex
+irm https://neko.holilihu.online/install.ps1 | iex
 ```
+
+> Fallback if the domain is unreachable: swap the URL for
+> `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
 Then set up your key and go:
 

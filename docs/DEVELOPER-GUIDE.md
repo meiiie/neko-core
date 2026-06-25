@@ -21,21 +21,22 @@ Mục lục:
 
 ## 0. Cài đặt nhanh (Quickstart)
 
-Cần **Python ≥ 3.11**. Cài **một lệnh** — trình cài dùng `pipx`, tách `neko` khỏi Python hệ thống,
-**không** tải mô hình nào:
+Cài **một lệnh** — tải **binary standalone** (đã gồm runtime; **không cần Bun/Python** trên máy đích),
+không tải mô hình nào:
 
 ```bash
 # macOS / Linux
-curl -fsSL https://neko.holilihu.online/install.sh | bash
+curl -fsSL https://neko.holilihu.online/install.sh | sh
 
 # Windows (PowerShell)
 irm https://neko.holilihu.online/install.ps1 | iex
 ```
 
-> URL dự phòng (nếu domain không truy cập được): `https://raw.githubusercontent.com/meiiie/bang_c/main/install.sh`
-> (và `…/install.ps1`). Cài thẳng từ nguồn: `pipx install "git+https://github.com/meiiie/bang_c.git"`.
+> URL dự phòng (nếu domain không truy cập được): `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh`
+> (và `…/install.ps1`). Từ nguồn (cần [Bun](https://bun.sh)):
+> `git clone https://github.com/meiiie/neko-core && cd neko-core && bun install && bun run build`.
 
-Sinh CLI `neko` (alias `neko-core`, `bang-c`). Kiểm tra: `neko --doctor`, `neko --version`.
+Sinh CLI `neko` (alias `neko-core`). Kiểm tra: `neko doctor`, `neko --version`.
 
 ### Dùng ngay với API — KHÔNG cần tải mô hình nặng
 
