@@ -20,7 +20,9 @@ jobs:
           - { os: ubuntu-latest,  target: bun-linux-x64,    asset: neko-linux-x64 }
           - { os: ubuntu-latest,  target: bun-linux-arm64,  asset: neko-linux-arm64 }
           - { os: macos-latest,   target: bun-darwin-arm64, asset: neko-macos-arm64 }
-          - { os: macos-13,       target: bun-darwin-x64,   asset: neko-macos-x64 }
+          # Intel macOS: cross-compile from the (arm64) macos-latest runner — macos-13 Intel runners
+          # queue indefinitely. fail-fast:false means a cross-compile hiccup won't block the others.
+          - { os: macos-latest,   target: bun-darwin-x64,   asset: neko-macos-x64 }
           - { os: windows-latest, target: bun-windows-x64,  asset: neko-windows-x64.exe }
     steps:
       - uses: actions/checkout@v4
