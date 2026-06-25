@@ -59,3 +59,27 @@ cost/token tracking · MCP client · single-binary distribution.
 - [x] **E4** Syntax-highlighted code blocks (`src/ui/highlight.tsx`; tokenized Ink Text segments, not raw ANSI).
 - [x] **E5** Markdown tables (aligned columns) in the renderer.
 - [x] **E6** Input queue while busy (type-ahead, drained after each turn) + render of non-streaming finals.
+
+## Phase F — SOTA refinement (research-grade quality -> product) [June 2026]
+> Direction (owner): lean **research-grade SOTA** (memory - planning - multi-agent, latest techniques)
+> as the engine that *drives* product polish — a "tinh hoa" architecture prepared to ship for real.
+> Keep the harness thin (the model does planning/decomposition); invest in prompt/skills/memory + the
+> daily-use experience. Dogfood: Neko improves its own repo.
+
+- [x] **F0** Distribution at Codex/Claude-Code grade: CI builds 5-OS standalone binaries -> GitHub
+  Releases; `install.sh`/`install.ps1` one-line install; branded domain `neko.holilihu.online`
+  (Cloudflare Worker -> neko-core); CI green. Default model `openai/gpt-oss-120b` after a multi-trial
+  Neko-bench (pass@1 97% / pass^3 92%, vs nemotron 72%/38%). *(verified: released binary runs end-to-end)*
+- [x] **F1** Bugs found via cross-model benchmarking + fixed: two `system` messages broke Llama/Mistral
+  tool-calling (-> one system message); `reasoning_effort` self-heal; non-interactive approval
+  fail-closed; shared `homeDir()` for Linux CI. *(committed; tests green)*
+- [x] **F2** Command result-awareness (Claude-Code-style): bash marks failures `(exit N -- FAILED)` and
+  the prompt mandates read-result -> on failure diagnose + fix + re-run. *(verified 3/3 self-correction)*
+- [x] **F3** Navigable slash-command menu: Up/Down select, Tab completes (was: arrows rewound the
+  half-typed command via history). *(regression test added)*
+- [ ] **F4** Remote-control stability pass (`/remote` / `/rc` logic + lifecycle).
+- [ ] **F5** Pixel-level UX polish: streamed-output presentation, markdown spacing/color, diff &
+  tool-call rendering, thinking display, streaming cadence — side-by-side vs Claude Code.
+- [ ] **F6** Naturalness: system-prompt tone/conciseness shaping; smoother tool-call narration.
+- [ ] **F7** SOTA memory - planning - multi-agent, latest techniques (kept thin/disposable).
+- [ ] **F8** `neko bench` — productize the Neko-bench harness (run + compare models).
