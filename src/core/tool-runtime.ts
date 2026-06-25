@@ -160,7 +160,10 @@ export class ToolRegistry {
       this.backgrounds.push(bg);
       return `Running in background [${id}]: ${command}\nCheck output with /bashes.`;
     }
-    return `(exit ${outcome.code ?? "?"})\n${capOutput(output)}`.trimEnd();
+    const code = outcome.code ?? 0;
+    // Make failures unmistakable so the model reacts (diagnoses + retries) instead of moving on.
+    const tag = code === 0 ? "(exit 0)" : `(exit ${code} -- command FAILED)`;
+    return `${tag}\n${capOutput(output)}`.trimEnd();
   }
 
   /** All tool schemas shown to the model: enabled built-in + connected MCP tools. */
