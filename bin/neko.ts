@@ -80,6 +80,12 @@ function load(args: Args): NekoConfig {
 /** Interactive approval gate for the CLI (one-shot readline per gated tool). */
 async function promptApprove(toolName: string, args: Record<string, any>): Promise<boolean> {
   const action = args.command ? `run: ${args.command}` : args.path ? `${toolName} ${args.path}` : toolName;
+  // Non-interactive (pipe / CI / no TTY): fail closed at once instead of hanging on a prompt that
+  // can never be answered. Re-run with --yolo to auto-approve gated tools in that context.
+  if (!process.stdin.isTTY) {
+    console.log(`\n[approval] ${action} -> DENIED (non-interactive; re-run with --yolo to auto-approve)`);
+    return false;
+  }
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const answer = (await rl.question(`\n[approval] ${action}\nApprove? [y/N] `)).trim().toLowerCase();
