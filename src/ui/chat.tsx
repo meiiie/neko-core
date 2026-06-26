@@ -215,11 +215,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps }).run(prompt);
     };
     // web_fetch's optional extractor: one model pass over the fetched page (Claude-style).
-    registryRef.current.summarize = async (instruction, content) => {
+    registryRef.current.summarize = async (instruction, content, schema) => {
       const res = await (provider ?? getProvider(cfg)).complete([
         { role: "system", content: WEB_EXTRACT_PROMPT },
         { role: "user", content: `${instruction}\n\n<page>\n${content.slice(0, 60000)}\n</page>` },
-      ]);
+      ], undefined, undefined, undefined, schema ? { responseSchema: schema } : undefined);
       return res.content ?? "(no answer)";
     };
     if (cfg.adversarialCheck) {

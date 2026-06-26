@@ -26,7 +26,17 @@ Mọi yêu cầu (rẻ nhất / đắt nhất / sắp xếp / lọc / tổng / x
 ## ⭐ Chiến lược tìm GIÁ TỐT NHẤT (đừng neo vào chuỗi lớn)
 Lỗi hay gặp: chỉ hỏi FPT/TGĐ/CellphoneS → ra **giá niêm yết cao**; shop nhỏ/cạnh tranh thường rẻ hơn vài triệu. Một purchasing officer giỏi **đào tới giá thấp nhất thực sự**:
 1. **Search rộng theo giá**: ngoài tên sản phẩm, search thêm `"<sản phẩm> giá rẻ nhất"`, `"<sản phẩm> khuyến mãi"`, và trang so giá **websosanh.vn**. Mở **nhiều shop**, gồm cả shop nhỏ giá tốt (xem MAP mở rộng).
-2. **BÓC GIÁ THEO BIẾN THỂ** (quan trọng nhất — giá các màu nằm SẴN trong HTML, đừng bỏ sót): một trang sản phẩm thường liệt kê **nhiều màu / dung lượng giá KHÁC NHAU** (vd S26 Ultra 12/256: Tím Cobalt 25.999.000đ nhưng Bạc Shadow 28.199.000đ; bản "thu cũ đổi mới" 24.099.000đ). **Khi gọi `web_fetch` trên trang sản phẩm, đưa instruction RÕ RÀNG**: *"Liệt kê MỌI giá theo từng màu/dung lượng cho cấu hình [12GB/256GB], chỉ ra giá THẤP NHẤT + tên màu, và máy chính hãng/bảo hành không"* — ĐỪNG để nó trả về 1 con số headline (đó là lý do hay bị sai cao). **Lấy đúng cấu hình yêu cầu; chưa chốt màu → lấy MÀU RẺ NHẤT** + ghi khoảng giá theo màu.
+2. **BÓC GIÁ THEO BIẾN THỂ** (quan trọng nhất — giá các màu nằm SẴN trong HTML, đừng bỏ sót): một trang sản phẩm thường liệt kê **nhiều màu / dung lượng giá KHÁC NHAU** (vd S26 Ultra 12/256: Tím Cobalt 25.999.000đ nhưng Bạc Shadow 28.199.000đ; bản "thu cũ đổi mới" 24.099.000đ). **DÙNG tham số `schema` của `web_fetch`** (schema-guided extraction — ép liệt kê đủ, tin cậy hơn hẳn prompt thường):
+   ```json
+   { "type":"object", "properties": {
+       "variants": { "type":"array", "items": { "type":"object",
+         "properties": { "label":{"type":"string"}, "price_vnd":{"type":"number"}, "in_stock":{"type":"boolean"} },
+         "required":["label","price_vnd"] } },
+       "lowest": { "type":"object", "properties": { "label":{"type":"string"}, "price_vnd":{"type":"number"} }, "required":["label","price_vnd"] },
+       "official": {"type":"boolean"}, "warranty": {"type":"string"} },
+     "required":["variants","lowest"] }
+   ```
+   -> web_fetch trả JSON đã validate với MỌI biến thể + giá thấp nhất. **Lấy đúng cấu hình yêu cầu; chưa chốt màu → lấy `lowest`** + ghi khoảng giá theo màu. (Không có schema thì ít nhất ra instruction rõ "liệt kê mọi màu + giá thấp nhất", đừng nhận 1 số headline.)
 3. **Khảo ≥4-6 nguồn** rồi mới kết luận "rẻ nhất" — giá thấp nhất phải là **giá thị trường thật**, không phải giá chuỗi lớn đầu tiên gặp.
 4. Vẫn ưu tiên **uy tín** (xem phần đánh giá người bán) — rẻ bất thường thì cảnh báo, đừng lấy đại.
 

@@ -128,3 +128,13 @@ cost/token tracking · MCP client · single-binary distribution.
   *(c)* **Deterministic benchmark** `skills/procurement/evals/run-evals.ts` — fixed offer table (no web),
   `--trials N` -> PASS/FLAKY/FAIL, verifies min/max/sort/filter + a real xlsx-with-links (inflates the
   zip to check). *(verified: 5/5 solid at --trials 2; full suite 147/0)*
+- [x] **G4** Schema-guided web extraction (researched SOTA, then built at the right layer). A fair A/B
+  (Claude Code vs Neko) showed the gap was extraction quality, not browsing: web_fetch's freeform
+  extractor collapsed a 7-variant price table to one number / grabbed the "listed" price. Researched the
+  SOTA (Firecrawl `/extract`, Crawl4AI, ScrapeGraphAI, structured-output / constrained decoding) and
+  **probed the endpoint — NVIDIA gpt-oss supports `response_format` json_schema**. Built it as a generic
+  Provider capability (`CompleteOptions.responseSchema` -> `response_format`, self-healed if rejected),
+  and gave `web_fetch` an optional `schema` arg -> schema-constrained JSON. Tool-layer fix, every skill
+  benefits — not a per-skill prompt band-aid. *(proven on the real Viettablet page: freeform = prose/one
+  number; with schema = all 8 variants + true lowest 24.099M. +provider unit test + a deterministic
+  extraction benchmark on a cached page fixture: 3/3 trials, full variant recall + true lowest. 150/0.)*

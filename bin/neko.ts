@@ -136,11 +136,11 @@ async function buildAgent(
     const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT;
     return await new Agent({ provider: getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps }).run(prompt);
   };
-  registry.summarize = async (instruction, content) => {
+  registry.summarize = async (instruction, content, schema) => {
     const res = await getProvider(cfg).complete([
       { role: "system", content: WEB_EXTRACT_PROMPT },
       { role: "user", content: `${instruction}\n\n<page>\n${content.slice(0, 60000)}\n</page>` },
-    ]);
+    ], undefined, undefined, undefined, schema ? { responseSchema: schema } : undefined);
     return res.content ?? "(no answer)";
   };
   if (cfg.adversarialCheck) {

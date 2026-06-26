@@ -134,10 +134,11 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "web_fetch",
     permission: SAFE,
-    summary: "Fetch a URL (HTML stripped to text). With `prompt`, a fast pass extracts just what you asked, instead of returning the whole page.",
+    summary: "Fetch a URL (HTML stripped to text). With `prompt`, a fast pass extracts just what you asked. With `schema` (a JSON Schema), extraction is schema-constrained and returns validated JSON - use it to reliably enumerate repeated data (e.g. every product variant/price) instead of one value.",
     parameters: {
       url: { type: "string", description: "Absolute http(s) URL." },
       prompt: { type: "string", description: "Optional: what to extract from the page." },
+      schema: { type: "object", description: "Optional JSON Schema. When set, the page is extracted into JSON matching this shape (constrained output) - best for lists/tables like price variants." },
     },
     required: ["url"],
   },

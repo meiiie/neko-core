@@ -62,7 +62,7 @@ export class ToolRegistry {
   /** Spawns an isolated sub-agent (set by the host); enables the `task` tool. */
   subagent?: (prompt: string, type?: string) => Promise<string>;
   /** One-shot model call (set by the host); lets web_fetch extract per a prompt (Claude-style). */
-  summarize?: (instruction: string, content: string) => Promise<string>;
+  summarize?: (instruction: string, content: string, schema?: Record<string, any>) => Promise<string>;
   /** Opt-in adversarial review of auto-approved mutating actions (set by the host). */
   checkAction?: (toolName: string, args: Record<string, any>) => Promise<{ ok: boolean; reason: string }>;
   /** Load a skill's body by name (set by the wiring layer; core can't import the skills adapter). */
@@ -247,9 +247,12 @@ export class ToolRegistry {
     if (name === "web_fetch") {
       const raw = await toolWebFetch(this.root, args);
       const prompt = String(args.prompt ?? "");
-      if (prompt && this.summarize && !raw.startsWith("Error")) {
+      // schema-guided extraction: a JSON Schema forces the extractor to fill a shape (e.g. enumerate
+      // every variant) instead of collapsing to one value - far more reliable than a freeform prompt.
+      const schema = args.schema && typeof args.schema === "object" ? (args.schema as Record<string, any>) : undefined;
+      if ((prompt || schema) && this.summarize && !raw.startsWith("Error")) {
         try {
-          return await this.summarize(prompt, raw);
+          return await this.summarize(prompt || "Extract the requested structured data from the page.", raw, schema);
         } catch {
           return raw;
         }

@@ -8,7 +8,7 @@
  */
 import type { NekoConfig } from "./config.ts";
 import type { Usage } from "../core/cost.ts";
-import type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
+import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
 // Re-export the port types so callers can keep importing them from the provider adapter.
 export type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
@@ -40,7 +40,7 @@ export class OpenAICompatProvider implements Provider {
   private readonly effortUnsupported = new Set<string>();
   constructor(private readonly cfg: NekoConfig) {}
 
-  async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal): Promise<ProviderResponse> {
+  async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
     if (!this.cfg.baseUrl) {
       throw new Error("openai_compat needs a base_url (set base_url or pick a --profile).");
     }
@@ -67,6 +67,11 @@ export class OpenAICompatProvider implements Provider {
     if (stream) payload.stream_options = { include_usage: true };
     if (tools && tools.length) payload.tools = tools;
     if (this.cfg.effort && !this.effortUnsupported.has(this.cfg.model)) payload.reasoning_effort = this.cfg.effort;
+    // Schema-constrained structured output: the endpoint fills the given JSON Schema (constrained
+    // decoding where supported). Self-healed below if the endpoint rejects it.
+    if (opts?.responseSchema) {
+      payload.response_format = { type: "json_schema", json_schema: { name: "extraction", schema: opts.responseSchema } };
+    }
 
     const url = `${this.cfg.baseUrl}/chat/completions`;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -119,6 +124,13 @@ export class OpenAICompatProvider implements Provider {
         this.effortUnsupported.add(this.cfg.model);
         delete payload.reasoning_effort;
         onDelta?.("(this endpoint rejected reasoning_effort - retrying without it)", "reasoning");
+        continue;
+      }
+      // Self-heal: if the endpoint rejects response_format/json_schema, drop it once and retry - the
+      // caller then falls back to prompt-guided JSON instead of the whole call failing.
+      if ((res.status === 400 || res.status === 422) && payload.response_format !== undefined && /response_format|json_schema|guided/i.test(body)) {
+        delete payload.response_format;
+        onDelta?.("(this endpoint rejected response_format - retrying without it)", "reasoning");
         continue;
       }
       const hint = res.status === 429 ? " (rate limited - slow down or raise max_retries)" : "";

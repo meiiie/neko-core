@@ -25,6 +25,31 @@ test("plain content (no think tags) streams through untouched", () => {
   expect(reasoning).toBe("");
 });
 
+test("complete sends response_format json_schema only when a responseSchema is given (structured output)", async () => {
+  const config = new NekoConfig({ provider: "openai_compat", base_url: "https://example/v1", model: "m" }, null, {}, "");
+  const provider = getProvider(config);
+  let sent: any = null;
+  const realFetch = globalThis.fetch;
+  const realKey = process.env.NEKO_API_KEY;
+  process.env.NEKO_API_KEY = "k"; // key is read on-demand from env
+  globalThis.fetch = (async (_url: any, init: any) => {
+    sent = JSON.parse(init.body);
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as any;
+  try {
+    const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] };
+    await provider.complete([{ role: "user", content: "hi" }], undefined, undefined, undefined, { responseSchema: schema });
+    expect(sent.response_format?.type).toBe("json_schema");
+    expect(sent.response_format?.json_schema?.schema).toEqual(schema);
+    await provider.complete([{ role: "user", content: "hi" }]); // no schema -> no response_format
+    expect(sent.response_format).toBeUndefined();
+  } finally {
+    globalThis.fetch = realFetch;
+    if (realKey === undefined) delete process.env.NEKO_API_KEY;
+    else process.env.NEKO_API_KEY = realKey;
+  }
+});
+
 test("parseOpenAIMessage extracts <think> from a non-streamed body", () => {
   const r = parseOpenAIMessage({ choices: [{ message: { content: "<think>weighing options</think>The answer is 42." } }] });
   expect(r.content).toBe("The answer is 42.");
