@@ -59,4 +59,4 @@ A **new model or endpoint is a config profile, not code** (`src/adapters/config.
 4. Open the PR describing **what** and **why**. CI runs typecheck + tests on every push.
 
 Not sure where to start? Open an issue describing what you'd like to do, or look for `good first issue`.
-Small, focused PRs get reviewed fastest. Thank you! 🐾
+Small, focused PRs get reviewed fastest. Thank you!
