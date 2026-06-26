@@ -201,3 +201,22 @@ cost/token tracking · MCP client · single-binary distribution.
   to the user's real logged-in Chrome. *(honest caveat: this masks common UA/webdriver checks; Cloudflare
   + captcha on big marketplaces is an arms race that can still need a human — and the cheapest prices are
   usually at static official retailers that don't need a browser at all. Wired into the procurement skill.)*
+- [x] **G11** Remote control, made professional + cross-device (studied Claude Code Remote Control + Codex
+  cloud clean-room). **(a) `/rc` v2** — the local HTTP control API grew a professional surface: SSE
+  streaming (`Accept: text/event-stream` streams token deltas + a `done` event with `{reply,tokens,ms}`),
+  `GET /status`, `POST /interrupt`, `Authorization: Bearer` only (the old `?token=` leaked into logs ->
+  rejected 401) with constant-time compare, a 1 MB body cap (413), turns serialized (409, no overlapping
+  runs on one session), and a discovery file (`~/.neko-core/remote.json`). Optional `remote_bind` to reach
+  it from another device over a trusted private mesh (Tailscale), with a loud off-loopback warning.
+  **(b) `/relay`** — the professional cross-device pattern (how Claude Code Remote Control works): the
+  local agent **dials OUT** to a relay you host and long-polls for instructions, so it never opens a
+  listening port and works behind any NAT/firewall with zero per-device setup (a phone browser is enough,
+  no Tailscale). Ships a self-hosted Cloudflare Worker (Durable-Object rendezvous) + a mobile web client +
+  deploy guide under `cloudflare/relay/`. Because the relay is YOURS, it's already more private than a
+  vendor cloud. **(c) E2E — the beyond-vendor piece:** `/relay` derives an AES-256-GCM key from a pairing
+  secret (carried in the URL `#fragment`, never sent to the relay); host (`relay-crypto.ts`) and phone
+  client (WebCrypto) seal/open at the edges, so the Worker forwards **only ciphertext** — a true
+  zero-knowledge blind forwarder, MORE private than Claude Code's relay (where the platform reads
+  plaintext). *(proven: node<->browser interop + tamper/wrong-secret rejection; the relay-sees-only-
+  ciphertext property as a unit test AND end-to-end with a real agent — relay saw only `{iv,ct}`, phone
+  decrypted "30". full suite 168/0.)*
