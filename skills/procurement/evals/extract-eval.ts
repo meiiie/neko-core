@@ -22,8 +22,8 @@ const NOT_VARIANTS = [36990000, 29699000, 37699000]; // listed price + other-con
 const SCHEMA = {
   type: "object",
   properties: {
-    variants: { type: "array", items: { type: "object", properties: { label: { type: "string" }, price_vnd: { type: "number" } }, required: ["label", "price_vnd"] } },
-    lowest: { type: "object", properties: { label: { type: "string" }, price_vnd: { type: "number" } }, required: ["label", "price_vnd"] },
+    variants: { type: "array", items: { type: "object", properties: { label: { type: "string" }, price_vnd: { type: "integer" } }, required: ["label", "price_vnd"] } },
+    lowest: { type: "object", properties: { label: { type: "string" }, price_vnd: { type: "integer" } }, required: ["label", "price_vnd"] },
   },
   required: ["variants", "lowest"],
 };

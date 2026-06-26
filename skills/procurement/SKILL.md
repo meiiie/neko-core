@@ -30,9 +30,9 @@ Lỗi hay gặp: chỉ hỏi FPT/TGĐ/CellphoneS → ra **giá niêm yết cao**
    ```json
    { "type":"object", "properties": {
        "variants": { "type":"array", "items": { "type":"object",
-         "properties": { "label":{"type":"string"}, "price_vnd":{"type":"number"}, "in_stock":{"type":"boolean"} },
+         "properties": { "label":{"type":"string"}, "price_vnd":{"type":"integer"}, "in_stock":{"type":"boolean"} },
          "required":["label","price_vnd"] } },
-       "lowest": { "type":"object", "properties": { "label":{"type":"string"}, "price_vnd":{"type":"number"} }, "required":["label","price_vnd"] },
+       "lowest": { "type":"object", "properties": { "label":{"type":"string"}, "price_vnd":{"type":"integer"} }, "required":["label","price_vnd"] },
        "official": {"type":"boolean"}, "warranty": {"type":"string"} },
      "required":["variants","lowest"] }
    ```
