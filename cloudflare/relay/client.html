@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Neko remote</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: #0b0b0c; color: #e6e6e6; }
+  header { padding: 12px 14px; background: #141416; border-bottom: 1px solid #222; }
+  header b { color: #c084fc; }
+  .cfg { display: grid; gap: 6px; padding: 12px 14px; border-bottom: 1px solid #1d1d20; }
+  .cfg input { background: #16161a; border: 1px solid #2a2a30; color: #e6e6e6; border-radius: 8px; padding: 8px 10px; font: inherit; }
+  #log { padding: 12px 14px 90px; }
+  .msg { margin: 10px 0; }
+  .me { color: #9ad; }
+  .me::before { content: "you  "; color: #567; }
+  .neko { white-space: pre-wrap; background: #141416; border: 1px solid #222; border-radius: 10px; padding: 10px 12px; }
+  .neko::before { content: "neko"; display: block; color: #c084fc; font-size: 12px; margin-bottom: 4px; }
+  .dim { color: #667; font-size: 13px; }
+  form { position: fixed; bottom: 0; left: 0; right: 0; display: flex; gap: 8px; padding: 10px; background: #0b0b0c; border-top: 1px solid #1d1d20; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  form input { flex: 1; background: #16161a; border: 1px solid #2a2a30; color: #e6e6e6; border-radius: 10px; padding: 11px 12px; font: inherit; }
+  form button { background: #7c3aed; color: #fff; border: 0; border-radius: 10px; padding: 0 16px; font: inherit; font-weight: 600; }
+  form button:disabled { opacity: .5; }
+</style></head>
+<body>
+<header><b>Neko</b> remote control <span class="dim" id="state">— set session + token below</span></header>
+<div class="cfg">
+  <input id="relay" placeholder="relay URL (this site)" autocomplete="off">
+  <input id="session" placeholder="session (from /relay on your machine)" autocomplete="off">
+  <input id="token" placeholder="token (from /relay)" autocomplete="off" type="password">
+</div>
+<div id="log"></div>
+<form id="f">
+  <input id="m" placeholder="message for Neko…" autocomplete="off" autocapitalize="off">
+  <button id="send" type="submit">Send</button>
+</form>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const log = $("log"), relay = $("relay"), session = $("session"), token = $("token");
+  relay.value = location.origin; // default to this Worker
+  // restore saved session/token
+  try { session.value = localStorage.nekoSession || ""; token.value = localStorage.nekoToken || ""; } catch {}
+  for (const el of [session, token]) el.onchange = () => { try { localStorage.nekoSession = session.value; localStorage.nekoToken = token.value; } catch {} };
+
+  function add(cls, text) { const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = text; log.appendChild(d); window.scrollTo(0, 1e9); return d; }
+  const hdr = () => ({ "content-type": "application/json", authorization: "Bearer " + token.value.trim() });
+
+  $("f").onsubmit = async (e) => {
+    e.preventDefault();
+    const msg = $("m").value.trim(); if (!msg) return;
+    if (!session.value || !token.value) { $("state").textContent = "— enter session + token first"; return; }
+    $("m").value = ""; $("send").disabled = true;
+    add("me", msg);
+    const out = add("neko dim", "…");
+    try {
+      const base = relay.value.trim().replace(/\/+$/, "");
+      const r = await fetch(base + "/send", { method: "POST", headers: hdr(), body: JSON.stringify({ session: session.value.trim(), message: msg }) });
+      if (!r.ok) { out.textContent = "send failed: HTTP " + r.status; out.className = "msg neko"; $("send").disabled = false; return; }
+      const { id } = await r.json();
+      // long-poll for the reply
+      let reply;
+      for (let i = 0; i < 30 && reply === undefined; i++) {
+        const rr = await fetch(base + "/result?session=" + encodeURIComponent(session.value.trim()) + "&id=" + id, { headers: hdr() });
+        if (rr.status === 200) reply = (await rr.json()).reply;
+      }
+      out.className = "msg neko";
+      out.textContent = reply ?? "(no reply — is Neko's /relay running?)";
+    } catch (err) {
+      out.className = "msg neko"; out.textContent = "error: " + err.message;
+    } finally {
+      $("send").disabled = false; $("m").focus();
+    }
+  };
+</script>
+</body></html>

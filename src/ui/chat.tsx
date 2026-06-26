@@ -25,7 +25,8 @@ import { agentsContextBlock, loadAgent } from "../adapters/agents.ts";
 import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
 import { readClipboardImage } from "../adapters/clipboard.ts";
 import { clearApiKey, setApiKey } from "../adapters/project.ts";
-import { startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
+import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
+import { startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
@@ -93,6 +94,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
   const [started, setStarted] = useState(false); // once a turn has run, drop the input placeholder
   const rcRef = useRef<RemoteControl | null>(null);
+  const relayRef = useRef<RemoteRelay | null>(null);
   const remoteSinkRef = useRef<((chunk: string) => void) | null>(null); // streams a turn's output to a remote SSE client
   const [rcOn, setRcOn] = useState(false);
   const cfg = useRef(loadConfig({ profile })).current;
@@ -320,7 +322,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   // Stop the remote-control server when the app exits.
   useEffect(() => { busyRef.current = busy; }, [busy]); // keep the ref in lockstep with the state
-  useEffect(() => () => rcRef.current?.stop(), []);
+  useEffect(() => () => { rcRef.current?.stop(); relayRef.current?.stop(); }, []);
 
   // Re-layout on terminal resize. Ink only clears the screen when the width DECREASES; enlarging
   // re-renders on top of the old frame -> duplicated input box. So on resize we wipe the screen and
@@ -491,23 +493,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         addLine("info", "remote control off");
       } else {
         try {
-          const rc = await startRemoteControl({
-            run: async (msg, onDelta) => {
-              if (busyRef.current) return { reply: "(neko is busy - try again when idle)" };
-              const t0 = Date.now();
-              const tok0 = agentRef.current!.cost.totalTokens;
-              remoteSinkRef.current = onDelta ?? null;
-              try {
-                await handle(msg);
-                const last = agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content;
-                return { reply: typeof last === "string" ? last : "(no reply)", tokens: agentRef.current!.cost.totalTokens - tok0, ms: Date.now() - t0 };
-              } finally {
-                remoteSinkRef.current = null;
-              }
-            },
-            status: () => ({ busy: busyRef.current, model: cfg.model, messages: agentRef.current!.messages.length }),
-            interrupt: () => { if (controllerRef.current) { controllerRef.current.abort(); return true; } return false; },
-          }, 4517, cfg.remoteBind);
+          const rc = await startRemoteControl(makeRemoteHandlers(), 4517, cfg.remoteBind);
           rcRef.current = rc;
           setRcOn(true);
           const loopback = cfg.remoteBind === "127.0.0.1" || cfg.remoteBind === "localhost";
@@ -516,6 +502,27 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         } catch (e) {
           addLine("error", `remote control failed to start: ${e instanceof Error ? e.message : String(e)}`);
         }
+      }
+      return;
+    }
+    if (text === "/relay" || text.startsWith("/relay ")) {
+      if (relayRef.current) {
+        relayRef.current.stop();
+        relayRef.current = null;
+        addLine("info", "relay off");
+        return;
+      }
+      const url = text.slice("/relay".length).trim();
+      if (!url) {
+        addLine("info", "usage: /relay <your-relay-url> - drive Neko from any phone/browser, no open port (deploy cloudflare/relay, then /relay https://neko-relay.<you>.workers.dev)");
+        return;
+      }
+      try {
+        const r = await startRemoteRelay(url, makeRemoteHandlers());
+        relayRef.current = r;
+        addLine("info", `relay on (control from any device, no open port): ${url}\n  open ${url} on your phone, then enter -\n  session: ${r.session}\n  token:   ${r.token}`);
+      } catch (e) {
+        addLine("error", `relay failed to start: ${e instanceof Error ? e.message : String(e)}`);
       }
       return;
     }
@@ -622,6 +629,26 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (next !== undefined) void handle(next).catch((e) => addLine("error", e instanceof Error ? e.message : String(e))); // drain queued input
     }
   };
+
+  // Shared remote handlers for /rc (HTTP) and /relay (outbound poll): run one turn (streaming to a
+  // remote sink if given), report status, interrupt.
+  const makeRemoteHandlers = (): RemoteHandlers => ({
+    run: async (msg, onDelta) => {
+      if (busyRef.current) return { reply: "(neko is busy - try again when idle)" };
+      const t0 = Date.now();
+      const tok0 = agentRef.current!.cost.totalTokens;
+      remoteSinkRef.current = onDelta ?? null;
+      try {
+        await handle(msg);
+        const last = agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content;
+        return { reply: typeof last === "string" ? last : "(no reply)", tokens: agentRef.current!.cost.totalTokens - tok0, ms: Date.now() - t0 };
+      } finally {
+        remoteSinkRef.current = null;
+      }
+    },
+    status: () => ({ busy: busyRef.current, model: cfg.model, messages: agentRef.current!.messages.length }),
+    interrupt: () => { if (controllerRef.current) { controllerRef.current.abort(); return true; } return false; },
+  });
 
   const onSubmit = (value: string) => {
     setInput("");
