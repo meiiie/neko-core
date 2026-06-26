@@ -38,6 +38,8 @@ export class OpenAICompatProvider implements Provider {
    * that model for the rest of the session, so a configured effort degrades gracefully instead of
    * hard-failing — and any value (low..high, 'max', future tiers) still passes through where supported. */
   private readonly effortUnsupported = new Set<string>();
+  /** Per-model effort clamp: an endpoint that caps at 'high' makes 'max' -> 'high' (intent preserved). */
+  private readonly effortOverride = new Map<string, string>();
   constructor(private readonly cfg: NekoConfig) {}
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
@@ -66,7 +68,8 @@ export class OpenAICompatProvider implements Provider {
     if (this.cfg.maxTokens > 0) payload.max_tokens = this.cfg.maxTokens; // 0 -> omit (model's full budget)
     if (stream) payload.stream_options = { include_usage: true };
     if (tools && tools.length) payload.tools = tools;
-    if (this.cfg.effort && !this.effortUnsupported.has(this.cfg.model)) payload.reasoning_effort = this.cfg.effort;
+    const effort = this.effortOverride.get(this.cfg.model) ?? this.cfg.effort;
+    if (effort && !this.effortUnsupported.has(this.cfg.model)) payload.reasoning_effort = effort;
     // Schema-constrained structured output: the endpoint fills the given JSON Schema (constrained
     // decoding where supported). Self-healed below if the endpoint rejects it.
     if (opts?.responseSchema) {
@@ -121,6 +124,14 @@ export class OpenAICompatProvider implements Provider {
       // e.g. NVIDIA's vLLM takes only low/medium/high, not 'max'). If that's the sole problem, drop the
       // field once and retry, so a configured effort works where supported and degrades where it isn't.
       if ((res.status === 400 || res.status === 422) && payload.reasoning_effort !== undefined && /reasoning_effort/i.test(body)) {
+        // The field is supported but this VALUE isn't (e.g. 'max' on an endpoint that caps at 'high').
+        // Clamp to the highest accepted tier first, so high-effort intent survives instead of vanishing.
+        if (payload.reasoning_effort !== "high" && /high/i.test(body) && /(low|medium)/i.test(body)) {
+          this.effortOverride.set(this.cfg.model, "high");
+          payload.reasoning_effort = "high";
+          onDelta?.("(endpoint accepts only low/medium/high - retrying with 'high')", "reasoning");
+          continue;
+        }
         this.effortUnsupported.add(this.cfg.model);
         delete payload.reasoning_effort;
         onDelta?.("(this endpoint rejected reasoning_effort - retrying without it)", "reasoning");
