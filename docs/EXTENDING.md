@@ -9,6 +9,22 @@ This mirrors how Claude Code and Codex extend: **Skills** (domain expertise) + *
 + **Plugins** (a bundle for distribution). See Anthropic's
 [Agent Skills](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills).
 
+## How Neko's capability grows: the memory triad
+Beyond pluggable skills, Neko gets more capable three complementary ways — all file-based, JIT-recalled
+via an index injected each turn, no vector DB:
+
+| Leg | Tool / dir | Holds | Authored by |
+|---|---|---|---|
+| **Facts** | `memory` · `~/.neko-core/memory/` | Durable facts/preferences | the agent, as it learns |
+| **Skills** | `skill` · `skills/` | Domain expertise (procedures + tools) | a human, up front |
+| **Workflows** | `workflow` · `~/.neko-core/workflows/` | Reusable PROCEDURES learned by doing | **the agent, from successful runs** |
+
+The third leg is the self-improving one (AWM — Agent Workflow Memory): after a non-trivial task that
+worked, the agent distills the steps/tools/gotchas into a workflow; a deterministic `matchWorkflow`
+recalls it before a similar task. Measured value: on a task with a non-obvious rule, a learned workflow
+took success from 0/3 to 3/3 (`test/workflow-value-eval.ts`). So Neko gets faster + more reliable over
+time in *every* domain, not just where a human wrote a skill.
+
 ## The three layers
 
 | Layer | What it is | In Neko |
