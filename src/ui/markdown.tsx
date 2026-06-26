@@ -139,6 +139,13 @@ export function Markdown({ text }: { text: string }): ReactNode {
       continue;
     }
 
+    // Horizontal rule (---, ***, ___): a dim separator instead of literal dashes.
+    if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
+      blocks.push(<Text key={key++} dimColor>{"-".repeat(48)}</Text>);
+      i++;
+      continue;
+    }
+
     const quote = line.match(/^>\s?(.*)$/);
     if (quote) {
       blocks.push(<Text key={key++} color="gray" italic>{"│ "}{inline(quote[1])}</Text>);
