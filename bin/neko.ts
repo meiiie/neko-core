@@ -18,7 +18,7 @@ import { renderBenchReport, runBench } from "../src/adapters/bench.ts";
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
-import { loadSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
+import { loadSkill, matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
 import { memoryIndexBlock } from "../src/core/memory.ts";
 import { ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
 import {
@@ -353,6 +353,9 @@ async function cmdRun(args: Args): Promise<number> {
     streamed += t.length;
     process.stdout.write(t);
   });
+  // Deterministically load a clearly-matching domain skill (don't rely on the model to pull it).
+  const matched = matchSkill(instruction);
+  if (matched) agent.appendSystem(`# Skill: ${matched.name}\n(skill files dir: ${matched.dir} - run bundled scripts from here)\n${matched.body}`);
   try {
     const answer = args.loop ? await agent.runUntilDone(instruction) : await agent.run(instruction);
     process.stdout.write("\n");

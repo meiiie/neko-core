@@ -31,7 +31,7 @@ import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
 import { latestSession, loadSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
 import { memoryIndexBlock } from "../core/memory.ts";
-import { loadSkill, skillsContextBlock } from "../adapters/skills.ts";
+import { loadSkill, matchSkill, skillsContextBlock } from "../adapters/skills.ts";
 import { ToolRegistry, todosContextBlock } from "../core/tool-runtime.ts";
 import { describeToolCall } from "../core/tools.ts";
 
@@ -143,6 +143,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [awaitingKey, setAwaitingKey] = useState(false); // /login: next submit is the API key
   const pastedRef = useRef<string[]>([]); // staged image data: URLs for the next turn
+  const autoLoadedSkills = useRef<Set<string>>(new Set()); // domain skills already auto-loaded this session
   const [pastedCount, setPastedCount] = useState(0);
 
   const addLine = (kind: LineKind, text: string, summary?: string) =>
@@ -551,6 +552,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     verbRef.current = VERBS[Math.floor(Math.random() * VERBS.length)];
     setStarted(true); // conversation begun -> drop the input placeholder hint
     registryRef.current!.clearCheckpoint(); // start a fresh file checkpoint for this turn (/rewind)
+    // Deterministically load a clearly-matching domain skill (don't rely on the model to pull it).
+    const matched = matchSkill(toSend);
+    if (matched && !autoLoadedSkills.current.has(matched.name)) {
+      autoLoadedSkills.current.add(matched.name);
+      agentRef.current!.appendSystem(`# Skill: ${matched.name}\n(skill files dir: ${matched.dir} - run bundled scripts from here)\n${matched.body}`);
+      addLine("info", `skill: ${matched.name}`);
+    }
     const turnStart = Date.now();
     turnTokensStartRef.current = agentRef.current!.cost.totalTokens; // baseline -> show THIS turn's tokens
     busyRef.current = true; // sync now so a keystroke landing this instant queues (not just after render)

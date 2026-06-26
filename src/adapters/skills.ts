@@ -84,9 +84,37 @@ export function skillsContextBlock(): string {
   const lines = list.slice(0, CAP).map((s) => `- ${s.name}: ${s.description || "(no description)"}`);
   if (list.length > CAP) lines.push(`- ... +${list.length - CAP} more`);
   return (
-    "Available skills (domain capabilities). When a task matches one, FIRST call the `skill` tool to " +
-    "load its full instructions, then follow them:\n" + lines.join("\n")
+    "Available skills (on-demand domain capabilities). IMPORTANT: if the user's task matches a skill's " +
+    "description below, you MUST call the `skill` tool to load it BEFORE planning or acting — the skill " +
+    "carries required domain rules and bundled tools you otherwise lack. Don't hand-roll a task a skill covers.\n" +
+    lines.join("\n")
   );
+}
+
+const SKILL_STOP = new Set(
+  ("the a an and or for to of in on at by with you your i it is are be do can will this that these those" +
+   " cua cho voi cac mot nay tai khi ban toi lam gium giup hay duoc khong neu thi va la").split(/\s+/),
+);
+function skillTokens(s: string): Set<string> {
+  return new Set(
+    s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/).filter((w) => w.length >= 3 && !SKILL_STOP.has(w)),
+  );
+}
+/** Deterministic skill match: if the user's task shares enough SIGNIFICANT keywords with a skill's
+ * name+description, return it — so a clearly-matching domain skill loads even when the model wouldn't
+ * proactively pull it. Conservative (needs a strong multi-keyword overlap) to avoid false positives. */
+export function matchSkill(userText: string): Skill | null {
+  const ut = skillTokens(userText);
+  if (ut.size < 3) return null;
+  let best: Skill | null = null;
+  let bestScore = 0;
+  for (const s of listSkills()) {
+    let hits = 0;
+    for (const w of skillTokens(`${s.name} ${s.description}`)) if (ut.has(w)) hits++;
+    if (hits > bestScore) { bestScore = hits; best = s; }
+  }
+  return bestScore >= 4 ? best : null;
 }
 
 export function renderSkills(): string {
