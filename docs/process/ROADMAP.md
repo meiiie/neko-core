@@ -170,3 +170,15 @@ cost/token tracking · MCP client · single-binary distribution.
   exactly the Shopee/Tiki gap. Chose **Playwright MCP** (pure hands, Neko stays the brain) over the more
   autonomous browser-use. Wired into the procurement skill (browser for dynamic sites, web_fetch+schema
   for static). *(honest caveat: browser solves JS rendering, not anti-bot/captcha on big marketplaces)*
+- [x] **G8** Workflow memory — procedural memory (AWM-style), the frontier technique chosen over rebuilding
+  browser-use. Researched the June-2026 frontier (Agent Workflow Memory, Agentic Plan Caching, Agentic
+  Context Engineering, self-improving-agent surveys) and picked the one that generalizes across every
+  domain + fits Neko's architecture. Where `memory` stores FACTS and `skills` are AUTHORED expertise, the
+  new `workflow` tool stores reusable PROCEDURES the agent LEARNED by doing (`~/.neko-core/workflows/*.md`,
+  file-based, core layer — mirrors `memory.ts`). A workflow index is injected each turn (progressive
+  disclosure) and `matchWorkflow` deterministically recalls a strongly-matching procedure before a similar
+  task (mirrors the skill auto-loader); the prompt tells the agent to write one after a non-trivial success.
+  **Verified the full self-improving loop end-to-end:** the agent calls `workflow write` to save a learned
+  procedure, and a matching later task auto-recalls + follows it. The third memory leg: facts + authored
+  skills + learned workflows -> the agent gets faster and more reliable over time. *(+unit tests; policy +
+  architecture green; full suite 153/0)*
