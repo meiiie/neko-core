@@ -34,7 +34,9 @@ const BASH_TIMEOUT_MS = 60_000;
  * generic extraction weakness is fixed once at the tool layer, not patched inside each domain skill. */
 export const WEB_EXTRACT_PROMPT =
   "Extract exactly what the instruction asks from the web page below, grounded ONLY in the page - if it " +
-  "isn't there, say so plainly; never invent or round figures. Quote numbers/prices verbatim. IMPORTANT: " +
+  "isn't there, say so plainly; never invent or round figures. If the page is clearly about a DIFFERENT " +
+  "item/model/version than the instruction asks about, say so explicitly and do NOT present that item's " +
+  "values as the answer (e.g. an S24 page does not give an S26 price). Quote numbers/prices verbatim. IMPORTANT: " +
   "when the page lists MULTIPLE values for the same thing (variants, colors, storage tiers, sellers, " +
   "options), enumerate them ALL with their labels and call out the lowest/highest - do NOT collapse to " +
   "one number or an 'about X'. Prefer a compact list or table over prose. Preserve each number's " +
