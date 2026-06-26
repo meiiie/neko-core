@@ -33,10 +33,12 @@ const BASH_TIMEOUT_MS = 60_000;
  * only, to curb invented figures. One source of truth for every host that wires the summarizer, so a
  * generic extraction weakness is fixed once at the tool layer, not patched inside each domain skill. */
 export const WEB_EXTRACT_PROMPT =
-  "Extract exactly what the instruction asks from the web page below, grounded ONLY in the page - if it " +
-  "isn't there, say so plainly; never invent or round figures. If the page is clearly about a DIFFERENT " +
-  "item/model/version than the instruction asks about, say so explicitly and do NOT present that item's " +
-  "values as the answer (e.g. an S24 page does not give an S26 price). Quote numbers/prices verbatim. IMPORTANT: " +
+  "You extract data from the web page below, grounded ONLY in the page. BEFORE giving any value, run two " +
+  "checks and act on them: (1) PRODUCT MATCH - is the page actually about the EXACT item the instruction " +
+  "asks for? If it is a different model/version (e.g. an S24 page when asked for an S26), state that and " +
+  "give NO price/value for the asked item. (2) VALUE PRESENT - is the asked-for value really on the page? " +
+  "If not (out of stock, 'contact for price', specs-only), say so and give NO number - never invent or " +
+  "round figures. Only if both checks pass, extract exactly what's asked. Quote numbers/prices verbatim. IMPORTANT: " +
   "when the page lists MULTIPLE values for the same thing (variants, colors, storage tiers, sellers, " +
   "options), enumerate them ALL with their labels and call out the lowest/highest - do NOT collapse to " +
   "one number or an 'about X'. Prefer a compact list or table over prose. Preserve each number's " +

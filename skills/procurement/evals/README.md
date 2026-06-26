@@ -34,3 +34,20 @@ Each is a self-contained HTML page with a known ground truth, chosen to break na
   real regression, not a flaky web page. The model is the only source of variance — hence `--trials`.
 - Fixes for failures these surface belong at the **tool layer** (`WEB_EXTRACT_PROMPT`, the response
   schema), not patched into the skill — so every skill that fetches the web benefits. See `docs/EXTENDING.md`.
+
+## Findings (measured, honest)
+- **Explicit schema-guided extraction is robust.** With a JSON Schema passed to `web_fetch` (so the
+  endpoint does constrained-decoding structured output), `harsh-eval` is **8/8 solid at --trials 3** —
+  including hallucination-resistance and prompt-injection defense. The schema's boolean/typed fields
+  force the model to make the judgment explicitly, which is what makes it reliable.
+- **Freeform agent extraction has a model ceiling.** When the *agent* fetches a single adversarial page
+  with a freeform prompt (no schema), `e2e-eval` lands around **4–5/6 solid**, and *which* 1–2 cases
+  flake shifts as you tune the prompt — a classic whack-a-mole signature. Measured: prompt/default-schema
+  tweaks moved the flaky case around (e.g. fixing `wrong-product` nudged `listed-trap`; a default guard
+  schema fixed `listed-trap` but hurt `hallucination-bait`/`prompt-injection`) without raising the
+  aggregate. This is **gpt-oss's freeform-judgment ceiling (~80–90%) on extreme single-URL traps**, not a
+  harness bug — chasing it with more prompt text is the trap the benchmark is meant to expose.
+- **Therefore:** for high-stakes extraction (prices), prefer the **schema path** (the procurement skill
+  passes an offer schema). And the real sourcing flow surveys **several** sources, so a single trap page
+  is diluted — much safer than the deliberately-harsh single-URL e2e case. The remaining frontier for
+  100% is a stronger extraction model or browser rendering (JS-gated sites), not more prompt tuning.
