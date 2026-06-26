@@ -26,7 +26,7 @@ Mọi yêu cầu (rẻ nhất / đắt nhất / sắp xếp / lọc / tổng / x
 ## ⭐ Chiến lược tìm GIÁ TỐT NHẤT (đừng neo vào chuỗi lớn)
 Lỗi hay gặp: chỉ hỏi FPT/TGĐ/CellphoneS → ra **giá niêm yết cao**; shop nhỏ/cạnh tranh thường rẻ hơn vài triệu. Một purchasing officer giỏi **đào tới giá thấp nhất thực sự**:
 1. **Search rộng theo giá**: ngoài tên sản phẩm, search thêm `"<sản phẩm> giá rẻ nhất"`, `"<sản phẩm> khuyến mãi"`, và trang so giá **websosanh.vn**. Mở **nhiều shop**, gồm cả shop nhỏ giá tốt (xem MAP mở rộng).
-2. **BÓC GIÁ THEO BIẾN THỂ**: một trang sản phẩm thường liệt kê **nhiều màu / dung lượng giá KHÁC NHAU** (vd S26 Ultra 12/256: Tím Cobalt 25.999.000đ nhưng Bạc Shadow 28.199.000đ; bản "thu cũ đổi mới" còn rẻ hơn). **Lấy đúng giá của cấu hình yêu cầu; nếu chưa chốt màu → lấy MÀU RẺ NHẤT** + ghi khoảng giá theo màu. ĐỪNG chỉ chộp một con số headline.
+2. **BÓC GIÁ THEO BIẾN THỂ** (quan trọng nhất — giá các màu nằm SẴN trong HTML, đừng bỏ sót): một trang sản phẩm thường liệt kê **nhiều màu / dung lượng giá KHÁC NHAU** (vd S26 Ultra 12/256: Tím Cobalt 25.999.000đ nhưng Bạc Shadow 28.199.000đ; bản "thu cũ đổi mới" 24.099.000đ). **Khi gọi `web_fetch` trên trang sản phẩm, đưa instruction RÕ RÀNG**: *"Liệt kê MỌI giá theo từng màu/dung lượng cho cấu hình [12GB/256GB], chỉ ra giá THẤP NHẤT + tên màu, và máy chính hãng/bảo hành không"* — ĐỪNG để nó trả về 1 con số headline (đó là lý do hay bị sai cao). **Lấy đúng cấu hình yêu cầu; chưa chốt màu → lấy MÀU RẺ NHẤT** + ghi khoảng giá theo màu.
 3. **Khảo ≥4-6 nguồn** rồi mới kết luận "rẻ nhất" — giá thấp nhất phải là **giá thị trường thật**, không phải giá chuỗi lớn đầu tiên gặp.
 4. Vẫn ưu tiên **uy tín** (xem phần đánh giá người bán) — rẻ bất thường thì cảnh báo, đừng lấy đại.
 
@@ -56,7 +56,7 @@ Khi người dùng muốn bảng giá / Excel / file để gửi đi:
 **Điện tử / công nghệ chính hãng** (điện thoại, laptop, Apple, gia dụng — ưu tiên, có bảo hành + VAT):
 - **Thế Giới Di Động** thegioididong.com (~1000 store) · **TopZone** (Apple) · **FPT Shop** fptshop.com.vn (63 tỉnh) · **F.Studio** (Apple)
 - **CellphoneS** cellphones.com.vn · **ShopDunk** shopdunk.com (Apple) · **Điện Máy Xanh** dienmayxanh.com · **Nguyễn Kim** nguyenkim.com · **Hoàng Hà Mobile** hoanghamobile.com · **Di Động Việt** didongviet.vn
-- **Shop giá tốt / cạnh tranh** (thường rẻ hơn chuỗi lớn — nhớ check uy tín): **Minh Tuấn Mobile** minhtuanmobile.com · **Clickbuy** clickbuy.com.vn · **Di Động Mỹ** didongmy.com · **Bạch Long Mobile** bachlongmobile.com · **24hStore** 24hstore.vn · **Hnam Mobile** hnammobile.com · **XTmobile** xtmobile.vn · + **websosanh.vn** (so giá)
+- **Shop giá tốt / cạnh tranh** (thường rẻ hơn chuỗi lớn — nhớ check uy tín): **Viettablet** viettablet.com · **Minh Tuấn Mobile** minhtuanmobile.com · **Clickbuy** clickbuy.com.vn · **Di Động Mỹ** didongmy.com · **Bạch Long Mobile** bachlongmobile.com · **24hStore** 24hstore.vn · **Hnam Mobile** hnammobile.com · **XTmobile** xtmobile.vn · + **websosanh.vn** (so giá)
 - *(TGDĐ + FPT ≈ 75% điểm bán Apple ủy quyền — an toàn cho iPhone/MacBook chính hãng. Nhưng giá rẻ nhất hay nằm ở shop cạnh tranh — luôn khảo thêm.)*
 
 **Sàn TMĐT tổng hợp** (đa dạng, nhiều shop — cẩn thận chính hãng vs trôi nổi):
