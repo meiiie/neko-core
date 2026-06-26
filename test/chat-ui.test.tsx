@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
+import { VERSION } from "../src/shared/version.ts";
 import { ApprovalBox, ChatApp, renderTail } from "../src/ui/chat.tsx";
 
 test("renderTail bounds live-stream rendering to O(1) so the event loop can't stall on huge output", () => {
@@ -45,7 +46,7 @@ test("header + input + status bar render on start", () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
   const { lastFrame, unmount } = render(<ChatApp yolo provider={provider} />);
   const out = lastFrame() ?? "";
-  expect(out).toContain("0.2.0"); // version line under the logo
+  expect(out).toContain(VERSION); // version line under the logo
   expect(out).toContain("auto"); // mode shown in the bottom status bar
   expect(out).toContain("shift+tab"); // status bar hint
   unmount();
