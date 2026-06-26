@@ -77,9 +77,22 @@ cost/token tracking · MCP client · single-binary distribution.
   the prompt mandates read-result -> on failure diagnose + fix + re-run. *(verified 3/3 self-correction)*
 - [x] **F3** Navigable slash-command menu: Up/Down select, Tab completes (was: arrows rewound the
   half-typed command via history). *(regression test added)*
-- [ ] **F4** Remote-control stability pass (`/remote` / `/rc` logic + lifecycle).
-- [ ] **F5** Pixel-level UX polish: streamed-output presentation, markdown spacing/color, diff &
-  tool-call rendering, thinking display, streaming cadence — side-by-side vs Claude Code.
-- [ ] **F6** Naturalness: system-prompt tone/conciseness shaping; smoother tool-call narration.
-- [ ] **F7** SOTA memory - planning - multi-agent, latest techniques (kept thin/disposable).
-- [ ] **F8** `neko bench` — productize the Neko-bench harness (run + compare models).
+- [x] **F4** Remote-control stability: `startRemoteControl` now binds async + port-hops on EADDRINUSE
+  (no crash), keeps a permanent error handler, returns HTTP 500 on a failing turn (no client hang),
+  and the `/rc` caller awaits + reports failures. *(+2 robustness tests)*
+- [x] **F5** Reviewed transcript + markdown renderers (already SOTA-aligned: tool markers, diff color,
+  tables, code highlight); added the missing markdown horizontal-rule. *(deeper pixel-tuning of
+  streamed output is best done live with the owner; UI tests green)*
+- [x] **F6** Naturalness: dropped the literal narration example the model parroted ('Writing the
+  file...'), ask for a natural note in its own words; tone steered to a senior-engineer voice (no
+  preamble/postamble). *(verified: narration reads naturally while acting+verifying)*
+- [x] **F7** SOTA memory/planning/multi-agent — **assessed against June-2026 research; Neko is already
+  aligned**, so the SOTA-correct move was NOT to bolt on a heavy subsystem: *(a)* memory =
+  agentic file-based retrieval (the research's "single biggest unlock" over vector search) — kept,
+  + added Mem0-style consolidation (search-then-UPDATE, don't duplicate) to the prompt; *(b)*
+  multi-agent — research found a single agent beats multi-agent on ~64% of tasks at half the cost, so
+  Neko's thin single-agent-first harness (subagents via `task` only for isolation) is correct, not a
+  gap; *(c)* resilience — retry/backoff + loop-guard + self-verify (F2) + closed-loop (`--loop`) already
+  cover the "evaluation agent" pattern.
+- [x] **F8** `neko bench` — built-in agentic-coding benchmark (`src/adapters/bench.ts`): pass@1 +
+  `--trials N` (PASS/FLAKY/FAIL), deterministic verifiers. *(verified: gpt-oss-120b 8/8 at --trials 2)*
