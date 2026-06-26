@@ -26,6 +26,18 @@ const MAX_SEARCH_MATCHES = 200;
 const MAX_LIST = 200;
 const MAX_OUTPUT_CHARS = 20_000;
 const BASH_TIMEOUT_MS = 60_000;
+
+/** System prompt for web_fetch's one-pass extractor. Tuned so it does NOT collapse a multi-value page
+ * (variant / color / seller price tables) into a single number — the old "be concise" did exactly
+ * that, making price sourcing read one headline figure instead of the real per-variant low. Grounded-
+ * only, to curb invented figures. One source of truth for every host that wires the summarizer, so a
+ * generic extraction weakness is fixed once at the tool layer, not patched inside each domain skill. */
+export const WEB_EXTRACT_PROMPT =
+  "Extract exactly what the instruction asks from the web page below, grounded ONLY in the page - if it " +
+  "isn't there, say so plainly; never invent or round figures. Quote numbers/prices verbatim. IMPORTANT: " +
+  "when the page lists MULTIPLE values for the same thing (variants, colors, storage tiers, sellers, " +
+  "options), enumerate them ALL with their labels and call out the lowest/highest - do NOT collapse to " +
+  "one number or an 'about X'. Prefer a compact list or table over prose.";
 const IGNORE_DIRS = new Set([
   ".git", "node_modules", "__pycache__", ".venv", "venv",
   "dist", "build", ".mypy_cache", ".pytest_cache", ".ruff_cache",

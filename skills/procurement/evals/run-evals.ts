@@ -49,9 +49,10 @@ const OFFERS = `| Mặt hàng | Cấu hình | Giá (VND) | Nguồn | Loại ngư
 | MacBook Air M4 | 13in 256GB | 26990000 | FPT Shop | chính hãng | https://fptshop.com.vn/macbook-air-m4 |
 | MacBook Air M4 | 13in 256GB | 25490000 | ShopDunk | chính hãng | https://shopdunk.com/macbook-air-m4 |`;
 
-const preamble = `Dưới đây là BẢNG CHÀO GIÁ đã có sẵn. KHÔNG tra web, KHÔNG dùng web_search/web_fetch — chỉ dùng đúng bảng này.\n\n${OFFERS}\n\nYêu cầu: `;
+const INTRO = "Dưới đây là dữ liệu đã có sẵn. KHÔNG tra web, KHÔNG dùng web_search/web_fetch — chỉ dùng đúng dữ liệu này.";
 
-type Eval = { id: string; ask: string; check: (out: string, dir: string) => string | null };
+type Eval = { id: string; ask: string; data?: string; check: (out: string, dir: string) => string | null };
+const buildPrompt = (e: Eval) => `${INTRO}\n\n${e.data ?? OFFERS}\n\nYêu cầu: ${e.ask}`;
 const norm = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").replace(/[,.\s₫đ]/g, "").toLowerCase();
 const before = (out: string, a: string, b: string) => out.indexOf(a) >= 0 && out.indexOf(a) < out.indexOf(b);
 
@@ -65,6 +66,23 @@ const EVALS: Eval[] = [
     id: "highest",
     ask: "Giá CAO NHẤT cho iPhone 16 Pro 256GB trong bảng là nguồn nào, bao nhiêu? Trả lời ngắn gọn.",
     check: (out) => (norm(out).includes("27990000") && /cellphones/i.test(out) ? null : "không nêu đúng nguồn đắt nhất (CellphoneS / 27.990.000)"),
+  },
+  {
+    // Guards the REAL failure mode found live: a messy product page lists many variant prices + a high
+    // "listed" (niêm yết) price — the agent must report the true LOWEST variant, not the headline figure.
+    id: "variant-lowest",
+    data:
+      "Trang sản phẩm — Samsung Galaxy S26 Ultra 12GB/256GB chính hãng (BH 12 tháng):\n" +
+      "Giá niêm yết gốc: 36.990.000đ. Đang ưu đãi theo phiên bản:\n" +
+      "Thu Cũ Đổi Mới 24.099.000đ | Tím Cobalt 25.999.000đ | Đen Classic 26.999.000đ | " +
+      "Trắng Classic 26.999.000đ | Xanh Sky Blue 27.099.000đ | Vàng Hồng 28.199.000đ | Bạc Shadow 28.199.000đ",
+    ask: "Giá THẤP NHẤT thực sự cho bản 12/256 là bao nhiêu, ở diện/màu nào? Đừng lấy giá niêm yết gốc.",
+    check: (out) => {
+      const n = norm(out);
+      if (!n.includes("24099000")) return "không tìm ra giá thấp nhất thật (24.099.000 - Thu Cũ Đổi Mới)";
+      if (/gia\s*thap\s*nhat[^0-9]{0,20}36990000/i.test(n)) return "lấy nhầm giá niêm yết gốc (36.99tr) làm thấp nhất";
+      return null;
+    },
   },
   {
     id: "sort-desc",
@@ -100,7 +118,7 @@ const EVALS: Eval[] = [
 function runOne(e: Eval): { id: string; pass: boolean; detail: string } {
   const dir = mkdtempSync(join(tmpdir(), "neko-proc-"));
   try {
-    const r = spawnSync(process.execPath, [NEKO, "run", preamble + e.ask, "--yolo"], { cwd: dir, encoding: "utf-8", timeout: 180000 });
+    const r = spawnSync(process.execPath, [NEKO, "run", buildPrompt(e), "--yolo"], { cwd: dir, encoding: "utf-8", timeout: 180000 });
     const out = (r.stdout || "") + (r.stderr || "");
     const fail = e.check(out, dir);
     return { id: e.id, pass: !fail, detail: fail || "ok" };

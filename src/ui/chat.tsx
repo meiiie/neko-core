@@ -32,7 +32,7 @@ import { getProvider, type Provider } from "../adapters/providers.ts";
 import { latestSession, loadSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
 import { memoryIndexBlock } from "../core/memory.ts";
 import { loadSkill, matchSkill, skillsContextBlock } from "../adapters/skills.ts";
-import { ToolRegistry, todosContextBlock } from "../core/tool-runtime.ts";
+import { ToolRegistry, todosContextBlock, WEB_EXTRACT_PROMPT } from "../core/tool-runtime.ts";
 import { describeToolCall } from "../core/tools.ts";
 
 export { ApprovalBox, type Approval }; // re-exported for tests
@@ -217,7 +217,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // web_fetch's optional extractor: one model pass over the fetched page (Claude-style).
     registryRef.current.summarize = async (instruction, content) => {
       const res = await (provider ?? getProvider(cfg)).complete([
-        { role: "system", content: "Extract exactly what the user asks from the web page below. Be concise; quote facts; say if not found." },
+        { role: "system", content: WEB_EXTRACT_PROMPT },
         { role: "user", content: `${instruction}\n\n<page>\n${content.slice(0, 60000)}\n</page>` },
       ]);
       return res.content ?? "(no answer)";

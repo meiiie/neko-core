@@ -20,7 +20,7 @@ import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
 import { loadSkill, matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
 import { memoryIndexBlock } from "../src/core/memory.ts";
-import { ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
+import { ToolRegistry, todosContextBlock, WEB_EXTRACT_PROMPT } from "../src/core/tool-runtime.ts";
 import {
   collectCapabilities,
   evaluatePolicy,
@@ -138,7 +138,7 @@ async function buildAgent(
   };
   registry.summarize = async (instruction, content) => {
     const res = await getProvider(cfg).complete([
-      { role: "system", content: "Extract exactly what the user asks from the web page below. Be concise; quote facts; say if not found." },
+      { role: "system", content: WEB_EXTRACT_PROMPT },
       { role: "user", content: `${instruction}\n\n<page>\n${content.slice(0, 60000)}\n</page>` },
     ]);
     return res.content ?? "(no answer)";
