@@ -54,7 +54,7 @@ export class ToolRegistry {
   /** Opt-in adversarial review of auto-approved mutating actions (set by the host). */
   checkAction?: (toolName: string, args: Record<string, any>) => Promise<{ ok: boolean; reason: string }>;
   /** Load a skill's body by name (set by the wiring layer; core can't import the skills adapter). */
-  loadSkill?: (name: string) => string | null;
+  loadSkill?: (name: string) => { body: string; dir: string } | null;
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
   /** Opt-in OS sandbox for bash (fs read-only except cwd). Set from config by the host. */
@@ -186,8 +186,9 @@ export class ToolRegistry {
    * a domain it just decided is relevant, without that body ever sitting in context unused. */
   private runSkill(args: Record<string, any>): string {
     const name = String(requireArg(args, "name"));
-    const body = this.loadSkill?.(name);
-    return body ? `# Skill: ${name}\n${body}` : `(no skill '${name}' - check the skills listed in your context)`;
+    const s = this.loadSkill?.(name);
+    if (!s) return `(no skill '${name}' - check the skills listed in your context)`;
+    return `# Skill: ${name}\n(skill files dir: ${s.dir} - run any bundled scripts from here by absolute path)\n${s.body}`;
   }
 
   /** All tool schemas shown to the model: enabled built-in + connected MCP tools. */

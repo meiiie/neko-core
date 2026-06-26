@@ -60,8 +60,16 @@ and buy**. A hard rule in the skill: it **never places orders or pays** — the 
 The hands it uses: `web_search` + `web_fetch` today; a **browser MCP** (Playwright) for JS-heavy sites
 (Shopee/Tiki) and, later, a **voice-call MCP** to phone vendors for stock/quotes (ask only, never buy).
 
-This is the template for any domain: deep expertise in a skill, general tools (or an MCP) for the
-hands, human-in-the-loop for anything irreversible.
+A skill can ship more than a SKILL.md — the procurement skill bundles:
+- **`scripts/`** — runnable helpers. `make-sheet.ts` turns a normalized offer table into a real `.xlsx`
+  with clickable hyperlinks + auto-filter (zero-dependency, runs under `bun`). The `skill` tool surfaces
+  the skill's own directory, so the body can invoke `bun "<skill files dir>/scripts/make-sheet.ts" ...`.
+- **`evals/`** — a deterministic check (`run-evals.ts`): fixed input (no network), `--trials N` ->
+  PASS/FLAKY/FAIL, so a domain's behavior (lowest/highest/sort/filter/export) is measurable + regression-proof.
+
+This is the template for any domain: deep expertise in a SKILL.md, optional bundled scripts for the
+mechanical parts, evals to keep it honest, general tools (or an MCP) for the hands, and human-in-the-loop
+for anything irreversible.
 
 ## Add a new domain capability
 1. **Write the skill.** `skills/<name>/SKILL.md` (bundled) or `~/.neko-core/skills/<name>.md` (personal).

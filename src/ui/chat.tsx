@@ -201,7 +201,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     registryRef.current.sandboxAllowNetwork = cfg.sandboxNetwork;
     registryRef.current.searxngUrl = cfg.searxngUrl;
     registryRef.current.searchBackend = cfg.searchBackend;
-    registryRef.current.loadSkill = (name) => loadSkill(name)?.body ?? null;
+    registryRef.current.loadSkill = (name) => { const s = loadSkill(name); return s ? { body: s.body, dir: s.dir } : null; };
     // Sub-agents: the `task` tool spawns a fresh, isolated agent (depth 1 — its registry has no
     // subagent), inheriting the parent's mode/approval/hooks so its tool use is gated the same.
     registryRef.current.subagent = async (prompt, type) => {

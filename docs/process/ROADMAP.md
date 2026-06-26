@@ -119,3 +119,12 @@ cost/token tracking · MCP client · single-binary distribution.
   plan; never buys autonomously). Repo `skills/` is now a bundled skill dir (lowest priority). Extension
   model documented in `docs/EXTENDING.md`. *(verified end-to-end: auto-loads the skill, sources live
   iPhone prices from CellphoneS/TGDD/FPT/Hoang Ha)* — next: browser MCP for JS-heavy sites; voice-call MCP.
+- [x] **G3** Procurement, broadened to SOTA + benchmarked. *(a)* Diverse queries — the skill works
+  structured-data-first (a normalized offer table where price is a number), so it handles lowest/highest
+  price, sort asc/desc, filter (budget/official-only/in-stock/VAT), top-N, totals, multi-item compare.
+  *(b)* **Excel export with clickable links** — a bundled, zero-dependency `scripts/make-sheet.ts`
+  (hand-rolled OOXML in a STORED zip: real .xlsx, hyperlinks + auto-filter + bold header, opens with no
+  warning); the `skill` tool now surfaces the skill's own dir so bundled scripts run by absolute path.
+  *(c)* **Deterministic benchmark** `skills/procurement/evals/run-evals.ts` — fixed offer table (no web),
+  `--trials N` -> PASS/FLAKY/FAIL, verifies min/max/sort/filter + a real xlsx-with-links (inflates the
+  zip to check). *(verified: 5/5 solid at --trials 2; full suite 147/0)*

@@ -5,12 +5,13 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homeDir } from "../shared/home.ts";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export interface Skill {
   name: string;
   description: string;
   body: string;
+  dir: string; // the skill's own directory — so bundled scripts/assets can be run by absolute path
 }
 
 function skillDirs(): string[] {
@@ -41,7 +42,7 @@ function parse(file: string): Skill | null {
     if (d) description = d[1].trim();
   }
   if (description === ">" || description === "|") description = ""; // YAML block scalar marker
-  return { name, description: description.replace(/\s+/g, " ").slice(0, 120), body: body.trim() };
+  return { name, description: description.replace(/\s+/g, " ").slice(0, 120), body: body.trim(), dir: dirname(file) };
 }
 
 export function listSkills(): Skill[] {

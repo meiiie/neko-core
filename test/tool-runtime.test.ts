@@ -227,10 +227,11 @@ test("bash is interrupted at once when the abort signal fires (no long wait, no 
 
 test("skill tool loads a skill body on demand via the injected hook (progressive disclosure)", async () => {
   const { reg } = makeReg("auto", () => true);
-  reg.loadSkill = (name) => (name === "demo" ? "do the demo thing" : null);
+  reg.loadSkill = (name) => (name === "demo" ? { body: "do the demo thing", dir: "/skills/demo" } : null);
   const out = await reg.execute("skill", { name: "demo" });
   expect(out).toContain("# Skill: demo");
   expect(out).toContain("do the demo thing");
+  expect(out).toContain("/skills/demo"); // dir surfaced so bundled scripts are runnable
   expect(await reg.execute("skill", { name: "nope" })).toContain("no skill");
 });
 
