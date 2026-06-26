@@ -6,34 +6,39 @@
  *
  *   bun test/moa-value-eval.ts          (needs a working NVIDIA key in ~/.neko-core/config.json)
  *
- * FINDINGS (2026-06-27, NVIDIA endpoint) — honest, not a marketing win:
- *   - exact-match, strong aggregator (gpt-oss-120b): single 8/8 == MoA 8/8, MoA ~2.5x cost (no headroom).
- *   - exact-match, weak aggregator (llama-3.1-8b) + strong advisors: 7/8 == 7/8, ~4.1x cost, and MoA
- *     even REGRESSED one task (a weak aggregator can mis-synthesize good advice).
- *   - open-ended, LLM-judged peer mixture: 2-2 even.
- *   Takeaway: MoA is implemented correctly but does NOT beat a strong single model here; its real value
- *   is pooling WEAKER/local models toward frontier quality (the paper's regime) and combining models
- *   when no single strong one is on hand. It is an OPT-IN cost/quality lever, not a free upgrade. The
- *   "Opus+GPT beats each" claim is Hermes's own HermesBench; independent here it ties.
+ * FINDINGS (2026-06-27, NVIDIA endpoint) — honest, exhaustively checked, NOT a marketing win.
+ * Five runs across regimes, MoA never beat the single model:
+ *   1. easy exact-match, strong agg (gpt-oss-120b):                 8/8 == 8/8   (~2.5x cost)
+ *   2. easy exact-match, weak agg (llama-3.1-8b) + strong advisors: 7/8 == 7/8   (~4.1x, MoA REGRESSED 1)
+ *   3. HARD exact-match, strong agg + 3 diverse strong advisors:    8/8 == 8/8   (~7.5x cost)
+ *   4. HARD exact-match, capable mid agg (llama-3.3-70b) + advisors: 8/8 == 8/8  (~3.5x cost)
+ *   5. open-ended, LLM-judged peer mixture:                          even (1-1, 2-2)
+ *   Conclusion, stated plainly: modern strong/mid models already ACE verifiable-answer tasks, so there
+ *   is no headroom for MoA to recover anything — it just multiplies cost (and a weak aggregator can even
+ *   mis-synthesize good advice). MoA is implemented CORRECTLY and faithfully (single-iteration like
+ *   Hermes's production moa_loop, advisory-safe reference view, graceful degradation, mixture cost
+ *   accounting) but does NOT "beat SOTA" on independent measurement. Its genuine value is pooling
+ *   WEAKER/local models toward frontier quality (the paper's regime) when no single strong model is on
+ *   hand — an OPT-IN cost/quality lever, not a free upgrade. The "Opus+GPT beats each" headline is
+ *   Hermes's own HermesBench; it did not replicate here. Truth over a fabricated win.
  */
 import { loadConfig, NekoConfig } from "../src/adapters/config.ts";
 import { getProvider } from "../src/adapters/providers.ts";
 
-// Scenario that EXPOSES MoA's value: a weak/cheap aggregator, lifted by strong diverse advisors.
-// (A peer-level mixture where the aggregator is already strong just ties + costs more — verified
-// separately with aggregator=gpt-oss-120b: single 8/8, MoA 8/8.)
-const AGGREGATOR = "meta/llama-3.1-8b-instruct";
+// "Beat the best" test: a HARD set with headroom + diverse strong advisors -> the SAME strong
+// aggregator. If the single model errs on some, MoA has a real chance to recover them.
+const AGGREGATOR = "meta/llama-3.3-70b-instruct";
 const REFERENCES = ["openai/gpt-oss-120b", "deepseek-ai/deepseek-v4-pro"];
 
 const TASKS: { q: string; answer: string }[] = [
-  { q: "How many times does the letter 'r' appear in the word 'strawberry'?", answer: "3" },
-  { q: "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost, in cents?", answer: "5" },
-  { q: "Next number in the sequence: 2, 6, 12, 20, 30, ___?", answer: "42" },
-  { q: "A farmer has 17 sheep. All but 9 die. How many sheep are left?", answer: "9" },
-  { q: "Which weighs more: a pound of feathers or a pound of bricks? Answer 'same', 'feathers', or 'bricks'.", answer: "same" },
-  { q: "What is 3/4 + 1/8 as a fraction in simplest form?", answer: "7/8" },
-  { q: "In the classic Monty Hall problem (3 doors, host opens a goat door), to maximize your chance should you 'switch' or 'stay'?", answer: "switch" },
-  { q: "A clock shows 3:15. What is the smaller angle, in degrees, between the hour and minute hands?", answer: "7.5" },
+  { q: "What is the remainder when 2^200 is divided by 7?", answer: "4" },
+  { q: "How many integers from 1 to 1000 (inclusive) are divisible by 3 or 5?", answer: "467" },
+  { q: "A 3x3x3 cube is painted on all outer faces, then cut into 27 unit cubes. How many unit cubes have exactly 2 painted faces?", answer: "12" },
+  { q: "Solve for x (x>2): log base 2 of x, plus log base 2 of (x-2), equals 3. What is x?", answer: "4" },
+  { q: "How many diagonals does a regular octagon (8 sides) have?", answer: "20" },
+  { q: "In how many distinct ways can the letters of the word MISSISSIPPI be arranged?", answer: "34650" },
+  { q: "A fair coin is flipped 5 times. What is the probability of exactly 3 heads, as a fraction in simplest form?", answer: "5/16" },
+  { q: "If f(x) = 2x + 1 and g(x) = x^2, what is f(g(3))?", answer: "19" },
 ];
 
 const SYSTEM = "You are a careful problem solver. Think it through, then give ONLY the final answer on the last line, as briefly as possible.";
@@ -85,10 +90,8 @@ const moaPeer = getProvider(new NekoConfig({ ...base.data, provider: "moa", moa:
 const judge = getProvider(new NekoConfig({ ...base.data, provider: "openai_compat", model: "deepseek-ai/deepseek-v4-pro", temperature: 0 }, null, base.profiles, base.apiKey));
 
 const OPEN: string[] = [
-  "Explain why the sky is blue, and name one common misconception about it.",
   "Give three concrete trade-offs between SQL and NoSQL databases for a high-write workload.",
   "What are the main risks of a single global mutable variable in a multi-threaded program, and one safer alternative?",
-  "Outline a concise spec for a token-bucket rate limiter: inputs, outputs, and two edge cases.",
 ];
 
 console.log(`\nOpen-ended quality (LLM-judged by deepseek-v4-pro) — single(${STRONG_AGG}) vs MoA(${PEER_REFS.join(" + ")} -> ${STRONG_AGG})\n`);

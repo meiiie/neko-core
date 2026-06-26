@@ -372,10 +372,13 @@ export class MoaProvider implements Provider {
   }
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
-    // 1. References analyze IN PARALLEL, WITHOUT tools (they advise; they don't act). A failing
-    //    reference degrades to a noted gap instead of sinking the turn.
+    // 1. References analyze IN PARALLEL, WITHOUT tools (they advise; they don't act), on an
+    //    ADVISORY-SAFE view of the conversation (user/assistant text only — no system prompt to
+    //    re-bill, no tool_calls/tool results that strict providers 400 on). A failing reference
+    //    degrades to a noted gap instead of sinking the turn.
+    const refMessages = advisoryMessages(messages);
     const refs = await Promise.all(this.references.map((r) =>
-      r.provider.complete(messages, undefined, undefined, signal)
+      r.provider.complete(refMessages, undefined, undefined, signal)
         .then((res) => ({ label: r.label, content: (res.content ?? "").trim(), usage: res.usage }))
         .catch((e) => ({ label: r.label, content: `(unavailable: ${messageOf(e)})`, usage: undefined as Usage | undefined })),
     ));
@@ -397,6 +400,27 @@ export class MoaProvider implements Provider {
     //    aggregator's so the context-window / auto-compaction math isn't inflated by the references.
     return { ...res, usage: moaUsage(refs.map((r) => r.usage), res.usage) };
   }
+}
+
+/** Advisory-safe message view for reference models (learned from Hermes Agent's moa_loop): keep only
+ * user/assistant TEXT turns. Drops the system prompt (don't re-bill it per reference), tool-result
+ * messages, and tool_calls payloads (strict providers 400 on orphan tool messages). Falls back to the
+ * last user turn if everything was stripped. */
+function advisoryMessages(messages: any[]): any[] {
+  const textOf = (c: any): string => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((p) => p?.type === "text").map((p) => p.text).join(" ") : "");
+  const trimmed: any[] = [];
+  for (const m of messages) {
+    if (m.role !== "user" && m.role !== "assistant") continue; // drop system + tool-result roles
+    const text = textOf(m.content).trim();
+    if (!text) continue; // drop tool-call-only assistant turns / empty
+    trimmed.push({ role: m.role, content: text });
+  }
+  if (trimmed.length) return trimmed;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const t = textOf(messages[i]?.content).trim();
+    if (messages[i]?.role === "user" && t) return [{ role: "user", content: t }];
+  }
+  return [{ role: "user", content: "" }];
 }
 
 /** A single-model sub-config: base settings (+ a named profile's base_url/key) with this model + temp. */

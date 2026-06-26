@@ -160,6 +160,7 @@ test("MoA: references analyze WITHOUT tools, aggregator acts WITH tools + their 
     const aggCalls = calls.filter((c) => c.model === "agg");
     expect(refCalls.length).toBe(2);
     expect(refCalls.every((c) => !c.hasTools)).toBe(true); // advisors never get tools
+    expect(refCalls.every((c) => c.sys === "")).toBe(true); // advisory-safe view: no system prompt re-billed
     expect(aggCalls.length).toBe(1);
     expect(aggCalls[0].hasTools).toBe(true); // only the aggregator acts
     expect(aggCalls[0].sys).toContain("MIXTURE-OF-AGENTS");
