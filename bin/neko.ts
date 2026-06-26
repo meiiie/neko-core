@@ -193,6 +193,7 @@ Commands:
   skills        list available skills (~/.neko-core/skills)
   recipes       list runnable recipes (~/.neko-core/recipes)
   login         save an API key (neko login <key>, or pipe it); logout removes it
+  update        download the latest release and replace this binary (self-update)
   mcp           list configured MCP servers and their tools
   chat          interactive session (default - same as bare 'neko' / 'neko code')
   run <task>    one-shot: run a single instruction
@@ -423,6 +424,7 @@ async function main(): Promise<number> {
       case "recipes": return cmdRecipes();
       case "login": return await cmdLogin(args);
       case "logout": return cmdLogout();
+      case "update": { const { selfUpdate } = await import("../src/adapters/update.ts"); return (await selfUpdate(console.log)) ? 0 : 1; }
       case "mcp": return await cmdMcp(args);
       case "run": return await cmdRun(args);
       case "bench": return await cmdBench(args);

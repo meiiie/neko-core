@@ -27,6 +27,7 @@ import { readClipboardImage } from "../adapters/clipboard.ts";
 import { clearApiKey, setApiKey } from "../adapters/project.ts";
 import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
 import { startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
+import { checkForUpdate } from "../adapters/update.ts";
 import { randomBytes } from "node:crypto";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
@@ -325,6 +326,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Stop the remote-control server when the app exits.
   useEffect(() => { busyRef.current = busy; }, [busy]); // keep the ref in lockstep with the state
   useEffect(() => () => { rcRef.current?.stop(); relayRef.current?.stop(); }, []);
+  // Startup update check (daily-cached, non-blocking): notify if a newer release exists.
+  useEffect(() => {
+    if (!cfg.autoUpdateCheck) return;
+    void checkForUpdate().then((v) => { if (v) addLine("info", `a newer Neko (${v}) is available - run \`neko update\``); }).catch(() => {});
+  }, []);
 
   // Re-layout on terminal resize. Ink only clears the screen when the width DECREASES; enlarging
   // re-renders on top of the old frame -> duplicated input box. So on resize we wipe the screen and

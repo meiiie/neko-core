@@ -40,6 +40,8 @@ export const DEFAULTS: Record<string, any> = {
   retry_max_delay_seconds: 30,
   offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
   approval: "prompt", // prompt | auto (--yolo flips gated tools to auto)
+  effort_ceiling: "high", // highest reasoning_effort the endpoint accepts (OpenAI standard caps at high); a profile can raise it
+  auto_update_check: true, // notify on a newer release at startup (daily-cached; set false to silence)
   mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
   active_profile: null,
   profiles: {
@@ -89,8 +91,12 @@ export class NekoConfig {
     if (perModel && typeof perModel === "object" && m && perModel[m] != null) return Number(perModel[m]);
     return Number(this.data.context_window ?? 131072);
   }
-  /** Reasoning effort (low|medium|high) sent as `reasoning_effort`; "" = omit (default). */
+  /** Reasoning effort (low|medium|high, or higher tiers where supported) sent as `reasoning_effort`; "" = omit. */
   get effort(): string { return String(this.data.reasoning_effort ?? "").trim().toLowerCase(); }
+  /** The highest effort tier the endpoint accepts; a configured effort above it is clamped down to it. "" = no clamp. */
+  get effortCeiling(): string { return String(this.data.effort_ceiling ?? "").trim().toLowerCase(); }
+  /** Check for a newer release at startup (daily-cached, non-blocking). */
+  get autoUpdateCheck(): boolean { return this.data.auto_update_check !== false; }
   /** When true, the catastrophic-bash seatbelt is disabled (default false). */
   get allowDangerousBash(): boolean { return Boolean(this.data.allow_dangerous_bash); }
 

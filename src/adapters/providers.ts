@@ -15,6 +15,16 @@ export type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/po
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
+const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"];
+/** Clamp a configured reasoning effort down to the endpoint's declared ceiling. Unknown tiers pass through. */
+export function clampEffort(effort: string, ceiling: string): string {
+  if (!effort || !ceiling) return effort;
+  const e = EFFORT_ORDER.indexOf(effort);
+  const c = EFFORT_ORDER.indexOf(ceiling);
+  if (e === -1 || c === -1) return effort;
+  return e > c ? ceiling : effort;
+}
+
 export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "openai_compat") return new OpenAICompatProvider(config);
   throw new Error(
@@ -68,7 +78,9 @@ export class OpenAICompatProvider implements Provider {
     if (this.cfg.maxTokens > 0) payload.max_tokens = this.cfg.maxTokens; // 0 -> omit (model's full budget)
     if (stream) payload.stream_options = { include_usage: true };
     if (tools && tools.length) payload.tools = tools;
-    const effort = this.effortOverride.get(this.cfg.model) ?? this.cfg.effort;
+    // Proactively map a configured effort down to the endpoint's declared ceiling (e.g. 'max' -> 'high'
+    // for an endpoint that caps at high), so the intent is honored without a wasted 400 round-trip.
+    const effort = clampEffort(this.effortOverride.get(this.cfg.model) ?? this.cfg.effort, this.cfg.effortCeiling);
     if (effort && !this.effortUnsupported.has(this.cfg.model)) payload.reasoning_effort = effort;
     // Schema-constrained structured output: the endpoint fills the given JSON Schema (constrained
     // decoding where supported). Self-healed below if the endpoint rejects it.

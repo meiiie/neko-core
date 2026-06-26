@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { NekoConfig } from "../src/adapters/config.ts";
-import { getProvider, makeThinkSplitter, OpenAICompatProvider, parseOpenAIMessage } from "../src/adapters/providers.ts";
+import { clampEffort, getProvider, makeThinkSplitter, OpenAICompatProvider, parseOpenAIMessage } from "../src/adapters/providers.ts";
 
 function cfg(provider: string) {
   return new NekoConfig({ provider }, null, {}, "");
@@ -122,6 +122,32 @@ test("self-heals when an endpoint rejects reasoning_effort: drops the field, ret
     sentEffort.length = 0;
     await provider.complete([{ role: "user", content: "again" }]);
     expect(sentEffort[0]).toBeUndefined();
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("clampEffort maps a configured effort down to the endpoint ceiling (extensible per profile)", () => {
+  expect(clampEffort("max", "high")).toBe("high"); // gpt-oss reality: high IS the model's ceiling
+  expect(clampEffort("xhigh", "high")).toBe("high");
+  expect(clampEffort("high", "high")).toBe("high");
+  expect(clampEffort("medium", "high")).toBe("medium"); // below ceiling -> untouched
+  expect(clampEffort("max", "max")).toBe("max"); // endpoint that supports max -> passes through
+  expect(clampEffort("max", "")).toBe("max"); // no ceiling declared -> pass through
+  expect(clampEffort("weird", "high")).toBe("weird"); // unknown vocab -> pass through, let self-heal handle
+});
+
+test("effort_ceiling clamps 'max' to 'high' UP FRONT (single request, no 400 round-trip)", async () => {
+  const orig = globalThis.fetch;
+  const sentEffort: (string | undefined)[] = [];
+  globalThis.fetch = (async (_url: string, init: any) => {
+    sentEffort.push(JSON.parse(init.body).reasoning_effort);
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: {} }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as any;
+  try {
+    const c = new NekoConfig({ provider: "openai_compat", base_url: "http://x/v1", model: "m", reasoning_effort: "max", effort_ceiling: "high" }, null, {}, "k");
+    await new OpenAICompatProvider(c).complete([{ role: "user", content: "hi" }]);
+    expect(sentEffort).toEqual(["high"]); // clamped proactively -> one request, no wasted 400
   } finally {
     globalThis.fetch = orig;
   }
