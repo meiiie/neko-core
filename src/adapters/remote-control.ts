@@ -46,11 +46,11 @@ function authorized(req: { headers: Record<string, any> }, token: string): boole
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export async function startRemoteControl(handlers: RemoteHandlers, port = 4517): Promise<RemoteControl> {
+export async function startRemoteControl(handlers: RemoteHandlers, port = 4517, host = "127.0.0.1"): Promise<RemoteControl> {
   const token = randomUUID();
   let inFlight = false; // the agent runs one turn at a time; serialize so concurrent POSTs can't overlap.
   const server: Server = createServer((req, res) => {
-    const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+    const url = new URL(req.url ?? "/", `http://${host}:${port}`);
     if (!authorized(req, token)) {
       res.statusCode = 401;
       res.end("unauthorized");
@@ -114,14 +114,14 @@ export async function startRemoteControl(handlers: RemoteHandlers, port = 4517):
         else reject(e);
       };
       server.once("error", onErr);
-      server.listen(p, "127.0.0.1", () => { server.removeListener("error", onErr); resolve(p); });
+      server.listen(p, host, () => { server.removeListener("error", onErr); resolve(p); });
     };
     attempt();
   });
   server.on("error", () => { /* swallow post-bind socket errors so a late one can't throw */ });
 
   // Discovery: write the endpoint so local tools/CLIs can find it; remove it on stop.
-  const url = `http://127.0.0.1:${bound}`;
+  const url = `http://${host}:${bound}`;
   const discPath = join(homeDir(), ".neko-core", "remote.json");
   try {
     mkdirSync(join(homeDir(), ".neko-core"), { recursive: true });

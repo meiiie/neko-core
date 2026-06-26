@@ -507,10 +507,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             },
             status: () => ({ busy: busyRef.current, model: cfg.model, messages: agentRef.current!.messages.length }),
             interrupt: () => { if (controllerRef.current) { controllerRef.current.abort(); return true; } return false; },
-          });
+          }, 4517, cfg.remoteBind);
           rcRef.current = rc;
           setRcOn(true);
-          addLine("info", `remote control on (local only): ${rc.url}\n  curl -s -H "Authorization: Bearer ${rc.token}" ${rc.url}/message -d '{"message":"hi"}'\n  stream: add -N -H "Accept: text/event-stream"  ·  GET /status  ·  POST /interrupt  ·  discovery: ~/.neko-core/remote.json`);
+          const loopback = cfg.remoteBind === "127.0.0.1" || cfg.remoteBind === "localhost";
+          if (!loopback) addLine("info", `⚠ remote control is EXPOSED on ${cfg.remoteBind} - anyone on that network with the token can run code here. Use ONLY a trusted private network (Tailscale/VPN), never a public address.`);
+          addLine("info", `remote control on${loopback ? " (local only)" : ""}: ${rc.url}\n  curl -s -H "Authorization: Bearer ${rc.token}" ${rc.url}/message -d '{"message":"hi"}'\n  stream: add -N -H "Accept: text/event-stream"  ·  GET /status  ·  POST /interrupt  ·  discovery: ~/.neko-core/remote.json`);
         } catch (e) {
           addLine("error", `remote control failed to start: ${e instanceof Error ? e.message : String(e)}`);
         }
