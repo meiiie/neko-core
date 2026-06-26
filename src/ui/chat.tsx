@@ -27,6 +27,7 @@ import { readClipboardImage } from "../adapters/clipboard.ts";
 import { clearApiKey, setApiKey } from "../adapters/project.ts";
 import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
 import { startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
+import { randomUUID } from "node:crypto";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
@@ -518,9 +519,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         return;
       }
       try {
-        const r = await startRemoteRelay(url, makeRemoteHandlers());
+        const secret = randomUUID(); // E2E key — printed to you, NEVER sent to the relay (the secret lives in the URL fragment, which browsers don't transmit)
+        const r = await startRemoteRelay(url, makeRemoteHandlers(), { secret });
         relayRef.current = r;
-        addLine("info", `relay on (control from any device, no open port): ${url}\n  open ${url} on your phone, then enter -\n  session: ${r.session}\n  token:   ${r.token}`);
+        const base = url.replace(/\/+$/, "");
+        const pair = `${base}/#s=${r.session}&t=${r.token}&k=${secret}`;
+        addLine("info", `relay on - E2E, the relay only sees ciphertext. Open on your phone (one tap):\n  ${pair}\n  (or enter manually)  session: ${r.session}  token: ${r.token}  secret: ${secret}`);
       } catch (e) {
         addLine("error", `relay failed to start: ${e instanceof Error ? e.message : String(e)}`);
       }

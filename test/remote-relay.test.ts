@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { RemoteHandlers } from "../src/adapters/remote-control.ts";
+import { open, seal } from "../src/adapters/relay-crypto.ts";
 import { startRemoteRelay } from "../src/adapters/remote-relay.ts";
 
 /** A tiny in-memory relay double standing in for the Cloudflare Worker, so we can prove the host
@@ -77,6 +78,52 @@ test("remote-relay: outbound dial-out + long-poll routes a client instruction to
     }
   } finally {
     relay.server.stop();
+  }
+});
+
+test("remote-relay E2E: the relay only ever sees ciphertext (zero-knowledge)", async () => {
+  const seen: string[] = []; // everything that passed through the relay
+  const sessions = new Map<string, { queue: any[]; replies: Map<string, any> }>();
+  const server = Bun.serve({
+    port: 4703,
+    async fetch(req) {
+      const u = new URL(req.url);
+      const sid = u.searchParams.get("session") ?? "";
+      if (u.pathname === "/register" && req.method === "POST") { const { session } = await req.json(); sessions.set(session, { queue: [], replies: new Map() }); return Response.json({ ok: true }); }
+      const s = sessions.get(sid);
+      if (u.pathname === "/pull") return Response.json(s?.queue.shift() ?? {});
+      if (u.pathname === "/reply" && req.method === "POST") { const { session, id, reply } = await req.json(); seen.push(JSON.stringify(reply)); sessions.get(session)?.replies.set(id, reply); return Response.json({ ok: true }); }
+      if (u.pathname === "/send" && req.method === "POST") { const { session, message } = await req.json(); seen.push(JSON.stringify(message)); sessions.get(session)?.queue.push({ id: "j1", message }); return Response.json({ id: "j1" }); }
+      if (u.pathname === "/result") { const r = s?.replies.get(u.searchParams.get("id") ?? ""); return r !== undefined ? Response.json({ reply: r }) : new Response("", { status: 204 }); }
+      return new Response("nf", { status: 404 });
+    },
+  });
+  const url = "http://127.0.0.1:4703";
+  const secret = "pair-9988";
+  let received = "";
+  try {
+    const rc = await startRemoteRelay(url, handlers(async (m: string) => { received = m; return { reply: "your password is hunter2" }; }), { pollMs: 30, secret });
+    try {
+      const headers = { "content-type": "application/json", authorization: `Bearer ${rc.token}` };
+      // The client seals with the shared secret (node seal == what the browser sends, proven interoperable).
+      const sealed = seal(secret, "what is my bank password");
+      const { id } = await (await fetch(`${url}/send`, { method: "POST", headers, body: JSON.stringify({ session: rc.session, message: sealed }) })).json();
+      let reply: any;
+      for (let i = 0; i < 50 && reply === undefined; i++) {
+        const res = await fetch(`${url}/result?session=${rc.session}&id=${id}`, { headers });
+        if (res.status === 200) reply = (await res.json()).reply;
+        else await new Promise((r) => setTimeout(r, 30));
+      }
+      expect(received).toBe("what is my bank password"); // the host decrypted + ran it
+      expect(open(secret, reply)).toBe("your password is hunter2"); // the reply was sealed; unseal it
+      const all = seen.join(" "); // CRUCIAL: the relay saw only ciphertext, never the plaintext
+      expect(all).not.toContain("bank password");
+      expect(all).not.toContain("hunter2");
+    } finally {
+      rc.stop();
+    }
+  } finally {
+    server.stop();
   }
 });
 

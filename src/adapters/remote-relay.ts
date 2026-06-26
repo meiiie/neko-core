@@ -15,6 +15,7 @@
  *   GET  /result?session=&id=...                   client long-polls for the matching reply
  */
 import { randomUUID } from "node:crypto";
+import { isSealed, open, seal } from "./relay-crypto.ts";
 import type { RemoteHandlers } from "./remote-control.ts";
 
 export interface RemoteRelay {
@@ -26,7 +27,7 @@ export interface RemoteRelay {
 export async function startRemoteRelay(
   relayUrl: string,
   handlers: RemoteHandlers,
-  opts: { session?: string; token?: string; pollMs?: number } = {},
+  opts: { session?: string; token?: string; pollMs?: number; secret?: string } = {},
 ): Promise<RemoteRelay> {
   const base = relayUrl.replace(/\/+$/, "");
   const session = opts.session ?? randomUUID();
@@ -43,11 +44,11 @@ export async function startRemoteRelay(
 
   const loop = async () => {
     while (running) {
-      let job: { id?: string; message?: string } | null = null;
+      let job: { id?: string; message?: unknown } | null = null;
       try {
         const r = await fetch(`${base}/pull?session=${encodeURIComponent(session)}`, { headers, signal: ctrl.signal });
         if (!running) break;
-        if (r.ok) job = (await r.json()) as { id?: string; message?: string };
+        if (r.ok) job = (await r.json()) as { id?: string; message?: unknown };
       } catch {
         if (!running) break;
         await new Promise((res) => setTimeout(res, idleMs)); // backoff on a network error
@@ -55,14 +56,26 @@ export async function startRemoteRelay(
       }
       if (job?.id) {
         // One instruction at a time (the loop is naturally serialized — no overlapping turns).
-        let result;
+        // E2E: the client encrypts with the shared secret; decrypt here so the relay never saw plaintext.
+        let message: string | null = null;
         try {
-          result = await handlers.run(String(job.message ?? ""));
-        } catch (e) {
-          result = { reply: `error: ${e instanceof Error ? e.message : String(e)}` };
+          message = opts.secret && isSealed(job.message) ? open(opts.secret, job.message) : String(job.message ?? "");
+        } catch {
+          message = null; // wrong secret or tampered — can't run it
         }
+        let result;
+        if (message === null) result = { reply: "error: could not decrypt (check the pairing secret)" };
+        else {
+          try {
+            result = await handlers.run(message);
+          } catch (e) {
+            result = { reply: `error: ${e instanceof Error ? e.message : String(e)}` };
+          }
+        }
+        // Seal the reply too, so the relay only ever forwards ciphertext (metadata stays plaintext).
+        const reply = opts.secret ? seal(opts.secret, String(result.reply ?? "")) : result.reply;
         try {
-          await fetch(`${base}/reply`, { method: "POST", headers, body: JSON.stringify({ session, id: job.id, ...result }) });
+          await fetch(`${base}/reply`, { method: "POST", headers, body: JSON.stringify({ session, id: job.id, reply, tokens: result.tokens, ms: result.ms }) });
         } catch {
           /* relay dropped the reply — keep polling rather than crash */
         }

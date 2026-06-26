@@ -22,9 +22,12 @@ npx wrangler deploy      # prints your URL, e.g. https://neko-relay.<you>.worker
 
 ## Use it
 1. On your machine: `neko chat`, then `/relay https://neko-relay.<you>.workers.dev`.
-   It prints a **session** + **token** (and the phone URL). Neko now dials out and waits — no open port.
-2. On your phone: open the Worker URL in a browser, enter the **session** + **token**, and type. Each
-   message runs as a real turn on your machine (your files, tools, MCP) and the reply comes back.
+   It prints a one-tap **pairing URL** (`…/#s=…&t=…&k=…`) plus the **session** + **token** + **secret**.
+   Neko now dials out and waits — no open port. The **secret** is the E2E key; it rides in the URL
+   fragment, which browsers never send to the server.
+2. On your phone: open the pairing URL (or open the Worker URL and paste session/token/secret), then
+   type. Each message runs as a real turn on your machine (your files, tools, MCP) and the reply comes
+   back — end-to-end encrypted the whole way.
 
 Or from any shell (no app):
 ```bash
@@ -40,8 +43,13 @@ curl -s -H "Authorization: Bearer $TOKEN" "$RELAY/result?session=$SESSION&id=$ID
   your messages even in transit), see **end-to-end encryption** below.
 
 ## End-to-end encryption (zero-knowledge relay) — beyond the vendor model
-A vendor relay (e.g. Claude Code's) sees your messages + tool results in plaintext. Because this relay is
-yours AND the protocol carries opaque payloads, you can encrypt each message with a shared secret (a
-pairing code) so the Worker only ever forwards ciphertext — it cannot read anything. The host (Neko) and
-the phone client share the secret; the relay is a blind forwarder. (Roadmap: G-series — the host side
-encrypts/decrypts with AES-GCM derived from the pairing secret; the web client uses WebCrypto.)
+A vendor relay (e.g. Claude Code's) sees your messages + tool results in plaintext. **This one does not.**
+`/relay` derives an AES-256-GCM key from the pairing **secret** (which never leaves your machine + phone),
+and seals every message and reply before it reaches the Worker. The Worker forwards **only ciphertext** —
+it cannot read anything, even in transit. The host (Neko, `src/adapters/relay-crypto.ts`) and the phone
+client (WebCrypto in `client.html`) interoperate; tampered or wrong-secret payloads fail GCM authentication.
+
+Proven by `test/relay-crypto.test.ts` (node ↔ browser interop, tamper/wrong-secret rejected) and
+`test/remote-relay.test.ts` (the relay observes only ciphertext — never the plaintext). This makes the
+rendezvous a true blind forwarder: **more private than the vendor model**, where the platform reads your
+messages.

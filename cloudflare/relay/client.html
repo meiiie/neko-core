@@ -24,11 +24,12 @@
   form button:disabled { opacity: .5; }
 </style></head>
 <body>
-<header><b>Neko</b> remote control <span class="dim" id="state">— set session + token below</span></header>
+<header><b>Neko</b> remote control <span class="dim" id="state">— end-to-end encrypted</span></header>
 <div class="cfg">
   <input id="relay" placeholder="relay URL (this site)" autocomplete="off">
-  <input id="session" placeholder="session (from /relay on your machine)" autocomplete="off">
+  <input id="session" placeholder="session (from /relay)" autocomplete="off">
   <input id="token" placeholder="token (from /relay)" autocomplete="off" type="password">
+  <input id="secret" placeholder="secret (E2E pairing code from /relay)" autocomplete="off" type="password">
 </div>
 <div id="log"></div>
 <form id="f">
@@ -37,11 +38,45 @@
 </form>
 <script>
   const $ = (id) => document.getElementById(id);
-  const log = $("log"), relay = $("relay"), session = $("session"), token = $("token");
+  const log = $("log"), relay = $("relay"), session = $("session"), token = $("token"), secret = $("secret");
   relay.value = location.origin; // default to this Worker
-  // restore saved session/token
-  try { session.value = localStorage.nekoSession || ""; token.value = localStorage.nekoToken || ""; } catch {}
-  for (const el of [session, token]) el.onchange = () => { try { localStorage.nekoSession = session.value; localStorage.nekoToken = token.value; } catch {} };
+
+  // One-tap pairing: /relay prints a URL with the secret in the fragment (#s=&t=&k=). The browser never
+  // sends the fragment to the server, so the secret stays client-side. Parse it, then clear the bar.
+  if (location.hash.length > 1) {
+    const h = new URLSearchParams(location.hash.slice(1));
+    if (h.get("s")) session.value = h.get("s");
+    if (h.get("t")) token.value = h.get("t");
+    if (h.get("k")) secret.value = h.get("k");
+    history.replaceState(null, "", location.pathname);
+  } else {
+    try { session.value = localStorage.nekoSession || ""; token.value = localStorage.nekoToken || ""; secret.value = localStorage.nekoSecret || ""; } catch {}
+  }
+  for (const el of [session, token, secret]) el.onchange = () => { try { localStorage.nekoSession = session.value; localStorage.nekoToken = token.value; localStorage.nekoSecret = secret.value; } catch {} };
+
+  // E2E (AES-256-GCM; key = PBKDF2(secret)) — wire-compatible with the Node host (relay-crypto.ts).
+  const b64 = (u8) => btoa(String.fromCharCode(...u8));
+  const ub64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  let keyPromise = null, keyFor = "";
+  function key() {
+    const s = secret.value.trim();
+    if (!s) return null;
+    if (keyFor !== s) {
+      keyFor = s;
+      keyPromise = crypto.subtle.importKey("raw", new TextEncoder().encode(s), "PBKDF2", false, ["deriveKey"])
+        .then((base) => crypto.subtle.deriveKey({ name: "PBKDF2", salt: new TextEncoder().encode("neko-relay-e2e-v1"), iterations: 100000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]));
+    }
+    return keyPromise;
+  }
+  async function seal(k, text) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, k, new TextEncoder().encode(text)));
+    return { iv: b64(iv), ct: b64(ct) };
+  }
+  async function unseal(k, s) {
+    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: ub64(s.iv) }, k, ub64(s.ct));
+    return new TextDecoder().decode(pt);
+  }
 
   function add(cls, text) { const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = text; log.appendChild(d); window.scrollTo(0, 1e9); return d; }
   const hdr = () => ({ "content-type": "application/json", authorization: "Bearer " + token.value.trim() });
@@ -55,14 +90,15 @@
     const out = add("neko dim", "…");
     try {
       const base = relay.value.trim().replace(/\/+$/, "");
-      const r = await fetch(base + "/send", { method: "POST", headers: hdr(), body: JSON.stringify({ session: session.value.trim(), message: msg }) });
-      if (!r.ok) { out.textContent = "send failed: HTTP " + r.status; out.className = "msg neko"; $("send").disabled = false; return; }
+      const k = await key();
+      const payload = k ? await seal(k, msg) : msg; // E2E: the relay only ever sees ciphertext
+      const r = await fetch(base + "/send", { method: "POST", headers: hdr(), body: JSON.stringify({ session: session.value.trim(), message: payload }) });
+      if (!r.ok) { out.className = "msg neko"; out.textContent = "send failed: HTTP " + r.status; return; }
       const { id } = await r.json();
-      // long-poll for the reply
       let reply;
       for (let i = 0; i < 30 && reply === undefined; i++) {
         const rr = await fetch(base + "/result?session=" + encodeURIComponent(session.value.trim()) + "&id=" + id, { headers: hdr() });
-        if (rr.status === 200) reply = (await rr.json()).reply;
+        if (rr.status === 200) { const got = (await rr.json()).reply; reply = k && got && got.iv ? await unseal(k, got) : got; }
       }
       out.className = "msg neko";
       out.textContent = reply ?? "(no reply — is Neko's /relay running?)";
