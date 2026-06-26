@@ -152,12 +152,29 @@ export class ToolRegistry {
   /** Run a shell command. Resolves on exit/timeout, OR early (kept running) if Ctrl+B detaches it. */
   private async runBash(args: Record<string, any>, signal?: AbortSignal): Promise<string> {
     const command = requireArg(args, "command");
+    // Per-call timeout (default 60s, clamped to [1s, 10min]) so slow builds/tests aren't cut off.
+    const timeoutMs = Math.min(Math.max(Math.floor(Number(args.timeout) || BASH_TIMEOUT_MS), 1000), 600_000);
     const sb = wrapBash(command, this.root, { enabled: this.sandboxBash, allowNetwork: this.sandboxAllowNetwork });
     const child = spawn(sb.file, sb.args, { shell: sb.shell, cwd: this.root });
-    let output = "";
     // Cap LIVE accumulation so a runaway command (`yes`, an infinite echo loop) can't grow the buffer
     // to gigabytes and OOM the process before the timeout fires.
     const MAX_BASH_OUTPUT = 200_000;
+
+    // Model-initiated background (run_in_background): start it, return immediately, and keep
+    // accumulating output into a record the user reads with /bashes. For servers/watchers/long jobs.
+    if (args.run_in_background === true) {
+      const id = `bg${++this.bgCounter}`;
+      const bg = { id, command, output: "", done: false, code: undefined as number | null | undefined };
+      const grab = (d: any) => { if (bg.output.length < MAX_BASH_OUTPUT) bg.output += d.toString(); };
+      child.stdout?.on("data", grab);
+      child.stderr?.on("data", grab);
+      child.on("close", (code) => { bg.done = true; bg.code = code; });
+      child.on("error", (err) => { bg.done = true; bg.output += `\nError: ${err.message}`; });
+      this.backgrounds.push(bg);
+      return `Running in background [${id}]: ${command}\nCheck its output later with /bashes.`;
+    }
+
+    let output = "";
     const onData = (d: any) => { if (output.length < MAX_BASH_OUTPUT) output += d.toString(); };
     child.stdout?.on("data", onData);
     child.stderr?.on("data", onData);
@@ -166,7 +183,7 @@ export class ToolRegistry {
     const outcome = await Promise.race([
       new Promise<{ kind: "exit"; code: number | null }>((res) => child.on("close", (code) => res({ kind: "exit", code }))),
       new Promise<{ kind: "error"; err: Error }>((res) => child.on("error", (err) => res({ kind: "error", err }))),
-      new Promise<{ kind: "timeout" }>((res) => setTimeout(() => res({ kind: "timeout" }), BASH_TIMEOUT_MS)),
+      new Promise<{ kind: "timeout" }>((res) => setTimeout(() => res({ kind: "timeout" }), timeoutMs)),
       new Promise<{ kind: "detach" }>((res) => { detach = () => res({ kind: "detach" }); this.detachCurrent = detach; }),
       new Promise<{ kind: "abort" }>((res) => {
         if (!signal) return;
@@ -185,7 +202,7 @@ export class ToolRegistry {
     if (outcome.kind === "error") return `Error: ${outcome.err.message}`;
     if (outcome.kind === "timeout") {
       try { child.kill(); } catch { /* already gone */ }
-      return `(timed out after ${BASH_TIMEOUT_MS}ms)\n${capOutput(output)}`.trimEnd();
+      return `(timed out after ${timeoutMs}ms)\n${capOutput(output)}`.trimEnd();
     }
     if (outcome.kind === "detach") {
       const id = `bg${++this.bgCounter}`;
@@ -397,22 +414,67 @@ function toolReadFile(root: string, args: Record<string, any>): string {
   if (text.length > MAX_READ_CHARS) {
     text = text.slice(0, MAX_READ_CHARS) + `\n... (truncated at ${MAX_READ_CHARS} chars)`;
   }
+  // offset/limit: read a slice of a large file instead of the whole prefix (Claude-style paging).
+  const allLines = text.split("\n");
+  const offset = Math.max(1, Math.floor(Number(args.offset) || 1)); // 1-based
+  const limit = Number(args.limit) > 0 ? Math.floor(Number(args.limit)) : undefined;
+  const start = offset - 1;
+  const slice = limit !== undefined ? allLines.slice(start, start + limit) : allLines.slice(start);
   // Line-numbered for reference (the model cites lines; numbers are display-only).
-  return text.split("\n").map((l, i) => `${String(i + 1).padStart(5)}  ${l}`).join("\n");
+  const body = slice.map((l, i) => `${String(start + i + 1).padStart(5)}  ${l}`).join("\n");
+  const windowed = start > 0 || (limit !== undefined && start + slice.length < allLines.length);
+  return windowed ? `(lines ${start + 1}-${start + slice.length} of ${allLines.length})\n${body}` : body;
 }
 
 function toolSearch(root: string, args: Record<string, any>): string {
   const pattern = requireArg(args, "pattern");
+  // Prefer ripgrep when installed: far faster on big trees + honors .gitignore. Fall back to the
+  // built-in walk (no rg) — both support glob/case_insensitive/context so behavior is consistent.
+  const rg = Bun.which("rg");
+  if (rg) {
+    const out = ripgrepSearch(rg, root, pattern, args);
+    if (out !== null) return out; // null = rg couldn't run -> use the JS walk
+  }
+  return jsSearch(root, pattern, args);
+}
+
+/** ripgrep search. Returns null only if rg fails to spawn (so the caller falls back to jsSearch). */
+function ripgrepSearch(rgPath: string, root: string, pattern: string, args: Record<string, any>): string | null {
+  const rel = args.path ? relative(resolve(root), resolveInRoot(root, args.path)).split(sep).join("/") || "." : ".";
+  const ctx = Math.max(0, Math.min(5, Math.floor(Number(args.context) || 0)));
+  const rgArgs = ["--line-number", "--no-heading", "--color=never", "--max-columns=250", "--max-count=2000"];
+  if (args.case_insensitive) rgArgs.push("-i");
+  if (args.glob) rgArgs.push("--glob", String(args.glob));
+  if (ctx) rgArgs.push("-C", String(ctx));
+  rgArgs.push("--", pattern, rel); // -- so a pattern starting with '-' isn't read as a flag
+  const r = spawnSync(rgPath, rgArgs, { cwd: root, encoding: "utf-8", maxBuffer: 16 * 1024 * 1024, timeout: 30_000 });
+  if (r.error) return null; // couldn't spawn -> let the JS fallback handle it
+  if (r.status === 2) return `Error: ${String(r.stderr || "").trim().slice(0, 200) || "search failed"}`; // e.g. bad regex
+  const lines = String(r.stdout || "").split("\n").filter(Boolean);
+  if (!lines.length) return "(no matches)";
+  const shown = lines.slice(0, MAX_SEARCH_MATCHES).map((l) => l.replace(/\\/g, "/"));
+  if (lines.length > MAX_SEARCH_MATCHES) shown.push(`... (truncated at ${MAX_SEARCH_MATCHES} matches)`);
+  return shown.join("\n");
+}
+
+/** Built-in regex walk — the fallback when ripgrep isn't installed. Also supports glob/case/context. */
+function jsSearch(root: string, pattern: string, args: Record<string, any>): string {
   let regex: RegExp;
   try {
-    regex = new RegExp(pattern);
+    regex = new RegExp(pattern, args.case_insensitive ? "i" : "");
   } catch (error) {
     return `Error: invalid regex: ${(error as Error).message}`;
   }
   const base = resolveInRoot(root, args.path || ".");
   const rootResolved = resolve(root);
+  const ctx = Math.max(0, Math.min(5, Math.floor(Number(args.context) || 0)));
+  const glob = args.glob ? new Bun.Glob(String(args.glob)) : null;
   const matches: string[] = [];
   for (const file of walkFiles(base)) {
+    if (glob) {
+      const relToBase = relative(base, file).split(sep).join("/");
+      if (!glob.match(relToBase) && !glob.match(file.split(sep).pop() ?? "")) continue;
+    }
     let text: string;
     try {
       text = readFileSync(file, "utf-8");
@@ -420,10 +482,16 @@ function toolSearch(root: string, args: Record<string, any>): string {
       continue; // binary / unreadable
     }
     const lines = text.split(/\r?\n/);
+    const rel = relative(rootResolved, file).split(sep).join("/");
     for (let i = 0; i < lines.length; i++) {
       if (regex.test(lines[i])) {
-        const rel = relative(rootResolved, file).split(sep).join("/");
-        matches.push(`${rel}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+        if (ctx) {
+          for (let j = Math.max(0, i - ctx); j <= Math.min(lines.length - 1, i + ctx); j++) {
+            matches.push(`${rel}:${j + 1}:${j === i ? " " : "-"}${lines[j].slice(0, 200)}`);
+          }
+        } else {
+          matches.push(`${rel}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+        }
         if (matches.length >= MAX_SEARCH_MATCHES) {
           matches.push(`... (truncated at ${MAX_SEARCH_MATCHES} matches)`);
           return matches.join("\n");

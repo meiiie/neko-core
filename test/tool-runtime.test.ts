@@ -269,3 +269,53 @@ test("todo_write records the list on the registry and renders a checklist", asyn
   expect(out).toContain("[~] fix");
   expect(reg.todos.length).toBe(2);
 });
+
+test("read_file offset/limit returns a line window numbered from the offset", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "lines.txt"), Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join("\n"));
+  const out = await reg.execute("read_file", { path: "lines.txt", offset: 5, limit: 3 });
+  expect(out).toContain("(lines 5-7 of 20)");
+  expect(out).toMatch(/\s5\s+line5/); // numbered from the offset
+  expect(out).toContain("line7");
+  expect(out).not.toContain("line8");
+  expect(out).not.toContain("line4");
+});
+
+test("search: case-insensitive is opt-in", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "a.txt"), "Hello World\n");
+  expect(await reg.execute("search", { pattern: "hello" })).toContain("(no matches)"); // case-sensitive default
+  expect(await reg.execute("search", { pattern: "hello", case_insensitive: true })).toContain("a.txt");
+});
+
+test("search: glob limits which files are searched", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "a.ts"), "needle\n");
+  writeFileSync(join(root, "b.md"), "needle\n");
+  const out = await reg.execute("search", { pattern: "needle", glob: "*.ts" });
+  expect(out).toContain("a.ts");
+  expect(out).not.toContain("b.md");
+});
+
+test("search: context shows surrounding lines", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "c.txt"), "one\ntwo\nTARGET\nfour\nfive\n");
+  const out = await reg.execute("search", { pattern: "TARGET", context: 1 });
+  expect(out).toContain("TARGET");
+  expect(out).toContain("two"); // line before
+  expect(out).toContain("four"); // line after
+  expect(out).not.toContain("one"); // beyond a context of 1
+});
+
+test("bash honors a per-call timeout arg (clamped to a 1s floor)", async () => {
+  const { reg } = makeReg("auto", () => true);
+  const out = await reg.execute("bash", { command: 'node -e "setTimeout(function(){},9000)"', timeout: 1000 });
+  expect(out).toContain("timed out after 1000ms");
+});
+
+test("bash run_in_background returns at once and records the job", async () => {
+  const { reg } = makeReg("auto", () => true);
+  const out = await reg.execute("bash", { command: 'node -e "setTimeout(function(){},400)"', run_in_background: true });
+  expect(out).toContain("Running in background");
+  expect(reg.backgrounds.length).toBe(1);
+});

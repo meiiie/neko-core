@@ -23,17 +23,24 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "read_file",
     permission: SAFE,
-    summary: "Read a UTF-8 text file from the project.",
-    parameters: { path: { type: "string", description: "File path, relative to the project root." } },
+    summary: "Read a UTF-8 text file from the project. Use offset+limit to read a slice of a large file.",
+    parameters: {
+      path: { type: "string", description: "File path, relative to the project root." },
+      offset: { type: "number", description: "1-based line number to start from (for paging large files)." },
+      limit: { type: "number", description: "Maximum number of lines to return from offset." },
+    },
     required: ["path"],
   },
   {
     name: "search",
     permission: SAFE,
-    summary: "Search file contents by regular expression across the project.",
+    summary: "Search file contents by regular expression across the project (ripgrep when available, honoring .gitignore; otherwise a built-in walk).",
     parameters: {
       pattern: { type: "string", description: "Regular expression to search for." },
       path: { type: "string", description: "Directory to search (default: project root)." },
+      glob: { type: "string", description: "Optional glob to limit files, e.g. *.ts or src/**/*.js." },
+      case_insensitive: { type: "boolean", description: "Case-insensitive match (default false)." },
+      context: { type: "number", description: "Lines of context to show around each match (0-5, default 0)." },
     },
     required: ["pattern"],
   },
@@ -100,8 +107,12 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "bash",
     permission: GATED,
-    summary: "Run a shell command in the project root (approval-gated).",
-    parameters: { command: { type: "string", description: "The shell command to run." } },
+    summary: "Run a shell command in the project root (approval-gated). Set a longer timeout for slow builds/tests, or run_in_background for long-lived processes (servers, watchers).",
+    parameters: {
+      command: { type: "string", description: "The shell command to run." },
+      timeout: { type: "number", description: "Timeout in milliseconds (default 60000, max 600000)." },
+      run_in_background: { type: "boolean", description: "Start it in the background and return immediately; read its output later with /bashes. Use for servers/watchers or anything long-running." },
+    },
     required: ["command"],
   },
   {
