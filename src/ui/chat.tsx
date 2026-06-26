@@ -73,6 +73,16 @@ function resultSummary(name: string | undefined, obs: string): string | undefine
   }
 }
 
+/** Cap live-streamed text to a bounded tail so re-parsing + re-rendering it every frame stays O(1),
+ * not O(n): a long reasoning trace or a huge answer must NEVER block the event loop, or Esc/Ctrl+C
+ * go dead and the only escape is killing the terminal. The full text is still committed to the
+ * transcript verbatim when the stream finishes. */
+export function renderTail(s: string, maxChars = 4000): string {
+  if (s.length <= maxChars) return s;
+  const cut = s.indexOf("\n", s.length - maxChars);
+  return "...\n" + (cut >= 0 ? s.slice(cut + 1) : s.slice(s.length - maxChars));
+}
+
 export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider }: ChatProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -222,6 +232,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       onDelta: (t, kind) => {
         if (kind === "reasoning") {
           reasoningRef.current += t;
+          // Reasoning is transient (display-only, only the last lines shown) — keep a bounded tail so
+          // a long trace can't grow the per-frame split cost without limit and stall the event loop.
+          if (reasoningRef.current.length > 8000) reasoningRef.current = reasoningRef.current.slice(-6000);
           maybePump();
           return;
         }
@@ -604,7 +617,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           when streaming finishes and flushStream moves it into <Static>. */}
       {stream ? (
         <Box flexDirection="column" marginTop={1} marginBottom={1}>
-          <Markdown text={stream} />
+          <Markdown text={renderTail(stream)} />
         </Box>
       ) : null}
 

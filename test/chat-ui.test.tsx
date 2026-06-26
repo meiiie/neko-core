@@ -2,7 +2,17 @@ import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
-import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
+import { ApprovalBox, ChatApp, renderTail } from "../src/ui/chat.tsx";
+
+test("renderTail bounds live-stream rendering to O(1) so the event loop can't stall on huge output", () => {
+  expect(renderTail("short text")).toBe("short text"); // under cap -> unchanged
+  const huge = Array.from({ length: 100000 }, (_, i) => `line ${i}`).join("\n"); // ~> 4000 chars
+  const out = renderTail(huge, 4000);
+  expect(out.length).toBeLessThan(4200); // capped regardless of input size
+  expect(out.startsWith("...")).toBe(true); // truncation marker
+  expect(out).toContain("line 99999"); // the latest content is kept (the tail)
+  expect(out).not.toContain("line 0\n"); // the old head is dropped
+});
 
 const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));
 
