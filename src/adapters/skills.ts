@@ -14,7 +14,11 @@ export interface Skill {
 }
 
 function skillDirs(): string[] {
-  return [join(homeDir(), ".neko-core", "skills"), join(process.cwd(), ".neko-core", "skills")];
+  return [
+    join(homeDir(), ".neko-core", "skills"), // user skills
+    join(process.cwd(), ".neko-core", "skills"), // project skills
+    join(import.meta.dir, "..", "..", "skills"), // skills bundled with Neko (lowest priority; user/project override)
+  ];
 }
 
 function parse(file: string): Skill | null {
