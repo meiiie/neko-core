@@ -22,6 +22,8 @@ export async function startRemoteControl(
   port = 4517,
 ): Promise<RemoteControl> {
   const token = randomUUID();
+  let inFlight = false; // the agent runs one turn at a time; serialize so two concurrent POSTs can't
+  // start overlapping turns on the same session (which corrupts its state).
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
     if (url.searchParams.get("token") !== token && req.headers["x-neko-token"] !== token) {
@@ -33,6 +35,14 @@ export async function startRemoteControl(
       let body = "";
       req.on("data", (c) => (body += c));
       req.on("end", async () => {
+        if (inFlight) {
+          // Already processing a turn — reject rather than race a second overlapping run.
+          res.statusCode = 409;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ error: "busy: a message is already being processed" }));
+          return;
+        }
+        inFlight = true;
         try {
           let text = body;
           try { text = JSON.parse(body).message ?? body; } catch { /* treat body as raw text */ }
@@ -44,6 +54,8 @@ export async function startRemoteControl(
           res.statusCode = 500;
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+        } finally {
+          inFlight = false;
         }
       });
       return;
