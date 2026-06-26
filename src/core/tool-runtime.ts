@@ -53,6 +53,8 @@ export class ToolRegistry {
   summarize?: (instruction: string, content: string) => Promise<string>;
   /** Opt-in adversarial review of auto-approved mutating actions (set by the host). */
   checkAction?: (toolName: string, args: Record<string, any>) => Promise<{ ok: boolean; reason: string }>;
+  /** Load a skill's body by name (set by the wiring layer; core can't import the skills adapter). */
+  loadSkill?: (name: string) => string | null;
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
   /** Opt-in OS sandbox for bash (fs read-only except cwd). Set from config by the host. */
@@ -178,6 +180,14 @@ export class ToolRegistry {
     // Make failures unmistakable so the model reacts (diagnoses + retries) instead of moving on.
     const tag = code === 0 ? "(exit 0)" : `(exit ${code} -- command FAILED)`;
     return `${tag}\n${capOutput(output)}`.trimEnd();
+  }
+
+  /** Progressive disclosure: return a skill's full instructions on demand so the model can go deep on
+   * a domain it just decided is relevant, without that body ever sitting in context unused. */
+  private runSkill(args: Record<string, any>): string {
+    const name = String(requireArg(args, "name"));
+    const body = this.loadSkill?.(name);
+    return body ? `# Skill: ${name}\n${body}` : `(no skill '${name}' - check the skills listed in your context)`;
   }
 
   /** All tool schemas shown to the model: enabled built-in + connected MCP tools. */
@@ -307,7 +317,9 @@ export class ToolRegistry {
       this.snapshotFile(resolveInRoot(this.root, String(args.path)));
     }
     try {
-      const out = name === "bash" ? await this.runBash(args, signal) : await DISPATCH[name](this.root, args);
+      const out = name === "bash" ? await this.runBash(args, signal)
+        : name === "skill" ? this.runSkill(args)
+        : await DISPATCH[name](this.root, args);
       this.runPostHook(name, args, out);
       return out;
     } catch (error) {

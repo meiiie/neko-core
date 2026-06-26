@@ -171,6 +171,15 @@ export const TOOL_SPECS: ToolSpec[] = [
     },
     required: ["action"],
   },
+  {
+    name: "skill",
+    permission: SAFE,
+    summary: "Load a domain skill's full instructions on demand. The available skills (name + one-line description) are listed in your context; when a task matches one, call this with its name FIRST, then follow the instructions it returns. Keeps you general while letting you go deep on a domain.",
+    parameters: {
+      name: { type: "string", description: "The skill name to load (exactly as listed under 'Available skills')." },
+    },
+    required: ["name"],
+  },
 ];
 
 export function listTools(): ToolSpec[] {
@@ -193,6 +202,7 @@ const TOOL_LABELS: Record<string, string> = {
   exit_plan_mode: "Plan",
   task: "Task",
   memory: "Memory",
+  skill: "Skill",
 };
 
 /** A compact "Label(primary-arg)" for a tool call, e.g. `Read(src/app.ts)` or `Bash(bun test)`. */
@@ -201,6 +211,8 @@ export function describeToolCall(name: string, args: Record<string, any>): strin
   const a = args ?? {};
   const primary = name === "memory"
     ? [a.action, a.name ?? a.query].filter(Boolean).join(" ")
+    : name === "skill"
+    ? (a.name ?? "")
     : (a.path ?? a.command ?? a.query ?? a.url ?? a.pattern ?? a.description ?? "");
   const s = String(primary).replace(/\s+/g, " ").trim();
   const shown = s.length > 80 ? s.slice(0, 80) + "…" : s;

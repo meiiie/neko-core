@@ -31,6 +31,7 @@ import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
 import { latestSession, loadSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
 import { memoryIndexBlock } from "../core/memory.ts";
+import { loadSkill, skillsContextBlock } from "../adapters/skills.ts";
 import { ToolRegistry, todosContextBlock } from "../core/tool-runtime.ts";
 import { describeToolCall } from "../core/tools.ts";
 
@@ -200,6 +201,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     registryRef.current.sandboxAllowNetwork = cfg.sandboxNetwork;
     registryRef.current.searxngUrl = cfg.searxngUrl;
     registryRef.current.searchBackend = cfg.searchBackend;
+    registryRef.current.loadSkill = (name) => loadSkill(name)?.body ?? null;
     // Sub-agents: the `task` tool spawns a fresh, isolated agent (depth 1 — its registry has no
     // subagent), inheriting the parent's mode/approval/hooks so its tool use is gated the same.
     registryRef.current.subagent = async (prompt, type) => {
@@ -240,7 +242,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>
-        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), memoryIndexBlock(), todosContextBlock(registryRef.current!.todos)]
+        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), todosContextBlock(registryRef.current!.todos)]
           .filter(Boolean)
           .join("\n\n"),
       onDelta: (t, kind) => {

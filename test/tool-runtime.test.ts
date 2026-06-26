@@ -225,6 +225,15 @@ test("bash is interrupted at once when the abort signal fires (no long wait, no 
   expect(Date.now() - start).toBeLessThan(3000); // returned promptly, not after the 5s command
 });
 
+test("skill tool loads a skill body on demand via the injected hook (progressive disclosure)", async () => {
+  const { reg } = makeReg("auto", () => true);
+  reg.loadSkill = (name) => (name === "demo" ? "do the demo thing" : null);
+  const out = await reg.execute("skill", { name: "demo" });
+  expect(out).toContain("# Skill: demo");
+  expect(out).toContain("do the demo thing");
+  expect(await reg.execute("skill", { name: "nope" })).toContain("no skill");
+});
+
 test("read_file reads only a bounded prefix of a huge file (no whole-file slurp -> OOM)", async () => {
   const { root, reg } = makeReg("auto", () => true);
   writeFileSync(join(root, "big.txt"), "x".repeat(600_000)); // > read-byte cap (400KB) and char cap (100K)

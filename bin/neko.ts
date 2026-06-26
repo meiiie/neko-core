@@ -18,7 +18,7 @@ import { renderBenchReport, runBench } from "../src/adapters/bench.ts";
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
-import { renderSkills } from "../src/adapters/skills.ts";
+import { loadSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
 import { memoryIndexBlock } from "../src/core/memory.ts";
 import { ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
 import {
@@ -127,6 +127,7 @@ async function buildAgent(
   registry.sandboxAllowNetwork = cfg.sandboxNetwork;
   registry.searxngUrl = cfg.searxngUrl;
   registry.searchBackend = cfg.searchBackend;
+  registry.loadSkill = (name) => loadSkill(name)?.body ?? null;
   registry.subagent = async (prompt, type) => {
     const subReg = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
@@ -158,7 +159,7 @@ async function buildAgent(
     maxSteps: cfg.maxSteps,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     dynamicContext: () =>
-      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), memoryIndexBlock(), todosContextBlock(registry.todos)]
+      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), todosContextBlock(registry.todos)]
         .filter(Boolean)
         .join("\n\n"),
     onEvent: printEvent,

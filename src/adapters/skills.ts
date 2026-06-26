@@ -69,6 +69,21 @@ export function loadSkill(name: string): Skill | null {
   return listSkills().find((s) => s.name === name) ?? null;
 }
 
+/** Progressive disclosure (SOTA): inject just the skill names + one-line descriptions into context
+ * (~cheap) so the model KNOWS what domain capabilities exist and can pull the full instructions in
+ * on demand via the `skill` tool — never bloating context with skill bodies it isn't using. */
+export function skillsContextBlock(): string {
+  const list = listSkills();
+  if (!list.length) return "";
+  const CAP = 50;
+  const lines = list.slice(0, CAP).map((s) => `- ${s.name}: ${s.description || "(no description)"}`);
+  if (list.length > CAP) lines.push(`- ... +${list.length - CAP} more`);
+  return (
+    "Available skills (domain capabilities). When a task matches one, FIRST call the `skill` tool to " +
+    "load its full instructions, then follow them:\n" + lines.join("\n")
+  );
+}
+
 export function renderSkills(): string {
   const list = listSkills();
   if (!list.length) {
