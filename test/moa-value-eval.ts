@@ -13,9 +13,12 @@
  *   3. HARD exact-match, strong agg + 3 diverse strong advisors:    8/8 == 8/8   (~7.5x cost)
  *   4. HARD exact-match, capable mid agg (llama-3.3-70b) + advisors: 8/8 == 8/8  (~3.5x cost)
  *   5. open-ended, LLM-judged peer mixture:                          even (1-1, 2-2)
- *   Conclusion, stated plainly: modern strong/mid models already ACE verifiable-answer tasks, so there
- *   is no headroom for MoA to recover anything — it just multiplies cost (and a weak aggregator can even
- *   mis-synthesize good advice). MoA is implemented CORRECTLY and faithfully (single-iteration like
+ *   6. FALSE-PREMISE traps (gpt-oss's documented weak spot, see moa-trap-eval.ts): single 4/6, MoA 5/6
+ *      -> MoA EXCEEDS the single model where it is weak (diverse advisors catch a trap it missed).
+ *   The honest nuance: MoA TIES on SATURATED tasks (no headroom to improve) but genuinely EXCEEDS a
+ *   strong single model WHERE that model has a WEAKNESS (here false-premise robustness). So "beats SOTA"
+ *   holds on the right regime, not as a blanket free win. MoA is implemented CORRECTLY and faithfully
+ *   (single-iteration like
  *   Hermes's production moa_loop, advisory-safe reference view, graceful degradation, mixture cost
  *   accounting) but does NOT "beat SOTA" on independent measurement. Its genuine value is pooling
  *   WEAKER/local models toward frontier quality (the paper's regime) when no single strong model is on
