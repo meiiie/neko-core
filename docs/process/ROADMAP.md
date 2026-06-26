@@ -96,3 +96,26 @@ cost/token tracking · MCP client · single-binary distribution.
   cover the "evaluation agent" pattern.
 - [x] **F8** `neko bench` — built-in agentic-coding benchmark (`src/adapters/bench.ts`): pass@1 +
   `--trials N` (PASS/FLAKY/FAIL), deterministic verifiers. *(verified: gpt-oss-120b 8/8 at --trials 2)*
+
+## Phase G — robustness hardening + SOTA extensibility
+
+- [x] **G0** Serious-bug audit (found via real dogfooding — "freezes after long use"): fixed 7 robustness
+  bugs, each a real freeze/OOM/crash at the edges. (1) live-stream render was O(n)/frame -> on long
+  reasoning/output the event loop stalled and Esc/Ctrl+C went dead (kill-terminal); bounded to O(1)
+  via `renderTail`. (2) bash ignored the abort signal -> Esc/Ctrl+C couldn't stop a running command
+  (60s wait + orphan child); threaded the AbortSignal -> kill at once. (3) bash output buffered
+  unbounded -> a runaway command (`yes`) OOMed; capped at 200 KB. (4) read_file slurped a whole file
+  before truncating -> multi-GB OOM; now reads a bounded prefix via fd. (5) `void handle()` could
+  surface an unhandled rejection -> crash; wrapped. (6) transcript `lines` bounded (trim + Static
+  remount). (7) session save spawned git every turn (spawnSync, up to 2s) -> cached per cwd, which
+  also **killed the recurring session-test flake**. *(full suite 146/0, no flake; each fix tested)*
+- [x] **G1** SOTA skill extensibility — **progressive disclosure** (Anthropic Agent-Skills pattern):
+  skill name+description injected into context (`skillsContextBlock`, ~100 tokens each) so the model
+  auto-discovers capabilities, + a SAFE `skill` tool that loads the full body JIT (via an injected
+  registry hook, so core never imports the skills adapter). A domain is now a pluggable skill; the
+  core stays thin + general. *(verified end-to-end + unit test; policy + architecture green)*
+- [x] **G2** First domain capability: bundled **`procurement`** skill (Purchasing Officer — sources VN
+  platforms, compares price/trust/warranty/VAT/shipping-to-Bac-Giang, outputs a human-approved purchase
+  plan; never buys autonomously). Repo `skills/` is now a bundled skill dir (lowest priority). Extension
+  model documented in `docs/EXTENDING.md`. *(verified end-to-end: auto-loads the skill, sources live
+  iPhone prices from CellphoneS/TGDD/FPT/Hoang Ha)* — next: browser MCP for JS-heavy sites; voice-call MCP.
