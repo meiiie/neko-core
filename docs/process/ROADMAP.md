@@ -192,3 +192,12 @@ cost/token tracking · MCP client · single-binary distribution.
   playbook) 0/3 -> the agent learns the rule in task 1 -> REUSE (learned playbook, always-on) 3/3 on a
   NEW price. *(benchmark-integrity fix along the way: both value benchmarks now run the agent in a sandbox
   cwd after it was caught reading the benchmark's own source to cheat. full suite 156/0)*
+- [x] **G10** Stealth browser for anti-bot sites (the G7 frontier). Researched the SOTA stealth stacks
+  (patchright, puppeteer-extra-stealth, nodriver, dedicated stealth MCP servers) and found the cleanest
+  fit is **config-only, no third-party package**: `@playwright/mcp --device "Desktop Chrome"`. Measured on
+  a local detector: vanilla headless leaked `headlessUA=true` (a bot signal); with `--device` both
+  `navigator.webdriver` AND the headless User-Agent read **false** — basic fingerprints masked via config
+  alone, true to Neko's config-first principle. Most-undetectable option documented too: `--cdp-endpoint`
+  to the user's real logged-in Chrome. *(honest caveat: this masks common UA/webdriver checks; Cloudflare
+  + captcha on big marketplaces is an arms race that can still need a human — and the cheapest prices are
+  usually at static official retailers that don't need a browser at all. Wired into the procurement skill.)*
