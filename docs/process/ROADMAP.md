@@ -182,3 +182,13 @@ cost/token tracking · MCP client · single-binary distribution.
   procedure, and a matching later task auto-recalls + follows it. The third memory leg: facts + authored
   skills + learned workflows -> the agent gets faster and more reliable over time. *(+unit tests; policy +
   architecture green; full suite 153/0)*
+- [x] **G9** ACE — Agentic Context Engineering (arXiv 2510.04618), clean-room. The fourth self-improving
+  primitive: a `playbook` of operating strategies/lessons that is ALWAYS in context (vs JIT memory/
+  workflows) and refined by incremental DELTA updates (`playbook add`/`revise` one bullet) + grow-and-
+  refine de-dup — never rewritten into a vague summary (the "context collapse" ACE is built to avoid).
+  `core/playbook.ts` (mirrors `memory.ts`), a `playbook` tool, an always-on context block, and a Reflector
+  prompt (after a non-obvious/failed step, add or sharpen a lesson). **Value benchmark proves the
+  learn->persist->reuse loop with an UNGUESSABLE rule** (`test/ace-value-eval.ts`): BASELINE (empty
+  playbook) 0/3 -> the agent learns the rule in task 1 -> REUSE (learned playbook, always-on) 3/3 on a
+  NEW price. *(benchmark-integrity fix along the way: both value benchmarks now run the agent in a sandbox
+  cwd after it was caught reading the benchmark's own source to cheat. full suite 156/0)*
