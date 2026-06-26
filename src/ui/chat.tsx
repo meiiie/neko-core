@@ -250,7 +250,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>
-        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), todosContextBlock(registryRef.current!.todos)]
+        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), registryRef.current?.mcp?.indexBlock?.() ?? "", todosContextBlock(registryRef.current!.todos)]
           .filter(Boolean)
           .join("\n\n"),
       onDelta: (t, kind) => {
@@ -577,7 +577,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (mentions) {
       for (const m of [...new Set(mentions)]) {
         const p = m.slice(1).replace(/[)\].,;:]+$/, "");
-        if (p) toSend += `\n\n[@${p}]\n${await registryRef.current!.execute("read_file", { path: p })}`;
+        if (p) { const r = await registryRef.current!.execute("read_file", { path: p }); toSend += `\n\n[@${p}]\n${typeof r === "string" ? r : "[image attachment]"}`; }
       }
     }
     const imgs = pastedRef.current; // consume any staged pasted images
@@ -825,7 +825,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   if (opts.resumeId && !resumed) console.error(`neko: no session '${opts.resumeId}' - starting fresh.`);
   const id = resumed?.id ?? newSessionId();
   const cfg = loadConfig({ profile: opts.profile });
-  const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny });
+  const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);
   const app = render(
     <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} />,
     { exitOnCtrlC: false }, // we require a double Ctrl-C

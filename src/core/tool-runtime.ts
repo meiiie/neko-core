@@ -83,6 +83,8 @@ export class ToolRegistry {
   /** Opt-in OS sandbox for bash (fs read-only except cwd). Set from config by the host. */
   sandboxBash = false;
   sandboxAllowNetwork = false;
+  /** When true, read_file returns image files as vision content (needs a vision-capable model). */
+  vision = false;
   /** Web-search backend (set from config). searxng_url -> self-hosted metasearch; else Tavily (env
    * key) -> agent search; else DuckDuckGo (free, zero-config). `searchBackend` forces one. */
   searxngUrl = "";
@@ -239,7 +241,7 @@ export class ToolRegistry {
     ];
   }
 
-  async execute(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  async execute(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string | any[]> {
     if (typeof args !== "object" || args === null) {
       return `Error: arguments for ${name} must be an object`;
     }
@@ -316,6 +318,12 @@ export class ToolRegistry {
       return renderTodos(this.todos);
     }
 
+    // mcp_load: a SAFE meta-tool that pulls MCP tool schemas on demand (lazy mode). No side effects.
+    if (name === "mcp_load" && this.mcp?.loadTools) {
+      const names = Array.isArray(args.names) ? args.names.map(String) : [String(args.name ?? "")].filter(Boolean);
+      return this.mcp.loadTools(names);
+    }
+
     // MCP tools: their effects are unknown, so treat them as gated (mode-governed).
     if (this.mcp?.has(name)) {
       const decision = this.mode === "auto" ? "allow" : this.mode === "plan" ? "deny" : "prompt";
@@ -362,13 +370,26 @@ export class ToolRegistry {
     }
     try {
       const out = name === "bash" ? await this.runBash(args, signal)
+        : name === "read_file" ? this.runReadFile(args)
         : name === "skill" ? this.runSkill(args)
         : await DISPATCH[name](this.root, args);
-      this.runPostHook(name, args, out);
+      this.runPostHook(name, args, typeof out === "string" ? out : "[image]");
       return out;
     } catch (error) {
       return `Error: ${(error as Error).message}`;
     }
+  }
+
+  /** read_file with media awareness: images -> vision content (if enabled), PDFs -> extracted text,
+   * everything else -> the line-numbered text path. */
+  private runReadFile(args: Record<string, any>): string | any[] {
+    const raw = requireArg(args, "path");
+    const path = resolveInRoot(this.root, raw);
+    if (!existsSync(path)) return `Error: no such file: ${raw}`;
+    const ext = (raw.split(".").pop() ?? "").toLowerCase();
+    if (IMAGE_EXTS.has(ext)) return readImageFile(path, raw, ext, this.vision);
+    if (ext === "pdf") return readPdfFile(path, raw);
+    return toolReadFile(this.root, args);
   }
 
   /** post_tool_use hook: fire-and-observe after a tool runs (logging/formatting; never blocks). */
@@ -424,6 +445,62 @@ function toolReadFile(root: string, args: Record<string, any>): string {
   const body = slice.map((l, i) => `${String(start + i + 1).padStart(5)}  ${l}`).join("\n");
   const windowed = start > 0 || (limit !== undefined && start + slice.length < allLines.length);
   return windowed ? `(lines ${start + 1}-${start + slice.length} of ${allLines.length})\n${body}` : body;
+}
+
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
+
+/** Read an image as vision content (caption + data URL) when vision is on, else as metadata text. */
+function readImageFile(path: string, raw: string, ext: string, vision: boolean): string | any[] {
+  const buf = readFileSync(path);
+  const dims = imageDims(buf, ext);
+  const meta = `image ${raw}${dims ? ` ${dims.w}x${dims.h}` : ""}, ${Math.max(1, Math.round(buf.length / 1024))} KB`;
+  if (!vision) {
+    return `[${meta}] - to view it, set "vision": true in config with a vision-capable model, or paste it (Alt+V).`;
+  }
+  const mime = ext === "jpg" ? "jpeg" : ext === "svg" ? "svg+xml" : ext;
+  return [
+    { type: "text", text: `[${meta}]` },
+    { type: "image_url", image_url: { url: `data:image/${mime};base64,${buf.toString("base64")}` } },
+  ];
+}
+
+/** Extract text from a PDF via pdftotext (poppler) when available; else explain how to read it. */
+function readPdfFile(path: string, raw: string): string {
+  const exe = Bun.which("pdftotext");
+  if (!exe) return `[PDF ${raw}] - text extraction needs 'pdftotext' (poppler) on PATH (not found). Install it, or open the pages with a vision model.`;
+  const r = spawnSync(exe, ["-layout", path, "-"], { encoding: "utf-8", maxBuffer: 16 * 1024 * 1024, timeout: 30_000 });
+  if (r.error) return `Error extracting PDF: ${r.error.message}`;
+  let text = String(r.stdout || "");
+  if (!text.trim()) {
+    const err = String(r.stderr || "").trim().slice(0, 150);
+    return r.status !== 0 && err
+      ? `[PDF ${raw}] - could not extract text: ${err}`
+      : `[PDF ${raw}] - no extractable text (likely a scanned/image PDF; needs OCR or a vision model).`;
+  }
+  if (text.length > MAX_READ_CHARS) text = text.slice(0, MAX_READ_CHARS) + `\n... (truncated at ${MAX_READ_CHARS} chars)`;
+  return text;
+}
+
+/** Cheap width/height from common image headers (PNG/GIF/JPEG), or null. No decoding, no deps. */
+function imageDims(buf: Buffer, ext: string): { w: number; h: number } | null {
+  try {
+    if (ext === "png" && buf.length >= 24) return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+    if (ext === "gif" && buf.length >= 10) return { w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
+    if ((ext === "jpg" || ext === "jpeg") && buf.length > 4) {
+      let i = 2;
+      while (i + 9 < buf.length) {
+        if (buf[i] !== 0xff) { i++; continue; }
+        const marker = buf[i + 1];
+        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+          return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) }; // SOF segment: height then width
+        }
+        i += 2 + buf.readUInt16BE(i + 2); // skip this segment
+      }
+    }
+  } catch {
+    /* malformed header -> no dims */
+  }
+  return null;
 }
 
 function toolSearch(root: string, args: Record<string, any>): string {

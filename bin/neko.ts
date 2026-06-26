@@ -121,7 +121,7 @@ async function buildAgent(
   onDelta?: (t: string, kind?: string) => void,
 ): Promise<{ agent: Agent; close: () => Promise<void> }> {
   const mode = yolo ? "auto" : cfg.mode;
-  const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny });
+  const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);
   const registry = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
   registry.hooks = cfg.hooks;
   registry.allowDangerousBash = cfg.allowDangerousBash;
@@ -129,12 +129,14 @@ async function buildAgent(
   registry.sandboxAllowNetwork = cfg.sandboxNetwork;
   registry.searxngUrl = cfg.searxngUrl;
   registry.searchBackend = cfg.searchBackend;
+  registry.vision = cfg.vision;
   registry.loadSkill = (name) => { const s = loadSkill(name); return s ? { body: s.body, dir: s.dir } : null; };
   registry.subagent = async (prompt, type) => {
     const subReg = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
     subReg.searxngUrl = cfg.searxngUrl;
     subReg.searchBackend = cfg.searchBackend;
+    subReg.vision = cfg.vision;
     const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT;
     return await new Agent({ provider: getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps }).run(prompt);
   };
@@ -161,7 +163,7 @@ async function buildAgent(
     maxSteps: cfg.maxSteps,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     dynamicContext: () =>
-      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), todosContextBlock(registry.todos)]
+      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), registry.mcp?.indexBlock?.() ?? "", todosContextBlock(registry.todos)]
         .filter(Boolean)
         .join("\n\n"),
     onEvent: printEvent,

@@ -41,4 +41,7 @@ export interface McpTools {
   /** MCP prompts (optional): list templates and render one to text. */
   promptList?(): { server: string; name: string }[];
   getPrompt?(server: string, name: string, args: Record<string, any>): Promise<string>;
+  /** Lazy tool loading (optional): pull tool schemas on demand instead of all upfront. */
+  loadTools?(names: string[]): string;
+  indexBlock?(): string;
 }

@@ -42,7 +42,24 @@ function makeTransport(cfg: McpServerConfig): { transport: any; type: string } {
   };
 }
 
+/** The synthetic meta-tool exposed in lazy mode so the model can pull tool schemas on demand. */
+const MCP_LOAD_SPEC = {
+  type: "function",
+  function: {
+    name: "mcp_load",
+    description: "Load MCP tools by name so you can call them. The available MCP tools (names + one-line descriptions) are listed in your context under 'MCP tools'. Pass the exact names you need; their schemas are returned and the tools become callable.",
+    parameters: {
+      type: "object",
+      properties: { names: { type: "array", items: { type: "string" }, description: "MCP tool names to load, e.g. mcp__server__tool." } },
+      required: ["names"],
+    },
+  },
+};
+
 export class McpHub {
+  /** Lazy mode: don't put every MCP tool schema in context — list names only, load on demand. */
+  lazy = false;
+  private loaded = new Set<string>();
   private clients = new Map<string, Client>();
   private toolMap = new Map<string, { server: string; tool: string }>();
   private specs: any[] = [];
@@ -129,7 +146,29 @@ export class McpHub {
   }
 
   toolSchemas(): any[] {
-    return this.specs;
+    if (!this.lazy) return this.specs;
+    // Lazy: expose only the loader meta-tool + whatever's been loaded this session.
+    return [MCP_LOAD_SPEC, ...this.specs.filter((s) => this.loaded.has(s.function.name))];
+  }
+
+  /** Lazy-mode context block: list all MCP tool names + one-line descriptions (cheap), so the model
+   * knows what it can `mcp_load`. "" when not lazy (full schemas are already in the tool list). */
+  indexBlock(): string {
+    if (!this.lazy || !this.specs.length) return "";
+    const lines = this.specs.map((s) => `  ${s.function.name} - ${String(s.function.description ?? "").split("\n")[0].slice(0, 100)}`);
+    return `MCP tools (lazy: call mcp_load with the names you need, then call them):\n${lines.join("\n")}`;
+  }
+
+  /** Load tool schemas on demand (lazy mode). Returns their schemas so the model learns the args. */
+  loadTools(names: string[]): string {
+    const loaded: any[] = [];
+    for (const n of names) {
+      const spec = this.specs.find((s) => s.function.name === n);
+      if (spec) { this.loaded.add(n); loaded.push(spec); }
+    }
+    if (!loaded.length) return `No matching MCP tools for: ${names.join(", ") || "(none)"}. Check the names in the 'MCP tools' list in your context.`;
+    return `Loaded ${loaded.length} MCP tool(s) - now callable:\n` +
+      loaded.map((s) => `${s.function.name}: ${JSON.stringify(s.function.parameters)}`).join("\n");
   }
 
   toolNames(): string[] {
@@ -209,12 +248,18 @@ export class McpHub {
   }
 }
 
+/** Above this many connected MCP tools, default to lazy loading so the context isn't flooded. */
+const LAZY_TOOL_THRESHOLD = 30;
+
 export async function buildMcpHub(
   servers: Record<string, McpServerConfig>,
   filter: { allow?: string[]; deny?: string[] } = {},
+  lazy?: boolean,
 ): Promise<McpHub> {
   const hub = new McpHub(filter);
   await hub.connectAll(servers);
+  // Lazy when explicitly enabled in config, else auto when many tools would otherwise bloat context.
+  hub.lazy = lazy ?? hub.toolNames().length > LAZY_TOOL_THRESHOLD;
   return hub;
 }
 

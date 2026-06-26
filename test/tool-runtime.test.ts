@@ -319,3 +319,42 @@ test("bash run_in_background returns at once and records the job", async () => {
   expect(out).toContain("Running in background");
   expect(reg.backgrounds.length).toBe(1);
 });
+
+test("read_file: image returns metadata by default, vision content (data URL) when enabled", async () => {
+  const { root, reg } = makeReg();
+  const png = Buffer.alloc(24); // minimal PNG header carrying parseable dimensions
+  png.writeUInt32BE(120, 16); // width
+  png.writeUInt32BE(80, 20); // height
+  writeFileSync(join(root, "logo.png"), png);
+  const meta = await reg.execute("read_file", { path: "logo.png" });
+  expect(typeof meta).toBe("string");
+  expect(meta).toContain("120x80"); // dimensions parsed from the header
+  expect(meta).toContain("vision"); // hint to enable it
+  reg.vision = true;
+  const content = await reg.execute("read_file", { path: "logo.png" });
+  expect(Array.isArray(content)).toBe(true);
+  const parts = content as any[];
+  expect(parts.find((p) => p.type === "image_url").image_url.url).toContain("data:image/png;base64,");
+  expect(parts.find((p) => p.type === "text").text).toContain("120x80");
+});
+
+test("read_file: a PDF is routed to text extraction and degrades gracefully", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "doc.pdf"), "not a real pdf");
+  const out = await reg.execute("read_file", { path: "doc.pdf" });
+  expect(typeof out).toBe("string");
+  expect(out as string).toMatch(/PDF|extract|text/i); // never a thrown crash
+});
+
+test("mcp_load routes to the hub loader as a safe meta-tool (no approval)", async () => {
+  const { reg } = makeReg("default", () => false); // would deny a gated tool
+  let gotNames: string[] = [];
+  reg.mcp = {
+    toolSchemas: () => [],
+    has: () => false,
+    call: async () => "",
+    loadTools: (n: string[]) => { gotNames = n; return `loaded ${n.length}`; },
+  };
+  expect(await reg.execute("mcp_load", { names: ["mcp__x__a", "mcp__x__b"] })).toBe("loaded 2"); // not denied
+  expect(gotNames).toEqual(["mcp__x__a", "mcp__x__b"]);
+});

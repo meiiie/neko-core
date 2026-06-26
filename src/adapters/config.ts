@@ -108,6 +108,12 @@ export class NekoConfig {
   get remoteBind(): string { return String(this.data.remote_bind ?? "127.0.0.1"); }
   /** Default relay URL for /relay (your deployed cloudflare/relay Worker), so `/relay` needs no argument. */
   get relayUrl(): string { return String(this.data.relay_url ?? ""); }
+  /** When true, read_file returns image files as vision content (needs a vision-capable model). Off by
+   * default so text-only models never receive image content in a tool result (which some endpoints reject). */
+  get vision(): boolean { return Boolean(this.data.vision); }
+  /** Lazy MCP tool loading: true/false to force, or unset (undefined) to auto-enable when there are
+   * many MCP tools — so a big MCP surface lists names only and loads schemas on demand. */
+  get mcpLazy(): boolean | undefined { return this.data.mcp_lazy === undefined ? undefined : Boolean(this.data.mcp_lazy); }
 
   /** When true, auto-approved mutating tools get a model "is this safe?" review first. */
   get adversarialCheck(): boolean { return Boolean(this.data.adversarial_check); }
