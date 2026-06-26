@@ -228,7 +228,7 @@ export class Agent {
       if (toolCalls.length > 1 && toolCalls.every((c) => CONCURRENCY_SAFE.has(c.name))) {
         lastSig = ""; // a parallel fan-out breaks any single-call repeat chain
         toolCalls.forEach((call) => this.emit("tool_call", call));
-        const observations = await Promise.all(toolCalls.map((call) => this.tools.execute(call.name, call.arguments)));
+        const observations = await Promise.all(toolCalls.map((call) => this.tools.execute(call.name, call.arguments, signal)));
         toolCalls.forEach((call, i) => {
           this.emit("tool_result", { call, observation: observations[i] });
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: observations[i] });
@@ -244,7 +244,7 @@ export class Agent {
           lastSig = sig;
           const observation = repeats >= 2
             ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
-            : await this.tools.execute(call.name, call.arguments);
+            : await this.tools.execute(call.name, call.arguments, signal);
           this.emit("tool_result", { call, observation });
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: observation });
         }

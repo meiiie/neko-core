@@ -214,6 +214,17 @@ test("Ctrl+B moves a running bash command to the background", async () => {
   expect(reg.detachRunningBash()).toBe(false); // nothing running now
 });
 
+test("bash is interrupted at once when the abort signal fires (no long wait, no orphan)", async () => {
+  const { reg } = makeReg("auto", () => true);
+  const ctrl = new AbortController();
+  const p = reg.execute("bash", { command: 'node -e "setTimeout(function(){},5000)"' }, ctrl.signal);
+  setTimeout(() => ctrl.abort(), 150);
+  const start = Date.now();
+  const out = await p;
+  expect(out).toContain("interrupted");
+  expect(Date.now() - start).toBeLessThan(3000); // returned promptly, not after the 5s command
+});
+
 test("catastrophic bash is refused even in auto mode (seatbelt)", async () => {
   const { reg } = makeReg("auto", () => true); // auto would otherwise auto-approve bash
   expect(await reg.execute("bash", { command: "rm -rf /" })).toContain("Refused"); // never runs

@@ -125,12 +125,15 @@ export class ToolRegistry {
   }
 
   /** Run a shell command. Resolves on exit/timeout, OR early (kept running) if Ctrl+B detaches it. */
-  private async runBash(args: Record<string, any>): Promise<string> {
+  private async runBash(args: Record<string, any>, signal?: AbortSignal): Promise<string> {
     const command = requireArg(args, "command");
     const sb = wrapBash(command, this.root, { enabled: this.sandboxBash, allowNetwork: this.sandboxAllowNetwork });
     const child = spawn(sb.file, sb.args, { shell: sb.shell, cwd: this.root });
     let output = "";
-    const onData = (d: any) => { output += d.toString(); };
+    // Cap LIVE accumulation so a runaway command (`yes`, an infinite echo loop) can't grow the buffer
+    // to gigabytes and OOM the process before the timeout fires.
+    const MAX_BASH_OUTPUT = 200_000;
+    const onData = (d: any) => { if (output.length < MAX_BASH_OUTPUT) output += d.toString(); };
     child.stdout?.on("data", onData);
     child.stderr?.on("data", onData);
 
@@ -140,9 +143,20 @@ export class ToolRegistry {
       new Promise<{ kind: "error"; err: Error }>((res) => child.on("error", (err) => res({ kind: "error", err }))),
       new Promise<{ kind: "timeout" }>((res) => setTimeout(() => res({ kind: "timeout" }), BASH_TIMEOUT_MS)),
       new Promise<{ kind: "detach" }>((res) => { detach = () => res({ kind: "detach" }); this.detachCurrent = detach; }),
+      new Promise<{ kind: "abort" }>((res) => {
+        if (!signal) return;
+        if (signal.aborted) return res({ kind: "abort" });
+        signal.addEventListener("abort", () => res({ kind: "abort" }), { once: true });
+      }),
     ]);
     this.detachCurrent = null;
 
+    // Esc / Ctrl+C while a command runs: kill the child at once (don't wait out the 60s timeout) and
+    // stop it leaking as an orphan.
+    if (outcome.kind === "abort") {
+      try { child.kill(); } catch { /* already gone */ }
+      return `(interrupted)\n${capOutput(output)}`.trimEnd();
+    }
     if (outcome.kind === "error") return `Error: ${outcome.err.message}`;
     if (outcome.kind === "timeout") {
       try { child.kill(); } catch { /* already gone */ }
@@ -174,7 +188,7 @@ export class ToolRegistry {
     ];
   }
 
-  async execute(name: string, args: Record<string, any>): Promise<string> {
+  async execute(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
     if (typeof args !== "object" || args === null) {
       return `Error: arguments for ${name} must be an object`;
     }
@@ -293,7 +307,7 @@ export class ToolRegistry {
       this.snapshotFile(resolveInRoot(this.root, String(args.path)));
     }
     try {
-      const out = name === "bash" ? await this.runBash(args) : await DISPATCH[name](this.root, args);
+      const out = name === "bash" ? await this.runBash(args, signal) : await DISPATCH[name](this.root, args);
       this.runPostHook(name, args, out);
       return out;
     } catch (error) {
