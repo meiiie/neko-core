@@ -27,7 +27,8 @@ import { readClipboardImage } from "../adapters/clipboard.ts";
 import { clearApiKey, setApiKey } from "../adapters/project.ts";
 import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
 import { startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
+import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
@@ -519,12 +520,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         return;
       }
       try {
-        const secret = randomUUID(); // E2E key — printed to you, NEVER sent to the relay (the secret lives in the URL fragment, which browsers don't transmit)
-        const r = await startRemoteRelay(url, makeRemoteHandlers(), { secret });
+        // Short (96-bit) ids so the pairing URL stays small enough to fit a scannable QR. The secret is
+        // the E2E key: printed to you, carried in the URL #fragment, NEVER sent to the relay.
+        const id = () => randomBytes(12).toString("base64url");
+        const session = id(), token = id(), secret = id();
+        const r = await startRemoteRelay(url, makeRemoteHandlers(), { session, token, secret });
         relayRef.current = r;
         const base = url.replace(/\/+$/, "");
         const pair = `${base}/#s=${r.session}&t=${r.token}&k=${secret}`;
-        addLine("info", `relay on - E2E, the relay only sees ciphertext. Open on your phone (one tap):\n  ${pair}\n  (or enter manually)  session: ${r.session}  token: ${r.token}  secret: ${secret}`);
+        const qr = qrMatrix(pair);
+        addLine("info", "relay on - E2E (the relay only sees ciphertext). Scan with your phone camera:");
+        if (qr) addLine("info", qrToText(qr));
+        addLine("info", `${pair}\n  (or enter manually)  session: ${r.session}  token: ${r.token}  secret: ${secret}`);
       } catch (e) {
         addLine("error", `relay failed to start: ${e instanceof Error ? e.message : String(e)}`);
       }
