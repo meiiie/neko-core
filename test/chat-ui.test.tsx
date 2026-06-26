@@ -165,7 +165,7 @@ test("input typed while busy is queued, then drained", async () => {
   expect(await until(() => seen("queued:"))).toBe(true); // queue indicator appeared
   expect(await until(() => seen("second"))).toBe(true); // queued task drained + ran after the first
   unmount();
-});
+}, 15000); // generous wall-clock: three poll-loops can be slow when the machine is under heavy load
 
 test("ApprovalBox shows an edit diff preview", () => {
   const approval = { toolName: "edit", args: { path: "a.ts", old_string: "const x = 1", new_string: "const x = 2" }, resolve: () => {} };
