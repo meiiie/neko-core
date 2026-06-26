@@ -93,6 +93,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
   const [started, setStarted] = useState(false); // once a turn has run, drop the input placeholder
   const rcRef = useRef<RemoteControl | null>(null);
+  const remoteSinkRef = useRef<((chunk: string) => void) | null>(null); // streams a turn's output to a remote SSE client
   const [rcOn, setRcOn] = useState(false);
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
@@ -262,6 +263,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
         streamRef.current += t;
+        remoteSinkRef.current?.(t); // also stream to a remote /message?SSE client driving this turn
         maybePump();
       },
       onEvent: (kind, data) => {
@@ -489,14 +491,26 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         addLine("info", "remote control off");
       } else {
         try {
-          const rc = await startRemoteControl(async (msg) => {
-            if (controllerRef.current) return "(neko is busy - try again when idle)";
-            await handle(msg);
-            return agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content ?? "(no reply)";
+          const rc = await startRemoteControl({
+            run: async (msg, onDelta) => {
+              if (busyRef.current) return { reply: "(neko is busy - try again when idle)" };
+              const t0 = Date.now();
+              const tok0 = agentRef.current!.cost.totalTokens;
+              remoteSinkRef.current = onDelta ?? null;
+              try {
+                await handle(msg);
+                const last = agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content;
+                return { reply: typeof last === "string" ? last : "(no reply)", tokens: agentRef.current!.cost.totalTokens - tok0, ms: Date.now() - t0 };
+              } finally {
+                remoteSinkRef.current = null;
+              }
+            },
+            status: () => ({ busy: busyRef.current, model: cfg.model, messages: agentRef.current!.messages.length }),
+            interrupt: () => { if (controllerRef.current) { controllerRef.current.abort(); return true; } return false; },
           });
           rcRef.current = rc;
           setRcOn(true);
-          addLine("info", `remote control on (local only): ${rc.url}\n  curl -s "${rc.url}/message?token=${rc.token}" -d '{"message":"hi"}'`);
+          addLine("info", `remote control on (local only): ${rc.url}\n  curl -s -H "Authorization: Bearer ${rc.token}" ${rc.url}/message -d '{"message":"hi"}'\n  stream: add -N -H "Accept: text/event-stream"  ·  GET /status  ·  POST /interrupt  ·  discovery: ~/.neko-core/remote.json`);
         } catch (e) {
           addLine("error", `remote control failed to start: ${e instanceof Error ? e.message : String(e)}`);
         }
