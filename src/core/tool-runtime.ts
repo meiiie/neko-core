@@ -14,6 +14,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import type { McpTools } from "./ports.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
+import { workflowTool } from "./workflows.ts";
 import { wrapBash } from "./sandbox.ts";
 import { GATED, resolveTool, toolSchemas } from "./tools.ts";
 
@@ -648,6 +649,7 @@ const DISPATCH: Record<string, (root: string, args: Record<string, any>) => stri
   // bash is handled by ToolRegistry.runBash (needs instance state for Ctrl+B backgrounding).
   // web_search + web_fetch are handled in execute() (need backend config / a summarizer).
   memory: (_root, args) => memoryTool(args),
+  workflow: (_root, args) => workflowTool(args),
 };
 
 const WEB_HEADERS = { "User-Agent": "Mozilla/5.0 (NekoCore)" };

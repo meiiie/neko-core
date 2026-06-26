@@ -20,6 +20,7 @@ import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
 import { loadSkill, matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
 import { memoryIndexBlock } from "../src/core/memory.ts";
+import { matchWorkflow, workflowsContextBlock } from "../src/core/workflows.ts";
 import { ToolRegistry, todosContextBlock, WEB_EXTRACT_PROMPT } from "../src/core/tool-runtime.ts";
 import {
   collectCapabilities,
@@ -159,7 +160,7 @@ async function buildAgent(
     maxSteps: cfg.maxSteps,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     dynamicContext: () =>
-      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), todosContextBlock(registry.todos)]
+      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), todosContextBlock(registry.todos)]
         .filter(Boolean)
         .join("\n\n"),
     onEvent: printEvent,
@@ -356,6 +357,9 @@ async function cmdRun(args: Args): Promise<number> {
   // Deterministically load a clearly-matching domain skill (don't rely on the model to pull it).
   const matched = matchSkill(instruction);
   if (matched) agent.appendSystem(`# Skill: ${matched.name}\n(skill files dir: ${matched.dir} - run bundled scripts from here)\n${matched.body}`);
+  // Recall a learned procedure that matches this task (AWM-style), so past experience is reused.
+  const wf = matchWorkflow(instruction);
+  if (wf) agent.appendSystem(`# Learned workflow: ${wf.name}\n${wf.body}`);
   try {
     const answer = args.loop ? await agent.runUntilDone(instruction) : await agent.run(instruction);
     process.stdout.write("\n");

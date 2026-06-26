@@ -31,6 +31,7 @@ import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
 import { latestSession, loadSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
 import { memoryIndexBlock } from "../core/memory.ts";
+import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
 import { loadSkill, matchSkill, skillsContextBlock } from "../adapters/skills.ts";
 import { ToolRegistry, todosContextBlock, WEB_EXTRACT_PROMPT } from "../core/tool-runtime.ts";
 import { describeToolCall } from "../core/tools.ts";
@@ -243,7 +244,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>
-        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), todosContextBlock(registryRef.current!.todos)]
+        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), todosContextBlock(registryRef.current!.todos)]
           .filter(Boolean)
           .join("\n\n"),
       onDelta: (t, kind) => {
@@ -558,6 +559,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       autoLoadedSkills.current.add(matched.name);
       agentRef.current!.appendSystem(`# Skill: ${matched.name}\n(skill files dir: ${matched.dir} - run bundled scripts from here)\n${matched.body}`);
       addLine("info", `skill: ${matched.name}`);
+    }
+    // Recall a learned procedure that matches this task (AWM-style), so past experience is reused.
+    const wf = matchWorkflow(toSend);
+    if (wf && !autoLoadedSkills.current.has("wf:" + wf.name)) {
+      autoLoadedSkills.current.add("wf:" + wf.name);
+      agentRef.current!.appendSystem(`# Learned workflow: ${wf.name}\n${wf.body}`);
+      addLine("info", `workflow: ${wf.name}`);
     }
     const turnStart = Date.now();
     turnTokensStartRef.current = agentRef.current!.cost.totalTokens; // baseline -> show THIS turn's tokens

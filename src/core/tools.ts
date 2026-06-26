@@ -181,6 +181,18 @@ export const TOOL_SPECS: ToolSpec[] = [
     },
     required: ["name"],
   },
+  {
+    name: "workflow",
+    permission: SAFE,
+    summary: "Your learned procedural memory (~/.neko-core/workflows/*.md). list | read | write | delete | search. Where `memory` holds facts, workflows hold reusable PROCEDURES you learned by doing: read one before redoing a similar task; write one after a non-trivial task whose approach (steps/tools/gotchas) would help next time. This is how you get faster and more reliable over time.",
+    parameters: {
+      action: { type: "string", enum: ["list", "read", "write", "delete", "search"], description: "What to do." },
+      name: { type: "string", description: "Workflow file name (for read/write/delete)." },
+      content: { type: "string", description: "The procedure to store (for write): when-to-use on line 1, then steps/tools/gotchas." },
+      query: { type: "string", description: "Text to find across workflows (for search)." },
+    },
+    required: ["action"],
+  },
 ];
 
 export function listTools(): ToolSpec[] {
@@ -204,13 +216,14 @@ const TOOL_LABELS: Record<string, string> = {
   task: "Task",
   memory: "Memory",
   skill: "Skill",
+  workflow: "Workflow",
 };
 
 /** A compact "Label(primary-arg)" for a tool call, e.g. `Read(src/app.ts)` or `Bash(bun test)`. */
 export function describeToolCall(name: string, args: Record<string, any>): string {
   const label = TOOL_LABELS[name] ?? name;
   const a = args ?? {};
-  const primary = name === "memory"
+  const primary = name === "memory" || name === "workflow"
     ? [a.action, a.name ?? a.query].filter(Boolean).join(" ")
     : name === "skill"
     ? (a.name ?? "")
