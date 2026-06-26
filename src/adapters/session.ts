@@ -25,13 +25,22 @@ function sessionsDir(): string {
 }
 
 /** Current git branch for a directory, or "" if not a repo. */
+// Cache the branch per cwd: git rarely changes mid-session, so look it up ONCE instead of spawning
+// git (a blocking spawnSync, up to 2s) on every per-turn save — that hitch adds up and is what made
+// the session test flaky under load.
+const branchCache = new Map<string, string>();
 function currentBranch(cwd: string): string {
+  const cached = branchCache.get(cwd);
+  if (cached !== undefined) return cached;
+  let branch = "";
   try {
     const r = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd, encoding: "utf-8", timeout: 2000 });
-    return r.status === 0 ? r.stdout.trim() : "";
+    branch = r.status === 0 ? r.stdout.trim() : "";
   } catch {
-    return "";
+    branch = "";
   }
+  branchCache.set(cwd, branch);
+  return branch;
 }
 
 export function newSessionId(): string {

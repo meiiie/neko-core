@@ -147,6 +147,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const addLine = (kind: LineKind, text: string, summary?: string) =>
     setLines((prev) => [...prev, { id: idRef.current++, kind, text, summary }]);
 
+  // Bound the in-memory transcript so a marathon session can't grow `lines` (and the resize re-emit)
+  // without limit. <Static> is append-only, so when we trim the front we wipe + remount it (resizeKey)
+  // to re-print the kept tail cleanly. Generous cap: only a very long session ever trips it.
+  const MAX_LINES = 3000;
+  useEffect(() => {
+    if (lines.length <= MAX_LINES) return;
+    stdout?.write("\x1b[2J\x1b[3J\x1b[H"); // clear screen + scrollback so the remount re-prints cleanly
+    setLines((prev) => [
+      { id: idRef.current++, kind: "info", text: "(... earlier transcript trimmed to keep the session fast ...)" },
+      ...prev.slice(prev.length - 2000),
+    ]);
+    setResizeKey((k) => k + 1);
+  }, [lines.length]);
+
   // Throttle live re-renders to ~25fps (leading-edge, no timer): deltas accumulate in refs, the
   // screen syncs at most every ~40ms. Streaming a long reply re-parses markdown a few times a second
   // instead of once per token — smooth, no flicker, far less CPU. Any final tokens within the last
