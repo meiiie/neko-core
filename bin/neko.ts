@@ -14,6 +14,7 @@ import { environmentBlock, projectContextBlock, renderContext } from "../src/ada
 import { collectChecks, render } from "../src/adapters/doctor.ts";
 import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
+import { renderBenchReport, runBench } from "../src/adapters/bench.ts";
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
@@ -46,6 +47,7 @@ interface Args {
   loop: boolean;
   version: boolean;
   help: boolean;
+  trials?: number;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -57,6 +59,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--force") args.force = true;
     else if (a === "--yolo") args.yolo = true;
     else if (a === "--loop") args.loop = true;
+    else if (a === "--trials") args.trials = Number(argv[++i]) || 1;
     else if (a === "--resume") {
       args.resume = true;
       const next = argv[i + 1];
@@ -188,6 +191,7 @@ Commands:
   mcp           list configured MCP servers and their tools
   chat          interactive session (default - same as bare 'neko' / 'neko code')
   run <task>    one-shot: run a single instruction
+  bench         run a tiny agentic-coding benchmark against the configured model (pass@1)
 
 Options:
   --profile <name>   named runtime profile (see 'neko profiles')
@@ -359,6 +363,15 @@ async function cmdRun(args: Args): Promise<number> {
   return 0;
 }
 
+async function cmdBench(args: Args): Promise<number> {
+  const cfg = load(args);
+  const trials = args.trials ?? 1;
+  console.log(`Running Neko-bench against ${cfg.model} (${trials} trial(s)/task, auto-approve)...`);
+  const report = await runBench(cfg, { trials }, (m) => console.log(m));
+  console.log("\n" + renderBenchReport(report));
+  return 0;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const cmd = args.command;
@@ -401,6 +414,7 @@ async function main(): Promise<number> {
       case "logout": return cmdLogout();
       case "mcp": return await cmdMcp(args);
       case "run": return await cmdRun(args);
+      case "bench": return await cmdBench(args);
       default:
         console.error(`neko: error: unknown command '${cmd}'. Run 'neko --help'.`);
         return 2;
