@@ -64,6 +64,14 @@ export const DEFAULTS: Record<string, any> = {
   },
 };
 
+export interface MoaRef { model: string; profile?: string }
+export interface MoaConfig {
+  references: MoaRef[];
+  aggregator: MoaRef;
+  referenceTemperature: number;
+  aggregatorTemperature: number;
+}
+
 export class NekoConfig {
   constructor(
     /** printable, profile-merged, env-overridden settings (no secrets) */
@@ -97,6 +105,24 @@ export class NekoConfig {
   get effortCeiling(): string { return String(this.data.effort_ceiling ?? "").trim().toLowerCase(); }
   /** Check for a newer release at startup (daily-cached, non-blocking). */
   get autoUpdateCheck(): boolean { return this.data.auto_update_check !== false; }
+
+  /** Mixture-of-Agents config (when provider == "moa"): reference models analyze (no tools), an
+   * aggregator synthesizes their advice and does the actual tool calls. Each ref/agg is a model id on
+   * the base endpoint, or {model, profile} to pull base_url/key from a named profile. null if unset. */
+  get moa(): MoaConfig | null {
+    const m = this.data.moa;
+    if (!m || typeof m !== "object") return null;
+    const norm = (x: any): MoaRef => (typeof x === "string" ? { model: x } : { model: String(x?.model ?? ""), profile: x?.profile ? String(x.profile) : undefined });
+    const references = Array.isArray(m.references) ? m.references.map(norm).filter((r: MoaRef) => r.model) : [];
+    const aggregator = norm(m.aggregator);
+    if (!references.length || !aggregator.model) return null;
+    return {
+      references,
+      aggregator,
+      referenceTemperature: m.reference_temperature != null ? Number(m.reference_temperature) : 0.6,
+      aggregatorTemperature: m.aggregator_temperature != null ? Number(m.aggregator_temperature) : this.temperature,
+    };
+  }
   /** When true, the catastrophic-bash seatbelt is disabled (default false). */
   get allowDangerousBash(): boolean { return Boolean(this.data.allow_dangerous_bash); }
 

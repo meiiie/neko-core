@@ -6,7 +6,8 @@
  * nothing more than pointing base_url at a local server, so there is no in-process GGUF
  * provider in the TS build (that lives only in the Python reference).
  */
-import type { NekoConfig } from "./config.ts";
+import { NekoConfig } from "./config.ts";
+import type { MoaRef } from "./config.ts";
 import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
@@ -26,10 +27,11 @@ export function clampEffort(effort: string, ceiling: string): string {
 }
 
 export function getProvider(config: NekoConfig): Provider {
+  if (config.provider === "moa") return new MoaProvider(config);
   if (config.provider === "openai_compat") return new OpenAICompatProvider(config);
   throw new Error(
     `Unknown provider '${config.provider}'. Use openai_compat ` +
-      "(point base_url at a remote API or a local server such as llama-server / Ollama).",
+      "(point base_url at a remote API or a local server such as llama-server / Ollama), or moa (mixture-of-agents).",
   );
 }
 
@@ -346,4 +348,79 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Mixture-of-Agents (clean-room from the Together AI MoA paper, arXiv 2406.04692, + Hermes Agent's
+ * design): N reference models analyze the request IN PARALLEL and WITHOUT tools; their analyses become
+ * private advice for an aggregator model, and ONLY the aggregator carries the tools and drives the agent
+ * loop. Diverse advisors lift quality on hard turns; the cost is N+1 model calls per turn, so it is an
+ * opt-in "quality" provider (`provider: "moa"` + a `moa` config block), not a default.
+ */
+export class MoaProvider implements Provider {
+  private readonly references: { provider: OpenAICompatProvider; label: string }[];
+  private readonly aggregator: OpenAICompatProvider;
+
+  constructor(cfg: NekoConfig) {
+    const moa = cfg.moa;
+    if (!moa) throw new Error("provider 'moa' needs a 'moa' config block with references + an aggregator.");
+    this.references = moa.references.map((r) => ({
+      provider: new OpenAICompatProvider(moaSubConfig(cfg, r, moa.referenceTemperature)),
+      label: r.model,
+    }));
+    this.aggregator = new OpenAICompatProvider(moaSubConfig(cfg, moa.aggregator, moa.aggregatorTemperature));
+  }
+
+  async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
+    // 1. References analyze IN PARALLEL, WITHOUT tools (they advise; they don't act). A failing
+    //    reference degrades to a noted gap instead of sinking the turn.
+    const refs = await Promise.all(this.references.map((r) =>
+      r.provider.complete(messages, undefined, undefined, signal)
+        .then((res) => ({ label: r.label, content: (res.content ?? "").trim(), usage: res.usage }))
+        .catch((e) => ({ label: r.label, content: `(unavailable: ${messageOf(e)})`, usage: undefined as Usage | undefined })),
+    ));
+    if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
+
+    // 2. Fold the advisors' analyses into the system prompt for THIS call only (ephemeral — the agent
+    //    persists only the returned message, so advice never pollutes the saved conversation).
+    const advice = refs.map((r, i) => `### Advisor ${i + 1} (${r.label})\n${r.content || "(no answer)"}`).join("\n\n");
+    const guidance =
+      `MIXTURE-OF-AGENTS: ${refs.length} independent model(s) analyzed the current request. Treat their ` +
+      `analyses below as ADVICE - they may disagree or be wrong; weigh them critically, take what's correct, ` +
+      `then give the best answer and perform any tool actions yourself.\n\n${advice}`;
+    const aggMessages = withSystemAppendix(messages, guidance);
+
+    // 3. The aggregator alone holds the tools and produces the streamed answer.
+    const res = await this.aggregator.complete(aggMessages, tools, onDelta, signal, opts);
+
+    // 4. Bill the whole mixture: total_tokens sums every call, but prompt/completion stay the
+    //    aggregator's so the context-window / auto-compaction math isn't inflated by the references.
+    return { ...res, usage: moaUsage(refs.map((r) => r.usage), res.usage) };
+  }
+}
+
+/** A single-model sub-config: base settings (+ a named profile's base_url/key) with this model + temp. */
+function moaSubConfig(cfg: NekoConfig, ref: MoaRef, temperature: number): NekoConfig {
+  const profileData = ref.profile && cfg.profiles[ref.profile] ? cfg.profiles[ref.profile] : {};
+  const data = { ...cfg.data, ...profileData, model: ref.model, temperature, provider: "openai_compat" };
+  return new NekoConfig(data, null, cfg.profiles, cfg.apiKey);
+}
+
+/** Append text to the conversation's system message (on a copy), or prepend one if there's none. */
+function withSystemAppendix(messages: any[], text: string): any[] {
+  const copy = messages.map((m) => ({ ...m }));
+  const sys = copy.find((m) => m.role === "system");
+  if (sys && typeof sys.content === "string") {
+    sys.content = `${sys.content}\n\n${text}`;
+    return copy;
+  }
+  return [{ role: "system", content: text }, ...copy];
+}
+
+/** Mixture usage: total_tokens sums every reference + aggregator; prompt/completion stay the aggregator's. */
+function moaUsage(refUsages: (Usage | undefined)[], aggUsage: Usage | undefined): Usage | undefined {
+  const all = [...refUsages, aggUsage].filter((u): u is Usage => !!u);
+  if (!all.length) return undefined;
+  const total = all.reduce((a, u) => a + (u.total_tokens ?? (u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)), 0);
+  return { prompt_tokens: aggUsage?.prompt_tokens, completion_tokens: aggUsage?.completion_tokens, total_tokens: total };
 }

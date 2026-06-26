@@ -137,6 +137,60 @@ test("clampEffort maps a configured effort down to the endpoint ceiling (extensi
   expect(clampEffort("weird", "high")).toBe("weird"); // unknown vocab -> pass through, let self-heal handle
 });
 
+test("MoA: references analyze WITHOUT tools, aggregator acts WITH tools + their advice, cost summed", async () => {
+  const orig = globalThis.fetch;
+  const calls: { model: string; hasTools: boolean; sys: string }[] = [];
+  globalThis.fetch = (async (_url: string, init: any) => {
+    const body = JSON.parse(init.body);
+    const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
+    const sys = body.messages.find((m: any) => m.role === "system")?.content ?? "";
+    calls.push({ model: body.model, hasTools, sys });
+    const ok = (content: string, usage: any) => new Response(JSON.stringify({ choices: [{ message: { content } }], usage }), { status: 200, headers: { "content-type": "application/json" } });
+    return body.model === "agg"
+      ? ok("FINAL", { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 })
+      : ok(`analysis-${body.model}`, { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
+  }) as any;
+  try {
+    const cfg = new NekoConfig({ provider: "moa", base_url: "http://x/v1", moa: { references: ["ref-a", "ref-b"], aggregator: "agg" } }, null, {}, "k");
+    const res = await getProvider(cfg).complete(
+      [{ role: "system", content: "SYS" }, { role: "user", content: "hi" }],
+      [{ type: "function", function: { name: "t", parameters: {} } }],
+    );
+    const refCalls = calls.filter((c) => c.model !== "agg");
+    const aggCalls = calls.filter((c) => c.model === "agg");
+    expect(refCalls.length).toBe(2);
+    expect(refCalls.every((c) => !c.hasTools)).toBe(true); // advisors never get tools
+    expect(aggCalls.length).toBe(1);
+    expect(aggCalls[0].hasTools).toBe(true); // only the aggregator acts
+    expect(aggCalls[0].sys).toContain("MIXTURE-OF-AGENTS");
+    expect(aggCalls[0].sys).toContain("analysis-ref-a");
+    expect(aggCalls[0].sys).toContain("analysis-ref-b");
+    expect(aggCalls[0].sys).toContain("SYS"); // base system preserved
+    expect(res.content).toBe("FINAL");
+    expect(res.usage?.total_tokens).toBe(15 + 15 + 150); // whole mixture billed
+    expect(res.usage?.prompt_tokens).toBe(100); // aggregator's only (context-window math not inflated)
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("MoA: a failing reference degrades to a noted gap; the turn still completes", async () => {
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async (_url: string, init: any) => {
+    const body = JSON.parse(init.body);
+    if (body.model === "bad") return new Response("boom", { status: 500 });
+    const content = body.model === "agg" ? "DONE" : "ok";
+    return new Response(JSON.stringify({ choices: [{ message: { content } }], usage: {} }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as any;
+  try {
+    const cfg = new NekoConfig({ provider: "moa", base_url: "http://x/v1", max_retries: 0, moa: { references: ["good", "bad"], aggregator: "agg" } }, null, {}, "k");
+    const res = await getProvider(cfg).complete([{ role: "user", content: "hi" }]);
+    expect(res.content).toBe("DONE"); // the bad advisor didn't sink the turn
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 test("effort_ceiling clamps 'max' to 'high' UP FRONT (single request, no 400 round-trip)", async () => {
   const orig = globalThis.fetch;
   const sentEffort: (string | undefined)[] = [];
