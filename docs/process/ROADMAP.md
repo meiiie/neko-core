@@ -160,3 +160,13 @@ cost/token tracking · MCP client · single-binary distribution.
   guard schema instead of chasing the eval. Mitigation is structural, not more prompt text: the skill
   uses the schema path for prices, and real sourcing surveys several sources (diluting a single trap).
   Documented in `evals/README`. *(4-layer suite: run-evals 5/5 · extract 2/2 · harsh 8/8 · e2e ~4-5/6)*
+- [x] **G7** Browser MCP for JS-gated sites (the static-fetch frontier from G6) — researched the SOTA
+  (browser-use 89.1% WebVoyager + runs as a stdio MCP server; Microsoft's Playwright MCP as a pure tool
+  layer; Stagehand; Skyvern vision; DOM-driven beats vision by 12-17pp) and **verified the integration
+  end-to-end** — no Neko code, just config (config-first). Neko's MCP client connected to `@playwright/mcp`
+  and exposed 23 browser tools (`mcp__playwright__browser_navigate/snapshot/click/...`). Proof on a page
+  whose price is injected by JS: `web_fetch` (static, scripts stripped) saw only "loading...", while the
+  agent via `browser_navigate` -> `browser_snapshot` read the rendered DOM and reported the real price -
+  exactly the Shopee/Tiki gap. Chose **Playwright MCP** (pure hands, Neko stays the brain) over the more
+  autonomous browser-use. Wired into the procurement skill (browser for dynamic sites, web_fetch+schema
+  for static). *(honest caveat: browser solves JS rendering, not anti-bot/captcha on big marketplaces)*

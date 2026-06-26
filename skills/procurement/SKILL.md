@@ -95,7 +95,10 @@ Khi người dùng muốn bảng giá / Excel / file để gửi đi:
 5. **Bàn giao**: bảng/kế hoạch + ⚠️ cần xác minh + bước tiếp theo ("người mở link, kiểm tra lại giá/tồn, rồi đặt").
 
 ## Công cụ
-- `web_search` + `web_fetch` (tra giá/spec) · `write_file` (JSON/CSV) · `bash` (chạy make-sheet.ts) · **browser MCP** cho sàn động · *(tương lai)* **voice-call MCP** hỏi tồn/giá sỉ — chỉ hỏi, không đặt.
+- `web_search` + `web_fetch` (tra giá/spec; **dùng `schema` của web_fetch** để bóc biến thể tin cậy) · `write_file` (JSON/CSV) · `bash` (chạy make-sheet.ts).
+- **Browser MCP cho sàn động (Shopee/Tiki/Lazada/TikTok)**: các sàn này render giá bằng JS → `web_fetch` tĩnh nhận vỏ rỗng. Nếu có tool `mcp__playwright__browser_*` (đã cấu hình) thì: `mcp__playwright__browser_navigate` mở trang → `mcp__playwright__browser_snapshot` đọc DOM ĐÃ RENDER (thấy giá) → rồi bóc như thường. Không có thì ghi "cần người mở link xác minh".
+  - *Bật:* thêm vào config `{"mcp_servers":{"playwright":{"command":"npx","args":["-y","@playwright/mcp@latest","--headless"]}}}` (cần `npx playwright install chromium` 1 lần). Lưu ý: sàn lớn có anti-bot — browser xử lý JS, nhưng captcha/chặn IP thì có thể vẫn cần người.
+- *(tương lai)* **voice-call MCP** hỏi tồn/giá sỉ — chỉ hỏi, không đặt.
 
 ## Nhớ lại + tích luỹ
 Lưu vào memory các nguồn/đại lý tốt (giá tốt, ship Bắc Giang nhanh, xuất VAT) để lần sau dùng lại — sourcing giỏi là kinh nghiệm tích luỹ.
