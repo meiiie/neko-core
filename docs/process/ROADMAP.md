@@ -220,3 +220,18 @@ cost/token tracking · MCP client · single-binary distribution.
   plaintext). *(proven: node<->browser interop + tamper/wrong-secret rejection; the relay-sees-only-
   ciphertext property as a unit test AND end-to-end with a real agent — relay saw only `{iv,ct}`, phone
   decrypted "30". full suite 168/0.)*
+- [x] **G12** Tool-use parity with Claude Code (atomic-level audit of agent.ts/tool-runtime.ts/mcp.ts).
+  Verdict: the orchestration (loop, read-only parallel fan-out, loop-guard, abort, compact, hooks,
+  permissions, adversarial check) and MCP (stdio/http/sse + OAuth + resources + prompts + reconnect)
+  were already at par; the gaps were five leaf-tool capabilities, now all closed. **(a) search** uses
+  ripgrep when installed (fast on big trees, honors .gitignore), falling back to the built-in walk; both
+  gained `glob` / `case_insensitive` / `context`. **(b) bash** gained a per-call `timeout` (default 60s,
+  clamped [1s,10min]) and `run_in_background` so the MODEL can launch servers/watchers (not only the
+  human via Ctrl+B). **(c) read_file** gained `offset`/`limit` paging. **(d) read_file media**: images ->
+  vision content (caption + data URL) under a config `vision` flag (off by default so text models never
+  receive image tool content), with dimensions parsed from PNG/GIF/JPEG headers; PDFs -> text via
+  pdftotext when present (useful even for text models), clear degradation otherwise. **(e) MCP lazy
+  loading**: auto when >30 connected tools (or `mcp_lazy` in config), the context lists tool names only +
+  an `mcp_load` meta-tool pulls schemas on demand -- no flooding context with dozens of unused schemas.
+  *(+13 tests incl. a real stdio MCP fixture server for lazy loading; tool-runtime 39/0, policy +
+  architecture PASS, full suite green.)*
