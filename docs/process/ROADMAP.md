@@ -148,3 +148,15 @@ cost/token tracking · MCP client · single-binary distribution.
   ("24.099.000" -> 24.099) -> number-magnitude rule + integer-typed price (constrained decoding forbids
   the stray decimal); (c) variant-collapse already covered by G4. *(result: 8/8 cases solid at
   --trials 3 — incl. hallucination-resistance + prompt-injection defense; full suite 150/0)*
+- [x] **G6** End-to-end agent benchmark + an honest ceiling finding (`skills/procurement/evals/e2e-eval.ts`).
+  Serves the adversarial fixtures over real local HTTP and points the WHOLE agent at them (skill auto-load
+  -> web_fetch -> extraction -> answer). Building it surfaced a benchmark bug worth keeping in mind
+  (`spawnSync` blocks the event loop so the in-process server can't answer -> use async `spawn`), and a
+  real product-match gap (the agent could report a Galaxy S24's price as an S26's -> WEB_EXTRACT_PROMPT
+  now front-loads two active checks: product-match + value-present). **The honest finding:** explicit
+  *schema-guided* extraction is robust (8/8, G5), but the *agent's freeform* single-URL extraction has a
+  gpt-oss judgment ceiling (~80-90%) on extreme adversarial pages — measured the whack-a-mole directly
+  (prompt/default-schema tweaks only move WHICH 1-2 of 6 cases flake), so I reverted an over-fit default
+  guard schema instead of chasing the eval. Mitigation is structural, not more prompt text: the skill
+  uses the schema path for prices, and real sourcing surveys several sources (diluting a single trap).
+  Documented in `evals/README`. *(4-layer suite: run-evals 5/5 · extract 2/2 · harsh 8/8 · e2e ~4-5/6)*
