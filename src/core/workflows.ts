@@ -94,7 +94,8 @@ export function workflowsContextBlock(): string {
     "Learned workflows (reusable procedures from past tasks). BEFORE redoing a task that matches one, " +
     "`workflow read` it and follow the steps. AFTER finishing a non-trivial task whose approach would " +
     "help next time, `workflow write` a short procedure (when-to-use on line 1, then the steps/tools/" +
-    "gotchas) - this is how you get faster + more reliable over time:\n" +
+    "gotchas) - UPDATE a close existing one here instead of duplicating. This is how you get faster + " +
+    "more reliable over time:\n" +
     lines.join("\n")
   );
 }

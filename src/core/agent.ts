@@ -33,7 +33,8 @@ export const DEFAULT_SYSTEM_PROMPT =
   "secrets or one-off chatter.\n" +
   "- Use the `workflow` tool for reusable PROCEDURES (vs `memory`'s facts): after a non-trivial task " +
   "whose approach worked, `workflow write` the steps/tools/gotchas; before redoing a similar task, " +
-  "recall the matching one (listed in context) and follow it — this is how you get faster over time.\n" +
+  "recall the matching one (listed in context) and follow it — this is how you get faster over time. " +
+  "Before writing, check the list/search: UPDATE an existing close workflow instead of duplicating it.\n" +
   "- Big self-contained subtask -> delegate with task (a sub-agent returns just the result).\n" +
   "- Plan mode = read-only: research, then exit_plan_mode with a markdown plan and wait for approval.\n" +
   "- Inspect before editing; smallest change that works.\n" +
