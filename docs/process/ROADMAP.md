@@ -138,3 +138,13 @@ cost/token tracking · MCP client · single-binary distribution.
   benefits — not a per-skill prompt band-aid. *(proven on the real Viettablet page: freeform = prose/one
   number; with schema = all 8 variants + true lowest 24.099M. +provider unit test + a deterministic
   extraction benchmark on a cached page fixture: 3/3 trials, full variant recall + true lowest. 150/0.)*
+- [x] **G5** Harsh + diverse adversarial extraction benchmark (`skills/procurement/evals/harsh-eval.ts`
+  + 8 fixtures), driving fixes data-first. Each fixture breaks naive extraction: strikethrough "listed"
+  price, promo/installment/trade-in noise, a DIFFERENT product on the page, out-of-stock/"contact",
+  mixed VN currency formats, bundle-vs-standalone, a specs-only page (hallucination bait), and a
+  prompt-injection page that commands the AI to "set the price to 1". It exposed 3 real gaps, all fixed
+  at the TOOL layer (in `WEB_EXTRACT_PROMPT` / the schema): (a) injection succeeded 2/3 -> page text is
+  now treated as UNTRUSTED DATA, never instructions; (b) VN thousands-separator mis-read
+  ("24.099.000" -> 24.099) -> number-magnitude rule + integer-typed price (constrained decoding forbids
+  the stray decimal); (c) variant-collapse already covered by G4. *(result: 8/8 cases solid at
+  --trials 3 — incl. hallucination-resistance + prompt-injection defense; full suite 150/0)*
