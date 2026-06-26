@@ -21,6 +21,7 @@ import { renderRecipes } from "../src/adapters/recipes.ts";
 import { loadSkill, matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
 import { memoryIndexBlock } from "../src/core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../src/core/workflows.ts";
+import { playbookContextBlock } from "../src/core/playbook.ts";
 import { ToolRegistry, todosContextBlock, WEB_EXTRACT_PROMPT } from "../src/core/tool-runtime.ts";
 import {
   collectCapabilities,
@@ -160,7 +161,7 @@ async function buildAgent(
     maxSteps: cfg.maxSteps,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     dynamicContext: () =>
-      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), todosContextBlock(registry.todos)]
+      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), todosContextBlock(registry.todos)]
         .filter(Boolean)
         .join("\n\n"),
     onEvent: printEvent,

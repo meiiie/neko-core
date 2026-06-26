@@ -32,6 +32,7 @@ import { getProvider, type Provider } from "../adapters/providers.ts";
 import { latestSession, loadSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
 import { memoryIndexBlock } from "../core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
+import { playbookContextBlock } from "../core/playbook.ts";
 import { loadSkill, matchSkill, skillsContextBlock } from "../adapters/skills.ts";
 import { ToolRegistry, todosContextBlock, WEB_EXTRACT_PROMPT } from "../core/tool-runtime.ts";
 import { describeToolCall } from "../core/tools.ts";
@@ -244,7 +245,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>
-        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), todosContextBlock(registryRef.current!.todos)]
+        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), todosContextBlock(registryRef.current!.todos)]
           .filter(Boolean)
           .join("\n\n"),
       onDelta: (t, kind) => {

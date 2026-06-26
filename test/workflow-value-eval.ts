@@ -9,11 +9,14 @@
  * Run:  bun test/workflow-value-eval.ts [--trials N]
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 const NEKO = join(import.meta.dir, "..", "bin", "neko.ts");
+// Run the agent in an empty sandbox dir (not the repo) so its file tools can't read this benchmark's
+// source and cheat — config + workflows live in HOME, so they still apply.
+const SANDBOX = mkdtempSync(join(tmpdir(), "nk-wfval-"));
 const WF_DIR = join(process.env.USERPROFILE || process.env.HOME || homedir(), ".neko-core", "workflows");
 const WF_FILE = join(WF_DIR, "company-standard-discount.md");
 const WF_CONTENT =
@@ -29,7 +32,7 @@ const EXPECTED = "24100000";
 const norm = (s: string) => s.replace(/[,.\s₫đ]/g, "");
 
 function runTask(): boolean {
-  const r = spawnSync(process.execPath, [NEKO, "run", TASK, "--yolo"], { encoding: "utf-8", timeout: 90000 });
+  const r = spawnSync(process.execPath, [NEKO, "run", TASK, "--yolo"], { cwd: SANDBOX, encoding: "utf-8", timeout: 90000 });
   return norm((r.stdout || "") + (r.stderr || "")).includes(EXPECTED);
 }
 

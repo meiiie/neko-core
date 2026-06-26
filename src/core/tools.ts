@@ -193,6 +193,17 @@ export const TOOL_SPECS: ToolSpec[] = [
     },
     required: ["action"],
   },
+  {
+    name: "playbook",
+    permission: SAFE,
+    summary: "Your evolving operating playbook (always in your context). read | add | revise | remove. After a task that was non-obvious or went wrong, REFLECT and `add` one specific reusable lesson, or `revise` an existing bullet to sharpen it. Refine one bullet at a time; merge near-duplicates; keep specifics. This is how your operating context improves over time (ACE).",
+    parameters: {
+      action: { type: "string", enum: ["read", "add", "revise", "remove"], description: "What to do." },
+      content: { type: "string", description: "The lesson/strategy bullet (for add, or the refined text for revise)." },
+      find: { type: "string", description: "Text identifying the bullet to revise/remove." },
+    },
+    required: ["action"],
+  },
 ];
 
 export function listTools(): ToolSpec[] {
@@ -217,14 +228,15 @@ const TOOL_LABELS: Record<string, string> = {
   memory: "Memory",
   skill: "Skill",
   workflow: "Workflow",
+  playbook: "Playbook",
 };
 
 /** A compact "Label(primary-arg)" for a tool call, e.g. `Read(src/app.ts)` or `Bash(bun test)`. */
 export function describeToolCall(name: string, args: Record<string, any>): string {
   const label = TOOL_LABELS[name] ?? name;
   const a = args ?? {};
-  const primary = name === "memory" || name === "workflow"
-    ? [a.action, a.name ?? a.query].filter(Boolean).join(" ")
+  const primary = name === "memory" || name === "workflow" || name === "playbook"
+    ? [a.action, a.name ?? a.find ?? a.query].filter(Boolean).join(" ")
     : name === "skill"
     ? (a.name ?? "")
     : (a.path ?? a.command ?? a.query ?? a.url ?? a.pattern ?? a.description ?? "");

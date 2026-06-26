@@ -35,6 +35,8 @@ export const DEFAULT_SYSTEM_PROMPT =
   "whose approach worked, `workflow write` the steps/tools/gotchas; before redoing a similar task, " +
   "recall the matching one (listed in context) and follow it — this is how you get faster over time. " +
   "Before writing, check the list/search: UPDATE an existing close workflow instead of duplicating it.\n" +
+  "- After a non-obvious or failed step, REFLECT: `playbook add` a one-line lesson (or `playbook revise` " +
+  "an existing bullet to sharpen it) — your playbook is always in context, so it improves how you work.\n" +
   "- Big self-contained subtask -> delegate with task (a sub-agent returns just the result).\n" +
   "- Plan mode = read-only: research, then exit_plan_mode with a markdown plan and wait for approval.\n" +
   "- Inspect before editing; smallest change that works.\n" +
