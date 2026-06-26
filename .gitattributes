@@ -1,0 +1,18 @@
+# Normalize line endings: store text as LF, check out LF everywhere (no CRLF churn across OSes).
+* text=auto eol=lf
+
+# Binary assets — never normalize or diff.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.pdf binary
+
+# Lockfiles: treat as generated (collapse in diffs / reviews).
+bun.lock linguist-generated=true -diff
+pnpm-lock.yaml linguist-generated=true -diff
+
+# Keep the Python reference out of language stats (it's a spec, not shipped).
+reference/** linguist-vendored=true

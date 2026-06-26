@@ -16,3 +16,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
+      - name: policy audit (safe/gated boundary)
+        run: bun bin/neko.ts policy
+      - name: build the single binary
+        run: bun run build
