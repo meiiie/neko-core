@@ -106,6 +106,8 @@ export class NekoConfig {
   /** Address /remote-control binds to. Default 127.0.0.1 (loopback, safe). Set to a TRUSTED private
    * address (e.g. a Tailscale IP) to drive Neko from another device — never a public-facing one. */
   get remoteBind(): string { return String(this.data.remote_bind ?? "127.0.0.1"); }
+  /** Default relay URL for /relay (your deployed cloudflare/relay Worker), so `/relay` needs no argument. */
+  get relayUrl(): string { return String(this.data.relay_url ?? ""); }
 
   /** When true, auto-approved mutating tools get a model "is this safe?" review first. */
   get adversarialCheck(): boolean { return Boolean(this.data.adversarial_check); }

@@ -513,9 +513,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         addLine("info", "relay off");
         return;
       }
-      const url = text.slice("/relay".length).trim();
+      const url = text.slice("/relay".length).trim() || cfg.relayUrl;
       if (!url) {
-        addLine("info", "usage: /relay <your-relay-url> - drive Neko from any phone/browser, no open port (deploy cloudflare/relay, then /relay https://neko-relay.<you>.workers.dev)");
+        addLine("info", "usage: /relay <your-relay-url> - drive Neko from any phone, no open port. Deploy cloudflare/relay once, set relay_url in config, then just type /relay.");
         return;
       }
       try {
