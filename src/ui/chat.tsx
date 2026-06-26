@@ -570,7 +570,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       persist();
       const next = queueRef.current.shift();
       setQueued(queueRef.current.length);
-      if (next !== undefined) void handle(next); // drain queued input
+      if (next !== undefined) void handle(next).catch((e) => addLine("error", e instanceof Error ? e.message : String(e))); // drain queued input
     }
   };
 
@@ -606,7 +606,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       addLine("info", `queued: ${trunc(text, 60)}`);
       return;
     }
-    void handle(text);
+    void handle(text).catch((e) => addLine("error", e instanceof Error ? e.message : String(e)));
   };
 
   return (

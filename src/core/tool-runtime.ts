@@ -8,7 +8,7 @@
  * tool never crashes the agent loop. Path-taking tools refuse to escape the project root.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { McpTools } from "./ports.ts";
@@ -333,12 +333,27 @@ function toolReadFile(root: string, args: Record<string, any>): string {
   const raw = requireArg(args, "path");
   const path = resolveInRoot(root, raw);
   if (!existsSync(path)) return `Error: no such file: ${raw}`;
-  if (statSync(path).isDirectory()) return `Error: is a directory: ${raw}`;
+  const stat = statSync(path);
+  if (stat.isDirectory()) return `Error: is a directory: ${raw}`;
   let text: string;
   try {
-    text = readFileSync(path, "utf-8");
+    // Read at most a bounded prefix: a giant file (multi-GB log/data) must not be slurped whole into
+    // memory only to be truncated — that OOMs the process. The result is capped to MAX_READ_CHARS anyway.
+    const MAX_READ_BYTES = MAX_READ_CHARS * 4; // UTF-8 is <= 4 bytes/char
+    if (stat.size > MAX_READ_BYTES) {
+      const fd = openSync(path, "r");
+      try {
+        const buf = Buffer.alloc(MAX_READ_BYTES);
+        const n = readSync(fd, buf, 0, MAX_READ_BYTES, 0);
+        text = buf.subarray(0, n).toString("utf-8");
+      } finally {
+        closeSync(fd);
+      }
+    } else {
+      text = readFileSync(path, "utf-8");
+    }
   } catch {
-    return `Error: not a UTF-8 text file: ${raw}`;
+    return `Error: cannot read file: ${raw}`;
   }
   if (text.length > MAX_READ_CHARS) {
     text = text.slice(0, MAX_READ_CHARS) + `\n... (truncated at ${MAX_READ_CHARS} chars)`;
