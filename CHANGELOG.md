@@ -4,6 +4,17 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
+## [0.4.0] — 2026-06-27
+
+### Added
+- **Mixture-of-Agents provider** (`provider: "moa"`, or `neko --profile moa`): diverse reference models
+  analyze in parallel without tools (on an advisory-safe view of the conversation — no system prompt or
+  tool payloads re-sent), then a strong aggregator synthesizes their advice and drives the tool loop.
+  Clean-room from the MoA paper (arXiv 2406.04692) + Hermes Agent. Mixture token cost is accounted; a
+  failing reference degrades gracefully. Opt-in quality mode (N+1 calls/turn). Independent benchmarks: it
+  TIES strong single models on saturated tasks (no headroom) but EXCEEDS them where the single model is
+  weak — false-premise robustness, 5/6 vs 4/6.
+
 ## [0.3.0] — 2026-06-27
 
 ### Added

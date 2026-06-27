@@ -57,6 +57,13 @@ export const DEFAULTS: Record<string, any> = {
     fireworks: { provider: "openai_compat", base_url: "https://api.fireworks.ai/inference/v1", model: "accounts/fireworks/models/llama-v3p3-70b-instruct" },
     xai: { provider: "openai_compat", base_url: "https://api.x.ai/v1", model: "grok-2-latest" },
     openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "" },
+    // Mixture-of-Agents: diverse advisors analyze, a strong aggregator synthesizes + acts. `neko
+    // --profile moa`. Opt-in quality mode (N+1 model calls/turn) — best where one model is weak.
+    moa: {
+      provider: "moa",
+      base_url: "https://integrate.api.nvidia.com/v1",
+      moa: { references: ["deepseek-ai/deepseek-v4-pro", "meta/llama-3.3-70b-instruct"], aggregator: "openai/gpt-oss-120b" },
+    },
     // Local servers (no API key needed):
     ollama: { provider: "openai_compat", base_url: "http://localhost:11434/v1", model: "llama3.2" },
     lmstudio: { provider: "openai_compat", base_url: "http://localhost:1234/v1", model: "local-model" },
