@@ -60,6 +60,19 @@ Keep steps minimal (each screenshot+reason is slow); stop when the goal is visib
   (`browser_snapshot` is an accessibility tree = DOM-grounded, the reliable path), or a dedicated
   web-agent like **browser-use** behind an MCP bridge. Web grounding via the DOM beats raw-pixel clicking.
 
+## Quick start — WEB (validated, works today with a text model)
+The web case needs NO vision: `@playwright/mcp`'s snapshot is a DOM/accessibility tree, so a text model
+grounds via the DOM (the browser-use insight: DOM beats pixels). Add it to config:
+```json
+{ "mcp_servers": { "playwright": { "command": "npx", "args": ["-y", "@playwright/mcp@latest", "--headless", "--isolated"] } } }
+```
+(One-time: `npx playwright install chromium`.) Neko then drives the page via `browser_navigate` /
+`browser_type` / `browser_click` / `browser_snapshot` / `browser_evaluate`. **Verified end-to-end with the
+default gpt-oss-120b:** navigate -> type a query into the search box + submit -> open the result -> read it,
+AND self-correct when a tool call errored (retried with a better selector). Drop `--headless` to watch it;
+add stealth (`--device "Desktop Chrome"`, or CloakBrowser via `--cdp-endpoint`) for anti-bot sites — see
+the `procurement` skill.
+
 ## Honest scope
 This skill is the **method + the wiring**, ready for a vision/GUI model + an input tool. With Neko's
 default text model it covers the **code-first** half fully; the GUI half activates once a vision-capable
