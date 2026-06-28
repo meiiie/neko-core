@@ -109,13 +109,19 @@ is automatic (see `image_format`).
 Two SOTA concerns when an agent drives the REAL machine: the user should SEE it's controlling, and ideally
 the agent shouldn't hijack the user's cursor.
 
-**(A) Overlay — works now, same desktop.** `overlay.ps1 [stopFile] [maxSeconds]` paints a transparent,
-click-through, always-on-top layer: a coloured screen border + a "NEKO is controlling" banner + a ring
-marking the agent's cursor -- a VISUAL agent-cursor over the shared physical one (the same idea as Clicky's
-overlay). A low-level mouse hook detects a REAL (non-injected) user click via the `LLMHF_INJECTED` flag and
-flips to PAUSED, writing `stopFile` so the loop yields control. Run it in the background for a session.
-Limit: the OS has ONE physical cursor, so this SHOWS presence + yields on touch; it does not truly separate
-input.
+**(A) Overlay — works now, same desktop.** `overlay.ps1 [stopFile] [maxSeconds] [statusFile]` paints a
+transparent, click-through, always-on-top layer, pixel-faithful to Clicky's `OverlayWindow.swift`:
+- a coloured screen border + a "NEKO is controlling" banner;
+- a **blue (#3380FF) glowing triangle cursor** (tilted -35 deg) that **flies to a new target along a
+  quadratic bezier ARC** (control = midpoint lifted by `min(dist*0.2, 80)`, scale-bump at mid-flight, spring
+  follow when near) -- a VISUAL agent-cursor over the shared physical one, like Clicky;
+- a small **label bubble** beside it ("Neko", or the first line of `statusFile`);
+- a low-level mouse hook that, on a REAL (non-injected, `LLMHF_INJECTED`) user click, flips to PAUSED and
+  writes `stopFile` so the loop yields.
+Run it in the background for a session. Limits: the OS has ONE physical cursor, so this SHOWS presence +
+yields on touch (not true input separation). On a SCALED display (125-150%), the marker can be offset from
+the cursor unless the mover/overlay/capture share a DPI-awareness context -- verify on the real screen and
+make the helpers DPI-consistent if needed.
 
 **(B) True input isolation (own cursor, doesn't touch yours) — the robust SOTA.** Run the agent in a
 SEPARATE virtual desktop/session with its own input queue. Claude Computer Use uses a container + Xvfb
