@@ -635,13 +635,15 @@ function toolWriteFile(root: string, args: Record<string, any>): string {
 function editDiff(path: string, origLines: string[], startLine: number, removed: string[], added: string[]): string {
   const ctx = 2;
   const num = (i: number) => String(i + 1).padStart(4); // 1-based line number, right-aligned
+  // Claude-style row: line number FIRST, then the +/-/space marker, then the content.
+  const row = (i: number, sign: string, l: string) => `${num(i)} ${sign} ${l}`;
   const out = [`Edited ${path}  (+${added.length} -${removed.length})`];
   const beforeStart = Math.max(0, startLine - ctx);
-  origLines.slice(beforeStart, startLine).forEach((l, i) => out.push(`  ${num(beforeStart + i)}  ${l}`)); // context
-  removed.slice(0, 16).forEach((l, i) => out.push(`- ${num(startLine + i)}  ${l}`)); // removed (red)
-  added.slice(0, 16).forEach((l, i) => out.push(`+ ${num(startLine + i)}  ${l}`)); // added (green)
+  origLines.slice(beforeStart, startLine).forEach((l, i) => out.push(row(beforeStart + i, " ", l))); // context
+  removed.slice(0, 16).forEach((l, i) => out.push(row(startLine + i, "-", l))); // removed (red)
+  added.slice(0, 16).forEach((l, i) => out.push(row(startLine + i, "+", l))); // added (green)
   const afterStart = startLine + removed.length;
-  origLines.slice(afterStart, afterStart + ctx).forEach((l, i) => out.push(`  ${num(afterStart + i)}  ${l}`));
+  origLines.slice(afterStart, afterStart + ctx).forEach((l, i) => out.push(row(afterStart + i, " ", l)));
   return out.join("\n");
 }
 

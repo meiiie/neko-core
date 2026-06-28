@@ -57,8 +57,9 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
       return (
         <Box flexDirection="column">
           {shown.map((l, i) => {
-            const add = l.startsWith("+");
-            const del = l.startsWith("-");
+            const m = l.match(/^\s*\d+ ([+-]) /); // Claude-style "  20 - ..." (line number, then marker)
+            const add = l.startsWith("+") || m?.[1] === "+";
+            const del = l.startsWith("-") || m?.[1] === "-";
             const disp = l.length > 200 ? l.slice(0, 200) + "…" : l;
             return (
               <Text key={i} color={isError ? "red" : add ? "green" : del ? "red" : undefined} dimColor={!isError && !add && !del}>
@@ -74,8 +75,9 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
       return (
         <Box flexDirection="column">
           {line.text.split("\n").map((l, i) => {
-            const add = l.startsWith("+");
-            const del = l.startsWith("-");
+            const m = l.match(/^\s*\d+ ([+-]) /); // Claude-style "  20 - ..." (line number, then marker)
+            const add = l.startsWith("+") || m?.[1] === "+";
+            const del = l.startsWith("-") || m?.[1] === "-";
             return (
               <Text key={i} color={add ? "green" : del ? "red" : undefined} dimColor={!add && !del}>
                 {(i === 0 ? "  ⎿ " : "     ") + l}

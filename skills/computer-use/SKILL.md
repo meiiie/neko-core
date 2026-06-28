@@ -73,6 +73,20 @@ AND self-correct when a tool call errored (retried with a better selector). Drop
 add stealth (`--device "Desktop Chrome"`, or CloakBrowser via `--cdp-endpoint`) for anti-bot sites — see
 the `procurement` skill.
 
+## Huge pages — read in PARTS, like a human (SOTA: agentic chunking + sub-agent)
+A heavy page's full snapshot can be tens of thousands of tokens; dumping it whole is slow, costly, and
+risks overflowing the window. Read strategically instead:
+- **Extract targeted data** with `browser_evaluate` (the one selector / the specific value), not the whole
+  accessibility tree.
+- **Read in chunks** when you must see raw content — page through it a section at a time (the same idea as
+  `read_file`'s offset/limit), not all at once.
+- **Delegate the bulk to a sub-agent** (`task`): it reads the heavy page and returns just the answer, so the
+  main context stays clean (the SOTA sub-agent-summarization pattern).
+
+Neko also self-protects so a giant page can't crash a turn: a single tool result is capped, and a long
+turn compresses its OLDEST observations in place before the window overflows. That's a safety net — reading
+in parts is still faster and cheaper.
+
 ## Honest scope
 This skill is the **method + the wiring**, ready for a vision/GUI model + an input tool. With Neko's
 default text model it covers the **code-first** half fully; the GUI half activates once a vision-capable

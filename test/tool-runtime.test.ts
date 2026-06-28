@@ -40,9 +40,10 @@ test("edit returns a unified diff (context, -removed, +added)", async () => {
   const out = await reg.execute("edit", { path: "f.ts", old_string: "c();", new_string: "C1();\nC2();" });
   expect(out).toContain("Edited f.ts");
   expect(out).toContain("(+2 -1)");
-  expect(out).toMatch(/-\s+3\s+c\(\);/); // removed line 3 (red), with line number
-  expect(out).toMatch(/\+\s+3\s+C1\(\);/); // added (green), line-numbered
-  expect(out).toMatch(/\s+2\s+b\(\);/); // context line 2 (dim) with its number
+  // Claude-style rows: line number FIRST, then the +/-/space marker, then the content.
+  expect(out).toMatch(/\s+3 - c\(\);/); // removed line 3 (red), line-numbered
+  expect(out).toMatch(/\s+3 \+ C1\(\);/); // added (green), line-numbered
+  expect(out).toMatch(/\s+2 {3}b\(\);/); // context line 2 (dim): number, then space-marker, then content
 });
 
 test("multi_edit applies several edits atomically", async () => {
