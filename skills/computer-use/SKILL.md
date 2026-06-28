@@ -105,6 +105,28 @@ ground. Keep each image small (GIF) so its base64 fits NVIDIA's token budget; th
 is automatic (see `image_format`).
 (For keyboard, `WScript.Shell.SendKeys` works but is global/focus-sensitive -- see `tui-self-test`.)
 
+## Agent presence + control isolation (clicky-style)
+Two SOTA concerns when an agent drives the REAL machine: the user should SEE it's controlling, and ideally
+the agent shouldn't hijack the user's cursor.
+
+**(A) Overlay — works now, same desktop.** `overlay.ps1 [stopFile] [maxSeconds]` paints a transparent,
+click-through, always-on-top layer: a coloured screen border + a "NEKO is controlling" banner + a ring
+marking the agent's cursor -- a VISUAL agent-cursor over the shared physical one (the same idea as Clicky's
+overlay). A low-level mouse hook detects a REAL (non-injected) user click via the `LLMHF_INJECTED` flag and
+flips to PAUSED, writing `stopFile` so the loop yields control. Run it in the background for a session.
+Limit: the OS has ONE physical cursor, so this SHOWS presence + yields on touch; it does not truly separate
+input.
+
+**(B) True input isolation (own cursor, doesn't touch yours) — the robust SOTA.** Run the agent in a
+SEPARATE virtual desktop/session with its own input queue. Claude Computer Use uses a container + Xvfb
+virtual display; UFO2 uses the Windows RDP/WinStation subsystem (events scoped to that session, can't reach
+the primary desktop). On Windows 11 **Home** (no Windows Sandbox / Hyper-V), the practical paths:
+- **VirtualBox / VMware VM** — a full Windows guest; Neko runs inside with its OWN cursor; watch via the VM
+  window. Heavy (a Windows ISO + license + tens of GB) but fully isolated and parallel-safe.
+- **WSL2 + WSLg** — a Linux virtual desktop (own display + cursor, like Claude CU) for Linux apps.
+- A separate WinStation (`CreateDesktop`) is lightest but many apps won't render there.
+The shared-desktop foreground fight (a maximized app stealing focus) is exactly what isolation removes.
+
 ## Huge pages — read in PARTS, like a human (SOTA: agentic chunking + sub-agent)
 A heavy page's full snapshot can be tens of thousands of tokens; dumping it whole is slow, costly, and
 risks overflowing the window. Read strategically instead:
