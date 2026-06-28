@@ -109,13 +109,16 @@ is automatic (see `image_format`).
 Two SOTA concerns when an agent drives the REAL machine: the user should SEE it's controlling, and ideally
 the agent shouldn't hijack the user's cursor.
 
-**(A) Overlay — works now, same desktop.** `overlay.ps1 [stopFile] [maxSeconds] [statusFile]` paints a
-transparent, click-through, always-on-top layer, pixel-faithful to Clicky's `OverlayWindow.swift`:
+**(A) Overlay — works now, same desktop.** `overlay.ps1 [stopFile] [maxSeconds] [targetFile] [shotFile]`
+paints a **flicker-free** (custom double-buffered Form: OptimizedDoubleBuffer + no OnPaintBackground, clear
+in OnPaint), transparent, click-through, always-on-top layer, pixel-faithful to Clicky's `OverlayWindow.swift`:
 - a coloured screen border + a "NEKO is controlling" banner;
-- a **blue (#3380FF) glowing triangle cursor** (tilted -35 deg) that **flies to a new target along a
-  quadratic bezier ARC** (control = midpoint lifted by `min(dist*0.2, 80)`, scale-bump at mid-flight, spring
-  follow when near) -- a VISUAL agent-cursor over the shared physical one, like Clicky;
-- a small **label bubble** beside it ("Neko", or the first line of `statusFile`);
+- a **blue (#3380FF) glowing triangle cursor** (tilted -35 deg) that is an **INDEPENDENT agent cursor**: the
+  agent writes `targetFile` (`x,y` or `x,y|label`) and the triangle **flies there along a quadratic bezier
+  ARC** (control = midpoint lifted by `min(dist*0.2, 80)`, scale-bump mid-flight) -- INDEPENDENT of the
+  user's real cursor (verified: triangle sat at the target while the system cursor was in a far corner).
+  With NO target it **follows the user's cursor** as a buddy beside it (DeepMind Magic-Pointer / Clicky pattern);
+- a **label bubble** beside it (from `targetFile`, e.g. what the agent is doing);
 - a low-level mouse hook that, on a REAL (non-injected, `LLMHF_INJECTED`) user click, flips to PAUSED and
   writes `stopFile` so the loop yields.
 Run it in the background for a session (`overlay.ps1` takes an optional 4th arg `shotFile` to self-capture
