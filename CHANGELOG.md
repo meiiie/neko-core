@@ -34,6 +34,14 @@ All notable changes to Neko Code are documented here. The format follows
   reusing the login with no CDP and no credentials. The overlay now shows a **tab/window indicator** —
   frames + labels the exact window/tab Neko is driving ("NEKO dang dung tab nay: <title>"), driven by
   `neko_active_window.txt`.
+- **Computer-use robustness — audit trail, intervention-resume, goal-loop** — every desktop action is appended
+  timestamped to `%TEMP%\neko_actions.log` (override via `NEKO_ACTION_LOG`), so "what steps did you do?" is a
+  `read` away. On a real (non-injected) user click the overlay yields and the helpers return `PAUSED`; the new
+  `idle.ps1` blocks until the user has been idle a few seconds then clears the pause, so Neko can RE-PERCEIVE
+  (re-screenshot / `uia.ps1 read`) and RE-PLAN from the new state — SOTA state-managed interruption / shared
+  autonomy, "re-perceive don't blind-resume". And `runUntilDone` (`neko run --loop`) now re-inspects the ACTUAL
+  state each pass before judging DONE (Reflexion/CRITIC/Chain-of-Verification) — the fix for tasks that quit
+  early (the Paint test). SKILL.md documents all three.
 - **Deep research** — a `deep-research` skill (plan -> multi-source search -> read primaries -> cross-verify
   >=2 authoritative sources -> cited synthesis) and a strengthened always-on Accuracy section in the prompt.
 - **tui-self-test** skill — verify the TUI render (ink-testing-library + a live screenshot loop) with the

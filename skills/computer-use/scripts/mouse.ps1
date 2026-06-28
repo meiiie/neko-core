@@ -19,11 +19,13 @@ if($env:NEKO_INPUT -eq 'inject' -and ($cmd -in 'click','dblclick','stroke','move
   & (Join-Path $PSScriptRoot 'inject.ps1') $map[$cmd] @args
   exit
 }
+# --- Action audit log (sendinput path; the inject path logs inside inject.ps1) ---
+if($cmd -in 'click','dblclick','stroke'){ try { $alog= if($env:NEKO_ACTION_LOG){$env:NEKO_ACTION_LOG}else{"$env:TEMP\neko_actions.log"}; ("{0}  mouse {1} {2}" -f (Get-Date -Format 'HH:mm:ss'),$cmd,($args -join ' ')) | Out-File $alog -Append -Encoding utf8 } catch {} }
 # --- Agent presence (opt-in via NEKO_PRESENCE = computer_use_overlay): drive the independent cursor +
 #     honour click-to-takeover. Auto-launches overlay.ps1 if its heartbeat is stale. ---
 if($env:NEKO_PRESENCE){
   $stop="$env:TEMP\neko_overlay.stop"; $run="$env:TEMP\neko_overlay.run"; $tgt="$env:TEMP\neko_cursor.txt"
-  if((Test-Path $stop) -and ((Get-Content $stop -TotalCount 1 -ErrorAction SilentlyContinue) -match 'user')){ Write-Output "paused: you took control (overlay yielded)"; exit }
+  if((Test-Path $stop) -and ((Get-Content $stop -TotalCount 1 -ErrorAction SilentlyContinue) -match 'user')){ Write-Output "PAUSED: the user took control. STOP acting -> run idle.ps1 to wait until they're done -> then re-screenshot / uia.ps1 read and resume toward the goal."; exit }
   if(-not (Test-Path $run) -or (((Get-Date)-(Get-Item $run).LastWriteTime).TotalSeconds -gt 3)){ Remove-Item $stop -ErrorAction SilentlyContinue; Start-Process powershell -ArgumentList '-NoProfile','-File',(Join-Path $PSScriptRoot 'overlay.ps1') -WindowStyle Hidden }
   if($cmd -in 'move','click','dblclick','stroke'){ "$($args[0]),$($args[1])|Neko $cmd" | Out-File $tgt -Encoding ascii }
   if($env:NEKO_DRAW_WINDOW){ $env:NEKO_DRAW_WINDOW | Out-File "$env:TEMP\neko_active_window.txt" -Encoding utf8 }  # overlay frames + labels this window/tab

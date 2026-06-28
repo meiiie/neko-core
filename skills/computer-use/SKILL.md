@@ -248,6 +248,36 @@ focus-steal (takes your screen) or a separate desktop/session. The honest landsc
 Pick by need: teach/help on the user's real config -> (A)+(A2), same visible desktop. Do isolated/risky/
 background work or "play this game while I watch YouTube" -> (B) VM. Don't put teaching in a VM (wrong machine).
 
+## Robustness — audit trail, intervention+resume, goal-loop (the professional layer)
+Three things separate a real computer-use agent from a demo:
+
+**1. Audit trail ("what did Neko do?").** Every desktop ACTION (`uia` invoke/setvalue/toggle, `inject`/`mouse`
+tap/click/stroke) is appended, timestamped, to `%TEMP%\neko_actions.log` (override via `NEKO_ACTION_LOG`).
+To answer "what steps did you take?" or to review/replay, `read` that log -- a human-readable trace of the
+real OS-level actions (complements the agent transcript). Cheap, always-on.
+
+**2. Intervention + auto-resume (state-managed interruption / shared autonomy -- SOTA).** While Neko drives,
+the overlay's low-level hook detects a REAL (non-injected) user click/move and writes the stop-file; the next
+helper call returns `PAUSED: the user took control`. The loop -- DON'T blindly continue:
+- helper says PAUSED  ->  STOP acting immediately;
+- run `idle.ps1 [idleSec=3] [maxWaitSec=90]` -- it blocks until the user has been idle a few seconds, then
+  clears the pause (returns "resume: ...");
+- **RE-PERCEIVE**: screenshot + `uia.ps1 read`/`list` -- the user may have changed the state;
+- **RE-PLAN** toward the goal from the NEW state, then resume.
+"Re-perceive, don't blind-resume" is the mixed-initiative principle (the human is always in charge). The
+overlay shows red "Đã dừng — bạn đang điều khiển" while paused; injected (agent) input is exempt from the
+takeover hook, so Neko's own actions never trip it.
+
+**3. Goal-completion loop (persistence -- finish the task, don't give up).** A single `run` stops the moment
+the model emits no tool call -- which is exactly why an earlier Paint task quit after 2 strokes. For a real
+GOAL use the closed loop: **`neko run --loop "<goal>"`** (`agent.runUntilDone`). Each pass RE-INSPECTS the
+ACTUAL state (re-screenshot / re-read), compares to the goal + a high bar, and either replies DONE or does the
+next concrete step -- up to maxIters. This is the **Reflexion / CRITIC / Chain-of-Verification** pattern
+(Actor -> Evaluator -> Self-Reflection); research notes most gains land in the first ~2-3 passes, so the bound
+is sane. Tip: for read/verify-heavy turns, lower `reasoning_effort` so the model emits the verdict instead of
+over-reasoning into the token cap. Compose all three: the goal-loop drives to completion, the resume loop
+hands control back-and-forth cleanly, and the audit log records every step.
+
 ## Huge pages — read in PARTS, like a human (SOTA: agentic chunking + sub-agent)
 A heavy page's full snapshot can be tens of thousands of tokens; dumping it whole is slow, costly, and
 risks overflowing the window. Read strategically instead:

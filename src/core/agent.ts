@@ -193,8 +193,10 @@ export class Agent {
       if (opts.signal?.aborted || out === "[interrupted]") return out;
       out = await this.run(
         `CLOSED-LOOP REVIEW (pass ${i + 1}/${maxIters}). Goal: "${goal}".\n` +
-          `Critically check the work so far against the goal and a high quality bar. If it is FULLY ` +
-          `met, reply with exactly "DONE" and nothing else. Otherwise, fix what's missing now.`,
+          `First RE-INSPECT the ACTUAL current state (re-run the check / re-read the file / re-screenshot ` +
+          `or re-read the UI) — judge what IS, not your memory of what you intended. Then compare against ` +
+          `the goal and a high quality bar. If it is FULLY met, reply with exactly "DONE" and nothing else. ` +
+          `Otherwise, keep working: do the next concrete step now (don't stop until the goal is achieved).`,
         opts.signal,
       );
       if (/^\s*done[.!]?\s*$/i.test(out)) break;

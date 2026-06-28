@@ -13,11 +13,13 @@
 # This is the visible-desktop "don't hijack my mouse" path; controlling a HIDDEN/background app needs isolation.
 param([string]$cmd="tap")
 $a=$args
+# --- Action audit log (trace what Neko did; review the steps with: read %TEMP%\neko_actions.log) ---
+if($cmd -in 'tap','dbltap','stroke'){ try { $alog= if($env:NEKO_ACTION_LOG){$env:NEKO_ACTION_LOG}else{"$env:TEMP\neko_actions.log"}; ("{0}  inject {1} {2}" -f (Get-Date -Format 'HH:mm:ss'),$cmd,($a -join ' ')) | Out-File $alog -Append -Encoding utf8 } catch {} }
 
 # --- Agent presence (opt-in via NEKO_PRESENCE): point the independent overlay cursor + honour takeover. ---
 if($env:NEKO_PRESENCE){
   $stop="$env:TEMP\neko_overlay.stop"; $run="$env:TEMP\neko_overlay.run"; $tgt="$env:TEMP\neko_cursor.txt"
-  if((Test-Path $stop) -and ((Get-Content $stop -TotalCount 1 -ErrorAction SilentlyContinue) -match 'user')){ Write-Output "paused: you took control (overlay yielded)"; exit }
+  if((Test-Path $stop) -and ((Get-Content $stop -TotalCount 1 -ErrorAction SilentlyContinue) -match 'user')){ Write-Output "PAUSED: the user took control. STOP acting -> run idle.ps1 to wait until they're done -> then re-screenshot / uia.ps1 read and resume toward the goal."; exit }
   if(-not (Test-Path $run) -or (((Get-Date)-(Get-Item $run).LastWriteTime).TotalSeconds -gt 3)){ Remove-Item $stop -ErrorAction SilentlyContinue; Start-Process powershell -ArgumentList '-NoProfile','-File',(Join-Path $PSScriptRoot 'overlay.ps1') -WindowStyle Hidden }
   if($cmd -in 'tap','dbltap','stroke'){ "$($a[0]),$($a[1])|Neko $cmd" | Out-File $tgt -Encoding ascii }
   if($env:NEKO_DRAW_WINDOW){ $env:NEKO_DRAW_WINDOW | Out-File "$env:TEMP\neko_active_window.txt" -Encoding utf8 }  # overlay frames + labels this window/tab
