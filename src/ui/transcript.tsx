@@ -13,6 +13,19 @@ export interface Line {
   summary?: string; // 1-line collapse for read-type tool results (full is under Ctrl+O)
 }
 
+/** Color the "+N" green and "-N" red inside an edit/write header like "Edited f  (+3 -1)". */
+function HeaderCounts({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/([+-]\d+)/).map((p, k) =>
+        /^\+\d+$/.test(p) ? <Text key={k} color="green">{p}</Text>
+        : /^-\d+$/.test(p) ? <Text key={k} color="red">{p}</Text>
+        : p,
+      )}
+    </>
+  );
+}
+
 /** Render one transcript line. The `key` is set by the caller's <Static> map. */
 export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
   switch (line.kind) {
@@ -61,6 +74,10 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
             const add = l.startsWith("+") || m?.[1] === "+";
             const del = l.startsWith("-") || m?.[1] === "-";
             const disp = l.length > 200 ? l.slice(0, 200) + "…" : l;
+            if (i === 0 && !isError && /\([^)]*[+-]\d+[^)]*\)/.test(disp)) {
+              // Edit/write header: dim, but color the +N green and -M red (Claude-style).
+              return <Text key={i} dimColor>{"  └ "}<HeaderCounts text={disp} /></Text>;
+            }
             return (
               <Text key={i} color={isError ? "red" : add ? "green" : del ? "red" : undefined} dimColor={!isError && !add && !del}>
                 {(i === 0 ? "  └ " : "     ") + disp}
