@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Agent } from "../src/core/agent.ts";
+import { Agent, clampObservation, estimateTokens, MAX_OBS_CHARS } from "../src/core/agent.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 class ScriptedProvider {
@@ -191,4 +191,47 @@ test("max_steps cap fires", async () => {
   const provider = { complete: async () => loop };
   const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(root, "auto", () => true), maxSteps: 3 });
   expect(await agent.run("go")).toContain("max_steps=3");
+});
+
+test("clampObservation caps a huge tool result so one result can't overflow the window", () => {
+  const huge = "y".repeat(MAX_OBS_CHARS * 3);
+  const out = clampObservation(huge) as string;
+  expect(out.length).toBeLessThan(huge.length);
+  expect(out.length).toBeLessThanOrEqual(MAX_OBS_CHARS + 200); // head + tail + marker, bounded
+  expect(out).toContain("truncated to fit the context window");
+  expect(out.startsWith("y")).toBe(true); // head preserved
+  expect(out.endsWith("y")).toBe(true);   // tail preserved
+  // Small strings and multimodal arrays pass through untouched.
+  expect(clampObservation("short")).toBe("short");
+  const parts = [{ type: "text", text: "hi" }];
+  expect(clampObservation(parts as any)).toBe(parts as any);
+});
+
+test("estimateTokens approximates ~4 chars/token over the conversation", () => {
+  const msgs = [{ role: "user", content: "a".repeat(400) }, { role: "assistant", content: "b".repeat(400) }];
+  expect(estimateTokens(msgs)).toBe(200); // 800 chars / 4
+});
+
+test("in-loop guard clips OLD observations within one turn before context overflows", async () => {
+  const big = "x".repeat(5000); // under MAX_OBS_CHARS, so it accumulates rather than being clamped per-result
+  const tools = { schemas: () => [], execute: async () => big };
+  const script: any[] = [];
+  // 9 tool turns (unique args so the loop guard doesn't trip), then a final answer.
+  for (let i = 0; i < 9; i++) script.push({ content: null, tool_calls: [{ id: `c${i}`, name: "read_file", arguments: { path: `p${i}` } }] });
+  script.push({ content: "done", tool_calls: [] });
+  const provider = {
+    complete: async (msgs: any[]) => {
+      // A summarizing compaction call (multi-turn fallback) -> return a stub summary, never a script item.
+      if (msgs.length === 2 && String(msgs[0]?.content ?? "").startsWith("Summarize")) return { content: "SUMMARY", usage: {} };
+      return script.shift();
+    },
+  };
+  const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 20, maxContextTokens: 4000 });
+  expect(await agent.run("go")).toBe("done");
+  // Older tool observations were compressed IN PLACE (so the single long turn stayed under the window),
+  // while the most recent ones were kept full.
+  const clipped = agent.messages.filter((m: any) => typeof m.content === "string" && m.content.includes("chars elided to fit context"));
+  expect(clipped.length).toBeGreaterThan(0);
+  const fullRecent = agent.messages.filter((m: any) => m.role === "tool" && m.content === big);
+  expect(fullRecent.length).toBeGreaterThan(0); // recent observations untouched
 });

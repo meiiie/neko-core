@@ -220,7 +220,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       subReg.searxngUrl = parent.searxngUrl;
       subReg.searchBackend = parent.searchBackend;
       const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT; // named agent role, else default
-      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps }).run(prompt);
+      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps, maxContextTokens: cfg.contextWindow }).run(prompt);
     };
     // web_fetch's optional extractor: one model pass over the fetched page (Claude-style).
     registryRef.current.summarize = async (instruction, content, schema) => {
@@ -248,6 +248,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       provider: provider ?? getProvider(cfg),
       tools: registryRef.current,
       maxSteps: cfg.maxSteps,
+      maxContextTokens: cfg.contextWindow,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>

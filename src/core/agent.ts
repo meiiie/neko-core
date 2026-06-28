@@ -49,6 +49,26 @@ export const DEFAULT_SYSTEM_PROMPT =
 // "fleet"). Mutating tools (write_file/edit/bash) are excluded so they stay ordered + gated.
 const CONCURRENCY_SAFE = new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "task"]);
 
+// A single tool result (a giant browser snapshot, a huge file/page read) must not push the prompt past
+// the model's context window -- the server then computes a NEGATIVE max_tokens (window - prompt) and
+// rejects the whole turn with HTTP 400. Cap each observation (head + tail, with a marker) so one result
+// can't overflow the window. Multimodal array results (image parts) pass through untouched.
+export const MAX_OBS_CHARS = 48000;
+export function clampObservation(obs: string | any[]): string | any[] {
+  if (typeof obs !== "string" || obs.length <= MAX_OBS_CHARS) return obs;
+  const head = obs.slice(0, MAX_OBS_CHARS - 2000);
+  const tail = obs.slice(-2000);
+  return `${head}\n... [${obs.length - head.length - 2000} chars truncated to fit the context window] ...\n${tail}`;
+}
+
+// Rough token estimate (~4 chars/token) over the whole conversation, used to trigger IN-LOOP compaction
+// before a request would overflow the window. Cheap + conservative -- exactness isn't needed for a guard.
+export function estimateTokens(messages: any[]): number {
+  let chars = 0;
+  for (const m of messages) chars += typeof m.content === "string" ? m.content.length : JSON.stringify(m.content ?? "").length;
+  return Math.ceil(chars / 4);
+}
+
 // onEvent(kind, data): kind in {"tool_call", "tool_result", "final", "max_steps"}.
 export type EventHook = (kind: string, data: any) => void;
 
@@ -63,6 +83,9 @@ export interface AgentOptions {
   /** Re-evaluated before every turn (env + project context), so model/cwd/git/NEKO.md stay
    * current even if the user switches model or edits memory mid-session. */
   dynamicContext?: () => string;
+  /** Model context window (tokens). The loop compacts IN-LOOP before a request would overflow it,
+   * so a single long turn (e.g. many huge browser snapshots) can't blow past the window. */
+  maxContextTokens?: number;
 }
 
 export class Agent {
@@ -73,6 +96,7 @@ export class Agent {
   private readonly onEvent?: EventHook;
   private readonly onDelta?: DeltaHook;
   private readonly dynamicContext?: () => string;
+  private readonly maxContextTokens: number;
   readonly cost = new CostTracker();
   messages: any[] = [];
   /** The single system message is `<base prompt>` + DYN_MARK + `<live session context>`.
@@ -88,6 +112,7 @@ export class Agent {
     this.onEvent = opts.onEvent;
     this.onDelta = opts.onDelta;
     this.dynamicContext = opts.dynamicContext;
+    this.maxContextTokens = opts.maxContextTokens ?? 131072;
   }
 
   /** Summarize the conversation and replace it with the summary, freeing context. */
@@ -123,6 +148,27 @@ export class Agent {
     });
     this.messages = [...sys, { role: "user", content: `[Summary of earlier conversation]\n${summary}` }, ...leanTail];
     return summary;
+  }
+
+  /** In-loop context relief for a SINGLE long turn (one user message, many tool rounds) where
+   * compact()'s snap-to-user boundary can free nothing. Compress the OLDEST tool observations in
+   * place -- head + a marker -- keeping the most recent ones full and never breaking tool_call/result
+   * pairing. This is the "observation masking" approach SOTA long-horizon agents use. Returns true if
+   * it freed anything (so the caller only falls back to a summary when there's nothing left to clip). */
+  private shrinkOldObservations(): boolean {
+    const CLIP = 1200, KEEP_RECENT = 3, MARK = "chars elided to fit context";
+    const toolIdx = this.messages
+      .map((m, i) => (m.role === "tool" && typeof m.content === "string" ? i : -1))
+      .filter((i) => i >= 0);
+    let shrank = false;
+    for (const i of toolIdx.slice(0, Math.max(0, toolIdx.length - KEEP_RECENT))) {
+      const m = this.messages[i];
+      if (m.content.length > CLIP + 80 && !m.content.includes(MARK)) {
+        m.content = m.content.slice(0, CLIP) + `\n... [${m.content.length - CLIP} ${MARK}] ...`;
+        shrank = true;
+      }
+    }
+    return shrank;
   }
 
   /** Conversation undo: drop the last user turn (and the assistant response after it) from context.
@@ -208,6 +254,15 @@ export class Agent {
     for (let step = 0; step < this.maxSteps; step++) {
       this.emit("step", step + 1);
       if (signal?.aborted) return "[interrupted]";
+      // In-loop overflow guard: within ONE turn (e.g. many huge browser snapshots) context can grow
+      // past the window with no chance for the between-turn UI compaction to run. Compact here BEFORE a
+      // request would overflow -- otherwise the server computes a negative max_tokens and 400s the turn.
+      if (estimateTokens(this.messages) > 0.8 * this.maxContextTokens) {
+        this.emit("compact", "auto");
+        // One long turn has a single user message, so compact()'s snap-to-user boundary frees nothing;
+        // clip the oldest observations in place first, and only summarize if that found nothing to clip.
+        if (!this.shrinkOldObservations()) await this.compact();
+      }
       let response;
       try {
         response = await this.provider.complete(this.messages, this.tools.schemas(), this.onDelta, signal);
@@ -237,7 +292,7 @@ export class Agent {
         const observations = await Promise.all(toolCalls.map((call) => this.tools.execute(call.name, call.arguments, signal)));
         toolCalls.forEach((call, i) => {
           this.emit("tool_result", { call, observation: observations[i] });
-          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: observations[i] });
+          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observations[i]) });
         });
       } else {
         for (const call of toolCalls) {
@@ -252,7 +307,7 @@ export class Agent {
             ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
             : await this.tools.execute(call.name, call.arguments, signal);
           this.emit("tool_result", { call, observation });
-          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: observation });
+          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
         }
       }
     }
