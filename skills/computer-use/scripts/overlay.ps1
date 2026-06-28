@@ -9,7 +9,7 @@
 # true input separation needs an isolated session/VM (see SKILL.md section B / isolated/).
 #
 # Usage:  powershell -NoProfile -File overlay.ps1 [stopFile] [maxSeconds] [statusFile]
-param([string]$stopFile = "$env:TEMP\neko_overlay.stop", [int]$maxSeconds = 600, [string]$statusFile = "")
+param([string]$stopFile = "$env:TEMP\neko_overlay.stop", [int]$maxSeconds = 600, [string]$statusFile = "", [string]$shotFile = "")
 Remove-Item $stopFile -ErrorAction SilentlyContinue
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 Add-Type @"
@@ -46,7 +46,7 @@ $f.BackColor=$key; $f.TransparencyKey=$key
 $c=[System.Windows.Forms.Cursor]::Position
 $script:mx=[double]$c.X; $script:my=[double]$c.Y
 $script:flying=$false; $script:ft=0.0; $script:sx=0.0; $script:sy=0.0; $script:cx=0.0; $script:cy=0.0; $script:tx=0.0; $script:ty=0.0; $script:scale=1.0
-$script:paused=$false; $script:opacity=1.0; $script:pt=$null; $script:first=$true
+$script:paused=$false; $script:opacity=1.0; $script:pt=$null; $script:first=$true; $script:shot=$false
 function TriPts($ax,$ay,$sc){
   $rad=[Math]::PI*-35.0/180.0; $ca=[Math]::Cos($rad); $sa=[Math]::Sin($rad)
   $S=22.0*$sc; $Hh=19.0*$sc
@@ -104,6 +104,12 @@ $timer.Add_Tick({
     $script:mx += $dx*0.25; $script:my += $dy*0.25; $script:scale=1.0   # spring follow (Clicky response 0.2)
   }
   $f.Invalidate()
+  # Self-capture from INSIDE the overlay process (same DPI context as the form) so the marker's true
+  # alignment to the cursor can be verified without a cross-process capture artifact.
+  if($shotFile -and -not $script:shot -and ((Get-Date)-$t0).TotalSeconds -gt 2.5){
+    $script:shot=$true
+    try { $sb=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm=New-Object System.Drawing.Bitmap $sb.Width,$sb.Height; ([System.Drawing.Graphics]::FromImage($bm)).CopyFromScreen(0,0,0,0,$bm.Size); $bm.Save($shotFile); $bm.Dispose() } catch {}
+  }
   if([Ov]::UserActed -and -not $script:paused){ $script:paused=$true; "user" | Out-File $stopFile -Encoding ascii; $script:pt=Get-Date }
   if((Test-Path $stopFile) -and -not [Ov]::UserActed){ $f.Close() }
   if($script:paused -and $script:pt -and ((Get-Date)-$script:pt).TotalSeconds -gt 1.5){ $f.Close() }

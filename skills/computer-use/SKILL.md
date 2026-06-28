@@ -118,10 +118,12 @@ transparent, click-through, always-on-top layer, pixel-faithful to Clicky's `Ove
 - a small **label bubble** beside it ("Neko", or the first line of `statusFile`);
 - a low-level mouse hook that, on a REAL (non-injected, `LLMHF_INJECTED`) user click, flips to PAUSED and
   writes `stopFile` so the loop yields.
-Run it in the background for a session. Limits: the OS has ONE physical cursor, so this SHOWS presence +
-yields on touch (not true input separation). On a SCALED display (125-150%), the marker can be offset from
-the cursor unless the mover/overlay/capture share a DPI-awareness context -- verify on the real screen and
-make the helpers DPI-consistent if needed.
+Run it in the background for a session (`overlay.ps1` takes an optional 4th arg `shotFile` to self-capture
+from inside its own process for verification). Limit: the OS has ONE physical cursor, so this SHOWS presence
++ yields on touch -- not true input separation (that's section B). **Verified pixel-aligned:** an in-process
+self-capture put the marker exactly on the hovered tab. A CROSS-process screenshot of the overlay may show
+the marker offset on a scaled display -- that is a capture artifact (the capturing process has a different
+DPI-awareness context than the overlay), NOT what the user sees on the real screen.
 
 **(B) True input isolation (own cursor, doesn't touch yours) — the robust SOTA.** Run the agent in a
 SEPARATE virtual desktop/session with its own input queue. Claude Computer Use uses a container + Xvfb
