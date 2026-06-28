@@ -98,12 +98,30 @@ tool-calls) orchestrates and calls a vision model as a sub-step to "see". Three 
 VLM's grounding: `phi-3-vision` is decent on distinctive / corner targets (~10-20 px) but UNRELIABLE on dense
 or centred ones (it placed a centred search box at x=92 when truth was ~890) -- and when pass-1 is far off,
 the crop is around the wrong place, so pass-2 can't recover. It's also SLOW (2 vision calls + NVIDIA latency).
-A GUI-trained model (UI-TARS / OpenCUA / Claude Computer Use) would make this tight and fast; none is on
-NVIDIA today. Net: the pipeline + technique are complete and ready; treat coordinates as approximate, prefer
-big/distinctive targets, verify after the click, and don't fire irreversible clicks on a low-confidence
-ground. Keep each image small (GIF) so its base64 fits NVIDIA's token budget; the `<img>`-format conversion
-is automatic (see `image_format`).
+But raw-pixel grounding is the LAST resort -- see "Grounding without a GUI-trained model" below: the
+accessibility tree (`uia.ps1`) gives exact OS coordinates as TEXT, so a plain text model grounds reliably +
+pixel-perfect with no vision at all. `ground.ts` (pixel-vision) is only for custom-drawn UIs with no tree,
+and only THAT benefits from a GUI-trained model (UI-TARS/OpenCUA/Claude CU; none on NVIDIA). For pixel-vision:
+treat coords as approximate, verify after the click, don't fire irreversible clicks on a low-confidence
+ground; keep each image small (GIF) under NVIDIA's token budget (`<img>` conversion is automatic).
 (For keyboard, `WScript.Shell.SendKeys` works but is global/focus-sensitive -- see `tui-self-test`.)
+
+## Grounding without a GUI-trained model (the key technique)
+"Everything is data" -- the screen ALREADY is structured data; don't make the model estimate pixels. Ground
+in order of reliability (only the last needs a GUI-trained model):
+1. **Code / CLI / API** (CoAct-1) -- no grounding at all, most reliable (Neko's code-first principle).
+2. **Accessibility tree** -- `uia.ps1` dumps the foreground window's interactive elements via Windows UI
+   Automation: NAME + ROLE + EXACT bounding rect FROM THE OS. A plain text model (gpt-oss) reads the list,
+   picks by name, clicks the exact center -- pixel-perfect, <100 ms, private, NO vision, NO GUI-training. This
+   is exactly why WEB works with gpt-oss (the DOM); UIA is the desktop DOM. Works for standard apps (Office,
+   browsers, system apps, most software). VERIFIED: `uia.ps1` listed a window's buttons with click coords.
+3. **OCR** -- for a text target with no UIA, OCR the screen (Tesseract / NVIDIA NeMo-OCR NIM) -> exact box.
+4. **Set-of-Marks** (OmniParser-style) -- custom/canvas UIs: detect elements, overlay NUMBERED marks, ask
+   "which number?" -> click its known box. Turns "estimate coords" into "pick #N" (easy text reasoning).
+5. **Raw-pixel VLM** (`ground.ts`) -- LAST resort; the only path that wants a GUI-trained model.
+Microsoft UFO2, Windows-Use, DirectShell, OmniParser all LEAD with the accessibility tree + scripts and use
+pixel-vision only to fill gaps. So Neko controls standard desktop apps RELIABLY today with plain gpt-oss +
+`uia.ps1` + `mouse.ps1` -- no GUI-trained model required.
 
 ## Agent presence + control isolation (clicky-style)
 Two SOTA concerns when an agent drives the REAL machine: the user should SEE it's controlling, and ideally
