@@ -1,14 +1,13 @@
-# Clicky-style agent-presence overlay, v3. Two SOTA upgrades:
-#  1. FLICKER-FREE: a custom double-buffered Form (OptimizedDoubleBuffer + no OnPaintBackground, clear in
-#     OnPaint) so the whole transparent layer is composited off-screen and blitted atomically -- no flicker.
-#  2. INDEPENDENT agent cursor (DeepMind Magic-Pointer / Clicky pattern): the blue triangle has its OWN
-#     position, driven by a TARGET FILE the agent writes. When the agent sets a target it FLIES there
-#     (bezier arc), independent of the user's real cursor; when idle (no target) it follows the user's
-#     cursor as a buddy beside it. A WH_MOUSE_LL hook yields on a REAL user click.
+# Clicky-style agent-presence overlay, v4 (atomic UX pass).
+#  - FLICKER-FREE custom double-buffered Form (composited off-screen, blitted atomically).
+#  - INDEPENDENT agent cursor: a blue triangle with its OWN position, driven by a TARGET FILE the agent writes;
+#    it FLIES there on an EASE-IN-OUT bezier arc (independent of the user's cursor), follows the user when idle.
+#  - MICRO-INTERACTIONS: a click-pulse ripple on arrival, a soft drop-shadow, rounded panels, scale-pop in flight.
+#  - PRESENCE: frames + labels the exact window/tab Neko is using; a WH_MOUSE_LL hook yields on a REAL click.
+#  - VIETNAMESE: UI strings load from overlay.i18n.txt (UTF-8) at runtime -- PS 5.1 parses .ps1 as cp1252, so
+#    diacritics live in a data file, not in the script. GDI renders them.
 #
-# Usage:  overlay.ps1 [stopFile] [maxSeconds] [targetFile]
-#   Agent controls the independent cursor by writing the targetFile:  "x,y"  or  "x,y|label"  -> fly there;
-#   "idle" / empty / missing -> follow the user's cursor.
+# Usage:  overlay.ps1 [stopFile] [maxSeconds] [targetFile] [shotFile] [activeWinFile]
 param([string]$stopFile="$env:TEMP\neko_overlay.stop", [int]$maxSeconds=600, [string]$targetFile="$env:TEMP\neko_cursor.txt", [string]$shotFile="", [string]$activeWinFile="$env:TEMP\neko_active_window.txt")
 Remove-Item $stopFile -ErrorAction SilentlyContinue
 Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing -TypeDefinition @"
@@ -33,68 +32,98 @@ public class Hk {
   public static void Remove(){ if(H!=IntPtr.Zero) UnhookWindowsHookEx(H); }
 }
 "@
-$blue=[System.Drawing.Color]::FromArgb(255,51,128,255); $red=[System.Drawing.Color]::FromArgb(255,255,70,70); $key=[System.Drawing.Color]::FromArgb(255,1,2,3)
+$blue=[System.Drawing.Color]::FromArgb(255,51,128,255); $red=[System.Drawing.Color]::FromArgb(255,255,74,74); $key=[System.Drawing.Color]::FromArgb(255,1,2,3)
+# --- i18n (UTF-8 data file; ASCII fallbacks if missing) ---
+$script:S=@{ controlling="Neko dang dieu khien  -  bam chuot de dung"; using_tab="Neko dang dung tab nay:"; paused="Da dung  -  ban dang dieu khien"; label="Neko" }
+$i18n=Join-Path $PSScriptRoot 'overlay.i18n.txt'
+if(Test-Path $i18n){ try { foreach($ln in (Get-Content $i18n -Encoding UTF8)){ if($ln -notmatch '^\s*#' -and $ln -match '^\s*([a-z_]+)\s*=(.*)$'){ $script:S[$matches[1]]=($matches[2].TrimEnd("`r","`n")) } } } catch {} }
 $f=New-Object NekoOverlay
 $f.FormBorderStyle='None'; $f.WindowState='Maximized'; $f.TopMost=$true; $f.ShowInTaskbar=$false
 $f.StartPosition='Manual'; $f.Bounds=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $f.BackColor=$key; $f.TransparencyKey=$key
 $c=[System.Windows.Forms.Cursor]::Position; $script:mx=[double]$c.X; $script:my=[double]$c.Y
 $script:flying=$false; $script:ft=0.0; $script:sx=0.0;$script:sy=0.0;$script:cxp=0.0;$script:cyp=0.0;$script:txp=0.0;$script:typ=0.0;$script:scale=1.0
-$script:paused=$false; $script:pt=$null; $script:label="Neko"; $script:shot=$false; $script:lasthb=(Get-Date).AddSeconds(-10)
-$script:winRect=$null; $script:winLabel=""; $script:lastwin=(Get-Date).AddSeconds(-10)   # the specific window/tab Neko is using (framed + banner)
+$script:paused=$false; $script:pt=$null; $script:label=$script:S.label; $script:shot=$false; $script:lasthb=(Get-Date).AddSeconds(-10)
+$script:winRect=$null; $script:winLabel=""; $script:lastwin=(Get-Date).AddSeconds(-10)
+$script:agentTarget=$false; $script:pulseT=2.0; $script:pulseX=0.0; $script:pulseY=0.0   # click-pulse ripple state
+$script:bf=New-Object System.Drawing.Font("Segoe UI",12.5,[System.Drawing.FontStyle]::Bold)
+$script:lf=New-Object System.Drawing.Font("Segoe UI",10,[System.Drawing.FontStyle]::Bold)
 function TriPts($ax,$ay,$sc){ $rad=[Math]::PI*-35.0/180.0; $ca=[Math]::Cos($rad); $sa=[Math]::Sin($rad); $S=22.0*$sc; $Hh=19.0*$sc; $base=@(@(0.0,0.0),@((-$S/2.0),$Hh),@(($S/2.0),$Hh)); $o=New-Object System.Collections.Generic.List[System.Drawing.PointF]; foreach($p in $base){ $rx=$p[0]*$ca-$p[1]*$sa; $ry=$p[0]*$sa+$p[1]*$ca; $o.Add((New-Object System.Drawing.PointF([single]($ax+$rx),[single]($ay+$ry)))) }; return $o.ToArray() }
+function RRP($x,$y,$w,$h,$rad){ $d=$rad*2.0; $p=New-Object System.Drawing.Drawing2D.GraphicsPath; $p.AddArc($x,$y,$d,$d,180,90); $p.AddArc($x+$w-$d,$y,$d,$d,270,90); $p.AddArc($x+$w-$d,$y+$h-$d,$d,$d,0,90); $p.AddArc($x,$y+$h-$d,$d,$d,90,90); $p.CloseFigure(); return $p }
 $f.Add_Paint({ param($s,$e)
-  $g=$e.Graphics; $g.Clear($key); $g.SmoothingMode='AntiAlias'
+  $g=$e.Graphics; $g.Clear($key); $g.SmoothingMode='AntiAlias'; $g.TextRenderingHint='ClearTypeGridFit'
   $col= if($script:paused){$red}else{$blue}
-  $bf=New-Object System.Drawing.Font("Segoe UI",13,[System.Drawing.FontStyle]::Bold)
+  $panel=New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(238,17,19,25))
+  $colBr=New-Object System.Drawing.SolidBrush $col
+  # ---- presence frame + banner ----
   if($script:winRect){
-    # Neko is using a SPECIFIC window/tab: frame that window + banner its title at its top-left.
-    $r=$script:winRect; $bw=5; $g.DrawRectangle((New-Object System.Drawing.Pen $col,$bw), $r.L+2, $r.T+2, ($r.R-$r.L)-4, ($r.B-$r.T)-4)
-    $txt= if($script:paused){"DA DUNG - ban dang dieu khien"}else{"NEKO dang dung tab nay:  " + $script:winLabel}
-    $sz=$g.MeasureString($txt,$bf); $bx=$r.L+10; $by=$r.T+8
-    $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(240,20,22,28))),$bx,$by,$sz.Width+24,$sz.Height+12)
-    $g.DrawString($txt,$bf,(New-Object System.Drawing.SolidBrush $col),$bx+12,$by+6)
+    $r=$script:winRect; $L=[Math]::Max(2,$r.L);$T=[Math]::Max(2,$r.T);$R=[Math]::Min($f.Width-2,$r.R);$B=[Math]::Min($f.Height-2,$r.B)
+    $fp=RRP $L $T ($R-$L) ($B-$T) 14; $g.DrawPath((New-Object System.Drawing.Pen $col,4),$fp); $fp.Dispose()
+    $txt= if($script:paused){$script:S.paused}else{ ($script:S.using_tab + "  " + $script:winLabel) }
+    $sz=$g.MeasureString($txt,$script:bf); $bx=$L+12; $by=$T+10
+    $bp=RRP $bx $by ($sz.Width+26) ($sz.Height+12) 9; $g.FillPath($panel,$bp); $bp.Dispose()
+    $dot=New-Object System.Drawing.SolidBrush $col; $g.FillEllipse($dot,$bx+12,$by+($sz.Height/2)-3,7,7)
+    $g.DrawString($txt,$script:bf,$colBr,$bx+26,$by+6)
   } else {
-    $bw=6; $g.DrawRectangle((New-Object System.Drawing.Pen $col,$bw), [int]($bw/2),[int]($bw/2),$f.Width-$bw,$f.Height-$bw)
-    $txt= if($script:paused){"DA DUNG  -  ban dang dieu khien"}else{"NEKO DANG DIEU KHIEN  -  bam chuot de dung"}
-    $sz=$g.MeasureString($txt,$bf); $bx=[int](($f.Width-$sz.Width)/2)-18
-    $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(235,20,22,28))),$bx,14,$sz.Width+36,$sz.Height+14)
-    $g.DrawString($txt,$bf,(New-Object System.Drawing.SolidBrush $col),$bx+18,21)
+    $fp=RRP 4 4 ($f.Width-8) ($f.Height-8) 16; $g.DrawPath((New-Object System.Drawing.Pen $col,5),$fp); $fp.Dispose()
+    $txt= if($script:paused){$script:S.paused}else{$script:S.controlling}
+    $sz=$g.MeasureString($txt,$script:bf); $bw2=$sz.Width+44; $bx=[int](($f.Width-$bw2)/2)
+    $bp=RRP $bx 14 $bw2 ($sz.Height+14) 11; $g.FillPath($panel,$bp); $bp.Dispose()
+    $g.FillEllipse($colBr,$bx+16,21+($sz.Height/2)-4,8,8)
+    $g.DrawString($txt,$script:bf,$colBr,$bx+30,21)
   }
+  # ---- click-pulse ripple (under the cursor) ----
+  if($script:pulseT -lt 1.0){
+    $ease=1.0-[Math]::Pow(1.0-$script:pulseT,2); $rr=8.0+$ease*34.0; $a=[int]((1.0-$script:pulseT)*170)
+    $pen=New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb($a,$col.R,$col.G,$col.B)),3
+    $g.DrawEllipse($pen,[single]($script:pulseX-$rr),[single]($script:pulseY-$rr),[single]($rr*2),[single]($rr*2))
+    $a2=[int]((1.0-$script:pulseT)*90); $pen2=New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb($a2,$col.R,$col.G,$col.B)),2
+    $rr2=$rr*0.6; $g.DrawEllipse($pen2,[single]($script:pulseX-$rr2),[single]($script:pulseY-$rr2),[single]($rr2*2),[single]($rr2*2))
+  }
+  # ---- cursor: drop-shadow, glow, fill, white outline ----
   try {
-    foreach($gl in @(@(2.0,55),@(1.4,110),@(1.0,255))){ $g.FillPolygon((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb([int]$gl[1],$col.R,$col.G,$col.B))), (TriPts $script:mx $script:my $gl[0])) }
-    $g.DrawPolygon((New-Object System.Drawing.Pen ([System.Drawing.Color]::White),1.5), (TriPts $script:mx $script:my $script:scale))
-    $lbl=$script:label; $lf=New-Object System.Drawing.Font("Segoe UI",10,[System.Drawing.FontStyle]::Bold); $ls=$g.MeasureString($lbl,$lf); $lx=[int]$script:mx+16; $ly=[int]$script:my+14
-    $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(225,20,22,28))),$lx,$ly,$ls.Width+14,$ls.Height+8)
-    $g.DrawString($lbl,$lf,(New-Object System.Drawing.SolidBrush $col),$lx+7,$ly+4)
+    $g.FillPolygon((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(70,0,0,0))), (TriPts ($script:mx+2.0) ($script:my+3.0) $script:scale))
+    foreach($gl in @(@(2.0,50),@(1.4,105),@(1.0,255))){ $g.FillPolygon((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb([int]$gl[1],$col.R,$col.G,$col.B))), (TriPts $script:mx $script:my $gl[0])) }
+    $g.DrawPolygon((New-Object System.Drawing.Pen ([System.Drawing.Color]::White),1.6), (TriPts $script:mx $script:my $script:scale))
+    # ---- label bubble (rounded, edge-clamped) ----
+    $lbl=$script:label; $ls=$g.MeasureString($lbl,$script:lf)
+    $lx=[Math]::Min([int]$script:mx+17,$f.Width-[int]$ls.Width-26); $ly=[Math]::Min([int]$script:my+15,$f.Height-[int]$ls.Height-16)
+    $lp=RRP $lx $ly ($ls.Width+18) ($ls.Height+9) 7; $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(228,17,19,25))),$lp); $lp.Dispose()
+    $g.DrawString($lbl,$script:lf,$colBr,$lx+9,$ly+4)
   } catch {}
 })
 $f.Add_Shown({ [Hk]::Install() })
-$t0=Get-Date; $timer=New-Object System.Windows.Forms.Timer; $timer.Interval=22
+$t0=Get-Date; $timer=New-Object System.Windows.Forms.Timer; $timer.Interval=16
 $timer.Add_Tick({
  try {
   $line=$null; if(Test-Path $targetFile){ $line=(Get-Content $targetFile -TotalCount 1 -ErrorAction SilentlyContinue) }
   if($line -and ($line -match '^\s*(-?\d+)\s*,\s*(-?\d+)\s*(\|(.*))?$')){
-    $tx=[double]$matches[1]; $ty=[double]$matches[2]; if($matches[4]){ $script:label=$matches[4].Trim() } else { $script:label="Neko" }
-  } else { $p=[System.Windows.Forms.Cursor]::Position; $tx=[double]$p.X+22; $ty=[double]$p.Y+16; $script:label="Neko" }
+    $tx=[double]$matches[1]; $ty=[double]$matches[2]; if($matches[4]){ $script:label=$matches[4].Trim() } else { $script:label=$script:S.label }; $script:agentTarget=$true
+  } else { $p=[System.Windows.Forms.Cursor]::Position; $tx=[double]$p.X+22; $ty=[double]$p.Y+16; $script:label=$script:S.label; $script:agentTarget=$false }
   $dx=$tx-$script:mx; $dy=$ty-$script:my; $dist=[Math]::Sqrt($dx*$dx+$dy*$dy)
-  if(-not $script:flying -and $dist -gt 70){ $script:flying=$true; $script:ft=0.0; $script:sx=$script:mx;$script:sy=$script:my;$script:txp=$tx;$script:typ=$ty; $arc=[Math]::Min($dist*0.2,80.0); $script:cxp=($script:sx+$tx)/2; $script:cyp=(($script:sy+$ty)/2)-$arc }
-  if($script:flying){ $script:ft=[Math]::Min(1.0,$script:ft+0.05); $t=$script:ft; $om=1.0-$t; $script:mx=$om*$om*$script:sx+2*$om*$t*$script:cxp+$t*$t*$script:txp; $script:my=$om*$om*$script:sy+2*$om*$t*$script:cyp+$t*$t*$script:typ; $script:scale=1.0+0.35*[Math]::Sin($t*[Math]::PI); if($script:ft -ge 1.0){ $script:flying=$false; $script:scale=1.0 } }
-  else { $script:mx+=$dx*0.25; $script:my+=$dy*0.25; $script:scale=1.0 }
+  if(-not $script:flying -and $dist -gt 60){ $script:flying=$true; $script:ft=0.0; $script:sx=$script:mx;$script:sy=$script:my;$script:txp=$tx;$script:typ=$ty; $arc=[Math]::Min($dist*0.22,90.0); $script:cxp=($script:sx+$tx)/2; $script:cyp=(($script:sy+$ty)/2)-$arc }
+  if($script:flying){
+    $script:ft=[Math]::Min(1.0,$script:ft+0.055); $t=$script:ft
+    $te= if($t -lt 0.5){2.0*$t*$t}else{1.0-[Math]::Pow(-2.0*$t+2.0,2)/2.0}   # ease-in-out
+    $om=1.0-$te; $script:mx=$om*$om*$script:sx+2*$om*$te*$script:cxp+$te*$te*$script:txp; $script:my=$om*$om*$script:sy+2*$om*$te*$script:cyp+$te*$te*$script:typ
+    $script:scale=1.0+0.30*[Math]::Sin($te*[Math]::PI)
+    if($script:ft -ge 1.0){ $script:flying=$false; $script:scale=1.0; if($script:agentTarget){ $script:pulseT=0.0; $script:pulseX=$script:txp; $script:pulseY=$script:typ } }
+  } else { $script:mx+=$dx*0.22; $script:my+=$dy*0.22; $script:scale=1.0 }
+  if($script:pulseT -lt 1.0){ $script:pulseT+=0.045 }
   # which window/tab is Neko using? -> frame it + banner its title (throttled; Get-Process is slow)
   if(((Get-Date)-$script:lastwin).TotalMilliseconds -gt 500){ $script:lastwin=Get-Date
     $awl=$null; if(Test-Path $activeWinFile){ $awl=(Get-Content $activeWinFile -Raw -Encoding UTF8 -ErrorAction SilentlyContinue) }
-    if($awl){ $awl=($awl -replace '﻿','').Trim() }   # strip BOM (Out-File -utf8 prepends one) + whitespace
+    if($awl){ $awl=($awl -replace '﻿','').Trim() }
     if($awl){ $wp=Get-Process | Where-Object { $_.MainWindowTitle -like "*$awl*" } | Select-Object -First 1
-      if($wp){ $rc=New-Object Hk+RECT; if([Hk]::GetWindowRect($wp.MainWindowHandle,[ref]$rc)){ $script:winRect=$rc; $l=$wp.MainWindowTitle; if($l.Length -gt 60){$l=$l.Substring(0,60)+"..."}; $script:winLabel=$l } else { $script:winRect=$null } }
+      if($wp){ $rc=New-Object Hk+RECT; if([Hk]::GetWindowRect($wp.MainWindowHandle,[ref]$rc)){ $script:winRect=$rc; $l=$wp.MainWindowTitle; if($l.Length -gt 64){$l=$l.Substring(0,64)+[char]0x2026}; $script:winLabel=$l } else { $script:winRect=$null } }
       else { $script:winRect=$null } }
     else { $script:winRect=$null } }
   $f.Invalidate()
-  if(((Get-Date)-$script:lasthb).TotalSeconds -gt 1){ $script:lasthb=Get-Date; try { "1" | Out-File "$env:TEMP\neko_overlay.run" -Encoding ascii } catch {} }  # heartbeat so the tools know it's alive
+  if(((Get-Date)-$script:lasthb).TotalSeconds -gt 1){ $script:lasthb=Get-Date; try { "1" | Out-File "$env:TEMP\neko_overlay.run" -Encoding ascii } catch {} }
   if($shotFile -and -not $script:shot -and ((Get-Date)-$t0).TotalSeconds -gt 3.5){ $script:shot=$true; try { $sb=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm=New-Object System.Drawing.Bitmap $sb.Width,$sb.Height; ([System.Drawing.Graphics]::FromImage($bm)).CopyFromScreen(0,0,0,0,$bm.Size); $bm.Save($shotFile); $bm.Dispose() } catch {} }
   if([Hk]::UserActed -and -not $script:paused){ $script:paused=$true; "user" | Out-File $stopFile -Encoding ascii; $script:pt=Get-Date }
   if((Test-Path $stopFile) -and -not [Hk]::UserActed){ $f.Close() }
-  if($script:paused -and $script:pt -and ((Get-Date)-$script:pt).TotalSeconds -gt 1.5){ $f.Close() }
+  if($script:paused -and $script:pt -and ((Get-Date)-$script:pt).TotalSeconds -gt 1.6){ $f.Close() }
   if(((Get-Date)-$t0).TotalSeconds -gt $maxSeconds){ $f.Close() }
  } catch {}
 })

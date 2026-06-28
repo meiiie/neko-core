@@ -1,0 +1,6 @@
+# Overlay UI strings (UTF-8). Read at runtime so PowerShell 5.1's cp1252 script-parsing never mojibakes them.
+# key=value. Edit freely / add a locale by swapping this file. GDI renders the diacritics.
+controlling=Neko đang điều khiển  ·  bấm chuột để dừng
+using_tab=Neko đang dùng tab này:
+paused=Đã dừng  ·  bạn đang điều khiển
+label=Neko

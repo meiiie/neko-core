@@ -187,16 +187,19 @@ injection — its own pointer channel), **(B) ISOLATE it** (separate desktop/VM 
 any-app incl. games). Key fact: the OS has ONE *mouse* cursor, but SEPARATE *pen/touch* input channels —
 that is how the agent gets its own pointer on the same screen without taking yours.
 
-**(A) Overlay — works now, same desktop.** `overlay.ps1 [stopFile] [maxSeconds] [targetFile] [shotFile]`
-paints a **flicker-free** (custom double-buffered Form: OptimizedDoubleBuffer + no OnPaintBackground, clear
+**(A) Overlay — works now, same desktop.** `overlay.ps1 [stopFile] [maxSeconds] [targetFile] [shotFile] [activeWinFile]`
+(v4) paints a **flicker-free** (custom double-buffered Form: OptimizedDoubleBuffer + no OnPaintBackground, clear
 in OnPaint), transparent, click-through, always-on-top layer, pixel-faithful to Clicky's `OverlayWindow.swift`:
-- a coloured screen border + a "NEKO is controlling" banner;
-- a **blue (#3380FF) glowing triangle cursor** (tilted -35 deg) that is an **INDEPENDENT agent cursor**: the
-  agent writes `targetFile` (`x,y` or `x,y|label`) and the triangle **flies there along a quadratic bezier
-  ARC** (control = midpoint lifted by `min(dist*0.2, 80)`, scale-bump mid-flight) -- INDEPENDENT of the
-  user's real cursor (verified: triangle sat at the target while the system cursor was in a far corner).
-  With NO target it **follows the user's cursor** as a buddy beside it (DeepMind Magic-Pointer / Clicky pattern);
-- a **label bubble** beside it (from `targetFile`, e.g. what the agent is doing);
+- a coloured **rounded** screen border (or a frame around the specific window Neko uses) + a rounded banner
+  with a status dot; **UI strings live in `overlay.i18n.txt` (UTF-8, Vietnamese with diacritics)** -- read at
+  runtime because PS 5.1 parses `.ps1` as cp1252, so diacritics must NOT be literals in the script;
+- a **blue (#3380FF) glowing triangle cursor** (tilted -35 deg, drop-shadow + white outline) that is an
+  **INDEPENDENT agent cursor**: the agent writes `targetFile` (`x,y` or `x,y|label`) and the triangle **flies
+  there on an EASE-IN-OUT bezier ARC** (control = midpoint lifted by `min(dist*0.22, 90)`, scale-pop mid-flight),
+  then a **click-pulse ripple** marks the arrival -- INDEPENDENT of the user's real cursor (verified: triangle
+  sat at the target while the system cursor was in a far corner). With NO target it **follows the user's
+  cursor** as a buddy beside it (DeepMind Magic-Pointer / Clicky pattern);
+- a rounded **label bubble** beside it (from `targetFile`, e.g. what the agent is doing);
 - a low-level mouse hook that, on a REAL (non-injected, `LLMHF_INJECTED`) user click, flips to PAUSED and
   writes `stopFile` so the loop yields.
 Run it in the background for a session (`overlay.ps1` takes an optional 4th arg `shotFile` to self-capture
