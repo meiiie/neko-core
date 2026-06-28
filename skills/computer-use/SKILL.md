@@ -1,6 +1,6 @@
 ---
 name: computer-use
-description: Drive the computer like a person when there is no programmatic path — see the screen, then click/type/scroll. For "open this app and do X", "click the button", "fill this form in the GUI", "automate this desktop/web flow", controlling software that has no API/CLI. (điều khiển máy tính, thao tác giao diện, tự bấm/điền, automate desktop). PREFER code/CLI first; fall back to GUI only when necessary. Needs a vision-capable model for the GUI parts.
+description: Drive the computer like a person when there is no programmatic path — see the screen, then click/type/scroll. For "open this app and do X", "click the button", "fill this form in the GUI", "automate this desktop/web flow", controlling software that has no API/CLI. (điều khiển máy tính, thao tác giao diện, tự bấm/điền, automate desktop). PREFER code/CLI first; then the accessibility tree (web=DOM, desktop=Windows UIA) which a plain text model drives with no vision; raw-pixel vision only for custom-drawn UIs.
 ---
 
 # Skill: Computer use (code-first, GUI-fallback)
@@ -9,13 +9,16 @@ Distilled from the 2026 SOTA (UI-TARS, OpenCUA, Aguvis, **CoAct-1**, OSWorld). T
 the method.
 
 ## The hard truth (read this)
-- **GUI clicking needs a GUI-grounding vision model.** A text-only model (e.g. gpt-oss) cannot see the
-  screen or locate where to click. The GUI loop below works only with a **vision-capable model** (set
-  `vision: true` + a vision model) — ideally a GUI-trained one (UI-TARS/OpenCUA class).
-- **Even frontier agents top out ~72% on OSWorld** (real desktop tasks); open models ~42-45%. Treat GUI
-  actions as **fallible** — verify after every step, never assume.
-- **It can break things.** Mouse/keyboard on the real machine is destructive. Guardrails below are not
-  optional.
+- **Most "GUI" control needs NO vision.** The screen is already structured data — the OS accessibility
+  tree (web=DOM, desktop=Windows UIA) exposes every control's name + role + exact coordinates as TEXT, so a
+  plain text model (gpt-oss) grounds reliably and pixel-perfect. **Raw-pixel vision is the LAST resort**
+  (custom-drawn UIs with no tree) — only THAT wants a GUI-trained model. See "Grounding without a
+  GUI-trained model" below; this is the spine of the skill.
+- **Even frontier *pixel-vision* agents top out ~72% on OSWorld**; open models ~42-45%. That ceiling is the
+  pixel path — the accessibility-tree path is deterministic, not a guess. Either way, **verify after every
+  step**.
+- **It can break things.** Mouse/keyboard/`invoke` on the real machine is destructive. Guardrails below are
+  not optional.
 
 ## Principle 1 — CODE FIRST (Neko's edge, from CoAct-1)
 The strongest computer-use agents mix **coding actions** with GUI clicks: a shell command or script is
@@ -73,10 +76,49 @@ AND self-correct when a tool call errored (retried with a better selector). Drop
 add stealth (`--device "Desktop Chrome"`, or CloakBrowser via `--cdp-endpoint`) for anti-bot sites — see
 the `procurement` skill.
 
-## Quick start — DESKTOP (Windows: WORKS via a vision sub-call)
-Native apps have no DOM, so it's the screenshot -> ground -> click loop. No single available model does
-vision + GUI-grounding + tool-calling together, so SEPARATE them: the text driver (gpt-oss, reliable
-tool-calls) orchestrates and calls a vision model as a sub-step to "see". Three bundled scripts in
+## Quick start — DESKTOP (Windows: WORKS with plain gpt-oss, NO vision — via UIA)
+Native apps have no DOM, but Windows UI Automation (UIA) IS the desktop's accessibility tree — the desktop
+DOM. **This is the primary path; use it first.** `uia.ps1` lets a text model perceive + act + verify with
+no vision and (for pattern actions) no cursor movement:
+
+```
+# perceive: list actionable elements (name + role + verb + exact coords)
+NEKO_UIA_WINDOW="<window title>" pwsh uia.ps1 list
+#   [Edit] 'Input' (setvalue) -> 960,432
+#   [Button] 'Greet' (invoke) -> 794,494
+# act by NAME (programmatic UIA pattern -> no cursor, no focus steal, works occluded):
+pwsh uia.ps1 setvalue "Input" "Neko"      # ValuePattern (type without keyboard)
+pwsh uia.ps1 invoke   "Greet"             # InvokePattern (click without moving the mouse); falls back to a
+                                          #   real coord-click only if no pattern is exposed
+pwsh uia.ps1 toggle   "Show advanced"     # TogglePattern (checkbox/switch)
+# verify (no vision): read a value/state back
+pwsh uia.ps1 get "Input"                  # -> value 'Input' = 'Neko'
+```
+**VERIFIED end-to-end** on a real .NET window: `list` -> `setvalue Input=Neko` -> `invoke Greet` ->
+screenshot showed `Hello, Neko!`, and `get` read the value back — all with the default gpt-oss, zero vision,
+zero cursor movement. The loop is **perceive (`list`) → act (`invoke`/`setvalue`/`toggle`) → verify
+(`get`/`list`)**, all text.
+
+Performance + reliability are SOTA-grade: a CacheRequest bulk-fetches every property+pattern in ONE
+cross-process call (a naive `FindAll` makes one COM round-trip per node and TIMES OUT on rich WinUI/WPF
+trees), and actions use server-side `FindFirst(Name=…)`. Target a window by `$env:NEKO_UIA_WINDOW` (title
+substring; UIA acts without focus) or default to the foreground window.
+
+**App-type matrix (honest — UIA quality varies by app framework):**
+| App kind | UIA quality | Note |
+|---|---|---|
+| WPF, WinForms (compiled), most LOB apps | first-class | `invoke`/`setvalue`/`toggle` work, no cursor |
+| Win32 classic (Office, Explorer dialogs) | good | stays alive when backgrounded |
+| UWP (Calculator, Settings) | good but **suspends** | tree collapses when fully hidden — keep it VISIBLE |
+| WinUI (Win11 Notepad) | good but frame-hosted | content is a child of an outer frame; target the content |
+| Pre-UIA legacy (charmap) / custom-drawn (games, canvas) | poor/none | no element tree → fall to OCR / Set-of-Marks / pixel-vision |
+
+So: prefer UIA; drop to the vision sub-call below ONLY for the last row (no accessibility tree).
+
+### Vision fallback (custom-drawn UIs with no tree)
+When there's genuinely no accessibility tree, it's the screenshot -> ground -> click loop. No single
+available model does vision + GUI-grounding + tool-calling together, so SEPARATE them: the text driver
+(gpt-oss) orchestrates and calls a vision model as a sub-step to "see". Bundled scripts in
 `skills/computer-use/scripts/`:
 - **Screenshot** — `screenshot.ps1 <out.gif> [width]` captures + downscales to a small **GIF** and prints
   `scale` (driver maps `real = view / scale`). Why GIF, not JPEG/PNG: NVIDIA's gateway counts the image's
@@ -110,11 +152,15 @@ ground; keep each image small (GIF) under NVIDIA's token budget (`<img>` convers
 "Everything is data" -- the screen ALREADY is structured data; don't make the model estimate pixels. Ground
 in order of reliability (only the last needs a GUI-trained model):
 1. **Code / CLI / API** (CoAct-1) -- no grounding at all, most reliable (Neko's code-first principle).
-2. **Accessibility tree** -- `uia.ps1` dumps the foreground window's interactive elements via Windows UI
-   Automation: NAME + ROLE + EXACT bounding rect FROM THE OS. A plain text model (gpt-oss) reads the list,
-   picks by name, clicks the exact center -- pixel-perfect, <100 ms, private, NO vision, NO GUI-training. This
-   is exactly why WEB works with gpt-oss (the DOM); UIA is the desktop DOM. Works for standard apps (Office,
-   browsers, system apps, most software). VERIFIED: `uia.ps1` listed a window's buttons with click coords.
+2. **Accessibility tree** -- `uia.ps1` reads AND acts on a window via Windows UI Automation: NAME + ROLE +
+   EXACT bounding rect FROM THE OS, plus the assistive-tech action patterns. A plain text model (gpt-oss)
+   `list`s elements, then acts BY NAME: `invoke` (InvokePattern -- click with NO cursor movement / no focus
+   steal / works occluded), `setvalue` (ValuePattern -- type with no keyboard), `toggle`, and `get` to verify
+   -- pixel/element-perfect, <100 ms, private, NO vision, NO GUI-training. Falls back to a real coord-click
+   only if an element exposes no pattern. This is exactly why WEB works with gpt-oss (the DOM); UIA is the
+   desktop DOM. **VERIFIED end-to-end:** list -> setvalue -> invoke -> screenshot/get confirmed the action,
+   default gpt-oss, no vision. See the DESKTOP quick-start for the loop + the app-type matrix (works on
+   WPF/WinForms/Win32/UWP/WinUI; only pre-UIA-legacy & custom-drawn UIs need the lower rungs).
 3. **OCR** -- for a text target with no UIA, OCR the screen (Tesseract / NVIDIA NeMo-OCR NIM) -> exact box.
 4. **Set-of-Marks** (OmniParser-style) -- custom/canvas UIs: detect elements, overlay NUMBERED marks, ask
    "which number?" -> click its known box. Turns "estimate coords" into "pick #N" (easy text reasoning).

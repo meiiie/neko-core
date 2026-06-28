@@ -12,6 +12,13 @@ All notable changes to Neko Code are documented here. The format follows
   a real VN procurement run. A Windows desktop **control primitive** `mouse.ps1` (pos/move/click) plus the
   Clicky-inspired `[POINT:x,y]` grounding path, so the screenshot -> vision-ground -> click loop is ready the
   moment a vision/GUI model is configured.
+- **Desktop control with NO vision (UIA)** — `uia.ps1` drives Windows apps through the OS accessibility tree
+  (the desktop DOM): a plain text model `list`s a window's controls (name + role + verb + exact OS coords),
+  then acts BY NAME — `invoke` (InvokePattern: click without moving the cursor), `setvalue` (type without the
+  keyboard), `toggle`, and `get` to verify — no vision, no GUI-trained model, no cursor hijack. SOTA-grade
+  perf via a UIA CacheRequest (one bulk cross-process call; a naive tree walk times out on rich WinUI/WPF).
+  Verified end-to-end on a real .NET window (`list` -> `setvalue` -> `invoke` -> screenshot confirmed). Raw-
+  pixel vision is now only the LAST resort, for custom-drawn UIs with no accessibility tree.
 - **Deep research** — a `deep-research` skill (plan -> multi-source search -> read primaries -> cross-verify
   >=2 authoritative sources -> cited synthesis) and a strengthened always-on Accuracy section in the prompt.
 - **tui-self-test** skill — verify the TUI render (ink-testing-library + a live screenshot loop) with the
