@@ -84,19 +84,25 @@ tool-calls) orchestrates and calls a vision model as a sub-step to "see". Three 
   negative `max_tokens`). GIF's indexed colour is tiny for UI and -- unlike the JPEG encoder -- does NOT trip
   antivirus screen-capture heuristics. If a capture script is still blocked, split it: a simple `CopyFromScreen`
   -> `Save(png)` (scans clean) then a FILE resize -> `Save(...,Gif)` (no screen capture, scans clean).
-- **See / ground** — `bun see.ts <image> "<question>"` sends the image to a vision model ($NEKO_VISION_MODEL,
-  default `microsoft/phi-3-vision-128k-instruct`) and prints its answer/coordinates. The driver calls this via
-  `bash` to look. **Verified end-to-end:** gpt-oss orchestrated `see.ts` to ground a window's close button to
-  ~20-40 px of truth, then said it would `mouse.ps1 click` there.
+- **See / ground** — `bun see.ts <image> "<question>"` (one-shot) sends the image to a vision model
+  ($NEKO_VISION_MODEL, default `microsoft/phi-3-vision-128k-instruct`) and prints its answer/coordinates.
+  For a precise CLICK target, `bun ground.ts "<target>" [full.png]` runs the **2-pass crop-and-zoom**
+  (captures, grounds rough, crops a high-res region, re-grounds, maps to real px) and prints `x,y`.
+  **Verified:** gpt-oss orchestrated `see.ts` to ground a corner button to ~10-20 px.
 - **Control** — `mouse.ps1 <pos|move|click|dblclick> [x] [y]`. `pos`/`move` harmless; `click` is gated (approval).
 - **Loop**: `screenshot.ps1` -> `see.ts` (ground in view px) -> scale to real px -> `mouse.ps1 click` -> re-shot -> reflect.
 - **Multi-monitor**: coordinates are the virtual desktop; map per display (Clicky's `screenN`).
 
-General-VLM grounding is APPROXIMATE (~10-40 px) -- fine for big targets. For SMALL targets use the SOTA
-high-res technique (ScreenSpot-Pro / iterative focus refinement): ground roughly, then CROP that region from
-a full-res capture and re-ask `see.ts` on the zoomed crop -- the target is now large + central, so the second
-pass is tight. Keep each image small (GIF) so its base64 fits NVIDIA's token budget. The format enabler is
-auto: NVIDIA NIM needs the `<img>`-tag image format for the older vision models (see `image_format`).
+**Honest ceiling — the model, not the machinery.** `ground.ts` implements the SOTA crop-and-zoom
+(ScreenSpot-Pro / iterative focus refinement) correctly, but real-world precision is capped by the available
+VLM's grounding: `phi-3-vision` is decent on distinctive / corner targets (~10-20 px) but UNRELIABLE on dense
+or centred ones (it placed a centred search box at x=92 when truth was ~890) -- and when pass-1 is far off,
+the crop is around the wrong place, so pass-2 can't recover. It's also SLOW (2 vision calls + NVIDIA latency).
+A GUI-trained model (UI-TARS / OpenCUA / Claude Computer Use) would make this tight and fast; none is on
+NVIDIA today. Net: the pipeline + technique are complete and ready; treat coordinates as approximate, prefer
+big/distinctive targets, verify after the click, and don't fire irreversible clicks on a low-confidence
+ground. Keep each image small (GIF) so its base64 fits NVIDIA's token budget; the `<img>`-format conversion
+is automatic (see `image_format`).
 (For keyboard, `WScript.Shell.SendKeys` works but is global/focus-sensitive -- see `tui-self-test`.)
 
 ## Huge pages — read in PARTS, like a human (SOTA: agentic chunking + sub-agent)
