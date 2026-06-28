@@ -26,6 +26,23 @@ export function clampEffort(effort: string, ceiling: string): string {
   return e > c ? ceiling : effort;
 }
 
+/** NVIDIA NIM vision endpoints take the image embedded as an <img> tag inside the message content
+ * STRING, not as an OpenAI image_url content-part. Fold any image_url parts into <img> tags so these
+ * models actually SEE the image (verified: phi-3-vision / neva read + ground via this format; the
+ * OpenAI content-part format is silently ignored). Text-only messages pass through unchanged. */
+export function toImgTagMessages(messages: any[]): any[] {
+  return messages.map((m) => {
+    if (!Array.isArray(m.content)) return m;
+    let text = "";
+    const imgs: string[] = [];
+    for (const part of m.content) {
+      if (part?.type === "text") text += part.text;
+      else if (part?.type === "image_url" && part.image_url?.url) imgs.push(`<img src="${part.image_url.url}" />`);
+    }
+    return imgs.length ? { ...m, content: `${text} ${imgs.join(" ")}`.trim() } : m;
+  });
+}
+
 export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "moa") return new MoaProvider(config);
   if (config.provider === "openai_compat") return new OpenAICompatProvider(config);
@@ -71,9 +88,13 @@ export class OpenAICompatProvider implements Provider {
     }
 
     const stream = Boolean(onDelta);
+    // NVIDIA NIM vision models need the image as an <img> tag in the content string, not an OpenAI
+    // image_url part (which they silently ignore). Convert when the endpoint needs it -- config-first,
+    // auto for an NVIDIA base_url. No-op for text-only messages, so it's safe to always apply.
+    const imgTag = this.cfg.imageFormat === "img-tag" || (this.cfg.imageFormat === "auto" && /nvidia/i.test(this.cfg.baseUrl));
     const payload: Record<string, any> = {
       model: this.cfg.model,
-      messages,
+      messages: imgTag ? toImgTagMessages(messages) : messages,
       temperature: this.cfg.temperature,
       stream,
     };
