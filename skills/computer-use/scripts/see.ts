@@ -21,7 +21,8 @@ const question =
   rest.join(" ").trim() ||
   "Describe this screen. List each visible UI element (windows, buttons, fields, icons, text) with its approximate pixel coordinates x,y.";
 const model = process.env.NEKO_VISION_MODEL || "microsoft/phi-3-vision-128k-instruct";
-const ext = imagePath.toLowerCase().endsWith(".png") ? "png" : "jpeg";
+const lower = imagePath.toLowerCase();
+const ext = lower.endsWith(".png") ? "png" : lower.endsWith(".gif") ? "gif" : "jpeg"; // NVIDIA NIM takes png/gif/jpeg
 const b64 = readFileSync(imagePath).toString("base64");
 const cfg = loadConfig({ overrides: { model, vision: true } as any });
 const res = await getProvider(cfg).complete([
