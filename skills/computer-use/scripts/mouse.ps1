@@ -26,6 +26,7 @@ if($env:NEKO_PRESENCE){
   if((Test-Path $stop) -and ((Get-Content $stop -TotalCount 1 -ErrorAction SilentlyContinue) -match 'user')){ Write-Output "paused: you took control (overlay yielded)"; exit }
   if(-not (Test-Path $run) -or (((Get-Date)-(Get-Item $run).LastWriteTime).TotalSeconds -gt 3)){ Remove-Item $stop -ErrorAction SilentlyContinue; Start-Process powershell -ArgumentList '-NoProfile','-File',(Join-Path $PSScriptRoot 'overlay.ps1') -WindowStyle Hidden }
   if($cmd -in 'move','click','dblclick','stroke'){ "$($args[0]),$($args[1])|Neko $cmd" | Out-File $tgt -Encoding ascii }
+  if($env:NEKO_DRAW_WINDOW){ $env:NEKO_DRAW_WINDOW | Out-File "$env:TEMP\neko_active_window.txt" -Encoding utf8 }  # overlay frames + labels this window/tab
 }
 # --- Optional: bring a target window to the foreground first. Desktop input (SendInput) lands on the active
 #     window; when the agent's console has focus, strokes would miss. Set NEKO_DRAW_WINDOW=<title substring>. ---

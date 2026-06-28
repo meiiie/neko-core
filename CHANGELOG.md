@@ -27,6 +27,13 @@ All notable changes to Neko Code are documented here. The format follows
   the non-hijacking path (`"sendinput"` forces the legacy path); a new backend is a config value + a script.
   No driver, no admin, Win11-Home compatible. (Hidden/background or game control still needs VM isolation —
   documented honestly in the skill.)
+- **Web reading via accessibility + tab presence** — `uia.ps1 read` dumps a page/doc as TEXT (so a text
+  model summarizes a web page with no vision); Unicode `@<utf8-file>` targets (invoke-by-name survives the
+  cp1252 console and is layout-independent). Launching Chrome with `--force-renderer-accessibility` exposes
+  the logged-in page DOM to UIA — gpt-oss autonomously browsed + summarized a live feed and composed a post,
+  reusing the login with no CDP and no credentials. The overlay now shows a **tab/window indicator** —
+  frames + labels the exact window/tab Neko is driving ("NEKO dang dung tab nay: <title>"), driven by
+  `neko_active_window.txt`.
 - **Deep research** — a `deep-research` skill (plan -> multi-source search -> read primaries -> cross-verify
   >=2 authoritative sources -> cited synthesis) and a strengthened always-on Accuracy section in the prompt.
 - **tui-self-test** skill — verify the TUI render (ink-testing-library + a live screenshot loop) with the

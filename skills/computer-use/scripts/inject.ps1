@@ -20,6 +20,7 @@ if($env:NEKO_PRESENCE){
   if((Test-Path $stop) -and ((Get-Content $stop -TotalCount 1 -ErrorAction SilentlyContinue) -match 'user')){ Write-Output "paused: you took control (overlay yielded)"; exit }
   if(-not (Test-Path $run) -or (((Get-Date)-(Get-Item $run).LastWriteTime).TotalSeconds -gt 3)){ Remove-Item $stop -ErrorAction SilentlyContinue; Start-Process powershell -ArgumentList '-NoProfile','-File',(Join-Path $PSScriptRoot 'overlay.ps1') -WindowStyle Hidden }
   if($cmd -in 'tap','dbltap','stroke'){ "$($a[0]),$($a[1])|Neko $cmd" | Out-File $tgt -Encoding ascii }
+  if($env:NEKO_DRAW_WINDOW){ $env:NEKO_DRAW_WINDOW | Out-File "$env:TEMP\neko_active_window.txt" -Encoding utf8 }  # overlay frames + labels this window/tab
 }
 # --- Optional: raise a target window so the touch lands on it (touch hits the topmost window at the point). ---
 if($env:NEKO_DRAW_WINDOW){

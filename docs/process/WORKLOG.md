@@ -3,6 +3,48 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-06-29 — Computer-use: independent pointer, web-via-a11y, tab presence
+
+Built `skills/computer-use` into a real, config-first, composable capability — Neko USES the
+computer, on the user's real visible machine, with its own pointer that doesn't hijack the mouse.
+
+**Grounding + action (no GUI-trained model, mostly no vision):**
+- `uia.ps1` — the Windows accessibility tree as the desktop DOM: `list` (actionable elements +
+  verb + exact coords), `invoke`/`setvalue`/`toggle` (UIA patterns — act with NO cursor), `get`
+  (verify), `read` (dump a page/doc as TEXT to summarize). CacheRequest beats the FindAll timeout
+  on rich WinUI/WPF trees. Unicode targets via `@<utf8-file>` (the cp1252 console mangles Vietnamese
+  args; invoke-by-name is layout-independent — coord taps on a reflowing feed are fragile).
+- `inject.ps1` — **independent agent pointer** via Windows TOUCH INJECTION
+  (`InitializeTouchInjection`/`InjectTouchInput`): tap/dbltap/stroke on the visible desktop WITHOUT
+  moving the user's mouse (verified: drew in Paint with the real cursor parked, unmoved). No driver,
+  no admin, Win11-Home OK.
+- `mouse.ps1` — legacy SendInput (moves the one system cursor); when `NEKO_INPUT=inject` it
+  transparently delegates the acting verbs to `inject.ps1`.
+- `overlay.ps1` — the VISIBLE agent cursor (blue triangle, flies to where Neko acts) + a presence
+  banner; now also a **tab/window indicator**: reads `neko_active_window.txt` and frames + labels
+  the exact window/tab Neko is using ("NEKO dang dung tab nay: <title>").
+
+**Config-first (a backend/flag, not a code change):** `computer_use_overlay` -> `NEKO_PRESENCE`
+(overlay + takeover); `computer_use_input: "inject"|"sendinput"` -> `NEKO_INPUT` (which pointer
+backend). Helpers also publish `NEKO_DRAW_WINDOW` to the active-window file for the indicator.
+
+**Web via accessibility (reuse the logged-in browser, no CDP, no credentials):** launch Chrome with
+`--force-renderer-accessibility` so `uia.ps1 read` sees the page DOM as text. gpt-oss AUTONOMOUSLY
+browsed + summarized a live Facebook feed (read -> scroll via inject -> summarize), and opened +
+composed a post by invoking the composer BY NAME. Posting capability proven end-to-end; the final
+irreversible publish is left to the user's explicit go.
+
+**Honest findings (dead ends documented so we don't repeat them):** Chrome 149 blocks CDP on the
+default profile; Chrome 127+ App-Bound Encryption blocks cookie-copy (so a copied profile loses the
+login) -> `--force-renderer-accessibility` on the default profile is the clean reuse path. UWP apps
+suspend their UIA tree when fully hidden (keep visible). For read-heavy turns, lower `reasoning_effort`
+so the model emits the answer instead of over-reasoning into the output-token cap.
+
+**Independent cursor — the answer:** Windows has ONE *mouse* cursor (a 2nd OS arrow needs a kernel
+driver). But it has SEPARATE pen/touch input channels, so Neko's pointer = touch injection (acts,
+mouse untouched) + the overlay triangle (visible) + the tab frame (which window). Functionally its
+own cursor on the same screen; true hidden/background or game control still needs a VM (isolation).
+
 ## 2026-06-22 — Session 1: port → harness → go-live
 
 **Ported the coding-agent core out of the frozen `bang_c` (PORTING steps 1–6):**

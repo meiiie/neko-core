@@ -9,7 +9,7 @@
 # Usage:  overlay.ps1 [stopFile] [maxSeconds] [targetFile]
 #   Agent controls the independent cursor by writing the targetFile:  "x,y"  or  "x,y|label"  -> fly there;
 #   "idle" / empty / missing -> follow the user's cursor.
-param([string]$stopFile="$env:TEMP\neko_overlay.stop", [int]$maxSeconds=600, [string]$targetFile="$env:TEMP\neko_cursor.txt", [string]$shotFile="")
+param([string]$stopFile="$env:TEMP\neko_overlay.stop", [int]$maxSeconds=600, [string]$targetFile="$env:TEMP\neko_cursor.txt", [string]$shotFile="", [string]$activeWinFile="$env:TEMP\neko_active_window.txt")
 Remove-Item $stopFile -ErrorAction SilentlyContinue
 Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing -TypeDefinition @"
 using System; using System.Windows.Forms; using System.Drawing; using System.Runtime.InteropServices;
@@ -24,6 +24,8 @@ public class Hk {
   [DllImport("user32.dll")] public static extern bool UnhookWindowsHookEx(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr CallNextHookEx(IntPtr h, int n, IntPtr w, IntPtr l);
   [DllImport("kernel32.dll")] public static extern IntPtr GetModuleHandle(string m);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);   // frame the window Neko is using
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L; public int T; public int R; public int B; }
   [StructLayout(LayoutKind.Sequential)] public struct MS { public int x; public int y; public uint data; public uint flags; public uint time; public IntPtr extra; }
   public static bool UserActed=false; static IntPtr H=IntPtr.Zero; static Proc _cb;
   static IntPtr Cb(int n, IntPtr w, IntPtr l){ if(n>=0){ MS s=(MS)Marshal.PtrToStructure(l,typeof(MS)); int m=w.ToInt32(); bool inj=(s.flags&0x01)!=0; if(!inj && (m==513||m==516)) UserActed=true; } return CallNextHookEx(H,n,w,l); }
@@ -39,15 +41,26 @@ $f.BackColor=$key; $f.TransparencyKey=$key
 $c=[System.Windows.Forms.Cursor]::Position; $script:mx=[double]$c.X; $script:my=[double]$c.Y
 $script:flying=$false; $script:ft=0.0; $script:sx=0.0;$script:sy=0.0;$script:cxp=0.0;$script:cyp=0.0;$script:txp=0.0;$script:typ=0.0;$script:scale=1.0
 $script:paused=$false; $script:pt=$null; $script:label="Neko"; $script:shot=$false; $script:lasthb=(Get-Date).AddSeconds(-10)
+$script:winRect=$null; $script:winLabel=""; $script:lastwin=(Get-Date).AddSeconds(-10)   # the specific window/tab Neko is using (framed + banner)
 function TriPts($ax,$ay,$sc){ $rad=[Math]::PI*-35.0/180.0; $ca=[Math]::Cos($rad); $sa=[Math]::Sin($rad); $S=22.0*$sc; $Hh=19.0*$sc; $base=@(@(0.0,0.0),@((-$S/2.0),$Hh),@(($S/2.0),$Hh)); $o=New-Object System.Collections.Generic.List[System.Drawing.PointF]; foreach($p in $base){ $rx=$p[0]*$ca-$p[1]*$sa; $ry=$p[0]*$sa+$p[1]*$ca; $o.Add((New-Object System.Drawing.PointF([single]($ax+$rx),[single]($ay+$ry)))) }; return $o.ToArray() }
 $f.Add_Paint({ param($s,$e)
   $g=$e.Graphics; $g.Clear($key); $g.SmoothingMode='AntiAlias'
   $col= if($script:paused){$red}else{$blue}
-  $bw=6; $g.DrawRectangle((New-Object System.Drawing.Pen $col,$bw), [int]($bw/2),[int]($bw/2),$f.Width-$bw,$f.Height-$bw)
-  $txt= if($script:paused){"DA DUNG  -  ban dang dieu khien"}else{"NEKO DANG DIEU KHIEN  -  bam chuot de dung"}
-  $bf=New-Object System.Drawing.Font("Segoe UI",13,[System.Drawing.FontStyle]::Bold); $sz=$g.MeasureString($txt,$bf); $bx=[int](($f.Width-$sz.Width)/2)-18
-  $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(235,20,22,28))),$bx,14,$sz.Width+36,$sz.Height+14)
-  $g.DrawString($txt,$bf,(New-Object System.Drawing.SolidBrush $col),$bx+18,21)
+  $bf=New-Object System.Drawing.Font("Segoe UI",13,[System.Drawing.FontStyle]::Bold)
+  if($script:winRect){
+    # Neko is using a SPECIFIC window/tab: frame that window + banner its title at its top-left.
+    $r=$script:winRect; $bw=5; $g.DrawRectangle((New-Object System.Drawing.Pen $col,$bw), $r.L+2, $r.T+2, ($r.R-$r.L)-4, ($r.B-$r.T)-4)
+    $txt= if($script:paused){"DA DUNG - ban dang dieu khien"}else{"NEKO dang dung tab nay:  " + $script:winLabel}
+    $sz=$g.MeasureString($txt,$bf); $bx=$r.L+10; $by=$r.T+8
+    $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(240,20,22,28))),$bx,$by,$sz.Width+24,$sz.Height+12)
+    $g.DrawString($txt,$bf,(New-Object System.Drawing.SolidBrush $col),$bx+12,$by+6)
+  } else {
+    $bw=6; $g.DrawRectangle((New-Object System.Drawing.Pen $col,$bw), [int]($bw/2),[int]($bw/2),$f.Width-$bw,$f.Height-$bw)
+    $txt= if($script:paused){"DA DUNG  -  ban dang dieu khien"}else{"NEKO DANG DIEU KHIEN  -  bam chuot de dung"}
+    $sz=$g.MeasureString($txt,$bf); $bx=[int](($f.Width-$sz.Width)/2)-18
+    $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(235,20,22,28))),$bx,14,$sz.Width+36,$sz.Height+14)
+    $g.DrawString($txt,$bf,(New-Object System.Drawing.SolidBrush $col),$bx+18,21)
+  }
   try {
     foreach($gl in @(@(2.0,55),@(1.4,110),@(1.0,255))){ $g.FillPolygon((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb([int]$gl[1],$col.R,$col.G,$col.B))), (TriPts $script:mx $script:my $gl[0])) }
     $g.DrawPolygon((New-Object System.Drawing.Pen ([System.Drawing.Color]::White),1.5), (TriPts $script:mx $script:my $script:scale))
@@ -68,6 +81,14 @@ $timer.Add_Tick({
   if(-not $script:flying -and $dist -gt 70){ $script:flying=$true; $script:ft=0.0; $script:sx=$script:mx;$script:sy=$script:my;$script:txp=$tx;$script:typ=$ty; $arc=[Math]::Min($dist*0.2,80.0); $script:cxp=($script:sx+$tx)/2; $script:cyp=(($script:sy+$ty)/2)-$arc }
   if($script:flying){ $script:ft=[Math]::Min(1.0,$script:ft+0.05); $t=$script:ft; $om=1.0-$t; $script:mx=$om*$om*$script:sx+2*$om*$t*$script:cxp+$t*$t*$script:txp; $script:my=$om*$om*$script:sy+2*$om*$t*$script:cyp+$t*$t*$script:typ; $script:scale=1.0+0.35*[Math]::Sin($t*[Math]::PI); if($script:ft -ge 1.0){ $script:flying=$false; $script:scale=1.0 } }
   else { $script:mx+=$dx*0.25; $script:my+=$dy*0.25; $script:scale=1.0 }
+  # which window/tab is Neko using? -> frame it + banner its title (throttled; Get-Process is slow)
+  if(((Get-Date)-$script:lastwin).TotalMilliseconds -gt 500){ $script:lastwin=Get-Date
+    $awl=$null; if(Test-Path $activeWinFile){ $awl=(Get-Content $activeWinFile -Raw -Encoding UTF8 -ErrorAction SilentlyContinue) }
+    if($awl){ $awl=($awl -replace '﻿','').Trim() }   # strip BOM (Out-File -utf8 prepends one) + whitespace
+    if($awl){ $wp=Get-Process | Where-Object { $_.MainWindowTitle -like "*$awl*" } | Select-Object -First 1
+      if($wp){ $rc=New-Object Hk+RECT; if([Hk]::GetWindowRect($wp.MainWindowHandle,[ref]$rc)){ $script:winRect=$rc; $l=$wp.MainWindowTitle; if($l.Length -gt 60){$l=$l.Substring(0,60)+"..."}; $script:winLabel=$l } else { $script:winRect=$null } }
+      else { $script:winRect=$null } }
+    else { $script:winRect=$null } }
   $f.Invalidate()
   if(((Get-Date)-$script:lasthb).TotalSeconds -gt 1){ $script:lasthb=Get-Date; try { "1" | Out-File "$env:TEMP\neko_overlay.run" -Encoding ascii } catch {} }  # heartbeat so the tools know it's alive
   if($shotFile -and -not $script:shot -and ((Get-Date)-$t0).TotalSeconds -gt 3.5){ $script:shot=$true; try { $sb=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm=New-Object System.Drawing.Bitmap $sb.Width,$sb.Height; ([System.Drawing.Graphics]::FromImage($bm)).CopyFromScreen(0,0,0,0,$bm.Size); $bm.Save($shotFile); $bm.Dispose() } catch {} }
