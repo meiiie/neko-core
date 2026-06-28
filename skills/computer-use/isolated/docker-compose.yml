@@ -1,0 +1,30 @@
+# Isolated desktop for agent computer-use -- the Claude-Computer-Use architecture, runnable with the Docker
+# you already have (WSL2). The agent drives a virtual Linux desktop INSIDE this container: its OWN display
+# and OWN cursor, fully isolated from your Windows host. Your real mouse/keyboard are never touched, and you
+# can keep working while you watch the agent live in a browser.
+#
+#   docker compose up -d        # first run pulls the image (~1-2 GB)
+#   start http://localhost:3000 # the isolated desktop, in your browser (KasmVNC)
+#   docker compose down         # stop + discard
+#
+# This brings up the isolated DESKTOP. Wiring Neko inside it is the next step (see README.md): build a Linux
+# `neko`, add `xdotool` (mouse/keyboard) + `scrot`/`import` (screenshot) -- the Linux equivalents of
+# mouse.ps1 / screenshot.ps1 -- and run Neko in the container so it grounds + acts on the virtual display.
+services:
+  neko-desktop:
+    image: lscr.io/linuxserver/webtop:ubuntu-xfce   # Xvfb + XFCE + KasmVNC, an isolated X11 desktop in a browser
+    container_name: neko-desktop
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Ho_Chi_Minh
+      - TITLE=Neko (isolated)
+    ports:
+      - "3000:3000"      # http  (the desktop in your browser)
+      - "3001:3001"      # https
+    shm_size: "1gb"
+    restart: unless-stopped
+    # volumes:
+    #   - ./neko-home:/config   # persist the guest home if you want state to survive `down`
