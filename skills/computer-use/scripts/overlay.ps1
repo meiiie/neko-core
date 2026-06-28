@@ -48,7 +48,15 @@ $script:winRect=$null; $script:winLabel=""; $script:lastwin=(Get-Date).AddSecond
 $script:agentTarget=$false; $script:pulseT=2.0; $script:pulseX=0.0; $script:pulseY=0.0   # click-pulse ripple state
 $script:bf=New-Object System.Drawing.Font("Segoe UI",12.5,[System.Drawing.FontStyle]::Bold)
 $script:lf=New-Object System.Drawing.Font("Segoe UI",10,[System.Drawing.FontStyle]::Bold)
-function TriPts($ax,$ay,$sc){ $rad=[Math]::PI*-35.0/180.0; $ca=[Math]::Cos($rad); $sa=[Math]::Sin($rad); $S=22.0*$sc; $Hh=19.0*$sc; $base=@(@(0.0,0.0),@((-$S/2.0),$Hh),@(($S/2.0),$Hh)); $o=New-Object System.Collections.Generic.List[System.Drawing.PointF]; foreach($p in $base){ $rx=$p[0]*$ca-$p[1]*$sa; $ry=$p[0]*$sa+$p[1]*$ca; $o.Add((New-Object System.Drawing.PointF([single]($ax+$rx),[single]($ay+$ry)))) }; return $o.ToArray() }
+# Refined cursor silhouette: a sleek notched chevron (apex = the exact target pixel; concave back for elegance),
+# tilted -38 deg. Returns a GraphicsPath so it can be glow-stroked, gradient-filled, and white-bordered.
+function CurPath($ax,$ay,$sc){
+  $rad=[Math]::PI*-38.0/180.0; $ca=[Math]::Cos($rad); $sa=[Math]::Sin($rad)
+  $base=@(@(0.0,0.0),@(-7.8,22.5),@(0.0,14.5),@(7.8,22.5))   # tip, left, notch, right (sleek, sharp apex)
+  $pts=New-Object System.Collections.Generic.List[System.Drawing.PointF]
+  foreach($p in $base){ $x=$p[0]*$sc; $y=$p[1]*$sc; $rx=$x*$ca-$y*$sa; $ry=$x*$sa+$y*$ca; $pts.Add((New-Object System.Drawing.PointF([single]($ax+$rx),[single]($ay+$ry)))) }
+  $path=New-Object System.Drawing.Drawing2D.GraphicsPath; $path.AddPolygon($pts.ToArray()); return $path
+}
 function RRP($x,$y,$w,$h,$rad){ $d=$rad*2.0; $p=New-Object System.Drawing.Drawing2D.GraphicsPath; $p.AddArc($x,$y,$d,$d,180,90); $p.AddArc($x+$w-$d,$y,$d,$d,270,90); $p.AddArc($x+$w-$d,$y+$h-$d,$d,$d,0,90); $p.AddArc($x,$y+$h-$d,$d,$d,90,90); $p.CloseFigure(); return $p }
 $f.Add_Paint({ param($s,$e)
   $g=$e.Graphics; $g.Clear($key); $g.SmoothingMode='AntiAlias'; $g.TextRenderingHint='ClearTypeGridFit'
@@ -80,11 +88,24 @@ $f.Add_Paint({ param($s,$e)
     $a2=[int]((1.0-$script:pulseT)*90); $pen2=New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb($a2,$col.R,$col.G,$col.B)),2
     $rr2=$rr*0.6; $g.DrawEllipse($pen2,[single]($script:pulseX-$rr2),[single]($script:pulseY-$rr2),[single]($rr2*2),[single]($rr2*2))
   }
-  # ---- cursor: drop-shadow, glow, fill, white outline ----
+  # ---- cursor: soft shadow -> glow hugging the silhouette -> gradient fill -> crisp white border ----
   try {
-    $g.FillPolygon((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(70,0,0,0))), (TriPts ($script:mx+2.0) ($script:my+3.0) $script:scale))
-    foreach($gl in @(@(2.0,50),@(1.4,105),@(1.0,255))){ $g.FillPolygon((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb([int]$gl[1],$col.R,$col.G,$col.B))), (TriPts $script:mx $script:my $gl[0])) }
-    $g.DrawPolygon((New-Object System.Drawing.Pen ([System.Drawing.Color]::White),1.6), (TriPts $script:mx $script:my $script:scale))
+    $rnd=[System.Drawing.Drawing2D.LineJoin]::Round
+    $sp1=CurPath ($script:mx+1.5) ($script:my+2.5) $script:scale; $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(52,0,0,0))),$sp1); $sp1.Dispose()
+    $sp2=CurPath ($script:mx+3.0) ($script:my+4.5) $script:scale; $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(34,0,0,0))),$sp2); $sp2.Dispose()
+    $cp=CurPath $script:mx $script:my $script:scale
+    $gp1=New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(26,$col.R,$col.G,$col.B)),9.0; $gp1.LineJoin=$rnd; $g.DrawPath($gp1,$cp)
+    $gp2=New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(64,$col.R,$col.G,$col.B)),5.0; $gp2.LineJoin=$rnd; $g.DrawPath($gp2,$cp)
+    $bnd=$cp.GetBounds()
+    if($script:paused){ $c1=[System.Drawing.Color]::FromArgb(255,255,124,124); $c2=[System.Drawing.Color]::FromArgb(255,206,38,38) }
+    else { $c1=[System.Drawing.Color]::FromArgb(255,140,190,255); $c2=[System.Drawing.Color]::FromArgb(255,28,92,210) }
+    $lgb=New-Object System.Drawing.Drawing2D.LinearGradientBrush($bnd,$c1,$c2,108.0); $g.FillPath($lgb,$cp); $lgb.Dispose()
+    $wp=New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(240,255,255,255)),1.35; $wp.LineJoin=$rnd; $g.DrawPath($wp,$cp)
+    # subtle edge specular near the tip (a premium "catch light" on the upper-left edge)
+    $radS=[Math]::PI*-38.0/180.0; $lx0=(-7.8*$script:scale); $ly0=(22.5*$script:scale)
+    $lbx=$script:mx+($lx0*[Math]::Cos($radS)-$ly0*[Math]::Sin($radS)); $lby=$script:my+($lx0*[Math]::Sin($radS)+$ly0*[Math]::Cos($radS))
+    $hp=New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(140,255,255,255)),1.3; $hp.StartCap='Round'; $hp.EndCap='Round'
+    $g.DrawLine($hp,[single]($script:mx+($lbx-$script:mx)*0.12),[single]($script:my+($lby-$script:my)*0.12),[single]($script:mx+($lbx-$script:mx)*0.52),[single]($script:my+($lby-$script:my)*0.52)); $cp.Dispose()
     # ---- label bubble (rounded, edge-clamped) ----
     $lbl=$script:label; $ls=$g.MeasureString($lbl,$script:lf)
     $lx=[Math]::Min([int]$script:mx+17,$f.Width-[int]$ls.Width-26); $ly=[Math]::Min([int]$script:my+15,$f.Height-[int]$ls.Height-16)
