@@ -4,6 +4,32 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
+## [Unreleased]
+
+### Added
+- **Computer use** — a `computer-use` skill (code-first per CoAct-1, the GUI perception-action loop, hard
+  guardrails). WEB control validated end-to-end through `@playwright/mcp` (DOM-driven, no vision needed) and
+  a real VN procurement run. A Windows desktop **control primitive** `mouse.ps1` (pos/move/click) plus the
+  Clicky-inspired `[POINT:x,y]` grounding path, so the screenshot -> vision-ground -> click loop is ready the
+  moment a vision/GUI model is configured.
+- **Deep research** — a `deep-research` skill (plan -> multi-source search -> read primaries -> cross-verify
+  >=2 authoritative sources -> cited synthesis) and a strengthened always-on Accuracy section in the prompt.
+- **tui-self-test** skill — verify the TUI render (ink-testing-library + a live screenshot loop) with the
+  SendKeys focus-leak guardrail learned from dogfooding.
+
+### Fixed
+- **Context-overflow crash** — one huge tool result (a heavy page's browser snapshot) could push the prompt
+  past the context window, so the server returned a negative `max_tokens` and 400'd the turn. Each
+  observation is now capped, and a long turn compresses its OLDEST observations in place (observation
+  masking) before it would overflow. Regression-verified on the exact page that crashed (772k tokens, 0 crash).
+- **Procurement price typing** — prices are captured per condition (new / used-trade-in / installment), each
+  a labeled row, so a used/trade-in price is never reported as the new price.
+
+### Changed
+- **UI polish** (verified live) — diffs render Claude-style (line number first, red removals / green
+  additions); the tool-result connector uses a glyph (`└`) that renders on every terminal font; the
+  diff/write header colors its `+N` green and `-M` red.
+
 ## [0.4.0] — 2026-06-27
 
 ### Added
