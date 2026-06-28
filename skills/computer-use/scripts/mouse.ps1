@@ -10,6 +10,15 @@
 #   powershell -NoProfile -File mouse.ps1 dblclick <x> <y>
 #   powershell -NoProfile -File mouse.ps1 stroke <x1> <y1> <x2> <y2> [x3 y3 ...]   # pen-down drag (draw)
 param([string]$cmd = "pos")
+# --- Config-first input backend (NEKO_INPUT = computer_use_input): "inject" routes the acting verbs to the
+#     non-hijacking TOUCH path (inject.ps1) so Neko clicks/draws WITHOUT moving the user's mouse. A new
+#     backend is a config value + a script, not a rewrite. ---
+if($env:NEKO_INPUT -eq 'inject' -and ($cmd -in 'click','dblclick','stroke','move')){
+  if($cmd -eq 'move'){ Write-Output "move skipped (inject backend: overlay shows position; mouse not hijacked)"; exit }
+  $map=@{ click='tap'; dblclick='dbltap'; stroke='stroke' }
+  & (Join-Path $PSScriptRoot 'inject.ps1') $map[$cmd] @args
+  exit
+}
 # --- Agent presence (opt-in via NEKO_PRESENCE = computer_use_overlay): drive the independent cursor +
 #     honour click-to-takeover. Auto-launches overlay.ps1 if its heartbeat is stale. ---
 if($env:NEKO_PRESENCE){
@@ -17,6 +26,13 @@ if($env:NEKO_PRESENCE){
   if((Test-Path $stop) -and ((Get-Content $stop -TotalCount 1 -ErrorAction SilentlyContinue) -match 'user')){ Write-Output "paused: you took control (overlay yielded)"; exit }
   if(-not (Test-Path $run) -or (((Get-Date)-(Get-Item $run).LastWriteTime).TotalSeconds -gt 3)){ Remove-Item $stop -ErrorAction SilentlyContinue; Start-Process powershell -ArgumentList '-NoProfile','-File',(Join-Path $PSScriptRoot 'overlay.ps1') -WindowStyle Hidden }
   if($cmd -in 'move','click','dblclick','stroke'){ "$($args[0]),$($args[1])|Neko $cmd" | Out-File $tgt -Encoding ascii }
+}
+# --- Optional: bring a target window to the foreground first. Desktop input (SendInput) lands on the active
+#     window; when the agent's console has focus, strokes would miss. Set NEKO_DRAW_WINDOW=<title substring>. ---
+if($env:NEKO_DRAW_WINDOW -and ($cmd -in 'move','click','dblclick','stroke')){
+  Add-Type 'using System;using System.Runtime.InteropServices;public class FgW{[DllImport("user32.dll")]public static extern bool SetForegroundWindow(IntPtr h);[DllImport("user32.dll")]public static extern bool ShowWindow(IntPtr h,int n);}'
+  $tw=Get-Process | Where-Object { $_.MainWindowTitle -like "*$($env:NEKO_DRAW_WINDOW)*" } | Select-Object -First 1
+  if($tw){ [FgW]::ShowWindow($tw.MainWindowHandle,3) | Out-Null; [FgW]::SetForegroundWindow($tw.MainWindowHandle) | Out-Null; Start-Sleep -Milliseconds 200 }
 }
 Add-Type @"
 using System; using System.Runtime.InteropServices;

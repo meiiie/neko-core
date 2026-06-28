@@ -167,11 +167,15 @@ in order of reliability (only the last needs a GUI-trained model):
 5. **Raw-pixel VLM** (`ground.ts`) -- LAST resort; the only path that wants a GUI-trained model.
 Microsoft UFO2, Windows-Use, DirectShell, OmniParser all LEAD with the accessibility tree + scripts and use
 pixel-vision only to fill gaps. So Neko controls standard desktop apps RELIABLY today with plain gpt-oss +
-`uia.ps1` + `mouse.ps1` -- no GUI-trained model required.
+`uia.ps1` -- no GUI-trained model required. For the rare pointer action (canvas/drag/non-UIA target), act with
+`inject.ps1` (touch -- does NOT move the user's mouse) or `mouse.ps1` (SendInput -- legacy); see Agent presence
+(A2) for the config-first backend switch.
 
 ## Agent presence + control isolation (clicky-style)
-Two SOTA concerns when an agent drives the REAL machine: the user should SEE it's controlling, and ideally
-the agent shouldn't hijack the user's cursor.
+Three composable layers: **(A) SEE it** (overlay), **(A2) ACT without hijacking your mouse** (touch
+injection — its own pointer channel), **(B) ISOLATE it** (separate desktop/VM — for hidden/background or
+any-app incl. games). Key fact: the OS has ONE *mouse* cursor, but SEPARATE *pen/touch* input channels —
+that is how the agent gets its own pointer on the same screen without taking yours.
 
 **(A) Overlay — works now, same desktop.** `overlay.ps1 [stopFile] [maxSeconds] [targetFile] [shotFile]`
 paints a **flicker-free** (custom double-buffered Form: OptimizedDoubleBuffer + no OnPaintBackground, clear
@@ -186,8 +190,9 @@ in OnPaint), transparent, click-through, always-on-top layer, pixel-faithful to 
 - a low-level mouse hook that, on a REAL (non-injected, `LLMHF_INJECTED`) user click, flips to PAUSED and
   writes `stopFile` so the loop yields.
 Run it in the background for a session (`overlay.ps1` takes an optional 4th arg `shotFile` to self-capture
-from inside its own process for verification). Limit: the OS has ONE physical cursor, so this SHOWS presence
-+ yields on touch -- not true input separation (that's section B). **Verified pixel-aligned:** an in-process
+from inside its own process for verification). Limit: the overlay only SHOWS presence + yields on touch; for
+the agent to ACT without moving your mouse, pair it with (A2) injection; for a fully separate input queue use
+(B). **Verified pixel-aligned:** an in-process
 self-capture put the marker exactly on the hovered tab. A CROSS-process screenshot of the overlay may show
 the marker offset on a scaled display -- that is a capture artifact (the capturing process has a different
 DPI-awareness context than the overlay), NOT what the user sees on the real screen.
@@ -201,15 +206,34 @@ took control"). Off by default = zero overhead. The 3-file protocol (run/target/
 point: ANY tool (or an external agent) that writes the target file drives the same agent cursor -- a uniform
 presence layer across web + desktop, beyond Clicky's point-only macOS app.
 
-**(B) True input isolation (own cursor, doesn't touch yours) — the robust SOTA.** Run the agent in a
-SEPARATE virtual desktop/session with its own input queue. Claude Computer Use uses a container + Xvfb
-virtual display; UFO2 uses the Windows RDP/WinStation subsystem (events scoped to that session, can't reach
-the primary desktop). On Windows 11 **Home** (no Windows Sandbox / Hyper-V), the practical paths:
-- **VirtualBox / VMware VM** — a full Windows guest; Neko runs inside with its OWN cursor; watch via the VM
-  window. Heavy (a Windows ISO + license + tens of GB) but fully isolated and parallel-safe.
-- **WSL2 + WSLg** — a Linux virtual desktop (own display + cursor, like Claude CU) for Linux apps.
-- A separate WinStation (`CreateDesktop`) is lightest but many apps won't render there.
-The shared-desktop foreground fight (a maximized app stealing focus) is exactly what isolation removes.
+**(A2) Independent ACTING pointer — touch injection (no mouse hijack).** `inject.ps1 tap|dbltap|stroke
+<coords>` acts via Windows TOUCH INJECTION (`InitializeTouchInjection`/`InjectTouchInput`) — a SEPARATE
+pointer channel, so the agent clicks/drags/draws on the VISIBLE desktop while the user's MOUSE stays put.
+**VERIFIED:** drew lines in Paint with the real cursor parked in a corner (unmoved before == after); no
+driver, no admin, unpackaged P/Invoke, Win11-Home OK. Pair with (A) overlay = Clicky's "instructor pointer"
+but it actually ACTS: the overlay shows WHERE, injection DOES it, your mouse is free. **Config-first:** set
+`computer_use_input: "inject"` -> bash gets `NEKO_INPUT=inject` -> `mouse.ps1`'s `click`/`dblclick`/`stroke`
+transparently route to `inject.ps1` (agent code unchanged); `"sendinput"` forces the legacy cursor-moving
+path; a NEW backend is a config value + a script, not a rewrite. Honest scope: touch lands on the TOPMOST
+window at the point, so the target must be VISIBLE (raise it with `NEKO_DRAW_WINDOW=<title>`); a few legacy
+mouse-only apps ignore touch -> fall back to `mouse.ps1` (SendInput) or, for controls, UIA. This is the
+visible-desktop "don't hijack my mouse" answer; controlling a HIDDEN/background app is (B). And for CONTROLS,
+**UIA invoke already needs no pointer at all** -- prefer it; injection is for canvas/drag/non-UIA targets.
+
+**(B) True input isolation (own cursor + own input queue) — for HIDDEN/background or ANY app incl. games.**
+Why isolation, not injection, here: Win32 has ONE input queue and delivers real input only to the ACTIVE
+window, and client Windows allows ONE interactive session -- so reaching a hidden window needs either
+focus-steal (takes your screen) or a separate desktop/session. The honest landscape on Windows 11 **Home**:
+- **Separate Desktop object** (`CreateDesktop` + `SetThreadDesktop`) — native, Home-OK, lightest: run the app
+  + a local input helper on a HIDDEN desktop; you keep using the default desktop. Good for plain Win32/GDI
+  apps; **fails for GPU/DirectX games and DWM-composited apps** (render black / can't capture).
+- **VM (VirtualBox/VMware)** — the robust, GENERAL answer (what Pig API / Claude CU / Power-Automate-unattended
+  use): the app/game runs in the guest with its OWN screen+cursor+input; watch via the VM window while the host
+  is untouched. Heavy (Windows ISO, GBs); anti-cheat may detect VMs.
+- **NOT available on Home:** RDP host & UFO2-style RDP-loopback PiP (Home can't host RDP); a 2nd concurrent
+  interactive session (client Windows = single session). These need Pro/Enterprise/Server.
+Pick by need: teach/help on the user's real config -> (A)+(A2), same visible desktop. Do isolated/risky/
+background work or "play this game while I watch YouTube" -> (B) VM. Don't put teaching in a VM (wrong machine).
 
 ## Huge pages — read in PARTS, like a human (SOTA: agentic chunking + sub-agent)
 A heavy page's full snapshot can be tens of thousands of tokens; dumping it whole is slow, costly, and

@@ -88,6 +88,9 @@ export class ToolRegistry {
   /** Agent-presence overlay (computer_use_overlay): when on, bash gets NEKO_PRESENCE=1 so the desktop
    * helpers (mouse.ps1 / ground.ts) show the independent agent cursor + honour click-to-takeover. */
   presence = false;
+  /** Desktop input backend (computer_use_input): when "inject"/"sendinput", bash gets NEKO_INPUT=<value> so
+   * mouse.ps1 routes clicks/strokes to the non-hijacking touch-injection path or the legacy SendInput path. */
+  inputBackend = "";
   /** Web-search backend (set from config). searxng_url -> self-hosted metasearch; else Tavily (env
    * key) -> agent search; else DuckDuckGo (free, zero-config). `searchBackend` forces one. */
   searxngUrl = "";
@@ -161,7 +164,10 @@ export class ToolRegistry {
     const timeoutMs = Math.min(Math.max(Math.floor(Number(args.timeout) || BASH_TIMEOUT_MS), 1000), 600_000);
     const sb = wrapBash(command, this.root, { enabled: this.sandboxBash, allowNetwork: this.sandboxAllowNetwork });
     // Agent-presence opt-in: desktop helpers read NEKO_PRESENCE to show the independent cursor + honour takeover.
-    const env = this.presence ? { ...process.env, NEKO_PRESENCE: "1" } : process.env;
+    // Desktop input backend opt-in: NEKO_INPUT picks the non-hijacking (inject) vs legacy (sendinput) path.
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (this.presence) env.NEKO_PRESENCE = "1";
+    if (this.inputBackend && this.inputBackend !== "auto") env.NEKO_INPUT = this.inputBackend;
     const child = spawn(sb.file, sb.args, { shell: sb.shell, cwd: this.root, env });
     // Cap LIVE accumulation so a runaway command (`yes`, an infinite echo loop) can't grow the buffer
     // to gigabytes and OOM the process before the timeout fires.

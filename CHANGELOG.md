@@ -19,6 +19,14 @@ All notable changes to Neko Code are documented here. The format follows
   perf via a UIA CacheRequest (one bulk cross-process call; a naive tree walk times out on rich WinUI/WPF).
   Verified end-to-end on a real .NET window (`list` -> `setvalue` -> `invoke` -> screenshot confirmed). Raw-
   pixel vision is now only the LAST resort, for custom-drawn UIs with no accessibility tree.
+- **Independent agent pointer (no mouse hijack)** — `inject.ps1` (tap/dbltap/stroke) acts via Windows TOUCH
+  INJECTION, a SEPARATE pointer channel, so Neko clicks/drags/draws on the visible desktop WITHOUT moving the
+  user's mouse (verified: drew in Paint with the real cursor parked, unmoved). Pairs with the overlay (the
+  visible "instructor" triangle) for a true clicky-style cursor that actually acts. **Config-first:**
+  `computer_use_input: "inject"` -> `NEKO_INPUT=inject` -> `mouse.ps1`'s click/stroke transparently route to
+  the non-hijacking path (`"sendinput"` forces the legacy path); a new backend is a config value + a script.
+  No driver, no admin, Win11-Home compatible. (Hidden/background or game control still needs VM isolation —
+  documented honestly in the skill.)
 - **Deep research** — a `deep-research` skill (plan -> multi-source search -> read primaries -> cross-verify
   >=2 authoritative sources -> cited synthesis) and a strengthened always-on Accuracy section in the prompt.
 - **tui-self-test** skill — verify the TUI render (ink-testing-library + a live screenshot loop) with the

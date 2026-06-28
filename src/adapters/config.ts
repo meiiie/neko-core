@@ -156,6 +156,10 @@ export class NekoConfig {
   /** Show the independent agent-cursor overlay during desktop computer-use (clicky-style presence): a blue
    * cursor that flies to where the agent acts + click-to-takeover. Off by default. */
   get computerUseOverlay(): boolean { return Boolean(this.data.computer_use_overlay); }
+  /** Desktop input backend: "inject" = touch injection (the agent acts WITHOUT moving the user's mouse --
+   * its own pointer channel); "sendinput" = legacy SendInput (moves the one system cursor). "auto"/unset
+   * leaves each helper's default. A new backend is a config value, not a code change. */
+  get computerUseInput(): string { return String(this.data.computer_use_input ?? "auto"); }
   /** Lazy MCP tool loading: true/false to force, or unset (undefined) to auto-enable when there are
    * many MCP tools — so a big MCP surface lists names only and loads schemas on demand. */
   get mcpLazy(): boolean | undefined { return this.data.mcp_lazy === undefined ? undefined : Boolean(this.data.mcp_lazy); }
