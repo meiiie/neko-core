@@ -106,3 +106,13 @@ in parts is still faster and cheaper.
 This skill is the **method + the wiring**, ready for a vision/GUI model + an input tool. With Neko's
 default text model it covers the **code-first** half fully; the GUI half activates once a vision-capable
 model and an input MCP are configured. Don't pretend to click a screen you can't see.
+
+**Tested: NVIDIA-hosted vision models (2026-06) — none yet viable for AUTONOMOUS desktop.** `meta/llama-4-maverick`
+sees images via the standard OpenAI `image_url` format, but it HALLUCINATES the UI layout AND emits tool calls as
+plain JSON text (not the `tool_calls` field) so it can't drive the agentic loop. `llama-3.2-90b/11b-vision`,
+`gemma-3`, and `nvidia/vila` did not process the image via that format at all. The strong tool-caller (gpt-oss)
+is text-only. So desktop autonomy needs ONE model with vision + reliable GUI grounding + OpenAI tool-calling
+(Claude Computer Use, or a UI-TARS/OpenCUA-class model) -- not in NVIDIA's catalog today. **Web** computer-use
+(DOM via `@playwright/mcp`, no vision) stays the reliable autonomous path; the desktop primitives (screenshot +
+`mouse.ps1`) compose into a working loop the moment such a model is configured (verified manually, operator as
+the grounder). Note: NVIDIA inline images are capped (~180 KB base64) -- downscale large screenshots first.
