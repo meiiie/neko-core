@@ -93,7 +93,17 @@ pwsh uia.ps1 invoke   "Greet"             # InvokePattern (click without moving 
 pwsh uia.ps1 toggle   "Show advanced"     # TogglePattern (checkbox/switch)
 # verify (no vision): read a value/state back
 pwsh uia.ps1 get "Input"                  # -> value 'Input' = 'Neko'
+# read a whole page/doc as TEXT (Text/Document/Hyperlink names) -- summarize a web page, no vision:
+pwsh uia.ps1 read                          # dumps readable content (list = actionable; read = content)
+# Unicode targets (Vietnamese/CJK/emoji): the cp1252 console mangles non-ASCII args -> pass @<utf8-file>:
+pwsh uia.ps1 invoke "@C:\tmp\name.txt"     # reads the exact element name from a UTF-8 file (round-trips clean)
 ```
+WEB note: a browser exposes the page to UIA only when accessibility is on -- launch Chrome with
+`--force-renderer-accessibility` (reuses the logged-in profile, no CDP) so `uia.ps1 read` sees the feed/DOM
+as text. **VERIFIED:** gpt-oss autonomously read + summarized a live Facebook feed via `read`, scrolled with
+`inject.ps1`, and opened + composed a post by invoking the composer BY NAME (`@file`) -- coordinate taps on a
+feed are fragile (the layout reflows between `list` and `tap`); invoke-by-name is layout-independent. For a
+heavy page, lower `reasoning_effort` so the model emits the answer instead of over-reasoning into the token cap.
 **VERIFIED end-to-end** on a real .NET window: `list` -> `setvalue Input=Neko` -> `invoke Greet` ->
 screenshot showed `Hello, Neko!`, and `get` read the value back — all with the default gpt-oss, zero vision,
 zero cursor movement. The loop is **perceive (`list`) → act (`invoke`/`setvalue`/`toggle`) → verify

@@ -51,6 +51,10 @@ function FindByName($nm){
   return $null
 }
 function Pat($e,$p){ try { return $e.GetCurrentPattern($p) } catch { return $null } }
+# Unicode-safe targets: pass `@<path>` to read the name/value from a UTF-8 file (the Windows console is
+# cp1252, so non-ASCII args -- Vietnamese, CJK, emoji -- mangle on the command line; a file round-trips clean).
+if($name -like '@*' -and (Test-Path $name.Substring(1))){ $name=(Get-Content $name.Substring(1) -Raw -Encoding UTF8).TrimEnd("`r","`n") }
+if($value -like '@*' -and (Test-Path $value.Substring(1))){ $value=(Get-Content $value.Substring(1) -Raw -Encoding UTF8).TrimEnd("`r","`n") }
 
 switch($cmd){
   "list" {
@@ -74,6 +78,22 @@ switch($cmd){
       Write-Output ("[$ct] '$nm' ($act) -> " + [int]($r.X+$r.Width/2) + "," + [int]($r.Y+$r.Height/2)); $n++
     }
     Write-Output "($n elements; act by name e.g. uia.ps1 invoke '<name>')"
+  }
+  "read" {
+    # Dump the page's READABLE text (Text/Document/Hyperlink/Edit/ListItem names), deduped, in tree order --
+    # for reading/summarizing a web page or doc as TEXT, no vision. (list = actionable; read = content.)
+    Write-Output ("WINDOW: " + $root.Current.Name)
+    $textTypes='Text','Document','Edit','Hyperlink','ListItem','Button'
+    $seen=@{}; $n=0; $cap=[Math]::Max($max,300)
+    foreach($e in (AllControls)){
+      if($n -ge $cap){ break }
+      $c=$e.Cached; $ct=$c.ControlType.ProgrammaticName -replace 'ControlType.',''
+      if($textTypes -notcontains $ct){ continue }
+      $nm=$c.Name; if(-not $nm){ continue }; $nm=$nm.Trim(); if($nm.Length -lt 2){ continue }
+      if($seen.ContainsKey($nm)){ continue }; $seen[$nm]=$true
+      Write-Output $nm; $n++
+    }
+    Write-Output "($n text blocks)"
   }
   "invoke" {
     $e=FindByName $name; if(-not $e){ Write-Output "not found: $name"; exit 1 }
