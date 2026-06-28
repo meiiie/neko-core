@@ -73,20 +73,25 @@ AND self-correct when a tool call errored (retried with a better selector). Drop
 add stealth (`--device "Desktop Chrome"`, or CloakBrowser via `--cdp-endpoint`) for anti-bot sites — see
 the `procurement` skill.
 
-## Quick start — DESKTOP (Windows: the control primitive)
-The web case is solved by the browser MCP. For NATIVE apps (no DOM) it's the raw perception-action loop:
-- **Perception** (have): `bash` a screenshot (PowerShell `CopyFromScreen`) -> `read_file` it with vision to SEE the screen.
-- **Ground**: a vision/GUI model names the target's pixel coordinate. A neat lightweight protocol (from the
-  Clicky project) is to have the model emit an inline `[POINT:x,y]` tag in its text that you parse out -- no
-  special tool needed. A text-only model (gpt-oss) CANNOT do this; it needs a vision/GUI-grounded model.
-- **Control** (now have): `powershell -NoProfile -File skills/computer-use/scripts/mouse.ps1 <pos|move|click|dblclick> [x] [y]`.
-  `pos`/`move` are harmless (verified: move then GetCursorPos round-trips); `click` acts on the REAL machine -- gate it behind approval.
-- **Loop**: screenshot -> ground (`[POINT:x,y]`) -> `mouse.ps1 click x y` -> re-screenshot -> reflect (did it land?).
-- **Multi-monitor**: coordinates are the virtual desktop; map per display (Clicky tracks a `screenN`).
+## Quick start — DESKTOP (Windows: WORKS via a vision sub-call)
+Native apps have no DOM, so it's the screenshot -> ground -> click loop. No single available model does
+vision + GUI-grounding + tool-calling together, so SEPARATE them: the text driver (gpt-oss, reliable
+tool-calls) orchestrates and calls a vision model as a sub-step to "see". Three bundled scripts in
+`skills/computer-use/scripts/`:
+- **Screenshot** — `screenshot.ps1 <out.jpg> [width]` captures + downscales (under NVIDIA's ~180 KB inline
+  image cap) and prints `scale` so the driver maps `real = vision / scale`. NOTE: some antivirus flags
+  screen-capture scripts as malicious (a false positive) -- if blocked, capture with a trusted tool / allow it.
+- **See / ground** — `bun see.ts <image> "<question>"` sends the image to a vision model ($NEKO_VISION_MODEL,
+  default `microsoft/phi-3-vision-128k-instruct`) and prints its answer/coordinates. The driver calls this via
+  `bash` to look. **Verified end-to-end:** gpt-oss orchestrated `see.ts` to ground a window's close button to
+  ~20-40 px of truth, then said it would `mouse.ps1 click` there.
+- **Control** — `mouse.ps1 <pos|move|click|dblclick> [x] [y]`. `pos`/`move` harmless; `click` is gated (approval).
+- **Loop**: `screenshot.ps1` -> `see.ts` (ground in view px) -> scale to real px -> `mouse.ps1 click` -> re-shot -> reflect.
+- **Multi-monitor**: coordinates are the virtual desktop; map per display (Clicky's `screenN`).
 
-So Neko has BOTH halves of desktop computer-use -- perception (screenshot + vision) and control (`mouse.ps1`) --
-ready the moment a vision/GUI model is configured to do the grounding. Until then this is a primitive, not an
-autonomous loop. (For keyboard, `WScript.Shell.SendKeys` works but is global/focus-sensitive -- see `tui-self-test`.)
+General-VLM grounding is APPROXIMATE (tens of px) -- fine for big targets; zoom + re-ask for small ones. The
+key enabler: NVIDIA NIM vision needs the `<img>`-tag image format (handled automatically, see `image_format`).
+(For keyboard, `WScript.Shell.SendKeys` works but is global/focus-sensitive -- see `tui-self-test`.)
 
 ## Huge pages — read in PARTS, like a human (SOTA: agentic chunking + sub-agent)
 A heavy page's full snapshot can be tens of thousands of tokens; dumping it whole is slow, costly, and
@@ -102,17 +107,18 @@ Neko also self-protects so a giant page can't crash a turn: a single tool result
 turn compresses its OLDEST observations in place before the window overflows. That's a safety net — reading
 in parts is still faster and cheaper.
 
-## Honest scope
-This skill is the **method + the wiring**, ready for a vision/GUI model + an input tool. With Neko's
-default text model it covers the **code-first** half fully; the GUI half activates once a vision-capable
-model and an input MCP are configured. Don't pretend to click a screen you can't see.
+## Honest scope (tested, 2026-06)
+**Desktop autonomy WORKS on NVIDIA** via the driver + vision-sub-call split above -- verified: gpt-oss drove
+`see.ts`, which had `microsoft/phi-3-vision-128k-instruct` ground a close button to ~20-40 px, then chose to
+`mouse.ps1` it. Earlier I wrongly concluded "no NVIDIA model is viable" -- that was a FORMAT bug, not a model
+limit: NVIDIA NIM vision needs the `<img>`-tag image format (the OpenAI `image_url` part is silently ignored),
+now handled by `image_format` auto. `phi-3-vision` and `nvidia/neva-22b` see + ground accurately; `maverick`
+sees but hallucinates; `gemma-3`/`vila`/`llama-3.2-vision` also work once the format is right.
 
-**Tested: NVIDIA-hosted vision models (2026-06) — none yet viable for AUTONOMOUS desktop.** `meta/llama-4-maverick`
-sees images via the standard OpenAI `image_url` format, but it HALLUCINATES the UI layout AND emits tool calls as
-plain JSON text (not the `tool_calls` field) so it can't drive the agentic loop. `llama-3.2-90b/11b-vision`,
-`gemma-3`, and `nvidia/vila` did not process the image via that format at all. The strong tool-caller (gpt-oss)
-is text-only. So desktop autonomy needs ONE model with vision + reliable GUI grounding + OpenAI tool-calling
-(Claude Computer Use, or a UI-TARS/OpenCUA-class model) -- not in NVIDIA's catalog today. **Web** computer-use
-(DOM via `@playwright/mcp`, no vision) stays the reliable autonomous path; the desktop primitives (screenshot +
-`mouse.ps1`) compose into a working loop the moment such a model is configured (verified manually, operator as
-the grounder). Note: NVIDIA inline images are capped (~180 KB base64) -- downscale large screenshots first.
+Real caveats that remain (state them, don't hide them):
+- **Grounding is approximate** (general VLM, not GUI-trained): ~tens of px. Fine for big targets; zoom/re-ask
+  for small ones. A GUI-trained model (UI-TARS/OpenCUA/Claude CU class) would be pixel-tight.
+- **Vision models don't tool-call** -- that's why the driver (gpt-oss) orchestrates and `see.ts` is a sub-call.
+- **Screenshot capture** may be blocked by antivirus on some machines (false positive on screen-capture
+  scripts); use a trusted capture path. Downscale to stay under NVIDIA's ~180 KB inline-image cap.
+- **Web** computer-use (DOM via `@playwright/mcp`, no vision) is still the most reliable autonomous path.
