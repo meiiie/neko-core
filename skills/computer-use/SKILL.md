@@ -73,6 +73,21 @@ AND self-correct when a tool call errored (retried with a better selector). Drop
 add stealth (`--device "Desktop Chrome"`, or CloakBrowser via `--cdp-endpoint`) for anti-bot sites — see
 the `procurement` skill.
 
+## Quick start — DESKTOP (Windows: the control primitive)
+The web case is solved by the browser MCP. For NATIVE apps (no DOM) it's the raw perception-action loop:
+- **Perception** (have): `bash` a screenshot (PowerShell `CopyFromScreen`) -> `read_file` it with vision to SEE the screen.
+- **Ground**: a vision/GUI model names the target's pixel coordinate. A neat lightweight protocol (from the
+  Clicky project) is to have the model emit an inline `[POINT:x,y]` tag in its text that you parse out -- no
+  special tool needed. A text-only model (gpt-oss) CANNOT do this; it needs a vision/GUI-grounded model.
+- **Control** (now have): `powershell -NoProfile -File skills/computer-use/scripts/mouse.ps1 <pos|move|click|dblclick> [x] [y]`.
+  `pos`/`move` are harmless (verified: move then GetCursorPos round-trips); `click` acts on the REAL machine -- gate it behind approval.
+- **Loop**: screenshot -> ground (`[POINT:x,y]`) -> `mouse.ps1 click x y` -> re-screenshot -> reflect (did it land?).
+- **Multi-monitor**: coordinates are the virtual desktop; map per display (Clicky tracks a `screenN`).
+
+So Neko has BOTH halves of desktop computer-use -- perception (screenshot + vision) and control (`mouse.ps1`) --
+ready the moment a vision/GUI model is configured to do the grounding. Until then this is a primitive, not an
+autonomous loop. (For keyboard, `WScript.Shell.SendKeys` works but is global/focus-sensitive -- see `tui-self-test`.)
+
 ## Huge pages — read in PARTS, like a human (SOTA: agentic chunking + sub-agent)
 A heavy page's full snapshot can be tens of thousands of tokens; dumping it whole is slow, costly, and
 risks overflowing the window. Read strategically instead:
