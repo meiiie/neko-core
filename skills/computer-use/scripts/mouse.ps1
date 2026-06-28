@@ -10,6 +10,14 @@
 #   powershell -NoProfile -File mouse.ps1 dblclick <x> <y>
 #   powershell -NoProfile -File mouse.ps1 stroke <x1> <y1> <x2> <y2> [x3 y3 ...]   # pen-down drag (draw)
 param([string]$cmd = "pos")
+# --- Agent presence (opt-in via NEKO_PRESENCE = computer_use_overlay): drive the independent cursor +
+#     honour click-to-takeover. Auto-launches overlay.ps1 if its heartbeat is stale. ---
+if($env:NEKO_PRESENCE){
+  $stop="$env:TEMP\neko_overlay.stop"; $run="$env:TEMP\neko_overlay.run"; $tgt="$env:TEMP\neko_cursor.txt"
+  if((Test-Path $stop) -and ((Get-Content $stop -TotalCount 1 -ErrorAction SilentlyContinue) -match 'user')){ Write-Output "paused: you took control (overlay yielded)"; exit }
+  if(-not (Test-Path $run) -or (((Get-Date)-(Get-Item $run).LastWriteTime).TotalSeconds -gt 3)){ Remove-Item $stop -ErrorAction SilentlyContinue; Start-Process powershell -ArgumentList '-NoProfile','-File',(Join-Path $PSScriptRoot 'overlay.ps1') -WindowStyle Hidden }
+  if($cmd -in 'move','click','dblclick','stroke'){ "$($args[0]),$($args[1])|Neko $cmd" | Out-File $tgt -Encoding ascii }
+}
 Add-Type @"
 using System; using System.Runtime.InteropServices;
 public class Mouse {

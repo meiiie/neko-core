@@ -11,9 +11,15 @@
  *  JPEG encoder that trips antivirus. Vision model: $NEKO_VISION_MODEL, default phi-3-vision.)
  */
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { see, parseXY } from "./vision.ts";
+
+// Agent presence (opt-in via NEKO_PRESENCE = computer_use_overlay): point the independent cursor at the
+// grounded location + honour click-to-takeover, via the same temp files the overlay watches.
+function present(x: number, y: number, label: string) { if (process.env.NEKO_PRESENCE) { try { writeFileSync(join(tmpdir(), "neko_cursor.txt"), `${x},${y}|${label}`); } catch {} } }
+function tookOver(): boolean { if (!process.env.NEKO_PRESENCE) return false; const s = join(tmpdir(), "neko_overlay.stop"); return existsSync(s) && readFileSync(s, "utf8").includes("user"); }
 
 function ps(script: string): string {
   const r = spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf-8", maxBuffer: 32 * 1024 * 1024 });
@@ -32,6 +38,7 @@ async function locate(image: string, q: string): Promise<[number, number] | null
 
 const target = process.argv[2];
 if (!target) { console.error('usage: bun ground.ts "<target description>" [full-screenshot.png]'); process.exit(1); }
+if (tookOver()) { console.log("paused: user took control"); process.exit(0); }
 
 const VIEW = 768;          // pass-1 downscale width
 const CW = 480, CH = 360;  // zoom-crop size in full-res pixels
@@ -54,6 +61,7 @@ if (!r1) { console.error("pass1: could not parse coordinates from the vision rep
 const scale1 = VIEW / SW;
 const rx = Math.round(r1[0] / scale1), ry = Math.round(r1[1] / scale1);
 console.error(`[ground] pass1 rough -> ${rx},${ry} (real)`);
+present(rx, ry, `Neko: ${target}`.slice(0, 40));   // fly the agent cursor to the rough target while we refine
 
 // 4. Crop a high-res region around the rough point (clamped).
 const ox = Math.max(0, Math.min(SW - CW, rx - Math.round(CW / 2)));
@@ -65,4 +73,5 @@ const r2 = await locate(cropGif, `Reply with ONLY two numbers "x,y": the pixel l
 if (!r2) { console.log(`${rx},${ry}`); process.exit(0); } // fall back to the rough point
 
 // 6. Map crop-local -> real screen.
+present(ox + r2[0], oy + r2[1], `Neko: ${target}`.slice(0, 40));
 console.log(`${ox + r2[0]},${oy + r2[1]}`);

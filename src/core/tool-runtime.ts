@@ -85,6 +85,9 @@ export class ToolRegistry {
   sandboxAllowNetwork = false;
   /** When true, read_file returns image files as vision content (needs a vision-capable model). */
   vision = false;
+  /** Agent-presence overlay (computer_use_overlay): when on, bash gets NEKO_PRESENCE=1 so the desktop
+   * helpers (mouse.ps1 / ground.ts) show the independent agent cursor + honour click-to-takeover. */
+  presence = false;
   /** Web-search backend (set from config). searxng_url -> self-hosted metasearch; else Tavily (env
    * key) -> agent search; else DuckDuckGo (free, zero-config). `searchBackend` forces one. */
   searxngUrl = "";
@@ -157,7 +160,9 @@ export class ToolRegistry {
     // Per-call timeout (default 60s, clamped to [1s, 10min]) so slow builds/tests aren't cut off.
     const timeoutMs = Math.min(Math.max(Math.floor(Number(args.timeout) || BASH_TIMEOUT_MS), 1000), 600_000);
     const sb = wrapBash(command, this.root, { enabled: this.sandboxBash, allowNetwork: this.sandboxAllowNetwork });
-    const child = spawn(sb.file, sb.args, { shell: sb.shell, cwd: this.root });
+    // Agent-presence opt-in: desktop helpers read NEKO_PRESENCE to show the independent cursor + honour takeover.
+    const env = this.presence ? { ...process.env, NEKO_PRESENCE: "1" } : process.env;
+    const child = spawn(sb.file, sb.args, { shell: sb.shell, cwd: this.root, env });
     // Cap LIVE accumulation so a runaway command (`yes`, an infinite echo loop) can't grow the buffer
     // to gigabytes and OOM the process before the timeout fires.
     const MAX_BASH_OUTPUT = 200_000;

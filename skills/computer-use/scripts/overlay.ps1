@@ -38,7 +38,7 @@ $f.StartPosition='Manual'; $f.Bounds=[System.Windows.Forms.Screen]::PrimaryScree
 $f.BackColor=$key; $f.TransparencyKey=$key
 $c=[System.Windows.Forms.Cursor]::Position; $script:mx=[double]$c.X; $script:my=[double]$c.Y
 $script:flying=$false; $script:ft=0.0; $script:sx=0.0;$script:sy=0.0;$script:cxp=0.0;$script:cyp=0.0;$script:txp=0.0;$script:typ=0.0;$script:scale=1.0
-$script:paused=$false; $script:pt=$null; $script:label="Neko"; $script:shot=$false
+$script:paused=$false; $script:pt=$null; $script:label="Neko"; $script:shot=$false; $script:lasthb=(Get-Date).AddSeconds(-10)
 function TriPts($ax,$ay,$sc){ $rad=[Math]::PI*-35.0/180.0; $ca=[Math]::Cos($rad); $sa=[Math]::Sin($rad); $S=22.0*$sc; $Hh=19.0*$sc; $base=@(@(0.0,0.0),@((-$S/2.0),$Hh),@(($S/2.0),$Hh)); $o=New-Object System.Collections.Generic.List[System.Drawing.PointF]; foreach($p in $base){ $rx=$p[0]*$ca-$p[1]*$sa; $ry=$p[0]*$sa+$p[1]*$ca; $o.Add((New-Object System.Drawing.PointF([single]($ax+$rx),[single]($ay+$ry)))) }; return $o.ToArray() }
 $f.Add_Paint({ param($s,$e)
   $g=$e.Graphics; $g.Clear($key); $g.SmoothingMode='AntiAlias'
@@ -69,6 +69,7 @@ $timer.Add_Tick({
   if($script:flying){ $script:ft=[Math]::Min(1.0,$script:ft+0.05); $t=$script:ft; $om=1.0-$t; $script:mx=$om*$om*$script:sx+2*$om*$t*$script:cxp+$t*$t*$script:txp; $script:my=$om*$om*$script:sy+2*$om*$t*$script:cyp+$t*$t*$script:typ; $script:scale=1.0+0.35*[Math]::Sin($t*[Math]::PI); if($script:ft -ge 1.0){ $script:flying=$false; $script:scale=1.0 } }
   else { $script:mx+=$dx*0.25; $script:my+=$dy*0.25; $script:scale=1.0 }
   $f.Invalidate()
+  if(((Get-Date)-$script:lasthb).TotalSeconds -gt 1){ $script:lasthb=Get-Date; try { "1" | Out-File "$env:TEMP\neko_overlay.run" -Encoding ascii } catch {} }  # heartbeat so the tools know it's alive
   if($shotFile -and -not $script:shot -and ((Get-Date)-$t0).TotalSeconds -gt 3.5){ $script:shot=$true; try { $sb=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm=New-Object System.Drawing.Bitmap $sb.Width,$sb.Height; ([System.Drawing.Graphics]::FromImage($bm)).CopyFromScreen(0,0,0,0,$bm.Size); $bm.Save($shotFile); $bm.Dispose() } catch {} }
   if([Hk]::UserActed -and -not $script:paused){ $script:paused=$true; "user" | Out-File $stopFile -Encoding ascii; $script:pt=Get-Date }
   if((Test-Path $stopFile) -and -not [Hk]::UserActed){ $f.Close() }
@@ -76,4 +77,4 @@ $timer.Add_Tick({
   if(((Get-Date)-$t0).TotalSeconds -gt $maxSeconds){ $f.Close() }
  } catch {}
 })
-$timer.Start(); [System.Windows.Forms.Application]::Run($f); [Hk]::Remove()
+$timer.Start(); [System.Windows.Forms.Application]::Run($f); [Hk]::Remove(); Remove-Item "$env:TEMP\neko_overlay.run" -ErrorAction SilentlyContinue

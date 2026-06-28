@@ -153,6 +153,9 @@ export class NekoConfig {
   /** Image wire format: "openai" (image_url content-part) | "img-tag" (<img> in the content string) |
    * "auto" (img-tag for an NVIDIA base_url, which ignores the OpenAI part; openai otherwise). */
   get imageFormat(): string { return String(this.data.image_format ?? "auto"); }
+  /** Show the independent agent-cursor overlay during desktop computer-use (clicky-style presence): a blue
+   * cursor that flies to where the agent acts + click-to-takeover. Off by default. */
+  get computerUseOverlay(): boolean { return Boolean(this.data.computer_use_overlay); }
   /** Lazy MCP tool loading: true/false to force, or unset (undefined) to auto-enable when there are
    * many MCP tools — so a big MCP surface lists names only and loads schemas on demand. */
   get mcpLazy(): boolean | undefined { return this.data.mcp_lazy === undefined ? undefined : Boolean(this.data.mcp_lazy); }

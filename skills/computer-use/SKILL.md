@@ -128,6 +128,15 @@ self-capture put the marker exactly on the hovered tab. A CROSS-process screensh
 the marker offset on a scaled display -- that is a capture artifact (the capturing process has a different
 DPI-awareness context than the overlay), NOT what the user sees on the real screen.
 
+**Activation (config-first, extensible).** Set `computer_use_overlay: true` in config -> the bash tool runs
+desktop helpers with `NEKO_PRESENCE=1`, so `mouse.ps1` / `ground.ts` automatically: (1) auto-launch the
+overlay if its heartbeat (`%TEMP%\neko_overlay.run`) is stale, (2) write the target (`%TEMP%\neko_cursor.txt`
+= `x,y|label`) as they act -- the independent cursor flies to where Neko is working and shows what it's
+doing, (3) honour takeover -- if the user clicked, the helper reads the stop-file and yields ("paused: you
+took control"). Off by default = zero overhead. The 3-file protocol (run/target/stop) is the extension
+point: ANY tool (or an external agent) that writes the target file drives the same agent cursor -- a uniform
+presence layer across web + desktop, beyond Clicky's point-only macOS app.
+
 **(B) True input isolation (own cursor, doesn't touch yours) — the robust SOTA.** Run the agent in a
 SEPARATE virtual desktop/session with its own input queue. Claude Computer Use uses a container + Xvfb
 virtual display; UFO2 uses the Windows RDP/WinStation subsystem (events scoped to that session, can't reach
