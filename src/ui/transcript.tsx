@@ -47,7 +47,7 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
       // Read-type tools collapse to a 1-line summary; full output is under Ctrl+O.
       if (line.summary) {
         const more = line.text.split("\n").length > 1;
-        return <Text dimColor>{`  ⎿ ${line.summary}${more ? " (ctrl+o to expand)" : ""}`}</Text>;
+        return <Text dimColor>{`  └ ${line.summary}${more ? " (ctrl+o to expand)" : ""}`}</Text>;
       }
       const all = line.text.split("\n");
       const isError = /^(Error|Blocked|Denied|Refused)/.test(all[0] ?? "");
@@ -63,7 +63,7 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
             const disp = l.length > 200 ? l.slice(0, 200) + "…" : l;
             return (
               <Text key={i} color={isError ? "red" : add ? "green" : del ? "red" : undefined} dimColor={!isError && !add && !del}>
-                {(i === 0 ? "  ⎿ " : "     ") + disp}
+                {(i === 0 ? "  └ " : "     ") + disp}
               </Text>
             );
           })}
@@ -80,7 +80,7 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
             const del = l.startsWith("-") || m?.[1] === "-";
             return (
               <Text key={i} color={add ? "green" : del ? "red" : undefined} dimColor={!add && !del}>
-                {(i === 0 ? "  ⎿ " : "     ") + l}
+                {(i === 0 ? "  └ " : "     ") + l}
               </Text>
             );
           })}

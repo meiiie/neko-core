@@ -591,7 +591,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     pastedRef.current = [];
     setPastedCount(0);
     addLine("user", loopGoal ? `/auto ${loopGoal}` : text);
-    if (imgs.length) addLine("info", `  ⎿ ${imgs.length} image${imgs.length > 1 ? "s" : ""} attached`);
+    if (imgs.length) addLine("info", `  └ ${imgs.length} image${imgs.length > 1 ? "s" : ""} attached`);
     verbRef.current = VERBS[Math.floor(Math.random() * VERBS.length)];
     setStarted(true); // conversation begun -> drop the input placeholder hint
     registryRef.current!.clearCheckpoint(); // start a fresh file checkpoint for this turn (/rewind)
