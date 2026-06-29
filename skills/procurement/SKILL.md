@@ -15,14 +15,20 @@ Bạn là **trợ lý mua hàng (Purchasing Officer)**: nhận một danh sách 
 5. Mua cho công ty → để ý **hoá đơn VAT** (hoá đơn đỏ) nếu cần kê khai.
 6. **PHẢI xuất đúng KẾT QUẢ được hỏi** (bảng / sắp xếp thấp→cao + cao→thấp / Excel) trước khi kết thúc — **ĐỪNG trả lời "DONE" trống** khi chưa có bảng. Data thiếu/rác → đưa cái thu được + ghi ⚠️ nguồn nào chưa đọc được, **không bỏ trống**.
 
-## Nguyên tắc CỐT LÕI: dữ liệu có cấu trúc trước, trình bày sau
-Mọi yêu cầu (rẻ nhất / đắt nhất / sắp xếp / lọc / tổng / xuất Excel) đều thao tác trên MỘT bảng chào giá chuẩn hoá. **Luôn dựng bảng này TRƯỚC**, rồi mới lọc/sắp/tính/xuất. Mỗi dòng = một chào giá:
+## Nguyên tắc CỐT LÕI: LLM TRÍCH nguyên văn — CODE TÍNH (đừng để model tự parse số / min / tổng)
+**Chuẩn chuyên nghiệp (đồng thuận 2026, xem `docs/process/WEB.md`):** model KHÔNG đáng tin khi *chép số chính xác* và *làm toán* — nên **KHÔNG để nó làm**. Việc của bạn (model): **TRÍCH mỗi chào giá NGUYÊN VĂN** (đúng như trang viết) vào MỘT bảng. Việc của **CODE** (`price-table.ts`): parse số + sắp xếp + min/max/tổng/median — deterministic, không bao giờ đọc nhầm "31.990.000" thành 31, không bao giờ lấy nhầm min. Mỗi dòng = một chào giá:
 ```json
-{ "Mặt hàng": "iPhone 16 Pro", "Cấu hình": "256GB", "Màu": "Đen", "Tình trạng": "Mới", "Giá": 22390000, "Nguồn": "TGĐ",
+{ "Mặt hàng": "iPhone 16 Pro", "Cấu hình": "256GB", "Màu": "Đen", "Tình trạng": "Mới", "Giá": "22.390.000đ", "Nguồn": "TGĐ",
   "Người bán": "chính hãng", "Uy tín": "cao", "Bảo hành": "12 tháng", "VAT": "có",
   "Tồn": "còn", "Ship Bắc Giang": "có, ~1-2 ngày", "Link": "https://..." }
 ```
-**`Giá` là SỐ (VND, không dấu chấm/đ)** — để sắp xếp + min/max + cộng tổng chính xác. Mỗi mặt hàng nên có **≥4-6 nguồn** (gồm cả shop giá tốt, KHÔNG chỉ 3 chuỗi lớn) để so.
+**`Giá` = CHUỖI NGUYÊN VĂN từ trang** (vd `"31.990.000đ"`, `"12,5 triệu"`) — **ĐỪNG tự đổi thành số, đừng tự đọc, đừng tự tính min/tổng**; script lo hết. Mỗi mặt hàng nên có **≥4-6 nguồn** (gồm cả shop giá tốt, KHÔNG chỉ 3 chuỗi lớn).
+
+**→ Gom xong, ghi `baogia.json` rồi CHẠY (bắt buộc — đây là bước TÍNH):**
+```bash
+bun "<skill files dir>/scripts/price-table.ts" baogia.json --normalized baogia_norm.json
+```
+Script in: **bảng đã sắp thấp→cao + cao→thấp**, **THẤP NHẤT / CAO NHẤT / TỔNG / TRUNG BÌNH / MEDIAN (tính bằng code)**, và **cờ ⚠️** cho giá lệch xa median (nghi parse sai / phụ kiện / nhầm phân khúc) + dòng không đọc được giá. **Trình bày đúng output đó**; **RE-CHECK mọi dòng ⚠️** (mở lại trang, đúng nhãn/phân khúc) trước khi chốt "rẻ nhất". Cần Excel: `bun "<skill files dir>/scripts/make-sheet.ts" baogia_norm.json baogia.xlsx --sheet "Bao gia"`.
 
 **`Tình trạng` = Mới / Cũ (thu cũ-đổi mới) / Trả góp / Kèm BH.** Một trang sản phẩm thường hiện **NHIỀU giá cho CÙNG một máy** — lấy **HẾT**, **mỗi loại MỘT DÒNG có nhãn** (đừng gộp, đừng vớ một số). Quan trọng: **giá rẻ bất thường gần như luôn là MÁY CŨ / TRẢ GÓP / THU-CŨ** — ghi đúng nhãn, ĐỪNG nhầm thành giá máy mới. Ví dụ thật: TGĐ iPhone 15 128GB hiện **Mới 18.990.000đ** *và* **Cũ (thu cũ, BH 1 tháng) 13.770.000đ** → đó là **hai dòng khác nhau**, không phải "giá iPhone 15 = 13.77tr".
 
@@ -46,12 +52,11 @@ Lỗi hay gặp: chỉ hỏi FPT/TGĐ/CellphoneS → ra **giá niêm yết cao**
    - Đọc bằng **browser** (trang JS-only): đọc kỹ `browser_snapshot`, **quét HẾT mọi giá hiển thị trên trang** (Mới · Cũ · Trả góp), mỗi cái một dòng có nhãn. **ĐỪNG `browser_evaluate` vớ con số đầu tiên gặp** — đó chính là cách vớ nhầm giá máy-cũ/trả-góp thành giá máy mới. Lệch bất thường so với nguồn khác → kiểm tra lại nhãn.
 3. **Khảo ≥4-6 nguồn** rồi mới kết luận "rẻ nhất" — giá thấp nhất phải là **giá thị trường thật**, không phải giá chuỗi lớn đầu tiên gặp.
 4. Vẫn ưu tiên **uy tín** (xem phần đánh giá người bán) — rẻ bất thường thì cảnh báo, đừng lấy đại.
-5. **KIỂM TRA HỢP LÝ GIÁ (bắt buộc — chống parse rác):** retailer JS (TGĐ/CellphoneS/FPT) khi `web_fetch` thường trả VỎ RỖNG → bộ trích (bị schema ép phải điền `price_vnd`) **bịa một số sai** thay vì báo "không có". Thực tế đã gặp: **TGĐ "31.990.000đ" → đọc nhầm thành `31`**; selector `.price` vớ **giá phụ kiện 490.000đ** (sạc/ốp). Quy tắc:
-   - **Loại ngay giá phi lý:** điện thoại flagship mà `Giá` < ~3.000.000 (vd 31, hay 490.000–900.000 = phụ kiện sạc/ốp/cáp) → **SAI**, bỏ hoặc đọc lại bằng browser với selector ĐÚNG ô giá máy (không phải phụ kiện).
-   - **Đối chiếu chéo:** một nguồn lệch hẳn (gấp đôi/một nửa) so với các nguồn khác → gần như chắc parse lỗi → kiểm lại, đừng đưa vào bảng.
-   - Trang JS (TGĐ/FPT/CellphoneS render giá bằng JS): **ưu tiên browser** (`browser_evaluate` selector ô giá chính), `web_fetch` tĩnh hay ra số rác.
-   - **GIÁ HIỆN TẠI, không phải GẠCH NGANG:** trang hay hiện *giá đang bán* (lớn, nổi) cạnh *giá gốc gạch ngang* (cao hơn). **Lấy giá ĐANG BÁN**, đừng lấy số gạch ngang/niêm yết gốc (đã gặp: lấy S24 Ultra 29.45tr gạch-ngang thay vì 25.29tr đang bán).
-   - **"RẺ NHẤT" = `min(Giá)` THỰC SỰ của bảng bạn vừa thu:** sau khi gom các nguồn, **chọn đúng dòng GIÁ NHỎ NHẤT** rồi báo. **ĐỪNG báo một nguồn đắt hơn khi BẠN ĐÃ THẤY nguồn rẻ hơn** (đã gặp: fetch ra iPhone 24.99tr CellphoneS nhưng lại báo "rẻ nhất = 31.49tr FPT" — sai logic min). Tổng/so sánh cũng tính trên các giá NHỎ NHẤT đã chọn.
+5. **TRÍCH ĐÚNG *con số nào* (parse/min/tổng/đối-chiếu đã có `price-table.ts` lo — đừng tự làm):** chất lượng phụ thuộc bạn lấy đúng giá:
+   - **Giá ĐANG BÁN, không phải GẠCH NGANG:** lấy giá đang bán (lớn, nổi); bỏ giá gốc gạch-ngang cao hơn (đã gặp: vớ S24 Ultra 29.45tr gạch-ngang thay vì 25.29tr đang bán).
+   - **Đúng PHÂN KHÚC được hỏi:** hỏi "máy MỚI" thì ĐỪNG lấy giá Cũ/thu-cũ/trả-góp (rẻ giả) — mỗi tình trạng MỘT dòng có nhãn.
+   - **Đừng vớ giá PHỤ KIỆN / số rác:** retailer JS (TGĐ/CellphoneS/FPT) `web_fetch` hay trả VỎ RỖNG → dễ vớ phụ kiện (sạc/ốp ~200-900k) hoặc số cụt. Trang JS → **browser** với selector ĐÚNG ô giá máy.
+   - **Lưới an toàn:** `price-table.ts` tự **gắn cờ ⚠️** mọi giá lệch xa median + dòng không đọc được — **đọc lại đúng các dòng ⚠️** đó rồi mới chốt. (Trích đúng từ đầu vẫn hơn dựa vào lưới.)
 
 ## Đa dạng truy vấn — làm đúng cái được hỏi
 Sau khi có bảng, đáp ứng linh hoạt (đây chỉ là ví dụ, suy luận thêm theo yêu cầu thật):
@@ -65,10 +70,10 @@ Sau khi có bảng, đáp ứng linh hoạt (đây chỉ là ví dụ, suy luậ
 
 ## Xuất Excel có link (và CSV)
 Khi người dùng muốn bảng giá / Excel / file để gửi đi:
-1. Ghi bảng (đã lọc/sắp theo yêu cầu) ra JSON: `write_file` -> `baogia.json` (mảng các dòng như trên, mỗi dòng có cột `Link` = URL).
+1. Đã có **`baogia_norm.json`** từ `price-table.ts` (giá là SỐ đã parse, đã sắp) — dùng FILE NÀY cho Excel (đừng dùng baogia.json verbatim, Excel sẽ không sort được chuỗi). Mỗi dòng có cột `Link` = URL.
 2. **BẮT BUỘC dùng script bundled `make-sheet.ts`** — ĐỪNG tự viết script Python/openpyxl/pandas (máy người dùng KHÔNG chắc có sẵn; còn `bun` thì luôn có vì Neko chạy bằng bun). Script này zero-dependency. Loader đã in **`skill files dir`** ở đầu nội dung skill này — dùng đúng đường dẫn đó:
    ```bash
-   bun "<skill files dir>/scripts/make-sheet.ts" baogia.json baogia.xlsx --sheet "Bao gia"
+   bun "<skill files dir>/scripts/make-sheet.ts" baogia_norm.json baogia.xlsx --sheet "Bao gia"
    ```
    -> file `.xlsx` thật: cột `Link`/URL thành **hyperlink bấm được**, có **auto-filter** (người dùng tự sort/lọc trong Excel), header in đậm, `Giá` là số nên Excel sort đúng. Mở bằng Excel/LibreOffice, không cảnh báo.
 3. Báo đường dẫn file + tóm tắt (số dòng, rẻ nhất/đắt nhất). Chỉ khi `bun`/script thật sự lỗi mới fallback: `write_file` một `.csv` với cột link dạng `=HYPERLINK("url";"nhãn")` (Excel mở, link bấm được).
@@ -107,12 +112,12 @@ Khi người dùng muốn bảng giá / Excel / file để gửi đi:
 ## Quy trình
 1. **Intake**: chốt mỗi mặt hàng — tên + cấu hình chính xác, số lượng, ngân sách/giá trần (nếu có), yêu cầu khác (mới/cũ, màu, VAT, deadline), **và DẠNG kết quả** (rẻ nhất? sắp xếp? Excel?). Thiếu thì hỏi ngắn gọn.
 2. **Tra** từng mặt hàng trên nguồn phù hợp: `web_search` tìm trang, `web_fetch` đọc giá/tồn/spec. Sàn động (Shopee/Tiki/Lazada/TikTok) chặn bot/JS -> dùng **browser MCP** nếu có; không thì ghi "cần người mở link xác minh".
-3. **Dựng bảng chuẩn hoá** (mục Cốt lõi) — đủ nguồn để so.
-4. **Thao tác đúng yêu cầu** (lọc/sắp/min-max/tổng) -> trình bày + (nếu cần) **xuất Excel**.
+3. **Dựng bảng (giá NGUYÊN VĂN)** -> `baogia.json` -> **chạy `price-table.ts`** (nó parse/sắp/min-max/tổng/median + gắn cờ ⚠️). Mục Cốt lõi.
+4. **RE-CHECK các dòng ⚠️**, trình bày output của script (đã sắp + thống kê) đúng yêu cầu (lọc thêm nếu cần) + (nếu cần) **xuất Excel** từ `baogia_norm.json`.
 5. **Bàn giao**: bảng/kế hoạch + ⚠️ cần xác minh + bước tiếp theo ("người mở link, kiểm tra lại giá/tồn, rồi đặt").
 
 ## Công cụ
-- `web_search` + `web_fetch` (tra giá/spec; **dùng `schema` của web_fetch** để bóc biến thể tin cậy) · `write_file` (JSON/CSV) · `bash` (chạy make-sheet.ts).
+- `web_search` + `web_fetch` (tra giá/spec; **dùng `schema` của web_fetch** để bóc biến thể tin cậy — nhưng giá để dạng CHUỖI nguyên văn) · `write_file` (baogia.json) · `bash` chạy **`price-table.ts`** (parse + sắp + min/max/tổng/median + cờ ⚠️, deterministic) rồi **`make-sheet.ts`** (Excel có link).
 - **Browser MCP cho sàn động (Shopee/Tiki/Lazada/TikTok)**: các sàn này render giá bằng JS → `web_fetch` tĩnh nhận vỏ rỗng. Nếu có tool `mcp__playwright__browser_*` (đã cấu hình) thì: `mcp__playwright__browser_navigate` mở trang → `mcp__playwright__browser_snapshot` đọc DOM ĐÃ RENDER (thấy giá) → rồi bóc như thường. Không có thì ghi "cần người mở link xác minh".
   - *Bật:* thêm vào config `{"mcp_servers":{"browser":{"command":"bunx","args":["@playwright/mcp@latest","--isolated","--browser","chrome"]}}}` (cần Chrome cài sẵn; hoặc `npx playwright install chromium` cho bản bundled).
   - *Headed real-Chrome > headless (đo thực tế):* `--browser chrome` (không `--headless`) dùng Chrome thật → **ít bị bot-detect hơn hẳn**. Đo: headless bị **captcha** ở Google/DuckDuckGo + **tường xác minh** ở Shopee/Lazada; **headed real-Chrome đọc được giá Lazada**. Token: dùng `browser_evaluate` lấy đúng selector/`innerText`, **ĐỪNG `browser_snapshot`** (một lần snapshot tốn ~cả trăm nghìn token).

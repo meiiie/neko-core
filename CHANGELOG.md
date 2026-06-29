@@ -7,6 +7,14 @@ All notable changes to Neko Code are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Deterministic price-table layer (`price-table.ts`) — LLM extracts, code computes** — the professional,
+  non-patchwork fix for a class of dogfood failures (gpt-oss read "31.990.000đ" as 31, reported a pricier
+  source as "cheapest" while holding a cheaper one, summed wrong). Per the 2026 consensus on reliable
+  extraction, the model now only transcribes prices VERBATIM and a deterministic script (`parseVnd` + sort +
+  min/max/sum/median + outlier flags) does all the numbers — making the misparse / wrong-min / wrong-sum bug
+  class *impossible*. Unit-tested (the script is deterministic, so it can be; the model can't). The
+  procurement skill is reframed around it; the principle is documented in `docs/process/WEB.md` as the shape
+  for any future numeric extraction.
 - **Computer use** — a `computer-use` skill (code-first per CoAct-1, the GUI perception-action loop, hard
   guardrails). WEB control validated end-to-end through `@playwright/mcp` (DOM-driven, no vision needed) and
   a real VN procurement run. A Windows desktop **control primitive** `mouse.ps1` (pos/move/click) plus the

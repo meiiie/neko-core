@@ -13,6 +13,21 @@ Two layers, simplest first.
 Good for: docs, articles, plain pages, quick lookups. Limits: no JavaScript rendering, and
 bot-protected / logged-in sites will block a plain fetch (see §2 for those).
 
+### Reliable extraction: the LLM extracts, code computes
+A model is unreliable at exact number transcription and arithmetic — dogfooding caught gpt-oss
+reading the VN price "31.990.000đ" as `31`, picking a pricier source when it had already seen a
+cheaper one, and producing a wrong sum. The 2026 consensus on reliable extraction is to split the
+job: the **LLM only extracts each value VERBATIM** (the price exactly as written), and
+**deterministic code parses, sorts, and does min/max/sum/median** — never the model. Don't ask an
+LLM to be a calculator; ask it to transcribe, then call one. (Refs: structured-output / agentic-
+pattern guides and "why LLMs struggle at math", 2026.)
+
+In practice this lives in `skills/procurement/scripts/price-table.ts` (`parseVnd` + sort + stats +
+outlier flags), and the procurement skill tells the model to write prices as verbatim strings and
+run it. Because it's deterministic, it's unit-tested (`test/price-table.test.ts`) — the model isn't.
+The same principle is the right shape for any future numeric extraction (specs, dates, quantities):
+extract verbatim, compute in code.
+
 ### One command: `neko setup web`
 Stands up the whole SOTA web stack and wires it into config (idempotent, key-safe):
 SearXNG in Docker (JSON API on) + the browser MCP (headed real-Chrome). Verifies the JSON
