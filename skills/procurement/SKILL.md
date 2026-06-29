@@ -50,6 +50,8 @@ Lỗi hay gặp: chỉ hỏi FPT/TGĐ/CellphoneS → ra **giá niêm yết cao**
    - **Loại ngay giá phi lý:** điện thoại flagship mà `Giá` < ~3.000.000 (vd 31, hay 490.000–900.000 = phụ kiện sạc/ốp/cáp) → **SAI**, bỏ hoặc đọc lại bằng browser với selector ĐÚNG ô giá máy (không phải phụ kiện).
    - **Đối chiếu chéo:** một nguồn lệch hẳn (gấp đôi/một nửa) so với các nguồn khác → gần như chắc parse lỗi → kiểm lại, đừng đưa vào bảng.
    - Trang JS (TGĐ/FPT/CellphoneS render giá bằng JS): **ưu tiên browser** (`browser_evaluate` selector ô giá chính), `web_fetch` tĩnh hay ra số rác.
+   - **GIÁ HIỆN TẠI, không phải GẠCH NGANG:** trang hay hiện *giá đang bán* (lớn, nổi) cạnh *giá gốc gạch ngang* (cao hơn). **Lấy giá ĐANG BÁN**, đừng lấy số gạch ngang/niêm yết gốc (đã gặp: lấy S24 Ultra 29.45tr gạch-ngang thay vì 25.29tr đang bán).
+   - **"RẺ NHẤT" = `min(Giá)` THỰC SỰ của bảng bạn vừa thu:** sau khi gom các nguồn, **chọn đúng dòng GIÁ NHỎ NHẤT** rồi báo. **ĐỪNG báo một nguồn đắt hơn khi BẠN ĐÃ THẤY nguồn rẻ hơn** (đã gặp: fetch ra iPhone 24.99tr CellphoneS nhưng lại báo "rẻ nhất = 31.49tr FPT" — sai logic min). Tổng/so sánh cũng tính trên các giá NHỎ NHẤT đã chọn.
 
 ## Đa dạng truy vấn — làm đúng cái được hỏi
 Sau khi có bảng, đáp ứng linh hoạt (đây chỉ là ví dụ, suy luận thêm theo yêu cầu thật):
