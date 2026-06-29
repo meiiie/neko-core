@@ -14,7 +14,7 @@ import { environmentBlock, projectContextBlock, renderContext } from "../src/ada
 import { collectChecks, render } from "../src/adapters/doctor.ts";
 import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
-import { renderBenchReport, runBench } from "../src/adapters/bench.ts";
+import { renderBenchReport, renderLiftReport, runBench, runHarnessLift } from "../src/adapters/bench.ts";
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
@@ -200,6 +200,7 @@ Commands:
   chat          interactive session (default - same as bare 'neko' / 'neko code')
   run <task>    one-shot: run a single instruction
   bench         run a tiny agentic-coding benchmark against the configured model (pass@1)
+  bench lift    measure the HARNESS LIFT: the same tasks raw (model only) vs +Neko (tools+loop)
 
 Options:
   --profile <name>   named runtime profile (see 'neko profiles')
@@ -383,6 +384,12 @@ async function cmdRun(args: Args): Promise<number> {
 
 async function cmdBench(args: Args): Promise<number> {
   const cfg = load(args);
+  // `neko bench lift`: measure the HARNESS LIFT — the same tasks raw (model only) vs +Neko (tools + loop).
+  if (args.positionals[0] === "lift") {
+    console.log(`Measuring harness lift against ${cfg.model} (raw model vs +Neko, auto-approve)...`);
+    console.log("\n" + renderLiftReport(await runHarnessLift(cfg, (m) => console.log(m))));
+    return 0;
+  }
   const trials = args.trials ?? 1;
   console.log(`Running Neko-bench against ${cfg.model} (${trials} trial(s)/task, auto-approve)...`);
   const report = await runBench(cfg, { trials }, (m) => console.log(m));

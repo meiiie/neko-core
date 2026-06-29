@@ -49,6 +49,13 @@ All notable changes to Neko Code are documented here. The format follows
   it structurally instead of constructing fragile shell strings. Verified live against a real Paint window.
 - **`auto_loop` config (persist by default)** — set `"auto_loop": true` and `neko run` uses the closed loop
   (runUntilDone) by default, so you don't retype `--loop`; `--once` (alias `--no-loop`) forces a single shot.
+- **`neko bench lift` — harness-lift benchmark** — runs the same tasks twice, RAW (the model alone, no
+  tools/loop, must emit file contents) vs +NEKO (tools + agentic loop), and reports the delta. Makes the
+  thesis ("the harness turns a model into a capable agent") measurable instead of vibes. Honest finding: on
+  tiny self-contained coding tasks a capable model (gpt-oss-120b) one-shots them, so the lift is ~0 there —
+  the lift shows on tasks the raw model CANNOT do (a `run-to-know` task whose value needs executing code; and
+  agentic/computer-use, where raw can't act at all — cf. the Paint house: raw scribbled+quit, +Neko drew a
+  full house).
 - **Deep research** — a `deep-research` skill (plan -> multi-source search -> read primaries -> cross-verify
   >=2 authoritative sources -> cited synthesis) and a strengthened always-on Accuracy section in the prompt.
 - **tui-self-test** skill — verify the TUI render (ink-testing-library + a live screenshot loop) with the

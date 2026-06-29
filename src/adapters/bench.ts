@@ -66,6 +66,14 @@ const TASKS: BenchTask[] = [
     prompt: 'Edit pkg.json to add a top-level "license" field set to "MIT". Keep the existing "name" and "version" fields and keep it valid JSON.',
     verify: (d) => { try { const j = JSON.parse(read(d, "pkg.json") ?? ""); return j.name === "demo" && j.version === "1.0.0" && j.license === "MIT"; } catch { return false; } },
   },
+  {
+    // Needs a TOOL: the value is 50 rounds of modular squaring — impossible to compute by hand, so the raw
+    // model must guess (fails) while the harness RUNS gen.mjs and copies the exact number (passes).
+    id: "run-to-know",
+    files: { "gen.mjs": "let x = 7n;\nfor (let i = 0; i < 50; i++) x = (x * x + 9n) % 1000000007n;\nconsole.log(x.toString());\n" },
+    prompt: "Run `bun gen.mjs` — it prints one number. Create answer.txt whose entire content is that exact number.",
+    verify: (d) => { const g = runJs(d, "gen.mjs"); const want = (g.out ?? "").trim(); const got = (read(d, "answer.txt") ?? "").trim(); return g.ok && want.length > 0 && got === want; },
+  },
 ];
 
 export interface BenchResult { id: string; passes: number; trials: number; tokens: number; }
@@ -102,6 +110,66 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number } = {}, 
   const passed = results.reduce((a, r) => a + r.passes, 0);
   const total = results.reduce((a, r) => a + r.trials, 0);
   return { model: cfg.model, trials, results, passed, total, tokens: results.reduce((a, r) => a + r.tokens, 0), seconds: (Date.now() - t0) / 1000 };
+}
+
+// ---- Harness-lift: the SAME tasks run RAW (model only, no tools/loop) vs +NEKO (tools + agentic loop).
+// The thesis made measurable: Neko's edge is the HARNESS turning a given model into a capable agent. ----
+export interface LiftRow { id: string; raw: boolean; harness: boolean; }
+export interface LiftReport { model: string; rows: LiftRow[]; rawPass: number; harnessPass: number; total: number; seconds: number; }
+
+/** Pull ```filename\n...``` fenced blocks out of a raw model reply (it has no tools, so it must emit files). */
+function parseFileBlocks(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const re = /```([^\n`]*)\n([\s\S]*?)```/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const name = (m[1] || "").trim().split(/\s+/).pop() ?? "";
+    if (name && name.includes(".")) out[name] = m[2];
+  }
+  return out;
+}
+
+async function runRawTask(cfg: NekoConfig, task: BenchTask, dir: string): Promise<boolean> {
+  for (const [n, c] of Object.entries(task.files)) writeFileSync(join(dir, n), c); // seed inputs (also so unchanged-file checks hold)
+  const filesBlock = Object.keys(task.files).length
+    ? "Existing files:\n" + Object.entries(task.files).map(([n, c]) => `--- ${n} ---\n${c}`).join("\n\n") + "\n\n"
+    : "";
+  const prompt = `${task.prompt}\n\n${filesBlock}You have NO tools and cannot run code. Reply with the FULL final content of EACH file that should exist after the task, each in its own fenced block whose info-string is the exact filename, e.g.\n\`\`\`name.ext\n...content...\n\`\`\`\nOutput ONLY the file blocks, nothing else.`;
+  const res = await getProvider(cfg).complete([{ role: "user", content: prompt }]);
+  for (const [n, c] of Object.entries(parseFileBlocks(res.content ?? ""))) { try { writeFileSync(join(dir, n), c); } catch {} }
+  try { return task.verify(dir); } catch { return false; }
+}
+
+/** Run each task twice — raw model vs full Neko harness — and report the lift. */
+export async function runHarnessLift(cfg: NekoConfig, onProgress?: (msg: string) => void): Promise<LiftReport> {
+  const t0 = Date.now();
+  const root = mkdtempSync(join(tmpdir(), "neko-lift-"));
+  const rows: LiftRow[] = [];
+  try {
+    for (const task of TASKS) {
+      const rdir = join(root, `${task.id}-raw`); mkdirSync(rdir, { recursive: true });
+      onProgress?.(`  ${task.id}: raw ...`);
+      let raw = false; try { raw = await runRawTask(cfg, task, rdir); } catch { raw = false; }
+      const hdir = join(root, `${task.id}-harness`); mkdirSync(hdir, { recursive: true });
+      for (const [n, c] of Object.entries(task.files)) writeFileSync(join(hdir, n), c);
+      onProgress?.(`  ${task.id}: +neko ...`);
+      const reg = new ToolRegistry(hdir, "auto", async () => true);
+      const agent = new Agent({ provider: getProvider(cfg), tools: reg, maxSteps: cfg.maxSteps, systemPrompt: DEFAULT_SYSTEM_PROMPT });
+      let harness = false; try { await agent.run(task.prompt); harness = task.verify(hdir); } catch { harness = false; }
+      rows.push({ id: task.id, raw, harness });
+      onProgress?.(`  ${task.id} -> raw ${raw ? "PASS" : "fail"} | +neko ${harness ? "PASS" : "fail"}`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  return { model: cfg.model, rows, rawPass: rows.filter((r) => r.raw).length, harnessPass: rows.filter((r) => r.harness).length, total: rows.length, seconds: (Date.now() - t0) / 1000 };
+}
+
+export function renderLiftReport(r: LiftReport): string {
+  const rows = r.rows.map((x) => `  ${x.id.padEnd(12)}  raw ${x.raw ? "PASS" : "----"}    +neko ${x.harness ? "PASS" : "----"}`).join("\n");
+  const rp = r.total ? Math.round((r.rawPass / r.total) * 100) : 0;
+  const hp = r.total ? Math.round((r.harnessPass / r.total) * 100) : 0;
+  return `Harness-lift :: ${r.model}\n${rows}\n  ----------------------------------\n  RAW model alone:  ${r.rawPass}/${r.total} (${rp}%)\n  + NEKO harness:   ${r.harnessPass}/${r.total} (${hp}%)\n  LIFT: +${r.harnessPass - r.rawPass} task(s)  (+${hp - rp} pts)   ${r.seconds.toFixed(0)}s`;
 }
 
 export function renderBenchReport(r: BenchReport): string {
