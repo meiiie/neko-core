@@ -197,6 +197,7 @@ Commands:
   login         save an API key (neko login <key>, or pipe it); logout removes it
   update        download the latest release and replace this binary (self-update)
   mcp           list configured MCP servers and their tools
+  setup [web]   one command to stand up the SOTA web stack (SearXNG + browser MCP, wired)
   chat          interactive session (default - same as bare 'neko' / 'neko code')
   run <task>    one-shot: run a single instruction
   bench         run a tiny agentic-coding benchmark against the configured model (pass@1)
@@ -440,6 +441,7 @@ async function main(): Promise<number> {
       case "update": { const { selfUpdate } = await import("../src/adapters/update.ts"); return (await selfUpdate(console.log)) ? 0 : 1; }
       case "mcp": return await cmdMcp(args);
       case "run": return await cmdRun(args);
+      case "setup": { const { setupWeb } = await import("../src/adapters/setup.ts"); return await setupWeb(args.positionals[0] ?? "web", (m) => console.log(m)); }
       case "bench": return await cmdBench(args);
       default:
         console.error(`neko: error: unknown command '${cmd}'. Run 'neko --help'.`);

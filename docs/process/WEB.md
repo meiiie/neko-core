@@ -13,6 +13,13 @@ Two layers, simplest first.
 Good for: docs, articles, plain pages, quick lookups. Limits: no JavaScript rendering, and
 bot-protected / logged-in sites will block a plain fetch (see §2 for those).
 
+### One command: `neko setup web`
+Stands up the whole SOTA web stack and wires it into config (idempotent, key-safe):
+SearXNG in Docker (JSON API on) + the browser MCP (headed real-Chrome). Verifies the JSON
+API, then `neko doctor` shows `web_search: searxng`. Sub-targets: `neko setup searxng` /
+`neko setup browser`. (No Docker? It says so and you can use a Tavily key instead.) The
+manual recipe below is what it automates.
+
 ### Upgrading web_search to SOTA — free, self-hosted (SearXNG)
 [browser-search](https://github.com/Johell1NS/browser-search)'s core idea is **SearXNG** — a
 metasearch engine that aggregates Google/Bing/DDG/… into one JSON API, free and unlimited. Run one

@@ -49,6 +49,11 @@ All notable changes to Neko Code are documented here. The format follows
   it structurally instead of constructing fragile shell strings. Verified live against a real Paint window.
 - **`auto_loop` config (persist by default)** — set `"auto_loop": true` and `neko run` uses the closed loop
   (runUntilDone) by default, so you don't retype `--loop`; `--once` (alias `--no-loop`) forces a single shot.
+- **`neko setup web` — one-command SOTA web stack** — stands up SearXNG in Docker (JSON API enabled, the bit
+  that's off by default), verifies it, and wires `searxng_url` + the `@playwright/mcp` browser MCP (headed
+  real-Chrome) into config — idempotent, key-safe (never touches `api_key`), with clear `[skip]` messages if
+  Docker/bunx is missing. Sub-targets `setup searxng` / `setup browser`. Turns the manual setup that lifted
+  Neko above a hand search (DuckDuckGo 18.3M → SearXNG 7.99M) into one command.
 - **`neko bench lift` — harness-lift benchmark** — runs the same tasks twice, RAW (the model alone, no
   tools/loop, must emit file contents) vs +NEKO (tools + agentic loop), and reports the delta. Makes the
   thesis ("the harness turns a model into a capable agent") measurable instead of vibes. Honest finding: on

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { setApiKey, setModel } from "../src/adapters/project.ts";
+import { patchUserConfig, setApiKey, setModel } from "../src/adapters/project.ts";
 
 // project.ts resolves the user config under homedir(); point that at a temp dir per test.
 const ORIG = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
@@ -42,4 +42,14 @@ test("setModel updates a valid config without losing other keys", () => {
   const after = JSON.parse(readFileSync(path, "utf-8"));
   expect(after.model).toBe("kimi");
   expect(after.api_key).toBe("SECRET");
+});
+
+test("patchUserConfig merges keys and preserves api_key (used by `neko setup web`)", () => {
+  const path = withTempHome('{ "api_key": "SECRET", "model": "m1" }');
+  patchUserConfig({ searxng_url: "http://localhost:8888", search_backend: "searxng" });
+  const after = JSON.parse(readFileSync(path, "utf-8"));
+  expect(after.searxng_url).toBe("http://localhost:8888");
+  expect(after.search_backend).toBe("searxng");
+  expect(after.api_key).toBe("SECRET"); // key untouched
+  expect(after.model).toBe("m1");
 });

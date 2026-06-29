@@ -73,6 +73,11 @@ export function clearApiKey(): string {
   }
 }
 
+/** Merge top-level keys into the user config (preserves api_key / mcp_servers / etc.). Key-safe. */
+export function patchUserConfig(patch: Record<string, any>): void {
+  updateUserConfig((d) => { for (const [k, v] of Object.entries(patch)) d[k] = v; });
+}
+
 /** Add/replace an MCP server in the user config (~/.neko-core/config.json). */
 export function addMcpServer(name: string, server: Record<string, any>): string {
   try {
