@@ -48,7 +48,11 @@ if (import.meta.main) {
 const path = process.argv[2];
 if (!path) { console.error('usage: bun price-table.ts <rows.json> [--col Giá] [--normalized out.json]'); process.exit(2); }
 const col = flag("--col") ?? "Giá";
-const rows: Record<string, any>[] = JSON.parse(readFileSync(path, "utf8"));
+const json = JSON.parse(readFileSync(path, "utf8"));
+// Accept a bare array OR a common wrapper ({items|rows|data|baogia: [...]}) so a slightly-shaped JSON
+// from the model doesn't cost a retry.
+const rows: Record<string, any>[] = Array.isArray(json) ? json : (json.items ?? json.rows ?? json.data ?? json.baogia ?? []);
+if (!Array.isArray(rows) || rows.length === 0) { console.error('price-table: no rows (expected a JSON array, or { items|rows|data: [...] })'); process.exit(2); }
 
 const parsed = rows.map((r) => ({ row: r, vnd: parseVnd(r[col]), raw: r[col] }));
 const valid = parsed.filter((p) => p.vnd != null && p.vnd > 0) as { row: Record<string, any>; vnd: number; raw: any }[];
