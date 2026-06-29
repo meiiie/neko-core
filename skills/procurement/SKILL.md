@@ -27,7 +27,9 @@ Mọi yêu cầu (rẻ nhất / đắt nhất / sắp xếp / lọc / tổng / x
 
 ## ⭐ Chiến lược tìm GIÁ TỐT NHẤT (đừng neo vào chuỗi lớn)
 Lỗi hay gặp: chỉ hỏi FPT/TGĐ/CellphoneS → ra **giá niêm yết cao**; shop nhỏ/cạnh tranh thường rẻ hơn vài triệu. Một purchasing officer giỏi **đào tới giá thấp nhất thực sự**:
-1. **Search rộng theo giá**: ngoài tên sản phẩm, search thêm `"<sản phẩm> giá rẻ nhất"`, `"<sản phẩm> khuyến mãi"`, và trang so giá **websosanh.vn**. Mở **nhiều shop**, gồm cả shop nhỏ giá tốt (xem MAP mở rộng).
+1. **Search rộng theo giá**: ngoài tên sản phẩm, search thêm `"<sản phẩm> giá rẻ nhất"`, `"<sản phẩm> khuyến mãi"`, `"<sản phẩm> cũ likenew giá"`, và trang so giá **websosanh.vn**. Mở **nhiều shop**, gồm cả shop nhỏ giá tốt (xem MAP mở rộng).
+   - **DÙNG SearXNG, đừng để DuckDuckGo** (đo thực tế): cùng gpt-oss, DuckDuckGo bỏ lỡ phân khúc cũ → "rẻ nhất" sai cao (vd iPhone 14 Pro: DDG ra 18,3tr); **SearXNG surface được Chợ Tốt/24hStore/ClickBuy → ra 7,99tr.** Bật MỘT lần: `searxng_url` trong config (xem `docs/process/WEB.md` cho recipe Docker JSON). Đây là **đòn bẩy lớn nhất** cho "tìm giá rẻ nhất".
+   - **Hàng ĐỜI CŨ / ngừng bán** (iPhone 14 Pro, máy 2-3 năm tuổi...): đáy giá KHÔNG nằm ở chuỗi lớn (chỉ bán máy mới giá cao / hết hàng) mà ở **C2C (Chợ Tốt) + shop likenew** — BẮT BUỘC quét cả phân khúc này, nếu không sẽ ra giá "rẻ nhất" cao gấp đôi thực tế. Phân biệt rõ: **cá nhân/chợ (rẻ nhất, không BH)** vs **shop likenew (có BH, đắt hơn ~2-4tr)** vs **mới chính hãng**.
 2. **BÓC GIÁ THEO BIẾN THỂ + TÌNH TRẠNG** (quan trọng nhất — giá nằm SẴN trong HTML, đừng bỏ sót): một trang sản phẩm thường liệt kê **nhiều màu / dung lượng / tình trạng (Mới · Cũ-thu-cũ · Trả góp) giá KHÁC NHAU** (vd S26 Ultra 12/256: Tím Cobalt 25.999.000đ nhưng Bạc Shadow 28.199.000đ; bản "thu cũ đổi mới" 24.099.000đ). **Liệt kê ĐỦ MỌI giá, mỗi cái một dòng có nhãn `Tình trạng`** — đừng vớ một số headline.
    - Đọc bằng **`web_fetch`** → **DÙNG tham số `schema`** (schema-guided extraction — ép liệt kê đủ, tin cậy hơn hẳn prompt thường):
    ```json
@@ -73,6 +75,10 @@ Khi người dùng muốn bảng giá / Excel / file để gửi đi:
 - **Shop giá tốt / cạnh tranh** (thường rẻ hơn chuỗi lớn — nhớ check uy tín): **Viettablet** viettablet.com · **Minh Tuấn Mobile** minhtuanmobile.com · **Clickbuy** clickbuy.com.vn · **Di Động Mỹ** didongmy.com · **Bạch Long Mobile** bachlongmobile.com · **24hStore** 24hstore.vn · **Hnam Mobile** hnammobile.com · **XTmobile** xtmobile.vn · + **websosanh.vn** (so giá)
 - *(TGDĐ + FPT ≈ 75% điểm bán Apple ủy quyền — an toàn cho iPhone/MacBook chính hãng. Nhưng giá rẻ nhất hay nằm ở shop cạnh tranh — luôn khảo thêm.)*
 
+**Máy CŨ / likenew / C2C** (đáy giá cho hàng đời cũ — ĐỪNG bỏ qua khi tìm "rẻ nhất"; ghi rõ tình trạng + BH):
+- **Chợ Tốt** chotot.com (C2C cá nhân — **rẻ nhất**, không BH, kiểm kỹ người bán) · **websosanh.vn** (so giá đa sàn) · **24hStore** 24hstore.vn · **ClickBuy** clickbuy.com.vn · **Di Động Việt** (máy cũ) · **Bạch Long / Minh Tuấn / Hnam / XTmobile** (đều có mục "máy cũ/likenew") · các store likenew chuyên (Nhí Store, Didongthongminh...).
+- Quy tắc giá hàng cũ: **C2C (Chợ Tốt) < shop likenew có-BH < mới chính hãng**. Đo thực: iPhone 14 Pro 128GB — Chợ Tốt ~8tr, likenew-shop 12-14tr, mới ~22,9tr.
+
 **Sàn TMĐT tổng hợp** (đa dạng, nhiều shop — cẩn thận chính hãng vs trôi nổi):
 - **Shopee** shopee.vn (lớn nhất ~53%, ưu tiên **Shopee Mall**) · **TikTok Shop** (~44%, hay mã giảm sâu) · **Lazada** lazada.vn (**LazMall**) · **Tiki** tiki.vn (**Tiki Trading/Chính hãng**) · **Sendo** sendo.vn
 
@@ -101,8 +107,9 @@ Khi người dùng muốn bảng giá / Excel / file để gửi đi:
 ## Công cụ
 - `web_search` + `web_fetch` (tra giá/spec; **dùng `schema` của web_fetch** để bóc biến thể tin cậy) · `write_file` (JSON/CSV) · `bash` (chạy make-sheet.ts).
 - **Browser MCP cho sàn động (Shopee/Tiki/Lazada/TikTok)**: các sàn này render giá bằng JS → `web_fetch` tĩnh nhận vỏ rỗng. Nếu có tool `mcp__playwright__browser_*` (đã cấu hình) thì: `mcp__playwright__browser_navigate` mở trang → `mcp__playwright__browser_snapshot` đọc DOM ĐÃ RENDER (thấy giá) → rồi bóc như thường. Không có thì ghi "cần người mở link xác minh".
-  - *Bật:* thêm vào config `{"mcp_servers":{"playwright":{"command":"npx","args":["-y","@playwright/mcp@latest","--headless","--device","Desktop Chrome"]}}}` (cần `npx playwright install chromium` 1 lần).
-  - *Stealth cấp 1 (cơ bản, mặc định):* `--device "Desktop Chrome"` ẩn `navigator.webdriver` + UA headless (đo thực tế: cả hai về false) — **chỉ config, không cần package thứ 3**. Đủ cho phần lớn sàn JS.
+  - *Bật:* thêm vào config `{"mcp_servers":{"browser":{"command":"bunx","args":["@playwright/mcp@latest","--isolated","--browser","chrome"]}}}` (cần Chrome cài sẵn; hoặc `npx playwright install chromium` cho bản bundled).
+  - *Headed real-Chrome > headless (đo thực tế):* `--browser chrome` (không `--headless`) dùng Chrome thật → **ít bị bot-detect hơn hẳn**. Đo: headless bị **captcha** ở Google/DuckDuckGo + **tường xác minh** ở Shopee/Lazada; **headed real-Chrome đọc được giá Lazada**. Token: dùng `browser_evaluate` lấy đúng selector/`innerText`, **ĐỪNG `browser_snapshot`** (một lần snapshot tốn ~cả trăm nghìn token).
+  - *Stealth cấp 1 (mặc định):* `--device "Desktop Chrome"` ẩn `navigator.webdriver` + UA headless. Đủ cho phần lớn sàn JS; Shopee thì gần như luôn chặn (kể cả vậy) → gắn cờ "cần người mở link".
   - *Stealth cấp 2 (mạnh nhất — [CloakBrowser](https://github.com/CloakHQ/CloakBrowser)):* trình duyệt Chromium **vá fingerprint ở cấp nguồn C++ (58 patch: canvas/WebGL/audio/WebRTC/CDP...)** + `humanize` chuột/phím giống người; vượt được cả **Cloudflare Turnstile + reCAPTCHA** mà cấp-1 không tới. Nó là **drop-in Playwright**, nên cầu nối vào Neko qua **CDP**: chạy Chromium của CloakBrowser với remote-debugging (xem docs của họ cho cờ launch), rồi `@playwright/mcp --cdp-endpoint http://localhost:9222` → tool `mcp__playwright__browser_*` của Neko lái trình duyệt tàng hình đó. *(Nó là HẠ TẦNG, trí tuệ vẫn là Neko.)*
     - **Caveat thật (phải đọc):** **(1) ToS/pháp lý:** vượt bot-detection + qua captcha là **vùng xám, vi phạm ToS nhiều site** — chỉ dùng cho **truy cập HỢP PHÁP của bạn + dữ liệu công khai**, không lạm dụng/scrape ồ ạt. **(2)** binary ~200MB (free v146, Pro cho bản mới). **(3)** Bản thân Neko/agent **không tự giải captcha thay bạn** nếu rơi vào tình huống cần — gắn cờ "cần người".
     - **Honest cho procurement:** **nguồn chính hãng TĨNH (TGĐ/FPT/CellphoneS/ShopDunk...) thường cho giá tốt nhất mà KHÔNG cần stealth gì cả** — `web_fetch` đọc thẳng. Chỉ với tới CloakBrowser khi đúng 1 trang anti-bot chặn gắt mà thật sự cần. Đừng phức tạp hoá khi nguồn tĩnh đã đủ.
