@@ -67,6 +67,11 @@ All notable changes to Neko Code are documented here. The format follows
   SendKeys focus-leak guardrail learned from dogfooding.
 
 ### Fixed
+- **A throwing tool no longer crashes the whole turn** — a model glitch (e.g. emitting `web_fetch` with no
+  `url`) made an executor `throw`, which escaped the agent loop and killed the run (`neko: error: ...`). Tool
+  execution now goes through `safeExecute`, so any throw becomes a recoverable error OBSERVATION fed back to
+  the model (honouring the loop's "errors are fed back so the model adapts rather than crash" contract).
+  Caught a real failure mid price-research; regression-tested.
 - **Context-overflow crash** — one huge tool result (a heavy page's browser snapshot) could push the prompt
   past the context window, so the server returned a negative `max_tokens` and 400'd the turn. Each
   observation is now capped, and a long turn compresses its OLDEST observations in place (observation

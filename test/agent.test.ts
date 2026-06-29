@@ -34,6 +34,22 @@ test("loop runs tools then finishes", async () => {
   ]);
 });
 
+test("a throwing tool call (model glitch) is fed back as an error, not crashed", async () => {
+  // web_fetch with no `url` makes requireArg throw -- before safeExecute this rejected the whole turn.
+  const script = [
+    { content: null, tool_calls: [{ id: "c1", name: "web_fetch", arguments: {} }] }, // no url -> throws
+    { content: "recovered", tool_calls: [] },
+  ];
+  const agent = new Agent({
+    provider: new ScriptedProvider(script) as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    maxSteps: 5,
+  });
+  expect(await agent.run("go")).toBe("recovered"); // run did NOT crash
+  const toolMsg = agent.messages.find((m: any) => m.role === "tool");
+  expect(String(toolMsg.content)).toMatch(/error/i); // the throw became a recoverable observation
+});
+
 test("dynamicContext is merged into the ONE system message and refreshed each turn (no staleness, one system msg)", async () => {
   let model = "m1";
   const agent = new Agent({

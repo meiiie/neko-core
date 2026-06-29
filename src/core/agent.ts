@@ -238,6 +238,18 @@ export class Agent {
     sys.content = `${base}\n\n${text}` + (dyn !== undefined ? Agent.DYN_MARK + dyn : "");
   }
 
+  /** Execute a tool but NEVER throw: a malformed/failed tool call (e.g. a model emitting web_fetch with no
+   * `url`, or any executor that throws) becomes an error OBSERVATION the model can recover from, instead of
+   * rejecting the whole turn. The loop is built on "feed errors back so the model adapts" — this enforces it
+   * for every tool, not just the ones already wrapped inside execute(). */
+  private async safeExecute(call: { name: string; arguments: Record<string, any> }, signal?: AbortSignal): Promise<string | any[]> {
+    try {
+      return await this.tools.execute(call.name, call.arguments, signal);
+    } catch (error) {
+      return `Error running ${call.name}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
   /** Run the loop until the model is done or maxSteps is hit. Returns the final text.
    * Pass an AbortSignal to support Esc-to-interrupt (stops cleanly between/within steps).
    * `images` (data: URLs) attach as OpenAI vision content — used by paste-image (needs a vision model). */
@@ -291,7 +303,7 @@ export class Agent {
       if (toolCalls.length > 1 && toolCalls.every((c) => CONCURRENCY_SAFE.has(c.name))) {
         lastSig = ""; // a parallel fan-out breaks any single-call repeat chain
         toolCalls.forEach((call) => this.emit("tool_call", call));
-        const observations = await Promise.all(toolCalls.map((call) => this.tools.execute(call.name, call.arguments, signal)));
+        const observations = await Promise.all(toolCalls.map((call) => this.safeExecute(call, signal)));
         toolCalls.forEach((call, i) => {
           this.emit("tool_result", { call, observation: observations[i] });
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observations[i]) });
@@ -307,7 +319,7 @@ export class Agent {
           lastSig = sig;
           const observation = repeats >= 2
             ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
-            : await this.tools.execute(call.name, call.arguments, signal);
+            : await this.safeExecute(call, signal);
           this.emit("tool_result", { call, observation });
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
         }
