@@ -21,7 +21,7 @@ test("schema shape", () => {
 
 test("tool order", () => {
   expect(toolSchemas().map((t: any) => t.function.name)).toEqual([
-    "read_file", "search", "glob", "ls", "write_file", "edit", "multi_edit", "bash", "todo_write",
+    "read_file", "search", "glob", "ls", "write_file", "edit", "multi_edit", "bash", "computer", "todo_write",
     "web_search", "web_fetch", "exit_plan_mode", "task", "memory", "skill", "workflow", "playbook",
   ]);
 });
@@ -35,4 +35,5 @@ test("permission classes", () => {
   expect(resolveTool("glob").permission).toBe(SAFE);
   expect(resolveTool("write_file").permission).toBe(GATED);
   expect(resolveTool("edit").permission).toBe(GATED);
+  expect(resolveTool("computer").permission).toBe(GATED);
 });

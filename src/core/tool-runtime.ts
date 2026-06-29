@@ -9,6 +9,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { McpTools } from "./ports.ts";
@@ -383,6 +384,7 @@ export class ToolRegistry {
       const out = name === "bash" ? await this.runBash(args, signal)
         : name === "read_file" ? this.runReadFile(args)
         : name === "skill" ? this.runSkill(args)
+        : name === "computer" ? this.runComputer(args)
         : await DISPATCH[name](this.root, args);
       this.runPostHook(name, args, typeof out === "string" ? out : "[image]");
       return out;
@@ -401,6 +403,47 @@ export class ToolRegistry {
     if (IMAGE_EXTS.has(ext)) return readImageFile(path, raw, ext, this.vision);
     if (ext === "pdf") return readPdfFile(path, raw);
     return toolReadFile(this.root, args);
+  }
+
+  /** First-class desktop/GUI control (Windows): dispatches to the computer-use skill's accessibility-tree
+   * scripts. Reads/acts on a window BY NAME (no vision); pointer acts use touch injection (no mouse hijack).
+   * Unicode element names go through a temp UTF-8 file (@file) -- the cp1252 console mangles non-ASCII args. */
+  private runComputer(args: Record<string, any>): string {
+    const action = String(args.action ?? "");
+    const skill = this.loadSkill?.("computer-use");
+    const scriptsDir = skill ? join(skill.dir, "scripts") : join(this.root, "skills", "computer-use", "scripts");
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (args.window) { env.NEKO_UIA_WINDOW = String(args.window); env.NEKO_DRAW_WINDOW = String(args.window); }
+    if (this.presence) env.NEKO_PRESENCE = "1";
+    if (this.inputBackend && this.inputBackend !== "auto") env.NEKO_INPUT = this.inputBackend;
+    const tmp: string[] = [];
+    const atFile = (s: string): string => { const p = join(tmpdir(), `neko_uia_${Date.now()}_${tmp.length}.txt`); writeFileSync(p, s, "utf8"); tmp.push(p); return "@" + p; };
+    let script: string, sa: string[];
+    switch (action) {
+      case "list": case "read": script = "uia.ps1"; sa = [action]; break;
+      case "get": case "invoke": case "toggle": {
+        const nm = String(args.name ?? ""); if (!nm) return `Error: computer ${action} needs 'name'.`;
+        script = "uia.ps1"; sa = [action, atFile(nm)]; break;
+      }
+      case "setvalue": {
+        const nm = String(args.name ?? ""); if (!nm) return "Error: computer setvalue needs 'name'.";
+        script = "uia.ps1"; sa = ["setvalue", atFile(nm), atFile(String(args.value ?? ""))]; break;
+      }
+      case "click": script = "inject.ps1"; sa = ["tap", String(Math.round(Number(args.x))), String(Math.round(Number(args.y)))]; break;
+      case "stroke": {
+        const pts = Array.isArray(args.points) ? args.points.map((n: any) => String(Math.round(Number(n)))) : [];
+        if (pts.length < 4 || pts.length % 2 !== 0) return "Error: computer stroke needs an even 'points' array [x1,y1,x2,y2,...] (>= 2 points).";
+        script = "inject.ps1"; sa = ["stroke", ...pts]; break;
+      }
+      case "screenshot": { const out = join(tmpdir(), `neko_shot_${Date.now()}.gif`); script = "screenshot.ps1"; sa = [out]; break; }
+      default: return `Unknown computer action '${action}'. Use: list | read | get | invoke | setvalue | toggle | click | stroke | screenshot.`;
+    }
+    try {
+      const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa], { encoding: "utf-8", cwd: this.root, env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
+      return (r.stdout || "").trim() || (r.stderr || "").trim() || "(no output)";
+    } finally {
+      for (const p of tmp) { try { rmSync(p, { force: true }); } catch {} }
+    }
   }
 
   /** post_tool_use hook: fire-and-observe after a tool runs (logging/formatting; never blocks). */

@@ -42,6 +42,13 @@ All notable changes to Neko Code are documented here. The format follows
   autonomy, "re-perceive don't blind-resume". And `runUntilDone` (`neko run --loop`) now re-inspects the ACTUAL
   state each pass before judging DONE (Reflexion/CRITIC/Chain-of-Verification) — the fix for tasks that quit
   early (the Paint test). SKILL.md documents all three.
+- **First-class `computer` tool** — computer-use is now a native, gated agent tool, not just bash-ed scripts:
+  `computer({action, window, name, value, x, y, points})` with `action` = list/read/get/invoke/setvalue/
+  toggle/click/stroke/screenshot. It dispatches to the accessibility-tree scripts (Unicode names via an
+  automatic temp UTF-8 `@file`), honours the presence/input config, and is gated like bash. The agent calls
+  it structurally instead of constructing fragile shell strings. Verified live against a real Paint window.
+- **`auto_loop` config (persist by default)** — set `"auto_loop": true` and `neko run` uses the closed loop
+  (runUntilDone) by default, so you don't retype `--loop`; `--once` (alias `--no-loop`) forces a single shot.
 - **Deep research** — a `deep-research` skill (plan -> multi-source search -> read primaries -> cross-verify
   >=2 authoritative sources -> cited synthesis) and a strengthened always-on Accuracy section in the prompt.
 - **tui-self-test** skill — verify the TUI render (ink-testing-library + a live screenshot loop) with the

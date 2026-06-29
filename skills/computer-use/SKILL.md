@@ -78,8 +78,14 @@ the `procurement` skill.
 
 ## Quick start — DESKTOP (Windows: WORKS with plain gpt-oss, NO vision — via UIA)
 Native apps have no DOM, but Windows UI Automation (UIA) IS the desktop's accessibility tree — the desktop
-DOM. **This is the primary path; use it first.** `uia.ps1` lets a text model perceive + act + verify with
-no vision and (for pattern actions) no cursor movement:
+DOM. **This is the primary path; use it first.**
+
+**Prefer the first-class `computer` tool** over bash-ing the scripts: `computer({action, window, name, value,
+x, y, points})` — `action` is `list | read | get | invoke | setvalue | toggle | click | stroke | screenshot`.
+It dispatches to the scripts below (Unicode names handled via a temp UTF-8 `@file` automatically), gated like
+bash, and honours the presence/input config. Bash + the raw scripts is the fallback / for anything the tool
+doesn't expose. The underlying `uia.ps1` lets a text model perceive + act + verify with no vision and (for
+pattern actions) no cursor movement:
 
 ```
 # perceive: list actionable elements (name + role + verb + exact coords)

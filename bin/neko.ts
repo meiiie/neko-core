@@ -47,6 +47,7 @@ interface Args {
   resume: boolean;
   resumeId?: string;
   loop: boolean;
+  once: boolean;
   version: boolean;
   help: boolean;
   trials?: number;
@@ -54,13 +55,14 @@ interface Args {
 
 function parseArgs(argv: string[]): Args {
   const tokens: string[] = [];
-  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, version: false, help: false };
+  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, once: false, version: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--profile") args.profile = argv[++i];
     else if (a === "--force") args.force = true;
     else if (a === "--yolo") args.yolo = true;
     else if (a === "--loop") args.loop = true;
+    else if (a === "--once" || a === "--no-loop") args.once = true;
     else if (a === "--trials") args.trials = Number(argv[++i]) || 1;
     else if (a === "--resume") {
       args.resume = true;
@@ -203,6 +205,7 @@ Options:
   --profile <name>   named runtime profile (see 'neko profiles')
   --yolo             auto-approve gated tools (bounded autonomy)
   --loop             run "run" as a closed loop: work + self-review until done
+  --once             force a single-shot run (overrides config "auto_loop": true)
   --resume [id]      (chat) resume a session by id, or the latest for this directory
   --version          print version`;
 
@@ -353,7 +356,8 @@ async function cmdRun(args: Args): Promise<number> {
     return 2;
   }
   let streamed = 0;
-  const { agent, close } = await buildAgent(load(args), args.yolo, (t, kind) => {
+  const cfg = load(args);
+  const { agent, close } = await buildAgent(cfg, args.yolo, (t, kind) => {
     if (kind === "reasoning" || kind === "tool") return; // CLI prints only the final content
     streamed += t.length;
     process.stdout.write(t);
@@ -365,7 +369,9 @@ async function cmdRun(args: Args): Promise<number> {
   const wf = matchWorkflow(instruction);
   if (wf) agent.appendSystem(`# Learned workflow: ${wf.name}\n${wf.body}`);
   try {
-    const answer = args.loop ? await agent.runUntilDone(instruction) : await agent.run(instruction);
+    // Persist toward the goal when --loop OR config auto_loop is set; --once forces a single shot.
+    const useLoop = !args.once && (args.loop || cfg.autoLoop);
+    const answer = useLoop ? await agent.runUntilDone(instruction) : await agent.run(instruction);
     process.stdout.write("\n");
     if (streamed === 0 && answer.trim()) console.log(answer); // synthetic/non-streamed result
     console.log(`[${agent.cost.summary()}]`);

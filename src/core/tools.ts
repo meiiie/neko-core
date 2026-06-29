@@ -116,6 +116,27 @@ export const TOOL_SPECS: ToolSpec[] = [
     required: ["command"],
   },
   {
+    name: "computer",
+    permission: GATED,
+    summary:
+      "Drive the desktop/GUI (Windows) via the OS accessibility tree — no vision, no GUI-trained model. Read a window's elements/text and act on them BY NAME (reliable + layout-independent), plus pointer actions. Prefer this over bash-ing the scripts. Set `window` to a title substring (e.g. 'Paint', 'Chrome'); omit = foreground. Pointer acts use touch injection (does NOT move the user's mouse). See the computer-use skill for the perceive->act->verify loop, takeover/resume, and the goal loop.",
+    parameters: {
+      action: {
+        type: "string",
+        enum: ["list", "read", "get", "invoke", "setvalue", "toggle", "click", "stroke", "screenshot"],
+        description:
+          "list = actionable elements (name+verb+coords); read = the page/doc as text; get = an element's value; invoke = click a control by name; setvalue = type into a field by name; toggle = a checkbox by name; click = tap x,y (touch); stroke = drag/draw through points; screenshot = capture to a GIF.",
+      },
+      window: { type: "string", description: "Target window title substring (e.g. 'Paint'). Omit = foreground window." },
+      name: { type: "string", description: "Element NAME for get/invoke/setvalue/toggle (copy it from `list`/`read`)." },
+      value: { type: "string", description: "Text to set, for setvalue." },
+      x: { type: "number", description: "X pixel, for click." },
+      y: { type: "number", description: "Y pixel, for click." },
+      points: { type: "array", description: "Flat [x1,y1,x2,y2,...] screen pixels for stroke (drag/draw).", items: { type: "number" } },
+    },
+    required: ["action"],
+  },
+  {
     name: "todo_write",
     permission: SAFE,
     summary: "Record/update the task todo list. Use it to plan multi-step work and track progress.",
@@ -231,6 +252,7 @@ const TOOL_LABELS: Record<string, string> = {
   glob: "Glob",
   ls: "List",
   bash: "Bash",
+  computer: "Computer",
   todo_write: "Update Todos",
   web_search: "WebSearch",
   web_fetch: "Fetch",
@@ -248,6 +270,8 @@ export function describeToolCall(name: string, args: Record<string, any>): strin
   const a = args ?? {};
   const primary = name === "memory" || name === "workflow" || name === "playbook"
     ? [a.action, a.name ?? a.find ?? a.query].filter(Boolean).join(" ")
+    : name === "computer"
+    ? [a.action, a.name ?? a.window ?? (a.x !== undefined ? `${a.x},${a.y}` : "")].filter(Boolean).join(" ")
     : name === "skill"
     ? (a.name ?? "")
     : (a.path ?? a.command ?? a.query ?? a.url ?? a.pattern ?? a.description ?? "");

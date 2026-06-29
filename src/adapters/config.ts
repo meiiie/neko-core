@@ -160,6 +160,9 @@ export class NekoConfig {
    * its own pointer channel); "sendinput" = legacy SendInput (moves the one system cursor). "auto"/unset
    * leaves each helper's default. A new backend is a config value, not a code change. */
   get computerUseInput(): string { return String(this.data.computer_use_input ?? "auto"); }
+  /** Persist toward the GOAL by default: `neko run` uses the closed loop (runUntilDone) so a task isn't
+   * abandoned the moment the model stops calling tools. Off = single-shot. `--loop`/`--once` override. */
+  get autoLoop(): boolean { return Boolean(this.data.auto_loop); }
   /** Lazy MCP tool loading: true/false to force, or unset (undefined) to auto-enable when there are
    * many MCP tools — so a big MCP surface lists names only and loads schemas on demand. */
   get mcpLazy(): boolean | undefined { return this.data.mcp_lazy === undefined ? undefined : Boolean(this.data.mcp_lazy); }
