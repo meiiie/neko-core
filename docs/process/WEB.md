@@ -20,8 +20,26 @@ metasearch engine that aggregates Google/Bing/DDG/… into one JSON API, free an
 
 ```json
 // ~/.neko-core/config.json
-{ "searxng_url": "http://localhost:8080" }
+{ "searxng_url": "http://localhost:8888", "search_backend": "searxng" }
 ```
+
+**Working recipe (verified).** The catch: SearXNG **disables the JSON API by default** (and public instances
+keep it off), but Neko's backend needs JSON. Enable it in a mounted `settings.yml`:
+
+```yaml
+# ~/neko-searxng/settings.yml
+use_default_settings: true
+server: { secret_key: "change-me", limiter: false }
+search: { formats: [html, json] }
+```
+```bash
+docker run -d --name neko-searxng --restart unless-stopped -p 8888:8080 \
+  -v "$HOME/neko-searxng:/etc/searxng" searxng/searxng:latest
+# verify the JSON API:  curl "http://localhost:8888/search?format=json&q=test"
+```
+Measured impact (gpt-oss-120b, "iPhone 14 Pro rẻ nhất VN"): DuckDuckGo found a lowest of ~18.3M and missed
+the used market; **SearXNG surfaced Chợ Tốt / 24hStore / ClickBuy and found 7.99M** — same model, better
+harness. If SearXNG is down, `web_search` falls back to DuckDuckGo automatically.
 
 Or use **Tavily** (search built for agents) with a free key, env-only (never stored):
 `export TAVILY_API_KEY=tvly-...`. Force a backend with `"search_backend": "searxng" | "tavily" |
