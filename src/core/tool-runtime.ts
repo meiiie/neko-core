@@ -432,18 +432,30 @@ export class ToolRegistry {
         const nm = String(args.name ?? ""); if (!nm) return "Error: computer setvalue needs 'name'.";
         script = "uia.ps1"; sa = ["setvalue", atFile(nm), atFile(String(args.value ?? ""))]; break;
       }
-      case "click": script = "inject.ps1"; sa = ["tap", String(Math.round(Number(args.x))), String(Math.round(Number(args.y)))]; break;
+      case "click": {
+        const x = Number(args.x), y = Number(args.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return "Error: computer click needs numeric 'x' and 'y'.";
+        script = "inject.ps1"; sa = ["tap", String(Math.round(x)), String(Math.round(y))]; break;
+      }
       case "stroke": {
-        const pts = Array.isArray(args.points) ? args.points.map((n: any) => String(Math.round(Number(n)))) : [];
-        if (pts.length < 4 || pts.length % 2 !== 0) return "Error: computer stroke needs an even 'points' array [x1,y1,x2,y2,...] (>= 2 points).";
-        script = "inject.ps1"; sa = ["stroke", ...pts]; break;
+        const nums = Array.isArray(args.points) ? args.points.map((n: any) => Number(n)) : [];
+        if (nums.length < 4 || nums.length % 2 !== 0 || nums.some((n) => !Number.isFinite(n))) return "Error: computer stroke needs an even 'points' array of NUMBERS [x1,y1,x2,y2,...] (>= 2 points).";
+        script = "inject.ps1"; sa = ["stroke", ...nums.map((n) => String(Math.round(n)))]; break;
       }
       case "screenshot": { const out = join(tmpdir(), `neko_shot_${Date.now()}.gif`); script = "screenshot.ps1"; sa = [out]; break; }
       default: return `Unknown computer action '${action}'. Use: list | read | get | invoke | setvalue | toggle | click | stroke | screenshot.`;
     }
     try {
       const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa], { encoding: "utf-8", cwd: this.root, env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
-      return (r.stdout || "").trim() || (r.stderr || "").trim() || "(no output)";
+      // Surface failures instead of swallowing them into "(no output)" — the agent can only adapt to a
+      // failure it can SEE (same contract as the rest of the loop). Timeout/spawn error -> r.error.
+      if (r.error) {
+        const timedOut = (r.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+        return `Error: computer ${action} ${timedOut ? "timed out after 90s (the PowerShell action hung)" : "could not run PowerShell"}: ${r.error.message}`;
+      }
+      const out = (r.stdout || "").trim(), err = (r.stderr || "").trim();
+      if (r.status && r.status !== 0) return `Error: computer ${action} failed (PowerShell exit ${r.status}). ${err || out || ""}`.trim();
+      return out || (err && `Error: computer ${action}: ${err}`) || "(no output)";
     } finally {
       for (const p of tmp) { try { rmSync(p, { force: true }); } catch {} }
     }

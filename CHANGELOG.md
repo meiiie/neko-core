@@ -75,6 +75,12 @@ All notable changes to Neko Code are documented here. The format follows
   SendKeys focus-leak guardrail learned from dogfooding.
 
 ### Fixed
+- **`computer` tool: failures are visible, inputs are validated** — `runComputer` swallowed PowerShell
+  spawn errors / timeouts into `"(no output)"`, so the agent couldn't tell a *failed* action from a silent
+  one; and `click` coerced a missing/invalid coordinate to the string `"NaN"` and passed it to the injector.
+  Now spawn errors, timeouts (the 90s hang), and non-zero exits are surfaced as real error observations, and
+  `click`/`stroke` reject non-numeric coordinates up front (deterministic input validation, unit-tested) —
+  the same "surface errors, validate in code" standard as the extraction layer.
 - **A throwing tool no longer crashes the whole turn** — a model glitch (e.g. emitting `web_fetch` with no
   `url`) made an executor `throw`, which escaped the agent loop and killed the run (`neko: error: ...`). Tool
   execution now goes through `safeExecute`, so any throw becomes a recoverable error OBSERVATION fed back to

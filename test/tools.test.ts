@@ -1,6 +1,17 @@
 import { expect, test } from "bun:test";
 
 import { describeToolCall, GATED, resolveTool, SAFE, toOpenAISchema, toolSchemas } from "../src/core/tools.ts";
+import { ToolRegistry } from "../src/core/tool-runtime.ts";
+
+test("computer action validates inputs deterministically (no NaN/garbage reaches PowerShell)", async () => {
+  const tools = new ToolRegistry(process.cwd(), "auto", () => true);
+  // These all return BEFORE spawnSync, so no PowerShell runs — pure input validation.
+  expect(String(await tools.execute("computer", { action: "click" }))).toContain("numeric");
+  expect(String(await tools.execute("computer", { action: "click", x: "abc", y: 5 }))).toContain("numeric");
+  expect(String(await tools.execute("computer", { action: "stroke", points: [1, 2, "x", 4] }))).toContain("NUMBERS");
+  expect(String(await tools.execute("computer", { action: "invoke" }))).toContain("needs 'name'");
+  expect(String(await tools.execute("computer", { action: "bogus" }))).toContain("Unknown computer action");
+});
 
 test("describeToolCall uses Claude-style labels + primary arg", () => {
   expect(describeToolCall("read_file", { path: "src/a.ts" })).toBe("Read(src/a.ts)");
