@@ -454,6 +454,111 @@ one never blocks another.
   gate behind an opt-in profile flag; the detector needs ≥1 `todo_write` to exist (no plan = no
   divergence to detect), so it composes naturally with the existing `todo_write` tool.
 
+- [ ] **Volatile-field stabilization of the system-prompt prefix (Don't Break the Cache).**
+  `adapters/context.ts` `environmentBlock()` (line ~103) injects a `Date: <today>` line AND a
+  `git status --porcelain` dirty-count into the `<env>` block that is concatenated into the
+  SYSTEM PROMPT — so that prefix CHANGES EVERY TURN (the date ticks; a single edit flips the
+  dirty-count from `0` to `1`), which invalidates the provider's prompt-prefix (KV) cache and
+  forces the next request to re-process the entire prefix from scratch. *Don't Break the Cache*
+  (Lumer et al., arXiv 2601.06007, Jan 2026) names this as the #1 prefix-cache killer —
+  "embedding timestamps, datetime strings, session identifiers, or user-specific information at
+  the beginning of the prompt instantly invalidates the prefix match" — and shows prompt caching
+  cuts long-horizon agentic cost **41-80%** (GPT-5.2 -79%, Claude Sonnet 4.5 -78%) when the prefix
+  is stable. **Distinct from the existing "Prompt-prefix cache stability during compaction
+  (TokenPilot)" item**: that one fixes `compact()` *rewriting the head* mid-run; this fixes
+  *volatile fields in the stable static prefix that change every turn even with zero compaction*.
+  The two compose: a stable static prefix (this item) + a non-destructive append compaction
+  (TokenPilot) = a fully cache-friendly trajectory. For Neko: (a) move the `Date:` line OUT of the
+  prefix entirely — either drop it (the model rarely needs the calendar date to code) or push it
+  into a late/volatile region; (b) drop the dirty-file-COUNT from the env block (keep `branch`,
+  drop the `(N uncommitted changes)` suffix, or move it to a tail user-message), so the static
+  prefix is byte-stable across turns; (c) audit `bin/neko.ts`/`ui/chat.tsx` for any OTHER per-turn-
+  varying text (random IDs, wall-clock) concatenated into the system message and freeze/relocate it.
+  **Verify**: (1) a unit test that builds the system prompt twice with a clock advanced by 1 day +
+  a faked edit, and asserts the STATIC PREFIX is byte-identical between the two (fails today — the
+  `Date:` line + dirty-count differ); (2) a test that the env block still reports branch + cwd +
+  model (no loss of useful info, just no per-turn churn); (3) if the provider reports
+  `cached_tokens` in `usage`, an adapter-level test over two consecutive `complete()` calls with
+  unchanged prefix asserts cache hit rises (fallback proxy: assert the message array's prefix is
+  stable across steps); (4) bench: `cached_tokens` up, total `cost` down, pass-rate flat. NB: some
+  providers require a *minimum prefix length* (e.g. OpenAI ≥1024 tokens) before caching engages —
+  no code change needed, just note it; and prefix-cache semantics are provider-specific, so gate on
+  whether the active provider reports cache metrics, else assert prefix-stability as the proxy.
+
+- [ ] **Per-step model cascade — cheap-model-first, escalate only on failure (SLM-probe/RouteLM).**
+  Neko runs ONE model for the entire `run()`: `cfg.model`/`getProvider(cfg)` is fixed for the whole
+  agent loop, so a frontier model burns full cost on every step — including the many mechanical
+  read-only steps (`read_file`/`search`/`glob`/`ls`/a known `bash` command) where a cheap model
+  would emit an equivalent tool call. *Model cascading* (surveyed in Moslem & Kelleher, arXiv
+  2603.04445, 2026; RouteLLM Ong et al. 2025; MixLLM Wang et al. 2025) is the established win:
+  attempt each step on a SMALL/cheap model, and escalate to the configured frontier model ONLY when
+  the cheap step fails or produces low-confidence output — reported **24-84% cost reduction at
+  parity quality** (R2-Reasoner -84.46% API cost at competitive accuracy; MixLLM 97.25% of GPT-4
+  quality at 24.18% of cost; SLMs match LLM performance on the top-20% high-confidence queries).
+  **Distinct from the existing "Per-step adaptive reasoning effort (Ares)" item**: Ares dials the
+  THINKING budget on ONE model (a compute knob); this swaps the MODEL ITSELF between a cheap and a
+  frontier tier per step (a cost-tier knob). The two compose. For Neko, the transferable,
+  training-free proxy (the SLM-probe router is trained; AutoMix-style self-verification is not):
+  (1) let a profile declare an optional `cascadeModel` (a cheap/fast model) alongside the main
+  `model`; (2) in the agent loop, route READ-ONLY steps (those whose tool calls are all in the
+  `CONCURRENCY_SAFE`/read-only set — `read_file/search/glob/ls/web_search/web_fetch`) to the
+  cheap model first; (3) escalate to the frontier model for write/edit/build steps, tool-less
+  planning/final-synthesis turns, OR when the cheap model's step errored/produced no usable tool
+  call (AutoMix-style self-verification: if the cheap step's output is malformed or the tool call is
+  rejected, re-run the step on the frontier model and continue from there). This reuses the existing
+  per-`complete()` provider indirection — no loop-structure change, just a per-step provider choice.
+  **Verify**: (1) a unit test with a stub "cheap" provider + stub "frontier" provider recording
+  which handled each step; assert a pure-read step goes to the cheap model and a write step goes to
+  the frontier model; (2) a test that a read step whose cheap-model output is malformed/erroring
+  escalates to the frontier model on the next `complete()` (and the trajectory continues correctly);
+  (3) a test that with NO `cascadeModel` configured, every step uses the single configured model
+  (no regression to today's behavior); (4) bench: `cost` drops (cheap tier handles read-heavy
+  tasks) at flat-or-up pass-rate — the escalation guard must keep pass-rate from regressing. NB:
+  ship behind an **opt-in** `cascadeModel` profile flag so a wrong step classification (cheap model
+  botches a read the frontier would've nailed, but it doesn't error) is a per-task quality toggle,
+  not a default breakage; and different models may use incompatible chat templates / the cheap
+  model may not support `reasoning_effort` — the adapter already self-heals on rejected fields,
+  verify that path under the cascade.
+
+- [ ] **Budget-aware early-stop of doomed trajectories (BAGEN).** Neko's only resource guard is a
+  hard `maxSteps` cap (`core/agent.ts`): the loop runs flat-out until the model stops calling tools
+  OR `maxSteps` fires — at which point it forces ONE more `complete()` asking for a summary. There
+  is zero notion of a TOKEN/cost budget, and NO mechanism to ABORT a trajectory the agent is clearly
+  not going to complete — so a run that's doomed (stuck in a hard bug, a missing dependency, an
+  impossible spec) burns the FULL step+token budget before the hard stop, and the only signal to the
+  operator is the final `[stopped: reached max_steps]` string. BAGEN (Lin et al., arXiv 2606.00198,
+  May 2026) shows the budget-aware signal is **already present and training-free in frontier
+  models**: a simple early-stop policy that aborts when the model signals a trajectory is
+  infeasible saves **28-64% tokens on failed trajectories** (GPT-5.2 -64.1%, Gemini 3.1 -55.7%,
+  Claude Sonnet 4.6 -49.6%, Qwen3 -38.8%) at only **1.6-4.2pp** overall success cost — the
+  transferable, training-free lever (SFT+RL only sharpens it). **Distinct from the existing
+  "Broad doom-loop detection"** (counts repeats-per-path, tactical), **"Tool-error recovery"**
+  (single-error redirect), **"PIVOT"** (plan-vs-execution divergence), and **"Pre-completion verify
+  gate"** (one-shot exit check): none of them ABORT a whole trajectory on a *feasibility/dead-end*
+  signal, and none are token-budget-aware. For Neko: (1) support an optional `tokenBudget` (and/or a
+  `costBudget`) on `run()`/profile, tracked against the existing `agent.cost.totalTokens` each step;
+  (2) add an opt-in early-stop probe: every `k` steps, append a brief user-role feasibility check
+  ("Given remaining budget R and current state, can this task still be completed? Reply with
+  `FEASIBLE` or `INFEASIBLE: <reason>`.") reusing the existing `appendSystem`/turn plumbing — on an
+  `INFEASIBLE` verdict (or on `cost` crossing `budget` with the step still incomplete), stop the loop
+  EARLY and return a structured `stopped: budget-exhausted/infeasible` result with the model's stated
+  reason, instead of grinding to `maxSteps`. (3) Near the budget ceiling, steer rather than abort:
+  mirror BAGEN's "request more resources / wrap up" — when remaining budget < threshold, nudge the
+  model to SUMMARIZE progress + open questions and stop, not start fresh sub-tasks. **Verify**: (1)
+  a unit test where a stub provider emits an `INFEASIBLE` verdict at step `k`; assert the loop stops
+  at step `k` (NOT `maxSteps`) and the result carries the reason (assert it does NOT early-stop on a
+  `FEASIBLE` verdict, nor when the probe is off); (2) a test that crossing a configured `tokenBudget`
+  triggers the wrap-up/stop with `agent.cost.totalTokens <= budget + oneStepTolerance` (no budget
+  blowout); (3) a test that with NO budget/probe configured, behavior is identical to today (hard
+  `maxSteps` only — no regression); (4) a trajectory test where the stub would loop to `maxSteps` on
+  an unsolvable task — assert WITH the probe it stops early at lower token cost. Bench: on a
+  deliberately-unsolvable task, `outTok`/`calls` drop sharply at ~flat pass-rate on the solvable
+  ones (early-stop only fires on doomed runs). NB: ship behind an **opt-in** `tokenBudget`/probe
+  flag; the probe adds a periodic extra turn, so gate its cadence (`k`) to avoid overhead on short
+  tasks; BAGEN finds frontier models alert TOO LATE (>70% feasibility even at 60% budget consumed),
+  so a pure self-poll may under-trigger — the *hard token-budget* ceiling is the reliable backstop,
+  the feasibility poll is the bonus.
+
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->
 

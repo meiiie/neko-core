@@ -459,14 +459,77 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   non-decreasing-quality solutions. Training-free (runtime trajectory refinement via environment
   feedback); **up to +94% relative constraint satisfaction, 3-5× fewer tokens** than competing
   refinement; effective fully autonomously.
-  -> **Neko mapping:** Neko has no runtime plan: `todo_write` items are optional and UNENFORCED, and
-  nothing compares the live trajectory against them — so the model can spend 8 steps editing an
-  off-plan file with no nudge. The distinct lever (vs "Broad doom-loop"/"Tool-error recovery," which
-  fire on tactical repeats/errors; vs "Pre-completion verify gate," which fires once at exit; vs
-  "Event-driven re-grounding," which re-states the original TASK with no notion of a PLAN): every `k`
-  steps, INSPECT the tools/paths actually touched against the current `todo_write` items and, on
-  divergence, `appendSystem()` a textual-gradient nudge to re-plan. (See BACKLOG "Plan-execution
-  misalignment detector + textual-gradient replan (PIVOT).")
+    -> **Neko mapping:** Neko has no runtime plan: `todo_write` items are optional and UNENFORCED, and
+    nothing compares the live trajectory against them — so the model can spend 8 steps editing an
+    off-plan file with no nudge. The distinct lever (vs "Broad doom-loop"/"Tool-error recovery," which
+    fire on tactical repeats/errors; vs "Pre-completion verify gate," which fires once at exit; vs
+    "Event-driven re-grounding," which re-states the original TASK with no notion of a PLAN): every `k`
+    steps, INSPECT the tools/paths actually touched against the current `todo_write` items and, on
+    divergence, `appendSystem()` a textual-gradient nudge to re-plan. (See BACKLOG "Plan-execution
+    misalignment detector + textual-gradient replan (PIVOT).")
+
+## Token efficiency / context engineering — 2026-Q3 update #5 (RESEARCH pass)
+> Three fresh angles, none overlapping the existing 30-item backlog. One per DISTINCT axis:
+> prefix-cache *stability* (Don't Break the Cache — volatile static-prefix fields), *cost-tier*
+> efficiency (model cascade — cheap-first/escalate-on-failure, distinct from Ares's single-model
+> *effort* knob), and *trajectory feasibility* / budget-awareness (BAGEN — early-stop doomed runs,
+> distinct from PIVOT/doom-loop tactical nudges). Each maps to a unit-testable `## Research-seeded`
+> BACKLOG item, and each gap was confirmed against `src/`.
+
+- **Don't Break the Cache: An Evaluation of Prompt Caching for Long-Horizon Agentic Tasks** — Lumer,
+  Nizar, Jangiti, Frank, Gulati, Phadate, Subbiah, Jan 2026 ([arXiv 2601.06007](https://arxiv.org/abs/2601.06007)).
+  Prompt caching (reusing computed KV tensors on repeated prefixes) cuts long-horizon agentic API
+  cost **41-80%** (GPT-5.2 -79.3%, Claude Sonnet 4.5 -77.8%; GPT-4o -47.8%, Gemini 2.5 Pro -38.3%)
+  and TTFT 13-31%. But it relies on EXACT prefix matching: "a cache miss occurs when any token
+  differs from the cached content, even at the very beginning." It names the #1 cache killer:
+  **dynamic content in the system prompt** — "embedding timestamps, datetime strings, session
+  identifiers, or user-specific information at the beginning of the prompt instantly invalidates the
+  prefix match" — plus dynamic tool sets (MCP) and compaction/pruning. (A `git status` dirty-count
+  falls squarely under "user-specific information that changes.")
+  -> **Neko mapping:** `adapters/context.ts` `environmentBlock()` (line ~103) concatenates a
+  `Date: <today>` line + a `git status --porcelain` dirty-count into the `<env>` block that goes
+  into the SYSTEM PROMPT — so the prefix CHANGES EVERY TURN (date ticks daily; a single edit flips
+  the dirty-count 0->1), busting the cache on every step with zero compaction. The **distinct**
+  lever (vs the existing "Prompt-prefix cache stability during compaction (TokenPilot)," which fixes
+  `compact()` *rewriting the head* mid-run): fix *volatile fields in the stable static prefix* that
+  churn every turn even with no compaction. The two compose for a fully cache-friendly trajectory.
+  (See BACKLOG "Volatile-field stabilization of the system-prompt prefix (Don't Break the Cache).")
+- **Dynamic Model Routing and Cascading for Efficient LLM Inference: A Survey** — Moslem & Kelleher
+  (Trinity College Dublin), 2026 ([arXiv 2603.04445](https://arxiv.org/abs/2603.04445)). Surveys the
+  cost/quality win of routing each request to the cheapest model that can handle it, and *cascading*
+  (attempt on a small/cheap model, escalate to a frontier model only when the response is deemed
+  insufficient). Exact reported savings from surveyed methods: **R2-Reasoner -84.46% API cost at
+  competitive accuracy; MixLLM 97.25% of GPT-4 quality at 24.18% of cost; SLMs match LLM performance
+  on top-20% high-confidence queries; routing overhead <8 ms/query.** (RouteLLM Ong et al. 2025
+  likewise ~2x cost cut from Chatbot Arena-trained routers.) Key distinction: the routers/probes are
+  mostly TRAINED (RouteLMT LoRA, RouteLLM preference training); AutoMix-style self-verification
+  (escalate when the cheap output is malformed/low-confidence) is the training-free transfer.
+  -> **Neko mapping:** Neko runs ONE model for the whole `run()` (`cfg.model`/`getProvider(cfg)`
+  fixed for the loop) — so the frontier model burns full cost on every mechanical read-only step.
+  The **distinct** lever (vs the existing "Per-step adaptive reasoning effort (Ares)," which dials
+  THINKING budget on ONE model): swap the MODEL ITSELF per step — cheap model first for read-only
+  steps (the `CONCURRENCY_SAFE`/read set), escalate to the frontier model for write/edit/build
+  steps, tool-less planning, or when the cheap step errors. Training-free proxy = AutoMix-style
+  self-verification (escalate on malformed/rejected tool calls). (See BACKLOG "Per-step model
+  cascade — cheap-model-first, escalate only on failure (SLM-probe/RouteLM).")
+- **BAGEN: Are LLM Agents Budget-Aware?** — Lin, Wang, Liu, Shan, Bai, Zhang et al. (Northwestern /
+  All Hands AI / Stanford), May 2026 ([arXiv 2606.00198](https://arxiv.org/abs/2606.00198)). Asks
+  whether agents can PREDICT remaining budget + recognize infeasible trajectories. Three findings:
+  (1) budget-awareness is decoupled from task performance (r≈0.35; best actor ≠ best estimator);
+  (2) frontier models are *over-optimistic* — predict >70% feasibility even at 60% budget consumed,
+  alerting only in the final 20% (too late); (3) **the early-stop signal is already present and
+  TRAINING-FREE** — a simple policy that aborts when the model declares a trajectory infeasible saves
+  **28-64% tokens on failed trajectories** (GPT-5.2 -64.1%, Gemini 3.1 -55.7%, Sonnet 4.6 -49.6%,
+  Qwen3 -38.8%) at only **1.6-4.2pp** overall success cost. SFT+RL only sharpens it. Budget tracked
+  per-turn (tokens internal; USD/weeks external).
+  -> **Neko mapping:** Neko's only resource guard is a hard `maxSteps` cap (`core/agent.ts`) — no
+  token/cost budget, no way to ABORT a doomed run, so an impossible task burns the full budget before
+  `[stopped: reached max_steps]`. The **distinct** lever (vs "Broad doom-loop"/"Tool-error recovery"
+  (tactical repeat/error nudges), "PIVOT" (plan divergence), "Pre-completion verify gate" (one-shot
+  exit)): a whole-trajectory *feasibility* early-stop — let the agent declare INFEASIBLE (or hit a
+  `tokenBudget` ceiling) and stop early with a reason, instead of grinding to maxSteps. Training-free
+  (frontier models already surface the signal); a hard `tokenBudget` backstop covers the over-optimism.
+  (See BACKLOG "Budget-aware early-stop of doomed trajectories (BAGEN).")
 
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
