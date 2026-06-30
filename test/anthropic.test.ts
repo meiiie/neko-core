@@ -1,6 +1,17 @@
 import { expect, test } from "bun:test";
 
-import { parseMessage, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
+import { parseMessage, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
+
+test("thinkingBudget maps the effort ladder; off/unset => 0 (no extended thinking)", () => {
+  expect(thinkingBudget("off")).toBe(0);
+  expect(thinkingBudget("")).toBe(0);
+  expect(thinkingBudget("nonsense")).toBe(0);
+  expect(thinkingBudget("low")).toBeGreaterThan(0);
+  expect(thinkingBudget("medium")).toBeGreaterThan(thinkingBudget("low"));
+  expect(thinkingBudget("high")).toBeGreaterThan(thinkingBudget("medium"));
+  expect(thinkingBudget("xhigh")).toBeGreaterThan(thinkingBudget("high"));
+  expect(thinkingBudget("max")).toBeGreaterThan(thinkingBudget("xhigh"));
+});
 
 test("toAnthropicMessages: system folds to top-level, tool_calls -> tool_use, tool result -> user block", () => {
   const { system, msgs } = toAnthropicMessages([

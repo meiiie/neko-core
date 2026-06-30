@@ -30,6 +30,14 @@ export class AnthropicProvider implements Provider {
     };
     if (system) payload.system = system;
     if (tools && tools.length) payload.tools = toAnthropicTools(tools);
+    // Reasoning EFFORT on the Anthropic API = extended thinking. Map Neko's effort -> a `thinking` budget so
+    // low..max actually deepen GLM's reasoning on Z.ai (the OpenAI `reasoning_effort` field doesn't apply here).
+    const budget = thinkingBudget(this.cfg.effort);
+    if (budget > 0) {
+      payload.thinking = { type: "enabled", budget_tokens: budget };
+      payload.max_tokens = Math.max(payload.max_tokens, budget + 8192); // room for the answer AFTER thinking
+      delete payload.temperature; // extended thinking requires the default temperature (can't set it)
+    }
 
     const url = `${this.cfg.baseUrl.replace(/\/+$/, "")}/v1/messages`;
     const headers: Record<string, string> = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
@@ -114,6 +122,19 @@ export function toAnthropicMessages(messages: any[]): { system: string; msgs: an
 /** OpenAI {type:function, function:{name,description,parameters}} -> Anthropic {name,description,input_schema}. */
 export function toAnthropicTools(tools: any[]): any[] {
   return tools.map((t) => ({ name: t.function?.name, description: t.function?.description ?? "", input_schema: t.function?.parameters ?? { type: "object", properties: {} } }));
+}
+
+/** Neko reasoning effort -> Anthropic extended-thinking budget (tokens). 0 = no extended thinking (fast).
+ *  Matches the effort ladder low|medium|high|xhigh|max (and "off"/unset). */
+export function thinkingBudget(effort: string): number {
+  switch ((effort || "").toLowerCase()) {
+    case "low": return 2048;
+    case "medium": return 6000;
+    case "high": return 12000;
+    case "xhigh": return 24000;
+    case "max": return 32000;
+    default: return 0; // off / unset -> no extended thinking
+  }
 }
 
 function textOf(content: any): string {
