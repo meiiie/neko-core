@@ -42,6 +42,15 @@ function makeTransport(cfg: McpServerConfig): { transport: any; type: string } {
   };
 }
 
+/** A hung MCP server (stdio command that never speaks, unresponsive URL) must not block Neko's startup
+ *  forever. Bound each connect; on timeout the server is skipped with an error instead of hanging the loop. */
+const MCP_CONNECT_TIMEOUT_MS = 15_000;
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms); });
+  return Promise.race([p.finally(() => clearTimeout(timer)), timeout]);
+}
+
 /** The synthetic meta-tool exposed in lazy mode so the model can pull tool schemas on demand. */
 const MCP_LOAD_SPEC = {
   type: "function",
@@ -94,8 +103,10 @@ export class McpHub {
     for (const [name, cfg] of Object.entries(servers ?? {})) {
       try {
         this.configs.set(name, cfg);
-        const { client, type } = await this.makeClient(name, cfg);
-        const res: any = await client.listTools();
+        // OAuth is user-paced (browser authorize) so it must NOT be timed out; everything else is bounded.
+        const connect = this.makeClient(name, cfg);
+        const { client, type } = cfg.oauth ? await connect : await withTimeout(connect, MCP_CONNECT_TIMEOUT_MS, `MCP '${name}' connect`);
+        const res: any = await withTimeout(client.listTools(), MCP_CONNECT_TIMEOUT_MS, `MCP '${name}' listTools`);
         let tools = 0;
         for (const tool of res.tools ?? []) {
           if (!this.allowed(name, tool.name)) continue; // mcp_allow/mcp_deny filter

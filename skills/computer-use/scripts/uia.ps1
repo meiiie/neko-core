@@ -51,6 +51,20 @@ function FindByName($nm){
   return $null
 }
 function Pat($e,$p){ try { return $e.GetCurrentPattern($p) } catch { return $null } }
+# act->verify for invoke: a fingerprint of the window's control tree ("type:name" set) + the set of top-level
+# window titles. Diffing before/after an invoke shows DETERMINISTICALLY what the action changed (menu opened,
+# fields appeared, a dialog popped) -- invoke has no single property to read back, so we read the STRUCTURE.
+function TreeSig($r){
+  $sig=New-Object 'System.Collections.Generic.HashSet[string]'
+  $h=$cr.Activate()
+  try { foreach($x in $r.FindAll($TS::Descendants,$ctrlView)){ $c=$x.Cached; $nm=$c.Name; if($nm){ [void]$sig.Add((($c.ControlType.ProgrammaticName -replace 'ControlType.','')+":"+$nm)) } } } finally { $h.Dispose() }
+  return $sig
+}
+function WindowSig(){
+  $s=New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach($w in $A::RootElement.FindAll($TS::Children,$TrueC)){ $n=$w.Current.Name; if($n){ [void]$s.Add($n) } }
+  return $s
+}
 # Unicode-safe targets: pass `@<path>` to read the name/value from a UTF-8 file (the Windows console is
 # cp1252, so non-ASCII args -- Vietnamese, CJK, emoji -- mangle on the command line; a file round-trips clean).
 if($name -like '@*' -and (Test-Path $name.Substring(1))){ $name=(Get-Content $name.Substring(1) -Raw -Encoding UTF8).TrimEnd("`r","`n") }
@@ -99,11 +113,27 @@ switch($cmd){
   }
   "invoke" {
     $e=FindByName $name; if(-not $e){ Write-Output "not found: $name"; exit 1 }
-    $ip=Pat $e ([System.Windows.Automation.InvokePattern]::Pattern); if($ip){ $ip.Invoke(); Write-Output "invoked: $name"; exit }
-    $sp=Pat $e ([System.Windows.Automation.SelectionItemPattern]::Pattern); if($sp){ $sp.Select(); Write-Output "selected: $name"; exit }
-    $tp=Pat $e ([System.Windows.Automation.TogglePattern]::Pattern); if($tp){ $tp.Toggle(); Write-Output "toggled: $name"; exit }
-    $r=$e.Current.BoundingRectangle; $cx=[int]($r.X+$r.Width/2); $cy=[int]($r.Y+$r.Height/2)
-    [FG]::SetCursorPos($cx,$cy); Start-Sleep -Milliseconds 60; [FG]::mouse_event(0x0002,0,0,0,0); [FG]::mouse_event(0x0004,0,0,0,0); Write-Output "clicked: $name @ $cx,$cy"
+    # snapshot the structure BEFORE acting (so we can prove what changed)
+    $beforeT=TreeSig $root; $beforeW=WindowSig
+    $did=$null
+    $ip=Pat $e ([System.Windows.Automation.InvokePattern]::Pattern); if($ip){ $ip.Invoke(); $did='invoked' }
+    if(-not $did){ $sp=Pat $e ([System.Windows.Automation.SelectionItemPattern]::Pattern); if($sp){ $sp.Select(); $did='selected' } }
+    if(-not $did){ $tp=Pat $e ([System.Windows.Automation.TogglePattern]::Pattern); if($tp){ $tp.Toggle(); $did='toggled' } }
+    if(-not $did){
+      $r=$e.Current.BoundingRectangle; $cx=[int]($r.X+$r.Width/2); $cy=[int]($r.Y+$r.Height/2)
+      [FG]::SetCursorPos($cx,$cy); Start-Sleep -Milliseconds 60; [FG]::mouse_event(0x0002,0,0,0,0); [FG]::mouse_event(0x0004,0,0,0,0); $did="clicked @ $cx,$cy"
+    }
+    # act->VERIFY: diff the tree + windows AFTER, so the model SEES the effect (no vision, deterministic).
+    Start-Sleep -Milliseconds 140
+    $afterT=TreeSig $root; $afterW=WindowSig
+    $added=@($afterT | Where-Object { -not $beforeT.Contains($_) })
+    $removed=@($beforeT | Where-Object { -not $afterT.Contains($_) })
+    $newWin=@($afterW | Where-Object { -not $beforeW.Contains($_) })
+    Write-Output "${did}: $name"
+    if($newWin.Count){ Write-Output ("  + NEW WINDOW: " + ($newWin -join '; ')) }
+    if($added.Count){ Write-Output ("  + appeared ($($added.Count)): " + (($added | Select-Object -First 14) -join '  |  ')) }
+    if($removed.Count){ Write-Output ("  - gone ($($removed.Count)): " + (($removed | Select-Object -First 14) -join '  |  ')) }
+    if(-not $newWin.Count -and -not $added.Count -and -not $removed.Count){ Write-Output "  (no tree change detected -- action may have had NO effect, or its effect is outside this window; try `list` on the foreground)" }
   }
   "setvalue" {
     $e=FindByName $name; if(-not $e){ Write-Output "not found: $name"; exit 1 }

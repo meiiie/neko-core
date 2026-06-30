@@ -4,7 +4,8 @@
  * each turn; `neko chat --resume` reloads the latest session for the current directory.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 
@@ -56,7 +57,9 @@ export function saveSession(session: Session): void {
   session.updatedAt = new Date().toISOString();
   session.branch = currentBranch(session.cwd);
   session.bytes = JSON.stringify(session.messages).length;
-  writeFileSync(join(dir, `${session.id}.json`), JSON.stringify(session, null, 2), "utf-8");
+  // Atomic: a kill/crash mid-write must never truncate the transcript (loadSession would then drop the whole
+  // conversation as unparseable). temp + rename = the file is always the old or the new session, never half.
+  atomicWriteFileSync(join(dir, `${session.id}.json`), JSON.stringify(session, null, 2));
 }
 
 export function loadSession(id: string): Session | null {
@@ -102,7 +105,7 @@ export function renameSession(id: string, title: string): void {
   const s = loadSession(id);
   if (!s) return;
   s.title = title.trim() || undefined;
-  writeFileSync(path, JSON.stringify(s, null, 2), "utf-8");
+  atomicWriteFileSync(path, JSON.stringify(s, null, 2));
 }
 
 export function renderSessions(): string {

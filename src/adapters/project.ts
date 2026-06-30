@@ -4,6 +4,7 @@
  * ./.neko-core/config.json. Neither is committed (both gitignored). Env vars override.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { dirname, join } from "node:path";
 
@@ -34,7 +35,9 @@ function updateUserConfig(mutate: (data: Record<string, any>) => void): void {
 function writeUserConfig(data: Record<string, any>): void {
   const path = userConfigPath();
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(data, null, 2) + "\n", "utf-8");
+  // Atomic: this file holds the API key — a crash mid-write must never truncate it into invalid JSON
+  // (readUserConfig would then throw on every subsequent settings change). temp + rename = all-or-nothing.
+  atomicWriteFileSync(path, JSON.stringify(data, null, 2) + "\n");
 }
 
 /** Save the API key to ~/.neko-core/config.json (used by /login). */

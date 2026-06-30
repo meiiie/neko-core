@@ -11,9 +11,11 @@ All notable changes to Neko Code are documented here. The format follows
   state-changing UIA action no longer trusts that it worked: `setvalue` reads the value back and asserts it
   landed (a read-only field is caught up front; rejected / reformatted / masked / truncated input becomes a
   "WARN MISMATCH", exit 1), and `toggle` asserts the state actually flipped. The model decides the action;
-  code verifies it against the structure. `invoke`/`click` can't self-verify (side effects), so the skill +
-  tool tell the model to re-perceive (`list`/`get`/`read`) after them. Live-tested on a WPF window
-  (set+VERIFIED on a normal field, FAIL READ-ONLY on a locked one).
+  code verifies it against the structure. `invoke` also self-verifies via a **UIA tree diff** — it snapshots
+  the window's control tree + the top-level windows before/after and reports what appeared / went away / which
+  new window opened (deterministic proof it did something, or a warning that it didn't); `click` still can't
+  self-verify, so re-perceive after it. Live-tested on WPF windows (set+VERIFIED on a field, FAIL READ-ONLY on
+  a locked one, `invoke` reporting the exact element that appeared).
 - **Deterministic price-table layer (`price-table.ts`) — LLM extracts, code computes** — the professional,
   non-patchwork fix for a class of dogfood failures (gpt-oss read "31.990.000đ" as 31, reported a pricier
   source as "cheapest" while holding a cheaper one, summed wrong). Per the 2026 consensus on reliable
@@ -82,6 +84,16 @@ All notable changes to Neko Code are documented here. The format follows
   SendKeys focus-leak guardrail learned from dogfooding.
 
 ### Fixed
+- **Atomic writes — a crash can no longer lose the session / API key / memory** — `saveSession` (per turn),
+  the user config writer (holds the API key), and the NEKO.md memory note all did a plain `writeFileSync`,
+  which truncates-then-writes; a kill/crash/concurrent-write in that window left an unparseable file that the
+  loaders then silently dropped — i.e. the whole conversation or the saved key, gone. They now go through
+  `shared/atomic.ts` (write a temp sibling, then atomic rename), so the target is always the old or the new
+  bytes, never a truncation. Unit-tested incl. "a failed write leaves the original intact".
+- **MCP: a hung server no longer blocks startup** — `connectAll` awaited each server's connect + `listTools`
+  with no timeout, so one unresponsive stdio command / URL hung Neko's startup indefinitely (and stalled every
+  server after it). Each connect is now bounded (15s) and skipped-with-error on timeout; interactive OAuth is
+  exempt (user-paced).
 - **`computer` tool: failures are visible, inputs are validated** — `runComputer` swallowed PowerShell
   spawn errors / timeouts into `"(no output)"`, so the agent couldn't tell a *failed* action from a silent
   one; and `click` coerced a missing/invalid coordinate to the string `"NaN"` and passed it to the injector.

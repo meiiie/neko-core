@@ -5,8 +5,9 @@
  * text is prepended to the agent's system prompt so it knows the project's conventions.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { platform, release } from "node:os";
+import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -124,7 +125,7 @@ export function rememberNote(text: string, scope: "project" | "user" = "project"
     body = `${body.trimEnd()}\n\n## Memory\n${line}\n`.trimStart();
   }
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, body, "utf-8");
+  atomicWriteFileSync(file, body);
   return `Remembered in ${scope === "user" ? "~/.neko-core/NEKO.md" : "NEKO.md"}`;
 }
 
