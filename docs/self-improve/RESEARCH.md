@@ -168,6 +168,64 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   and validate against the tool-call unit tests + bench, not just token count. (See BACKLOG
   "Tool-schema notation optimization.")
 
+## Token efficiency / context engineering — 2026-Q2/Q3 update (RESEARCH pass)
+> Three fresh angles from the latest wave, each mapped to a concrete `## Research-seeded` BACKLOG item.
+> Chosen because none overlap the existing backlog (ACON/clearing/doom-loop/verify-gate/anchor-compaction/
+> SkillReducer/AHE/TRON already cover the older levers).
+
+- **Tool Attention Is All You Need: Dynamic Tool Gating and Lazy Schema Loading for Eliminating the
+  MCP/Tools Tax** — Sadani & Kumar, Apr 2026 ([arXiv 2604.21816](https://arxiv.org/abs/2604.21816)).
+  The MCP/eager-schema-injection overhead is a recurring per-turn tax (practitioner audits: ~10k-60k
+  tokens). Their middleware keeps a compact **summary pool** (name + one-liner) in context and promotes
+  full JSON schemas only for top-k gated tools (via an Intent-Schema-Overlap score + state-aware gate).
+  Reported: per-turn tool tokens **47.3k -> 2.4k (-95%)**, effective context utilization 24% -> 91%.
+  **Methodological caveat (flagged in the abstract):** end-to-end success/latency/quality numbers are
+  *projections* from token counts + deployment telemetry, NOT measured on live agents — so any transfer
+  must validate pass-rate empirically, not assume the -95% transfers to accuracy.
+  -> **Neko mapping:** Neko *already* loads **MCP** tool schemas lazily via the `mcp_load` meta-tool
+  (`adapters/mcp.ts`), but the **built-in** tools (`read_file/search/glob/ls/todo_write/write_file/
+  edit/bash/web_search/web_fetch/skill/computer/...` + the large `browser_*` family) are injected in
+  full every turn via `tools.schemas()`. Applying the same two-phase loader to the built-ins is the
+  unexplored lever. (See BACKLOG "Lazy built-in tool-schema gating (the Tools Tax)." Distinct from the
+  existing "Tool-schema notation optimization" item — that compacts the *format* of schemas that ARE
+  sent; this drops schemas from the wire entirely.)
+- **TokenPilot: Cache-Efficient Context Management for LLM Agents** — Xu et al., Jun 2026
+  ([arXiv 2606.17016](https://arxiv.org/abs/2606.17016)). Identifies a trade-off prior work missed:
+  text pruning / dynamic eviction *mutates the prompt layout*, causing **prefix mismatches and KV-cache
+  invalidation** — so "saving" tokens can *raise* latency/cost by forcing the provider to re-process the
+  prefix from scratch. Dual-granularity fix: **Ingestion-Aware Compaction** (stabilize the prefix,
+  remove environmental noise at the ingestion gate before it enters the trajectory) +
+  **Lifecycle-Aware Eviction** (offload segments only when task-relevance expires, on a conservative
+  batch-turn schedule). **-61% / -87% cost** (isolated / continuous mode) at competitive accuracy.
+  -> **Neko mapping:** `compact()` mutates the *head* of `messages` (summarizes old turns in place,
+  rewrites the system text), busting the prefix cache every compaction. The lever: never rewrite the
+  stable prefix — append a summary message instead, and clip noisy tool results at the ingestion gate
+  (`safeExecute`) before they ever join `messages`. Distinct from ACON/anchor-compaction (which decide
+  *what* to summarize): this is about *where the mutation happens* (tail, not head) to preserve cache.
+  (See BACKLOG "Prompt-prefix cache stability during compaction.")
+- **Building Effective AI Coding Agents for the Terminal (OpenDev): Scaffolding, Harness, Context
+  Engineering, and Lessons Learned** — Bui, Mar 2026 ([arXiv 2603.05344](https://arxiv.org/abs/2603.05344)).
+  A Rust terminal coding agent — same product class as Neko. Among its mechanisms, the freshest is
+  **event-driven system reminders** that counteract **instruction fade-out** (the model losing sight of
+  the original task as context grows) by "injecting targeted guidance at the point of decision rather
+  than relying solely on the initial system prompt." (Other transferable mechanisms it lists — dual
+  planner/executor split, lazy tool discovery, adaptive compaction, cross-session memory — Neko already
+  has analogues.) The "instruction fade-out" framing has become a widely-cited 2026 meme
+  ([Cobus Greyling, Mar 2026](https://cobusgreyling.substack.com/p/instruction-fade-out-is-the-silent)).
+  -> **Neko mapping:** Neko re-injects an "Ongoing goal" only via the *manual* `/goal` slash command
+  (`ui/commands.ts`); there's no automatic periodic re-grounding of the original `instruction` during a
+  long `run()`. The lever: every `k` steps + right after each `compact()`, `appendSystem()` a short
+  verbatim reminder of the original task. Distinct from the existing "Pre-completion verification gate"
+  (fires once, at exit): this is *periodic*, *during* the run. (See BACKLOG "Event-driven task
+  re-grounding against instruction fade-out.")
+- **A Self-Improving Coding Agent (SICA)** — Robeyns, Szummer, Aitchison, Apr 2025
+  ([arXiv 2504.15228](https://arxiv.org/abs/2504.15228)). The *same thesis* as DGM (an agent that edits
+  its own code and empirically validates each change) but **eliminates the meta-agent/target-agent
+  distinction** — a single agent loop edits its own codebase directly. SWE-bench Verified subset
+  **17% -> 53%**. Cited here as grounding (the SWE-EVO survey frames DGM + SICA together); our loop is
+  already SICA-shaped (the agent edits its own src + verifies), so no new BACKLOG item — but it
+  confirms the architecture and is worth noting as prior art for the existing self-improve items.
+
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
 2. Find the closest existing Neko component (`compact()`, the tool schemas, the agent loop, a skill).

@@ -114,7 +114,57 @@ one never blocks another.
   rather than a foreign notation that would break the chat template. Verify: (1) a token-count test
   asserting the serialized schema shrank; (2) the *existing* tool-call unit tests still pass (the model
   still emits well-formed calls); (3) bench pass-rate flat (catches the TOON-style cascade failure).
-  Bench `in` tokens should drop on every tool-bearing step.
+    Bench `in` tokens should drop on every tool-bearing step.
+- [ ] **Lazy built-in tool-schema gating (the "Tools Tax").** Neko already loads *MCP* tool schemas on
+  demand via the `mcp_load` meta-tool (`adapters/mcp.ts`), but the **built-in** tools are still injected
+  in full every turn via `tools.schemas()` (`tool-runtime.ts`) — `read_file/search/glob/ls/todo_write/
+  write_file/edit/bash/web_search/web_fetch/skill/computer/...` plus the large `browser_*` family. Each
+  schema's structural overhead (`type`/`properties`/`required`/long descriptions) is re-fed and re-cached
+  on *every* step even when unused — a fixed per-turn tax that grows with every tool added. Borrow Tool
+  Attention's two-phase loader (arXiv 2604.21816, cut per-turn tool tokens 47.3k->2.4k, -95%): expose a
+  compact **name + one-line-description "summary pool"** for all built-ins upfront, and a safe
+  `tools_load` meta-tool that promotes the full JSON schema of only the ones a turn needs, mirroring the
+  existing `mcp_load` pattern. **Caveat from the paper**: end-to-end gains are *projected*, not measured
+  on live agents — so the verify gate is mandatory, not optional. Distinct from the "Tool-schema notation
+  optimization" item (which compacts the *format* of schemas that ARE sent): this drops schemas from the
+  wire entirely. Verify: (1) a unit test asserting `schemas()` returns only the summary pool + any
+  explicitly-loaded schemas, and that `tools_load` returns the full schema for a named tool; (2) the
+  existing tool-call unit tests still pass (the model still reaches the right tool via load-then-call);
+  (3) bench `in` tokens drop on tool-bearing steps at flat-or-up pass-rate. NB: ship behind an **opt-in**
+  profile flag so a regression in tool discovery is a toggle, not a default breakage.
+- [ ] **Prompt-prefix cache stability during compaction (TokenPilot).** `compact()` mutates the *head* of
+  `this.messages` (summarizes old messages in place, rewrites the system message text) — which invalidates
+  the provider's prompt-prefix (KV) cache on every compaction, so the next request re-processes the whole
+  prefix from scratch. TokenPilot (arXiv 2606.17016, -61% / -87% cost in isolated / continuous mode)
+  shows the fix: make compaction **ingestion-aware** — *never mutate the stable prefix* (system prompt +
+  earliest turns). Instead prune forward from the prefix boundary, and do ingestion-time noise removal at
+  the tool-result gate (before a noisy observation ever enters `messages`) so the stored trajectory is
+  already lean and the prefix never needs rewriting. For Neko: (a) change `compact()` so it *appends* a
+  compact summary message rather than rewriting the head, leaving the system message + earliest user
+  turns byte-identical; (b) add budget-aware truncation in observation formatting so huge tool results
+  are clipped *before* joining `messages`. **Verify**: a unit test that seeds a message history, runs
+  `compact()`, and asserts the system message + first N messages are byte-identical before/after (fails
+  today — `compact()` rewrites the head); plus a provider-adapter test that the message array handed to
+  `complete()` preserves a stable prefix across two simulated compactions. Bench: `cached_tokens` (if the
+  provider reports it in `usage`) should rise and `cost` drop at flat pass-rate. NB: prefix-cache
+  semantics are provider-specific; gate on whether the active provider reports cache metrics, else fall
+  back to asserting prefix-stability as the proxy.
+- [ ] **Event-driven task re-grounding against instruction fade-out (OpenDev).** Long runs drift: the
+  model literally loses sight of the *original* user instruction as tool observations pile up between it
+  and the working end of context. Neko re-injects an "Ongoing goal" only via the `/goal` slash command
+  (`ui/commands.ts`) — a *manual*, one-shot, user-invoked nudge. OpenDev (arXiv 2603.05344) shows the
+  fix: **event-driven system reminders** that re-inject the original task + key constraints "at the point
+  of decision" (each Nth step, and on threshold events like compaction / doom-loop nudge), not relying
+  solely on the initial prompt. Distinct from the existing "Pre-completion verification gate" (which
+  fires *once*, at exit): this is *periodic* re-grounding *during* the run, countering attention decay.
+  For Neko: capture the original `instruction` passed to `run()`; every `k` steps (and immediately after
+  any `compact()`), `appendSystem()` a short "REMINDER - your task is: <instruction verbatim>. Stay
+  focused on the original goal." (reuse the existing `appendSystem` plumbing). **Verify**: a unit test
+  where a stub provider emits `k+1` steps asserts the reminder observation is injected exactly at step
+  `k` (and once post-compaction) and contains the verbatim instruction; assert it does NOT fire when the
+  run is shorter than `k`. Functional check: a long-horizon bench task whose final step must reference
+  the *original* spec (not the most-recent observation) completes correctly WITH the reminder and
+  fails/drifts WITHOUT it. Bench tokens should be ~flat (reminder is small) at flat-or-up pass-rate.
 
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->
