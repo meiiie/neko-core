@@ -20,6 +20,29 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
 - **SWE-EVO** ([arXiv 2512.18470](https://arxiv.org/pdf/2512.18470)) — long-horizon software-evolution
   benchmark. → harder, realistic bench tasks beyond our self-contained ones.
 
+## Self-improving agents — on-the-fly evolution (2025-2026 update)
+- **Live-SWE-agent: Can SE Agents Self-Evolve on the Fly?** — Xia et al., Nov 2025
+  ([arXiv 2511.13646](https://arxiv.org/abs/2511.13646)). Unlike DGM's *offline* archive/benchmark
+  loop, it evolves the scaffold *at runtime*: a lightweight **step-reflection prompt** appended
+  after each environmental feedback asks whether creating/revising a tool would help; the agent
+  writes custom scripts (edit, search, repo-specific analyzers) that become first-class tools.
+  **No offline eval, no revert-on-regression** — validated only by runtime environmental feedback.
+  SWE-bench Verified **77.4%** (no test-time scaling).
+  → **Neko mapping:** our loop is offline (verify gate + bench). The transferable idea is the
+  *online* lever — a reflection nudge that turns reusable procedures into `.neko-core` skills/tools
+  *during* a run. (See BACKLOG "Online skill synthesis via step-reflection nudge.")
+- **GenericAgent: Token-Efficient Self-Evolving Agent via Contextual Information Density** — 2026
+  ([HF 2604.17091](https://huggingface.co/papers/2604.17091)). Performance is set by
+  *decision-relevant info density*, not context length. Four mechanisms: **hierarchical on-demand
+  memory** (active context holds a compact *index* of what knowledge exists, not the knowledge;
+  retrieved via tools on demand), self-evolution into reusable SOPs/code, minimal atomic tool set,
+  active truncation/compression. ~30K working budget, ~6× smaller than peers.
+  → **Neko mapping:** Neko already does progressive disclosure for *skills* (name+desc in prompt,
+  body via the `skill` tool) and *memories* (listed by name, read on demand) — confirming that
+  pattern pays. Remaining lever: project context (NEKO.md/CLAUDE.md) is still loaded *in full*
+  upfront; an index+retrieve split is the unexplored win (caveat: the codebase map genuinely helps
+  upfront, so scope carefully).
+
 ## Token efficiency / context engineering (direct token wins)
 - **ACON** ([arXiv 2510.00615](https://arxiv.org/abs/2510.00615)) — optimize context compression by
   **iteratively refining compression guidelines from FAILURE analysis**; 26-54% peak-token cut *and* higher
@@ -30,6 +53,14 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   memory management, -22.7% tokens at equal accuracy, up to -57% on some instances.
   → **Neko mapping:** an autonomous "what in context is still relevant?" pass before each step, not just at
   the 85%-full threshold.
+- **Less Context, Better Agents: Efficient Context Engineering for Long-Horizon Tool-Using LLM Agents** —
+  Lodha et al., Jun 2026 ([arXiv 2606.10209](https://arxiv.org/abs/2606.10209)). Two-move recipe on the
+  tool-call/response part of the trajectory: (1) **sliding-window pruning** (keep only last `k` pairs),
+  (2) **summarize the pruned-away history**. Result: ~64% fewer tokens *and* +20.6pp accuracy
+  (summarization alone adds ~18K tokens for +12.6pp).
+  → **Neko mapping:** a deterministic "tool-result clearing" rule in the agent loop — keep last `k`
+  observation bodies verbatim, replace older ones with a one-line marker. Cheapest, safest token lever;
+  distinct from ACON (which-to-clip) and Focus (relevance). (See BACKLOG "Tool-result clearing.")
 - **LLMLingua** (token-level pruning of low-information tokens), **Gisting / AutoCompressor** (compress prompts
   into soft/summary tokens). → cheaper prompt pre-processing for large tool results.
 - Five practical patterns (summarization chains, semantic dedup, structured extraction, ...) cut 30-70% of
