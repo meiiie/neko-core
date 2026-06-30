@@ -89,6 +89,9 @@ export class ToolRegistry {
   sandboxAllowNetwork = false;
   /** When true, read_file returns image files as vision content (needs a vision-capable model). */
   vision = false;
+  /** When true, expose NO tools to the model — for a pure perception/vision pass (image Q&A), since
+   * vision-only endpoints reject tool-calling ("auto tool choice requires --enable-auto-tool-choice"). */
+  noTools = false;
   /** Agent-presence overlay (computer_use_overlay): when on, bash gets NEKO_PRESENCE=1 so the desktop
    * helpers (mouse.ps1 / ground.ts) show the independent agent cursor + honour click-to-takeover. */
   presence = false;
@@ -250,6 +253,7 @@ export class ToolRegistry {
 
   /** All tool schemas shown to the model: enabled built-in + connected MCP tools. */
   schemas(): any[] {
+    if (this.noTools) return []; // perception mode: a vision-only endpoint 400s if sent any tools
     return [
       ...toolSchemas().filter((s) => !this.disabled.has(s.function.name)),
       ...(this.mcp?.toolSchemas() ?? []),

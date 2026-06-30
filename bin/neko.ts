@@ -5,6 +5,7 @@
  * Commands: config · doctor · profiles · init-user · init · chat · run
  * (chat/run are wired in later TS steps; config-first, offline-capable.)
  */
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent.ts";
@@ -51,6 +52,7 @@ interface Args {
   version: boolean;
   help: boolean;
   trials?: number;
+  images?: string[];
 }
 
 function parseArgs(argv: string[]): Args {
@@ -64,6 +66,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--loop") args.loop = true;
     else if (a === "--once" || a === "--no-loop") args.once = true;
     else if (a === "--trials") args.trials = Number(argv[++i]) || 1;
+    else if (a === "--image" || a === "--img") { const p = argv[++i]; if (p) (args.images ??= []).push(p); }
     else if (a === "--resume") {
       args.resume = true;
       const next = argv[i + 1];
@@ -121,6 +124,7 @@ async function buildAgent(
   cfg: NekoConfig,
   yolo: boolean,
   onDelta?: (t: string, kind?: string) => void,
+  noTools = false,
 ): Promise<{ agent: Agent; close: () => Promise<void> }> {
   const mode = yolo ? "auto" : cfg.mode;
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);
@@ -132,6 +136,7 @@ async function buildAgent(
   registry.searxngUrl = cfg.searxngUrl;
   registry.searchBackend = cfg.searchBackend;
   registry.vision = cfg.vision;
+  registry.noTools = noTools;
   registry.loadSkill = (name) => { const s = loadSkill(name); return s ? { body: s.body, dir: s.dir } : null; };
   registry.subagent = async (prompt, type) => {
     const subReg = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
@@ -208,6 +213,8 @@ Options:
   --yolo             auto-approve gated tools (bounded autonomy)
   --loop             run "run" as a closed loop: work + self-review until done
   --once             force a single-shot run (overrides config "auto_loop": true)
+  --image <path>     (run) attach an image (repeatable); perception mode, no tools. Use a VISION model,
+                     e.g. NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko run --image pkg.jpg "what is this?"
   --resume [id]      (chat) resume a session by id, or the latest for this directory
   --version          print version`;
 
@@ -351,10 +358,25 @@ async function cmdMcp(args: Args): Promise<number> {
   return 0;
 }
 
+/** Read a local image into a data URL (the form Agent.run consumes). Use a VISION model for image tasks
+ *  (gpt-oss is text-only) — e.g. `NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1`. */
+function loadImageDataUrl(path: string): string {
+  const ext = path.toLowerCase().split(".").pop() || "";
+  const mime = ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : ext === "webp" ? "image/webp" : "image/jpeg";
+  return `data:${mime};base64,${readFileSync(path).toString("base64")}`;
+}
+
 async function cmdRun(args: Args): Promise<number> {
   const instruction = args.positionals.join(" ").trim();
   if (!instruction) {
     console.error("neko: error: run needs an instruction, e.g. neko run \"add a test for X\"");
+    return 2;
+  }
+  let images: string[] = [];
+  try {
+    images = (args.images ?? []).map(loadImageDataUrl);
+  } catch (e) {
+    console.error(`neko: error: could not read --image: ${e instanceof Error ? e.message : e}`);
     return 2;
   }
   let streamed = 0;
@@ -363,7 +385,7 @@ async function cmdRun(args: Args): Promise<number> {
     if (kind === "reasoning" || kind === "tool") return; // CLI prints only the final content
     streamed += t.length;
     process.stdout.write(t);
-  });
+  }, images.length > 0); // image task -> perception mode (no tools; vision endpoints reject tool-calling)
   // Deterministically load a clearly-matching domain skill (don't rely on the model to pull it).
   const matched = matchSkill(instruction);
   if (matched) agent.appendSystem(`# Skill: ${matched.name}\n(skill files dir: ${matched.dir} - run bundled scripts from here)\n${matched.body}`);
@@ -372,8 +394,9 @@ async function cmdRun(args: Args): Promise<number> {
   if (wf) agent.appendSystem(`# Learned workflow: ${wf.name}\n${wf.body}`);
   try {
     // Persist toward the goal when --loop OR config auto_loop is set; --once forces a single shot.
-    const useLoop = !args.once && (args.loop || cfg.autoLoop);
-    const answer = useLoop ? await agent.runUntilDone(instruction) : await agent.run(instruction);
+    // Images go single-shot (Agent.run carries them; runUntilDone doesn't).
+    const useLoop = !args.once && (args.loop || cfg.autoLoop) && images.length === 0;
+    const answer = useLoop ? await agent.runUntilDone(instruction) : await agent.run(instruction, undefined, images.length ? images : undefined);
     process.stdout.write("\n");
     if (streamed === 0 && answer.trim()) console.log(answer); // synthetic/non-streamed result
     console.log(`[${agent.cost.summary()}]`);

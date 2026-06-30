@@ -3,6 +3,13 @@ import { expect, test } from "bun:test";
 import { describeToolCall, GATED, resolveTool, SAFE, toOpenAISchema, toolSchemas } from "../src/core/tools.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
+test("noTools (perception mode) exposes NO tool schemas — vision-only endpoints reject tool-calling", () => {
+  const r = new ToolRegistry(process.cwd(), "auto", () => true);
+  expect(r.schemas().length).toBeGreaterThan(0);
+  r.noTools = true;
+  expect(r.schemas()).toEqual([]);
+});
+
 test("computer action validates inputs deterministically (no NaN/garbage reaches PowerShell)", async () => {
   const tools = new ToolRegistry(process.cwd(), "auto", () => true);
   // These all return BEFORE spawnSync, so no PowerShell runs — pure input validation.

@@ -7,6 +7,12 @@ All notable changes to Neko Code are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`neko run --image <path>` — image tasks from the CLI (perception mode)** — attach one or more images to a
+  one-shot run; it goes through a perception path with NO tools (a vision-only endpoint 400s if sent any
+  tools). Use a vision model — verified end to end: `NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko
+  run --image pkg.jpg "what is this?"` read a SanDisk pack as "Cruzer Blade 16GB USB 2.0" (matching ChatGPT).
+  So image→SKU→price is two clean steps: `--image` perceives the product, then a normal `neko run` searches
+  by the inferred SKU.
 - **Computer-use act→verify (deterministic) — the desktop analogue of "LLM extracts, code computes"** — a
   state-changing UIA action no longer trusts that it worked: `setvalue` reads the value back and asserts it
   landed (a read-only field is caught up front; rejected / reformatted / masked / truncated input becomes a
