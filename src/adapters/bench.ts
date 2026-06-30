@@ -96,10 +96,13 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number } = {}, 
         onProgress?.(`  ${task.id}${trials > 1 ? ` [${t + 1}/${trials}]` : ""} ...`);
         const registry = new ToolRegistry(dir, "auto", async () => true);
         const agent = new Agent({ provider: getProvider(cfg), tools: registry, maxSteps: cfg.maxSteps, systemPrompt: DEFAULT_SYSTEM_PROMPT });
-        let pass = false;
-        try { await agent.run(task.prompt); pass = task.verify(dir); } catch { pass = false; }
+        let pass = false, err = "";
+        try { await agent.run(task.prompt); pass = task.verify(dir); } catch (e) { err = e instanceof Error ? e.message : String(e); }
         if (pass) passes++;
         tokens += agent.cost.totalTokens;
+        // Surface a thrown error (e.g. HTTP 401/timeout) — a swallowed exception used to read as a plain
+        // "0/1 fail", which hid real problems (a bad key looked like the model failing).
+        if (err) onProgress?.(`    ! ${task.id} ERRORED: ${err.replace(/\s+/g, " ").slice(0, 140)}`);
       }
       results.push({ id: task.id, passes, trials, tokens });
       onProgress?.(`  ${task.id} -> ${passes}/${trials} (${tokens} tok)`);

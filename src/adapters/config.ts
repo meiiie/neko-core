@@ -26,8 +26,8 @@ export interface Profile {
   base_url?: string;
   model?: string;
   /** Env var holding this provider's API key (e.g. "ZAI_API_KEY"), so multi-provider works with no config
-   * editing: pick the profile, set its env var. Resolved into the key; profile wins over the broad legacy
-   * OPENAI_/NVIDIA_ fallbacks, NEKO_API_KEY still overrides everything. */
+   * editing: pick the profile, set its env var. It's a FALLBACK — an explicit config api_key wins over it
+   * (a stale/foreign env var can't override a key you wrote into config). NEKO_API_KEY still overrides all. */
   key_env?: string;
 }
 
@@ -282,10 +282,11 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
   }
 
   // Pull the file-provided key out before building the printable dict (never printed).
-  // Resolve the key: this profile's key_env (provider-specific env var, e.g. ZAI_API_KEY) wins over a
-  // config api_key, so multi-provider works by setting per-provider env vars — no config editing.
+  // Resolve the key. An EXPLICIT config api_key (the user set it deliberately) wins; key_env (the profile's
+  // provider-specific env var, e.g. ZAI_API_KEY) is the FALLBACK — so a built-in preset with no key still
+  // works from its env var, but a stale/foreign env var can't override a key the user wrote into config.
   const keyEnv = merged.key_env ? String(merged.key_env) : "";
-  const apiKeyFromFile = (keyEnv && (process.env[keyEnv] ?? "").trim()) || String(merged.api_key ?? "");
+  const apiKeyFromFile = String(merged.api_key ?? "") || (keyEnv ? (process.env[keyEnv] ?? "").trim() : "");
   delete merged.api_key;
   delete merged.key_env;
   delete merged.profiles;
