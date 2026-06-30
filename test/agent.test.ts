@@ -93,9 +93,37 @@ test("compact keeps system + recent turns verbatim and summarizes the older ones
   const contents = agent.messages.map((m: any) => String(m.content));
   expect(agent.messages[0].content).toBe("base"); // system kept
   expect(contents.some((c) => c.includes("SUMMARY HERE"))).toBe(true); // older turns summarized
-  expect(contents).toContain("RECENT"); // recent turn kept verbatim
-  expect(contents).not.toContain("OLD1"); // oldest turn folded into the summary
-});
+    expect(contents).toContain("RECENT"); // recent turn kept verbatim
+    expect(contents).not.toContain("OLD1"); // oldest turn folded into the summary
+  });
+
+  test("compact clips a dense few-line tool result by char count (line guard alone misses it)", async () => {
+    // A minified/base64-style blob: long in chars, short in lines -> the line-count guard (>40 lines)
+    // would leave it fully intact, so compaction freed nothing. The char guard must clip it.
+    const dense = "x".repeat(50000);
+    const agent = new Agent({
+      provider: new ScriptedProvider([{ content: "SUM", tool_calls: [] }]) as any,
+      tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    });
+    // Need convo.length > KEEP_TAIL(8) so head is non-empty and compact() actually runs; the dense
+    // tool result sits in the kept tail where the lean-clip applies.
+    agent.messages = [
+      { role: "system", content: "base" },
+      { role: "user", content: "o1" }, { role: "assistant", content: "a1" }, // old head -> summarized
+      { role: "user", content: "o2" }, { role: "assistant", content: "a2" },
+      { role: "user", content: "r1" }, { role: "assistant", content: "a3" }, // recent tail (kept)
+      { role: "user", content: "r2" }, { role: "assistant", content: "a4" },
+      { role: "user", content: "r3" }, { role: "assistant", content: "a5" },
+      { role: "tool", content: dense }, // dense few-line result in the tail -> char-clipped
+      { role: "assistant", content: "a6" },
+    ];
+    await agent.compact();
+    const toolMsgs = agent.messages.filter((m: any) => m.role === "tool");
+    expect(toolMsgs.length).toBe(1);
+    expect((toolMsgs[0].content as string).length).toBeLessThan(dense.length); // clipped, not intact
+    expect(toolMsgs[0].content).toMatch(/chars clipped on compaction/); // char-guard marker present
+    expect(toolMsgs[0].content.startsWith("x")).toBe(true); // head preserved
+  });
 
 test("refreshSystemPrompt updates a resumed session's base system message", () => {
   const agent = new Agent({

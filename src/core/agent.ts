@@ -54,6 +54,9 @@ const CONCURRENCY_SAFE = new Set(["read_file", "search", "glob", "ls", "web_sear
 // rejects the whole turn with HTTP 400. Cap each observation (head + tail, with a marker) so one result
 // can't overflow the window. Multimodal array results (image parts) pass through untouched.
 export const MAX_OBS_CHARS = 48000;
+/** On compaction, also clip a kept-tail tool result once it exceeds this many CHARS — catches dense
+ * few-line output (minified JSON, base64, packed log lines) that the line-count guard misses. */
+export const LEAN_TAIL_CHARS = 8000;
 export function clampObservation(obs: string | any[]): string | any[] {
   if (typeof obs !== "string" || obs.length <= MAX_OBS_CHARS) return obs;
   const head = obs.slice(0, MAX_OBS_CHARS - 2000);
@@ -154,13 +157,21 @@ export class Agent {
     } catch {
       summary = "(earlier conversation elided to fit the context window; the summary call failed, but the recent turns below are intact)";
     }
-    // Low-hanging context win (Anthropic): big tool outputs kept in the tail are rarely re-read in
-    // full — clip them to the head, so post-compaction context stays lean.
-    const leanTail = tail.map((m) => {
-      if (m.role !== "tool" || typeof m.content !== "string") return m;
-      const lines = m.content.split("\n");
-      return lines.length > 40 ? { ...m, content: lines.slice(0, 40).join("\n") + `\n... (${lines.length - 40} more lines clipped on compaction)` } : m;
-    });
+      // Low-hanging context win (Anthropic): big tool outputs kept in the tail are rarely re-read in
+      // full — clip them to the head, so post-compaction context stays lean. Clip by LINE count for
+      // normal structured output, AND by total CHAR count for dense few-line output (minified JSON,
+      // base64, packed log lines) which is long in chars yet short in lines and would otherwise slip
+      // through unclipped, freeing no context.
+      const leanTail = tail.map((m) => {
+        if (m.role !== "tool" || typeof m.content !== "string") return m;
+        const lines = m.content.split("\n");
+        if (lines.length > 40) return { ...m, content: lines.slice(0, 40).join("\n") + `\n... (${lines.length - 40} more lines clipped on compaction)` };
+        if (m.content.length > LEAN_TAIL_CHARS) {
+          const head = m.content.slice(0, LEAN_TAIL_CHARS);
+          return { ...m, content: head + `\n... (${m.content.length - LEAN_TAIL_CHARS} more chars clipped on compaction)` };
+        }
+        return m;
+      });
     this.messages = [...sys, { role: "user", content: `[Summary of earlier conversation]\n${summary}` }, ...leanTail];
     return summary;
   }
