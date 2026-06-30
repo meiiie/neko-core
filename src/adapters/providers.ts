@@ -274,6 +274,7 @@ function splitThink(text: string | null | undefined): { content: string | null; 
 
 /** Parse a streamed (SSE) chat completion, calling onDelta for each content chunk. */
 async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderResponse> {
+  if (!res.body) throw new Error("streaming response had no body (the endpoint returned a 200 with an empty stream)");
   let content = "";
   let reasoning = "";
   let usage: Usage | undefined;
@@ -333,7 +334,7 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
 
 /** Yield non-empty lines from an SSE response body. */
 async function* sseLines(res: Response): AsyncGenerator<string> {
-  const reader = res.body!.getReader();
+  const reader = res.body!.getReader(); // parseStream guards res.body before calling this
   const decoder = new TextDecoder();
   let buffer = "";
   for (;;) {
