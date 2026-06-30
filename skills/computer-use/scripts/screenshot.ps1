@@ -5,6 +5,10 @@
 # NOTE: some antivirus flags screen-capture scripts (false positive). If blocked, run the two inline steps
 # in SKILL.md ("capture -> Save png" then "resize file -> Save gif") which scan clean.
 param([string]$out = "screen.gif", [int]$width = 768)
+# DPI: PER-MONITOR-AWARE v2 so the capture is the FULL physical screen (1920x1080, not the virtualized
+# 1536x864 at 125%) and the printed `scale` maps view-coords to PHYSICAL real coords -- the same space the
+# acting scripts (inject/mouse) click in. Otherwise vision-grounded clicks miss on a scaled display.
+try { Add-Type 'using System;using System.Runtime.InteropServices;public class Dpi{[DllImport("user32.dll")]public static extern bool SetProcessDpiAwarenessContext(IntPtr v);}'; [void][Dpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch {}
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $full=New-Object System.Drawing.Bitmap $s.Width,$s.Height

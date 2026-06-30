@@ -84,6 +84,14 @@ All notable changes to Neko Code are documented here. The format follows
   SendKeys focus-leak guardrail learned from dogfooding.
 
 ### Fixed
+- **Computer-use coordinate actions land on a scaled display (DPI fix)** — UIA reports element coordinates in
+  PHYSICAL pixels, but the acting scripts were DPI-UNAWARE, so on a scaled display (e.g. 125%) Windows
+  virtualized their click/tap coordinates and they landed ~1.25x off-target — every coordinate action quietly
+  missed. CONFIRMED with a functional test (an unaware mouse-click at a checkbox's reported coords missed; a
+  fully DPI-aware read+click toggled it). All five coordinate scripts (`uia`/`inject`/`mouse`/`overlay`/
+  `screenshot`) now set `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)`, so reads, actions, the cursor
+  overlay, and the screenshot `scale` all share one physical-pixel space. (Touch still routes control clicks
+  through `invoke`-by-name, not coordinates — injected touch doesn't promote to a control click.)
 - **Atomic writes — a crash can no longer lose the session / API key / memory** — `saveSession` (per turn),
   the user config writer (holds the API key), and the NEKO.md memory note all did a plain `writeFileSync`,
   which truncates-then-writes; a kill/crash/concurrent-write in that window left an unparseable file that the

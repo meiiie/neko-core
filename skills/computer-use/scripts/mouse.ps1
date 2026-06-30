@@ -10,6 +10,9 @@
 #   powershell -NoProfile -File mouse.ps1 dblclick <x> <y>
 #   powershell -NoProfile -File mouse.ps1 stroke <x1> <y1> <x2> <y2> [x3 y3 ...]   # pen-down drag (draw)
 param([string]$cmd = "pos")
+# DPI: PER-MONITOR-AWARE v2 BEFORE the Mouse class reads GetSystemMetrics, so W/H are PHYSICAL (1920, not the
+# virtualized 1536 at 125%) and the SendInput-absolute normalization matches uia.ps1's physical coords.
+try { Add-Type 'using System;using System.Runtime.InteropServices;public class Dpi{[DllImport("user32.dll")]public static extern bool SetProcessDpiAwarenessContext(IntPtr v);}'; [void][Dpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch {}
 # --- Config-first input backend (NEKO_INPUT = computer_use_input): "inject" routes the acting verbs to the
 #     non-hijacking TOUCH path (inject.ps1) so Neko clicks/draws WITHOUT moving the user's mouse. A new
 #     backend is a config value + a script, not a rewrite. ---

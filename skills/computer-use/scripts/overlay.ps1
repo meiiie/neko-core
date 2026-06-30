@@ -9,6 +9,10 @@
 #
 # Usage:  overlay.ps1 [stopFile] [maxSeconds] [targetFile] [shotFile] [activeWinFile]
 param([string]$stopFile="$env:TEMP\neko_overlay.stop", [int]$maxSeconds=600, [string]$targetFile="$env:TEMP\neko_cursor.txt", [string]$shotFile="", [string]$activeWinFile="$env:TEMP\neko_active_window.txt")
+# DPI: PER-MONITOR-AWARE v2 BEFORE any Form is created, so the overlay's coordinate space is PHYSICAL pixels
+# and the agent cursor lands where inject.ps1/mouse.ps1 act (they write physical coords). Without this the
+# triangle would point at the wrong spot on a scaled display. Must match the other coordinate scripts.
+try { Add-Type 'using System;using System.Runtime.InteropServices;public class Dpi{[DllImport("user32.dll")]public static extern bool SetProcessDpiAwarenessContext(IntPtr v);}'; [void][Dpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch {}
 Remove-Item $stopFile -ErrorAction SilentlyContinue
 Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing -TypeDefinition @"
 using System; using System.Windows.Forms; using System.Drawing; using System.Runtime.InteropServices;

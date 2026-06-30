@@ -19,6 +19,11 @@
 # NOTE: UWP apps (Calculator) suspend their UIA tree when fully hidden -- keep them visible. Classic Win32
 #       and WPF/WinForms apps keep their tree alive when backgrounded (best for automation).
 param([string]$cmd="list", [string]$name="", [string]$value="", [int]$max=120)
+# DPI: PER-MONITOR-AWARE v2 so coordinates are TRUE physical pixels. CONFIRMED necessary: on a 125%-scaled
+# display, a DPI-UNAWARE acting process taps/clicks at virtualized coords (Windows scales them up ~1.25x) and
+# MISSES the target, while a DPI-aware read+click lands (verified: checkbox toggled). All five coordinate
+# scripts (uia/inject/mouse/overlay/screenshot) MUST set this identically so reads and actions share one space.
+try { Add-Type 'using System;using System.Runtime.InteropServices;public class Dpi{[DllImport("user32.dll")]public static extern bool SetProcessDpiAwarenessContext(IntPtr v);}'; [void][Dpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch {}
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 Add-Type 'using System;using System.Runtime.InteropServices;public class FG{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern bool SetCursorPos(int x,int y);[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);}'
 $A=[System.Windows.Automation.AutomationElement]

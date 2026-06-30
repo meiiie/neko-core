@@ -13,6 +13,9 @@
 # This is the visible-desktop "don't hijack my mouse" path; controlling a HIDDEN/background app needs isolation.
 param([string]$cmd="tap")
 $a=$args
+# DPI: PER-MONITOR-AWARE v2 so injected touch coordinates are physical pixels, matching uia.ps1's reported
+# coords. CONFIRMED: without this, a DPI-virtualized process taps the wrong spot on a scaled (125%) display.
+try { Add-Type 'using System;using System.Runtime.InteropServices;public class Dpi{[DllImport("user32.dll")]public static extern bool SetProcessDpiAwarenessContext(IntPtr v);}'; [void][Dpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch {}
 # --- Action audit log (trace what Neko did; review the steps with: read %TEMP%\neko_actions.log) ---
 if($cmd -in 'tap','dbltap','stroke'){ try { $alog= if($env:NEKO_ACTION_LOG){$env:NEKO_ACTION_LOG}else{"$env:TEMP\neko_actions.log"}; ("{0}  inject {1} {2}" -f (Get-Date -Format 'HH:mm:ss'),$cmd,($a -join ' ')) | Out-File $alog -Append -Encoding utf8 } catch {} }
 
