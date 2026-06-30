@@ -641,6 +641,68 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   speculation seeds the cache). (See BACKLOG "Cost-aware cross-turn speculative tool pre-staging
   (Cost-Aware Speculative Execution).")
 
+## Token efficiency / context engineering — 2026-Q3 update #8 (RESEARCH pass)
+> Three fresh angles, none overlapping the existing 39-item backlog (confirmed via grep). One per
+> DISTINCT axis: *regression prevention* (TDAD — surface which tests an edit affects, vs run them
+> blindly), *execution-free verification* (Agentic Code Reasoning — judge a change by reasoning,
+> not by running it), and *output sampling* (test-time scaling — sample N edits, select via the
+> build/tests, vs commit to the first answer). Each is training-free and maps to a unit-testable
+> `## Research-seeded` BACKLOG item; each gap was confirmed against `src/`.
+
+- **TDAD: Test-Driven Agentic Development — Reducing Code Regressions in AI Coding Agents via
+  Graph-Based Impact Analysis** — Alonso, Yovine, Braberman, Mar 2026
+  ([arXiv 2603.17973](https://arxiv.org/abs/2603.17973)). Despite the name, the mechanism is NOT
+  test-first TDD — it's **pre-change impact analysis**: build a dependency map between source files
+  and the existing tests that exercise them, deliver it as a lightweight agent skill (a static text
+  file the agent queries at runtime), and the agent queries the map to know which tests to verify
+  before committing and can self-correct. On SWE-bench Verified (Qwen3-Coder-30B, 100 instances):
+  **regressions 6.08% → 1.82% (-70%)** AND issue-resolution **24% → 32% (+8pp)**. Key negative
+  finding: naive procedural-TDD instructions WITHOUT the targeted test context RAISED regressions
+  to 9.94% (worse than baseline) — "surfacing contextual information outperforms prescribing
+  procedural workflows." Training-free (static skill + off-the-shelf models on consumer hardware).
+  -> **Neko mapping:** Neko's `run()` (`core/agent.ts` ~325) has no notion of test-to-source
+  dependency — after an edit the agent is told nothing about the regression blast-radius, so it
+  either skips tests (ships a regression) or re-runs the whole suite (costly). The lever: generate a
+  repo source↔test map once (a plain script) and, after any `EDIT_TOOLS` call, surface the targeted
+  test subset (mirroring how the doom-loop nudge already fires on edits-per-path). Distinct from the
+  existing "Pre-completion verification gate" (undirected re-check at exit): this makes the verify
+  *targeted*. (See BACKLOG "Pre-edit test-surfacing via a source↔test dependency map (TDAD).")
+- **Agentic Code Reasoning** — Ugare & Chandra, Mar 2026
+  ([arXiv 2603.01896](https://arxiv.org/abs/2603.01896)). Asks whether LLM agents can reason about
+  code semantics *without executing it*, and introduces **semi-formal reasoning**: a structured
+  prompting method forcing the agent to construct explicit **premises**, **trace execution paths**,
+  and derive **formal conclusions** — a "certificate" it cannot skip cases or make unsupported claims
+  through. **Patch-equivalence verification 78% → 88% (93% on real agent-generated patches)**,
+  approaching the reliability needed for execution-free reward signals; +5pp Top-5 fault localization
+  on Defects4J; 87% on RubberDuckBench. Training-free (pure prompting).
+  -> **Neko mapping:** Neko's verification is ENTIRELY execution-based (the system prompt demands
+  re-running tests/builds; `runUntilDone` re-inspects by running something). The unexplored lever:
+  a cheap *execution-free* pre-check via semi-formal reasoning — state premises, trace the change's
+  execution path, conclude CORRECT/REGRESSION/UNCERTAIN — as a first filter BEFORE the costly
+  build+test cycle (which remains the backstop). Distinct from EVERY verify item (all execute a
+  tool to verify): this judges by reasoning symbolically. (See BACKLOG "Execution-free patch/claim
+  verification via semi-formal reasoning (Agentic Code Reasoning).")
+- **Thinking Longer, Not Larger: Enhancing Software Engineering Agents via Scaling Test-Time Compute
+  (TTC)** — Ma, Li, Dong, Jiang, Cao, Chen, Huang, Li, Mar 2025
+  ([arXiv 2503.23803](https://arxiv.org/abs/2503.23803)). A unified test-time-compute framework for
+  SWE agents: sample multiple candidate trajectories/patches and SELECT via execution verification
+  (the external-TTC arm) at critical development decision points, not only at the end-point. A **32B
+  model hit 46% on SWE-bench Verified, surpassing DeepSeek-R1-671B and OpenAI o1**. TTC's own
+  selector is TRAINED (reward models + rejection-sampled trajectories); the **training-free,
+  harness-portable** core is the mechanism every test-time-scaling system shares — **sample N
+  candidates, keep the one the build/tests accept** (SWE-Master, DeepSWE, and the broader
+  pass@k→select-on-execution line all use this).
+  -> **Neko mapping:** Neko's `run()` takes the FIRST response on every step (one `complete()` per
+  step, `core/agent.ts` ~351) — no sampling, no selection. The existing `MoaProvider`
+  (`adapters/providers.ts` ~391) samples DIFFERENT models and aggregates text; it does not sample the
+  SAME model N times nor select via execution. The distinct lever (vs MoA's model-diversity +
+  aggregation; vs Ares/cascade's per-step cost dial; vs doom-loop's reaction to a single failure):
+  on a HARD edit step (gated — only after a build/test failure), sample N candidate edits at raised
+  temperature and keep the first the existing build/tests accept (reusing the git workspace to
+  isolate each candidate), falling back to the single-answer path if none pass. Note the cost
+  inverts — this trades MORE tokens per gated step for HIGHER pass-rate-per-dollar on hard tasks.
+  (See BACKLOG "Execution-verified best-of-N sampling for hard edit steps (test-time scaling).")
+
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
 2. Find the closest existing Neko component (`compact()`, the tool schemas, the agent loop, a skill).

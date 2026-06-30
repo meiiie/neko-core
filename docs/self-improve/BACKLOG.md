@@ -747,6 +747,119 @@ one never blocks another.
   `search`/`glob`, only read-only) so wasted exec is rare; a wrong speculation costs one tool run,
   never tokens-in-context (the result is discarded on miss, unlike a real call which is appended).
 
+- [ ] **Pre-edit test-surfacing via a source↔test dependency map (TDAD).** Neko's loop has no notion
+  of which *existing* tests a given edit will affect: `run()` (`core/agent.ts` line ~325) streams
+  tool calls, and after a `write_file`/`edit`/`multi_edit` the agent is told nothing about the
+  regression blast-radius — so it either (a) skips re-running tests and ships a regression, or
+  (b) blindly re-runs the WHOLE suite (costly), never the targeted subset. The system prompt
+  (line ~43) only says "VERIFY after bash/tests" generically. TDAD (Alonso, Yovine, Braberman,
+  arXiv 2603.17973, Mar 2026) is the fresh SOTA fix and a direct result: build a **dependency map
+  between source files and the tests that exercise them**, deliver it as a *lightweight agent
+  skill (a static text file the agent queries at runtime)*, and **before/after committing a patch,
+  the agent queries the map to know exactly which tests to verify and can self-correct**. Result on
+  SWE-bench Verified (Qwen3-Coder-30B): **regressions 6.08% → 1.82% (-70%)**, AND issue-resolution
+  **24% → 32% (+8pp)**. Critically, the paper found naive *procedural* TDD ("write a failing test
+  first") is HARMFUL (regressions rose to 9.94%) — surfacing CONTEXT (the map) beats prescribing
+  WORKFLOW. **Distinct from EVERY existing backlog item**: none touch test-to-source mapping; the
+  "Pre-completion verification gate" forces *some* re-check at exit (undirected); this surfaces
+  *which* tests are relevant to the just-touched code so the verify is targeted, not whole-suite.
+  Training-free (a static skill + an agent query). For Neko: (1) generate the map ONCE per repo
+  (a small script: parse imports/references from src/ + a test-runner's `--testNamePattern`/file
+  association, or a cheap `grep -l "from '<src>'"` over the test tree) and write it to a
+  `.neko-core/test-map.md` skill (or a `test_map` built-in that returns the relevant test files
+  for a given changed path); (2) after any EDIT_TOOLS call, the loop (or a nudge) tells the agent
+  "changed <path> — relevant tests per the map: <list> — run them," mirroring how the doom-loop
+  nudge already fires on edits-per-path. Default: whole-suite fallback when no map exists. **Verify**:
+  (1) a unit test that, given a seeded map, a `test_map`/query for an edited `src/core/tools.ts`
+  returns the test(s) importing it (e.g. `test/tools.test.ts`) and NOT unrelated tests; (2) a test
+  that the post-edit nudge observation contains the targeted test list (fires on EDIT_TOOLS only,
+  not on reads); (3) a trajectory test where an edit breaks a previously-passing test the agent
+  DIDN'T just touch — assert WITH the map+nudge the agent runs that test and catches the regression,
+  and WITHOUT it ships the regression (the SWE-bench failure mode); (4) bench: regression rate
+  (pre-existing tests broken by a change) drops at flat-or-up issue-resolution; token cost ~flat
+  (targeted subset vs whole-suite should be CHEAPER, not costlier). NB: ship the map generator as a
+  plain script (no runtime parser dep — keeps local-first); the map is advisory (the agent may still
+  run more tests); keep it opt-in behind a profile flag so a stale/wrong map is a toggle, and
+  regenerate the map on demand (it's a function of the source tree, not live state).
+
+- [ ] **Execution-free patch/claim verification via semi-formal reasoning (Agentic Code Reasoning).**
+  Neko's verification is ENTIRELY execution-based: the system prompt demands "VERIFY — re-run the
+  test / re-read the file / re-run the build" (`core/agent.ts` line ~43), and `runUntilDone`
+  (line ~231) re-inspects by *running* something. There is NO mechanism to judge whether a change
+  is correct WITHOUT executing it — yet many changes (a refactor, a config tweak, a "does this fix
+  the bug?") could be cheaply sanity-checked in-the-head before the costly build/test cycle, and
+  some (an unbuildable WIP, a change to a file with no test) can't be execution-verified at all.
+  Agentic Code Reasoning (Ugare & Chandra, arXiv 2603.01896, Mar 2026) introduces **semi-formal
+  reasoning**: a *structured prompting* method that forces the agent to (1) state explicit
+  **premises**, (2) **trace execution paths** symbolically, and (3) derive **formal conclusions**
+  — a "certificate" the model *cannot skip cases or make unsupported claims* through. Training-free
+  (pure prompting). Results: **patch-equivalence verification 78% → 88% (93% on real
+  agent-generated patches)**, approaching execution-free reliability; +5pp Top-5 fault localization
+  on Defects4J; 87% on code QA. **Distinct from EVERY existing backlog item**: all verify-gate /
+  doom-loop / recovery / TACO items *execute* (run a tool) to verify; this verifies *by reasoning
+  about the code symbolically*, with zero tool execution — a genuinely different axis. It's the
+  pre-flight check BEFORE the build: cheap, catches "this can't possibly work" / "this changes
+  behavior X didn't ask for" before burning a build+test round-trip. For Neko: (1) add a SAFE
+  `verify_change` tool (or a pre-edit-gate option) that, given a changed path + the intent, runs a
+  ONE-SHOT semi-formal reasoning pass — the prompt forces: "State premises (what the code assumes).
+  Trace the execution path for the change. List cases that now behave differently. Conclude:
+  CORRECT / REGRESSION-AT-<case> / UNCERTAIN." with a structured output; (2) on UNCERTAIN or
+  REGRESSION-AT, steer the agent to fix before the build; on CORRECT, proceed to the (still-run)
+  execution verify as the backstop. Crucially this COMPOSES with, doesn't replace, execution
+  verification — it's a cheap first filter. **Verify**: (1) a unit/behavioral test where a stub
+  change has a latent regression (e.g. an off-by-one the build won't catch) — assert the
+  semi-formal pass flags REGRESSION-AT and the agent fixes it BEFORE the build step (count: build
+  runs only after the reasoning pass says CORRECT); (2) a test that a genuinely-correct change
+  passes the reasoning pass (low false-positive rate — don't block good edits); (3) a test the
+  structured output (premises/trace/conclusion) is present (the certificate isn't skippable);
+  (4) bench: `calls` (round-trips) drop on subtle-bug tasks (caught earlier, fewer build-fix-build
+  cycles) at flat-or-up pass-rate. NB: ship behind an **opt-in** profile flag (`semiformal_verify`)
+  — a reasoning pass that's wrong is just advice, but one that false-positives blocks progress, so
+  keep it ADVISORY (steer, don't hard-gate) unless the conclusion is high-confidence REGRESSION;
+  the prompt must be tight (the paper's value is the structure preventing skipped cases, not
+  verbosity — keep it a focused certificate, not a free-form essay, or it becomes token-cost with
+  no reliability gain).
+
+- [ ] **Execution-verified best-of-N sampling for hard edit steps (test-time scaling).** Neko's
+  `run()` takes the FIRST response on every step (`core/agent.ts` line ~351: one `complete()` call
+  per step, first answer wins) — there is NO sampling of alternatives and NO selection. The
+  existing `MoaProvider` (`adapters/providers.ts` line ~391) samples DIFFERENT MODELS in parallel
+  and *aggregates* their advice (text synthesis), but it does not (a) sample the SAME model N times
+  nor (b) SELECT among candidates via execution. So on a hard edit step (a tricky multi-hunk fix,
+  a regex that won't quite match), the agent commits to its single first attempt and then
+  iteratively debugs it across many steps (the exact doom-loop `EDIT_PER_PATH_CAP` catches) — when
+  sampling N diverse attempts and keeping the one the BUILD/TESTS accept would reach a correct
+  fix in one selection. This is the test-time-scaling win on SWE-bench (TTC scaling, Ma et al.,
+  arXiv 2503.23803: a 32B model to 46% on SWE-bench Verified via sampling + execution-guided
+  selection, surpassing 671B/o1; SWE-Master / DeepSWE likewise use candidate-patch selection via a
+  verifier). TTC's selector is *trained* (reward model); the **training-free, harness-portable**
+  proxy is: on a HARD edit step (gated — only when the prior attempt FAILED a build/test, or when a
+  profile flag opts in), (1) sample N candidate edits from the same model at raised temperature;
+  (2) **use the existing build/test run as the verifier** — execute each candidate (in isolated
+  worktree copies / via `git stash`-and-apply), keep the first whose build+tests pass; (3) if none
+  pass, fall back to the single-answer path (today's behavior) — no regression. **Distinct from
+  EVERY existing backlog item**: MoA samples models (diversity of *source*) and aggregates text;
+  this samples the SAME model (diversity of *sample*) and SELECTS via execution (diversity of
+  *outcome*). Doom-loop/recovery items react to a single failing attempt; this proactively
+  generates alternatives. Ares/cascade dial per-step *cost* on one answer; this spends more to get
+  a better FIRST answer on hard steps. For Neko: (1) an opt-in `bestOfN` on `run()`/profile
+  (default off — it multiplies cost on the gated steps); (2) the sampling reuses the provider's
+  `temperature` (already configurable) — sample at temperature >0; (3) the selection reuses
+  `git` (the repo is already a git workspace): stash, apply candidate-k, run the verify command,
+  restore — pick the passing one. Gate tightly: only fire after a build/test FAILURE (the model is
+  already stuck), or on an explicit hard-step marker, never on every step. **Verify**: (1) a unit
+  test with a stub provider that returns N distinct candidate edits and a stub "build" whose pass
+  condition matches only candidate-k — assert the loop selects candidate-k (not the first) and that
+  only N executions ran; (2) a test that when NO candidate passes, `run()` falls back to the
+  single-answer path (today's behavior — no regression, no infinite sampling); (3) a test that with
+  `bestOfN` OFF, exactly ONE `complete()` runs per step (no sampling — today's behavior); (4) bench:
+  on a hard-multi-hunk task, pass-rate UP (a correct sample is found) and `calls` DOWN (one
+  selection beats N debug iterations) — but track `cost` (sampling costs more tokens; the win is
+  pass-rate-per-dollar, not raw tokens). NB: this is the one item where **cost goes UP per gated
+  step** — the value is correctness/throughput on hard tasks, not token efficiency, so the verify
+  gate MUST measure pass-rate + dollar-cost together, not tokens alone; keep it strictly opt-in and
+  failure-gated so it only spends extra where the cheap single-path already failed.
+
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->
 
