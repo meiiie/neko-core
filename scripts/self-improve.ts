@@ -152,7 +152,8 @@ async function main() {
     if (gitDirty()) { log("dirty at iter start -> revert to clean baseline"); revert(); }
     const stuck = noImprove >= STUCK_AFTER;
     const goal = pickGoal(iter, stuck);
-    log(`iter ${iter}${stuck ? " [STUCK -> self-research SOTA]" : ""}: neko run (${goal.slice(0, 70)}...)`);
+    const researching = goal.startsWith("RESEARCH PASS");
+    log(`iter ${iter}${researching ? " [research]" : stuck ? " [stuck]" : ""}: neko run (${goal.slice(0, 70)}...)`);
     const headBefore = sh("git", ["rev-parse", "HEAD"]).out.trim();
     const run = await runNeko(goal);
 
