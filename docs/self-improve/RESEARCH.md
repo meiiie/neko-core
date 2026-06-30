@@ -703,6 +703,54 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   inverts — this trades MORE tokens per gated step for HIGHER pass-rate-per-dollar on hard tasks.
   (See BACKLOG "Execution-verified best-of-N sampling for hard edit steps (test-time scaling).")
 
+## Token efficiency / context engineering — 2026-Q3 update #9 (RESEARCH pass)
+> Three fresh angles, none overlapping the existing 42-item backlog (confirmed via grep). One per
+> DISTINCT axis: *executable* learned rules (HASP -- skills that fire as automatic guardrails on a
+> matched state, vs Neko's advisory-text lessons), *memory currency* (Supersede -- stale-fact
+> invalidation, vs RecMem's dedup/merge), and *reasoning reuse* (TRS -- skill-cards distilled from
+> the agent's own traces and deterministically recalled before a hard step, vs Ares's per-step
+> effort dial). Each maps to a unit-testable `## Research-seeded` BACKLOG item; each gap was
+> confirmed against `src/`.
+
+- **Harnessing LLM Agents with Skill Programs (HASP)** — Liu, Ming, Joty, Zhao, May 2026
+  ([arXiv 2605.17734](https://arxiv.org/abs/2605.17734)). Upgrades skills from passive textual
+  advice into executable **Program Functions (PFs)** that activate on failure-prone states and
+  modify the next action or inject corrective context. The inference-time deployment is
+  **training-free** (PFs wrap the existing agent loop): **+25% over ReAct** on web-search
+  reasoning (post-training + evolution: +30.4% over Search-R1).
+  -> **Neko mapping:** Neko's `playbook`/`workflow`/`memory`/skills are ALL advisory text the model
+  must choose to heed; none EXECUTE on a matched state. The lever: let a learned lesson register a
+  TRIGGER (a regex/keyword on the latest observation/tool call) + an ACTION (a corrective
+  `appendSystem` nudge), auto-injected when the trigger matches -- the agent teaches itself an
+  automatic guardrail the way it already teaches an advisory playbook bullet. Distinct from the
+  doom-loop/tool-error/PIVOT items (hardcoded tactical signals) and RecMem/decision-notes (storage).
+  (See BACKLOG "Executable skill guardrails that fire on failure-prone states (HASP/Skill Programs).")
+- **Supersede: Diagnosing and Training the Memory-Update Gap in LLM Agents** — Patel, Jun 2026
+  ([arXiv 2606.27472](https://arxiv.org/abs/2606.27472)). Names the **supersession gap**: when a
+  fact changes, a bounded self-maintained memory scores **77% vs 92% full-context** (p<0.005),
+  WORSENING as the conversation grows (68% -> 28% over a 24x-longer run) -- agents reliably use a
+  stale value when the current one isn't surfaced. Both a training-free *diagnosis* and a trained
+  (GRPO) sharpening; the transferable lever is the *currency* mechanic.
+  -> **Neko mapping:** Neko's `memory` (`core/memory.ts`) is append-only with NO notion of fact
+  currency -- a `write` never marks an older same-topic note SUPERSEDED, so `search` re-surfaces
+  stale values. The lever: on `write`, mark high-topic-overlap existing notes `superseded_by`
+  (keep history, demote from `list`/`search`). Distinct from RecMem (Q3 #6, merges near-duplicates)
+  -- this is a currency/timestamp layer for an invalidated VALUE, not dedup/merge. (See BACKLOG
+  "Stale-fact supersession in the memory store (Supersede).")
+- **Thinking with Reasoning Skills: Fewer Tokens, More Accuracy (TRS)** — Zhao, Shi, Xiao, Zhang,
+  Yang, Sun, Apr 2026 ([arXiv 2604.21764](https://arxiv.org/abs/2604.21764)). A **training-free,
+  black-box-compatible** framework: run the reasoning model on source problems, have a summarizer LLM
+  distill each trajectory into a compact **skill card** (`Trigger / Do / Avoid / Check / Risk` +
+  keywords), and recall the matching card(s) BEFORE reasoning so the model avoids redundant detours.
+  Reported (exact): math tokens **-18.5% to -59.1%** at flat-or-up accuracy; coding tokens **-10.3%
+  to -33.9%** at flat-or-up pass@1; hardest-subset accuracy lifts ~45% -> ~80% with tokens ~halved.
+  -> **Neko mapping:** Neko's `playbook`/`workflow` are HAND-AUTHORED prose recalled at the model's
+  discretion; Ares (Q3 #3) dials thinking EFFORT per step. The distinct lever: a `scripts/`
+  distiller that turns a completed hard-task trajectory into a structured card, plus deterministic
+  (keyword-triggered) recall of the card before a matching hard step -- reuse of a proven solution
+  sketch, not more thinking budget. (See BACKLOG "Reasoning-skill cards distilled from the agent's
+  own trajectories, recalled before a hard step (TRS).")
+
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
 2. Find the closest existing Neko component (`compact()`, the tool schemas, the agent loop, a skill).

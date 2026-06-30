@@ -860,6 +860,101 @@ one never blocks another.
   gate MUST measure pass-rate + dollar-cost together, not tokens alone; keep it strictly opt-in and
   failure-gated so it only spends extra where the cheap single-path already failed.
 
+- [ ] **Executable skill guardrails that fire on failure-prone states (HASP/Skill Programs).** Neko's
+    `playbook` (`core/playbook.ts`), `workflow` (`core/workflows.ts`), `memory` (`core/memory.ts`), and
+    skills (`adapters/skills.ts`) are ALL **advisory text** -- injected into context (the playbook block
+    every turn; skills/workflows on-demand via `appendSystem`) and left for the model to *choose* to
+    heed. There is NO mechanism for a learned lesson to EXECUTE: to detect a specific failure-prone
+    state in the live trajectory and automatically inject corrective context. HASP (Liu, Ming, Joty,
+    Zhao, arXiv 2605.17734, May 2026) upgrades skills into executable **Program Functions (PFs)** that
+    "activate on failure-prone states and modify the next action or inject corrective context" -- the
+    inference-time variant is **training-free** (PFs wrap the existing loop) yet still gives **+25%
+    over ReAct** on web-search reasoning. **Distinct from EVERY existing backlog item**: the
+    doom-loop/tool-error/PIVOT/pre-completion items fire on a *hardcoded tactical signal* (repeats,
+    an error, plan divergence); RecMem/decision-notes touch *storage*; this is a **user-learned rule
+    that registers a TRIGGER (a matched state) + an ACTION (a corrective nudge to inject)** -- the agent
+    can teach itself a new automatic guardrail the way it already teaches itself an advisory playbook
+    bullet. For Neko, the transferable training-free proxy: (1) extend the `playbook` tool with an
+    `add_guardrail` action storing a structured rule `{trigger: <regex/keyword on the latest
+    observation or tool call>, action: <nudge text>}` in `~/.neko-core/guardrails.json`; (2) in the
+    agent loop, after each tool observation, scan registered guardrails -- on a `trigger` match,
+    `appendSystem()` the matched `action` text automatically (reusing the existing nudge plumbing), so
+    a lesson like "when `bash tsc` reports TS2322, re-read the symbol's type definition before
+    re-editing" fires WITHOUT the model having to recall it. The guardrail only INJECTS context
+    (steers) -- it never auto-runs a tool -- so it stays safe-by-default. **Verify**: (1) a unit test
+    that registers a guardrail `{trigger:"TS2322", action:"re-check the type"}`, runs a step whose
+    observation contains "TS2322", and asserts the action text is `appendSystem`-injected on that turn
+    (and a non-matching observation does NOT inject it); (2) a test that guardrails only fire on the
+    matching turn, not every turn (no steady-state nag); (3) a test that `add_guardrail`/`list`/
+    `remove` persist round-trip; (4) a behavioral test where the stub would doom-loop on a known error
+    pattern WITH a registered guardrail for it -- assert the nudge fires and the loop does NOT repeat
+    the failing call 3x (the old guard trips later); without the guardrail it loops. Bench: flat-or-up
+    pass-rate on error-prone tasks, fewer wasted steps. NB: ship behind an **opt-in** profile flag
+    (`executable_guardrails`); keep triggers user-editable and the registry bounded (cap K guardrails).
+
+- [ ] **Stale-fact supersession in the memory store (Supersede).** Neko's `memory` tool
+    (`core/memory.ts`) is append-only: `write` creates/overwrites a WHOLE file by name, with NO notion
+    of FACT CURRENCY -- if a memory records "user prefers Tailwind v3" and the underlying fact changes
+    (migrated to v4), the only fix is for the agent to recall the OLD note's filename and `write`/
+    `delete` it by hand; nothing flags the v3 note as SUPERSEDED, and a later `memory search` happily
+    re-surfaces the stale value. *Supersede* (Patel, arXiv 2606.27472, Jun 2026) measures exactly this
+    gap: bounded self-maintained memory scores **77% vs 92% full-context** (the "supersession gap",
+    p<0.005), worsening as the conversation grows (68% -> 28% over a 24x-longer run) -- agents reliably
+    use a stale value when the current one isn't surfaced. The transferable, training-free lever is the
+    *currency* mechanic, not the RL (which only sharpens it). **Distinct from EVERY existing backlog
+    item**: RecMem (Q3 #6) merges *near-duplicate* notes by similarity; this targets a note whose
+    VALUE is invalidated by a newer fact even when the wording differs -- a currency/timestamp layer,
+    not dedup/merge. Decision-notes (Q2) is single-session. For Neko: (a) add an optional
+    `superseded_by` field + `updated_at` timestamp to each memory (front-matter or a
+    `~/.neko-core/memory/.index.json`); (b) on `memory write`, run a cheap keyword/entity-overlap pass
+    against existing notes in the same TOPIC cluster (no embedding model -- local-first) and, on a
+    high-overlap hit, mark the OLD note `superseded_by: <new name>` (keep history, do NOT delete) and
+    have `memory search`/`list` surface only the CURRENT (non-superseded) value, demoting stale ones
+    unless explicitly requested; (c) add a `memory supersede` action to explicitly invalidate a note by
+    name. **Verify**: (1) a unit test: write "prefers Tailwind v3", then "prefers Tailwind v4" -- assert
+    `list`/`search` returns ONLY the v4 note as current and v3 is marked superseded (still readable via
+    `read`); (2) a test that two clearly-DISTINCT-topic notes do NOT supersede each other (no false
+    invalidation -- the dangerous failure mode); (3) a test that explicit `memory supersede <name>`
+    marks it stale without a new write; (4) a behavioral test where an outdated memory value would lead
+    the agent to use the old convention -- assert WITH supersession the current value is the only one
+    surfaced and the task uses it. Bench: recalled-context correctness up (no stale values acted on)
+    at flat-or-up pass-rate; recalled token count ~flat. NB: keep the topic-similarity threshold
+    CONSERVATIVE (supersede only on HIGH keyword overlap + matching entity); ship behind an **opt-in**
+    profile flag (`memory_supersession`); never auto-delete, only demote.
+
+- [ ] **Reasoning-skill cards distilled from the agent's own trajectories, recalled before a hard
+    step (TRS).** Neko already has advisory lessons (`playbook`/`workflow`), but they are WRITTEN BY
+    THE AGENT BY HAND after a task -- short, generic, and never automatically tied to a SPECIFIC hard
+    step's signature. Ares (Q3 #3) dials *thinking effort* per step; it does not retrieve a *reusable
+    solution sketch* for the step at hand. Thinking with Reasoning Skills / TRS (Zhao et al., arXiv
+    2604.21764, Apr 2026) is the fresh SOTA and is **explicitly training-free and black-box
+    compatible**: run the reasoning model on source problems, have a summarizer LLM distill each
+    trajectory into a compact **skill card** (`Trigger / Do / Avoid / Check / Risk` + retrieval
+    keywords), store them as plain key-value entries, and at inference **recall the relevant card(s)
+    BEFORE reasoning** so the model avoids redundant detours. Reported (exact): math tokens **-18.5%
+    to -59.1%** at flat-or-up accuracy; coding tokens **-10.3% to -33.9%** at flat-or-up pass@1, with
+    the hardest subset accuracy lifting ~45% -> ~80% and tokens ~halved. Self-distilled from the
+    agent's OWN traces -- no weight updates. **Distinct from EVERY existing backlog item**:
+    `playbook`/`workflow` are manually-authored prose recalled at the agent's discretion; Ares is a
+    per-step *compute* dial; this is **automatic distillation of a completed task's own trajectory into
+    a structured card, then deterministic retrieval of the card whose `Trigger` matches the current
+    step** (deterministic recall, not model discretion). For Neko (a `scripts/` offline distiller + a
+    runtime recall hook, training-free): (1) an opt-in script that, after a `run()` on a hard task,
+    prompts the model to distill the trajectory into a card (`Trigger / Do / Avoid / Check / Risk` +
+    keywords) appended to `~/.neko-core/reasoning-skills.jsonl`; (2) at runtime, before a step that
+    looks hard (a tool-less step, or an EDIT_TOOLS step after a prior failure), do a cheap keyword
+    match of the current step's signature against card `Trigger`/keywords and, on a hit,
+    `appendSystem()` the card -- steering the model toward the proven path without it rediscovering it.
+    **Verify**: (1) a scripts-level unit test that a stub trajectory distills to a card with the 5
+    fields + keywords, persisted to the jsonl; (2) a runtime test that a step whose signature matches a
+    seeded card's `Trigger` gets the card `appendSystem`-injected, and a non-matching step does NOT
+    (deterministic recall); (3) a test that recall is bounded (<=K cards) so context never bloats;
+    (4) bench: `outTok` (reasoning tokens) drops on a repeated-similar-task workload at flat-or-up
+    pass-rate, and on a SECOND run of a hard task the step count drops (the card short-circuits the
+    first run's detours). NB: ship behind an **opt-in** profile flag (`reasoning_skill_recall`); keep
+    the distiller offline/one-shot (gate to tasks the bench flags as hard or repeated); retrieval is
+    keyword/BM25-style only (no embedding dep -- local-first).
+
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->
 
