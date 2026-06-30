@@ -49,6 +49,14 @@ export const DEFAULT_SYSTEM_PROMPT =
 // "fleet"). Mutating tools (write_file/edit/bash) are excluded so they stay ordered + gated.
 const CONCURRENCY_SAFE = new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "task"]);
 
+// File-mutating tools. The broad doom-loop guard counts repeated edits to the SAME path even
+// when the args differ (the common "chase a build error across N edits" loop the exact-repeat
+// guard misses). Normalized path = the `path` arg (write_file/edit) or that of multi_edit's file.
+const EDIT_TOOLS = new Set(["write_file", "edit", "multi_edit"]);
+// Thresholds for the BROAD doom-loop guard (distinct from the exact-repeat guard above).
+const EDIT_PER_PATH_CAP = 3;   // >= N edits to ONE path in a run -> nudge
+const FAILING_RUN_CAP = 3;     // >= N consecutive failing (non-zero exit) bash runs -> nudge
+
 // A single tool result (a giant browser snapshot, a huge file/page read) must not push the prompt past
 // the model's context window -- the server then computes a NEGATIVE max_tokens (window - prompt) and
 // rejects the whole turn with HTTP 400. Cap each observation (head + tail, with a marker) so one result
@@ -112,7 +120,15 @@ export class Agent {
   /** The single system message is `<base prompt>` + DYN_MARK + `<live session context>`.
    * One system message only: some chat templates (Llama/Mistral on vLLM) suppress tool-calling
    * when a SECOND system message is present, so session context is merged in, never split out. */
-  private static readonly DYN_MARK = "\n\n<session-context>\n";
+    private static readonly DYN_MARK = "\n\n<session-context>\n";
+
+    // BROAD doom-loop state (distinct from the per-step exact-repeat `lastSig`/`repeats` guard):
+    // (a) edits-per-path: the agent often loops editing ONE file with DIFFERENT args chasing a build
+    //     error -- the exact-repeat guard never trips because every sig differs. Track per-path count
+    //     and nudge once the cap is hit. (b) consecutive failing bash runs: re-running a failing
+    //     command 3x with tiny tweaks is the other classic budget sink.
+    private readonly editsPerPath = new Map<string, number>();
+    private consecutiveFailingRuns = 0;
 
   constructor(opts: AgentOptions) {
     this.provider = opts.provider;
@@ -264,17 +280,44 @@ export class Agent {
     sys.content = `${base}\n\n${text}` + (dyn !== undefined ? Agent.DYN_MARK + dyn : "");
   }
 
-  /** Execute a tool but NEVER throw: a malformed/failed tool call (e.g. a model emitting web_fetch with no
-   * `url`, or any executor that throws) becomes an error OBSERVATION the model can recover from, instead of
-   * rejecting the whole turn. The loop is built on "feed errors back so the model adapts" — this enforces it
-   * for every tool, not just the ones already wrapped inside execute(). */
-  private async safeExecute(call: { name: string; arguments: Record<string, any> }, signal?: AbortSignal): Promise<string | any[]> {
-    try {
-      return await this.tools.execute(call.name, call.arguments, signal);
-    } catch (error) {
-      return `Error running ${call.name}: ${error instanceof Error ? error.message : String(error)}`;
+    /** Execute a tool but NEVER throw: a malformed/failed tool call (e.g. a model emitting web_fetch with no
+     * `url`, or any executor that throws) becomes an error OBSERVATION the model can recover from, instead of
+     * rejecting the whole turn. The loop is built on "feed errors back so the model adapts" — this enforces it
+     * for every tool, not just the ones already wrapped inside execute(). */
+    private async safeExecute(call: { name: string; arguments: Record<string, any> }, signal?: AbortSignal): Promise<string | any[]> {
+      try {
+        return await this.tools.execute(call.name, call.arguments, signal);
+      } catch (error) {
+        return `Error running ${call.name}: ${error instanceof Error ? error.message : String(error)}`;
+      }
     }
-  }
+
+    /** The BROAD doom-loop guard (distinct from the exact-repeat `lastSig` guard). Catches the two loops the
+     * exact guard structurally cannot: (1) editing the SAME path with DIFFERENT args N times (every sig
+     * differs, so the exact guard never trips), and (2) re-running a failing bash command N times with tiny
+     * tweaks. Returns a nudge observation string when the cap is hit, or null to run the call normally. */
+    private broadLoopNudge(call: { name: string; arguments: Record<string, any> }): string | null {
+      if (EDIT_TOOLS.has(call.name)) {
+        const p = String(call.arguments?.path ?? "");
+        if (p) {
+          const n = (this.editsPerPath.get(p) ?? 0) + 1;
+          this.editsPerPath.set(p, n);
+          if (n >= EDIT_PER_PATH_CAP) {
+            return `[loop guard] You've edited "${p}" ${n} times this run and it's still not right. ` +
+              "Stop micro-editing the same file: step back, re-read the actual current state, reconsider your " +
+              "approach (is the root cause elsewhere?), then act — or give your final answer.";
+          }
+        }
+      }
+      return null;
+    }
+
+    /** A bash/test result "failed" if it carries a non-zero exit tag (see tool-runtime.ts: `(exit N -- command FAILED)`),
+     * a timeout, or an explicit error. Used to count CONSECUTIVE failing runs for the broad guard. */
+    private static isFailedRunResult(obs: unknown): boolean {
+      if (typeof obs !== "string") return false;
+      return /\(exit \d+ -- command FAILED\)/.test(obs) || /^\(timed out/.test(obs) || /^Error:/m.test(obs);
+    }
 
   /** Run the loop until the model is done or maxSteps is hit. Returns the final text.
    * Pass an AbortSignal to support Esc-to-interrupt (stops cleanly between/within steps).
@@ -337,18 +380,42 @@ export class Agent {
       } else {
         for (const call of toolCalls) {
           if (signal?.aborted) return "[interrupted]"; // stop promptly between tools on Esc
-          this.emit("tool_call", call);
-          // Loop guard: if the model makes the SAME call 3x in a row, it's stuck — nudge instead of
-          // re-running it, so it changes approach or finishes (prevents lag/chaos/spinning).
-          const sig = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
-          repeats = sig === lastSig ? repeats + 1 : 0;
-          lastSig = sig;
-          const observation = repeats >= 2
-            ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
-            : await this.safeExecute(call, signal);
-          this.emit("tool_result", { call, observation });
-          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
-        }
+            this.emit("tool_call", call);
+            // Loop guard: if the model makes the SAME call 3x in a row, it's stuck — nudge instead of
+            // re-running it, so it changes approach or finishes (prevents lag/chaos/spinning).
+            const sig = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
+            repeats = sig === lastSig ? repeats + 1 : 0;
+            lastSig = sig;
+            // BROAD doom-loop guard: catches repeated edits to ONE path with DIFFERENT args (which the
+            // exact-repeat guard above structurally cannot — every sig differs). When the per-path edit
+            // cap is hit, nudge instead of re-running, so the model re-reads the real state / reconsiders
+            // instead of micro-editing the same file into the budget.
+            const broad = this.broadLoopNudge(call);
+            const observation = repeats >= 2
+              ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
+              : broad !== null
+                ? broad
+                : await this.safeExecute(call, signal);
+            // Track consecutive failing bash runs for the broad guard. A success (or a non-bash tool)
+            // resets the streak; reaching the cap nudges on the NEXT failing run via the streak itself
+            // (the result is still fed back so the model can diagnose, but the loop now also signals).
+            if (call.name === "bash") {
+              this.consecutiveFailingRuns = Agent.isFailedRunResult(observation)
+                ? this.consecutiveFailingRuns + 1
+                : 0;
+            }
+            this.emit("tool_result", { call, observation });
+            this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
+            // After enough consecutive failing runs, append one nudge observation so the model changes
+            // approach instead of re-running a near-identical failing command.
+            if (call.name === "bash" && this.consecutiveFailingRuns >= FAILING_RUN_CAP) {
+              const nudge = "[loop guard] That command has now failed " + this.consecutiveFailingRuns +
+                " times in a row. Stop retrying near-identical versions: re-read the actual error, " +
+                "diagnose the root cause, change your approach — or give your final answer.";
+              this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: nudge });
+              this.consecutiveFailingRuns = 0; // reset so the nudge doesn't fire every step after
+            }
+          }
       }
     }
 

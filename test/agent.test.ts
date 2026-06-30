@@ -219,14 +219,97 @@ test("concurrency-safe tool calls in one turn run in parallel", async () => {
   expect(tools.maxActive).toBeGreaterThan(1); // overlapped => ran in parallel
 });
 
-test("loop guard stops re-running an identical tool call", async () => {
-  let execs = 0;
-  const tools = { schemas: () => [], execute: async () => { execs++; return "err"; } };
-  const provider = { complete: async () => ({ content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "p" } }] }) };
-  const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 6 });
+  test("loop guard stops re-running an identical tool call", async () => {
+    let execs = 0;
+    const tools = { schemas: () => [], execute: async () => { execs++; return "err"; } };
+    const provider = { complete: async () => ({ content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "p" } }] }) };
+    const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 6 });
+    await agent.run("go");
+    expect(execs).toBeLessThan(6); // guarded after the 3rd identical call, not executed every step
+    expect(agent.messages.some((m: any) => String(m.content).includes("loop guard"))).toBe(true);
+  });
+
+test("BROAD loop guard trips on N DISTINCT edits to ONE path (the exact-repeat guard misses this)", async () => {
+  // The classic doom-loop: edit the SAME file with DIFFERENT args chasing a build error. Every
+  // call signature differs, so the exact-repeat guard (lastSig/repeats) NEVER trips. The broad
+  // guard counts edits-per-path and nudges once the cap (3) is hit.
+  const edited: string[] = [];
+  const tools = {
+    schemas: () => [],
+    execute: async (_n: string, args: any) => { edited.push(args.path); return "ok"; },
+  };
+  // 5 distinct edit calls to the same path, then a final tool-less answer.
+  const script = [
+    { content: null, tool_calls: [{ id: "c1", name: "edit", arguments: { path: "src/x.ts", old_string: "a", new_string: "b" } }] },
+    { content: null, tool_calls: [{ id: "c2", name: "edit", arguments: { path: "src/x.ts", old_string: "c", new_string: "d" } }] },
+    { content: null, tool_calls: [{ id: "c3", name: "edit", arguments: { path: "src/x.ts", old_string: "e", new_string: "f" } }] },
+    { content: null, tool_calls: [{ id: "c4", name: "edit", arguments: { path: "src/x.ts", old_string: "g", new_string: "h" } }] },
+    { content: null, tool_calls: [{ id: "c5", name: "edit", arguments: { path: "src/x.ts", old_string: "i", new_string: "j" } }] },
+    { content: "done", tool_calls: [] },
+  ];
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 10 });
   await agent.run("go");
-  expect(execs).toBeLessThan(6); // guarded after the 3rd identical call, not executed every step
-  expect(agent.messages.some((m: any) => String(m.content).includes("loop guard"))).toBe(true);
+  // Only the first 2 edits actually execute; from the 3rd on the broad guard nudges instead of running.
+  expect(edited.length).toBeLessThanOrEqual(2);
+  expect(edited.every((p) => p === "src/x.ts")).toBe(true);
+  const broadNudges = agent.messages.filter((m: any) =>
+    String(m.content).includes("[loop guard]") && String(m.content).includes("src/x.ts"));
+  expect(broadNudges.length).toBeGreaterThan(0); // broad guard fired (exact guard would NOT have)
+});
+
+test("BROAD loop guard does NOT trip on edits to DIFFERENT paths (no false positive)", async () => {
+  const edited: string[] = [];
+  const tools = {
+    schemas: () => [],
+    execute: async (_n: string, args: any) => { edited.push(args.path); return "ok"; },
+  };
+  const script = [
+    { content: null, tool_calls: [{ id: "c1", name: "edit", arguments: { path: "a.ts", old_string: "a", new_string: "b" } }] },
+    { content: null, tool_calls: [{ id: "c2", name: "edit", arguments: { path: "b.ts", old_string: "c", new_string: "d" } }] },
+    { content: null, tool_calls: [{ id: "c3", name: "edit", arguments: { path: "c.ts", old_string: "e", new_string: "f" } }] },
+    { content: "done", tool_calls: [] },
+  ];
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 10 });
+  await agent.run("go");
+  expect(edited).toEqual(["a.ts", "b.ts", "c.ts"]); // all 3 ran — no false nudge on distinct paths
+  expect(agent.messages.some((m: any) => String(m.content).includes("[loop guard]"))).toBe(false);
+});
+
+test("BROAD loop guard trips on N CONSECUTIVE FAILING bash runs", async () => {
+  // The agent re-runs a failing command 3x with tiny tweaks; the exact-repeat guard won't trip
+  // (commands differ) but the failing-streak guard must nudge it to change approach.
+  const script = [
+    { content: null, tool_calls: [{ id: "b1", name: "bash", arguments: { command: "make test1" } }] },
+    { content: null, tool_calls: [{ id: "b2", name: "bash", arguments: { command: "make test2" } }] },
+    { content: null, tool_calls: [{ id: "b3", name: "bash", arguments: { command: "make test3" } }] },
+    { content: "done", tool_calls: [] },
+  ];
+  // tool-runtime tags failures as "(exit N -- command FAILED)" — every bash here fails.
+  const tools = { schemas: () => [], execute: async () => "(exit 1 -- command FAILED)\nsome error" };
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
+  await agent.run("go");
+  const nudge = agent.messages.find((m: any) =>
+    String(m.content).includes("[loop guard]") && String(m.content).includes("failed") && String(m.content).includes("times in a row"));
+  expect(nudge).toBeTruthy(); // the failing-streak nudge fired
+});
+
+test("BROAD loop guard resets the failing streak on a successful bash (no false positive)", async () => {
+  // fail, fail, SUCCESS (resets), then fail again -> streak is only 1, no nudge should fire.
+  const script = [
+    { content: null, tool_calls: [{ id: "b1", name: "bash", arguments: { command: "f1" } }] },
+    { content: null, tool_calls: [{ id: "b2", name: "bash", arguments: { command: "f2" } }] },
+    { content: null, tool_calls: [{ id: "b3", name: "bash", arguments: { command: "ok" } }] },
+    { content: null, tool_calls: [{ id: "b4", name: "bash", arguments: { command: "f3" } }] },
+    { content: "done", tool_calls: [] },
+  ];
+  let n = 0;
+  const tools = {
+    schemas: () => [],
+    execute: async () => { n++; return n === 3 ? "(exit 0)\nok" : "(exit 1 -- command FAILED)\nerr"; },
+  };
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
+  await agent.run("go");
+  expect(agent.messages.some((m: any) => String(m.content).includes("[loop guard]"))).toBe(false);
 });
 
 test("max_steps cap fires", async () => {
