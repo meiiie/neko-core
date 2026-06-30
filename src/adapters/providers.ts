@@ -54,11 +54,18 @@ export function getProvider(config: NekoConfig): Provider {
   );
 }
 
-/** List model ids the endpoint offers (OpenAI-compatible GET /models). Used by `/model list`. */
+/** List model ids the endpoint offers. Used by `/model list`. The Anthropic Messages API (and Z.ai's GLM
+ *  coding endpoint) exposes the list at `/v1/models` with the anthropic headers; OpenAI uses `/models`.
+ *  Both return `{ data: [{ id }] }`. */
 export async function listModels(config: NekoConfig): Promise<string[]> {
+  const anthropic = config.provider === "anthropic";
+  const url = `${config.baseUrl}${anthropic ? "/v1/models" : "/models"}`;
   const headers: Record<string, string> = {};
-  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
-  const res = await fetch(`${config.baseUrl}/models`, { headers, signal: AbortSignal.timeout(15000) });
+  if (config.apiKey) {
+    if (anthropic) { headers["x-api-key"] = config.apiKey; headers.authorization = `Bearer ${config.apiKey}`; headers["anthropic-version"] = "2023-06-01"; }
+    else headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   return ((data?.data ?? []) as any[]).map((m) => m?.id).filter(Boolean).sort();
