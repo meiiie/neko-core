@@ -370,6 +370,90 @@ one never blocks another.
   opt-in behind a profile flag so a hash collision (vanishingly rare for a real hash) is a
   toggle, not a silent correctness bug.
 
+- [ ] **Idempotent-tool-call result caching (ToolCaching).** Neko's agent loop runs EVERY tool call
+  through `safeExecute()` (`core/agent.ts`) afresh each turn — so when the model re-issues a
+  DETERMINISTIC call it has already made with identical args in the same run (a re-`search` for the
+  same regex, a re-`glob` of the same pattern, a re-`bash` of a read-only command like `git status`/
+  `ls`/`cat`, a re-`web_search`), the tool re-runs and the fresh result is re-appended to context —
+  burning both wall-clock (re-execution) AND tokens (a second full result body). ToolCaching (Zhai
+  et al., arXiv 2601.15335, Jan 2026) cuts this: cache `(tool, normalized-args) -> result` for
+  cacheable calls and serve the prior result on a repeat without re-executing. Distinct from the
+  existing "Mutation-aware stale-read elision (Context Rot)" item — that elides the re-*FEED* of an
+  unchanged `read_file`/`ls` result by hashing its OUTPUT (a context-token win only; the tool still
+  RUNS): this skips the re-*EXECUTION* of any idempotent tool (incl. slow deterministic `bash`/
+  `search`/`glob`/`web_search`), a wall-clock + token win, keyed on the INPUT args not the output
+  hash. For Neko: add a per-session `(tool, normalizedArgs) -> result` memo inside `safeExecute()`;
+  cache only the DETERMINISTICALLY-safe subset (extend the `CONCURRENCY_SAFE` set — `read_file/
+  search/glob/ls/web_search/web_fetch`; explicitly EXCLUDE `bash` unless the command is on a tiny
+  read-only allowlist like `ls`/`cat`/`pwd`/`git status`, since most bash mutates or is
+  time-dependent; always exclude `write_file`/`edit`/`task`). Invalidate the key on any mutation to
+  the same path (a `write_file`/`edit` to a path busts that path's `read_file` cache). **Verify**:
+  (1) a unit test calling `safeExecute(read_file, path)` twice with identical args asserts the tool
+  body is NOT re-invoked the 2nd time (a spy/counter) and the same cached string is returned; (2) a
+  test that editing the path between two reads RE-runs the tool and returns fresh content (no stale
+  cache); (3) a test that `bash`/`write_file` are NEVER served from cache (correctness — they
+  mutate); (4) bench wall-clock AND `inTok` drop on a task with repeated identical deterministic
+  reads/searches at flat-or-up pass-rate. NB: key the cache per-session only (never across runs),
+  keep it opt-in behind a profile flag, and cap its size (LRU) so a pathological run doesn't grow
+  memory unboundedly.
+- [ ] **Self-improve-loop candidate archive + best-keep (DGM/Population).** Neko's self-improve loop
+  (`scripts/self-improve.ts`) is strictly LINEAR: it commits ONE improvement, then builds the NEXT on
+  top — a single evolving branch. If commit #3's change interacts badly with #2, or #2 was actually a
+  neutral placebo that passed the verify gate, every later commit inherits the drift; there is no way
+  to keep a divergent harness variant and benchmark it against the current head. DGM (Zhang et al.,
+  ICLR 2026, arXiv 2505.22954) and the fresher **Meta-Harness** (Lee et al., Stanford IRIS, arXiv
+  2603.28052, Mar 2026 — #1 on Terminal-Bench-2 by SEARCHING over harness code) show the win: keep an
+  **ARCHIVE of candidate harness variants** (source + score + execution trace), benchmark each, and
+  keep the best — population-based exploration instead of one greedy line. Meta-Harness's proposer
+  specifically reads "the source code, scores, and execution traces of ALL prior candidates through a
+  filesystem" to propose the next. Distinct from the existing "Falsifiable-prediction gate (AHE)"
+  item (that gates a SINGLE linear commit on its predicted-vs-actual delta): this is about MAINTAINING
+  ALTERNATIVES so a bad branch can be abandoned, not just detected. For Neko: the loop already writes
+  `~/.neko-core/bench-log.jsonl` (per-commit bench deltas) and STATE.md — extend it to keep a small
+  **candidate archive** (`~/.neko-core/harness-archive/`): before each proposer run, snapshot the
+  current head's `git rev-parse HEAD` + its bench delta + a one-line trace; let the proposer (the
+  `neko run` task) READ the archive (its prior candidates' diffs + deltas) so it proposes informed
+  variants rather than amnesiac linear edits; on a commit that benchmarks WORSE than the prior head,
+  `git revert`/reset instead of stacking on top. **Verify** (scripts-level, no agent-loop change):
+  (1) a test that after N proposer runs the archive holds N entries (hash + delta + trace), none lost;
+  (2) a test where a stubbed "bad" improvement (passes typecheck but regresses bench) is committed
+  then DETECTED on the next benchmark and reverted (the loop returns to the prior head, not the
+  drifted one) — the linear loop today would keep the regression; (3) a test that the proposer's
+  system prompt embeds ≥1 prior candidate's delta (it is not amnesiac). Pure self-improve-harness
+  logic — no `src/` change. NB: keep the archive bounded (top-K by score) so it doesn't grow
+  forever; this is the machinery AHE's "experience-observability" + DGM's "archive" both assume.
+- [ ] **Plan-execution misalignment detector + textual-gradient replan (PIVOT).** Neko's loop is
+  PLAN-LESS at runtime: the model streams tool calls, and the only "plan" is whatever `todo_write`
+  items it optionally wrote (never enforced) plus the `lastSig`/`repeats` doom-loop guard. Nothing
+  detects that execution has DIVERGED from the model's own stated plan — e.g. the todos say "1. fix
+  agent.ts, 2. update tests, 3. bench" but the model has spent 8 steps editing `tools.ts` (a different
+  file) chasing a build error — so it silently drifts, burning the budget on off-plan work, with no
+  mechanism to notice and re-plan. PIVOT (Zhang et al., arXiv 2605.11225, May 2026) names this
+  plan-execution misalignment and fixes it with a **structured "textual gradient"**: after executing,
+  INSPECT the trajectory against the plan, compute the discrepancy as a loss, and if non-zero,
+  EVOLVE (re-plan) rather than continue the stale plan — up to **94% relative improvement in
+  constraint satisfaction** and **3-5× fewer tokens** than competing refinement. Training-free
+  (runtime trajectory refinement via environment feedback). Distinct from EVERY existing backlog
+  item: "Broad doom-loop detection" / "Tool-error recovery" fire on REPEATS/ERRORS (tactical);
+  "Pre-completion verify gate" fires once at EXIT; "Event-driven re-grounding" re-states the
+  original TASK verbatim (no notion of a PLAN). This compares the LIVE trajectory against the model's
+  OWN `todo_write` plan and replans on divergence. For Neko: every `k` steps, if a `todo_write` plan
+  exists, run a lightweight INSPECT pass — compare the tools/paths actually touched in the last `k`
+  steps against the current `todo_write` items (are we touching files relevant to the active todo?
+  have we spent >m steps without completing any todo?); on divergence, `appendSystem()` a
+  "textual-gradient" nudge: "Your recent steps (<summary>) don't match your plan (<current todos>).
+  Re-plan: either update the todos to match what you're actually doing, or return to the planned
+  work." (reuse existing `appendSystem` plumbing). **Verify**: (1) a unit test where a stub provider
+  writes a `todo_write` plan then emits `k` steps touching OFF-PLAN paths — assert the divergence
+  nudge fires exactly at step `k` and contains both the actual-summary and the plan-reference (assert
+  it does NOT fire when steps match the plan, or when no todos exist, or when `k` not reached); (2) a
+  test that completing a todo (writing the matching `[x]`) resets the divergence counter (no nag after
+  on-plan progress); (3) a trajectory test where the stub would drift off-plan into a budget limit —
+  assert WITH the detector it returns to plan and finishes within budget. Bench: flat-or-up pass-rate,
+  fewer wasted off-plan steps; primarily a budget/correctness win on long, multi-step tasks. NB:
+  gate behind an opt-in profile flag; the detector needs ≥1 `todo_write` to exist (no plan = no
+  divergence to detect), so it composes naturally with the existing `todo_write` tool.
+
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->
 

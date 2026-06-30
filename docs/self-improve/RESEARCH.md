@@ -409,6 +409,65 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   dangerous distractor degradation lives. (See BACKLOG "Mutation-aware stale-read elision
   (Context Rot 'dilution').")
 
+## Token efficiency / context engineering — 2026-Q3 update #4 (RESEARCH pass)
+> Three fresh angles, none overlapping the existing 27-item backlog. One per DISTINCT axis:
+> token efficiency (ToolCaching — idempotent-call memoization), self-improvement machinery
+> (Meta-Harness — archive-and-search over harness variants), and trajectory correctness (PIVOT —
+> plan-execution misalignment detection). Each maps to a unit-testable `## Research-seeded`
+> BACKLOG item.
+
+- **ToolCaching: Towards Efficient Caching for LLM Tool-calling** — Zhai, Shen, Luo, Yang, Jan 2026
+  ([arXiv 2601.15335](https://arxiv.org/abs/2601.15335)). Identifies that parallel/async execution
+  (the W&D / PASTES axis the prior pass covered) still leaves an unaddressed waste class:
+  **redundant/repeated tool-calling requests** with identical or equivalent arguments, which are
+  re-executed every time. A feature-driven, adaptive cache (VAAC: bandit-based admission +
+  value-driven multi-factor eviction over frequency/recency/value) serves repeats from the cache.
+  Reported: **up to +11% cache hit ratio, -34% end-to-end latency** vs. standard policies. The key
+  transferable idea is the (tool, args) → result memo for cacheable calls, not the eviction policy.
+  -> **Neko mapping:** Neko's `safeExecute()` (`core/agent.ts`) re-runs every call fresh — a re-issued
+  deterministic `search`/`glob`/read-only `bash`/`web_search` re-executes AND re-appends its full
+  result to context (double cost). The distinct lever (vs "Mutation-aware stale-read elision," which
+  hashes the OUTPUT to elide a re-FEED and still runs the tool): key on the INPUT args and skip the
+  re-EXECUTION of idempotent tools entirely — a wall-clock + token win. (See BACKLOG "Idempotent-
+  tool-call result caching (ToolCaching).")
+- **Meta-Harness: End-to-End Optimization of Model Harnesses** — Lee, Nair, Zhang, Lee, Khattab,
+  Finn (Stanford IRIS), Mar 2026 ([arXiv 2603.28052](https://arxiv.org/abs/2603.28052)). An
+  outer-loop system that SEARCHES over harness code (the code that decides what to store/retrieve/
+  present to the LLM) using an agentic proposer that accesses the **source code, scores, and
+  execution traces of ALL prior candidates via a filesystem** — so each proposal is informed by the
+  full history of tried variants, not an amnesiac edit. Results: **+7.7pp over a SOTA context manager
+  at 4× fewer tokens** on online classification; +4.7pp across 5 held-out models on IMO-level math;
+  discovered harnesses **surpass the best hand-engineered baselines (incl. ACE) on Terminal-Bench-2**
+  (#1 at time of submission). Distinct from AHE (which evolves a SINGLE harness linearly with
+  per-edit predictions): Meta-Harness keeps an ARCHIVE of candidates and benchmarks them
+  head-to-head — population search, not greedy descent. (Reinforces DGM's archive idea from the
+  north-star section.)
+  -> **Neko mapping:** Neko's self-improve loop (`scripts/self-improve.ts`) is strictly linear — one
+  branch, each commit stacked on the last, no way to keep a divergent variant or abandon a bad one.
+  The distinct lever (vs the existing "Falsifiable-prediction gate," which judges ONE linear commit):
+  maintain a small **candidate archive** (hash + bench delta + trace per variant) that the proposer
+  READS before proposing, and revert a commit that benchmarks worse than its parent instead of
+  stacking drift. Pure self-improve-harness logic — no `src/` change. (See BACKLOG "Self-improve-loop
+  candidate archive + best-keep (DGM/Population).")
+- **PIVOT: Bridging Planning and Execution in LLM Agents via Trajectory Refinement** — Zhang, Popa,
+  Xu, Song, Dimitriadis, May 2026 ([arXiv 2605.11225](https://arxiv.org/abs/2605.11225)). Names
+  **plan-execution misalignment**: an agent commits to a plan (e.g. a todo list) then, during
+  execution, drifts onto off-plan work without any mechanism to notice the divergence, burning budget.
+  Four stages — PLAN (candidate trajectories) → INSPECT (execute, compute a structured **"textual
+  gradient"** encoding the plan-vs-execution discrepancy) → EVOLVE (re-plan from the gradient, not the
+  stale plan) → VERIFY (final constraint check); a monotonic-acceptance rule keeps only
+  non-decreasing-quality solutions. Training-free (runtime trajectory refinement via environment
+  feedback); **up to +94% relative constraint satisfaction, 3-5× fewer tokens** than competing
+  refinement; effective fully autonomously.
+  -> **Neko mapping:** Neko has no runtime plan: `todo_write` items are optional and UNENFORCED, and
+  nothing compares the live trajectory against them — so the model can spend 8 steps editing an
+  off-plan file with no nudge. The distinct lever (vs "Broad doom-loop"/"Tool-error recovery," which
+  fire on tactical repeats/errors; vs "Pre-completion verify gate," which fires once at exit; vs
+  "Event-driven re-grounding," which re-states the original TASK with no notion of a PLAN): every `k`
+  steps, INSPECT the tools/paths actually touched against the current `todo_write` items and, on
+  divergence, `appendSystem()` a textual-gradient nudge to re-plan. (See BACKLOG "Plan-execution
+  misalignment detector + textual-gradient replan (PIVOT).")
+
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
 2. Find the closest existing Neko component (`compact()`, the tool schemas, the agent loop, a skill).
