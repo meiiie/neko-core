@@ -119,6 +119,43 @@ const TASKS: BenchTask[] = [
     prompt: "Create out.txt whose content is the word 'banana' REVERSED and then UPPERCASED (the letters of 'banana' in reverse order, all capitals).",
     verify: (d) => (read(d, "out.txt") ?? "").trim() === "ANANAB",
   },
+  // ---- tricky tier (subtle bugs + careful multi-step; richer signal even when the easy tier saturates) ----
+  {
+    id: "off-by-one",
+    files: {
+      "range.mjs": "export function sumTo(n) {\n  let s = 0;\n  for (let i = 0; i < n; i++) s += i;\n  return s;\n}\n",
+      "rt.mjs": "import assert from 'node:assert';\nimport { sumTo } from './range.mjs';\nassert.strictEqual(sumTo(5), 15);\nassert.strictEqual(sumTo(1), 1);\nassert.strictEqual(sumTo(0), 0);\nconsole.log('ok');\n",
+    },
+    prompt: "Fix the off-by-one bug in sumTo (range.mjs) so `bun rt.mjs` passes — sumTo(n) must return 1+2+...+n (sumTo(5)=15). Do not modify rt.mjs.",
+    verify: (d) => runJs(d, "rt.mjs").out.includes("ok") && (read(d, "rt.mjs") ?? "").includes("sumTo(5), 15"),
+  },
+  {
+    id: "closure-trap",
+    files: {
+      "makers.mjs": "export function makeGetters() {\n  const fns = [];\n  for (var i = 1; i <= 3; i++) { fns.push(() => i); }\n  return fns;\n}\n",
+      "mt.mjs": "import assert from 'node:assert';\nimport { makeGetters } from './makers.mjs';\nconst [a, b, c] = makeGetters();\nassert.strictEqual(a(), 1);\nassert.strictEqual(b(), 2);\nassert.strictEqual(c(), 3);\nconsole.log('ok');\n",
+    },
+    prompt: "Fix makeGetters in makers.mjs so `bun mt.mjs` passes — the three returned functions must return 1, 2, 3 respectively (a classic loop-closure bug). Do not modify mt.mjs.",
+    verify: (d) => runJs(d, "mt.mjs").out.includes("ok") && (read(d, "mt.mjs") ?? "").includes("c(), 3"),
+  },
+  {
+    id: "flatten",
+    files: { "ft.mjs": "import assert from 'node:assert';\nimport { flatten } from './flat.mjs';\nassert.deepStrictEqual(flatten([1,[2,[3,[4]],5]]), [1,2,3,4,5]);\nassert.deepStrictEqual(flatten([]), []);\nassert.deepStrictEqual(flatten([[],[1],[[2]]]), [1,2]);\nconsole.log('ok');\n" },
+    prompt: "Create flat.mjs exporting flatten(arr): fully flatten an arbitrarily-nested array of numbers into a flat array. Make `bun ft.mjs` pass.",
+    verify: (d) => runJs(d, "ft.mjs").out.includes("ok"),
+  },
+  {
+    id: "strict-format",
+    files: { "nums.txt": "3\n7\n10\n" },
+    prompt: "Read nums.txt (one integer per line). Write report.txt whose content is EXACTLY 'Total: 20' (the sum of the numbers, that exact format, no extra text).",
+    verify: (d) => (read(d, "report.txt") ?? "").trim() === "Total: 20",
+  },
+  {
+    id: "pipeline",
+    files: { "scores.csv": "name,score\nAmy,55\nBob,90\nCy,75\nDee,40\n" },
+    prompt: "Read scores.csv (a header, then name,score rows). Write passed.txt listing the names with score >= 70, ONE per line, in DESCENDING score order.",
+    verify: (d) => (read(d, "passed.txt") ?? "").replace(/\r/g, "").trim().split("\n").map((s) => s.trim()).filter(Boolean).join(",") === "Bob,Cy",
+  },
 ];
 
 export interface BenchResult { id: string; passes: number; trials: number; tokens: number; inTok: number; outTok: number; calls: number; ms: number; }

@@ -55,6 +55,26 @@ function verifyGate(): { ok: boolean; why?: string; out?: string } {
 }
 
 const STUCK_AFTER = Number(arg("--stuck-after", "3")); // research pass after this many no-improvement rounds
+const REVIEW_PROFILE = arg("--review-profile", "nvidia"); // a DIFFERENT model peer-reviews the diff (independence)
+const PEER_REVIEW = arg("--no-review", "") !== "true"; // anti-drift gate, on by default
+
+/** A second, INDEPENDENT model reviews the staged diff: "is this a real, safe improvement?" — the DGM
+ *  peer-review idea, the guard against drift (changes that pass tests but aren't actually better). */
+function peerReview(): { approve: boolean; verdict: string } {
+  const diff = sh("git", ["diff", "--cached"]).out;
+  if (!diff.trim()) return { approve: false, verdict: "empty diff" };
+  const prompt =
+    "You are a strict code reviewer. A coding agent made this change to the Neko codebase. Decide if it is a " +
+    "REAL, SAFE improvement.\n\nDIFF:\n" + diff.slice(0, 14000) +
+    "\n\nREJECT if it: adds complexity without clear benefit, weakens a guard / security check / test, games a " +
+    "metric (e.g. drops useful prompt text just to cut tokens), or is cosmetic/no-op churn. APPROVE only a " +
+    "genuine, focused improvement that a careful maintainer would keep. Reply with EXACTLY one word on the first " +
+    "line — APPROVE or REJECT — then one short reason.";
+  const r = sh("bun", ["bin/neko.ts", "run", "--profile", REVIEW_PROFILE, "--once", prompt], 300_000);
+  const first = (r.out.split("\n").find((l) => l.trim()) ?? "").trim();
+  const approve = /\bAPPROVE\b/i.test(first) && !/\bREJECT\b/i.test(first);
+  return { approve, verdict: r.out.replace(/\s+/g, " ").trim().slice(0, 180) };
+}
 const PREAMBLE =
   "FIRST read docs/self-improve/STATE.md, BACKLOG.md and HARNESS.md to orient (what you are, where you are, " +
   "the levers). THEN do the task below. Keep the change SMALL, self-contained, and VERIFIABLE; do NOT break " +
@@ -123,6 +143,13 @@ async function main() {
     if (!v.ok) { log(`VERIFY FAILED (${v.why}) -> revert. ${(v.out ?? "").replace(/\s+/g, " ").slice(0, 200)}`); revert(); noImprove++; await sleep(SLEEP_S); continue; }
 
     sh("git", ["add", "-A"]);
+    // Anti-drift: an INDEPENDENT model must agree the change is a real improvement (skip for the research
+    // pass, which only refills the backlog/docs — there's no code change to review).
+    if (PEER_REVIEW && !stuck) {
+      const pr = peerReview();
+      if (!pr.approve) { log(`PEER-REVIEW REJECTED -> revert (passed tests but not a real improvement). ${pr.verdict.slice(0, 120)}`); sh("git", ["reset", "-q"]); revert(); noImprove++; await sleep(SLEEP_S); continue; }
+      log(`peer-review APPROVED. ${pr.verdict.slice(0, 100)}`);
+    }
     const c = sh("git", ["commit", "-m", `self-improve: verified change (iter ${iter}) [auto]\n\nGoal: ${goal.slice(0, 80)}`]);
     commits++; noImprove = 0; // a green commit = real progress; resets the stuck counter
     log(`COMMIT #${commits} (iter ${iter}): green change committed to ${BRANCH}. ${c.ok ? "ok" : c.out.slice(-120)}`);
