@@ -90,8 +90,10 @@ const PREAMBLE =
   "and commits it for you. Running git yourself bypasses that safety gate.\n" +
   "FIRST read docs/self-improve/STATE.md, BACKLOG.md and HARNESS.md to orient (what you are, where you are, " +
   "the levers). THEN do the task below. Keep the change SMALL, self-contained, and VERIFIABLE; do NOT break " +
-  "typecheck or any existing test (the change is auto-reverted if you do). After, append ONE line to the " +
-  "'## Last moves' section of docs/self-improve/STATE.md noting what you changed and why.\n\nTASK: ";
+  "typecheck or any existing test (the change is auto-reverted if you do). Your goal is to produce a REAL, " +
+  "reviewable code diff this round — investigate briefly, then IMPLEMENT; do not end the turn having only " +
+  "analyzed. Prefer a small change you can FULLY finish and test over a big one you can't. After, append ONE " +
+  "line to the '## Last moves' section of docs/self-improve/STATE.md noting what you changed and why.\n\nTASK: ";
 
 // Rotating self-critique goals (the fallback engine when the backlog is empty) — each small + verifiable.
 const GOALS = [
@@ -110,20 +112,25 @@ const GOAL_RESEARCH =
   "items under '## Research-seeded' in docs/self-improve/BACKLOG.md. Note the key papers (title + link + 1-line " +
   "Neko mapping) in docs/self-improve/RESEARCH.md. Do not edit src/ — this round is research + backlog only.";
 
-/** First unchecked `- [ ] ` item from the backlog (the loop's preferred concrete goal), or "" if none. */
-function backlogGoal(): string {
+/** An unchecked `- [ ] ` item from the backlog — ROTATED by iter so the loop doesn't fixate on a single
+ *  (possibly too-hard) first item, which produced endless "no change". "" if none. */
+function backlogGoal(iter: number): string {
   try {
     const p = "docs/self-improve/BACKLOG.md";
     if (!existsSync(p)) return "";
-    const m = readFileSync(p, "utf8").split("\n").find((l) => /^\s*-\s*\[ \]\s+/.test(l));
-    return m ? m.replace(/^\s*-\s*\[ \]\s+/, "").trim() : "";
+    const items = readFileSync(p, "utf8").split("\n").filter((l) => /^\s*-\s*\[ \]\s+/.test(l));
+    if (!items.length) return "";
+    return items[iter % items.length].replace(/^\s*-\s*\[ \]\s+/, "").trim();
   } catch { return ""; }
 }
 
 function pickGoal(iter: number, stuck: boolean): string {
   if (stuck) return GOAL_RESEARCH; // out of ideas -> self-research SOTA, refill the backlog
-  const b = backlogGoal();
-  if (b) return PREAMBLE + "Implement this backlog item, then mark it [x] in docs/self-improve/BACKLOG.md with the commit rationale: " + b;
+  const b = backlogGoal(iter);
+  if (b) return PREAMBLE + "Work this backlog item; if it's too large to finish cleanly in ONE focused change, " +
+    "implement a well-scoped FIRST STEP of it (still a real diff + a test); if it turns out already done or not " +
+    "feasible, make a different SMALL concrete improvement instead. Mark it [x] in docs/self-improve/BACKLOG.md " +
+    "only if fully done. Item: " + b;
   return PREAMBLE + GOALS[iter % GOALS.length];
 }
 
