@@ -226,6 +226,66 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   already SICA-shaped (the agent edits its own src + verifies), so no new BACKLOG item — but it
   confirms the architecture and is worth noting as prior art for the existing self-improve items.
 
+## Token efficiency / context engineering — 2026-Q3 update (RESEARCH pass)
+> Three fresh angles, none overlapping the existing backlog (governance/compaction safety,
+> project-context cost, and delegation-time tool narrowing are all new). Chosen for verifiability:
+> each maps to a unit-testable `## Research-seeded` BACKLOG item.
+
+- **Governance Decay: How Context Compaction Silently Erases Safety Constraints in Long-Horizon
+  LLM Agents** — Chen, Jun 2026 ([arXiv 2606.22528](https://arxiv.org/abs/2606.22528)). Names a
+  failure mode prior compaction work missed: in-context **governance constraints** (policies,
+  guardrails, "never do X") that an agent obeys while visible are **silently dropped by the
+  summarizer**, after which the *same* agent does the now-unseen prohibited action. Across 1,323
+  episodes / 7 model families (ConstraintRot benchmark): **0% violations with policy visible → 30%
+  after compaction (59% worst-case models)**; when the constraint survives the summary → 0%, when
+  dropped → 38%. A **Compaction-Eviction Attack** (adversarial in-context content biases the
+  summarizer to drop a legit policy) defeats *every* evaluated model. Fix: **Constraint Pinning**
+  (training-free) — quarantine governance text out of lossy compaction; **restores 0% violations**.
+  Distinct from ACC/anchor-compaction (which preserve *task* facts): this is about *policy*
+  constraints surviving the prune.
+  -> **Neko mapping:** Neko's `compact()` summarizes the whole head (agent.ts summarizer prompt:
+  "task, key decisions, files changed, current state") with **zero notion** of governance text;
+  permission modes / safety policy live in the system prompt and are *not* quarantined from the
+  prune. The lever: a **pinned-constraint list** (a small marker-delimited block in the system
+  prompt, e.g. `<!-- pinned -->NEVER run rm -rf / web.<!-- /pinned -->`) that `compact()` extracts
+  *before* summarizing and re-injects verbatim into every post-compaction message, so compaction
+  can never erase it. (See BACKLOG "Constraint pinning across compaction (Governance Decay).")
+- **Evaluating AGENTS.md: Are Repository-Level Context Files Helpful for Coding Agents?** —
+  Gloaguen, Mündler, Müller, Raychev, Vechev, Feb 2026 ([arXiv 2602.11988](https://arxiv.org/abs/2602.11988)).
+  Directly pressures Neko's own project-context design (NEKO.md/CLAUDE.md loaded in full upfront).
+  Across SWE-bench + a novel developer-committed-file set: providing repo-level context files
+  **does not generally improve task success**, **increases inference cost >20% on average**, and —
+  critically — **"repository overviews" (the most popular, provider-recommended component) provide
+  no measurable benefit**. Only instructions specifying **non-standard coding practices** help.
+  (iwoszapar.com's 20-paper synthesis corroborates: AI-*generated* context files *hurt* success
+  ~3%, human-written help ~4%, both add >20% cost.)
+  -> **Neko mapping:** the current NEKO.md/CLAUDE.md design injects the full codebase *map*
+  (exactly the "repository overview" this paper flags as no-benefit) upfront on every run. The
+  unexplored, *evidence-backed* lever: **measure** the cost/benefit of the full upfront map vs a
+  *one-line index + on-demand retrieve* split (pointers to where info lives, fetched only if a turn
+  needs it) — the paper predicts the index split cuts the fixed per-run token tax without losing
+  success (and may gain, since over-retrieval hurts). Distinct from the lazy-tool-schema item (that
+  drops *tool schemas*): this drops *project-context prose*. (See BACKLOG "Project-context
+  index/retrieve split (AGENTS.md evaluation).")
+- **When Child Inherits: Modeling and Exploiting Subagent Spawn in Multi-Agent Networks** — Cai,
+  Zhang, Hei, May 2026 ([arXiv 2605.08460](https://arxiv.org/abs/2605.08460)). Models the `task`
+  sub-agent delegation as an **inheritance** problem and finds current frameworks (incl. Claude
+  Code / Gemini CLI style) violate trust boundaries in four ways: **insecure memory inheritance**
+  (parent→child carries instructions/states the parent didn't intend to delegate), weak resource
+  control, stale post-spawn state, improper termination authority. The lens: **scope should
+  *attenuate* per delegation hop** — each spawn *narrows* the permitted actions/context, never
+  widens — but most frameworks pass the parent's full tool set + context wholesale. (Reinforced by
+  the "context isolation as a product primitive" framing in Gemini CLI subagents, Apr 2026.)
+  -> **Neko mapping:** Neko's `task` tool (chat.tsx `registryRef.subagent`) spawns a fresh
+  `ToolRegistry` that inherits the parent's **full** built-in tool set (read/write/edit/bash/web/
+  ...) + all MCP tools + hooks — the spawn does **not** narrow which tools the child may use, only
+  swaps the system prompt for a named role. The lever, per the paper: let a delegation **specify a
+  reduced tool allowlist** (and drop the parent's full message history — already isolated) so a
+  read-only "researcher" sub-agent literally cannot `edit`/`bash`/`rm`, even via inherited hooks.
+  Two wins: (a) a *token* win (fewer tool schemas serialized for the sub-agent's loop), and (b) a
+  *correctness/safety* win (a scoped child can't drift into actions outside its role). (See BACKLOG
+  "Sub-agent scope attenuation via per-delegation tool allowlist.")
+
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
 2. Find the closest existing Neko component (`compact()`, the tool schemas, the agent loop, a skill).

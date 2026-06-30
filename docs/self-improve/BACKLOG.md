@@ -166,6 +166,67 @@ one never blocks another.
   the *original* spec (not the most-recent observation) completes correctly WITH the reminder and
   fails/drifts WITHOUT it. Bench tokens should be ~flat (reminder is small) at flat-or-up pass-rate.
 
+- [ ] **Constraint pinning across compaction (Governance Decay).** `compact()` summarizes the whole
+  head with a summarizer prompt ("task, key decisions, files changed, current state") that has
+  **zero notion of governance text** — so a policy constraint the agent obeys while visible
+  (e.g. "NEVER run `rm -rf`; this branch is read-only") can be silently dropped from the summary,
+  and the agent then does the now-unseen prohibited action on a later step. This is the exact
+  failure mode in *Governance Decay* (Chen 2026, arXiv 2606.22528): 0% violations while the policy
+  is visible → 30% after compaction (59% worst-case); their training-free **Constraint Pinning**
+  fix restores 0%. Distinct from ACC/anchor-compaction (which preserve *task* facts — errors,
+  target values) and "decision notes" (a separate session file): this preserves **policy/safety
+  constraints** that must survive every prune. For Neko: support a small **pinned-constraint
+  block** in the system prompt (marker-delimited, e.g. a `### Pinned constraints` section, or
+  `<!-- pinned -->...<!-- /pinned -->`); in `compact()`, *extract* any pinned text *before*
+  summarizing and *re-inject it verbatim* into the post-compaction system message, so compaction
+  can never erase it. **Verify**: a unit test that (a) seeds a message history whose system prompt
+  contains a pinned constraint string, (b) forces `compact()`, and (c) asserts the pinned string is
+  present verbatim in the post-compaction system message (fails today — the summarizer is free to
+  drop it). Then a trajectory-level test: a stub provider that would emit a now-prohibited tool
+  call *after* compaction — assert the pinned constraint blocks it. Bench tokens ~flat (pinned text
+  is tiny) at flat-or-up pass-rate; this is primarily a *safety-correctness* win, not a token win.
+- [ ] **Project-context index/retrieve split (AGENTS.md evaluation).** `adapters/context.ts` injects
+  the full project context (NEKO.md/CLAUDE.md, including the entire codebase **map**) into the
+  system prompt **upfront on every run**. *Evaluating AGENTS.md* (Gloaguen et al., arXiv 2602.11988,
+  Feb 2026) directly pressures this design: repo-level context files **do not generally improve task
+  success, raise inference cost >20% on average, and the "repository overview" — the most popular,
+  provider-recommended component — provides no measurable benefit**; only instructions on
+  *non-standard coding practices* help. Distinct from the lazy-tool-schema item (drops *tool
+  schemas* from the wire) and SkillReducer (compresses *skill* bodies): this targets the
+  *project-context prose* re-billed on every run. For Neko: this is a **measure-first** item.
+  (1) Instrument the fixed per-run token cost of the full upfront project context (the NEKO.md map
+  + CLAUDE.md body) and confirm it's material. (2) Prototype a split: keep a **tight index** of
+  *where* info lives (one line per subsystem + pointer to read it) in the upfront prompt, and a
+  small `project_context` retrieve tool that loads the full map section on demand (mirroring the
+  existing `skill`/`memory` on-demand pattern). **Verify**: (a) a test asserting the upfront
+  project-context token count drops by ≥X% in the index split while the index still names every
+  subsystem from the original map; (b) a long-horizon bench task that needs info from the map
+  completes (the agent reaches it via the retrieve tool) at flat-or-up pass-rate; (c) the bench
+  dev-log shows **total** `in` tokens down or flat (the retrieval calls must not exceed the upfront
+  savings). NB: the paper is correlational across *other* agents; validate on Neko's own bench
+  before shipping, and keep the full map as a fallback (the map genuinely helps our small codebase —
+  scope the split, don't delete the map blindly).
+- [ ] **Sub-agent scope attenuation via per-delegation tool allowlist.** The `task` tool
+  (chat.tsx `registryRef.subagent`) spawns a fresh `ToolRegistry` that inherits the parent's **full**
+  built-in tool set (`read_file/write_file/edit/bash/web_search/...`) + all MCP tools + hooks — the
+  spawn narrows the *role* (system prompt) but **not which tools the child may use**. *When Child
+  Inherits* (Cai, Zhang, Hei, arXiv 2605.08460, May 2026) models delegation as *inheritance* and
+  finds current frameworks violate trust boundaries by passing the full tool set + context wholesale;
+  its lens: **scope should attenuate per hop** — each spawn *narrows* permitted actions, never
+  widens. Distinct from the existing context-isolation story (the sub-agent already gets a *fresh*
+  context): this is about *tool* scope, which is un-attenuated today. For Neko: let the `task` tool
+  accept an optional **`tools` allowlist** (array of tool names); when set, the sub-agent's
+  `ToolRegistry` is constructed so only those tools (plus safe essentials) are exposed/serialized —
+  a delegated "researcher" with `tools: ["read_file","search","glob","ls"]` literally cannot
+  `edit`/`bash`/`rm` even via inherited hooks. Default (no allowlist) keeps today's full-inherit
+  behavior. **Verify**: (1) a unit test that a sub-agent spawned with `tools: ["read_file"]` has its
+  `schemas()` return only `read_file` (+ essentials) and that a call to `edit`/`bash` is refused with
+  a clear "not available in this sub-agent" message; (2) a test that omitting the allowlist preserves
+  the full tool set (no regression to existing delegation); (3) bench: a task that delegates research
+  completes correctly with a scoped allowlist, and the sub-agent's per-turn `in` tokens are lower
+  (fewer tool schemas serialized) at flat-or-up pass-rate. NB: ship the allowlist as **opt-in** so a
+  too-narrow list (model forgets a tool it needs) is a per-call miss, not a default breakage.
+
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->
 
