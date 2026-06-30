@@ -60,9 +60,35 @@ public static class TI {
 [TI]::Init() | Out-Null
 function Tap($x,$y){ [TI]::Down($x,$y); Start-Sleep -Milliseconds 60; [TI]::Up($x,$y) }
 
+# --- act->verify for a tap (touch has no element identity, so we read the STRUCTURE): snapshot the foreground
+# window's UIA control tree before/after and report what changed. On a non-UIA target (canvas/game) the diff is
+# empty -> we say so + suggest a screenshot. Loaded only for tap/dbltap so stroke/drawing stays lean. ---
+$script:uiaReady=$false
+function UiaSig(){
+  if(-not $script:uiaReady){ try { Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes; Add-Type 'using System;using System.Runtime.InteropServices;public class FGq{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();}'; $script:uiaReady=$true } catch { return $null } }
+  try {
+    $root=[System.Windows.Automation.AutomationElement]::FromHandle([FGq]::GetForegroundWindow()); if(-not $root){ return $null }
+    $sig=New-Object 'System.Collections.Generic.HashSet[string]'
+    $cr=New-Object System.Windows.Automation.CacheRequest
+    $cr.Add([System.Windows.Automation.AutomationElement]::NameProperty); $cr.Add([System.Windows.Automation.AutomationElement]::ControlTypeProperty)
+    $cv=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::IsControlElementProperty,$true)
+    $h=$cr.Activate()
+    try { foreach($x in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$cv)){ $n=$x.Cached.Name; if($n){ [void]$sig.Add((($x.Cached.ControlType.ProgrammaticName -replace 'ControlType.','')+":"+$n)) } } } finally { $h.Dispose() }
+    return $sig
+  } catch { return $null }
+}
+function VerifyReport($before){
+  if($null -eq $before){ return }
+  Start-Sleep -Milliseconds 140; $after=UiaSig; if($null -eq $after){ return }
+  $added=@($after | Where-Object { -not $before.Contains($_) }); $removed=@($before | Where-Object { -not $after.Contains($_) })
+  if($added.Count){ Write-Output ("  + appeared (" + $added.Count + "): " + (($added | Select-Object -First 12) -join '  |  ')) }
+  if($removed.Count){ Write-Output ("  - gone (" + $removed.Count + "): " + (($removed | Select-Object -First 12) -join '  |  ')) }
+  if(-not $added.Count -and -not $removed.Count){ Write-Output "  (no UIA tree change -- non-UIA target like a canvas/game, or no effect; screenshot to confirm)" }
+}
+
 switch($cmd){
-  "tap"    { Tap ([int]$a[0]) ([int]$a[1]); "tapped " + $a[0] + "," + $a[1] }
-  "dbltap" { Tap ([int]$a[0]) ([int]$a[1]); Start-Sleep -Milliseconds 90; Tap ([int]$a[0]) ([int]$a[1]); "double-tapped " + $a[0] + "," + $a[1] }
+  "tap"    { $b=UiaSig; Tap ([int]$a[0]) ([int]$a[1]); Write-Output ("tapped " + $a[0] + "," + $a[1]); VerifyReport $b }
+  "dbltap" { $b=UiaSig; Tap ([int]$a[0]) ([int]$a[1]); Start-Sleep -Milliseconds 90; Tap ([int]$a[0]) ([int]$a[1]); Write-Output ("double-tapped " + $a[0] + "," + $a[1]); VerifyReport $b }
   "stroke" {
     if($a.Count -lt 4){ "usage: stroke x1 y1 x2 y2 [x3 y3 ...]"; break }
     [TI]::Down([int]$a[0],[int]$a[1]); Start-Sleep -Milliseconds 30

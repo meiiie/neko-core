@@ -58,10 +58,18 @@ const parsed = rows.map((r) => ({ row: r, vnd: parseVnd(r[col]), raw: r[col] }))
 const valid = parsed.filter((p) => p.vnd != null && p.vnd > 0) as { row: Record<string, any>; vnd: number; raw: any }[];
 const failed = parsed.filter((p) => p.vnd == null || (p.vnd ?? 0) <= 0);
 
-const sortedVnd = valid.map((p) => p.vnd).sort((a, b) => a - b);
-const median = sortedVnd.length ? sortedVnd[Math.floor((sortedVnd.length - 1) / 2)] : 0;
-// Outlier = far from the median (likely a misparse / wrong segment / accessory / strikethrough). Deterministic flag for the agent to RE-CHECK, not auto-drop.
-for (const p of valid) (p as any).flag = median && (p.vnd < median / 4 || p.vnd > median * 4) ? "⚠️ lệch xa median — kiểm lại nhãn/nguồn" : "";
+const median = (arr: number[]): number => { const s = [...arr].sort((a, b) => a - b); return s.length ? s[Math.floor((s.length - 1) / 2)] : 0; };
+const medianAll = median(valid.map((p) => p.vnd));
+// Outlier flag = far from the median (likely a misparse / wrong segment / accessory / strikethrough),
+// computed PER PRODUCT GROUP ("Mặt hàng") -- a mixed table (USB + phones) must NOT flag cheap USBs against a
+// phone-dominated median. A group needs >=4 prices to judge an outlier; smaller groups aren't flagged.
+const groups = new Map<string, { row: Record<string, any>; vnd: number; raw: any; flag?: string }[]>();
+for (const p of valid) { const k = String(p.row["Mặt hàng"] ?? "_all"); (groups.get(k) ?? (groups.set(k, []), groups.get(k)!)).push(p); }
+for (const members of groups.values()) {
+  if (members.length < 4) { for (const p of members) (p as any).flag = ""; continue; }
+  const med = median(members.map((m) => m.vnd));
+  for (const p of members) (p as any).flag = (p.vnd < med / 4 || p.vnd > med * 4) ? "⚠️ lệch xa median nhóm — kiểm lại nhãn/nguồn" : "";
+}
 
 const colsToShow = ["Mặt hàng", "Cấu hình", "Tình trạng", "Nguồn", "Link"].filter((c) => rows.some((r) => r[c] != null));
 function table(list: typeof valid): string {
@@ -86,7 +94,7 @@ out.push("");
 out.push("### Thống kê (tính bằng code, không phải LLM)");
 out.push(`- THẤP NHẤT: ${vnd(asc[0]?.vnd ?? 0)}${asc[0] ? ` (${asc[0].row["Nguồn"] ?? ""}${asc[0].row["Tình trạng"] ? ", " + asc[0].row["Tình trạng"] : ""})` : ""}`);
 out.push(`- CAO NHẤT:  ${vnd(desc[0]?.vnd ?? 0)}${desc[0] ? ` (${desc[0].row["Nguồn"] ?? ""})` : ""}`);
-out.push(`- TỔNG: ${vnd(sum)}   ·   TRUNG BÌNH: ${vnd(Math.round(sum / (valid.length || 1)))}   ·   MEDIAN: ${vnd(median)}`);
+out.push(`- TỔNG: ${vnd(sum)}   ·   TRUNG BÌNH: ${vnd(Math.round(sum / (valid.length || 1)))}   ·   MEDIAN: ${vnd(medianAll)}`);
 const flagged = valid.filter((p) => (p as any).flag);
 if (flagged.length) out.push(`- ⚠️ ${flagged.length} giá nghi sai (lệch xa median) — RE-CHECK trước khi kết luận: ${flagged.map((p) => `${vnd(p.vnd)} (${p.row["Nguồn"] ?? "?"})`).join("; ")}`);
 if (failed.length) out.push(`- ⚠️ KHÔNG đọc được giá ở: ${failed.map((p) => p.row["Nguồn"] ?? JSON.stringify(p.raw)).join("; ")}`);
