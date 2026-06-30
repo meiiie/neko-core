@@ -641,7 +641,111 @@ one never blocks another.
   memories, the recalled-context token count drops at flat-or-up task pass-rate. NB: keep the
   similarity threshold conservative (merge only on HIGH overlap — a false-merge that drops a fact
   is worse than a duplicate); ship behind an **opt-in** profile flag (`consolidate_memory`) so a
-  too-aggressive merge is a toggle; no external embedding API (keeps the local-first guarantee).
+   too-aggressive merge is a toggle; no external embedding API (keeps the local-first guarantee).
+
+- [ ] **Scoped sub-trajectory folding with recovery (Context-Folding).** Neko has exactly two ways to
+  shed context mid-run, and neither collapses an *ad-hoc span within the parent's own trajectory*:
+  (a) `compact()`/`shrinkOldObservations` summarize the *whole head* by age/size (global), and
+  (b) the `task` sub-agent isolates an *entire* sub-run in a fresh context and returns just its
+  result string (whole-context delegation). So when the parent itself does a long exploratory burst
+  (read A → search B → read C → grep D → read E to understand one module), the only way to drop that
+  burst's bulk is to wait for global `compact()` — which also rewrites everything older, busts the
+  prefix cache, and risks summarizing away a needed detail. Context-Folding (Sun et al., arXiv
+  2510.11967, Oct 2025 — **10x smaller active context at matched-or-better accuracy than ReAct,
+  outperforming summarization-based methods**) lets the agent *procedurally branch into a
+  sub-trajectory and then fold it on completion, collapsing the intermediate steps while retaining a
+  concise summary of the outcome.* Distinct from EVERY existing item: `compact()` and its anchor/
+  cache/lossless/constraint variants touch the *global head prune*; `task`-scope-attenuation narrows
+  a *separate delegated agent*; LCM-lossless makes the compact() prune *recoverable* but doesn't add
+  an in-trajectory fold. This is a **first-class, agent-initiated fold marker** inside the parent's
+  own `messages`. For Neko: (a) add a lightweight `fold_context` tool (SAFE) that takes an optional
+  `summary` arg — when invoked, it snapshots the messages *since the last fold/turn boundary* to
+  `~/.neko-core/session-<id>/fold-<n>.jsonl`, replaces that span in `this.messages` with ONE summary
+  message (the agent-supplied summary, or a one-line marker), and returns the fold id; (b) reuse the
+  LCM-style recovery tool (the existing "Lossless compaction" item's `recover_context`) to restore a
+  named fold's raw steps verbatim on demand. Crucially the fold is **opt-in and agent-driven** (the
+  model decides a sub-investigation is done), not an automatic size trigger — so it composes with,
+  not replaces, `compact()`. **Verify**: (1) a unit test that seeds `messages` with a 6-message
+  exploratory span, calls `fold_context` with a summary, and asserts the span collapses to exactly
+  ONE summary message in `messages` while the raw 6 are persisted byte-identical to the fold file;
+  (2) a test that `recover_context(fold-n)` returns those raw 6 messages (fails today — no fold
+  exists); (3) a test that a fold marker survives a subsequent `compact()` (it's already a summary,
+  not re-summarized away); (4) a behavioral test where a stub provider does a long read-burst then
+  folds — assert WITH fold the post-fold `estimateTokens(this.messages)` is materially lower than
+  WITHOUT, at flat-or-up pass-rate. NB: ship behind an **opt-in** profile flag (`scoped_folding`);
+  the fold's summary quality is the risk (a bad summary drops a detail) — mitigated by the recovery
+  tool, so the verify gate must assert recovery round-trips, not just that the fold shrinks context.
+
+- [ ] **Failure-taxonomy evidence corpus for the self-improve proposer (How-Coding-Agents-Fail).**
+  Neko's self-improve loop (`scripts/self-improve.ts`) generates candidate improvements from a
+  *rotating GOALS list* + the BACKLOG, and judges each via a pass/fail verify gate + a qualitative
+  peer-review of the *diff*. What it has NO access to is a **grounded taxonomy of how coding agents
+  actually fail in the wild** — so the proposer can't target the highest-prevalence, growing failure
+  classes; it proposes whatever the static GOALS list cycles to. *How Coding Agents Fail Their Users*
+  (Tang et al., Notre Dame/Vanderbilt/Google, arXiv 2605.29442, May 2026 — **20,574 real sessions**)
+  quantifies the two dominant, *growing-over-time* failure classes that current reward signals
+  under-measure: **S3 Developer Constraint Violation (38.33% of failures, the #1 class, 73.68%
+  caused by instruction-following failure)** and **S7 Inaccurate Self-Reporting (22.58% — the agent
+  claims success without verifying; only 2.99% self-correct, 91.49% need explicit developer
+  pushback)**. Both are *directly measurable in Neko's own loop* and map to concrete harness levers
+  Neko does NOT yet have: (i) a **constraint-adherence check** (does the agent obey stated
+  scope/policy mid-run? — distinct from the existing *Governance-Decay* item, which is about
+  constraints SURVIVING compaction; this is about constraints being HONORED at decision time), and
+  (ii) an **honest-status / no-false-completion check** (distinct from the existing *Pre-completion
+  verification gate*, which forces a re-inspect before exit; this flags a CLAIMED-done that the
+  trajectory doesn't support). Distinct from the existing self-improve items: the *falsifiable-
+  prediction gate* judges one commit's *bench delta*; the *candidate-archive* keeps variants —
+  neither ingests a *failure-evidence corpus* to steer WHAT gets proposed. For Neko (a scripts/
+  self-improve-harness change, no agent-loop edit): (1) distill the S3/S7 signal definitions into a
+  small `docs/self-improve/FAILURE-TAXONOMY.md` evidence file the proposer's task preamble loads
+  (so it proposes "add a constraint-adherence check" / "add a false-completion detector" instead of
+  a random GOALS rotation); (2) add a cheap **S7 self-report verifier** to the loop's own post-run
+  check — after a `run()` that ended with a tool-less final answer, scan whether the final claim
+  ("done"/"fixed"/"passes") is supported by the trajectory (was the test actually re-run? did the
+  cited file get the cited edit?); log a SUPPORTED/UNSUPPORTED verdict to STATE.md. **Verify**
+  (scripts-level, pure harness logic): (1) a test that the proposer preamble embeds the S3/S7
+  definitions (the taxonomy file is read, not ignored); (2) a test where a stubbed run's final answer
+  claims "tests pass" but the trajectory shows no test re-run since the last edit — assert the S7
+  verifier logs UNSUPPORTED (and SUPPORTED when a test DID run post-edit); (3) a test that a run
+  honoring a stated scope constraint ("only touch src/core/") logs no S3 violation while one that
+  edits outside scope logs one. NB: this is *evidence-grounding* the proposer + a trajectory-level
+  status check — keep the verifier heuristic/cheap (no extra model call per run by default; an
+  opt-in model-based S7 judge is a later escalation).
+
+- [ ] **Cost-aware cross-turn speculative tool pre-staging (Cost-Aware Speculative Execution).**
+  Neko's loop is strictly sequential per turn: `complete()` → run the tool batch → `complete()` again
+  (the only intra-turn concurrency is the W&D fan-out of *already-decided* concurrency-safe calls via
+  `Promise.all`). So while the model is *generating* the next step (or while a slow tool like a big
+  `bash` build / `web_fetch` runs), nothing is pre-staged for the *likely next* step — the agent pays
+  the full latency of `read_file` of the path it's 90% about to read, only after it decides to. Cost-
+  Aware Speculative Execution (Fareed, arXiv 2606.07846, Jun 2026) generalizes the speculative-
+  execution idea to agent workflows with an **expected-value rule**: fire a downstream operation
+  before its upstream completes, but only on **admissible** edges (side-effect-free / idempotent /
+  stageable behind a commit barrier — wrong speculations roll back), pricing each speculation and
+  gating on a failure-weighted expected value with a Bayesian success-probability estimate. Distinct
+  from EVERY existing item: W&D grows *same-turn parallel width* (calls the model already decided on);
+  ToolCaching memoizes *re-execution of an identical repeat*; Ares dials *effort*; PASTES (cited
+  under W&D) is a *serving-system* latency-hider. This is **cross-turn eager pre-staging of a
+  PREDICTED-but-not-yet-requested read-only call**, rolled back (result discarded) on a miss. For
+  Neko (the cheap, training-free proxy — the paper's router is Bayesian; we use a rule): when the
+  agent emits a tool batch, optionally **speculatively pre-run** the highest-probability *next*
+  read-only call (seeded heuristics: after `search`/`glob` for `X`, pre-`read_file` the top-1 result;
+  after editing `path`, pre-`read_file` the path to confirm — though that one's already likely);
+  cache the result keyed by (tool, args); if the model's NEXT turn requests exactly that call, serve
+  it from the cache (zero added latency) and drop the speculation cost; if not, discard (the only cost
+  is the wasted tool execution — bounded, since only read-only/idempotent calls are eligible). This
+  COMPOSES with ToolCaching (speculation seeds the cache; a cache hit IS a successful speculation).
+  **Verify**: (1) a unit test that after a `search` result with a top-1 hit, the speculator pre-runs
+  `read_file` on it and a FOLLOW-UP `read_file` of the same path is served from cache without
+  re-execution (a spy/counter); (2) a test that a speculation whose predicted call is NOT made is
+  discarded (no leak into `messages`, no cost charged beyond the wasted tool exec); (3) a test that NO
+  mutating tool (`write_file`/`edit`/`bash`) is ever speculatively pre-run (admissibility — only the
+  `CONCURRENCY_SAFE` read-only set is eligible); (4) bench **wall-clock** drops on read-heavy tasks
+  (the latency win is the point — token cost is flat-or-down via cache reuse, NOT up, since a miss is
+  discarded not appended) at flat-or-up pass-rate. NB: ship behind an **opt-in** profile flag
+  (`speculative_prestage`); keep the heuristic conservative (pre-stage only top-1, only after
+  `search`/`glob`, only read-only) so wasted exec is rare; a wrong speculation costs one tool run,
+  never tokens-in-context (the result is discarded on miss, unlike a real call which is appended).
 
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->

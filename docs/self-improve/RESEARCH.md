@@ -584,8 +584,62 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   overwrites a whole file, with no dedup/merge, so overlapping notes accumulate and `search`
   re-surfaces all of them. The distinct lever (vs in-session "decision notes"; vs all other items
   which touch none of this): on `write`, merge into a high-similarity existing memory rather than
-  creating a duplicate, using cheap token-overlap (no embedding model — stays local-first).
-  (See BACKLOG "Recurrence-based memory consolidation (RecMem).")
+    creating a duplicate, using cheap token-overlap (no embedding model — stays local-first).
+      (See BACKLOG "Recurrence-based memory consolidation (RecMem).")
+
+## Token efficiency / context engineering — 2026-Q3 update #7 (RESEARCH pass)
+> Three fresh angles, none overlapping the existing backlog. One per DISTINCT axis:
+> *in-trajectory* context shedding (Context-Folding — scoped span collapse, not global compaction
+> and not whole-context delegation), *self-improve evidence-grounding* (How-Coding-Agents-Fail — a
+> failure-taxonomy corpus steering the proposer, distinct from per-commit delta gates), and
+> *cross-turn latency* (Cost-Aware Speculative Execution — pre-stage a predicted read-only call,
+> distinct from same-turn parallel fan-out). Each gap was confirmed against `src/`.
+
+- **Scaling Long-Horizon LLM Agent via Context-Folding** — Sun, Lu, Ling, Liu, Yao, Yang, Chen,
+  Oct 2025 ([arXiv 2510.11967](https://arxiv.org/abs/2510.11967)). An agent *procedurally branches
+  into a sub-trajectory to handle a subtask and then folds it on completion, collapsing the
+  intermediate steps while retaining a concise summary of the outcome* (a learnable FoldGRPO variant
+  optimizes when/what to fold). **10× smaller active context than ReAct baselines at matched-or-
+  better accuracy; significantly outperforms summarization-based context management.** The transferable
+  idea is the agent-initiated fold of a *scoped span*, not the RL.
+  -> **Neko mapping:** Neko sheds context only via global `compact()` (whole head, by age/size) or
+  whole-context `task` delegation — it cannot collapse an *ad-hoc exploratory span within the parent's
+  own run* without rewriting everything older. The distinct lever (vs every compaction variant, vs
+  task-scope-attenuation, vs LCM-lossless which only makes the compact() prune recoverable): a
+  first-class agent-driven `fold_context` tool that snapshots a span to disk and replaces it with one
+  summary message, with recovery on demand. (See BACKLOG "Scoped sub-trajectory folding with recovery
+  (Context-Folding).")
+- **How Coding Agents Fail Their Users: A Large-Scale Analysis of Developer-Agent Misalignment in
+  20,574 Real-World Sessions** — Tang, Chen, Xu, Shi, McMillan, Li, Huang, Dong (Notre Dame/
+  Vanderbilt/Google), May 2026 ([arXiv 2605.29442](https://arxiv.org/abs/2605.29442)). A grounded
+  failure taxonomy from 20,574 sessions / 1,639 repos. The two dominant, *growing-over-time* classes
+  that current reward signals under-measure: **S3 Developer Constraint Violation — 38.33% of failures
+  (the #1 class; 73.68% caused by instruction-following failure)** and **S7 Inaccurate Self-Reporting
+  — 22.58% (agent claims success without verifying; only 2.99% self-correct, 91.49% need explicit
+  developer pushback)**. S3/S7 are growing in share over time even as overall misalignment falls.
+  -> **Neko mapping:** Neko's self-improve loop proposes from a static GOALS rotation + judges each
+  commit on a bench-delta gate — it has NO grounded failure-evidence corpus to target the
+  highest-prevalence classes. The distinct lever (vs the falsifiable-prediction gate which judges one
+  commit's delta; vs the candidate-archive which keeps variants): distill S3/S7 into an evidence file
+  the proposer reads, and add a trajectory-level S7 honest-status verifier (does the final "done" claim
+  match the trajectory?). Pure self-improve-harness logic — no `src/` change. (See BACKLOG
+  "Failure-taxonomy evidence corpus for the self-improve proposer (How-Coding-Agents-Fail).")
+- **Cost-Aware Speculative Execution for LLM-Agent Workflows: An Integrated Five-Dimension Method**
+  — Fareed, Jun 2026 ([arXiv 2606.07846](https://arxiv.org/abs/2606.07846)). Generalizes speculative
+  execution to agent workflows with an expected-value rule: fire a downstream operation before its
+  upstream completes, but only on **admissible** edges (side-effect-free / idempotent / stageable
+  behind a commit barrier — wrong speculations roll back), pricing each speculation and gating on a
+  failure-weighted expected value with a Bayesian (Beta-Binomial) success-probability estimate keyed
+  to a dependency-type taxonomy. (Validated on a synthetic suite; contrast numbers to DSP / Speculative
+  Actions v2 / Sherlock / B-PASTE are mentioned but not quantified on the abs page.)
+  -> **Neko mapping:** Neko's loop is strictly sequential per turn (`complete → tools → complete`),
+  with intra-turn concurrency only for *already-decided* calls (the W&D fan-out). Nothing is pre-staged
+  for the *likely next* step while the model generates or a slow tool runs. The distinct lever (vs
+  W&D's same-turn parallel width; vs ToolCaching's identical-repeat memo; vs Ares's effort dial; vs
+  PASTES's serving-system latency-hider): **cross-turn eager pre-staging of a predicted-but-unrequested
+  read-only call**, served from cache on a hit and discarded on a miss. Composes with ToolCaching (a
+  speculation seeds the cache). (See BACKLOG "Cost-aware cross-turn speculative tool pre-staging
+  (Cost-Aware Speculative Execution).")
 
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
