@@ -68,16 +68,10 @@ const PEER_REVIEW = arg("--no-review", "") !== "true"; // anti-drift gate, on by
 function peerReview(): { approve: boolean; verdict: string } {
   const diff = sh("git", ["diff", "--cached"]).out;
   if (!diff.trim()) return { approve: false, verdict: "empty diff" };
-  const prompt =
-    "You are a strict code reviewer. Judge ONLY from the diff below — you have NO tools. A coding agent made this " +
-    "change to the Neko codebase. Decide if it is a REAL, SAFE improvement.\n\nDIFF:\n" + diff.slice(0, 14000) +
-    "\n\nREJECT if it: adds complexity without clear benefit, weakens a guard / security check / test, games a " +
-    "metric (e.g. drops useful prompt text just to cut tokens), or is cosmetic/no-op churn. APPROVE only a " +
-    "genuine, focused improvement a careful maintainer would keep. End your reply with a final line that is " +
-    "EXACTLY 'VERDICT: APPROVE' or 'VERDICT: REJECT'.";
-  // --no-tools = pure-judgment pass: the reviewer can't call git/bash (which got DENIED non-interactively and
-  // mangled the verdict before), it just reads the diff in the prompt and answers.
-  const r = sh("bun", ["bin/neko.ts", "run", "--profile", REVIEW_PROFILE, "--no-tools", "--once", prompt], 300_000);
+  // Dedicated reviewer script: it reads the staged diff itself (no CLI-length limit) with a clean reviewer
+  // system prompt (no coding-agent confusion). Replaces routing review through `neko run`, which on Windows
+  // both asked for the diff (agent prompt) and blew the command-line limit (big diff as an arg).
+  const r = sh("bun", ["scripts/review-diff.ts", "--profile", REVIEW_PROFILE], 300_000);
   const verdicts = [...r.out.matchAll(/VERDICT:\s*(APPROVE|REJECT)/gi)].map((m) => m[1].toUpperCase());
   const last = verdicts[verdicts.length - 1];
   // The decisive VERDICT line wins; else a clear single-word signal; else REJECT (anti-drift: only keep a
@@ -86,6 +80,9 @@ function peerReview(): { approve: boolean; verdict: string } {
   return { approve, verdict: (r.out.replace(/\s+/g, " ").trim().slice(0, 180)) || "(no output)" };
 }
 const PREAMBLE =
+  "Do NOT run git yourself (no git add / commit / checkout / reset / branch / stash) and do NOT push — leave " +
+  "your change UNCOMMITTED in the working tree; the harness verifies it, has an independent model review it, " +
+  "and commits it for you. Running git yourself bypasses that safety gate.\n" +
   "FIRST read docs/self-improve/STATE.md, BACKLOG.md and HARNESS.md to orient (what you are, where you are, " +
   "the levers). THEN do the task below. Keep the change SMALL, self-contained, and VERIFIABLE; do NOT break " +
   "typecheck or any existing test (the change is auto-reverted if you do). After, append ONE line to the " +
@@ -139,6 +136,7 @@ async function main() {
     const stuck = noImprove >= STUCK_AFTER;
     const goal = pickGoal(iter, stuck);
     log(`iter ${iter}${stuck ? " [STUCK -> self-research SOTA]" : ""}: neko run (${goal.slice(0, 70)}...)`);
+    const headBefore = sh("git", ["rev-parse", "HEAD"]).out.trim();
     const run = await runNeko(goal);
 
     if (isRateLimit(run.out)) {
@@ -147,6 +145,10 @@ async function main() {
     }
     rlBackoff = 900; // a non-rate-limited run resets the backoff
     if (!run.ok && isTransient(run.out)) { log(`transient error -> revert + short retry. ${run.out.slice(-160).replace(/\s+/g, " ")}`); revert(); await sleep(SLEEP_S); continue; }
+    // Enforce the no-self-commit rule: if the worker committed anyway, un-commit (keep the changes in the
+    // tree) so the verify+review gate still processes them instead of them sneaking in ungated.
+    const headAfter = sh("git", ["rev-parse", "HEAD"]).out.trim();
+    if (headBefore && headAfter !== headBefore) { log("worker self-committed -> un-committing so the gate applies"); sh("git", ["reset", headBefore]); }
     if (!gitDirty()) { log("no change produced -> next goal"); noImprove++; await sleep(SLEEP_S); continue; }
 
     const v = verifyGate();
