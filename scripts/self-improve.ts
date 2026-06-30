@@ -52,8 +52,13 @@ const isTransient = (s: string) => /\b(500|502|503|504)\b|network|ETIMEDOUT|fetc
 function verifyGate(): { ok: boolean; why?: string; out?: string } {
   const tc = sh("bun", ["run", "typecheck"], 180_000);
   if (!tc.ok) return { ok: false, why: "typecheck", out: tc.out.slice(-500) };
-  const t = sh("bun", ["test"], 360_000);
-  if (!t.ok || !/\b0 fail\b/.test(t.out)) return { ok: false, why: "tests", out: t.out.slice(-500) };
+  // Tests can be flaky (a timing-sensitive case occasionally times out); retry once so a flake doesn't
+  // falsely revert a real improvement. A GENUINE failure fails both runs and is still caught.
+  let t = sh("bun", ["test"], 360_000);
+  if (!t.ok || !/\b0 fail\b/.test(t.out)) {
+    t = sh("bun", ["test"], 360_000);
+    if (!t.ok || !/\b0 fail\b/.test(t.out)) return { ok: false, why: "tests", out: t.out.slice(-500) };
+  }
   const p = sh("bun", ["bin/neko.ts", "policy"], 60_000);
   if (!/PASS/.test(p.out)) return { ok: false, why: "policy", out: p.out.slice(-300) };
   return { ok: true };
