@@ -25,6 +25,10 @@ export interface Profile {
   provider?: string;
   base_url?: string;
   model?: string;
+  /** Env var holding this provider's API key (e.g. "ZAI_API_KEY"), so multi-provider works with no config
+   * editing: pick the profile, set its env var. Resolved into the key; profile wins over the broad legacy
+   * OPENAI_/NVIDIA_ fallbacks, NEKO_API_KEY still overrides everything. */
+  key_env?: string;
 }
 
 export const DEFAULTS: Record<string, any> = {
@@ -47,16 +51,21 @@ export const DEFAULTS: Record<string, any> = {
   profiles: {
     // A new model/endpoint is a data edit, not a code change. "Offline" = point a
     // profile at a local OpenAI-compatible server (llama-server :8080, Ollama :11434).
-    nvidia: { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "" },
-    openai: { provider: "openai_compat", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+    nvidia: { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "", key_env: "NVIDIA_API_KEY" },
+    openai: { provider: "openai_compat", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", key_env: "OPENAI_API_KEY" },
+    // Anthropic Messages API (provider: anthropic). Real Claude, and Z.ai's GLM coding-plan endpoint:
+    claude: { provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-4-6", key_env: "ANTHROPIC_API_KEY" },
+    zai: { provider: "anthropic", base_url: "https://api.z.ai/api/anthropic", model: "glm-4.6", key_env: "ZAI_API_KEY" },         // GLM Coding Plan quota
+    "zai-openai": { provider: "openai_compat", base_url: "https://api.z.ai/api/paas/v4", model: "glm-4.6", key_env: "ZAI_API_KEY" }, // Z.ai pay-as-you-go
     // Most hosted providers are OpenAI-compatible -> a profile, not new code. Set your model with /model.
-    groq: { provider: "openai_compat", base_url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
-    deepseek: { provider: "openai_compat", base_url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
-    mistral: { provider: "openai_compat", base_url: "https://api.mistral.ai/v1", model: "mistral-large-latest" },
-    together: { provider: "openai_compat", base_url: "https://api.together.xyz/v1", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
-    fireworks: { provider: "openai_compat", base_url: "https://api.fireworks.ai/inference/v1", model: "accounts/fireworks/models/llama-v3p3-70b-instruct" },
-    xai: { provider: "openai_compat", base_url: "https://api.x.ai/v1", model: "grok-2-latest" },
-    openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "" },
+    groq: { provider: "openai_compat", base_url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile", key_env: "GROQ_API_KEY" },
+    deepseek: { provider: "openai_compat", base_url: "https://api.deepseek.com/v1", model: "deepseek-chat", key_env: "DEEPSEEK_API_KEY" },
+    mistral: { provider: "openai_compat", base_url: "https://api.mistral.ai/v1", model: "mistral-large-latest", key_env: "MISTRAL_API_KEY" },
+    together: { provider: "openai_compat", base_url: "https://api.together.xyz/v1", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo", key_env: "TOGETHER_API_KEY" },
+    fireworks: { provider: "openai_compat", base_url: "https://api.fireworks.ai/inference/v1", model: "accounts/fireworks/models/llama-v3p3-70b-instruct", key_env: "FIREWORKS_API_KEY" },
+    xai: { provider: "openai_compat", base_url: "https://api.x.ai/v1", model: "grok-2-latest", key_env: "XAI_API_KEY" },
+    moonshot: { provider: "openai_compat", base_url: "https://api.moonshot.ai/v1", model: "kimi-k2-0905-preview", key_env: "MOONSHOT_API_KEY" },
+    openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "", key_env: "OPENROUTER_API_KEY" },
     // Mixture-of-Agents: diverse advisors analyze, a strong aggregator synthesizes + acts. `neko
     // --profile moa`. Opt-in quality mode (N+1 model calls/turn) — best where one model is weak.
     moa: {
@@ -219,11 +228,15 @@ export class NekoConfig {
 
   /** Read on demand; NEVER stored in `data` (so it can't leak via `neko config`). */
   get apiKey(): string {
+    // NEKO_API_KEY is the explicit override; then this profile's key (its key_env or config api_key, resolved
+    // in loadConfig); then the broad legacy fallbacks. The profile key sits ABOVE OPENAI_/NVIDIA_ so a
+    // multi-provider setup (each profile -> its own key_env) isn't hijacked by a stray OPENAI_/NVIDIA_API_KEY.
     return (
       process.env.NEKO_API_KEY ||
+      this.apiKeyFromFile ||
       process.env.OPENAI_API_KEY ||
       process.env.NVIDIA_API_KEY ||
-      this.apiKeyFromFile
+      ""
     ).trim();
   }
 }
@@ -269,8 +282,12 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
   }
 
   // Pull the file-provided key out before building the printable dict (never printed).
-  const apiKeyFromFile = String(merged.api_key ?? "");
+  // Resolve the key: this profile's key_env (provider-specific env var, e.g. ZAI_API_KEY) wins over a
+  // config api_key, so multi-provider works by setting per-provider env vars — no config editing.
+  const keyEnv = merged.key_env ? String(merged.key_env) : "";
+  const apiKeyFromFile = (keyEnv && (process.env[keyEnv] ?? "").trim()) || String(merged.api_key ?? "");
   delete merged.api_key;
+  delete merged.key_env;
   delete merged.profiles;
   delete merged.active_profile;
 

@@ -6,6 +6,15 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+- **Provider extensibility — any provider is a profile + an env var (no config editing)** — built-in presets
+  now declare a `key_env` (the env var holding that provider's key, e.g. `ZAI_API_KEY`, `DEEPSEEK_API_KEY`),
+  resolved with the right precedence (a profile's own key beats a stray `OPENAI_/NVIDIA_API_KEY`; `NEKO_API_KEY`
+  still overrides). So a multi-provider setup just means setting per-provider env vars and `--profile <name>` —
+  no JSON surgery. New presets ride the Anthropic provider: `zai` (GLM Coding Plan, quota endpoint),
+  `zai-openai` (Z.ai pay-as-you-go), `claude` (real Anthropic), plus `moonshot` (Kimi); `key_env` added to
+  openai/groq/deepseek/mistral/together/fireworks/xai/openrouter/nvidia. Adding a new provider stays a one-line
+  data edit. Unit-tested (key_env resolution + no cross-provider hijack).
+
 - **Anthropic Messages API provider — run on Claude or a Z.ai GLM coding plan** — `provider: "anthropic"`
   speaks `POST {base_url}/v1/messages` (the Claude format, and the format Z.ai's GLM Coding Plan / OpenCode
   endpoint `https://api.z.ai/api/anthropic` expects). It's a config choice, not a core change — same Provider

@@ -38,6 +38,23 @@ test("withModel clones the config at a different model, same endpoint, original 
   expect(cfg.model).toBe("main");
 });
 
+test("key_env: a built-in provider preset resolves its key from its declared env var (multi-provider)", () => {
+  process.env.ZAI_API_KEY = "ZKEY";
+  const cfg = loadConfig({ path: tmpConfig({}), profile: "zai" }); // built-in zai preset: provider anthropic, key_env ZAI_API_KEY
+  expect(cfg.provider).toBe("anthropic");
+  expect(cfg.baseUrl).toBe("https://api.z.ai/api/anthropic");
+  expect(cfg.apiKey).toBe("ZKEY");
+  delete process.env.ZAI_API_KEY;
+});
+
+test("a profile's resolved key beats a stray OPENAI_/NVIDIA_API_KEY (no cross-provider hijack)", () => {
+  process.env.DEEPSEEK_API_KEY = "DSK";
+  process.env.NVIDIA_API_KEY = "NV-stray";
+  const cfg = loadConfig({ path: tmpConfig({}), profile: "deepseek" });
+  expect(cfg.apiKey).toBe("DSK"); // the deepseek profile's key_env wins over the stray NVIDIA_API_KEY
+  delete process.env.DEEPSEEK_API_KEY; delete process.env.NVIDIA_API_KEY;
+});
+
 test("mcp_allow / mcp_deny parse to string arrays", () => {
   const cfg = loadConfig({ path: tmpConfig({ mcp_allow: ["fs"], mcp_deny: ["fs__delete", "danger"] }) });
   expect(cfg.mcpAllow).toEqual(["fs"]);
