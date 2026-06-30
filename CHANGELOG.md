@@ -92,6 +92,7 @@ All notable changes to Neko Code are documented here. The format follows
   SendKeys focus-leak guardrail learned from dogfooding.
 
 ### Fixed
+- **Path-escape guard now catches SYMLINKS, not just `../`** — `resolveInRoot` did lexical containment only, so a symlink INSIDE the root pointing OUTSIDE passed the check but actually escaped (read/write through it could touch files outside the project). It now also compares realpaths (resolving a new file's nearest existing parent), so a symlinked path that resolves outside the root is refused. Verified: reading through a junction escaping the root is refused, no leak. Low-risk on a local-first tool (you own the repo, write/bash are gated) but now closed.
 - **Computer-use coordinate actions land on a scaled display (DPI fix)** — UIA reports element coordinates in
   PHYSICAL pixels, but the acting scripts were DPI-UNAWARE, so on a scaled display (e.g. 125%) Windows
   virtualized their click/tap coordinates and they landed ~1.25x off-target — every coordinate action quietly

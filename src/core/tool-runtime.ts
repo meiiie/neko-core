@@ -8,7 +8,7 @@
  * tool never crashes the agent loop. Path-taking tools refuse to escape the project root.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -799,11 +799,32 @@ function requireArg(args: Record<string, any>, key: string): string {
   return String(value);
 }
 
+/** realpath that tolerates a not-yet-existing path: resolves the nearest EXISTING ancestor (so a new file's
+ *  symlinked parent dir is still caught), falling back to the lexical path if realpath fails. */
+function realpathNearest(p: string): string {
+  let probe = p;
+  while (probe !== dirname(probe) && !existsSync(probe)) probe = dirname(probe);
+  try {
+    const real = realpathSync(probe);
+    return probe === p ? real : real + p.slice(probe.length); // re-attach the not-yet-existing tail
+  } catch {
+    return p;
+  }
+}
+
 function resolveInRoot(root: string, p: string): string {
   const resolved = resolve(root, p);
   const rootResolved = resolve(root);
+  // 1) lexical containment — catches ../ escapes cheaply.
   if (resolved !== rootResolved && !resolved.startsWith(rootResolved + sep)) {
     throw new Error(`path escapes project root: ${p}`);
+  }
+  // 2) symlink containment — a symlink INSIDE the root pointing OUTSIDE would pass the lexical check but
+  // actually escape. Compare realpaths (both via realpathNearest so a new file's existing parent is resolved).
+  const rootReal = realpathNearest(rootResolved);
+  const real = realpathNearest(resolved);
+  if (real !== rootReal && !real.startsWith(rootReal + sep)) {
+    throw new Error(`path escapes project root via a symlink: ${p}`);
   }
   return resolved;
 }

@@ -1,7 +1,24 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describeToolCall, GATED, resolveTool, SAFE, toOpenAISchema, toolSchemas } from "../src/core/tools.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
+
+test("read_file refuses a path that escapes the root THROUGH a symlink (not just lexical ../)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nk-root-"));
+  const outside = mkdtempSync(join(tmpdir(), "nk-outside-"));
+  writeFileSync(join(outside, "secret.txt"), "TOPSECRET");
+  let linked = false;
+  // a 'junction' (dir symlink) needs no admin on Windows; skip if the platform still refuses.
+  try { symlinkSync(outside, join(root, "link"), "junction"); linked = true; } catch { /* no symlink perm */ }
+  if (!linked) return;
+  const tools = new ToolRegistry(root, "auto", () => true);
+  const res = String(await tools.execute("read_file", { path: "link/secret.txt" }));
+  expect(res).toMatch(/escapes project root/i); // refused
+  expect(res).not.toContain("TOPSECRET"); // and never leaked the file
+});
 
 test("noTools (perception mode) exposes NO tool schemas — vision-only endpoints reject tool-calling", () => {
   const r = new ToolRegistry(process.cwd(), "auto", () => true);
