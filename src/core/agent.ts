@@ -65,7 +65,14 @@ export function clampObservation(obs: string | any[]): string | any[] {
 // before a request would overflow the window. Cheap + conservative -- exactness isn't needed for a guard.
 export function estimateTokens(messages: any[]): number {
   let chars = 0;
-  for (const m of messages) chars += typeof m.content === "string" ? m.content.length : JSON.stringify(m.content ?? "").length;
+  for (const m of messages) {
+    chars += typeof m.content === "string" ? m.content.length : JSON.stringify(m.content ?? "").length;
+    // Count tool_calls too: a tool-heavy turn carries each call's name + arguments as JSON on the
+    // assistant message, which the content-only sum above ignores. For write_file the ENTIRE file
+    // text lives in arguments -- a turn writing several big files would otherwise be undercounted
+    // and the overflow guard would fire too late. Results are usually larger, but not always.
+    if (m.tool_calls) chars += JSON.stringify(m.tool_calls).length;
+  }
   return Math.ceil(chars / 4);
 }
 

@@ -228,6 +228,15 @@ test("estimateTokens approximates ~4 chars/token over the conversation", () => {
   expect(estimateTokens(msgs)).toBe(200); // 800 chars / 4
 });
 
+test("estimateTokens counts assistant tool_calls (e.g. write_file args) so the overflow guard isn't undercounted", () => {
+  const big = "x".repeat(400);
+  const without = [{ role: "assistant", content: "" }];
+  const withCalls = [{ role: "assistant", content: "", tool_calls: [{ id: "1", type: "function", function: { name: "write_file", arguments: JSON.stringify({ path: "p", content: big }) } }] }];
+  // The tool_call's serialized JSON adds length; the estimate must reflect it, not just content.
+  expect(estimateTokens(withCalls)).toBeGreaterThan(estimateTokens(without));
+  expect(estimateTokens(withCalls)).toBeGreaterThanOrEqual(Math.ceil(big.length / 4));
+});
+
 test("in-loop guard clips OLD observations within one turn before context overflows", async () => {
   const big = "x".repeat(5000); // under MAX_OBS_CHARS, so it accumulates rather than being clamped per-result
   const tools = { schemas: () => [], execute: async () => big };
