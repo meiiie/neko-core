@@ -6,6 +6,17 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+- **Anthropic Messages API provider — run on Claude or a Z.ai GLM coding plan** — `provider: "anthropic"`
+  speaks `POST {base_url}/v1/messages` (the Claude format, and the format Z.ai's GLM Coding Plan / OpenCode
+  endpoint `https://api.z.ai/api/anthropic` expects). It's a config choice, not a core change — same Provider
+  port as openai_compat. So Neko can run on a Z.ai coding-plan subscription (whose quota is on the Anthropic
+  endpoint, not the pay-as-you-go OpenAI one), e.g. for continuous self-improvement runs. Converts Neko's
+  OpenAI-shaped messages/tools to Anthropic blocks (system fold-up, tool_use / tool_result, image blocks,
+  input_schema) and parses both non-streamed and SSE responses (text/thinking/tool deltas, usage). Set up a
+  profile `{"provider":"anthropic","base_url":"https://api.z.ai/api/anthropic","model":"glm-4.6","api_key":"..."}`
+  and run `neko run --profile zai ...` / `neko chat --profile zai`. Live-verified end to end (glm-4.6 drove a
+  tool-calling agent run); conversions unit-tested.
+
 - **`neko run --image <path>` — image→price in ONE automatic command** — attach image(s) to a one-shot run.
   Neko runs a **vision pre-pass** (a vision model reads the image into text) and then hands that text to the
   normal tool-using agent, which searches/prices it — so a text model that can't see and a vision endpoint

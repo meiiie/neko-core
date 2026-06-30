@@ -143,7 +143,7 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
   const usage: Usage = {};
   for await (const ev of sseEvents(res)) {
     switch (ev.type) {
-      case "message_start": usage.prompt_tokens = ev.message?.usage?.input_tokens; break;
+      case "message_start": { const u = ev.message?.usage ?? {}; if (u.input_tokens != null) usage.prompt_tokens = u.input_tokens; if (u.output_tokens != null) usage.completion_tokens = u.output_tokens; break; }
       case "content_block_start": blocks[ev.index] = { type: ev.content_block?.type, id: ev.content_block?.id, name: ev.content_block?.name, json: "" }; break;
       case "content_block_delta": {
         const d = ev.delta;
@@ -157,7 +157,7 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
         if (b?.type === "tool_use") { let input: any = {}; try { input = b.json ? JSON.parse(b.json) : {}; } catch { input = { _raw: b.json }; } toolCalls.push({ id: b.id ?? "", name: b.name ?? "", arguments: input }); }
         break;
       }
-      case "message_delta": if (ev.usage?.output_tokens != null) usage.completion_tokens = ev.usage.output_tokens; break;
+      case "message_delta": { const u = ev.usage ?? {}; if (u.output_tokens != null) usage.completion_tokens = u.output_tokens; if (u.input_tokens != null) usage.prompt_tokens = u.input_tokens; break; }
       case "error": throw new Error(`anthropic stream error: ${String(JSON.stringify(ev.error)).slice(0, 200)}`);
       case "message_stop": break;
     }
