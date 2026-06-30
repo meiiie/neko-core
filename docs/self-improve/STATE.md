@@ -28,3 +28,4 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-06-30] estimateTokens now counts assistant tool_calls so the in-loop overflow guard isn't undercounted on tool-heavy turns (e.g. several large write_file calls); committed 620aed2.
