@@ -8,6 +8,7 @@
  */
 import { NekoConfig } from "./config.ts";
 import type { MoaRef } from "./config.ts";
+import { AnthropicProvider } from "./anthropic.ts";
 import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
@@ -45,10 +46,11 @@ export function toImgTagMessages(messages: any[]): any[] {
 
 export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "moa") return new MoaProvider(config);
+  if (config.provider === "anthropic") return new AnthropicProvider(config);
   if (config.provider === "openai_compat") return new OpenAICompatProvider(config);
   throw new Error(
-    `Unknown provider '${config.provider}'. Use openai_compat ` +
-      "(point base_url at a remote API or a local server such as llama-server / Ollama), or moa (mixture-of-agents).",
+    `Unknown provider '${config.provider}'. Use openai_compat (any OpenAI /chat/completions endpoint or a ` +
+      "local server), anthropic (Claude Messages API — also Z.ai's GLM coding endpoint), or moa (mixture-of-agents).",
   );
 }
 
