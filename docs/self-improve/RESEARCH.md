@@ -346,6 +346,69 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   error-prone tasks. (See BACKLOG "Tool-error-triggered recovery middleware (Self-Harness 'artifact
   middleware').")
 
+## Token efficiency / context engineering — 2026-Q3 update #3 (RESEARCH pass)
+> Three fresh angles, none overlapping the existing 24-item backlog. One per axis:
+> compute efficiency (Ares — per-step reasoning effort), turn efficiency (W&D —
+> parallel-tool width), context correctness (Context Rot — dilution from re-feeding
+> unchanged content). Each maps to a unit-testable `## Research-seeded` BACKLOG item.
+
+- **Ares: Adaptive Reasoning Effort Selection for Efficient LLM Agents** — Mar 2026
+  ([arXiv 2603.07915](https://arxiv.org/abs/2603.07915)). Thinking/reasoning models
+  (GPT-5, Claude, GLM with extended thinking) achieve high accuracy via long
+  chain-of-thought, but the reasoning tokens are spent at a FIXED effort the operator
+  configures once — so every step (trivial `ls` and hard debug alike) burns the same
+  thinking budget. Ares inserts a lightweight router that predicts the LOWEST reasoning
+  level (high/medium/low) needed for EACH step from the interaction history, reserving
+  high effort for inherently hard steps (complex navigation/planning) and dropping to low
+  for mechanical ones. **Reduces reasoning token usage up to 52.7% with minimal accuracy
+  loss** (TAU-Bench tool use, BrowseComp-Plus deep research, WebArena). Ares's router is
+  a *trained* classifier; the transferable idea for a training-free harness is the
+  *per-step* effort allocation itself, driven by step type.
+  -> **Neko mapping:** Neko sends ONE fixed `cfg.effort` for the whole run
+  (`adapters/providers.ts` `reasoning_effort` payload + `adapters/anthropic.ts`
+  thinking budget; user changes it manually via `/effort`). The unexplored lever:
+  allocate effort *per step* by the step's tool signature — low for read-only
+  inspection steps, high for edit/build/planning steps. No existing backlog item touches
+  reasoning effort. (See BACKLOG "Per-step adaptive reasoning effort (Ares).")
+- **W&D: Scaling Parallel Tool Calling for Efficient Deep Research Agents** — Feb 2026
+  ([arXiv 2602.07359](https://arxiv.org/abs/2602.07359)). Argues that scaling *width*
+  (multiple tool calls in a single reasoning step, using the model's intrinsic parallel
+  tool calling) beats scaling depth or multi-agent orchestration for many workloads —
+  both raising accuracy AND cutting the number of turns (hence context re-feeds).
+  **GPT-5-Medium + W&D 62.2% > GPT-5-High 54.9% on BrowseComp** (weaker model + width
+  beats stronger model + serialization). The paper also surfaces a width/depth trade-off
+  (over-wide batches can mis-coordinate) — width helps most for *independent* calls.
+  (Reinforced by the PASTES line of work, arXiv 2603.18897, which hides tool latency via
+  speculative parallel execution, -43.5% task time — a serving-system take on the same
+  "serialized loops expose tool latency" problem.)
+  -> **Neko mapping:** Neko's loop ALREADY fan-outs a tool batch via `Promise.all` when
+  every call is concurrency-safe (`CONCURRENCY_SAFE` in `core/agent.ts`), but WHETHER the
+  model emits a parallel batch is left to its own judgment, with NO nudge in the system
+  prompt. The cheap lever: a one-line system-prompt nudge to batch independent read-only
+  inspections into one turn (the fan-out machinery already exists — no loop change). No
+  existing backlog item targets turn-count or tool batching. (See BACKLOG "Parallel-tool-
+  width nudge for independent reads (W&D).")
+- **Context Rot: How Increasing Input Tokens Impacts LLM Performance** — Chroma Research,
+  Jul 2025 ([trychroma.com/research/context-rot](https://www.trychroma.com/research/context-rot)).
+  Evaluated 18 SOTA models (GPT-4.1, Claude 4, Gemini 2.5, Qwen3, ...) on how input
+  length/composition degrades performance. Two distinct harms: **distractors** (topically-
+  related near-miss content that misleads) and **dilution** (mere irrelevant bulk —
+  performance falls with input length even with NO distractors). Focused ~300-token
+  prompts beat ~113K-token full prompts across all models, *even with thinking enabled*;
+  the Claude family shows the largest focused-vs-full gap. Critically: it's not just
+  WHETHER info is present, but HOW MUCH non-essential bulk surrounds it. (Earlier
+  needle-in-haystack work had missed this by using only retrieval tasks, where position is
+  neutral; for reproduction/synthesis tasks, early placement of critical content helps.)
+  -> **Neko mapping:** Neko re-feeds tool results verbatim every turn until age-based
+  pruning — including a re-read of a path whose content is byte-identical to an earlier
+  read in the same trajectory (pure dilution, zero new signal). The unexplored, distinct
+  lever (vs "Tool-result clearing" which drops old results by AGE, vs TACO which compresses
+  NOISE LINES inside a kept result): elide a whole *unchanged duplicate* re-read by hashing
+  (tool, args) -> result and replacing an exact-equal repeat with a one-line marker. Exact-
+  equality only (never fuzzy) — the paper shows fuzzy/semantic near-matches are where the
+  dangerous distractor degradation lives. (See BACKLOG "Mutation-aware stale-read elision
+  (Context Rot 'dilution').")
+
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
 2. Find the closest existing Neko component (`compact()`, the tool schemas, the agent loop, a skill).

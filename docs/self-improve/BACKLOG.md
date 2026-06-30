@@ -290,6 +290,86 @@ one never blocks another.
   budget (the Terminal-Bench failure mode). Bench: flat-or-up pass-rate, fewer wasted steps on
   error-prone tasks; primarily a *correctness/budget* win.
 
+- [ ] **Per-step adaptive reasoning effort (Ares).** Neko sends ONE fixed `reasoning_effort`
+  for the whole run: `cfg.effort` is baked into the provider payload on every `complete()`
+  (`adapters/providers.ts` + `adapters/anthropic.ts` thinking budget), and the user only
+  changes it manually via `/effort`. So a run either burns maximum thinking tokens on a
+  trivial `ls`/`read_file` step (waste) or under-thinks a hard planning step (errors). Ares
+  (arXiv 2603.07915) shows a *per-step* effort router cuts reasoning tokens **up to 52.7%
+  with minimal accuracy loss** — reserving high effort for inherently hard steps (planning,
+  debugging) and dropping to low for mechanical ones (open URL, read a file, run a known
+  command). Ares's router is a *trained* classifier; for Neko the transferable, training-free
+  proxy is a **rule-based per-step effort** driven by the step's *tool*: steps whose only tool
+  calls are safe read-only inspection (`read_file/search/glob/ls/web_search/web_fetch`) or a
+  trivial bash command map to a LOW effort; steps that touch `write_file/edit/bash` (build/
+  test/install) or emit NO tools (the final synthesis / planning turn) get the configured HIGH
+  effort. Distinct from every existing backlog item (none touch reasoning effort) and from the
+  "Pre-completion verification gate" (that's a *prompt* gate; this is a *compute* knob).
+  **Verify**: (1) a unit test with a stub provider whose `complete()` records the
+  `reasoning_effort` sent each call; assert a turn calling only `read_file` sends LOW while a
+  turn calling `edit` sends the configured HIGH (and a tool-less turn sends HIGH); (2) the
+  existing tool-call + reasoning tests still pass (effort changes cost, not call shape); (3)
+  bench `outTok` (reasoning lives in output tokens) drops at flat-or-up pass-rate — the
+  primary metric is **reasoning/output tokens**, not `inTok`. NB: ship behind an **opt-in**
+  profile flag (`adaptive_effort`) so a wrong step classification is a toggle, not a default;
+  keep the configured effort as the HIGH ceiling and never exceed it. Providers that reject
+  `reasoning_effort` already self-heal (the adapter omits the field) — verify that path still
+  works under per-step changes.
+
+- [ ] **Parallel-tool-width nudge for independent reads (W&D).** Neko already fan-outs a tool
+  batch IF *every* call in it is concurrency-safe (the `CONCURRENCY_SAFE` set in `core/agent.ts`:
+  `read_file/search/glob/ls/web_search/web_fetch/task`) — but whether the model *emits* a
+  parallel batch at all is left entirely to the model's own judgment, and nothing in the system
+  prompt encourages it. So the model typically serializes obviously-independent reads (reading
+  3 files to understand a module, or `search` + `glob` together), costing one full round-trip
+  (a re-feed of the whole growing context) PER read. W&D (arXiv 2602.07359, "Scaling Parallel
+  Tool Calling") shows scaling *width* — multiple tool calls in one reasoning step — both
+  *raises* accuracy (GPT-5-Medium 62.2% > GPT-5-High 54.9% on BrowseComp) *and* cuts the
+  number of turns/context-re-feeds required. Distinct from every existing backlog item (none
+  touch turn-count or tool batching) and from "Sub-agent scope attenuation" (that narrows
+  *which* tools; this grows *how many in parallel*). For Neko, the cheap, training-free lever
+  is a **one-line system-prompt nudge** (no loop change needed — the fan-out machinery already
+  exists): tell the model, in the `## Tools` section, to batch independent read-only
+  inspections into one turn ("When you need several independent reads/searches, emit them
+  together in one step — they run in parallel") — mirroring how the existing prompt already
+  nudges "Prefer edit over rewriting". **Verify**: (1) a behavioral test where a stub provider
+  is asked to gather info from 3 files; assert that WITH the nudge the model emits all reads
+  in ONE assistant turn (one `complete()` call covering all three) and WITHOUT it emits them
+  across 3 turns (use the stub to count turns-to-completion); (2) the existing fan-out test
+  (parallel-safe batch runs via `Promise.all`) still passes; (3) bench `calls` (LLM
+  round-trips) and `inTok` (re-fed context) drop at flat-or-up pass-rate on read-heavy tasks.
+  NB: W&D also warns of a width/depth trade-off (too-wide batches can mis-coordinate) — the
+  nudge targets *independent* reads, so gate the verify on tasks where reads are genuinely
+  independent (the model still serializes when a read depends on a prior read's result).
+
+- [ ] **Mutation-aware stale-read elision (Context Rot "dilution").** Neko re-feeds tool
+  results verbatim every turn until `shrinkOldObservations`/`compact()` age them out —
+  including a `read_file`/`ls` result for a path the agent has NOT touched since, whose
+  contents are byte-identical to what's already earlier in context from a prior read of the
+  same path. Chroma's *Context Rot* (trychroma.com/research/context-rot, evaluated across 18
+  SOTA models incl. GPT-4.1/Claude 4/Gemini 2.5/Qwen3) shows mere irrelevant BULK measurably
+  degrades performance ("dilution": performance falls with input length even with NO
+  distractors), and that focused ~300-token prompts beat ~113K-token full prompts *even with
+  thinking enabled* — so re-feeding unchanged content is pure cost AND pure harm. Distinct
+  from the existing "Tool-result clearing" (drops whole OLD results by age) and TACO
+  (compresses NOISE LINES inside a result): this elides a *whole unchanged* re-read whose
+  content already exists verbatim earlier in the trajectory, collapsing a redundant duplicate.
+  For Neko: in observation formatting (where `clampObservation` runs), track the hash of each
+  `read_file`/`ls`/`search` result keyed by (tool, normalized-args); when a new result hashes
+  EQUAL to the most recent prior result for the same key, replace it with a one-line marker
+  (`[unchanged: read_file src/core/agent.ts — see earlier result]`) instead of re-appending
+  the full body. (Only exact-equality, byte-for-byte — never a fuzzy/semantic match, which
+  Context Rot shows is where the dangerous *distractor* degradation lives.) **Verify**: (1) a
+  unit test that calls the formatter with the same `read_file` path twice in a row; assert the
+  second observation is the marker, not the full body, and that a DIFFERENT path still emits
+  full body; (2) a test that a result whose content CHANGED between calls (the file was edited)
+  emits the full new body (no false elision); (3) the existing `clampObservation`/
+  `shrinkOldObservations` tests still pass; (4) bench `inTok` drops on tasks with repeated
+  reads of the same unchanged file at flat-or-up pass-rate. NB: key the cache per-session only
+  (never across runs), invalidate the key on any `write_file`/`edit` to that path, and keep it
+  opt-in behind a profile flag so a hash collision (vanishingly rare for a real hash) is a
+  toggle, not a silent correctness bug.
+
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->
 
