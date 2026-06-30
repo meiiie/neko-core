@@ -125,7 +125,7 @@ export const TOOL_SPECS: ToolSpec[] = [
         type: "string",
         enum: ["list", "read", "get", "invoke", "setvalue", "toggle", "click", "stroke", "screenshot"],
         description:
-          "list = actionable elements (name+verb+coords); read = the page/doc as text; get = an element's value; invoke = click a control by name; setvalue = type into a field by name; toggle = a checkbox by name; click = tap x,y (touch); stroke = drag/draw through points; screenshot = capture to a GIF.",
+          "list = actionable elements (name+verb+coords); read = the page/doc as text; get = an element's value; invoke = click a control by name; setvalue = type into a field by name (AUTO-VERIFIES by reading it back; read-only/rejected input -> error); toggle = a checkbox by name (AUTO-VERIFIES the state flipped); click = tap x,y (touch); stroke = drag/draw through points; screenshot = capture to a GIF. invoke/click can't self-verify (side effects) -> re-perceive with list/get/read after them.",
       },
       window: { type: "string", description: "Target window title substring (e.g. 'Paint'). Omit = foreground window." },
       name: { type: "string", description: "Element NAME for get/invoke/setvalue/toggle (copy it from `list`/`read`)." },

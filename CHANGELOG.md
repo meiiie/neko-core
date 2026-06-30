@@ -7,6 +7,13 @@ All notable changes to Neko Code are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Computer-use act→verify (deterministic) — the desktop analogue of "LLM extracts, code computes"** — a
+  state-changing UIA action no longer trusts that it worked: `setvalue` reads the value back and asserts it
+  landed (a read-only field is caught up front; rejected / reformatted / masked / truncated input becomes a
+  "WARN MISMATCH", exit 1), and `toggle` asserts the state actually flipped. The model decides the action;
+  code verifies it against the structure. `invoke`/`click` can't self-verify (side effects), so the skill +
+  tool tell the model to re-perceive (`list`/`get`/`read`) after them. Live-tested on a WPF window
+  (set+VERIFIED on a normal field, FAIL READ-ONLY on a locked one).
 - **Deterministic price-table layer (`price-table.ts`) — LLM extracts, code computes** — the professional,
   non-patchwork fix for a class of dogfood failures (gpt-oss read "31.990.000đ" as 31, reported a pricier
   source as "cheapest" while holding a cheaper one, summed wrong). Per the 2026 consensus on reliable

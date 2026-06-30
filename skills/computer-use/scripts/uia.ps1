@@ -107,13 +107,25 @@ switch($cmd){
   }
   "setvalue" {
     $e=FindByName $name; if(-not $e){ Write-Output "not found: $name"; exit 1 }
-    $vp=Pat $e ([System.Windows.Automation.ValuePattern]::Pattern); if($vp){ $vp.SetValue($value); Write-Output "set '$name' = '$value'"; exit }
-    Write-Output "no ValuePattern on: $name"; exit 1
+    $vp=Pat $e ([System.Windows.Automation.ValuePattern]::Pattern); if(-not $vp){ Write-Output "no ValuePattern on: $name"; exit 1 }
+    if($vp.Current.IsReadOnly){ Write-Output "FAIL setvalue: '$name' is READ-ONLY (cannot set)"; exit 1 }
+    $vp.SetValue($value)
+    # act -> VERIFY (deterministic): read the value back and confirm it landed. Catches input the field
+    # rejected / reformatted / masked / truncated -- so the model never assumes a silent setvalue worked.
+    Start-Sleep -Milliseconds 40
+    $actual=$vp.Current.Value
+    if($actual -ceq $value){ Write-Output "set+VERIFIED '$name' = '$value'" }
+    else { Write-Output "WARN setvalue MISMATCH on '$name': requested '$value' but field now reads '$actual' (rejected/reformatted/masked?)"; exit 1 }
+    exit
   }
   "toggle" {
     $e=FindByName $name; if(-not $e){ Write-Output "not found: $name"; exit 1 }
-    $tp=Pat $e ([System.Windows.Automation.TogglePattern]::Pattern); if($tp){ $tp.Toggle(); Write-Output "toggled: $name -> $($tp.Current.ToggleState)"; exit }
-    Write-Output "no TogglePattern on: $name"; exit 1
+    $tp=Pat $e ([System.Windows.Automation.TogglePattern]::Pattern); if(-not $tp){ Write-Output "no TogglePattern on: $name"; exit 1 }
+    $before=$tp.Current.ToggleState; $tp.Toggle(); Start-Sleep -Milliseconds 40; $after=$tp.Current.ToggleState
+    # act -> VERIFY: the state must actually have changed.
+    if($after -ne $before){ Write-Output "toggled+VERIFIED '$name': $before -> $after" }
+    else { Write-Output "WARN toggle: '$name' state did NOT change (still $after)"; exit 1 }
+    exit
   }
   "get" {
     $e=FindByName $name; if(-not $e){ Write-Output "not found: $name"; exit 1 }

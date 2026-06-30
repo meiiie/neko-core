@@ -93,10 +93,12 @@ NEKO_UIA_WINDOW="<window title>" pwsh uia.ps1 list
 #   [Edit] 'Input' (setvalue) -> 960,432
 #   [Button] 'Greet' (invoke) -> 794,494
 # act by NAME (programmatic UIA pattern -> no cursor, no focus steal, works occluded):
-pwsh uia.ps1 setvalue "Input" "Neko"      # ValuePattern (type without keyboard)
+pwsh uia.ps1 setvalue "Input" "Neko"      # ValuePattern (type without keyboard) -- AUTO-VERIFIES: reads the
+                                          #   value back -> "set+VERIFIED" or "WARN MISMATCH" (exit 1); a
+                                          #   read-only field -> "FAIL READ-ONLY" before any silent no-op
 pwsh uia.ps1 invoke   "Greet"             # InvokePattern (click without moving the mouse); falls back to a
                                           #   real coord-click only if no pattern is exposed
-pwsh uia.ps1 toggle   "Show advanced"     # TogglePattern (checkbox/switch)
+pwsh uia.ps1 toggle   "Show advanced"     # TogglePattern -- AUTO-VERIFIES the state actually flipped (else WARN)
 # verify (no vision): read a value/state back
 pwsh uia.ps1 get "Input"                  # -> value 'Input' = 'Neko'
 # read a whole page/doc as TEXT (Text/Document/Hyperlink names) -- summarize a web page, no vision:
@@ -113,7 +115,12 @@ heavy page, lower `reasoning_effort` so the model emits the answer instead of ov
 **VERIFIED end-to-end** on a real .NET window: `list` -> `setvalue Input=Neko` -> `invoke Greet` ->
 screenshot showed `Hello, Neko!`, and `get` read the value back — all with the default gpt-oss, zero vision,
 zero cursor movement. The loop is **perceive (`list`) → act (`invoke`/`setvalue`/`toggle`) → verify
-(`get`/`list`)**, all text.
+(`get`/`list`)**, all text. **Act→verify is now built in for state-changing patterns:** `setvalue` reads the
+value back and asserts it landed (read-only / rejected / reformatted / masked input is caught, not assumed),
+`toggle` asserts the state flipped — both exit 1 on mismatch so the model sees the failure. `invoke`/`click`
+have no single property to check (side effects), so still **re-perceive after them** (`list`/`get`/`read`)
+before assuming success — never blind-trust an action you can't read back. (Principle: the model decides the
+action, code verifies it against the structure — the desktop analogue of "LLM extracts, code computes".)
 
 Performance + reliability are SOTA-grade: a CacheRequest bulk-fetches every property+pattern in ONE
 cross-process call (a naive `FindAll` makes one COM round-trip per node and TIMES OUT on rich WinUI/WPF
