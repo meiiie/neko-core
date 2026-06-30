@@ -37,7 +37,12 @@ const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
 const gitDirty = () => sh("git", ["status", "--porcelain"]).out.trim().length > 0;
 function ensureBranch() {
   const cur = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"]).out.trim();
-  if (cur !== BRANCH) log(`branch ${cur} -> ${BRANCH}: ${sh("git", ["checkout", "-B", BRANCH]).ok ? "ok" : "FAILED"}`);
+  if (cur === BRANCH) return;
+  // CONTINUE the existing branch across re-launches (never `-B`, which would RESET it and discard every
+  // improvement committed in prior segments). Create it only if it doesn't exist yet.
+  const exists = sh("git", ["rev-parse", "--verify", "--quiet", BRANCH]).ok;
+  const r = exists ? sh("git", ["checkout", BRANCH]) : sh("git", ["checkout", "-b", BRANCH]);
+  log(`branch ${cur} -> ${BRANCH} (${exists ? "continue" : "new"}): ${r.ok ? "ok" : "FAILED " + r.out.slice(-120)}`);
 }
 function revert() { sh("git", ["checkout", "--", "."]); sh("git", ["clean", "-fd", "src", "test", "skills", "docs", "bin", "scripts"]); }
 const isRateLimit = (s: string) => /\b429\b|rate.?limit|quota|too many requests|insufficient|exceeded/i.test(s);
@@ -64,16 +69,21 @@ function peerReview(): { approve: boolean; verdict: string } {
   const diff = sh("git", ["diff", "--cached"]).out;
   if (!diff.trim()) return { approve: false, verdict: "empty diff" };
   const prompt =
-    "You are a strict code reviewer. A coding agent made this change to the Neko codebase. Decide if it is a " +
-    "REAL, SAFE improvement.\n\nDIFF:\n" + diff.slice(0, 14000) +
+    "You are a strict code reviewer. Judge ONLY from the diff below — you have NO tools. A coding agent made this " +
+    "change to the Neko codebase. Decide if it is a REAL, SAFE improvement.\n\nDIFF:\n" + diff.slice(0, 14000) +
     "\n\nREJECT if it: adds complexity without clear benefit, weakens a guard / security check / test, games a " +
     "metric (e.g. drops useful prompt text just to cut tokens), or is cosmetic/no-op churn. APPROVE only a " +
-    "genuine, focused improvement that a careful maintainer would keep. Reply with EXACTLY one word on the first " +
-    "line — APPROVE or REJECT — then one short reason.";
-  const r = sh("bun", ["bin/neko.ts", "run", "--profile", REVIEW_PROFILE, "--once", prompt], 300_000);
-  const first = (r.out.split("\n").find((l) => l.trim()) ?? "").trim();
-  const approve = /\bAPPROVE\b/i.test(first) && !/\bREJECT\b/i.test(first);
-  return { approve, verdict: r.out.replace(/\s+/g, " ").trim().slice(0, 180) };
+    "genuine, focused improvement a careful maintainer would keep. End your reply with a final line that is " +
+    "EXACTLY 'VERDICT: APPROVE' or 'VERDICT: REJECT'.";
+  // --no-tools = pure-judgment pass: the reviewer can't call git/bash (which got DENIED non-interactively and
+  // mangled the verdict before), it just reads the diff in the prompt and answers.
+  const r = sh("bun", ["bin/neko.ts", "run", "--profile", REVIEW_PROFILE, "--no-tools", "--once", prompt], 300_000);
+  const verdicts = [...r.out.matchAll(/VERDICT:\s*(APPROVE|REJECT)/gi)].map((m) => m[1].toUpperCase());
+  const last = verdicts[verdicts.length - 1];
+  // The decisive VERDICT line wins; else a clear single-word signal; else REJECT (anti-drift: only keep a
+  // change a reviewer clearly endorses).
+  const approve = last ? last === "APPROVE" : (/\bAPPROVE\b/i.test(r.out) && !/\bREJECT\b/i.test(r.out));
+  return { approve, verdict: (r.out.replace(/\s+/g, " ").trim().slice(0, 180)) || "(no output)" };
 }
 const PREAMBLE =
   "FIRST read docs/self-improve/STATE.md, BACKLOG.md and HARNESS.md to orient (what you are, where you are, " +

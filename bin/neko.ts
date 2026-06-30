@@ -49,6 +49,7 @@ interface Args {
   resumeId?: string;
   loop: boolean;
   once: boolean;
+  noTools?: boolean;
   version: boolean;
   help: boolean;
   trials?: number;
@@ -65,6 +66,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--yolo") args.yolo = true;
     else if (a === "--loop") args.loop = true;
     else if (a === "--once" || a === "--no-loop") args.once = true;
+    else if (a === "--no-tools") args.noTools = true;
     else if (a === "--trials") args.trials = Number(argv[++i]) || 1;
     else if (a === "--image" || a === "--img") { const p = argv[++i]; if (p) (args.images ??= []).push(p); }
     else if (a === "--resume") {
@@ -213,6 +215,7 @@ Options:
   --yolo             auto-approve gated tools (bounded autonomy)
   --loop             run "run" as a closed loop: work + self-review until done
   --once             force a single-shot run (overrides config "auto_loop": true)
+  --no-tools         (run) expose no tools; a pure text completion (e.g. a judgment/review pass)
   --image <path>     (run) attach an image (repeatable); perception mode, no tools. Use a VISION model,
                      e.g. NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko run --image pkg.jpg "what is this?"
   --resume [id]      (chat) resume a session by id, or the latest for this directory
@@ -408,7 +411,8 @@ async function cmdRun(args: Args): Promise<number> {
     if (kind === "reasoning" || kind === "tool") return; // CLI prints only the final content
     streamed += t.length;
     process.stdout.write(t);
-  }, images.length > 0); // image still present -> perception mode (no tools; vision endpoints reject tool-calling)
+  }, images.length > 0 || !!args.noTools); // perception/no-tools mode: pure text completion, no tool schemas
+    // (image present -> vision endpoints reject tool-calling; --no-tools -> e.g. a pure-judgment reviewer pass)
   // Deterministically load a clearly-matching domain skill (don't rely on the model to pull it).
   const matched = matchSkill(instruction);
   if (matched) agent.appendSystem(`# Skill: ${matched.name}\n(skill files dir: ${matched.dir} - run bundled scripts from here)\n${matched.body}`);
