@@ -33,7 +33,9 @@ function parse(file: string): Skill | null {
   let name = /SKILL\.md$/i.test(file) ? parts[parts.length - 2] : parts[parts.length - 1].replace(/\.md$/, "");
   let description = "";
   let body = text;
-  const fm = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  // CRLF-tolerant: a skill authored on Windows (Notepad -> \r\n) must still have its frontmatter parsed,
+  // or its name/description are lost and matchSkill (which keys on description) can't find it.
+  const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (fm) {
     body = fm[2];
     const n = fm[1].match(/^name:\s*(.+)$/m);

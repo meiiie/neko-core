@@ -638,7 +638,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
     } catch (error) {
       flushStream();
-      addLine("error", `${error instanceof Error ? error.message : error}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      // The user's own Esc (an AbortError that threw from compact()/a provider call instead of the loop
+      // returning "[interrupted]") isn't an error to alarm them with — show it like a normal interrupt.
+      if ((error as any)?.name === "AbortError" || /aborted by user/i.test(msg)) addLine("info", "(interrupted)");
+      else addLine("error", msg);
     } finally {
       busyRef.current = false;
       setBusy(false);

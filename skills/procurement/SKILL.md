@@ -32,6 +32,14 @@ Script in: **bảng đã sắp thấp→cao + cao→thấp**, **THẤP NHẤT / 
 
 **`Tình trạng` = Mới / Cũ (thu cũ-đổi mới) / Trả góp / Kèm BH.** Một trang sản phẩm thường hiện **NHIỀU giá cho CÙNG một máy** — lấy **HẾT**, **mỗi loại MỘT DÒNG có nhãn** (đừng gộp, đừng vớ một số). Quan trọng: **giá rẻ bất thường gần như luôn là MÁY CŨ / TRẢ GÓP / THU-CŨ** — ghi đúng nhãn, ĐỪNG nhầm thành giá máy mới. Ví dụ thật: TGĐ iPhone 15 128GB hiện **Mới 18.990.000đ** *và* **Cũ (thu cũ, BH 1 tháng) 13.770.000đ** → đó là **hai dòng khác nhau**, không phải "giá iPhone 15 = 13.77tr".
 
+## ⭐⭐ BƯỚC 0 — CHỐT MÃ/SKU CHÍNH XÁC TRƯỚC khi search (đòn bẩy lớn nhất cho hàng có mã)
+Search theo tên chung ("USB SanDisk 16GB") ra kết quả mơ hồ + giá cao; search theo **MÃ/SKU chính xác** ra đúng sản phẩm, **so sánh được**, **thường rẻ hơn**. Đo thật: ChatGPT đọc ảnh → "SanDisk Cruzer Blade **CZ50**" → SKU **SDCZ50-016G-B35** → ra **CZ50 16GB 105k**; còn search chung "SanDisk 16GB" ra **169k** (đắt hơn 60%, có khi sai dòng).
+1. **Chốt mã từ NGUỒN tốt nhất có:**
+   - **Có ẢNH sản phẩm** → đọc bao bì lấy dòng + mã. **gpt-oss KHÔNG có thị giác** → nếu có model vision (cấu hình `image_format`/endpoint vision) thì dùng để đọc ảnh; hoặc **screenshot + vision** (computer-use); hoặc hỏi người dùng "mã trên vỏ là gì?". ĐỪNG đoán mã.
+   - **Có mô tả** → suy ra dòng + mã chuẩn (vd "USB SanDisk 16GB nhỏ gọn đen-đỏ" ≈ Cruzer Blade CZ50, SKU SDCZ50-016G-B35).
+2. **Search THEO SKU** (`"SDCZ50-016G-B35 giá"`, `"Cruzer Blade CZ50 16GB"`) → mỗi nguồn cùng một mã = so sánh táo-với-táo.
+3. **Chưa chốt được mã** (không ảnh/không vision) → search theo mô tả + **ghi rõ "chưa chốt SKU, giá tham khảo theo dòng"**, đừng giả vờ chính xác.
+
 ## ⭐ Chiến lược tìm GIÁ TỐT NHẤT (đừng neo vào chuỗi lớn)
 Lỗi hay gặp: chỉ hỏi FPT/TGĐ/CellphoneS → ra **giá niêm yết cao**; shop nhỏ/cạnh tranh thường rẻ hơn vài triệu. Một purchasing officer giỏi **đào tới giá thấp nhất thực sự**:
 1. **Search rộng theo giá**: ngoài tên sản phẩm, search thêm `"<sản phẩm> giá rẻ nhất"`, `"<sản phẩm> khuyến mãi"`, `"<sản phẩm> cũ likenew giá"`, và trang so giá **websosanh.vn**. Mở **nhiều shop**, gồm cả shop nhỏ giá tốt (xem MAP mở rộng).

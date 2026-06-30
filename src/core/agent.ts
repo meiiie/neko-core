@@ -133,12 +133,20 @@ export class Agent {
       .map((m) => `${m.role}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`)
       .join("\n")
       .slice(0, 40000);
-    const res = await this.provider.complete([
-      { role: "system", content: "Summarize the conversation below concisely: the task, key decisions, files changed, and the current state. Be brief." },
-      { role: "user", content: text },
-    ]);
-    this.cost.add(res.usage);
-    const summary = res.content ?? "";
+    // Compaction MUST always free context. If the summarizer call fails (a transient model error),
+    // fall back to a crude marker rather than leaving the oversized context in place -- otherwise the
+    // next call just overflows again and the turn is stuck. The recent tail is kept verbatim regardless.
+    let summary: string;
+    try {
+      const res = await this.provider.complete([
+        { role: "system", content: "Summarize the conversation below concisely: the task, key decisions, files changed, and the current state. Be brief." },
+        { role: "user", content: text },
+      ]);
+      this.cost.add(res.usage);
+      summary = res.content ?? "";
+    } catch {
+      summary = "(earlier conversation elided to fit the context window; the summary call failed, but the recent turns below are intact)";
+    }
     // Low-hanging context win (Anthropic): big tool outputs kept in the tail are rarely re-read in
     // full — clip them to the head, so post-compaction context stays lean.
     const leanTail = tail.map((m) => {
