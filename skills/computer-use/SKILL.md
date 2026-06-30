@@ -55,7 +55,9 @@ Keep steps minimal (each screenshot+reason is slow); stop when the goal is visib
   most expensive failure mode (OSWorld data: bad grounding → confidently wrong action).
 
 ## Wiring it (config-first, no core change)
-- **Perception** is already possible: `bash` takes a screenshot → `read_file` reads it with vision.
+- **Perception** is already possible: `bash` takes a screenshot → `read_file` reads it with vision. (That
+  read needs a VISION model — gpt-oss is text-only. On the NVIDIA key, `NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1`
+  is a strong reader, verified; avoid llama-3.2-vision. But prefer UIA `read`/`list` — no vision needed.)
 - **Action (mouse/keyboard)** needs an input tool — connect a **computer-use MCP** (desktop screenshot +
   click/type) via `mcp_servers`, the same way the browser MCP is wired. Tools then appear as
   `mcp__<server>__*`.
