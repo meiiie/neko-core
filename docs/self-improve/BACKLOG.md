@@ -227,6 +227,69 @@ one never blocks another.
   (fewer tool schemas serialized) at flat-or-up pass-rate. NB: ship the allowlist as **opt-in** so a
   too-narrow list (model forgets a tool it needs) is a per-call miss, not a default breakage.
 
+- [ ] **Workflow-adaptive, critical-gated observation compression (TACO).** `shrinkOldObservations`
+  clips old tool results by *size* (40-line / 8K-char caps) — size-blind to *signal*, so it either
+  trashes a short error trace or keeps a 10K-char `apt install` "Unpacking ..." spam verbatim. TACO
+  (arXiv 2604.19572) is the fresh SOTA: a **training-free, line-level** compressor with two gates —
+  (1) **critical/non-critical**: any observation containing an explicit error/exception/test-failure
+  signal is passed through **unchanged**; only non-critical output is compressed, and (2)
+  **pattern rules** (regex trigger + keep/strip patterns, e.g. strip every `Unpacking|Setting up`
+  line from an `apt-get` log, keep the final status line) — reported to cut a 10,071-char install
+  log to 73 chars (99.3%) at +2-6pp TerminalBench, ~10% per-step tokens on large models. Distinct
+  from the existing "Tool-result clearing" (drops *whole old results* for a sliding window),
+  ACON/anchor-compaction (protect *task facts* in the summary), and AgentDiet (dedup *within* a
+  kept result): TACO compresses the *noise lines inside* an otherwise-kept observation, gated by
+  criticality. For Neko: (a) add an `isCritical(result)` test in observation formatting (regex for
+  `error|exception|fail|traceback|✗`, non-zero exit, etc.) — pass critical results through
+  untouched; (b) apply a small seeded rule set (`pip/npm/apt install`, `git clone`, `tsc`/`cargo
+  build` rebuild spam) that strips progress-bar / verbose-log lines while keeping the final status.
+  Keep rules in a file under `.neko-core/` so they're editable (AHE component-observability).
+  **Verify**: (1) a unit test where a `bash` result = a 200-line `npm install` log (no error) is
+  compressed to a one-line status (assert the error-critical sibling is passed through byte-identical);
+  (2) a unit test that an observation containing `Error:` / a non-zero exit code is NOT compressed;
+  (3) the existing `shrinkOldObservations` test still passes; (4) bench `in` tokens drop on a
+  build/install-heavy task at flat-or-up pass-rate.
+- [ ] **Lossless compaction with on-demand recovery (LCM `expand`).** `compact()` is **destructive**:
+  it summarizes the head *in place*, throwing away the raw observations forever — if the summary
+  dropped a detail a later step needs (the exact path, the precise error string), the agent cannot
+  get it back and must re-run the tool (wasting tokens / re-introducing the very cost compaction
+  saved). LCM (arXiv 2605.04050) makes compaction **lossless**: raw messages are *persisted* and the
+  summary carries a pointer; a tool (`lcm_expand`/`lcm_grep`) restores the verbatim original on
+  demand. Volt beat Claude Code v2.1.4 +4.5pp avg on OOLONG, widening to +12.6pp at 512K. Distinct
+  from the existing "Anchor-preserving compaction" (keeps a *static* anchor block in the summary) and
+  "Decision notes" (a separate *session* file): this is **reversibility of the prune itself** — the
+  raw observation is recoverable, not summarized-away. For Neko: compact() already runs in-memory;
+  (a) before rewriting the head, snapshot the about-to-be-summarized messages to
+  `~/.neko-core/session-<id>/compact-<n>.jsonl`; (b) emit the summary with a marker like
+  `[compacted N turns — use recover_context to see raw]`; (c) add a safe built-in `recover_context`
+  tool that loads + injects the stored raw block for a named compact. **Verify**: (1) a unit test
+  that forces `compact()`, then calls `recover_context` for that compact and asserts the *raw*
+  messages come back byte-identical (fails today — they're gone); (2) a trajectory test where the
+  summary drops a distinctive value, the agent `recover_context`s it, and the task succeeds (the
+  benchmark for "don't re-run the tool"); (3) `compact()` still reduces token count (the summary
+  still replaces the head in-context; recovery is opt-in). Bench: `in` tokens flat-or-down (recovery
+  fires rarely) at flat-or-up pass-rate; the win is correctness on tasks that today force a re-run.
+- [ ] **Tool-error-triggered recovery middleware (Self-Harness "artifact middleware").** Neko's doom-loop
+  guard trips only on the *exact same* tool call 3× — but the common, costly loop is subtler: a tool
+  *errors*, the agent flails (retries, edits around it, deletes the partial output it needs), and
+  burns the budget without ever being told how to *recover*. Self-Harness (arXiv 2606.09498) found
+  this exact failure across models and fixed it with a **tool-error-triggered system prompt** — when
+  a tool errors, inject a redirect: "the last tool errored; do NOT delete/rerun blindly — diagnose
+  the cause, recreate or repair the needed artifact, validate it, then proceed." Took
+  Qwen3.5-35B 20.3%→36.7% on Terminal-Bench-2 (a 16pp swing, the single biggest Self-Harness win).
+  Distinct from the existing "Broad doom-loop detection" (counts repeats per path) and the
+  "Pre-completion verification gate" (fires once at exit): this fires **on the first tool error** with
+  a *recovery-oriented* prompt, not just a "reconsider" nudge. For Neko: in the agent loop, detect a
+  non-zero `bash` exit / a refused write / a tool exception; on the next turn `appendSystem()` a
+  short recovery prompt (reuse the existing nudge plumbing). Make it threshold-gated (e.g. after the
+  1st error on a *write/edit/bash* tool, not on benign read misses) to avoid nagging. **Verify**: (1)
+  a unit test where a stub provider's `edit` errors once — assert the recovery observation fires
+  exactly once on the next turn and contains the diagnosis directive (assert it does NOT fire on a
+  successful tool call or when gated off); (2) a trajectory test where the stub would otherwise
+  delete-then-rerun into a budget limit — assert WITH the middleware it diagnoses-and-proceeds within
+  budget (the Terminal-Bench failure mode). Bench: flat-or-up pass-rate, fewer wasted steps on
+  error-prone tasks; primarily a *correctness/budget* win.
+
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->
 

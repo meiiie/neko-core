@@ -286,6 +286,66 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   *correctness/safety* win (a scoped child can't drift into actions outside its role). (See BACKLOG
   "Sub-agent scope attenuation via per-delegation tool allowlist.")
 
+## Token efficiency / context engineering — 2026-Q3 update #2 (RESEARCH pass)
+> Three fresh angles, none overlapping the existing backlog. One per axis: token efficiency
+> (TACO — line-level observation compression), context correctness (LCM — lossless compaction),
+> harness middleware (Self-Harness — tool-error recovery). Each maps to a unit-testable
+> `## Research-seeded` BACKLOG item.
+
+- **TACO: A Self-Evolving Framework for Efficient Terminal Agents via Workflow-Adaptive
+  Observation Compression** — Liu et al., Apr 2026 ([arXiv 2604.19572](https://arxiv.org/abs/2604.19572)).
+  Training-free, **line-level** compressor for terminal output with a **critical/non-critical
+  gate**: any observation with an explicit error/exception/failure signal is passed through
+  *unchanged*; only non-critical output is compressed by *pattern rules* (regex trigger + keep/strip
+  patterns, seeded for `apt/pip/npm install`, `git clone`, compiler output; rules self-evolve
+  across tasks via a global confidence-ranked pool). Cuts a 10,071-char `apt-get install` log to 73
+  chars (99.3%) while keeping the final status. **TerminalBench: +2-6pp accuracy, ~10% per-step
+  token cut on >200B models; SWE-Bench Lite 56.3→57.1% at 308M→271M tokens; DevEval 38.1→39.7% at
+  37M→27M tokens.** Key ablation: dropping the cross-task global rule pool costs 18% tokens; the
+  self-evolution is what generalizes across repos.
+  -> **Neko mapping:** Neko's `shrinkOldObservations` clips by *size* (40-line / 8K-char caps) —
+  size-blind to signal, so it either trashes a short error trace or keeps install-log spam verbatim.
+  The unexplored, **distinct** lever (vs "Tool-result clearing" which drops *whole old results*,
+  ACON/anchor-compaction which protect *task facts in the summary*, AgentDiet which dedups *within*
+  a kept result): compress the **noise lines inside** an otherwise-kept observation, gated by
+  criticality. Seed rules + an `isCritical()` regex guard are cheap and unit-testable. (See BACKLOG
+  "Workflow-adaptive, critical-gated observation compression (TACO).")
+- **LCM: Lossless Context Management** — Voltropy, Feb 2026 ([arXiv 2605.04050](https://arxiv.org/abs/2605.04050)).
+  Reframes compaction as **lossless**: raw messages are persisted to an immutable store; the active
+  context carries *summaries with pointers*, and a `lcm_expand`/`lcm_grep` tool restores the
+  verbatim original on demand. A hierarchical DAG (not a flat overwrite) gives multi-resolution
+  drill-down, and a scope-reduction invariant (a sub-agent must declare delegated vs retained work,
+  or the spawn is rejected) guards against infinite delegation. **Volt beat Claude Code v2.1.4
+  +4.5pp avg on OOLONG (74.8 vs 70.3), widening to +12.6pp at 512K tokens.**
+  -> **Neko mapping:** Neko's `compact()` is **destructive** — it summarizes the head in place,
+  throwing raw observations away forever; if the summary dropped a needed detail (exact path, error
+  string) the agent must re-run the tool. The **distinct** lever (vs "Anchor-preserving compaction"
+  which keeps a *static* anchor block, vs "Decision notes" which is a separate *session* file):
+  **reversibility of the prune** — snapshot the compacted block to `~/.neko-core/session-*/` and add
+  a safe `recover_context` tool. The win is correctness on tasks that today force an expensive
+  re-run, at flat-or-down tokens (recovery fires rarely). (See BACKLOG "Lossless compaction with
+  on-demand recovery (LCM `expand`).")
+- **Self-Harness: Harnesses That Improve Themselves** — Haidar et al., Jun 2026
+  ([arXiv 2606.09498](https://arxiv.org/abs/2606.09498)). Same self-improvement thesis as DGM/AHE/SICA
+  (an agent edits its own harness and empirically validates each edit) but its **Weakness Mining →
+  Harness Proposal → Proposal Validation** loop surfaced a concrete, broadly-transferable middleware
+  the prior wave missed: **tool-error-triggered recovery**. When a tool errors, inject a redirect
+  ("do NOT delete/rerun blindly — diagnose the cause, recreate/repair the needed artifact, validate
+  it, then proceed") instead of letting the agent flail (retry, edit around it, delete the partial
+  output it still needs). This single edit took **Qwen3.5-35B 20.3%→36.7% on Terminal-Bench-2
+  (a 16pp swing)** — the largest of Self-Harness's validated changes. Overall: M2.5 40.5%→61.9%,
+  Qwen3.5-35B 23.8%→38.1%, GLM-5 42.9%→57.1%. Distinguishing principle: every edit must specify the
+  targeted behavior, modified surface, motivating evidence, and evaluation result — no generic prompt
+  lengthening.
+  -> **Neko mapping:** Neko's doom-loop guard trips only on the *exact same* call 3×; it never fires
+  on the subtler, common loop where a tool *errors once* and the agent flails into a budget blowout.
+  The **distinct** lever (vs "Broad doom-loop detection" which counts repeats-per-path, vs the
+  "Pre-completion verification gate" which fires once at exit): fire a *recovery-oriented* system
+  prompt **on the first qualifying tool error** (non-zero bash exit, refused write, tool exception),
+  reusing the existing `appendSystem` nudge plumbing. Primarily a correctness/budget win on
+  error-prone tasks. (See BACKLOG "Tool-error-triggered recovery middleware (Self-Harness 'artifact
+  middleware').")
+
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
 2. Find the closest existing Neko component (`compact()`, the tool schemas, the agent loop, a skill).
