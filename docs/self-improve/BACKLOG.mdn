@@ -592,19 +592,19 @@ one never blocks another.
   one where the model transforms a failure into a fluent success narrative. Two concrete gaps:
   (1) `multi_edit`/`edit` (`tool-runtime.ts` lines ~778-787) reject a missing/non-unique
   `old_string` but NOT `old_string === new_string` — a no-op edit writes an identical file and
-  returns `Edited <path> (1 edits, +N -N)`, i.e. a *success* signal for zero change, which the
-  model reads as "the edit landed." (2) More broadly, *When Errors Become Narratives* (Wu, arXiv
-  2606.14589 — a longitudinal study of 22 silent-failure incidents in a production agent runtime)
-  finds ~70% of silent failures are caught only by human observation, not tests, and the most
-  dangerous class is **chained hallucination**: an LLM turns an error/empty result into a
-  plausible-sounding success ("fail-plausible"). For Neko: (a) in `edit`/`multi_edit`, if
-  `oldStr === newStr` (after trim normalization) return `Error: edit ${k+1} is a no-op (old_string
-  === new_string) — no change written` instead of a success; (b) (the cheap "fail-plausible" guard)
-  when `write_file` would overwrite a path with byte-identical content, return a `no change` marker
-  instead of a success; and (c) when a `bash`/`search`/`read_file` result is empty (0 bytes) or
-  matches a known no-signal shape, tag the observation `[empty result]` so the model can't silently
-  narrate over a void. Distinct from the doom-loop/recovery items (which fire on REPEATS or ERRORS)
-  and the pre-completion verify gate (one-shot at exit): this flags the *absence of a signal* at the
+  returns `Edited <path> (1 edits, +N -N)`, i.e. a *success* signal for zero change, which the model
+  reads as "the edit landed." (2) More broadly, *When Errors Become Narratives* (Wu, arXiv 2606.14589
+  — a longitudinal study of 22 silent-failure incidents in a production agent runtime) finds ~70% of
+  silent failures are caught only by human observation, not tests, and the most dangerous class is
+  **chained hallucination**: an LLM turns an error/empty result into a plausible-sounding success
+  ("fail-plausible"). For Neko: (a) in `edit`/`multi_edit`, if `oldStr === newStr` (after trim
+  normalization) return `Error: edit ${k+1} is a no-op (old_string === new_string) — no change
+  written` instead of a success; (b) (the cheap "fail-plausible" guard) when `write_file` would
+  overwrite a path with byte-identical content, return a `no change` marker instead of a success;
+  and (c) when a `bash`/`search`/`read_file` result is empty (0 bytes) or matches a known no-signal
+  shape, tag the observation `[empty result]` so the model can't silently narrate over a void.
+  Distinct from the doom-loop/recovery items (which fire on REPEATS or ERRORS) and the
+  pre-completion verify gate (one-shot at exit): this flags the *absence of a signal* at the
   tool-result boundary. **Verify**: (1) a unit test calling `edit` with `old_string === new_string`
   asserts it returns the no-op error and does NOT write the file (fails today — it writes + reports
   success); (2) a test that `write_file` of identical content returns the no-change marker and
@@ -616,32 +616,32 @@ one never blocks another.
   tag is additive, never lossy.
 
 - [ ] **Recurrence-based memory consolidation (RecMem).** Neko's `memory` tool (`core/tools.ts`
-  line ~198: `list | read | write | delete | search`) and its storage
-  (`~/.neko-core/memory/*.md`) are a pure **append-only KV store**: every `write` creates or
-  overwrites a whole file. There is no notion that a new `write` might be a DUPLICATE or
-  near-duplicate of an existing memory, and no merging — so the store accumulates overlapping
-  entries (three "user prefers X" notes across sessions), and `search` re-surfaces all of them,
-  inflating the cross-session context the agent recalls before working. RecMem (Dai et al., arXiv
-  2605.16045) cuts this: store incoming interactions, and only **consolidate (merge + summarize)**
-  a memory when a semantically-similar interaction RECURS — skipping heavy processing when no
-  similar cluster exists; reported to cut memory-construction token cost **up to 87% at higher
-  accuracy**. Distinct from every existing backlog item (none touch the `memory`/`workflow` store)
-  and from in-session "decision notes" (a single-session file): this is *cross-session dedup +
-  merge* of the durable memory store. For Neko, the training-free proxy: on `memory write`, before
-  persisting, (a) run a cheap text-similarity pass (token-overlap / keyword Jaccard, NO embedding
-  model — keeps it local-first and dependency-free) against the existing memory bodies; (b) if a
-  high-similarity match exists, MERGE the new note into that file (append a line, or rewrite the
-  merged body) instead of creating a new file; (c) if no match, write a new file as today.
-  Optionally: tag memories with a last-touched date so an LRU sweep can prune truly stale entries
-  (the "decay" lever). **Verify**: (1) a unit test where two `write` calls with near-identical
-  content (same keywords) result in ONE merged file (not two) — assert the store has 1 entry and
-  both facts are present; (2) a test that two clearly-distinct `write`s still create two files (no
-  false-merge — the dangerous failure mode); (3) a test that `search` returns the single merged
-  entry once (no duplicate recall); (4) bench: on a multi-session workload that records overlapping
-  memories, the recalled-context token count drops at flat-or-up task pass-rate. NB: keep the
-  similarity threshold conservative (merge only on HIGH overlap — a false-merge that drops a fact
-  is worse than a duplicate); ship behind an **opt-in** profile flag (`consolidate_memory`) so a
-  too-aggressive merge is a toggle; no external embedding API (keeps the local-first guarantee).
+  line ~198: `list | read | write | delete | search`) and its storage (`~/.neko-core/memory/*.md`)
+  are a pure **append-only KV store**: every `write` creates/overwrites a whole file. There is no
+  notion that a new `write` might be a DUPLICATE or near-duplicate of an existing memory, and no
+  merging — so the store accumulates overlapping entries (three "user prefers X" notes across
+  sessions), and `search` re-surfaces all of them, inflating the cross-session context the agent
+  recalls before working. RecMem (Dai et al., arXiv 2605.16045) cuts this: store incoming
+  interactions, and only **consolidate (merge + summarize)** a memory when a semantically-similar
+  interaction RECURS — skipping heavy processing when no similar cluster exists; reported to cut
+  memory-construction token cost **up to 87% at higher accuracy**. Distinct from every existing
+  backlog item (none touch the `memory`/`workflow` store) and from in-session "decision notes"
+  (a single-session file): this is *cross-session dedup + merge* of the durable memory store. For
+  Neko, the training-free proxy: on `memory write`, before persisting, (a) run a cheap text-similarity
+  pass (token-overlap / keyword Jaccard, NO embedding model — keeps it local-first and dependency-
+  free) against the existing memory bodies; (b) if a high-similarity match exists, MERGE the new
+  note into that file (append a line, or rewrite the merged body) instead of creating a new file;
+  (c) if no match, write a new file as today. Optionally: tag memories with a last-touched date so
+  an LRU sweep can prune truly stale entries (the "decay" lever). **Verify**: (1) a unit test where
+  two `write` calls with near-identical content (same keywords) result in ONE merged file (not two)
+  — assert the store has 1 entry and both facts are present; (2) a test that two clearly-distinct
+  `write`s still create two files (no false-merge — the dangerous failure mode); (3) a test that
+  `search` returns the single merged entry once (no duplicate recall); (4) bench: on a multi-session
+  workload that records overlapping memories, the recalled-context token count drops at flat-or-up
+  task pass-rate. NB: keep the similarity threshold conservative (merge only on HIGH overlap — a
+  false-merge that drops a fact is worse than a duplicate); ship behind an **opt-in** profile flag
+  (`consolidate_memory`) so a too-aggressive merge is a toggle; no external embedding API (keeps the
+  local-first guarantee).
 
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->
@@ -649,4 +649,3 @@ one never blocks another.
 ---
 *If this list is empty or stale, the loop triggers a RESEARCH pass (web_search SOTA + new papers) and appends
 fresh items here.*
-

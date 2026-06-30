@@ -531,6 +531,62 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   (frontier models already surface the signal); a hard `tokenBudget` backstop covers the over-optimism.
   (See BACKLOG "Budget-aware early-stop of doomed trajectories (BAGEN).")
 
+## Token efficiency / context engineering — 2026-Q3 update #6 (RESEARCH pass)
+> Three fresh angles, none overlapping the existing 33-item backlog. One per DISTINCT axis:
+> harness *correctness before execution* (Gecko — pre-flight tool-arg validation + self-repair),
+> tool-result *signal integrity* (Silent Failures — no-op / fail-plausible detection), and
+> cross-session *memory efficiency* (RecMem — recurrence-based consolidation/merge). Each maps to a
+> unit-testable `## Research-seeded` BACKLOG item, and each gap was confirmed against `src/`.
+
+- **Gecko: A Simulation Environment with Stateful Feedback for Refining Agent Tool Calls** —
+  Zhang, Li, Xing, Apostolopoulos, Lee, Zheng, Feb 2026 ([arXiv 2602.19218](https://arxiv.org/abs/2602.19218)).
+  Names a class of waste prior harness work missed: tool calls dispatched with **malformed /
+  schema-invalid arguments** (a partial JSON, a missing required key) are executed, error, and
+  burn a full round-trip before the model learns its call was wrong. Gecko is a stateful
+  simulation env that validates tool **name + arguments** against a schema and returns
+  **state-consistent feedback** so the model *refines the call in simulation before real
+  execution* (the GATS test-time-scaling method, training-free). Improves LLMs on BFCLv3 + τ²-bench.
+  The transferable idea is the pre-execution validation + self-repair loop, not the simulator.
+  -> **Neko mapping:** `adapters/providers.ts` (~line 230) and `adapters/anthropic.ts` (~line 102)
+  `JSON.parse` tool `arguments` and on failure silently coerce to `{}` / `{_raw}`; the malformed
+  call then runs through `tools.execute()` and fails *post-hoc* inside `safeExecute()`. The
+  unexplored lever: validate args against the tool schema *before* the dispatch loop in `run()`
+  and feed a structured validation observation back for self-repair, skipping the wasted execute.
+  Distinct from every existing item (all fire AFTER a tool runs). (See BACKLOG "Pre-flight
+  tool-argument validation + self-repair (Gecko).")
+- **When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM
+  Agent Runtime** — Wu, Jun 2026 ([arXiv 2606.14589](https://arxiv.org/abs/2606.14589)). A
+  longitudinal study of **22 silent-failure incidents** in a production agent runtime (~40 jobs, 8
+  providers, 4,286 unit tests, 827 governance checks, continuous since Mar 2026). Findings: **~70%
+  of silent failures were caught only by human observation, not tests/audits**; **0% ex-ante
+  prevention but 87% regression-blocking**; incident latency 13h–60d; the longest-lived failures
+  live "in the seams between components, where no test runs." Five-class taxonomy; the most
+  dangerous class is **chained hallucination / "fail-plausible"** — the LLM turns an error or empty
+  result into a fluent, plausible *success* narrative. Defense principle: make failures "loud,
+  attributable, and boring" at the tool-result boundary.
+  -> **Neko mapping:** Neko has no notion of a *silent* failure — an action with no error but no
+  real progress. Concrete gaps: `edit`/`multi_edit` (`tool-runtime.ts` ~778-787) reject a
+  missing/non-unique `old_string` but NOT `old_string === new_string` (a no-op edit writes an
+  identical file and reports *success*); `write_file` of identical content reports success. The
+  distinct lever (vs doom-loop/recovery which fire on repeats/errors; vs the verify gate which
+  fires once at exit): flag the *absence of a signal* — reject no-op edits, tag empty tool results.
+  (See BACKLOG "No-op-edit detection + fail-plausible output guard (Silent Failures).")
+- **RecMem: Recurrence-based Memory Consolidation for Efficient and Effective Long-Running LLM
+  Agents** — Dai, Deng, Guan, Tian, Yao, Yan, Cheng, May 2026 ([arXiv 2605.16045](https://arxiv.org/abs/2605.16045)).
+  Long-running agents accumulate overlapping memory entries because every interaction is stored
+  eagerly. RecMem stores incoming interactions in a lightweight "subconscious" layer and only
+  invokes an LLM to **extract/consolidate** once semantically-similar interactions show **sustained
+  recurrence** (a cluster worth summarizing) — skipping heavy processing when no similar cluster
+  exists. **Reduces memory-construction token cost up to 87% at higher accuracy** than three SOTA
+  memory systems. The transferable idea is the merge-on-recurrence policy, not the LLM call itself.
+  -> **Neko mapping:** the `memory` tool (`core/tools.ts` ~198) is a pure append-only KV store
+  (`list|read|write|delete|search`, files in `~/.neko-core/memory/*.md`) — every `write` creates or
+  overwrites a whole file, with no dedup/merge, so overlapping notes accumulate and `search`
+  re-surfaces all of them. The distinct lever (vs in-session "decision notes"; vs all other items
+  which touch none of this): on `write`, merge into a high-similarity existing memory rather than
+  creating a duplicate, using cheap token-overlap (no embedding model — stays local-first).
+  (See BACKLOG "Recurrence-based memory consolidation (RecMem).")
+
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
 2. Find the closest existing Neko component (`compact()`, the tool schemas, the agent loop, a skill).
