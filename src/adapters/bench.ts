@@ -5,9 +5,11 @@
  * Model choice is the biggest quality lever; this makes that measurable instead of vibes.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { homeDir } from "../shared/home.ts";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
 import { ToolRegistry } from "../core/tool-runtime.ts";
@@ -74,10 +76,53 @@ const TASKS: BenchTask[] = [
     prompt: "Run `bun gen.mjs` — it prints one number. Create answer.txt whose entire content is that exact number.",
     verify: (d) => { const g = runJs(d, "gen.mjs"); const want = (g.out ?? "").trim(); const got = (read(d, "answer.txt") ?? "").trim(); return g.ok && want.length > 0 && got === want; },
   },
+  // ---- harder tier (cross-file, state, algorithms, careful reading) ----
+  {
+    id: "two-file-bug",
+    files: {
+      "geometry.mjs": "export function area(w, h) {\n  return w + h;\n}\n",
+      "app.mjs": "import { area } from './geometry.mjs';\nconsole.log(area(6, 7));\n",
+    },
+    prompt: "`bun app.mjs` should print the AREA of a 6x7 rectangle (42) but prints the wrong number. Fix the bug in geometry.mjs ONLY — do not edit app.mjs.",
+    verify: (d) => runJs(d, "app.mjs").out.trim() === "42" && (read(d, "app.mjs") ?? "").includes("area(6, 7)"),
+  },
+  {
+    id: "stateful-bug",
+    files: {
+      "counter.mjs": "export function makeCounter() {\n  let n = 0;\n  return { inc() { n + 1; return n; } };\n}\n",
+      "ct.mjs": "import assert from 'node:assert';\nimport { makeCounter } from './counter.mjs';\nconst a = makeCounter();\nassert.strictEqual(a.inc(), 1);\nassert.strictEqual(a.inc(), 2);\nassert.strictEqual(a.inc(), 3);\nconst b = makeCounter();\nassert.strictEqual(b.inc(), 1);\nconsole.log('ok');\n",
+    },
+    prompt: "Fix the bug in makeCounter (counter.mjs) so `bun ct.mjs` passes — inc() must return 1, then 2, then 3, and a fresh counter is independent. Do not modify ct.mjs.",
+    verify: (d) => runJs(d, "ct.mjs").out.includes("ok") && (read(d, "ct.mjs") ?? "").includes("a.inc(), 3"),
+  },
+  {
+    id: "unique-sorted",
+    files: { "uq.mjs": "import assert from 'node:assert';\nimport { uniqueSorted } from './unique.mjs';\nassert.deepStrictEqual(uniqueSorted([3,1,2,3,1]), [1,2,3]);\nassert.deepStrictEqual(uniqueSorted([]), []);\nassert.deepStrictEqual(uniqueSorted([-1,-1,0,5,5]), [-1,0,5]);\nconsole.log('ok');\n" },
+    prompt: "Create unique.mjs exporting uniqueSorted(arr): return the array's DISTINCT numbers in ascending order. Make `bun uq.mjs` pass (do not modify uq.mjs).",
+    verify: (d) => runJs(d, "uq.mjs").out.includes("ok"),
+  },
+  {
+    id: "balanced-parens",
+    files: { "bp.mjs": "import assert from 'node:assert';\nimport { isBalanced } from './paren.mjs';\nassert.strictEqual(isBalanced('([]{})'), true);\nassert.strictEqual(isBalanced('([)]'), false);\nassert.strictEqual(isBalanced('((('), false);\nassert.strictEqual(isBalanced(''), true);\nconsole.log('ok');\n" },
+    prompt: "Create paren.mjs exporting isBalanced(s): true iff the brackets ()[]{} in s are correctly matched and nested. Make `bun bp.mjs` pass.",
+    verify: (d) => runJs(d, "bp.mjs").out.includes("ok"),
+  },
+  {
+    id: "csv-top",
+    files: { "data.csv": "name,score\nAlice,80\nBob,95\nCara,70\n" },
+    prompt: "Read data.csv (a header line, then name,score rows). Write top.txt whose ENTIRE content is the NAME with the highest score.",
+    verify: (d) => (read(d, "top.txt") ?? "").trim() === "Bob",
+  },
+  {
+    id: "careful-read",
+    files: {},
+    prompt: "Create out.txt whose content is the word 'banana' REVERSED and then UPPERCASED (the letters of 'banana' in reverse order, all capitals).",
+    verify: (d) => (read(d, "out.txt") ?? "").trim() === "ANANAB",
+  },
 ];
 
-export interface BenchResult { id: string; passes: number; trials: number; tokens: number; }
-export interface BenchReport { model: string; trials: number; results: BenchResult[]; passed: number; total: number; tokens: number; seconds: number; }
+export interface BenchResult { id: string; passes: number; trials: number; tokens: number; inTok: number; outTok: number; calls: number; ms: number; }
+export interface BenchReport { model: string; effort: string; trials: number; results: BenchResult[]; passed: number; total: number; tokens: number; inTok: number; outTok: number; calls: number; seconds: number; }
 
 /** Run the benchmark against the configured model. Each task runs `trials` times (single-run pass@1
  * is noisy — reliability science), each in its own temp dir. */
@@ -88,7 +133,7 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number } = {}, 
   const results: BenchResult[] = [];
   try {
     for (const task of TASKS) {
-      let passes = 0, tokens = 0;
+      let passes = 0, tokens = 0, inTok = 0, outTok = 0, calls = 0, ms = 0;
       for (let t = 0; t < trials; t++) {
         const dir = join(root, `${task.id}-${t}`);
         mkdirSync(dir, { recursive: true });
@@ -96,23 +141,48 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number } = {}, 
         onProgress?.(`  ${task.id}${trials > 1 ? ` [${t + 1}/${trials}]` : ""} ...`);
         const registry = new ToolRegistry(dir, "auto", async () => true);
         const agent = new Agent({ provider: getProvider(cfg), tools: registry, maxSteps: cfg.maxSteps, systemPrompt: DEFAULT_SYSTEM_PROMPT });
+        const tStart = Date.now();
         let pass = false, err = "";
         try { await agent.run(task.prompt); pass = task.verify(dir); } catch (e) { err = e instanceof Error ? e.message : String(e); }
+        ms += Date.now() - tStart;
         if (pass) passes++;
-        tokens += agent.cost.totalTokens;
+        tokens += agent.cost.totalTokens; inTok += agent.cost.promptTokens; outTok += agent.cost.completionTokens; calls += agent.cost.calls;
         // Surface a thrown error (e.g. HTTP 401/timeout) — a swallowed exception used to read as a plain
         // "0/1 fail", which hid real problems (a bad key looked like the model failing).
         if (err) onProgress?.(`    ! ${task.id} ERRORED: ${err.replace(/\s+/g, " ").slice(0, 140)}`);
       }
-      results.push({ id: task.id, passes, trials, tokens });
-      onProgress?.(`  ${task.id} -> ${passes}/${trials} (${tokens} tok)`);
+      results.push({ id: task.id, passes, trials, tokens, inTok, outTok, calls, ms });
+      const tps = ms > 0 ? Math.round((outTok / ms) * 1000) : 0;
+      onProgress?.(`  ${task.id} -> ${passes}/${trials}  ${(ms / trials / 1000).toFixed(1)}s  ${tokens} tok (${outTok} out, ${tps} tok/s)  ${(calls / trials).toFixed(0)} calls`);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-  const passed = results.reduce((a, r) => a + r.passes, 0);
-  const total = results.reduce((a, r) => a + r.trials, 0);
-  return { model: cfg.model, trials, results, passed, total, tokens: results.reduce((a, r) => a + r.tokens, 0), seconds: (Date.now() - t0) / 1000 };
+  const sum = (f: (r: BenchResult) => number) => results.reduce((a, r) => a + f(r), 0);
+  const report: BenchReport = {
+    model: cfg.model, effort: cfg.effort || "off", trials, results,
+    passed: sum((r) => r.passes), total: sum((r) => r.trials),
+    tokens: sum((r) => r.tokens), inTok: sum((r) => r.inTok), outTok: sum((r) => r.outTok), calls: sum((r) => r.calls),
+    seconds: (Date.now() - t0) / 1000,
+  };
+  appendBenchLog(report);
+  return report;
+}
+
+/** Dev-log: append each bench run as one JSON line to ~/.neko-core/bench-log.jsonl, so self-improvement is
+ * MEASURABLE over time — diff two runs to see if a harness change moved pass-rate, tokens, speed, or steps. */
+function appendBenchLog(r: BenchReport): void {
+  try {
+    const dir = join(homeDir(), ".neko-core");
+    mkdirSync(dir, { recursive: true });
+    const rec = {
+      ts: new Date().toISOString(), model: r.model, effort: r.effort, pass: r.passed, total: r.total,
+      seconds: Math.round(r.seconds), tokens: r.tokens, inTok: r.inTok, outTok: r.outTok, calls: r.calls,
+      tokPerSec: r.seconds > 0 ? Math.round(r.outTok / r.seconds) : 0,
+      tasks: r.results.map((x) => ({ id: x.id, pass: x.passes, trials: x.trials, ms: x.ms, inTok: x.inTok, outTok: x.outTok, calls: x.calls })),
+    };
+    appendFileSync(join(dir, "bench-log.jsonl"), JSON.stringify(rec) + "\n", "utf8");
+  } catch { /* a logging failure must never break the bench */ }
 }
 
 // ---- Harness-lift: the SAME tasks run RAW (model only, no tools/loop) vs +NEKO (tools + agentic loop).
@@ -176,9 +246,13 @@ export function renderLiftReport(r: LiftReport): string {
 }
 
 export function renderBenchReport(r: BenchReport): string {
-  const rows = r.results
-    .map((x) => `  ${x.passes === x.trials ? "PASS " : x.passes === 0 ? "FAIL " : "FLAKY"}  ${x.id.padEnd(12)} ${x.passes}/${x.trials}  ${String(x.tokens).padStart(6)} tok`)
-    .join("\n");
+  const rows = r.results.map((x) => {
+    const tag = x.passes === x.trials ? "PASS " : x.passes === 0 ? "FAIL " : "FLAKY";
+    const s = (x.ms / x.trials / 1000).toFixed(1);
+    const tps = x.ms > 0 ? Math.round((x.outTok / x.ms) * 1000) : 0;
+    return `  ${tag}  ${x.id.padEnd(14)} ${x.passes}/${x.trials}  ${s.padStart(5)}s  ${String(x.tokens).padStart(6)} tok  ${String(tps).padStart(4)} tok/s  ${String(Math.round(x.calls / x.trials)).padStart(2)} steps`;
+  }).join("\n");
   const pct = r.total ? Math.round((r.passed / r.total) * 100) : 0;
-  return `Neko-bench :: ${r.model}  (${r.trials} trial${r.trials > 1 ? "s" : ""}/task)\n${rows}\n  ----------------------------------\n  pass@1: ${r.passed}/${r.total} (${pct}%)   ${r.tokens} tok   ${r.seconds.toFixed(0)}s`;
+  const tps = r.seconds > 0 ? Math.round(r.outTok / r.seconds) : 0;
+  return `Neko-bench :: ${r.model} (effort ${r.effort}, ${r.trials} trial${r.trials > 1 ? "s" : ""}/task)\n${rows}\n  --------------------------------------------------------------\n  pass@1: ${r.passed}/${r.total} (${pct}%)   ${r.tokens} tok (in ${r.inTok}/out ${r.outTok})   ${tps} tok/s   ${r.calls} steps   ${r.seconds.toFixed(0)}s\n  (metrics appended to ~/.neko-core/bench-log.jsonl)`;
 }
