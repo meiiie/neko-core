@@ -24,6 +24,20 @@ test("isLocalEndpoint detects local model servers (no key needed)", () => {
   expect(loadConfig({ path: tmpConfig({ base_url: "https://integrate.api.nvidia.com/v1" }) }).isLocalEndpoint).toBe(false);
 });
 
+test("visionModel: explicit vision_model wins; NVIDIA gets a verified default; else empty", () => {
+  expect(loadConfig({ path: tmpConfig({ vision_model: "my/vlm" }) }).visionModel).toBe("my/vlm");
+  expect(loadConfig({ path: tmpConfig({ base_url: "https://integrate.api.nvidia.com/v1" }) }).visionModel).toBe("nvidia/llama-3.1-nemotron-nano-vl-8b-v1");
+  expect(loadConfig({ path: tmpConfig({ base_url: "https://api.openai.com/v1" }) }).visionModel).toBe("");
+});
+
+test("withModel clones the config at a different model, same endpoint, original unchanged", () => {
+  const cfg = loadConfig({ path: tmpConfig({ base_url: "https://x/v1", model: "main" }) });
+  const v = cfg.withModel("vision-x");
+  expect(v.model).toBe("vision-x");
+  expect(v.baseUrl).toBe("https://x/v1");
+  expect(cfg.model).toBe("main");
+});
+
 test("mcp_allow / mcp_deny parse to string arrays", () => {
   const cfg = loadConfig({ path: tmpConfig({ mcp_allow: ["fs"], mcp_deny: ["fs__delete", "danger"] }) });
   expect(cfg.mcpAllow).toEqual(["fs"]);

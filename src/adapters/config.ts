@@ -90,6 +90,17 @@ export class NekoConfig {
 
   get provider(): string { return String(this.data.provider ?? "openai_compat"); }
   get model(): string { return String(this.data.model ?? "").trim(); }
+  /** Model for a VISION pre-pass (reading an image into text the main agent can use): `vision_model`
+   * config, else a verified-good default on an NVIDIA endpoint, else "" (no auto vision). */
+  get visionModel(): string {
+    const set = String(this.data.vision_model ?? "").trim();
+    if (set) return set;
+    return /nvidia/i.test(this.baseUrl) ? "nvidia/llama-3.1-nemotron-nano-vl-8b-v1" : "";
+  }
+  /** A clone of this config pointing at a different model (same endpoint + key) — e.g. the vision pre-pass. */
+  withModel(model: string): NekoConfig {
+    return new NekoConfig({ ...this.data, model }, this.profile, this.profiles, this.apiKey);
+  }
   get baseUrl(): string { return String(this.data.base_url ?? "").replace(/\/+$/, ""); }
   /** A local model server (Ollama/llama.cpp/LM Studio/vLLM) — no API key required. */
   get isLocalEndpoint(): boolean {

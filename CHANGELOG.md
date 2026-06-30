@@ -6,13 +6,15 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
-### Added
-- **`neko run --image <path>` — image tasks from the CLI (perception mode)** — attach one or more images to a
-  one-shot run; it goes through a perception path with NO tools (a vision-only endpoint 400s if sent any
-  tools). Use a vision model — verified end to end: `NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko
-  run --image pkg.jpg "what is this?"` read a SanDisk pack as "Cruzer Blade 16GB USB 2.0" (matching ChatGPT).
-  So image→SKU→price is two clean steps: `--image` perceives the product, then a normal `neko run` searches
-  by the inferred SKU.
+- **`neko run --image <path>` — image→price in ONE automatic command** — attach image(s) to a one-shot run.
+  Neko runs a **vision pre-pass** (a vision model reads the image into text) and then hands that text to the
+  normal tool-using agent, which searches/prices it — so a text model that can't see and a vision endpoint
+  that can't tool-call combine into one command. The vision model is `vision_model` config, defaulting to the
+  verified `nvidia/llama-3.1-nemotron-nano-vl-8b-v1` on an NVIDIA endpoint (a new `NekoConfig.withModel` clones
+  the config at that model). Verified end to end: `neko run --image pack.jpg "tìm giá rẻ nhất VN"` -> the
+  vision pass read "SanDisk Cruzer Blade 16GB", the agent then web-searched the CZ50 and priced it. If no
+  vision model is available, the image run is a pure perception pass (no tools, since vision-only endpoints
+  reject tool-calling).
 - **Computer-use act→verify (deterministic) — the desktop analogue of "LLM extracts, code computes"** — a
   state-changing UIA action no longer trusts that it worked: `setvalue` reads the value back and asserts it
   landed (a read-only field is caught up front; rejected / reformatted / masked / truncated input becomes a
