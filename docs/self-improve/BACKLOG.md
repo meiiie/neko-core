@@ -75,6 +75,46 @@ one never blocks another.
   before/after token count of the skills block in the system prompt drops (a test asserts the
   compressed descriptions stay under N chars while covering all trigger keywords); bench pass-rate
   flat-or-up (the less-is-more effect).
+- [ ] **Anchor-preserving compaction (ACC-style).** `compact()`/`shrinkOldObservations` clip purely by
+  age/size (KEEP_TAIL, 40-line/8K-char caps) — size-blind to *importance*, so the summarizer can silently
+  drop the one error message / target value / stated decision the rest of the task hinges on (brevity
+  bias). Add an *anchor-extraction* pass to the existing summarizer call: when building the head text to
+  summarize, also ask the model to extract a compact **"Reasoning anchors"** block (verbatim error
+  strings, target values, key decisions) and **concatenate it onto the summary** so it survives the
+  prune. Distinct from ACON (*which* observation to clip, learned from failure) and "decision notes" (a
+  separate session file): this is *in-line importance tagging* inside the single summarizer prompt that
+  already runs. (Active Context Curation, arXiv 2604.11462, kept sparse anchors through every prune for
+  +4.8pp WebArena at -8.8% tokens.) Verify: a unit test where the head contains a distinctive error
+  string + target value; force `compact()`; assert BOTH appear verbatim in the resulting summary (fails
+  today — the summarizer drops them). Then assert bench `in` tokens not worse and pass-rate flat-or-up
+  (anchors are sparse, so the summary barely grows).
+- [ ] **Falsifiable-prediction gate in the self-improve loop (AHE decision-observability).** Today the
+  loop commits a self-change iff the verify gate passes (`typecheck + tests + policy`) plus a qualitative
+  peer-review ("is this a real improvement, any regression risk?"). That accepts *neutral* changes as
+  readily as real wins and judges the diff, not whether the *stated outcome* materialized — so the loop
+  can drift on placebo edits. Borrow AHE's *decision observability* (arXiv 2604.25850, beat Codex-CLI on
+  Terminal-Bench 2 this way): before editing, the loop **states a falsifiable prediction** ("this trims
+  ~X% bench `in` tokens at flat pass-rate" / "this fixes failing case Y"); after the verify gate, it
+  **compares the prediction to the actual bench delta** (from `~/.neko-core/bench-log.jsonl`) and records
+  the verdict (MET / NOT-MET / NEUTRAL) in STATE.md, committing only on MET-or-confirmed-NEUTRAL.
+  Distinct from the existing peer-review: peer-review judges the *diff* qualitatively; this checks the
+  *stated outcome* quantitatively against the bench. Verify: a scripts-level test where a stubbed change's
+  stated prediction ("−10% in-tokens") is checked against a stubbed bench delta (−2%) — assert the gate
+  logs NOT-MET and does NOT commit; assert it DOES commit when delta meets the prediction. Pure
+  self-improve-harness logic — no agent-loop change.
+- [ ] **Tool-schema notation optimization (TRON-style "Notation Matters").** Distinct from the existing
+  "Token audit of system prompt + tool schemas" Now-item (which targets *content* redundancy/dedup):
+  this targets the **notation/format** overhead. JSON schemas carry structural tokens (`"type"`,
+  `"properties"`, quotes, braces) that purpose-built notations cut. "Notation Matters" (arXiv 2605.29676,
+  May 2026) found **TRON trims up to 27% of schema tokens at ≤14pp accuracy cost**; critically it also
+  shows some compact formats (TOON) *cascade-parse-fail in multi-turn + parallel tool-call* settings —
+  so any change must be validated end-to-end, not just on token count. For Neko: measure the fixed
+  per-turn cost of `tools.schemas()`; try a conservative, OpenAI-compatible compaction (drop redundant
+  `"type":"string"` defaults, shorten repetitive keys, elide optional fields the model never misuses)
+  rather than a foreign notation that would break the chat template. Verify: (1) a token-count test
+  asserting the serialized schema shrank; (2) the *existing* tool-call unit tests still pass (the model
+  still emits well-formed calls); (3) bench pass-rate flat (catches the TOON-style cascade failure).
+  Bench `in` tokens should drop on every tool-bearing step.
 
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->

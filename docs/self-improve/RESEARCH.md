@@ -43,6 +43,32 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   upfront; an index+retrieve split is the unexplored win (caveat: the codebase map genuinely helps
   upfront, so scope carefully).
 
+## Self-improving agents — harness-level evolution (2026-Q2 update)
+- **Agentic Harness Engineering (AHE): Observability-Driven Automatic Evolution of Coding-Agent
+  Harnesses** — Apr 2026 ([arXiv 2604.25850](https://arxiv.org/abs/2604.25850)). Distinct from
+  DGM (which evolves the *agent* code) and ACE (which evolves the *context*): AHE evolves the
+  *harness* — tools, middleware, long-term memory — and crucially pairs **every edit with a
+  self-declared prediction that is later verified against task outcomes** (a "falsifiable
+  contract"), so evolution is evidence-anchored rather than blind trial-and-error. Three
+  observability pillars: *component* (every editable part has a file-level representation so edits
+  are revertible), *experience* (raw trajectory tokens distilled into a layered drill-down
+  evidence corpus), *decision* (the prediction/verify pairing). **Terminal-Bench 2 69.7%→77.0%**,
+  beating Codex-CLI (71.9%); **+5.1–10.1pp cross-family transfer** without re-evolution;
+  **12% fewer tokens** on SWE-bench. Key negative finding: **gains came from tools/middleware/
+  memory, NOT the system prompt** — factual harness structure transfers, prose-level strategy
+  does not.
+  → **Neko mapping:** (1) **Decision-observability for our self-improve loop** — today the loop
+  commits a change iff `typecheck + test + bench` pass (a pass/fail gate). AHE says: also have the
+  loop *state a falsifiable prediction* ("this cut ~X% bench `in` tokens at flat pass-rate") and
+  *check it against the actual bench delta* before keeping the commit — turning each item into a
+  contract, not a vibe. (2) **Experience-observability** — distill our bench/trajectory logs into
+  a small evidence corpus the loop reads before proposing (we currently re-derive from scratch).
+  (See BACKLOG "Falsifiable-prediction self-improve gate" + "Trajectory-distilled evidence index.")
+- **HyperAgents** (Meta) — critiques DGM's *hand-crafted, non-modifiable* meta-mechanism and
+  proposes making the improvement *process itself* evolvable. → reinforces the AHE direction: the
+  verify gate + bench (our meta-mechanism) should itself be a first-class editable, versioned
+  component.
+
 ## Token efficiency / context engineering (direct token wins)
 - **ACON** ([arXiv 2510.00615](https://arxiv.org/abs/2510.00615)) — optimize context compression by
   **iteratively refining compression guidelines from FAILURE analysis**; 26-54% peak-token cut *and* higher
@@ -98,8 +124,22 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   **brevity bias** (summaries dropping insights) and **context collapse** (iterative rewriting eroding detail).
   Adapts *label-free*, from natural execution feedback. +10.6% on agents.
   → **Neko mapping:** Neko's `playbook`/`memory`/`workflow` are *manually* written; ACE's structured
-  curation-from-failures is the unexplored lever — and its "reflection-before-exit" is exactly the verify-gate
-  idea. (See BACKLOG "Pre-completion verification gate"; informs a future "evolving playbook" item.)
+    curation-from-failures is the unexplored lever — and its "reflection-before-exit" is exactly the verify-gate
+    idea. (See BACKLOG "Pre-completion verification gate"; informs a future "evolving playbook" item.)
+- **Escaping the Context Bottleneck: Active Context Curation for LLM Agents via Reinforcement Learning**
+  — 2026 ([arXiv 2604.11462](https://arxiv.org/abs/2604.11462)). Trains a tiny **ContextCurator** policy
+  (a 7B model matches GPT-4o's context management) that, each step, splits working memory into **reasoning
+  anchors** (sparse, decision-critical data to *keep*) vs **environmental noise** (to *prune*). WebArena
+  36.4%→41.2% @ -8.8% tokens; DeepSearch 53.9%→57.1% @ **8× fewer tokens**. The key transferable idea is
+  the *category distinction*, not the RL: most context is "noise" that's safe to drop, but a few anchors
+  must survive every prune.
+  → **Neko mapping:** Neko's `compact()`/`shrinkOldObservations` clip by *age/size* (KEEP_TAIL, line/char
+  caps) — size-blind to *importance*. The unexplored lever: an **anchor-preserving compaction** that, at
+  compact time, first *extracts the reasoning anchors* from the about-to-be-summarized head (error
+  messages, target values, a stated decision) and *concatenates them onto the summary*, so compaction
+  stops silently dropping the one number/error the rest of the task hinges on. Distinct from ACON
+  (which-to-clip from failures) and "decision notes" (a separate file): this is *in-line* anchor tagging
+  inside the existing summarizer prompt. (See BACKLOG "Anchor-preserving compaction.")
 - **AgentDiet: Reducing Cost of LLM Agents with Trajectory Reduction** — Xiao et al., Mar 2026
   ([arXiv 2509.23586](https://arxiv.org/abs/2509.23586)). Identifies three waste classes in agent trajectories —
   **useless, redundant, expired** info — and strips them at inference time. **-39.9% to -59.7% input tokens,
@@ -113,7 +153,20 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   missing ones via adversarial delta-debugging), restructure bodies into actionable core + on-demand supplementary
   (progressive disclosure). **48% description / 39% body compression AND +2.8% functional quality** (less-is-more).
   → **Neko mapping:** Neko skills already do progressive disclosure at the *skill* level; SkillReducer pushes it
-  to the *description + body* level. (See BACKLOG "Skill description + body compression.")
+    to the *description + body* level. (See BACKLOG "Skill description + body compression.")
+- **Notation Matters: A Benchmark Study of Token-Optimized Formats in Agentic AI Systems** —
+  Kutschka & Geiger, May 2026 ([arXiv 2605.29676](https://arxiv.org/abs/2605.29676)). JSON tool
+  schemas/results carry structural token overhead (`"type"`, `"properties"`, braces) — purpose-built
+  notations cut it. **TRON trims up to 27% of schema tokens at ≤14pp accuracy cost**; **TOON ~18% at
+  ~9pp but cascades on multi-turn parse failures and breaks parallel tool calls** for most models. The
+  methodological lesson: input-compression (does the model *understand* a compact schema?) and
+  output-generation (can it *produce* one?) must be measured separately, and formats validated
+  end-to-end in the loop, not just on isolated tasks.
+  → **Neko mapping:** targets the *notation/format* of `tools.schemas()`, distinct from a content
+  dedup audit. Use conservative OpenAI-compatible compaction (drop redundant `"type":"string"`
+  defaults, shorten repetitive keys) rather than a foreign notation that breaks the chat template —
+  and validate against the tool-call unit tests + bench, not just token count. (See BACKLOG
+  "Tool-schema notation optimization.")
 
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
