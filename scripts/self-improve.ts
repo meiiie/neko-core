@@ -18,7 +18,7 @@
  *   --max 0 = infinite. Ctrl+C to stop.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 const arg = (n: string, d: string) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
 const PROFILE = arg("--profile", "zai");
@@ -54,20 +54,45 @@ function verifyGate(): { ok: boolean; why?: string; out?: string } {
   return { ok: true };
 }
 
-// Rotating, diverse goals — each must be SMALL, self-contained, verifiable, and must not break tests.
-const GOALS = [
-  "Review the Neko codebase and find ONE concrete, SMALL improvement: a real bug, a clarity fix, or a robustness hardening. Implement it minimally and self-contained. Adjust/add a focused test if relevant. Do NOT break typecheck or any existing test. End with a one-line summary of what changed and why.",
-  "Find ONE function or branch in src/ that lacks a test or whose edge cases are untested, and add a single focused, deterministic test for it. Do not change behavior; do not break existing tests.",
-  "Find ONE place in src/ that could mishandle bad/empty/oversized input or a failure, and harden it (validate, guard, or surface a clear error) without changing the happy path. Add a test for the bad-input case.",
-  "Find ONE small performance or token-efficiency win in src/ (an avoidable allocation, a redundant call, a needlessly large prompt) and implement it without changing behavior. Note the before/after rationale.",
-  "Find ONE unclear comment, doc, or skill instruction that would slow down future work, and improve it concisely and accurately. No behavior change.",
-  "Improve the agent HARNESS in one concrete way (the loop, a tool's contract, an observation, or a skill) so the model is more reliable — minimal, verified, tested. Don't regress existing tests.",
-];
+const STUCK_AFTER = Number(arg("--stuck-after", "3")); // research pass after this many no-improvement rounds
+const PREAMBLE =
+  "FIRST read docs/self-improve/STATE.md, BACKLOG.md and HARNESS.md to orient (what you are, where you are, " +
+  "the levers). THEN do the task below. Keep the change SMALL, self-contained, and VERIFIABLE; do NOT break " +
+  "typecheck or any existing test (the change is auto-reverted if you do). After, append ONE line to the " +
+  "'## Last moves' section of docs/self-improve/STATE.md noting what you changed and why.\n\nTASK: ";
 
-async function pickGoal(iter: number): Promise<string> {
-  // Prefer a CONCRETE failing-bench signal when one exists; else rotate the self-critique goals.
-  // (Bench is slow, so we only consult it occasionally, on iteration 1 and every BENCH_EVERY.)
-  return GOALS[iter % GOALS.length];
+// Rotating self-critique goals (the fallback engine when the backlog is empty) — each small + verifiable.
+const GOALS = [
+  "Find ONE concrete improvement in src/: a real bug, a clarity fix, or a robustness hardening. Implement it, add/adjust a focused test if relevant.",
+  "Find ONE function/branch in src/ that lacks a test or whose edge cases are untested, and add a single focused deterministic test. Do not change behavior.",
+  "Find ONE place in src/ that could mishandle bad/empty/oversized input or a failure, and harden it (validate/guard/clear error) without changing the happy path. Add a bad-input test.",
+  "Find ONE token-efficiency win in src/ (a needlessly large prompt/schema, a redundant observation) and implement it without changing behavior. Measure with `neko bench` if useful.",
+  "Improve the agent HARNESS in one concrete way (the loop, a tool contract, an observation, compaction, or a skill) per docs/self-improve/HARNESS.md — minimal, verified, tested.",
+];
+// When STUCK (no improvement for STUCK_AFTER rounds), Neko self-researches the latest SOTA and refills the backlog.
+const GOAL_RESEARCH =
+  "RESEARCH PASS (no src/ changes this round). The improvement backlog is running dry — go find fresh ideas. " +
+  "Use web_search to survey the LATEST SOTA on LLM-agent token efficiency, context engineering, harness/scaffold " +
+  "design, and self-improving agents (read titles + abstracts of recent papers). Pick 3 concrete, VERIFIABLE " +
+  "improvements for Neko (each: what to change + how the bench/tests prove it helped) and APPEND them as `- [ ] ` " +
+  "items under '## Research-seeded' in docs/self-improve/BACKLOG.md. Note the key papers (title + link + 1-line " +
+  "Neko mapping) in docs/self-improve/RESEARCH.md. Do not edit src/ — this round is research + backlog only.";
+
+/** First unchecked `- [ ] ` item from the backlog (the loop's preferred concrete goal), or "" if none. */
+function backlogGoal(): string {
+  try {
+    const p = "docs/self-improve/BACKLOG.md";
+    if (!existsSync(p)) return "";
+    const m = readFileSync(p, "utf8").split("\n").find((l) => /^\s*-\s*\[ \]\s+/.test(l));
+    return m ? m.replace(/^\s*-\s*\[ \]\s+/, "").trim() : "";
+  } catch { return ""; }
+}
+
+function pickGoal(iter: number, stuck: boolean): string {
+  if (stuck) return GOAL_RESEARCH; // out of ideas -> self-research SOTA, refill the backlog
+  const b = backlogGoal();
+  if (b) return PREAMBLE + "Implement this backlog item, then mark it [x] in docs/self-improve/BACKLOG.md with the commit rationale: " + b;
+  return PREAMBLE + GOALS[iter % GOALS.length];
 }
 
 async function runNeko(goal: string) {
@@ -77,12 +102,13 @@ async function runNeko(goal: string) {
 async function main() {
   ensureBranch();
   log(`START self-improve  profile=${PROFILE} branch=${BRANCH} max=${MAX === Infinity ? "inf" : MAX} sleep=${SLEEP_S}s`);
-  let iter = 0, commits = 0, rlBackoff = 900; // rate-limit backoff grows 900s -> capped at 24h
+  let iter = 0, commits = 0, noImprove = 0, rlBackoff = 900; // rate-limit backoff grows 900s -> capped at 24h
   while (iter < MAX) {
     iter++;
     if (gitDirty()) { log("dirty at iter start -> revert to clean baseline"); revert(); }
-    const goal = await pickGoal(iter);
-    log(`iter ${iter}: neko run (${goal.slice(0, 60)}...)`);
+    const stuck = noImprove >= STUCK_AFTER;
+    const goal = pickGoal(iter, stuck);
+    log(`iter ${iter}${stuck ? " [STUCK -> self-research SOTA]" : ""}: neko run (${goal.slice(0, 70)}...)`);
     const run = await runNeko(goal);
 
     if (isRateLimit(run.out)) {
@@ -91,14 +117,14 @@ async function main() {
     }
     rlBackoff = 900; // a non-rate-limited run resets the backoff
     if (!run.ok && isTransient(run.out)) { log(`transient error -> revert + short retry. ${run.out.slice(-160).replace(/\s+/g, " ")}`); revert(); await sleep(SLEEP_S); continue; }
-    if (!gitDirty()) { log("no change produced -> next goal"); await sleep(SLEEP_S); continue; }
+    if (!gitDirty()) { log("no change produced -> next goal"); noImprove++; await sleep(SLEEP_S); continue; }
 
     const v = verifyGate();
-    if (!v.ok) { log(`VERIFY FAILED (${v.why}) -> revert. ${(v.out ?? "").replace(/\s+/g, " ").slice(0, 200)}`); revert(); await sleep(SLEEP_S); continue; }
+    if (!v.ok) { log(`VERIFY FAILED (${v.why}) -> revert. ${(v.out ?? "").replace(/\s+/g, " ").slice(0, 200)}`); revert(); noImprove++; await sleep(SLEEP_S); continue; }
 
     sh("git", ["add", "-A"]);
     const c = sh("git", ["commit", "-m", `self-improve: verified change (iter ${iter}) [auto]\n\nGoal: ${goal.slice(0, 80)}`]);
-    commits++;
+    commits++; noImprove = 0; // a green commit = real progress; resets the stuck counter
     log(`COMMIT #${commits} (iter ${iter}): green change committed to ${BRANCH}. ${c.ok ? "ok" : c.out.slice(-120)}`);
 
     if (BENCH_EVERY > 0 && commits % BENCH_EVERY === 0) {
