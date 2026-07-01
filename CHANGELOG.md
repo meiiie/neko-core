@@ -6,6 +6,12 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+- **Horizontal gutter — the UI is inset from the terminal edges** — the whole REPL (transcript + live region)
+  now sits inside a left/right padding instead of running flush against column 0, matching Claude Code's
+  `paddingLeft={2}`. `<Static>` inherits the wrapper Box's padding, so one change indents both the committed
+  history and the live area; width-sensitive rendering (markdown tables, dividers, the stream clamp) uses the
+  padded inner width.
+
 - **Long generations no longer time out mid-stream ("The operation timed out")** — the request timeout was a
   TOTAL cap (`AbortSignal.timeout(timeout_seconds)`) applied to the whole streamed response, so a legitimately
   long generation (e.g. a landing page across 3 files) was aborted once it crossed `timeout_seconds` (120s) even

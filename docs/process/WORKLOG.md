@@ -3,6 +3,22 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-02 — Horizontal gutter; live-verified the idle-timeout fix
+
+Confirmed the idle-timeout fix end to end: a `neko run` on glm-5.2 asked for a professional 3-file landing
+page — the exact task that previously died with "The operation timed out" — and it **completed** (index.html
+432 lines, styles.css 386, script.js 156; 34.5k tokens / 16 calls; exit 0; the agent even opened the page in
+a browser to screenshot it). The idle timeout held across a multi-minute generation.
+
+**Horizontal gutter** (Claude Code uses `paddingLeft={2}` on its REPL container): Neko's UI ran flush against
+column 0. Added `paddingLeft/paddingRight` to the root Box — verified empirically that Ink's `<Static>`
+inherits a parent Box's padding, so one wrapper indents both the committed transcript and the live region.
+Width-sensitive rendering switched to `contentCols` (= `cols - gutter*2`) so tables/dividers/the stream clamp
+fit the inset width. Also hardened the async-tool UI tests (bash/plan approval) to poll-until-condition instead
+of a fixed tick — git-bash's heavier spawn makes a fixed wait flaky. (Note: those two tests can still flake when
+the machine is badly saturated — e.g. right after a live browser-driving run leaves orphaned node processes —
+but pass in isolation and on a healthy machine; the gutter was ruled out as the cause via an A/B run.)
+
 ## 2026-07-01 — Idle timeout (mid-stream abort fix), todo de-dup
 
 A real functional bug surfaced by dogfooding (a "make me a landing page" run failed with **"The operation
