@@ -1,6 +1,7 @@
 ---
 name: web-reach
 description: Read or search a SPECIFIC internet platform the right way - YouTube (transcripts, not the page), Twitter/X, Reddit, Facebook/Instagram feeds, GitHub repos/issues, Bilibili, XiaoHongShu, LinkedIn, RSS, podcasts - by ROUTING to the best FREE backend instead of blindly scraping the SPA. Recognize the platform from the URL or the ask, pick the specialized tool (yt-dlp for YouTube subs, gh for GitHub, agent-reach for login/social), and only fall back to web_fetch markdown for a generic page. For "doc/lay/tom tat/tim tren youtube, twitter/X, reddit, facebook, instagram, github, bilibili, tiktok, linkedin, RSS...". (doc va tim noi dung theo tung nen tang - dung dung cong cu, khong cao SPA).
+match: youtube\.com|youtu\.be|twitter\.com|reddit\.com|facebook\.com|instagram\.com|bilibili\.com|tiktok\.com|linkedin\.com|github\.com|xiaohongshu|\byoutube\b|\btwitter\b|\breddit\b|\bfacebook\b|\binstagram\b|\bbilibili\b|\btiktok\b|\blinkedin\b|\bgithub\b|\btweet|transcript|rss feed|\brss\b
 ---
 
 # Skill: Web reach (route each platform to the right free backend)

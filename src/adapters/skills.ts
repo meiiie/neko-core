@@ -12,6 +12,8 @@ export interface Skill {
   description: string;
   body: string;
   dir: string; // the skill's own directory — so bundled scripts/assets can be run by absolute path
+  match?: string; // optional frontmatter regex: an unambiguous trigger that deterministically loads this
+                  // skill (e.g. a platform URL for web-reach), where description token-overlap is too coarse.
 }
 
 function skillDirs(): string[] {
@@ -35,6 +37,7 @@ function parse(file: string): Skill | null {
   let body = text;
   // CRLF-tolerant: a skill authored on Windows (Notepad -> \r\n) must still have its frontmatter parsed,
   // or its name/description are lost and matchSkill (which keys on description) can't find it.
+  let match: string | undefined;
   const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (fm) {
     body = fm[2];
@@ -42,9 +45,11 @@ function parse(file: string): Skill | null {
     if (n) name = n[1].trim();
     const d = fm[1].match(/^description:\s*(.+)$/m);
     if (d) description = d[1].trim();
+    const m = fm[1].match(/^match:\s*(.+)$/m);
+    if (m) match = m[1].trim();
   }
   if (description === ">" || description === "|") description = ""; // YAML block scalar marker
-  return { name, description: description.replace(/\s+/g, " ").slice(0, 120), body: body.trim(), dir: dirname(file) };
+  return { name, description: description.replace(/\s+/g, " ").slice(0, 120), body: body.trim(), dir: dirname(file), match };
 }
 
 export function listSkills(): Skill[] {
@@ -107,11 +112,19 @@ function skillTokens(s: string): Set<string> {
  * name+description, return it — so a clearly-matching domain skill loads even when the model wouldn't
  * proactively pull it. Conservative (needs a strong multi-keyword overlap) to avoid false positives. */
 export function matchSkill(userText: string): Skill | null {
+  const skills = listSkills();
+  // Deterministic trigger first: a skill's frontmatter `match` regex is an unambiguous signal (e.g. a
+  // platform URL for web-reach) - load it directly, since description token-overlap is too coarse to catch
+  // short or other-language asks (a Vietnamese "lay transcript youtube ..." shares only ~3 English tokens).
+  for (const s of skills) {
+    if (!s.match) continue;
+    try { if (new RegExp(s.match, "i").test(userText)) return s; } catch { /* a bad regex just doesn't trigger */ }
+  }
   const ut = skillTokens(userText);
   if (ut.size < 3) return null;
   let best: Skill | null = null;
   let bestScore = 0;
-  for (const s of listSkills()) {
+  for (const s of skills) {
     let hits = 0;
     for (const w of skillTokens(`${s.name} ${s.description}`)) if (ut.has(w)) hits++;
     if (hits > bestScore) { bestScore = hits; best = s; }
