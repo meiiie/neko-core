@@ -6,6 +6,15 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+- **Long generations no longer time out mid-stream ("The operation timed out")** — the request timeout was a
+  TOTAL cap (`AbortSignal.timeout(timeout_seconds)`) applied to the whole streamed response, so a legitimately
+  long generation (e.g. a landing page across 3 files) was aborted once it crossed `timeout_seconds` (120s) even
+  while tokens were still streaming in. It's now an **idle timeout**: the timer resets on every streamed chunk,
+  so a healthy stream never times out and only a genuine STALL (no bytes for `timeout_seconds`) aborts. Fixed in
+  both providers (`anthropic` — the Z.ai/GLM path — and `openai_compat`). Unit-tested with a slow-but-active
+  stream (total time > budget, gaps < budget → completes). Also: the live **todo tracker** only shows while a
+  turn runs (the committed "Update Todos" result is the record) — it no longer prints the plan twice.
+
 - **Streaming no longer scroll-jumps to the top; list/footer/run-indicator polish** — the live streaming
   preview used to render the whole growing reply (up to ~60 lines), which overflows the terminal so Ink can't
   update it in place and **redraws from the top every frame** — the classic "it keeps scrolling to the top

@@ -3,6 +3,20 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-01 — Idle timeout (mid-stream abort fix), todo de-dup
+
+A real functional bug surfaced by dogfooding (a "make me a landing page" run failed with **"The operation
+timed out"**): the provider request timeout was a **TOTAL** cap — `AbortSignal.timeout(timeout_seconds*1000)`
+attached to the whole `fetch`, which keeps aborting the *body stream* too. So a long-but-healthy generation
+(3 files, glm-5.2 with thinking) crossed the 120s cap and was killed mid-stream. Switched both providers
+(`anthropic.ts` — the Z.ai/GLM path the user runs — and `providers.ts`) to an **idle timeout**: a manual
+`AbortController` + a timer that `bumpIdle()` resets on every `reader.read()` chunk (threaded through
+`parseStream`/`sseEvents`). A healthy stream never times out; only a genuine stall (no bytes for
+`timeout_seconds`) aborts. This is the standard SDK pattern (Claude Code / OpenAI SDK use idle, not total,
+timeouts for streaming). Unit-tested with a slow-but-active stream (gaps < budget, total > budget → finishes).
+Also de-duped the todo view: the sticky live tracker renders only while a turn runs; when idle the committed
+"Update Todos" tool result is the single record (it was showing the plan twice).
+
 ## 2026-07-01 — GeneBench-Pro harness-lift, Windows bash fix, TUI polish
 
 Continued on `self-improve`. Three linked arcs, all green (typecheck + 239 tests + policy + build).
