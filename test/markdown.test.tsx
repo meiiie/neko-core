@@ -81,10 +81,26 @@ test("compact markdown packs tighter than normal (predictable height for the str
   expect(nRows(true)).toBeLessThan(nRows(false)); // compact omits the added blank-line rhythm
 });
 
-test("a horizontal rule renders as a clean box-drawing line, not ASCII dashes", () => {
+test("a horizontal rule renders as spacing only (no cluttering full-width line)", () => {
   const out = strip(render(<Markdown text={"Above\n\n---\n\nBelow"} width={40} />).lastFrame());
-  expect(out).toMatch(/─{20,}/); // a run of box-drawing rule chars
-  expect(out).not.toMatch(/-{10,}/); // not a run of ASCII hyphens
+  expect(out).toContain("Above");
+  expect(out).toContain("Below");
+  expect(out).not.toMatch(/─{10,}/); // no box-drawing rule
+  expect(out).not.toMatch(/-{5,}/); // no ASCII dashes
+});
+
+test("keycap emoji (1-in-a-box) is normalized to '1.' so it doesn't render as a misaligned box", () => {
+  const out = strip(render(<Markdown text={"1️⃣ first item"} width={40} />).lastFrame());
+  expect(out).toContain("1. first item");
+  expect(out).not.toContain("⃣"); // the keycap combiner is gone
+});
+
+test("table columns line up when a cell holds a wide char (string-width, not code-point count)", () => {
+  const md = ["| Field | Note |", "|---|---|", "| A | plain |", "| B★ | wide star |"].join("\n");
+  const out = strip(render(<Markdown text={md} width={40} />).lastFrame());
+  const bordered = out.split("\n").filter((l) => /[│┌└├]/.test(l));
+  const widths = new Set(bordered.map((l) => [...l].length));
+  expect(widths.size).toBe(1); // every bordered row is the same visual width -> aligned
 });
 
 test("markdown table draws aligned box borders and truncates an over-wide cell", () => {

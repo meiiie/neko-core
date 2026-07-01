@@ -6,12 +6,17 @@
  */
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
+import stringWidth from "string-width";
 
 import { highlightLine } from "./highlight.tsx";
 
-/** Decode HTML entities + <br> so they don't show up literally (common in scraped/LLM tables). */
+/** Decode HTML entities + <br> so they don't show up literally (common in scraped/LLM tables). Also
+ * normalize the terminal-hostile emoji that misalign columns: keycaps (1\uFE0F\u20E3) -> "1.", and drop the
+ * emoji variation selector that forces an otherwise-plain glyph to render double-width. */
 function decodeEntities(s: string): string {
   return s
+    .replace(/([#*0-9])\uFE0F?\u20E3/g, "$1.") // keycap 1-in-a-box -> "1." (else a box+digit, misaligned)
+    .replace(/\uFE0F/g, "") // variation selector 16: stop forcing wide emoji presentation
     .replace(/<br\s*\/?>/gi, " ")
     .replace(/&#(\d+);/g, (_, n) => safeCp(Number(n)))
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => safeCp(parseInt(n, 16)))
@@ -77,7 +82,9 @@ function plain(s: string): string {
     .replace(/`([^`]+)`/g, "$1")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 }
-const plainLen = (s: string) => [...plain(s)].length;
+// Terminal display width (emoji/CJK = 2 cells), not code-point count — so table columns line up even
+// when a cell contains an emoji or wide character.
+const plainLen = (s: string) => stringWidth(plain(s));
 
 function splitRow(line: string): string[] {
   return line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
@@ -248,9 +255,10 @@ export function Markdown({ text, width, compact }: { text: string; width?: numbe
       continue;
     }
 
-    // Horizontal rule (---, ***, ___): a clean full-width box-drawing rule, not a run of ASCII dashes.
+    // Horizontal rule (---, ***, ___): render as spacing only. A full-width line reads as clutter in a
+    // terminal (feedback), and the model is told not to draw rules — so a rule just means "new section".
     if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
-      push(<Text key={key++} dimColor>{"─".repeat(maxWidth)}</Text>);
+      rhythm(); // just a section break -> blank spacing, no visible line
       i++;
       continue;
     }

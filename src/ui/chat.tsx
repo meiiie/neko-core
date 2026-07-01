@@ -206,6 +206,19 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const maybePump = () => {
     if (Date.now() - lastPumpRef.current < STREAM_MS) return;
     lastPumpRef.current = Date.now();
+    // Progressive commit: the terminal auto-follows output, so a live region TALLER than the viewport
+    // makes it redraw from the top every frame -- the "streaming keeps jumping to the top" bug. Once the
+    // buffered reply outgrows the viewport, move its COMPLETED paragraphs (up to the last blank line) into
+    // <Static> -- they scroll into scrollback naturally -- and keep only the current paragraph live.
+    const s = streamRef.current;
+    const viewport = (stdout?.rows ?? 24) - 8;
+    if (s.split("\n").length > viewport) {
+      const cut = s.lastIndexOf("\n\n");
+      if (cut > 0) {
+        addLine("assistant", s.slice(0, cut).trimEnd());
+        streamRef.current = s.slice(cut + 2);
+      }
+    }
     setStream(streamRef.current);
     setReasoning(reasoningRef.current);
   };
@@ -818,7 +831,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         </Box>
       ) : null}
 
-      {busy && !approval && reasoning.trim() ? (
+      {busy && !approval && !stream && reasoning.trim() ? ( // hide stale thinking once the answer streams (frees viewport)
         <Box flexDirection="column" marginTop={1}>
           {reasoning.trim().split("\n").slice(-6).map((l, i) => (
             <Text key={i} color="gray" italic>{"  " + (l.length > contentCols - 4 ? l.slice(0, contentCols - 5) + "…" : l)}</Text>
