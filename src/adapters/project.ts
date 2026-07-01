@@ -40,11 +40,23 @@ function writeUserConfig(data: Record<string, any>): void {
   atomicWriteFileSync(path, JSON.stringify(data, null, 2) + "\n");
 }
 
-/** Save the API key to ~/.neko-core/config.json (used by /login). */
+/** Save the API key to ~/.neko-core/config.json (used by /login). The key belongs to a PROVIDER, so it's
+ * saved to the ACTIVE profile's api_key (that profile's endpoint) — never the top-level field, which would
+ * override every profile's key and get sent to the wrong endpoint (the classic "pasted a Z.ai key while on
+ * the NVIDIA profile -> 401" trap). Falls back to top-level only when no profile is active. */
 export function setApiKey(key: string): string {
   try {
-    updateUserConfig((d) => { d.api_key = key.trim(); });
-    return "API key saved to ~/.neko-core/config.json";
+    let target = "the top-level key";
+    updateUserConfig((d: any) => {
+      const active = typeof d.active_profile === "string" ? d.active_profile : "";
+      if (active && d.profiles && typeof d.profiles === "object" && d.profiles[active]) {
+        d.profiles[active].api_key = key.trim();
+        target = `profile "${active}"`;
+      } else {
+        d.api_key = key.trim();
+      }
+    });
+    return `API key saved to ${target} in ~/.neko-core/config.json`;
   } catch (e) {
     return (e as Error).message;
   }
@@ -63,14 +75,21 @@ export function setEffort(effort: string): void {
   });
 }
 
-/** Remove the saved API key (used by /logout). Env keys are cleared by the caller. */
+/** Remove the saved API key (used by /logout). Env keys are cleared by the caller. Removes the ACTIVE
+ * profile's key AND any stray top-level key (so an old top-level key can't keep shadowing the profile). */
 export function clearApiKey(): string {
   try {
-    const data = readUserConfig();
-    if (!data.api_key) return "no saved API key in ~/.neko-core/config.json";
-    delete data.api_key;
+    const data = readUserConfig() as any;
+    const active = typeof data.active_profile === "string" ? data.active_profile : "";
+    let removed = "";
+    if (active && data.profiles && data.profiles[active] && data.profiles[active].api_key) {
+      delete data.profiles[active].api_key;
+      removed = `profile "${active}"`;
+    }
+    if (data.api_key) { delete data.api_key; removed = removed ? `${removed} + top-level` : "top-level key"; }
+    if (!removed) return "no saved API key in ~/.neko-core/config.json";
     writeUserConfig(data);
-    return "API key removed from ~/.neko-core/config.json";
+    return `API key removed from ${removed} in ~/.neko-core/config.json`;
   } catch (e) {
     return (e as Error).message;
   }
