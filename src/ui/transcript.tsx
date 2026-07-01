@@ -47,7 +47,13 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
         </Box>
       );
     case "user":
-      return <Text color="cyan">{"> "}{line.text}</Text>;
+      // A blank line above each user turn so the prompt stands clear of the previous turn's output
+      // (Claude-Code's UserPromptMessage does marginTop={1}); otherwise turns run together.
+      return (
+        <Box marginTop={1}>
+          <Text color="cyan">{"> "}{line.text}</Text>
+        </Box>
+      );
     case "assistant":
       return (
         <Box flexDirection="column" marginTop={1} marginBottom={1}>
@@ -55,7 +61,12 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
         </Box>
       );
     case "tool_call":
-      return <Text><Text color="green">● </Text>{line.text}</Text>;
+      // A blank line above each tool call groups it with its result and separates it from the prompt.
+      return (
+        <Box marginTop={1}>
+          <Text><Text color="green">● </Text>{line.text}</Text>
+        </Box>
+      );
     case "tool_result": {
       // Read-type tools collapse to a 1-line summary; full output is under Ctrl+O.
       if (line.summary) {

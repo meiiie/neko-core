@@ -133,6 +133,15 @@ test("RunningLine shows a dot + the tool label while a call is in flight", () =>
   expect(f).toContain("●"); // the (blinking) running dot
 });
 
+test("a user prompt and a tool call each get a blank line above (turn separation)", () => {
+  const u = strip(render(<TranscriptLine line={{ id: 1, kind: "user", text: "hi there" }} cfg={CFG} />).lastFrame()).split("\n");
+  expect(u[0].trim()).toBe(""); // marginTop blank row so the prompt isn't glued to the previous turn
+  expect(u.some((l) => l.includes("> hi there"))).toBe(true);
+  const t = strip(render(<TranscriptLine line={{ id: 2, kind: "tool_call", text: "Bash(ls)" }} cfg={CFG} />).lastFrame()).split("\n");
+  expect(t[0].trim()).toBe(""); // tool calls separate from the prompt / previous group
+  expect(t.some((l) => l.includes("Bash(ls)"))).toBe(true);
+});
+
 test("write_file approval previews size + a '+N more lines' hint", () => {
   const content = Array.from({ length: 20 }, (_, i) => `line${i}`).join("\n");
   const f = strip(render(<ApprovalBox approval={{ toolName: "write_file", args: { path: "x.html", content }, resolve: () => {} }} />).lastFrame());

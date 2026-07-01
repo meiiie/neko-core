@@ -34,6 +34,11 @@ lifts completion/answer-rate; crossing the pass threshold needs a stronger model
 - **Rhythm:** breathing room above headings + around tables (vertical rhythm, not cramped text). The real
   cramping culprit: Ink collapses an empty `<Text>` to height 0, so blank markdown lines between paragraphs
   were vanishing — now blank lines render as real rows (runs collapse to one) for even paragraph spacing.
+- **Turn separation** (studied Claude Code's own source at `../test/claude_lo/claude-code`, clean-room — its
+  `UserPromptMessage` uses `marginTop={1}` and `MessageRow` sets `addMargin` per row): Neko's transcript lines
+  (user / tool_call / info) had no margin, so a prompt glued to the previous turn's completion line and to the
+  tool call below it. Gave the user line + each tool_call line a blank line above — prompts now stand clear and
+  each tool call groups with its result.
 - **Ctrl+O is now a toggle** (`ui/chat.tsx`): it used to APPEND a full copy each press (never collapsing,
   because `<Static>` lines are immutable). Now it toggles an `expandedId` and shows the peeked result in the
   live region (below `<Static>`), so a second Ctrl+O collapses cleanly — no duplication.
