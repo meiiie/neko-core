@@ -3,6 +3,58 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-01 — Self-improve loop, Z.ai/glm-5.2 provider UX, web-reading overhaul
+
+A long session on the `self-improve` branch (39 commits ahead of main, all green: typecheck + 233 tests
++ policy + build). Three arcs; everything stays on the branch for review (main untouched at 3b7091a).
+
+**Self-improvement loop (Neko improves Neko).** `scripts/self-improve.ts`: glm-5.2 (Z.ai plan) edits Neko
+→ a hard VERIFY GATE (typecheck + 0-fail tests + policy) → an INDEPENDENT model peer-reviews the diff via
+`scripts/review-diff.ts` → commit to the branch, else revert; when stuck it web-searches SOTA and refills
+`docs/self-improve/BACKLOG.md`. Bench got per-task metrics (time / in-out tokens / tok-s / steps) + a JSONL
+dev-log (`~/.neko-core/bench-log.jsonl`) + a harder tier. Ran unattended in ~50-min batches and produced
+FOUR genuine, verified, reviewed harness wins: `estimateTokens` counts tool_calls (overflow-guard
+accuracy); `compact()` char-based lean-tail clip (dense-output token win); a broad doom-loop guard (later
+softened to warn-not-block, cap 6, on audit); and a real SECURITY fix — the bash seatbelt was bypassable
+by quoting the target (`rm -rf "$HOME"`). Honest yield: ~1 real win per 2-3 segments, then a plateau — a
+disciplined assistant, not a perpetual-motion machine (matches the feasibility analysis). Loop bugs found
++ fixed along the way: reviewer routed through `neko run` got DENIED tools → a real `--no-tools` flag +
+provider-direct reviewer; `ensureBranch` used `-B` (reset) → continue-branch; the worker self-committed
+past the gate → forbidden + un-committed; a flaky session test wrote the user's real `~/.neko-core/sessions`
+(2234 files) → isolated to a temp HOME.
+
+**Provider / model UX (Z.ai + glm-5.2).** New `anthropic` provider → the Z.ai coding-plan endpoint (glm-5.2;
+effort → extended-thinking budget). Per-provider keys via `key_env` + config, so a new provider is a profile,
+not a code change. Fixed the 401 trap (a top-level api_key shadowed the profile's; `setApiKey`/`/login` now
+save to the ACTIVE profile). `/login` = guided wizard (pick provider → paste its key); `/provider` switches
+account then CHAINS into that provider's model picker (`Agent.setProvider` + `NekoConfig.adopt` — live, no
+restart); `/model` swaps model within the current provider. No flags, no config editing.
+
+**Web reading — full overhaul.** Studied clean-room (in `../neko-refs/`, source-audited before running):
+Obscura (a Rust headless browser — built + tested, but it JS-errors on heavy SPAs like FB Comet, so NOT
+adopted), Hermes Agent (its "60x faster / 49x cheaper" = clean markdown + skip-the-LLM-on-small-pages +
+paginate), Agent-Reach (a per-platform free-backend router; installs a browser-session bridge for social
+logins). Shipped:
+- `web_fetch` returns deterministic **Markdown** (`htmlToMarkdown`: keeps links/headings/lists; no model
+  call). Hermes size policy: small page → no model call; large page → **paginate** (`page:N`) + 5-min cache
+  instead of truncating and losing content.
+- Opt-in `scrape_backend: "jina"` → Jina Reader renders public SPAs → markdown (free/keyless).
+- **Deterministic platform routes** in `web_fetch` (CODE, not a skill the model can ignore): YouTube →
+  `yt-dlp` transcript, GitHub → `gh`, RSS/Atom → item list; each falls back to a normal fetch if the tool is
+  missing. Real test: a YouTube task on gpt-oss went from 7 calls / 48-56k tokens (fumbling fake transcript
+  sites) to **2 calls / 16k tokens**.
+- Skills `web-reading` (efficient reads: a11y/markdown first, grab-once, no scroll-churn) + `web-reach`
+  (platform routing + honest ToS/account-ban warning for logged-in social feeds). Skills gained a
+  frontmatter `match:` regex so `matchSkill` loads a domain skill DETERMINISTICALLY (token-overlap was too
+  coarse — web-reach was silently never loading). The doom-loop guard was generalized to nudge on N
+  consecutive EMPTY/failed results from ANY tool (the FB scrape-thrash the edit/exact guards missed).
+- Login platforms (FB/X/IG/LinkedIn) are deliberately NOT auto-routed — they need the user's session and
+  carry ToS/ban risk, so they stay with the browser MCP + the skill's warning. Key finding: loading a skill
+  ≠ the model following it (gpt-oss ignored web-reach's routing) — the reliable fix is the tool layer, not a
+  skill.
+
+Version bumped 0.4.0 → 0.5.0-dev; the branch builds + is installed locally as `neko`.
+
 ## 2026-06-29 — Computer-use: independent pointer, web-via-a11y, tab presence
 
 Built `skills/computer-use` into a real, config-first, composable capability — Neko USES the

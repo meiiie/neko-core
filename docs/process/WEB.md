@@ -6,12 +6,26 @@ Two layers, simplest first.
 - **`web_search`** — pluggable backend, auto-picked: **SearXNG** (if `searxng_url` set) → **Tavily**
   (if `TAVILY_API_KEY` set) → **DuckDuckGo** (default, zero-config). Falls back to DuckDuckGo if the
   chosen backend errors. `neko doctor` shows the active one.
-- **`web_fetch`** — fetches a URL, runs a light readability pass (keeps `<article>`/`<main>`, drops
-  nav/footer/scripts) and strips to text. With a `prompt`, a single fast model pass extracts just
-  what you asked (Claude-style) instead of dumping the whole page.
+- **`web_fetch`** — fetches a URL as clean **Markdown** (deterministic HTML→markdown: keeps headings,
+  links, lists; drops nav/footer/scripts — a flat text-strip used to throw links away). A **small page
+  comes back whole with NO model call** (fast + cheap — the markdown IS the answer); a **large page
+  paginates** (`page:N` in the footer) instead of truncating and silently dropping the rest; results
+  cache ~5 min so pagination doesn't re-download. With a `prompt`/`schema` on a *large* page, a single
+  fast model pass still extracts just what you asked (now over clean markdown). *(Size policy + compact
+  reads learned from Hermes Agent + lightweight scrapers; our own implementation.)*
+  - **Deterministic platform routes** (CODE routes, not a skill the model can ignore, so it can't fumble
+    a known URL): a **YouTube** video → its **transcript** via `yt-dlp`; a **GitHub** repo/issue/PR →
+    `gh`; an **RSS/Atom** feed → a compact item list. Each falls back to a normal fetch if the tool is
+    missing/unauthenticated.
+  - **`scrape_backend: "jina"`** (opt-in) routes through Jina Reader (`r.jina.ai`) which renders public
+    JS/SPAs server-side and returns markdown — free + keyless for light use, `JINA_API_KEY` lifts the
+    rate limit. PUBLIC pages only (anonymous — no login).
 
-Good for: docs, articles, plain pages, quick lookups. Limits: no JavaScript rendering, and
-bot-protected / logged-in sites will block a plain fetch (see §2 for those).
+Good for: docs, articles, plain pages, quick lookups, YouTube transcripts, GitHub, feeds. Limits: a
+plain fetch renders no JavaScript (use `scrape_backend: "jina"` for public SPAs); **login-required feeds
+(FB / X / IG / LinkedIn) need your session** — see §2 (browser MCP) and the `web-reach` skill, which also
+warns about the ToS/account-ban risk of automating a logged-in social account. The `web-reading` skill
+teaches efficient reads (a11y/markdown first, grab-once, no scroll-churn).
 
 ### Reliable extraction: the LLM extracts, code computes
 A model is unreliable at exact number transcription and arithmetic — dogfooding caught gpt-oss
