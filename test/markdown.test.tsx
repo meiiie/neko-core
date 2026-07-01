@@ -57,6 +57,12 @@ test("compact markdown packs tighter than normal (predictable height for the str
   expect(nRows(true)).toBeLessThan(nRows(false)); // compact omits the added blank-line rhythm
 });
 
+test("a horizontal rule renders as a clean box-drawing line, not ASCII dashes", () => {
+  const out = strip(render(<Markdown text={"Above\n\n---\n\nBelow"} width={40} />).lastFrame());
+  expect(out).toMatch(/─{20,}/); // a run of box-drawing rule chars
+  expect(out).not.toMatch(/-{10,}/); // not a run of ASCII hyphens
+});
+
 test("markdown table draws aligned box borders and truncates an over-wide cell", () => {
   const md = [
     "| Mode | Behavior |",

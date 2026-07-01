@@ -4,7 +4,7 @@ import { render } from "ink-testing-library";
 
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { ChatApp } from "../src/ui/chat.tsx";
-import { RunningLine, ThinkingLine } from "../src/ui/thinking-line.tsx";
+import { fmtElapsed, RunningLine, ThinkingLine } from "../src/ui/thinking-line.tsx";
 import { ApprovalBox } from "../src/ui/approval-box.tsx";
 import { TranscriptLine } from "../src/ui/transcript.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
@@ -125,6 +125,14 @@ test("expanded tool result keeps the diff +/- lines", () => {
   expect(f).toContain("- ");
   expect(f).toContain("old();");
   expect(f).toContain("new();");
+});
+
+test("fmtElapsed: raw seconds under a minute, then Xm YYs (zero-padded) past it", () => {
+  expect(fmtElapsed(5)).toBe("5s");
+  expect(fmtElapsed(59)).toBe("59s");
+  expect(fmtElapsed(60)).toBe("1m 00s");
+  expect(fmtElapsed(65)).toBe("1m 05s");
+  expect(fmtElapsed(194)).toBe("3m 14s");
 });
 
 test("RunningLine shows a dot + the tool label while a call is in flight", () => {

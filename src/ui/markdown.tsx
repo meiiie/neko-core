@@ -197,9 +197,9 @@ export function Markdown({ text, width, compact }: { text: string; width?: numbe
       continue;
     }
 
-    // Horizontal rule (---, ***, ___): a dim separator instead of literal dashes.
+    // Horizontal rule (---, ***, ___): a clean full-width box-drawing rule, not a run of ASCII dashes.
     if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
-      push(<Text key={key++} dimColor>{"-".repeat(48)}</Text>);
+      push(<Text key={key++} dimColor>{"─".repeat(maxWidth)}</Text>);
       i++;
       continue;
     }
