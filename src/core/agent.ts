@@ -54,7 +54,8 @@ const CONCURRENCY_SAFE = new Set(["read_file", "search", "glob", "ls", "web_sear
 // guard misses). Normalized path = the `path` arg (write_file/edit) or that of multi_edit's file.
 const EDIT_TOOLS = new Set(["write_file", "edit", "multi_edit"]);
 // Thresholds for the BROAD doom-loop guard (distinct from the exact-repeat guard above).
-const EDIT_PER_PATH_CAP = 3;   // >= N edits to ONE path in a run -> nudge
+const EDIT_PER_PATH_CAP = 6;   // edits to ONE path in a run before a ONE-TIME soft nudge (warns, does NOT
+                               // block -- legitimate coding edits a file several times: write, test, fix, fix)
 const FAILING_RUN_CAP = 3;     // >= N consecutive failing (non-zero exit) bash runs -> nudge
 
 // A single tool result (a giant browser snapshot, a huge file/page read) must not push the prompt past
@@ -295,14 +296,15 @@ export class Agent {
     /** The BROAD doom-loop guard (distinct from the exact-repeat `lastSig` guard). Catches the two loops the
      * exact guard structurally cannot: (1) editing the SAME path with DIFFERENT args N times (every sig
      * differs, so the exact guard never trips), and (2) re-running a failing bash command N times with tiny
-     * tweaks. Returns a nudge observation string when the cap is hit, or null to run the call normally. */
+     * tweaks. Returns a ONE-TIME nudge string when the per-path edit cap is first reached (the caller runs
+     * the edit anyway and APPENDS this as a warning — it never blocks a legit edit), else null. */
     private broadLoopNudge(call: { name: string; arguments: Record<string, any> }): string | null {
       if (EDIT_TOOLS.has(call.name)) {
         const p = String(call.arguments?.path ?? "");
         if (p) {
           const n = (this.editsPerPath.get(p) ?? 0) + 1;
           this.editsPerPath.set(p, n);
-          if (n >= EDIT_PER_PATH_CAP) {
+          if (n === EDIT_PER_PATH_CAP) { // fire ONCE at the cap, not on every later edit
             return `[loop guard] You've edited "${p}" ${n} times this run and it's still not right. ` +
               "Stop micro-editing the same file: step back, re-read the actual current state, reconsider your " +
               "approach (is the root cause elsewhere?), then act — or give your final answer.";
@@ -386,16 +388,14 @@ export class Agent {
             const sig = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
             repeats = sig === lastSig ? repeats + 1 : 0;
             lastSig = sig;
-            // BROAD doom-loop guard: catches repeated edits to ONE path with DIFFERENT args (which the
-            // exact-repeat guard above structurally cannot — every sig differs). When the per-path edit
-            // cap is hit, nudge instead of re-running, so the model re-reads the real state / reconsiders
-            // instead of micro-editing the same file into the budget.
+            // BROAD doom-loop guard: counts repeated edits to ONE path with DIFFERENT args (which the
+            // exact-repeat guard above structurally cannot — every sig differs). It only WARNS (appended
+            // below after the edit runs), so a legitimate multi-edit is never blocked; only an EXACT
+            // 3x-identical repeat is blocked here (that one is unambiguously stuck).
             const broad = this.broadLoopNudge(call);
             const observation = repeats >= 2
               ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
-              : broad !== null
-                ? broad
-                : await this.safeExecute(call, signal);
+              : await this.safeExecute(call, signal);
             // Track consecutive failing bash runs for the broad guard. A success (or a non-bash tool)
             // resets the streak; reaching the cap nudges on the NEXT failing run via the streak itself
             // (the result is still fed back so the model can diagnose, but the loop now also signals).
@@ -406,6 +406,10 @@ export class Agent {
             }
             this.emit("tool_result", { call, observation });
             this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
+            // BROAD edit-loop guard (warn, don't block): the edit RAN above; append a one-time nudge so the
+            // model steps back instead of micro-editing one file forever. Skipped when the exact-repeat guard
+            // already blocked this step (repeats >= 2) to avoid double-nudging.
+            if (broad !== null && repeats < 2) this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: broad });
             // After enough consecutive failing runs, append one nudge observation so the model changes
             // approach instead of re-running a near-identical failing command.
             if (call.name === "bash" && this.consecutiveFailingRuns >= FAILING_RUN_CAP) {

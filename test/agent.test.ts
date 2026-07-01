@@ -229,32 +229,31 @@ test("concurrency-safe tool calls in one turn run in parallel", async () => {
     expect(agent.messages.some((m: any) => String(m.content).includes("loop guard"))).toBe(true);
   });
 
-test("BROAD loop guard trips on N DISTINCT edits to ONE path (the exact-repeat guard misses this)", async () => {
-  // The classic doom-loop: edit the SAME file with DIFFERENT args chasing a build error. Every
-  // call signature differs, so the exact-repeat guard (lastSig/repeats) NEVER trips. The broad
-  // guard counts edits-per-path and nudges once the cap (3) is hit.
+test("BROAD loop guard WARNS (does not block) on many DISTINCT edits to ONE path", async () => {
+  // The doom-loop SIGNAL: editing the SAME file with DIFFERENT args many times chasing a build error.
+  // Every call signature differs, so the exact-repeat guard (lastSig/repeats) NEVER trips. The broad
+  // guard counts edits-per-path and, at the cap (6), appends a ONE-TIME nudge -- but the edit still RUNS,
+  // so a LEGITIMATE multi-edit is never blocked (only an exact 3x-identical repeat is blocked, elsewhere).
   const edited: string[] = [];
   const tools = {
     schemas: () => [],
     execute: async (_n: string, args: any) => { edited.push(args.path); return "ok"; },
   };
-  // 5 distinct edit calls to the same path, then a final tool-less answer.
-  const script = [
-    { content: null, tool_calls: [{ id: "c1", name: "edit", arguments: { path: "src/x.ts", old_string: "a", new_string: "b" } }] },
-    { content: null, tool_calls: [{ id: "c2", name: "edit", arguments: { path: "src/x.ts", old_string: "c", new_string: "d" } }] },
-    { content: null, tool_calls: [{ id: "c3", name: "edit", arguments: { path: "src/x.ts", old_string: "e", new_string: "f" } }] },
-    { content: null, tool_calls: [{ id: "c4", name: "edit", arguments: { path: "src/x.ts", old_string: "g", new_string: "h" } }] },
-    { content: null, tool_calls: [{ id: "c5", name: "edit", arguments: { path: "src/x.ts", old_string: "i", new_string: "j" } }] },
-    { content: "done", tool_calls: [] },
-  ];
-  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 10 });
+  // 7 distinct edits to one path (past the cap of 6), then a final tool-less answer.
+  const script: any[] = Array.from({ length: 7 }, (_, i) => ({
+    content: null,
+    tool_calls: [{ id: `c${i}`, name: "edit", arguments: { path: "src/x.ts", old_string: `a${i}`, new_string: `b${i}` } }],
+  }));
+  script.push({ content: "done", tool_calls: [] });
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 12 });
   await agent.run("go");
-  // Only the first 2 edits actually execute; from the 3rd on the broad guard nudges instead of running.
-  expect(edited.length).toBeLessThanOrEqual(2);
+  // Every edit RAN -- the guard warns, it does NOT block (this was the fix: was cap-3-block, now cap-6-warn).
+  expect(edited.length).toBe(7);
   expect(edited.every((p) => p === "src/x.ts")).toBe(true);
+  // The broad nudge fired exactly ONCE, at the cap.
   const broadNudges = agent.messages.filter((m: any) =>
     String(m.content).includes("[loop guard]") && String(m.content).includes("src/x.ts"));
-  expect(broadNudges.length).toBeGreaterThan(0); // broad guard fired (exact guard would NOT have)
+  expect(broadNudges.length).toBe(1);
 });
 
 test("BROAD loop guard does NOT trip on edits to DIFFERENT paths (no false positive)", async () => {
