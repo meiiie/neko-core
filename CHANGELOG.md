@@ -6,6 +6,16 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+- **Streaming stops jumping to the top; declutter + emoji alignment** — (1) **scroll jump** — a live region
+  taller than the viewport made the terminal redraw from the top every frame while a long reply streamed. The
+  reply now **progressively commits** its completed paragraphs to scrollback (via `<Static>`) once it outgrows
+  the viewport, keeping the live region to the current paragraph, and the (stale) thinking trace is hidden once
+  the answer starts streaming — so the live area stays within the terminal and no longer jumps. (2) a markdown
+  horizontal rule (`---`) now renders as **plain spacing** instead of a full-width line (it read as clutter).
+  (3) **emoji alignment** — table column widths use terminal display width (`string-width`, emoji = 2 cells)
+  so a cell with an emoji no longer knocks the borders out of line, and keycap emojis (`1️⃣`) normalize to `1.`
+  (they render as a misaligned box otherwise). Unit-tested (keycap normalize, wide-char table alignment, rule).
+
 - **Wrapping no longer breaks words mid-character; LaTeX math renders as Unicode** — two fixes to how replies
   render: (1) **word-wrap** — markdown paragraphs were a `<Text>` with no width, so inside `<Static>` (+ the left
   gutter) they wrapped at the FULL terminal width and then spilled past the edge, and the terminal hard-wrapped

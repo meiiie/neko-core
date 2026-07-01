@@ -3,6 +3,22 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-02 — Streaming scroll-jump, declutter, emoji alignment
+
+More screenshot feedback:
+- **Streaming "keeps jumping to the top".** The terminal auto-follows output, so a live (non-`<Static>`) region
+  taller than the viewport forces a redraw-from-top every frame. Fix: **progressive commit** — once the buffered
+  reply outgrows the viewport, `maybePump` moves its completed paragraphs (up to the last blank line) into
+  `<Static>` (natural scrollback, no jump) and keeps only the current paragraph live; also hide the stale
+  thinking trace once the answer streams (frees ~6 rows). (The full Claude-Code behavior — scroll UP while it
+  streams + a "jump to bottom / N new messages" pill — needs the alternate-screen / managed-scroll-region
+  architecture; that's a larger change to raise separately, but this removes the reported top-jump.)
+- **`---` clutter.** A markdown rule rendered as a full-width `─` line, which read as noise; now it's just
+  spacing (the model is already told not to draw rules).
+- **Emoji misalignment.** Table widths counted code points, so an emoji cell (width 2) knocked the borders out
+  of line; switched `plainLen` to `string-width` (display width). Keycap emojis (`1️⃣`) that render as a box+digit
+  are normalized to `1.`, and the emoji variation selector is stripped.
+
 ## 2026-07-02 — Word-wrap regression fix + LaTeX->Unicode math
 
 Two issues from a screenshot (Vietnamese text breaking mid-word + raw LaTeX):
