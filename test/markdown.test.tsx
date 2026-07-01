@@ -19,6 +19,26 @@ test("truncCell marks a cut with an ellipsis", () => {
   expect(truncCell("hello world", 5)).toBe("hell…");
 });
 
+test("blank lines between paragraphs render (Ink collapses an empty <Text> otherwise)", () => {
+  const out = strip(render(<Markdown text={"First paragraph.\n\nSecond paragraph."} />).lastFrame());
+  const lines = out.split("\n");
+  const i1 = lines.findIndex((l) => l.includes("First paragraph"));
+  const i2 = lines.findIndex((l) => l.includes("Second paragraph"));
+  expect(i1).toBeGreaterThanOrEqual(0);
+  expect(i2).toBe(i1 + 2); // exactly one blank row between the two paragraphs
+  expect(lines[i1 + 1].trim()).toBe(""); // and that row is blank
+});
+
+test("runs of blank lines collapse to one; list items stay tight", () => {
+  const out = strip(render(<Markdown text={"Intro:\n- a\n- b\n\n\n\nOutro."} />).lastFrame());
+  const lines = out.split("\n");
+  const ia = lines.findIndex((l) => l.includes("- a"));
+  const ib = lines.findIndex((l) => l.includes("- b"));
+  const io = lines.findIndex((l) => l.includes("Outro"));
+  expect(ib).toBe(ia + 1); // bullets adjacent -> no blank between them
+  expect(io).toBe(ib + 2); // 3 source blanks collapse to a single blank row
+});
+
 test("markdown table draws aligned box borders and truncates an over-wide cell", () => {
   const md = [
     "| Mode | Behavior |",

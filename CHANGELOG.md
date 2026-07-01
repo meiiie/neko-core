@@ -16,8 +16,10 @@ All notable changes to Neko Code are documented here. The format follows
 
 - **Terminal UI polish — bordered tables, vertical rhythm, a real Ctrl+O toggle, a live run indicator** —
   markdown **tables** now draw aligned box borders and are budgeted to the terminal width (the widest column
-  shrinks, cells truncate to a single line) instead of overflowing and wrap-shattering their columns; headings
-  and tables get breathing room. **Ctrl+O** is now a proper expand/collapse **toggle** (it used to append a
+  shrinks, cells truncate to a single line) instead of overflowing and wrap-shattering their columns.
+  **Paragraph spacing** is fixed: Ink collapses an empty `<Text>` to zero height, so blank markdown lines were
+  disappearing and paragraphs ran together — blank lines now render as real rows (runs collapse to one), with a
+  blank line above headings and around tables, for even vertical rhythm. **Ctrl+O** is now a proper expand/collapse **toggle** (it used to append a
   duplicate full copy every press and never collapse); the peeked output shows in the live region so a second
   press closes it. A tool call **in flight** shows live with a **blinking dot** and commits to the transcript
   with a solid dot when it finishes — a clear running-vs-done signal (deferred + keyed by call id so parallel

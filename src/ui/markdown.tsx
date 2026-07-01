@@ -130,6 +130,16 @@ export function Markdown({ text, width }: { text: string; width?: number }): Rea
   const blocks: ReactNode[] = [];
   let i = 0;
   let key = 0;
+  let prevBlank = true; // start "blank" so there is no leading empty row
+
+  // Ink collapses an empty <Text> to height 0, so a blank markdown line rendered as <Text>{""}</Text>
+  // just disappears — which is why paragraphs looked cramped. A single space is what actually renders
+  // as a blank row. spacer() emits one, but collapses runs of blanks (and a leading blank) so the
+  // vertical rhythm stays even: exactly one blank line between blocks.
+  const spacer = () => {
+    if (!prevBlank) { blocks.push(<Text key={key++}> </Text>); prevBlank = true; }
+  };
+  const push = (node: ReactNode) => { blocks.push(node); prevBlank = false; };
 
   while (i < lines.length) {
     const line = lines[i];
@@ -142,7 +152,8 @@ export function Markdown({ text, width }: { text: string; width?: number }): Rea
         i++;
       }
       i++; // skip closing fence
-      blocks.push(
+      spacer();
+      push(
         <Box key={key++} flexDirection="column" paddingLeft={2}>
           {code.map((c, j) => (
             <Text key={j}>{c.length ? highlightLine(c) : " "}</Text>
@@ -163,51 +174,50 @@ export function Markdown({ text, width }: { text: string; width?: number }): Rea
         rows.push(splitRow(lines[i]));
         i++;
       }
-      blocks.push(renderTable(header, rows, key++, maxWidth));
+      spacer();
+      push(renderTable(header, rows, key++, maxWidth));
       continue;
     }
 
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
-      // Breathing room above a heading (except the very first block) for vertical rhythm.
-      blocks.push(
-        <Box key={key++} marginTop={blocks.length ? 1 : 0}>
-          <Text bold color="cyan">{inline(heading[2])}</Text>
-        </Box>,
-      );
+      spacer(); // breathing room above a heading even if the source left no blank line
+      push(<Text key={key++} bold color="cyan">{inline(heading[2])}</Text>);
       i++;
       continue;
     }
 
     // Horizontal rule (---, ***, ___): a dim separator instead of literal dashes.
     if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
-      blocks.push(<Text key={key++} dimColor>{"-".repeat(48)}</Text>);
+      push(<Text key={key++} dimColor>{"-".repeat(48)}</Text>);
       i++;
       continue;
     }
 
     const quote = line.match(/^>\s?(.*)$/);
     if (quote) {
-      blocks.push(<Text key={key++} color="gray" italic>{"│ "}{inline(quote[1])}</Text>);
+      push(<Text key={key++} color="gray" italic>{"│ "}{inline(quote[1])}</Text>);
       i++;
       continue;
     }
 
     const bullet = line.match(/^(\s*)[-*]\s+(.*)$/);
     if (bullet) {
-      blocks.push(<Text key={key++}>{bullet[1]}- {inline(bullet[2])}</Text>);
+      push(<Text key={key++}>{bullet[1]}- {inline(bullet[2])}</Text>);
       i++;
       continue;
     }
 
     const numbered = line.match(/^(\s*)(\d+)\.\s+(.*)$/);
     if (numbered) {
-      blocks.push(<Text key={key++}>{numbered[1]}{numbered[2]}. {inline(numbered[3])}</Text>);
+      push(<Text key={key++}>{numbered[1]}{numbered[2]}. {inline(numbered[3])}</Text>);
       i++;
       continue;
     }
 
-    blocks.push(<Text key={key++}>{inline(line)}</Text>);
+    if (!line.trim()) { spacer(); i++; continue; } // a real blank row (Ink would otherwise eat it)
+
+    push(<Text key={key++}>{inline(line)}</Text>);
     i++;
   }
 

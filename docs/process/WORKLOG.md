@@ -31,7 +31,9 @@ lifts completion/answer-rate; crossing the pass threshold needs a stronger model
   row, so a wide table overflowed the terminal and Ink wrap-shattered the columns. Rewrote it width-aware:
   box borders (`┌┬┐│├┼┤└┴┘`), columns budgeted to the terminal `cols` (`fitColumns` shrinks the widest first),
   cells truncated to a single line (`truncCell`, ellipsis) so borders stay aligned, inline styling kept.
-- **Rhythm:** breathing room above headings + around tables (vertical rhythm, not cramped text).
+- **Rhythm:** breathing room above headings + around tables (vertical rhythm, not cramped text). The real
+  cramping culprit: Ink collapses an empty `<Text>` to height 0, so blank markdown lines between paragraphs
+  were vanishing — now blank lines render as real rows (runs collapse to one) for even paragraph spacing.
 - **Ctrl+O is now a toggle** (`ui/chat.tsx`): it used to APPEND a full copy each press (never collapsing,
   because `<Static>` lines are immutable). Now it toggles an `expandedId` and shows the peeked result in the
   live region (below `<Static>`), so a second Ctrl+O collapses cleanly — no duplication.
