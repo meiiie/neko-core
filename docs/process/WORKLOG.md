@@ -3,6 +3,21 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-02 — Terminal-clean output (no emoji / real rules / readable elapsed)
+
+Screenshot review surfaced three presentation issues; studied Claude Code's own prompts to fix them right:
+- **Emojis misaligning** (the model emitted `1️⃣`/`🎯`/`🔑`; keycap emojis render as a box+digit on the Windows
+  terminal and throw off column widths). Root fix is a formatting instruction, not a render hack: Claude Code's
+  system prompt says *"MUST avoid using emojis"* + *"Only use emojis if the user explicitly requests it"* and
+  frames output as GitHub-flavored markdown in a monospace font. Added the equivalent **`## Output`** section to
+  Neko's `DEFAULT_SYSTEM_PROMPT` (markdown-for-monospace, no emojis unless asked, no hand-drawn ASCII rules).
+  So it's a baseline rule, not a per-domain skill — the user's instinct ("do we need a presentation skill?") was
+  close, but this belongs in the always-on system prompt.
+- **`-----` ASCII rules** looked like noise → a markdown `---` now renders as a clean full-width box-drawing
+  line (`─`), not a partial run of hyphens.
+- **`194s` elapsed** → `fmtElapsed` shows raw seconds under a minute, then `1m 00s … 3m 14s` (zero-padded) so a
+  long turn's timer reads cleanly. Unit-tested.
+
 ## 2026-07-02 — Horizontal gutter; live-verified the idle-timeout fix
 
 Confirmed the idle-timeout fix end to end: a `neko run` on glm-5.2 asked for a professional 3-file landing

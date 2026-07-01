@@ -6,6 +6,13 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+- **Terminal-clean output: no emoji, real rules, readable elapsed** — three presentation fixes so replies
+  look right in a monospace terminal: (1) the system prompt now tells the model to format for a monospace
+  terminal and **avoid emojis** (decorative/keycap emojis like a digit-in-a-box misalign the columns — the same
+  rule Claude Code uses); (2) a markdown horizontal rule (`---`) renders as a clean full-width box-drawing line
+  instead of a partial run of ASCII dashes; (3) the live spinner's elapsed time reads `1m 00s` … `3m 14s` past a
+  minute instead of an ever-growing bare `194s`. Unit-tested (`fmtElapsed`, box-rule render).
+
 - **Horizontal gutter — the UI is inset from the terminal edges** — the whole REPL (transcript + live region)
   now sits inside a left/right padding instead of running flush against column 0, matching Claude Code's
   `paddingLeft={2}`. `<Static>` inherits the wrapper Box's padding, so one change indents both the committed
