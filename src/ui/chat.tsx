@@ -774,7 +774,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const contentCols = Math.max(20, cols - gutter * 2);
   return (
     <Box flexDirection="column" paddingLeft={gutter} paddingRight={gutter}>
-      <Static key={resizeKey} items={lines}>{(line) => <TranscriptLine key={line.id} line={line} cfg={cfg} cols={contentCols} />}</Static>
+      {/* Each item is width-capped to contentCols: <Static> renders items at the FULL terminal width by
+          default, so with the left gutter a long line would spill past the edge and the terminal would
+          hard-wrap it mid-word. An explicit width makes every line wrap at our inset width instead. */}
+      <Static key={resizeKey} items={lines}>{(line) => <Box key={line.id} width={contentCols}><TranscriptLine line={line} cfg={cfg} cols={contentCols} /></Box>}</Static>
 
       {/* Ctrl+O peek: the most-recent collapsed tool result shown in full in the live region (not
           re-appended to <Static>), so a second Ctrl+O collapses it cleanly instead of duplicating. */}

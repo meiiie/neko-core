@@ -1,7 +1,31 @@
 import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 
-import { fitColumns, Markdown, truncCell } from "../src/ui/markdown.tsx";
+import { fitColumns, Markdown, mathToUnicode, truncCell } from "../src/ui/markdown.tsx";
+
+test("mathToUnicode converts common LaTeX to readable Unicode (incl. nested frac+sqrt)", () => {
+  expect(mathToUnicode(String.raw`x^2 + y^2 = r^2`)).toBe("x² + y² = r²");
+  expect(mathToUnicode(String.raw`\theta = \frac{\pi}{2}`)).toBe("θ = (π)/(2)");
+  expect(mathToUnicode(String.raw`x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}`)).toBe("x = (-b ± √(b²-4ac))/(2a)");
+  expect(mathToUnicode(String.raw`\sum_{i=1}^{n} a_i \times b_i`)).toBe("∑ᵢ₌₁ⁿ aᵢ × bᵢ");
+});
+
+test("Markdown wraps paragraphs at its OWN width, not the ambient terminal width (no mid-word split)", () => {
+  // ink-testing-library's default terminal is ~100 cols; an unconstrained paragraph would wrap there.
+  const long = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty";
+  const lines = strip(render(<Markdown text={long} width={40} />).lastFrame()).split("\n").filter((l) => l.trim());
+  expect(lines.length).toBeGreaterThan(2); // wrapped at 40, not at the ~100-col ambient width
+  for (const l of lines) expect([...l].length).toBeLessThanOrEqual(40); // never overflows OUR width
+});
+
+test("display math $$...$$ renders as Unicode, inline $...$ too, but a price $5 is left alone", () => {
+  const dm = strip(render(<Markdown text={"$$E = mc^2$$"} width={40} />).lastFrame());
+  expect(dm).toContain("E = mc²");
+  expect(dm).not.toContain("$$");
+  const inl = strip(render(<Markdown text={"Công thức $x^2$ và giá $5 to $10."} width={60} />).lastFrame());
+  expect(inl).toContain("x²");
+  expect(inl).toContain("$5 to $10"); // no LaTeX indicator -> not treated as math
+});
 import { TranscriptLine } from "../src/ui/transcript.tsx";
 
 const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");

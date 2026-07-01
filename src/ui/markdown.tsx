@@ -31,6 +31,44 @@ function safeCp(n: number): string {
   }
 }
 
+// LaTeX -> Unicode for terminal math. A terminal can't render MathML/LaTeX, so `$...$` shows raw. We map
+// the common constructs to readable Unicode instead. Tables are the extension point — add a symbol and it
+// works everywhere (inline + display) with no other change.
+const MATH_GREEK: Record<string, string> = {
+  alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", varepsilon: "ε", zeta: "ζ", eta: "η",
+  theta: "θ", vartheta: "ϑ", iota: "ι", kappa: "κ", lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π",
+  rho: "ρ", sigma: "σ", tau: "τ", upsilon: "υ", phi: "φ", varphi: "φ", chi: "χ", psi: "ψ", omega: "ω",
+  Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π", Sigma: "Σ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+};
+const MATH_OP: Record<string, string> = {
+  times: "×", cdot: "·", div: "÷", pm: "±", mp: "∓", ast: "∗", star: "⋆", circ: "∘",
+  leq: "≤", le: "≤", geq: "≥", ge: "≥", neq: "≠", ne: "≠", approx: "≈", equiv: "≡", sim: "∼", propto: "∝",
+  ll: "≪", gg: "≫", subset: "⊂", subseteq: "⊆", supset: "⊃", supseteq: "⊇", in: "∈", notin: "∉", cup: "∪", cap: "∩",
+  sum: "∑", prod: "∏", int: "∫", oint: "∮", partial: "∂", nabla: "∇", infty: "∞", forall: "∀", exists: "∃",
+  rightarrow: "→", to: "→", leftarrow: "←", Rightarrow: "⇒", Leftarrow: "⇐", leftrightarrow: "↔", mapsto: "↦",
+  cdots: "⋯", ldots: "…", dots: "…", vdots: "⋮", angle: "∠", perp: "⊥", parallel: "∥", pm2: "±",
+  langle: "⟨", rangle: "⟩", lfloor: "⌊", rfloor: "⌋", lceil: "⌈", rceil: "⌉", vec: "→",
+};
+const SUP: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾", n: "ⁿ", i: "ⁱ", T: "ᵀ", a: "ᵃ", b: "ᵇ", c: "ᶜ" };
+const SUB: Record<string, string> = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉", "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎", i: "ᵢ", j: "ⱼ", n: "ₙ", a: "ₐ", x: "ₓ" };
+const toScript = (s: string, map: Record<string, string>) => [...s].map((c) => map[c] ?? c).join("");
+
+/** Convert a LaTeX math snippet to readable Unicode (bounded, extend via the tables above). */
+export function mathToUnicode(src: string): string {
+  let t = src;
+  t = t.replace(/\\(text|mathrm|mathbf|mathit|operatorname)\s*\{([^{}]*)\}/g, "$2"); // \text{x} -> x
+  // Superscripts / subscripts / sqrt FIRST — they carry braces; resolving them lets \frac (below) see a
+  // brace-free numerator/denominator even when it contained e.g. \sqrt{...} or ^{...}.
+  t = t.replace(/\^\{([^{}]+)\}/g, (_, x) => toScript(x, SUP)).replace(/\^(\S)/g, (_, x) => SUP[x] ?? "^" + x);
+  t = t.replace(/_\{([^{}]+)\}/g, (_, x) => toScript(x, SUB)).replace(/_(\S)/g, (_, x) => SUB[x] ?? "_" + x);
+  for (let k = 0; k < 3; k++) t = t.replace(/\\sqrt\s*\{([^{}]*)\}/g, "√($1)");
+  for (let k = 0; k < 4; k++) t = t.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)"); // now nesting-safe
+  t = t.replace(/\\(det|dim|log|ln|exp|sin|cos|tan|min|max|arg|gcd|lim|mod)\b/g, "$1"); // named operators stay as words
+  t = t.replace(/\\([A-Za-z]+)/g, (m, name) => MATH_GREEK[name] ?? MATH_OP[name] ?? m.slice(1)); // greek/ops, else drop backslash
+  t = t.replace(/\\[,;:!> ]/g, " ").replace(/\\\\/g, "  ").replace(/[{}]/g, ""); // spacing macros, line breaks, stray braces
+  return t.replace(/\s+/g, " ").trim();
+}
+
 /** Visible text of a cell (markers stripped, entities decoded) — for column-width math. */
 function plain(s: string): string {
   return decodeEntities(s)
@@ -108,7 +146,7 @@ function renderTable(header: string[], rows: string[][], key: number, maxWidth: 
 function inline(raw: string): ReactNode[] {
   const s = decodeEntities(raw);
   const out: ReactNode[] = [];
-  const re = /(\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*|\[([^\]]+)\]\(([^)]+)\))/g;
+  const re = /(\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*|\[([^\]]+)\]\(([^)]+)\)|\$([^$\n]+)\$)/g;
   let last = 0;
   let key = 0;
   let m: RegExpExecArray | null;
@@ -118,6 +156,9 @@ function inline(raw: string): ReactNode[] {
     else if (m[3] !== undefined) out.push(<Text key={key++} color="yellow">{m[3]}</Text>);
     else if (m[4] !== undefined) out.push(<Text key={key++} italic>{m[4]}</Text>);
     else if (m[5] !== undefined) out.push(<Text key={key++} color="cyan" underline>{m[5]}</Text>); // [text](url) -> text
+    // Inline math $...$ -> Unicode, but ONLY when it actually looks like LaTeX (a backslash/^/_/brace),
+    // so a price like "$5 to $10" is left untouched.
+    else if (m[7] !== undefined) out.push(/[\\^_{}]/.test(m[7]) ? <Text key={key++} color="cyan">{mathToUnicode(m[7])}</Text> : m[0]);
     last = m.index + m[0].length;
   }
   if (last < s.length) out.push(s.slice(last));
@@ -170,6 +211,16 @@ export function Markdown({ text, width, compact }: { text: string; width?: numbe
           ))}
         </Box>,
       );
+      continue;
+    }
+
+    // Display math on its own line: $$ ... $$ or \[ ... \] -> Unicode, indented + dim (a terminal can't
+    // render LaTeX, so this makes the formula readable instead of showing raw markup).
+    const dm = line.match(/^\s*(?:\$\$(.+?)\$\$|\\\[(.+?)\\\])\s*$/);
+    if (dm) {
+      rhythm();
+      push(<Text key={key++} color="cyan">{"  " + mathToUnicode(dm[1] ?? dm[2] ?? "")}</Text>);
+      i++;
       continue;
     }
 
@@ -231,5 +282,9 @@ export function Markdown({ text, width, compact }: { text: string; width?: numbe
     i++;
   }
 
-  return <Box flexDirection="column">{blocks}</Box>;
+  // Constrain the column to `maxWidth` so paragraph <Text> wraps at OUR width, not the ambient terminal
+  // width. Inside <Static> (+ the left gutter) an unconstrained Text wraps at the full width, then the
+  // gutter shifts it right past the terminal edge — the terminal then hard-wraps mid-word and dumps the
+  // overflow at column 0 (broken Vietnamese: "tương ứ" / "ng"). An explicit width fixes the wrap point.
+  return <Box flexDirection="column" width={maxWidth}>{blocks}</Box>;
 }

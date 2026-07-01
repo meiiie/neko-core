@@ -49,7 +49,10 @@ export const DEFAULT_SYSTEM_PROMPT =
   "emojis — decorative ones (checkmarks, keycaps like a digit-in-a-box, arrows) misalign the columns and read as " +
   "clutter on a terminal; use a markdown heading / bold / a numbered list for emphasis instead. Only use emojis " +
   "if the user explicitly asks. Don't hand-draw ASCII rules (`-----`) or box art; let headings and blank lines " +
-  "separate sections.\n\n" +
+  "separate sections.\n" +
+  "- Math: prefer plain Unicode (x², aₙ, a/b, √, ×, ÷, ≤, ≥, ≠, θ, Σ, →) since a terminal can't render LaTeX/" +
+  "MathML. Simple LaTeX (`$...$`, `$$...$$`, \\frac, ^, _, greek) is converted to Unicode, but keep formulas " +
+  "short and readable rather than dense multi-line LaTeX.\n\n" +
   "Be concise — no filler, no 'I will now...' preamble or 'let me know if...' postamble; sound like a focused senior engineer pair-programming, not a script. When done: a short summary, then stop.";
 
 // Tools safe to run concurrently in one turn: read-only inspection + sub-agent tasks (the
