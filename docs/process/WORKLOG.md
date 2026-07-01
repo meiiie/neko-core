@@ -3,6 +3,24 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-02 — Word-wrap regression fix + LaTeX->Unicode math
+
+Two issues from a screenshot (Vietnamese text breaking mid-word + raw LaTeX):
+- **Wrap breaking words / losing the gutter indent.** Root cause (found by A/B + width probes, not guessed):
+  markdown paragraphs are a bare `<Text>` with no width, and Ink's `<Static>` renders items at the FULL
+  terminal width — so with the left gutter a long line wrapped at full width, got shifted right by the padding,
+  overflowed the real terminal edge, and the TERMINAL hard-wrapped it mid-character (dumping the tail at column
+  0). Vietnamese exposed it because the lines were long. Fix: give the markdown column an explicit
+  `width={maxWidth}` and width-cap every `<Static>` item to `contentCols`, so text wraps at OUR inset width at
+  word boundaries and never reaches the terminal edge. (The gutter itself was fine; this was a `<Static>`
+  width-propagation gap.)
+- **LaTeX math.** A terminal can't render `$...$`/`$$...$$`, so formulas showed raw. Built `mathToUnicode` —
+  extensible mapping tables (Greek, operators, super/subscripts) + `\frac`/`\sqrt`/`\text` handling with the
+  right ordering so nested `\frac{...\sqrt{...}...}{...}` works (quadratic formula → `(-b ± √(b²-4ac))/(2a)`).
+  Wired to display math (own-line `$$`/`\[`) and inline `$...$` (guarded so `$5 to $10` prices are left alone),
+  plus a system-prompt nudge toward plain Unicode math. This is a real, extend-by-adding-a-symbol feature, not a
+  patch — matches the "SOTA + infinitely extensible" bar.
+
 ## 2026-07-02 — Terminal-clean output (no emoji / real rules / readable elapsed)
 
 Screenshot review surfaced three presentation issues; studied Claude Code's own prompts to fix them right:

@@ -6,6 +6,18 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+- **Wrapping no longer breaks words mid-character; LaTeX math renders as Unicode** — two fixes to how replies
+  render: (1) **word-wrap** — markdown paragraphs were a `<Text>` with no width, so inside `<Static>` (+ the left
+  gutter) they wrapped at the FULL terminal width and then spilled past the edge, and the terminal hard-wrapped
+  them mid-character (Vietnamese "tương ứ" / "ng", the continuation dumped at column 0). Every transcript item is
+  now width-capped to the inset content width, so text wraps at word boundaries within the gutter and never
+  overflows. (2) **math** — a terminal can't render LaTeX, so `$...$` / `$$...$$` showed raw. A `mathToUnicode`
+  converter now maps the common constructs to readable Unicode: `\frac{a}{b}` → `(a)/(b)`, `x^2` → `x²`,
+  `\sqrt{...}` → `√(...)`, `\sum_{i=1}^{n}` → `∑ᵢ₌₁ⁿ`, Greek + operators (`\theta`→θ, `\times`→×, `\leq`→≤) —
+  handling nested `\frac`/`\sqrt` (the quadratic formula renders as `(-b ± √(b²-4ac))/(2a)`). Inline `$...$`
+  converts only when it actually looks like LaTeX, so a price like `$5 to $10` is left alone; the system prompt
+  also nudges the model toward plain Unicode math. Unit-tested (`mathToUnicode`, width-capped wrap, display/inline).
+
 - **Terminal-clean output: no emoji, real rules, readable elapsed** — three presentation fixes so replies
   look right in a monospace terminal: (1) the system prompt now tells the model to format for a monospace
   terminal and **avoid emojis** (decorative/keycap emojis like a digit-in-a-box misalign the columns — the same
