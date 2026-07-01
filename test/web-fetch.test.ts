@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { htmlToMarkdown, paginateWeb, vttToText } from "../src/core/tool-runtime.ts";
+import { htmlToMarkdown, paginateWeb, rssToMarkdown, vttToText } from "../src/core/tool-runtime.ts";
 
 test("htmlToMarkdown: HTML -> compact markdown (headings/links/lists kept; scripts/nav/footer dropped)", () => {
   const html = `<html><head><style>x{color:red}</style></head><body>
@@ -45,4 +45,15 @@ test("paginateWeb: small page whole; large page split with a next-page footer (n
 test("vttToText: VTT captions -> deduped plain text (drops cues/timestamps/headers/inline tags)", () => {
   const vtt = "WEBVTT\nKind: captions\nLanguage: en\n\n1\n00:00:00.000 --> 00:00:02.000\nHello world\n\n2\n00:00:02.000 --> 00:00:04.000\nHello world\n\n3\n00:00:04.000 --> 00:00:06.000\n<c>Second</c> line";
   expect(vttToText(vtt)).toBe("Hello world Second line"); // consecutive dupes collapsed, tags/cues/timestamps gone
+});
+
+test("rssToMarkdown: RSS/Atom XML -> compact item list (title+link, CDATA/tags stripped)", () => {
+  const rss = '<?xml version="1.0"?><rss><channel><title>My Feed</title>' +
+    '<item><title>First post</title><link>https://x.io/1</link><description><![CDATA[Hello <b>there</b>]]></description></item>' +
+    '<item><title>Second</title><link>https://x.io/2</link></item></channel></rss>';
+  const md = rssToMarkdown(rss);
+  expect(md).toContain("My Feed (2 items)");
+  expect(md).toContain("[First post](https://x.io/1)");
+  expect(md).toContain("Hello there");           // CDATA unwrapped + <b> stripped
+  expect(md).toContain("[Second](https://x.io/2)");
 });

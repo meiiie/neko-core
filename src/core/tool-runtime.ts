@@ -1018,14 +1018,11 @@ async function toolWebFetch(_root: string, args: Record<string, any>, backend = 
   if (!/^https?:\/\//i.test(url)) return "Error: url must start with http:// or https://";
   const hit = webCache.get(url);
   if (hit && Date.now() - hit.ts < WEB_CACHE_TTL) return hit.md;
-  // Deterministic platform route: a YouTube video URL -> its TRANSCRIPT via yt-dlp (captions, not the SPA
-  // HTML). This is code, not a skill the model can ignore - even when the model wrongly calls web_fetch on a
-  // youtube link (the common fumble) it gets clean text. Falls back to a normal fetch if yt-dlp is missing or
-  // the video has no captions.
-  if (/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)[\w-]{11}/i.test(url)) {
-    const t = ytTranscript(url);
-    if (t) { webCache.set(url, { md: t, ts: Date.now() }); return t; }
-  }
+  // Deterministic platform routes: send a known platform URL to the RIGHT free backend (CODE, not a skill
+  // the model can ignore) - a YouTube transcript via yt-dlp, a GitHub repo/issue/PR via gh. Falls back to a
+  // normal fetch when the tool is missing/unauthenticated or it's not a routable URL.
+  const routed = platformRoute(url);
+  if (routed) { webCache.set(url, { md: routed, ts: Date.now() }); return routed; }
   // Opt-in hosted scrape backend: Jina Reader (r.jina.ai) renders JS/SPAs and returns markdown in one call
   // (free + keyless for light use; JINA_API_KEY lifts the rate limit). PUBLIC pages only (anonymous bot -
   // no login/session; use the browser MCP for authenticated / hardest SPAs).
@@ -1042,11 +1039,67 @@ async function toolWebFetch(_root: string, args: Record<string, any>, backend = 
   } catch (error) {
     return `Error: fetch failed: ${(error as Error).message}`;
   }
-  if (!jina && contentType.includes("html")) {
-    text = htmlToMarkdown(text); // our deterministic HTML -> markdown (Jina already returns markdown)
+  if (!jina) {
+    // RSS/Atom feed -> a clean item list (detect by content-type or the XML root, since feed URLs have no
+    // fixed shape); else HTML -> markdown. Jina already returns markdown.
+    if (/application\/(rss|atom|xml)|text\/xml/i.test(contentType) || /^﻿?\s*(<\?xml|<rss\b|<feed\b)/i.test(text.slice(0, 400))) {
+      text = rssToMarkdown(text);
+    } else if (contentType.includes("html")) {
+      text = htmlToMarkdown(text); // our deterministic HTML -> markdown
+    }
   }
   webCache.set(url, { md: text, ts: Date.now() });
   return text;
+}
+
+/** Route a URL to the best free backend if it's a known platform; else null (caller does a normal fetch). */
+function platformRoute(url: string): string | null {
+  if (/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)[\w-]{11}/i.test(url)) return ytTranscript(url);
+  const gh = url.match(/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\/(issues|pull)\/(\d+))?(?:[/?#]|$)/i);
+  const RESERVED = new Set(["orgs", "sponsors", "topics", "search", "marketplace", "settings", "notifications", "features", "about", "pricing"]);
+  if (gh && gh[1] && gh[2] && !RESERVED.has(gh[1].toLowerCase())) return ghRead(gh[1], gh[2].replace(/\.git$/, ""), gh[3], gh[4]);
+  return null;
+}
+
+/** A GitHub repo / issue / PR via the gh CLI (authenticated, clean). null if gh is missing/unauth/not found. */
+function ghRead(owner: string, repo: string, kind?: string, num?: string): string | null {
+  try {
+    const target = `${owner}/${repo}`;
+    const args = kind === "issues" && num ? ["issue", "view", num, "-R", target, "--comments"]
+      : kind === "pull" && num ? ["pr", "view", num, "-R", target, "--comments"]
+      : ["repo", "view", target]; // README + about
+    const r = spawnSync("gh", args, { encoding: "utf8", timeout: 30_000, maxBuffer: 32 * 1024 * 1024 });
+    if (r.error || r.status !== 0 || !r.stdout?.trim()) return null; // gh missing / not authed / not found -> fall back
+    return `# GitHub: ${target}${kind ? ` (${kind} #${num})` : ""}\n\n${r.stdout.trim()}`;
+  } catch {
+    return null;
+  }
+}
+
+/** RSS/Atom XML -> a compact Markdown item list (title, link, short summary). Regex-level (no DOM), like the
+ * search parsers - good enough for an LLM to read a feed without the raw XML. */
+export function rssToMarkdown(xml: string): string {
+  const cdata = (s: string) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+  const tag = (block: string, name: string) => {
+    const m = block.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`, "i"));
+    return m ? stripTags(cdata(m[1])).trim() : "";
+  };
+  const linkOf = (block: string) => {
+    const href = block.match(/<link\b[^>]*href="([^"]+)"/i); // Atom
+    if (href) return href[1].trim();
+    const txt = block.match(/<link\b[^>]*>([\s\S]*?)<\/link>/i); // RSS
+    return txt ? stripTags(cdata(txt[1])).trim() : "";
+  };
+  const items = [...xml.matchAll(/<(item|entry)\b[\s\S]*?<\/\1>/gi)].map((m) => m[0]);
+  const head = xml.slice(0, xml.search(/<(item|entry)\b/i) + 1 || 400);
+  const feedTitle = tag(head, "title") || "Feed";
+  const rows = items.slice(0, 40).map((it) => {
+    const t = tag(it, "title") || "(untitled)";
+    const link = linkOf(it);
+    const desc = (tag(it, "description") || tag(it, "summary") || tag(it, "content")).slice(0, 200);
+    return `- ${link ? `[${t}](${link})` : t}${desc ? ` - ${desc}` : ""}`;
+  });
+  return `# ${feedTitle} (${items.length} item${items.length === 1 ? "" : "s"})\n\n${rows.join("\n")}`;
 }
 
 /** Return page `page` of a large fetched markdown, with a footer on how to get the next page - instead of
