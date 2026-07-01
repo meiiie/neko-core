@@ -24,7 +24,7 @@ import { loadConfig } from "../adapters/config.ts";
 import { agentsContextBlock, loadAgent } from "../adapters/agents.ts";
 import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
 import { readClipboardImage } from "../adapters/clipboard.ts";
-import { clearApiKey, setApiKey } from "../adapters/project.ts";
+import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
 import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
 import { startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
 import { checkForUpdate } from "../adapters/update.ts";
@@ -547,8 +547,24 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     if (text === "/login") {
-      setAwaitingKey(true);
-      addLine("info", "Paste your API key, then Enter (input hidden). /logout to remove it.");
+      // Guided sign-in (goose-style): choose the provider first, THEN paste its key — a key is meaningless
+      // without its endpoint. Picking switches to that provider live, then captures the key into it.
+      const names = Object.keys(cfg.profiles).sort();
+      setOverlay({
+        title: "Sign in - choose a provider, then paste its key",
+        items: names.map((n) => {
+          const p: any = cfg.profiles[n] ?? {};
+          return { id: n, label: n, detail: `${p.provider ?? "?"} · ${p.model ?? "?"}` + (n === cfg.profile ? "  (current)" : "") };
+        }),
+        onSelect: (it) => {
+          setOverlay(null);
+          setActiveProfile(it.id);
+          cfg.adopt(loadConfig({ profile: it.id })); // switch endpoint+model live
+          agentRef.current?.setProvider(getProvider(cfg));
+          setAwaitingKey(true); // next submit is captured as this provider's key
+          addLine("info", `Provider: ${it.id}. Paste its API key, then Enter (input hidden). /logout to remove it.`);
+        },
+      });
       return;
     }
     if (text === "/logout") {
