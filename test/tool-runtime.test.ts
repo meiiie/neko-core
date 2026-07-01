@@ -251,6 +251,16 @@ test("catastrophic bash is refused even in auto mode (seatbelt)", async () => {
   expect(await reg.execute("bash", { command: "echo hello" })).not.toContain("Refused"); // safe runs
 });
 
+test("seatbelt is not bypassed by QUOTING the target (rm -rf \"$HOME\"/\"/\"/'~')", async () => {
+  const { reg } = makeReg("auto", () => true);
+  // A quote char between the flag and the dangerous token must not defeat the guard.
+  for (const cmd of ['rm -rf "$HOME"', 'rm -rf "/"', "rm -rf '/'", "rm -rf '~'"]) {
+    expect(await reg.execute("bash", { command: cmd })).toContain("Refused");
+  }
+  // Regression guard: quoting a normal relative path is still fine (no false positives).
+  expect(await reg.execute("bash", { command: 'rm -rf "build"' })).not.toContain("Refused");
+});
+
 test("pre_tool_use hook blocks a tool on non-zero exit, allows on zero", async () => {
   const blocked = makeReg("auto", () => true).reg;
   blocked.hooks = { preToolUse: "exit 3" };

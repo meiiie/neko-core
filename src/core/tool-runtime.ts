@@ -849,9 +849,11 @@ function* walkFiles(base: string): Generator<string> {
 /** Conservative catastrophic-command detector (clearest data/disk-destroying forms only). */
 function dangerousCommand(command: string): string | null {
   const c = String(command).replace(/\s+/g, " ").trim();
-  if (/\brm\b/.test(c) && /-[a-z]*r/i.test(c) && /-[a-z]*f/i.test(c) && /\s(\/|\/\*|~|\$HOME)(\s|$)/.test(c)) {
-    return "recursive force-delete of / or home";
-  }
+    // The dangerous token may be QUOTED (`rm -rf "$HOME"`, `rm -rf "/"`, `rm -rf '~'`) -- without
+    // the optional quotes here the seatbelt is bypassed: the quoted target slips through as "allowed".
+    if (/\brm\b/.test(c) && /-[a-z]*r/i.test(c) && /-[a-z]*f/i.test(c) && /\s["']?(\/|\/\*|~|\$HOME)["']?(\s|$)/.test(c)) {
+      return "recursive force-delete of / or home";
+    }
   if (/\bdd\b.*\bof=\/dev\//i.test(c)) return "dd to a raw device";
   if (/\bmkfs(\.\w+)?\b/i.test(c)) return "filesystem format (mkfs)";
   if (/:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/.test(c)) return "fork bomb";

@@ -28,5 +28,6 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-01] bash seatbelt (dangerousCommand) was bypassable by QUOTING the target: `rm -rf "$HOME"`, `rm -rf "/"`, `rm -rf '~'` all slipped past the `rm -rf` guard because the target regex required the token immediately after whitespace -- a quote char broke the match. Made the token match quote-aware (optional `["']?`); added a test asserting the four quoted forms are Refused AND that quoting a normal relative path (`rm -rf "build"`) is still allowed. Verify gate green: typecheck + 227/0 tests + policy PASS. Left uncommitted for the harness.
 - [2026-06-30] compact() lean-tail clip now also triggers by char count (LEAN_TAIL_CHARS=8000), so dense few-line tool results (minified JSON/base64/packed logs) — long in chars but short in lines — are actually clipped instead of passing through fully intact and freeing no context; committed a76ec45.
 - [2026-06-30] estimateTokens now counts assistant tool_calls so the in-loop overflow guard isn't undercounted on tool-heavy turns (e.g. several large write_file calls); committed 620aed2.
