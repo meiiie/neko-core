@@ -16,7 +16,7 @@ import { ctxPercent, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TextInput } from "./text-input.tsx";
-import { ThinkingLine, VERBS } from "./thinking-line.tsx";
+import { RunningLine, ThinkingLine, VERBS } from "./thinking-line.tsx";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
@@ -149,6 +149,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const turnTokensStartRef = useRef(0); // cost.totalTokens at turn start -> spinner shows this turn only
   const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null); // ctrl+o: which tool_result is peeked in full (toggle)
+  // Tool calls in flight: shown LIVE with a blinking dot, then committed to <Static> (solid dot) with
+  // their result. A keyed list (not one value) because the agent's concurrent path fires all tool_calls
+  // before any tool_result. Ref = source of truth for the event handler; state mirrors it for render.
+  const inflightRef = useRef<{ key: string; text: string }[]>([]);
+  const [inflight, setInflight] = useState<{ key: string; text: string }[]>([]);
+  const syncInflight = () => setInflight([...inflightRef.current]);
   const [awaitingKey, setAwaitingKey] = useState(false); // /login: next submit is the API key
   const pastedRef = useRef<string[]>([]); // staged image data: URLs for the next turn
   const autoLoadedSkills = useRef<Set<string>>(new Set()); // domain skills already auto-loaded this session
@@ -278,8 +285,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       onEvent: (kind, data) => {
         if (kind === "tool_call") {
           flushStream();
-          addLine("tool_call", describeToolCall(data.name, data.arguments));
+          // Defer the commit: show this call LIVE with a blinking dot (RunningLine) while it runs;
+          // it commits to <Static> paired with its result below. Keyed by call id so parallel calls pair up.
+          const k = data.id || data.name || `t${inflightRef.current.length}`;
+          inflightRef.current.push({ key: k, text: describeToolCall(data.name, data.arguments) });
+          syncInflight();
         } else if (kind === "tool_result") {
+          // The call finished: drop its blinking line and commit tool_call + result to <Static> (solid dot).
+          const k = data.call?.id || data.call?.name;
+          const idx = inflightRef.current.findIndex((x) => x.key === k);
+          const done = idx >= 0 ? inflightRef.current.splice(idx, 1)[0] : { text: describeToolCall(data.call?.name, data.call?.arguments) };
+          syncInflight();
+          addLine("tool_call", done.text);
           // Store the full result (capped) for Ctrl+O; read-type tools get a 1-line summary
           // (Claude-style), keeping the full output one keystroke away.
           const obs = String(data.observation).split("\n").slice(0, 400).join("\n");
@@ -391,14 +408,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     if (approval || overlay) return; // let their own handlers own the rest of the keys
-    if (key.ctrl && char === "o") { // expand: re-print the most recent collapsed tool output in full
+    if (key.ctrl && char === "o") { // toggle: expand the most recent collapsed tool output, press again to collapse
       // Match the collapse logic in TranscriptLine: summarized reads collapse at >1 line, plain
       // results at >8 — so the "(ctrl+o to expand)" hint and this finder never disagree.
       const last = [...lines].reverse().find(
         (l) => l.kind === "tool_result" && l.text.split("\n").length > (l.summary ? 1 : 8),
       );
-      if (last) addLine("tool_result_full", last.text);
-      else addLine("info", "nothing to expand");
+      if (!last) { addLine("info", "nothing to expand"); return; }
+      setExpandedId((cur) => (cur === last.id ? null : last.id)); // second press collapses (no duplicate re-print)
       return;
     }
     if (key.meta && char === "v") return pasteImage();
@@ -663,6 +680,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } finally {
       busyRef.current = false;
       setBusy(false);
+      if (inflightRef.current.length) { inflightRef.current = []; syncInflight(); } // drop any un-resulted (aborted) blinking lines
       controllerRef.current = null;
       persist();
       const next = queueRef.current.shift();
@@ -714,6 +732,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     multilineRef.current = "";
     setPendingMulti(false);
     if (!text) return;
+    setExpandedId(null); // a new turn: drop any ctrl+o peek panel
     historyRef.current.push(text);
     historyPos.current = historyRef.current.length;
     if (busyRef.current) {
@@ -728,13 +747,28 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   return (
     <Box flexDirection="column">
-      <Static key={resizeKey} items={lines}>{(line) => <TranscriptLine key={line.id} line={line} cfg={cfg} />}</Static>
+      <Static key={resizeKey} items={lines}>{(line) => <TranscriptLine key={line.id} line={line} cfg={cfg} cols={cols} />}</Static>
+
+      {/* Ctrl+O peek: the most-recent collapsed tool result shown in full in the live region (not
+          re-appended to <Static>), so a second Ctrl+O collapses it cleanly instead of duplicating. */}
+      {(() => {
+        const l = expandedId != null ? lines.find((x) => x.id === expandedId) : undefined;
+        if (!l) return null;
+        const all = l.text.split("\n");
+        const CAP = 40;
+        return (
+          <Box flexDirection="column" marginTop={1}>
+            <TranscriptLine line={{ id: l.id, kind: "tool_result_full", text: all.slice(0, CAP).join("\n") }} cfg={cfg} cols={cols} />
+            <Text dimColor>{`     ${all.length > CAP ? `+${all.length - CAP} more lines - ` : ""}ctrl+o to collapse`}</Text>
+          </Box>
+        );
+      })()}
 
       {/* Same margins as the committed assistant line (transcript.tsx) so the text doesn't jump a row
           when streaming finishes and flushStream moves it into <Static>. */}
       {stream ? (
         <Box flexDirection="column" marginTop={1} marginBottom={1}>
-          <Markdown text={renderTail(stream)} />
+          <Markdown text={renderTail(stream)} width={cols} />
         </Box>
       ) : null}
 
@@ -754,6 +788,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           {reasoning.trim().split("\n").slice(-6).map((l, i) => (
             <Text key={i} color="gray" italic>{"  " + (l.length > cols - 4 ? l.slice(0, cols - 5) + "…" : l)}</Text>
           ))}
+        </Box>
+      ) : null}
+
+      {inflight.length ? (
+        <Box flexDirection="column" marginTop={1}>
+          {inflight.map((t) => <RunningLine key={t.key} text={t.text} />)}
         </Box>
       ) : null}
 

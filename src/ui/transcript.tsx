@@ -27,7 +27,7 @@ function HeaderCounts({ text }: { text: string }) {
 }
 
 /** Render one transcript line. The `key` is set by the caller's <Static> map. */
-export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
+export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfig; cols?: number }) {
   switch (line.kind) {
     case "welcome":
       return (
@@ -51,7 +51,7 @@ export function TranscriptLine({ line, cfg }: { line: Line; cfg: NekoConfig }) {
     case "assistant":
       return (
         <Box flexDirection="column" marginTop={1} marginBottom={1}>
-          <Markdown text={line.text} />
+          <Markdown text={line.text} width={cols} />
         </Box>
       );
     case "tool_call":

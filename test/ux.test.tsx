@@ -4,7 +4,7 @@ import { render } from "ink-testing-library";
 
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { ChatApp } from "../src/ui/chat.tsx";
-import { ThinkingLine } from "../src/ui/thinking-line.tsx";
+import { RunningLine, ThinkingLine } from "../src/ui/thinking-line.tsx";
 import { ApprovalBox } from "../src/ui/approval-box.tsx";
 import { TranscriptLine } from "../src/ui/transcript.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
@@ -125,6 +125,12 @@ test("expanded tool result keeps the diff +/- lines", () => {
   expect(f).toContain("- ");
   expect(f).toContain("old();");
   expect(f).toContain("new();");
+});
+
+test("RunningLine shows a dot + the tool label while a call is in flight", () => {
+  const f = strip(render(<RunningLine text="Running ls" />).lastFrame());
+  expect(f).toContain("Running ls");
+  expect(f).toContain("●"); // the (blinking) running dot
 });
 
 test("write_file approval previews size + a '+N more lines' hint", () => {
