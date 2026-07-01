@@ -294,19 +294,24 @@ export class ToolRegistry {
     // web_fetch: fetch the page, then (if a prompt + summarizer are available) extract just what
     // was asked via a single model pass — instead of dumping the whole page into context.
     if (name === "web_fetch") {
-      const raw = await toolWebFetch(this.root, args);
+      const md = await toolWebFetch(this.root, args);
+      if (md.startsWith("Error")) return md;
       const prompt = String(args.prompt ?? "");
       // schema-guided extraction: a JSON Schema forces the extractor to fill a shape (e.g. enumerate
       // every variant) instead of collapsing to one value - far more reliable than a freeform prompt.
       const schema = args.schema && typeof args.schema === "object" ? (args.schema as Record<string, any>) : undefined;
-      if ((prompt || schema) && this.summarize && !raw.startsWith("Error")) {
+      // Skip the model when the page is small enough to just read (Hermes-style: no LLM call when it adds
+      // nothing - most pages). A prompt/schema on a LARGE page still gets the single-pass extractor, now
+      // over clean markdown rather than raw HTML.
+      if ((prompt || schema) && this.summarize && md.length > WEB_SMALL_PAGE) {
         try {
-          return await this.summarize(prompt || "Extract the requested structured data from the page.", raw, schema);
+          return await this.summarize(prompt || "Extract the requested structured data from the page.", md, schema);
         } catch {
-          return raw;
+          /* fall through to the paginated markdown */
         }
       }
-      return raw;
+      // Paginate a large page on demand instead of truncating it (no content lost).
+      return paginateWeb(md, Math.max(1, Number(args.page ?? 1) || 1));
     }
 
     // task: delegate to an isolated sub-agent (its own context + tools); return its result.
@@ -999,10 +1004,18 @@ async function ddgSearch(query: string): Promise<SearchResult[]> {
   });
 }
 
-/** Fetch a URL and return readable text (scripts/styles/tags stripped). */
+const webCache = new Map<string, { md: string; ts: number }>();
+const WEB_CACHE_TTL = 5 * 60_000; // 5 min - so paginating a large page doesn't re-download/re-convert it
+const WEB_SMALL_PAGE = 5_000; // <= this many chars: the markdown IS the answer, skip the model (fast + cheap)
+
+/** Fetch a URL and return its FULL content as compact Markdown (HTML) or text. Cached briefly so pagination
+ * (page 2, 3...) serves from memory. NOT truncated here - the caller paginates on demand (save locally +
+ * page, don't silently lose content). */
 async function toolWebFetch(_root: string, args: Record<string, any>): Promise<string> {
   const url = requireArg(args, "url");
   if (!/^https?:\/\//i.test(url)) return "Error: url must start with http:// or https://";
+  const hit = webCache.get(url);
+  if (hit && Date.now() - hit.ts < WEB_CACHE_TTL) return hit.md;
   let text: string;
   let contentType: string;
   try {
@@ -1015,7 +1028,19 @@ async function toolWebFetch(_root: string, args: Record<string, any>): Promise<s
   if (contentType.includes("html")) {
     text = htmlToMarkdown(text); // deterministic HTML -> compact markdown (keeps links/headings/lists, no model call)
   }
-  return text.length > MAX_READ_CHARS ? text.slice(0, MAX_READ_CHARS) + "\n... (truncated)" : text;
+  webCache.set(url, { md: text, ts: Date.now() });
+  return text;
+}
+
+/** Return page `page` of a large fetched markdown, with a footer on how to get the next page - instead of
+ * truncating and silently dropping the rest. Small pages (<= MAX_READ_CHARS) come back whole. */
+export function paginateWeb(md: string, page: number): string {
+  if (md.length <= MAX_READ_CHARS) return md;
+  const pages = Math.ceil(md.length / MAX_READ_CHARS);
+  const p = Math.min(Math.max(1, page), pages);
+  const body = md.slice((p - 1) * MAX_READ_CHARS, p * MAX_READ_CHARS);
+  const more = p < pages ? `call web_fetch again with the same url and page:${p + 1} for the next page` : "this is the last page";
+  return `${body}\n\n... (page ${p}/${pages}, ${md.length} chars total; ${more})`;
 }
 
 /** Light readability: drop scripts/chrome, prefer the main article so the model reads content,

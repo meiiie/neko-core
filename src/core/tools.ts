@@ -166,11 +166,12 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "web_fetch",
     permission: SAFE,
-    summary: "Fetch a URL (HTML stripped to text). With `prompt`, a fast pass extracts just what you asked. With `schema` (a JSON Schema), extraction is schema-constrained and returns validated JSON - use it to reliably enumerate repeated data (e.g. every product variant/price) instead of one value.",
+    summary: "Fetch a URL as clean Markdown (headings/links/lists kept). A small page comes back whole with no model call (fast + cheap); a large one is paginated - use `page` to read more. With `prompt`, a fast pass extracts just what you asked; with `schema` (a JSON Schema), extraction is schema-constrained and returns validated JSON - best to enumerate repeated data (e.g. every product variant/price).",
     parameters: {
       url: { type: "string", description: "Absolute http(s) URL." },
       prompt: { type: "string", description: "Optional: what to extract from the page." },
       schema: { type: "object", description: "Optional JSON Schema. When set, the page is extracted into JSON matching this shape (constrained output) - best for lists/tables like price variants." },
+      page: { type: "number", description: "Optional: which page of a large fetched page to return (1-based). The footer tells you the total and the next page." },
     },
     required: ["url"],
   },
