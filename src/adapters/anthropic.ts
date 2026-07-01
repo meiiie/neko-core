@@ -47,11 +47,22 @@ export class AnthropicProvider implements Provider {
     let httpAttempt = 0, netAttempt = 0;
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
+      // IDLE timeout (reset on every streamed chunk), NOT a total request cap: a long-but-healthy
+      // generation (a big landing page legitimately streams for minutes) must not be killed while tokens
+      // keep arriving; only a genuine STALL aborts. AbortSignal.timeout() capped the whole request and
+      // aborted long streams mid-generation ("The operation timed out"). Same fix as providers.ts.
+      const idle = new AbortController();
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const bumpIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => idle.abort(new DOMException("Idle timeout", "TimeoutError")), this.cfg.timeoutSeconds * 1000);
+      };
+      bumpIdle();
       let res: Response;
       try {
-        const timeout = AbortSignal.timeout(this.cfg.timeoutSeconds * 1000);
-        res = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload), signal: signal ? AbortSignal.any([timeout, signal]) : timeout });
+        res = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload), signal: signal ? AbortSignal.any([idle.signal, signal]) : idle.signal });
       } catch (error) {
+        if (idleTimer) clearTimeout(idleTimer);
         if (signal?.aborted) throw error;
         if (Date.now() >= offlineDeadline) throw new Error(`anthropic completion failed: ${msgOf(error)}`);
         netAttempt++;
@@ -59,7 +70,14 @@ export class AnthropicProvider implements Provider {
         await sleep(this.retryDelayMs(Math.min(netAttempt - 1, 4)), signal);
         continue;
       }
-      if (res.ok) return stream ? await parseStream(res, onDelta!) : parseMessage(await res.json());
+      if (res.ok) {
+        try {
+          return stream ? await parseStream(res, onDelta!, bumpIdle) : parseMessage(await res.json());
+        } finally {
+          if (idleTimer) clearTimeout(idleTimer);
+        }
+      }
+      if (idleTimer) clearTimeout(idleTimer);
       const body = await res.text().catch(() => "");
       if (RETRYABLE_STATUS.has(res.status) && httpAttempt < this.cfg.maxRetries) {
         httpAttempt++;
@@ -156,13 +174,13 @@ export function parseMessage(data: any): ProviderResponse {
 
 /** Streamed (SSE) Anthropic response: text_delta -> content, thinking_delta -> reasoning, input_json_delta
  * accumulates a tool_use's args. */
-async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderResponse> {
+async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () => void): Promise<ProviderResponse> {
   if (!res.body) throw new Error("anthropic streaming response had no body");
   let content = "", reasoning = "";
   const blocks: Record<number, { type: string; id?: string; name?: string; json: string }> = {};
   const toolCalls: ToolCall[] = [];
   const usage: Usage = {};
-  for await (const ev of sseEvents(res)) {
+  for await (const ev of sseEvents(res, onActivity)) {
     switch (ev.type) {
       case "message_start": { const u = ev.message?.usage ?? {}; if (u.input_tokens != null) usage.prompt_tokens = u.input_tokens; if (u.output_tokens != null) usage.completion_tokens = u.output_tokens; break; }
       case "content_block_start": blocks[ev.index] = { type: ev.content_block?.type, id: ev.content_block?.id, name: ev.content_block?.name, json: "" }; break;
@@ -194,13 +212,14 @@ function usageOf(u: any): Usage {
 
 /** Yield the parsed JSON of each `data:` line in an Anthropic SSE stream (the `event:` line is redundant — the
  *  JSON carries its own `type`). */
-async function* sseEvents(res: Response): AsyncGenerator<any> {
+async function* sseEvents(res: Response, onActivity?: () => void): AsyncGenerator<any> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buf = "";
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    onActivity?.(); // bytes arrived -> reset the idle timeout so a healthy long stream never times out
     buf += decoder.decode(value, { stream: true });
     let idx: number;
     while ((idx = buf.indexOf("\n")) >= 0) {

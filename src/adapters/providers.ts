@@ -132,16 +132,27 @@ export class OpenAICompatProvider implements Provider {
     let netAttempt = 0;
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError"); // Esc: stop now
+      // IDLE timeout, not a total one. `timeoutSeconds` bounds a STALL (no bytes), reset on every
+      // streamed chunk — so a long-but-healthy generation (a big landing page legitimately streams for
+      // minutes) is never killed while tokens keep arriving. `AbortSignal.timeout()` capped the WHOLE
+      // request, which aborted long streams mid-generation ("The operation timed out").
+      const idle = new AbortController();
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const bumpIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => idle.abort(new DOMException("Idle timeout", "TimeoutError")), this.cfg.timeoutSeconds * 1000);
+      };
+      bumpIdle();
       let res: Response;
       try {
-        const timeout = AbortSignal.timeout(this.cfg.timeoutSeconds * 1000);
         res = await fetch(url, {
           method: "POST",
           headers,
           body: JSON.stringify(payload),
-          signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+          signal: signal ? AbortSignal.any([idle.signal, signal]) : idle.signal,
         });
       } catch (error) {
+        if (idleTimer) clearTimeout(idleTimer);
         if (signal?.aborted) throw error; // user interrupt, not a network blip
         if (Date.now() >= offlineDeadline) throw new Error(`openai_compat completion failed: ${messageOf(error)}`);
         netAttempt++;
@@ -150,9 +161,15 @@ export class OpenAICompatProvider implements Provider {
         continue;
       }
       if (res.ok) {
-        // Once the response is OK we commit to it (no mid-stream retry).
-        return stream ? await parseStream(res, onDelta!) : parseOpenAIMessage(await res.json());
+        // Committed (no mid-stream retry). Keep the idle timer live through the body read — bumpIdle on
+        // each chunk resets it — and clear it once the stream is fully consumed.
+        try {
+          return stream ? await parseStream(res, onDelta!, bumpIdle) : parseOpenAIMessage(await res.json());
+        } finally {
+          if (idleTimer) clearTimeout(idleTimer);
+        }
       }
+      if (idleTimer) clearTimeout(idleTimer); // non-ok response: stop the timer before retry/throw
       const body = await res.text().catch(() => "");
       if (RETRYABLE_STATUS.has(res.status) && httpAttempt < this.cfg.maxRetries) {
         httpAttempt++;
@@ -282,7 +299,7 @@ function splitThink(text: string | null | undefined): { content: string | null; 
 }
 
 /** Parse a streamed (SSE) chat completion, calling onDelta for each content chunk. */
-async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderResponse> {
+async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () => void): Promise<ProviderResponse> {
   if (!res.body) throw new Error("streaming response had no body (the endpoint returned a 200 with an empty stream)");
   let content = "";
   let reasoning = "";
@@ -294,7 +311,7 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
     (s) => { reasoning += s; onDelta(s, "reasoning"); },
   );
 
-  for await (const line of sseLines(res)) {
+  for await (const line of sseLines(res, onActivity)) {
     if (!line.startsWith("data:")) continue;
     const data = line.slice(5).trim();
     if (data === "[DONE]") break;
@@ -342,13 +359,14 @@ async function parseStream(res: Response, onDelta: DeltaHook): Promise<ProviderR
 }
 
 /** Yield non-empty lines from an SSE response body. */
-async function* sseLines(res: Response): AsyncGenerator<string> {
+async function* sseLines(res: Response, onActivity?: () => void): AsyncGenerator<string> {
   const reader = res.body!.getReader(); // parseStream guards res.body before calling this
   const decoder = new TextDecoder();
   let buffer = "";
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    onActivity?.(); // bytes arrived -> reset the idle timeout so a healthy long stream never times out
     buffer += decoder.decode(value, { stream: true });
     let idx: number;
     while ((idx = buffer.indexOf("\n")) >= 0) {

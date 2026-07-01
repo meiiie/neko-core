@@ -50,6 +50,40 @@ test("complete sends response_format json_schema only when a responseSchema is g
   }
 });
 
+test("idle timeout resets per chunk: a slow-but-active stream is NOT aborted (long generation)", async () => {
+  // timeout_seconds is an IDLE budget, reset on every streamed chunk — not a total request cap. Chunks
+  // arrive 120ms apart (< the 400ms idle) but total ~600ms (> 400ms). A total timeout would abort at
+  // 400ms mid-stream ("operation timed out"); the idle reset must let it finish.
+  const config = new NekoConfig({ provider: "openai_compat", base_url: "https://example/v1", model: "m", timeout_seconds: 0.4 }, null, {}, "");
+  const provider = getProvider(config);
+  const realFetch = globalThis.fetch;
+  const realKey = process.env.NEKO_API_KEY;
+  process.env.NEKO_API_KEY = "k";
+  const sse = (t: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`;
+  globalThis.fetch = (async () => {
+    const enc = new TextEncoder();
+    const parts = ["Hel", "lo ", "lan", "ding", " page"]; // 5 chunks * 120ms = 600ms > 400ms idle budget
+    const stream = new ReadableStream({
+      async start(controller) {
+        for (const p of parts) {
+          await new Promise((r) => setTimeout(r, 120));
+          controller.enqueue(enc.encode(sse(p)));
+        }
+        controller.enqueue(enc.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+  }) as any;
+  try {
+    const res = await provider.complete([{ role: "user", content: "hi" }], undefined, () => {});
+    expect(res.content).toBe("Hello landing page"); // finished despite total time > timeout_seconds
+  } finally {
+    globalThis.fetch = realFetch;
+    if (realKey === undefined) delete process.env.NEKO_API_KEY; else process.env.NEKO_API_KEY = realKey;
+  }
+}, 5000);
+
 test("parseOpenAIMessage extracts <think> from a non-streamed body", () => {
   const r = parseOpenAIMessage({ choices: [{ message: { content: "<think>weighing options</think>The answer is 42." } }] });
   expect(r.content).toBe("The answer is 42.");

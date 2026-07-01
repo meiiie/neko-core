@@ -796,7 +796,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         </Box>
       ) : null}
 
-      {todos.length ? (
+      {/* Live todo tracker: only WHILE a turn runs. When idle the committed "Update Todos" tool result
+          is the record — showing the sticky list too would duplicate it (a plan printed twice). */}
+      {busy && todos.length ? (
         <Box flexDirection="column" marginTop={1}>
           {todos.map((t, i) => (
             <Text key={i} color={t.status === "completed" ? "green" : t.status === "in_progress" ? "yellow" : "gray"}>
