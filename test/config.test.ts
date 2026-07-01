@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadConfig } from "../src/adapters/config.ts";
+import { loadConfig, NekoConfig } from "../src/adapters/config.ts";
 
 beforeEach(() => {
   for (const key of Object.keys(process.env)) {
@@ -130,4 +130,15 @@ test("contextWindow is per-model (model_context wins over the global default)", 
   expect(cfg.contextWindow).toBe(262144); // matches the active model
   const other = loadConfig({ path: tmpConfig({ model: "small-model", context_window: 100000, model_context: { "big-model": 262144 } }) });
   expect(other.contextWindow).toBe(100000); // falls back to the global window
+});
+
+test("NekoConfig.adopt swaps provider/model/endpoint/key IN PLACE (the /provider live-switch)", () => {
+  const a = new NekoConfig({ provider: "openai_compat", model: "gpt-oss", base_url: "https://nvidia/v1" }, "nvidia", {}, "NKEY");
+  const b = new NekoConfig({ provider: "anthropic", model: "glm-5.2", base_url: "https://z.ai" }, "zai", {}, "ZKEY");
+  a.adopt(b);
+  expect(a.provider).toBe("anthropic");
+  expect(a.model).toBe("glm-5.2");
+  expect(a.baseUrl).toBe("https://z.ai");
+  expect(a.apiKey).toBe("ZKEY"); // key swapped too -> no "new endpoint + old key" 401 after switching
+  expect(a.profile).toBe("zai");
 });

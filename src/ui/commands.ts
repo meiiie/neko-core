@@ -4,11 +4,11 @@
  * render, and this file owns "what the commands do".
  */
 import type { Agent } from "../core/agent.ts";
-import type { NekoConfig } from "../adapters/config.ts";
+import { loadConfig, type NekoConfig } from "../adapters/config.ts";
 import { rememberNote, renderContext } from "../adapters/context.ts";
 import { initProject } from "../adapters/project.ts";
-import { listModels } from "../adapters/providers.ts";
-import { setEffort, setModel } from "../adapters/project.ts";
+import { getProvider, listModels } from "../adapters/providers.ts";
+import { setActiveProfile, setEffort, setModel } from "../adapters/project.ts";
 import { fillRecipe, listRecipes, loadRecipe } from "../adapters/recipes.ts";
 import { listSessions, loadSession, renameSession, sessionTitle, type Session } from "../adapters/session.ts";
 import { listSkills, loadSkill } from "../adapters/skills.ts";
@@ -20,7 +20,7 @@ import type { Line, LineKind } from "./transcript.tsx";
 
 export const HELP = [
   "Commands:",
-  "  /help /cost /model /profiles /tools /skill(s) /init /clear /compact /reset /exit",
+  "  /help /cost /model /provider /tools /skill(s) /init /clear /compact /reset /exit",
   "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
@@ -33,7 +33,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
   { name: "/cost", desc: "token usage this session" },
   { name: "/model", desc: "show / list / switch model (/model list · /model <id>)" },
-  { name: "/profiles", desc: "list profiles" },
+  { name: "/provider", desc: "switch provider live: picker of profiles + presets (/provider <name> · /provider list)" },
   { name: "/tools", desc: "list / toggle tools (/tools bash)" },
   { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
   { name: "/init", desc: "scaffold ./.neko-core/config.json" },
@@ -114,6 +114,36 @@ function openResumePicker(ctx: CommandCtx, scope: "cwd" | "all"): void {
   });
 }
 
+/** Switch the active provider profile LIVE: persist it as the default (no --profile flag, no config edit),
+ * rebuild the provider (new endpoint + key + model), swap it into the running agent, and adopt the settings
+ * into the in-session cfg. If the profile has no key yet, point the user at /login (which saves to it). */
+function switchProfile(ctx: CommandCtx, name: string): void {
+  const { cfg, agent, addLine } = ctx;
+  if (!cfg.profiles[name]) {
+    return addLine("error", `no provider "${name}". Known: ${Object.keys(cfg.profiles).sort().join(", ")}`);
+  }
+  setActiveProfile(name); // persist as default for next session too
+  cfg.adopt(loadConfig({ profile: name })); // in-session cfg now = the new provider (endpoint+model+key)
+  agent.setProvider(getProvider(cfg)); // the running agent calls the new endpoint from the next turn
+  addLine("info", `provider -> ${name}  (${cfg.provider} · ${cfg.model})`);
+  if (!cfg.apiKey) addLine("info", `note: provider "${name}" has no API key yet - type /login to add it (it saves to this provider).`);
+}
+
+/** Open the provider picker: configured profiles + built-in presets (all already in cfg.profiles). */
+function openProviderPicker(ctx: CommandCtx): void {
+  const { cfg } = ctx;
+  const names = Object.keys(cfg.profiles).sort();
+  ctx.setOverlay({
+    title: "Select provider (endpoint + model + key)",
+    items: names.map((n) => {
+      const p: any = cfg.profiles[n] ?? {};
+      const cur = n === cfg.profile ? "  (current)" : "";
+      return { id: n, label: n, detail: `${p.provider ?? "?"} · ${p.model ?? "?"}${cur}` };
+    }),
+    onSelect: (it) => { ctx.setOverlay(null); switchProfile(ctx, it.id); },
+  });
+}
+
 /** Run a "/..." command. Returns when done; the caller returns from its turn afterwards. */
 export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<void> {
   const { cfg, agent, addLine } = ctx;
@@ -154,8 +184,15 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       }
       return;
     }
-    case "/profiles":
-      return addLine("info", "profiles: " + Object.keys(cfg.profiles).sort().join(", "));
+    case "/provider":
+    case "/providers":
+    case "/profiles": {
+      const arg = input.slice(cmd.length).trim();
+      if (arg === "list") return addLine("info", "providers: " + Object.keys(cfg.profiles).sort().join(", "));
+      if (arg) return switchProfile(ctx, arg); // /provider zai  -> switch directly
+      openProviderPicker(ctx); // /provider  -> guided picker
+      return;
+    }
     case "/tools": {
       const reg = ctx.registry;
       const arg = input.split(/\s+/)[1];

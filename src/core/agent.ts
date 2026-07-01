@@ -108,7 +108,7 @@ export interface AgentOptions {
 }
 
 export class Agent {
-  private readonly provider: Provider;
+  private provider: Provider; // swappable between turns so the REPL can switch providers live (see setProvider)
   private readonly tools: ToolRegistry;
   private readonly maxSteps: number;
   private readonly systemPrompt: string;
@@ -141,6 +141,10 @@ export class Agent {
     this.dynamicContext = opts.dynamicContext;
     this.maxContextTokens = opts.maxContextTokens ?? 131072;
   }
+
+  /** Swap the LLM provider live (used by the REPL's /provider command to switch endpoint+key between turns,
+   * no restart). Safe because commands run between turns, never mid-complete(). */
+  setProvider(provider: Provider): void { this.provider = provider; }
 
   /** Summarize the conversation and replace it with the summary, freeing context. */
   async compact(): Promise<string> {

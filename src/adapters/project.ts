@@ -67,6 +67,12 @@ export function setModel(model: string): void {
   updateUserConfig((d) => { d.model = model.trim(); });
 }
 
+/** Persist the active provider profile so `neko` uses it by default — no --profile flag, no config editing.
+ * Also drops any stray top-level model/api_key so the profile's own endpoint+key+model take effect cleanly. */
+export function setActiveProfile(name: string): void {
+  updateUserConfig((d: any) => { d.active_profile = name; delete d.model; delete d.api_key; });
+}
+
 /** Persist the chosen reasoning effort across sessions ("" / off clears it). */
 export function setEffort(effort: string): void {
   updateUserConfig((d) => {

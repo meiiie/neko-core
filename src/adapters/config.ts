@@ -92,10 +92,20 @@ export class NekoConfig {
   constructor(
     /** printable, profile-merged, env-overridden settings (no secrets) */
     public readonly data: Record<string, any>,
-    public readonly profile: string | null,
+    public profile: string | null,
     public readonly profiles: Record<string, Profile>,
-    private readonly apiKeyFromFile: string,
+    private apiKeyFromFile: string,
   ) {}
+
+  /** Adopt another config's provider profile IN PLACE — data, profile name, and resolved key — so the
+   * existing cfg reference (held by the REPL + agent wiring) stays valid while `/provider` switches the
+   * endpoint + model + key live, without a restart. */
+  adopt(other: NekoConfig): void {
+    for (const k of Object.keys(this.data)) delete this.data[k];
+    Object.assign(this.data, other.data);
+    this.profile = other.profile;
+    this.apiKeyFromFile = other.apiKeyFromFile;
+  }
 
   get provider(): string { return String(this.data.provider ?? "openai_compat"); }
   get model(): string { return String(this.data.model ?? "").trim(); }
