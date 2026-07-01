@@ -56,7 +56,7 @@ const EDIT_TOOLS = new Set(["write_file", "edit", "multi_edit"]);
 // Thresholds for the BROAD doom-loop guard (distinct from the exact-repeat guard above).
 const EDIT_PER_PATH_CAP = 6;   // edits to ONE path in a run before a ONE-TIME soft nudge (warns, does NOT
                                // block -- legitimate coding edits a file several times: write, test, fix, fix)
-const FAILING_RUN_CAP = 3;     // >= N consecutive failing (non-zero exit) bash runs -> nudge
+const UNPRODUCTIVE_CAP = 3;    // >= N consecutive EMPTY-or-failed tool results (any tool) -> nudge to change approach
 
 // A single tool result (a giant browser snapshot, a huge file/page read) must not push the prompt past
 // the model's context window -- the server then computes a NEGATIVE max_tokens (window - prompt) and
@@ -129,7 +129,7 @@ export class Agent {
     //     and nudge once the cap is hit. (b) consecutive failing bash runs: re-running a failing
     //     command 3x with tiny tweaks is the other classic budget sink.
     private readonly editsPerPath = new Map<string, number>();
-    private consecutiveFailingRuns = 0;
+    private consecutiveUnproductive = 0;
 
   constructor(opts: AgentOptions) {
     this.provider = opts.provider;
@@ -325,6 +325,18 @@ export class Agent {
       return /\(exit \d+ -- command FAILED\)/.test(obs) || /^\(timed out/.test(obs) || /^Error:/m.test(obs);
     }
 
+    /** A tool result that moved NOTHING forward: a failed run, or an EMPTY value ([], {}, "", null, 0). Empty
+     * results back-to-back are the signature of a doom-loop of selector probes on an obfuscated page (e.g. a
+     * Facebook feed) - the exact-repeat guard misses it because every selector differs. Handles the MCP
+     * "### Result\n[]" wrapper as well as a bare value. */
+    private static isUnproductiveResult(obs: unknown): boolean {
+      if (typeof obs !== "string") return false;
+      if (Agent.isFailedRunResult(obs)) return true;
+      const m = obs.match(/###\s*Result\s*\r?\n([\s\S]*?)(?:\r?\n###|$)/i);
+      const val = (m ? m[1] : obs).trim();
+      return val === "" || val === "[]" || val === "{}" || val === "null" || val === "undefined" || val === '""' || val === "0";
+    }
+
   /** Run the loop until the model is done or maxSteps is hit. Returns the final text.
    * Pass an AbortSignal to support Esc-to-interrupt (stops cleanly between/within steps).
    * `images` (data: URLs) attach as OpenAI vision content — used by paste-image (needs a vision model). */
@@ -400,28 +412,27 @@ export class Agent {
             const observation = repeats >= 2
               ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
               : await this.safeExecute(call, signal);
-            // Track consecutive failing bash runs for the broad guard. A success (or a non-bash tool)
-            // resets the streak; reaching the cap nudges on the NEXT failing run via the streak itself
-            // (the result is still fed back so the model can diagnose, but the loop now also signals).
-            if (call.name === "bash") {
-              this.consecutiveFailingRuns = Agent.isFailedRunResult(observation)
-                ? this.consecutiveFailingRuns + 1
-                : 0;
-            }
+            // Track consecutive UNPRODUCTIVE results (failed OR empty) from ANY tool; a productive result
+            // resets the streak. Catches the doom-loop the exact-repeat + edit guards structurally miss:
+            // probing a heavy/obfuscated page with a DIFFERENT selector each time, every one returning []
+            // (the classic Facebook-feed time sink). The result is still fed back; the loop also signals.
+            this.consecutiveUnproductive = Agent.isUnproductiveResult(observation) ? this.consecutiveUnproductive + 1 : 0;
             this.emit("tool_result", { call, observation });
             this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
             // BROAD edit-loop guard (warn, don't block): the edit RAN above; append a one-time nudge so the
             // model steps back instead of micro-editing one file forever. Skipped when the exact-repeat guard
             // already blocked this step (repeats >= 2) to avoid double-nudging.
             if (broad !== null && repeats < 2) this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: broad });
-            // After enough consecutive failing runs, append one nudge observation so the model changes
-            // approach instead of re-running a near-identical failing command.
-            if (call.name === "bash" && this.consecutiveFailingRuns >= FAILING_RUN_CAP) {
-              const nudge = "[loop guard] That command has now failed " + this.consecutiveFailingRuns +
-                " times in a row. Stop retrying near-identical versions: re-read the actual error, " +
-                "diagnose the root cause, change your approach — or give your final answer.";
+            // After enough consecutive empty/failed results, append one nudge so the model changes APPROACH
+            // (usually the strategy is wrong, not the arguments) instead of trying a 7th selector variant.
+            if (this.consecutiveUnproductive >= UNPRODUCTIVE_CAP) {
+              const nudge = "[loop guard] The last " + this.consecutiveUnproductive + " tool results in a row " +
+                "were empty or failed. That usually means the APPROACH is wrong, not the arguments - stop " +
+                "varying the same call. Step back and try a DIFFERENT tool/strategy (for a web page or feed, " +
+                "the accessibility snapshot or a markdown read is far more reliable than DOM selectors), or " +
+                "answer with what you already have.";
               this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: nudge });
-              this.consecutiveFailingRuns = 0; // reset so the nudge doesn't fire every step after
+              this.consecutiveUnproductive = 0; // reset so it fires once, then re-accumulates
             }
           }
       }

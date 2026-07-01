@@ -288,8 +288,8 @@ test("BROAD loop guard trips on N CONSECUTIVE FAILING bash runs", async () => {
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
   await agent.run("go");
   const nudge = agent.messages.find((m: any) =>
-    String(m.content).includes("[loop guard]") && String(m.content).includes("failed") && String(m.content).includes("times in a row"));
-  expect(nudge).toBeTruthy(); // the failing-streak nudge fired
+    String(m.content).includes("[loop guard]") && String(m.content).includes("empty or failed"));
+  expect(nudge).toBeTruthy(); // the unproductive-streak nudge fired (failing bash counts as unproductive)
 });
 
 test("BROAD loop guard resets the failing streak on a successful bash (no false positive)", async () => {
@@ -369,4 +369,21 @@ test("in-loop guard clips OLD observations within one turn before context overfl
   expect(clipped.length).toBeGreaterThan(0);
   const fullRecent = agent.messages.filter((m: any) => m.role === "tool" && m.content === big);
   expect(fullRecent.length).toBeGreaterThan(0); // recent observations untouched
+});
+
+test("unproductive-result guard nudges after N empty/failed results in a row (any tool, not just bash/edit)", async () => {
+  // The Facebook-feed time sink: probing with a DIFFERENT selector each call, every one returning [].
+  // The exact-repeat guard can't catch it (sigs differ); the edit guard is edit-only. The unproductive
+  // guard counts empty/failed results from ANY tool and nudges to change approach.
+  const tools = { schemas: () => [], execute: async () => "[]" }; // every call returns an empty result
+  const script: any[] = Array.from({ length: 4 }, (_, i) => ({
+    content: null,
+    tool_calls: [{ id: `c${i}`, name: "search", arguments: { pattern: `sel-${i}` } }], // distinct args each time
+  }));
+  script.push({ content: "done", tool_calls: [] });
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 12 });
+  await agent.run("go");
+  const nudges = agent.messages.filter((m: any) =>
+    String(m.content).includes("[loop guard]") && String(m.content).includes("empty or failed"));
+  expect(nudges.length).toBeGreaterThanOrEqual(1); // fired at the 3rd empty result in a row
 });
