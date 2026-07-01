@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { htmlToMarkdown, paginateWeb } from "../src/core/tool-runtime.ts";
+import { htmlToMarkdown, paginateWeb, vttToText } from "../src/core/tool-runtime.ts";
 
 test("htmlToMarkdown: HTML -> compact markdown (headings/links/lists kept; scripts/nav/footer dropped)", () => {
   const html = `<html><head><style>x{color:red}</style></head><body>
@@ -40,4 +40,9 @@ test("paginateWeb: small page whole; large page split with a next-page footer (n
   expect(p2).toContain("page 2/2");
   expect(p2).toContain("last page");
   expect(p2.includes("B")).toBe(true);   // the tail that truncation would have LOST is reachable
+});
+
+test("vttToText: VTT captions -> deduped plain text (drops cues/timestamps/headers/inline tags)", () => {
+  const vtt = "WEBVTT\nKind: captions\nLanguage: en\n\n1\n00:00:00.000 --> 00:00:02.000\nHello world\n\n2\n00:00:02.000 --> 00:00:04.000\nHello world\n\n3\n00:00:04.000 --> 00:00:06.000\n<c>Second</c> line";
+  expect(vttToText(vtt)).toBe("Hello world Second line"); // consecutive dupes collapsed, tags/cues/timestamps gone
 });

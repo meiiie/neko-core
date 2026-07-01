@@ -8,7 +8,7 @@
  * tool never crashes the agent loop. Path-taking tools refuse to escape the project root.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -1018,6 +1018,14 @@ async function toolWebFetch(_root: string, args: Record<string, any>, backend = 
   if (!/^https?:\/\//i.test(url)) return "Error: url must start with http:// or https://";
   const hit = webCache.get(url);
   if (hit && Date.now() - hit.ts < WEB_CACHE_TTL) return hit.md;
+  // Deterministic platform route: a YouTube video URL -> its TRANSCRIPT via yt-dlp (captions, not the SPA
+  // HTML). This is code, not a skill the model can ignore - even when the model wrongly calls web_fetch on a
+  // youtube link (the common fumble) it gets clean text. Falls back to a normal fetch if yt-dlp is missing or
+  // the video has no captions.
+  if (/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)[\w-]{11}/i.test(url)) {
+    const t = ytTranscript(url);
+    if (t) { webCache.set(url, { md: t, ts: Date.now() }); return t; }
+  }
   // Opt-in hosted scrape backend: Jina Reader (r.jina.ai) renders JS/SPAs and returns markdown in one call
   // (free + keyless for light use; JINA_API_KEY lifts the rate limit). PUBLIC pages only (anonymous bot -
   // no login/session; use the browser MCP for authenticated / hardest SPAs).
@@ -1050,6 +1058,46 @@ export function paginateWeb(md: string, page: number): string {
   const body = md.slice((p - 1) * MAX_READ_CHARS, p * MAX_READ_CHARS);
   const more = p < pages ? `call web_fetch again with the same url and page:${p + 1} for the next page` : "this is the last page";
   return `${body}\n\n... (page ${p}/${pages}, ${md.length} chars total; ${more})`;
+}
+
+/** A YouTube video's transcript via yt-dlp (captions only, NO video download). Returns null - so the caller
+ * falls back to a normal fetch - if yt-dlp isn't installed (ENOENT) or the video has no captions. */
+function ytTranscript(url: string): string | null {
+  let dir = "";
+  try {
+    dir = mkdtempSync(join(tmpdir(), "neko-yt-"));
+    // Narrow to en/en-orig: a wildcard like en.* pulls en-ar/en-US too and trips YouTube's 429 rate limit
+    // (yt-dlp then exits non-zero even though the en track downloaded). So don't gate on the exit status -
+    // gate on whether a .vtt actually landed.
+    const r = spawnSync(
+      "yt-dlp",
+      ["--skip-download", "--write-auto-subs", "--write-subs", "--sub-langs", "en,en-orig", "--sub-format", "vtt/best", "--no-warnings", "-o", join(dir, "s.%(ext)s"), url],
+      { encoding: "utf8", timeout: 90_000, maxBuffer: 64 * 1024 * 1024 },
+    );
+    if (r.error) return null; // yt-dlp not installed (ENOENT) -> caller falls back to a normal fetch
+    const vtt = readdirSync(dir).find((f) => f.endsWith(".vtt"));
+    if (!vtt) return null; // no captions produced (a real failure) -> fall back
+    const text = vttToText(readFileSync(join(dir, vtt), "utf8"));
+    return text ? `# YouTube transcript\n${url}\n\n${text}` : null;
+  } catch {
+    return null;
+  } finally {
+    if (dir) try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
+/** VTT captions -> plain deduped text. Auto-subs repeat each line as the caption rolls, so drop cue numbers,
+ * timestamps, WEBVTT/NOTE headers, inline <...> timing tags, and consecutive duplicate lines. */
+export function vttToText(vtt: string): string {
+  const out: string[] = [];
+  let last = "";
+  for (const raw of vtt.split(/\r?\n/)) {
+    const ln = raw.trim();
+    if (!ln || ln === "WEBVTT" || /^(Kind|Language|NOTE):/.test(ln) || ln.includes("-->") || /^\d+$/.test(ln)) continue;
+    const clean = ln.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+    if (clean && clean !== last) { out.push(clean); last = clean; }
+  }
+  return out.join(" ").trim();
 }
 
 /** Light readability: drop scripts/chrome, prefer the main article so the model reads content,
