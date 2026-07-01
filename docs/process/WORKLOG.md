@@ -3,6 +3,44 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-01 — GeneBench-Pro harness-lift, Windows bash fix, TUI polish
+
+Continued on `self-improve`. Three linked arcs, all green (typecheck + 239 tests + policy + build).
+
+**Dogfooded Neko on a real research benchmark (GeneBench-Pro).** OpenAI's new benchmark for agents doing
+messy multi-stage computational-biology analysis (129 problems; SOTA is low — GPT-5.6 Sol Pro 31.5%, Claude
+Opus 4.8 16%). Pulled the public 10-problem package from Hugging Face (`ajh-oai/genebench-pro-public-package`),
+built a thin runner (`E:\Sach\Sua\genebench-pro\`, outside the repo) that stages each problem's data files,
+runs `neko run --yolo "<task>"`, extracts the final JSON answer, and grades it with the benchmark's own public
+`reference_grader.py` (fully deterministic — no LLM judge). Proved Neko is exactly the right agent shape for
+this (bash + code execution + files + iterate). gpt-oss scored 0/10 (expected for a weak model on a 16-31%
+benchmark), but the run SURFACED two harness bugs that cost answers independent of model quality.
+
+**Windows bash fix (real harness-lift, benefits every Windows run).** The `bash` tool spawned via
+`{ shell: true }`, which on Windows is **cmd.exe** — so a model's natural Unix idioms (`python - <<'PY'`
+heredocs, single-quotes, `$VAR`, pipes) failed with "<< was unexpected at this time", burning steps. Fixed in
+`core/sandbox.ts`: on Windows the unsandboxed path now routes through real **Git-Bash** (`findWindowsBash()`
+prefers `NEKO_BASH`, then a Git install, then a git-derived path; deliberately ignores WSL's
+`System32\bash.exe`, which can't see the Windows-drive cwd), falling back to cmd.exe only if no bash is found.
+Verified a heredoc now runs (`HEREDOC_OK 4`). Re-running GeneBench with the fix + higher `max_steps` moved a
+problem from no-answer (cut off) to a graded answer; no-JSON count 2→1. Lesson confirmed: **harness quality
+lifts completion/answer-rate; crossing the pass threshold needs a stronger model.**
+
+**TUI polish (Claude-Code-level, clean-room from screenshots + our own code — nothing copied).**
+- **Tables** (`ui/markdown.tsx`): the old renderer space-padded columns with no borders as one `<Text>` per
+  row, so a wide table overflowed the terminal and Ink wrap-shattered the columns. Rewrote it width-aware:
+  box borders (`┌┬┐│├┼┤└┴┘`), columns budgeted to the terminal `cols` (`fitColumns` shrinks the widest first),
+  cells truncated to a single line (`truncCell`, ellipsis) so borders stay aligned, inline styling kept.
+- **Rhythm:** breathing room above headings + around tables (vertical rhythm, not cramped text).
+- **Ctrl+O is now a toggle** (`ui/chat.tsx`): it used to APPEND a full copy each press (never collapsing,
+  because `<Static>` lines are immutable). Now it toggles an `expandedId` and shows the peeked result in the
+  live region (below `<Static>`), so a second Ctrl+O collapses cleanly — no duplication.
+- **Blinking run indicator** (`ui/thinking-line.tsx` `RunningLine`): a tool call in flight now shows LIVE with
+  a blinking gray dot; it commits to the transcript (solid dot) only when it finishes — a clear running-vs-done
+  signal, matching Claude Code. Tool-call lines are deferred + keyed by call id so the agent's concurrent path
+  (all tool_calls, then all tool_results) pairs correctly. `cols` is threaded transcript → Markdown so both
+  the committed and streaming renders are width-aware.
+
 ## 2026-07-01 — Self-improve loop, Z.ai/glm-5.2 provider UX, web-reading overhaul
 
 A long session on the `self-improve` branch (39 commits ahead of main, all green: typecheck + 233 tests

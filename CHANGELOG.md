@@ -6,6 +6,47 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+- **The `bash` tool runs real bash on Windows (not cmd.exe)** — an unsandboxed bash command used to spawn
+  through `cmd.exe` on Windows, so the Unix idioms a model naturally emits (heredocs like `python - <<'PY'`,
+  single-quoting, `$VAR`, pipelines) failed with `"<< was unexpected at this time"` and wasted agent steps.
+  Neko now routes the tool through **Git-Bash** if present (`NEKO_BASH` override, then a Git install, then a
+  git-derived path; WSL's `System32\bash.exe` is deliberately skipped because it can't see the Windows-drive
+  workspace), falling back to the platform shell only when no bash is found. Dogfooded on OpenAI's GeneBench-Pro
+  benchmark, where the old behavior cost answers; unit-tested (`plainTarget` / git-bash detection).
+
+- **Terminal UI polish — bordered tables, vertical rhythm, a real Ctrl+O toggle, a live run indicator** —
+  markdown **tables** now draw aligned box borders and are budgeted to the terminal width (the widest column
+  shrinks, cells truncate to a single line) instead of overflowing and wrap-shattering their columns; headings
+  and tables get breathing room. **Ctrl+O** is now a proper expand/collapse **toggle** (it used to append a
+  duplicate full copy every press and never collapse); the peeked output shows in the live region so a second
+  press closes it. A tool call **in flight** shows live with a **blinking dot** and commits to the transcript
+  with a solid dot when it finishes — a clear running-vs-done signal (deferred + keyed by call id so parallel
+  tool calls pair correctly). Table layout is unit-tested (`fitColumns` / `truncCell` / bordered render).
+
+- **`web_fetch` reads the web as Markdown, with deterministic per-platform routing** — a fetch now returns
+  clean **Markdown** (`htmlToMarkdown`: keeps headings/links/lists, drops nav/scripts — the old flat strip
+  threw links away). A **small page comes back whole with NO model call** (the markdown is the answer); a
+  **large page paginates** (`page:N`) instead of truncating; results cache ~5 min. Known platforms route in
+  **code, not a skill the model can ignore**: a **YouTube** URL → its **transcript** via `yt-dlp`, **GitHub**
+  → `gh`, an **RSS/Atom** feed → a compact item list; each falls back to a normal fetch if the tool is missing.
+  Opt-in `scrape_backend: "jina"` renders public JS/SPAs via Jina Reader (keyless). Measured: a YouTube ask on
+  gpt-oss dropped from 7 calls / ~48k tokens (chasing fake-transcript sites) to **2 calls / ~16k**, and the
+  same on glm-5.2 answered in 2 calls / ~9k. Size policy + compact reads learned from Hermes Agent; our own
+  implementation. Unit-tested (`htmlToMarkdown` / `paginateWeb` / `vttToText` / `rssToMarkdown`).
+
+- **Skills load deterministically by a `match:` trigger, not just fuzzy keyword overlap** — a skill's
+  frontmatter may declare a `match:` regex (e.g. a platform URL for the new `web-reach` skill), checked FIRST
+  so a clearly-matching domain skill loads even for short or non-English asks that token-overlap missed (a
+  Vietnamese "lay transcript youtube ..." shared only ~3 English tokens and silently loaded nothing). Adds two
+  skills: `web-reading` (efficient reads — a11y/markdown first, grab-once, no scroll-churn) and `web-reach`
+  (route each platform to its best free backend). The doom-loop guard was generalized to nudge after N
+  unproductive tool results (empty/duplicate), not just repeated identical calls.
+
+- **Interactive provider/model switching in the REPL** — `/provider` picks a provider then chains into a
+  model picker; `/login` runs a guided provider-picker wizard before capturing the key; both swap the live
+  provider in place (`NekoConfig.adopt` + `agent.setProvider`) so a switch takes effect mid-session without
+  restart. Keys still resolve on demand and are never stored or printed.
+
 - **Provider extensibility — any provider is a profile + an env var (no config editing)** — built-in presets
   now declare a `key_env` (the env var holding that provider's key, e.g. `ZAI_API_KEY`, `DEEPSEEK_API_KEY`),
   resolved with the right precedence (a profile's own key beats a stray `OPENAI_/NVIDIA_API_KEY`; `NEKO_API_KEY`
