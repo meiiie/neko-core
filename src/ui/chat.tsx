@@ -766,9 +766,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     void handle(text).catch((e) => addLine("error", e instanceof Error ? e.message : String(e)));
   };
 
+  // Horizontal gutter (Claude Code uses paddingLeft={2}): inset the whole UI from the left AND right
+  // edges instead of running flush to column 0. <Static> inherits the parent Box's padding, so one
+  // wrapper indents both the committed history and the live region. Width-sensitive rendering (markdown
+  // tables, dividers, the stream clamp) uses `contentCols` = the padded inner width.
+  const gutter = 2;
+  const contentCols = Math.max(20, cols - gutter * 2);
   return (
-    <Box flexDirection="column">
-      <Static key={resizeKey} items={lines}>{(line) => <TranscriptLine key={line.id} line={line} cfg={cfg} cols={cols} />}</Static>
+    <Box flexDirection="column" paddingLeft={gutter} paddingRight={gutter}>
+      <Static key={resizeKey} items={lines}>{(line) => <TranscriptLine key={line.id} line={line} cfg={cfg} cols={contentCols} />}</Static>
 
       {/* Ctrl+O peek: the most-recent collapsed tool result shown in full in the live region (not
           re-appended to <Static>), so a second Ctrl+O collapses it cleanly instead of duplicating. */}
@@ -779,7 +785,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const CAP = 40;
         return (
           <Box flexDirection="column" marginTop={1}>
-            <TranscriptLine line={{ id: l.id, kind: "tool_result_full", text: all.slice(0, CAP).join("\n") }} cfg={cfg} cols={cols} />
+            <TranscriptLine line={{ id: l.id, kind: "tool_result_full", text: all.slice(0, CAP).join("\n") }} cfg={cfg} cols={contentCols} />
             <Text dimColor>{`     ${all.length > CAP ? `+${all.length - CAP} more lines - ` : ""}ctrl+o to collapse`}</Text>
           </Box>
         );
@@ -792,7 +798,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           {/* Clamp the live preview to the viewport height (compact = no extra blank-line rhythm, so the
               height is predictable) — otherwise a long streamed reply grows past the terminal and Ink
               redraws from the top each frame. The full reply commits to <Static> when the stream ends. */}
-          <Markdown text={clampToRows(renderTail(stream), Math.max(6, rows - 12), cols)} width={cols} compact />
+          <Markdown text={clampToRows(renderTail(stream), Math.max(6, rows - 12), contentCols)} width={contentCols} compact />
         </Box>
       ) : null}
 
@@ -812,7 +818,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       {busy && !approval && reasoning.trim() ? (
         <Box flexDirection="column" marginTop={1}>
           {reasoning.trim().split("\n").slice(-6).map((l, i) => (
-            <Text key={i} color="gray" italic>{"  " + (l.length > cols - 4 ? l.slice(0, cols - 5) + "…" : l)}</Text>
+            <Text key={i} color="gray" italic>{"  " + (l.length > contentCols - 4 ? l.slice(0, contentCols - 5) + "…" : l)}</Text>
           ))}
         </Box>
       ) : null}
@@ -848,7 +854,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         <SelectList
           title={overlay.title}
           items={overlay.items}
-          cols={cols}
+          cols={contentCols}
           onSelect={overlay.onSelect}
           onCtrlA={overlay.onCtrlA}
           ctrlAHint={overlay.ctrlAHint}
@@ -863,7 +869,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       ) : (
         <Box flexDirection="column">
           {pastedCount > 0 ? <Text color="magenta">  [{pastedCount} image attached - will send with your next message]</Text> : null}
-          <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
+          <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
           <Box>
             <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{awaitingKey ? "key> " : pendingMulti ? "... " : "> "}</Text>
             <TextInput
@@ -874,7 +880,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
               placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
             />
           </Box>
-          <Text dimColor>{"─".repeat(Math.max(10, cols - 1))}</Text>
+          <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
           {slashMatches.length ? (
             <Box flexDirection="column" paddingLeft={2}>
               {slashMatches.slice(0, SLASH_CAP).map((c, i) => (

@@ -26,6 +26,10 @@ test("renderTail bounds live-stream rendering to O(1) so the event loop can't st
 });
 
 const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+// Poll until a predicate holds (or the budget runs out). Async tool tests must NOT hinge on a fixed
+// tick: git-bash spawn + the follow-up provider call vary a lot with machine load, so a fixed wait
+// flakes. Budget is per-call; keep (#calls * budget) under each test's jest timeout.
+const until = async (pred: () => boolean, ms = 8000) => { for (let w = 0; w < ms && !pred(); w += 20) await tick(20); return pred(); };
 
 /** Scripted provider: step responses in order; streams content via onDelta. */
 class MockProvider implements Provider {
@@ -104,19 +108,17 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
     { content: "Finished.", tool_calls: [] },
   ]);
   const { stdin, lastFrame, frames, unmount } = render(<ChatApp yolo={false} provider={provider} />);
+  const seen = (s: string) => frames.join("\n").replace(/\x1b\[[0-9;]*m/g, "").includes(s);
   stdin.write("run echo");
   await tick(20);
   stdin.write("\r"); // Enter
-  await tick(200);
-  expect(lastFrame() ?? "").toContain("Approve bash?"); // approval box appeared
+  expect(await until(() => (lastFrame() ?? "").includes("Approve bash?"))).toBe(true); // approval box appeared
   expect(lastFrame() ?? "").toContain("$ echo hi"); // command preview
   stdin.write("y"); // approve
-  await tick(600); // async bash: spawn + close + the next provider call
-  const all = frames.join("\n");
-  expect(all).toContain("(exit 0)"); // tool ran after approval
-  expect(all).toContain("Finished"); // final answer
+  expect(await until(() => seen("(exit 0)"))).toBe(true); // tool ran after approval (git-bash spawn can be slow)
+  expect(await until(() => seen("Finished"))).toBe(true); // final answer
   unmount();
-});
+}, 40000);
 
 test("plan mode: exit_plan_mode shows the plan, 'y' proceeds", async () => {
   const provider = new MockProvider([
@@ -124,17 +126,16 @@ test("plan mode: exit_plan_mode shows the plan, 'y' proceeds", async () => {
     { content: "Implemented.", tool_calls: [] },
   ]);
   const { stdin, lastFrame, frames, unmount } = render(<ChatApp yolo={false} provider={provider} />);
+  const seen = (s: string) => frames.join("\n").replace(/\x1b\[[0-9;]*m/g, "").includes(s);
   stdin.write("plan it");
   await tick(20);
   stdin.write("\r");
-  await tick(200);
-  expect(lastFrame() ?? "").toContain("Ready to code?"); // plan review box
+  expect(await until(() => (lastFrame() ?? "").includes("Ready to code?"))).toBe(true); // plan review box
   expect(lastFrame() ?? "").toContain("do X"); // plan content rendered
   stdin.write("y"); // approve -> proceed
-  await tick(200);
-  expect(frames.join("\n")).toContain("Implemented."); // agent continued after approval
+  expect(await until(() => seen("Implemented."))).toBe(true); // agent continued after approval
   unmount();
-});
+}, 40000);
 
 test("typing '/' shows a slash-command autocomplete menu", async () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
