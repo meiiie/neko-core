@@ -31,6 +31,16 @@ Name the site type first, then pick the strategy:
    extraction and return `[{author, time, text: text.slice(0,300)}]`, NOT `document.body.innerText` (that
    returns 400K chars of mixed sidebar/chat noise and blows the token budget). Extract at the source.
 
+## Neko's compact-read tools (use these first - they ARE the "page -> markdown" read)
+- **Static / server-rendered page, you just need its content:** `web_fetch(url)` now returns clean
+  **Markdown** (headings, links, lists preserved) - a deterministic HTML->markdown, no model call, no raw
+  400K blob. Add a `prompt`/`schema` only when you need a SPECIFIC field extracted; otherwise the markdown
+  itself is the answer. (No browser needed.)
+- **Heavy SPA that only renders client-side (a real Chrome via the browser MCP is required):** navigate,
+  let it settle, then run `skills/web-reading/scripts/page-to-markdown.js` via `browser_evaluate` - it walks
+  the RENDERED DOM and returns compact Markdown (the SPA equivalent of web_fetch). Grab once; slice/dedupe on
+  the returned markdown.
+
 ## Virtualized feeds: grab ONCE, do NOT scroll-churn
 On FB/X/etc, scrolling **unmounts** the items you already have - so scroll-then-collect *destroys* your
 data instead of accumulating it, and each `scroll + await 2s` step x20-30 is where the minutes go.

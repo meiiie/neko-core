@@ -943,15 +943,43 @@ async function tavilySearch(query: string, key: string): Promise<SearchResult[]>
   return (data.results ?? []).map((r: any) => ({ title: String(r.title ?? ""), url: String(r.url ?? ""), snippet: stripTags(String(r.content ?? "")) }));
 }
 
-function stripTags(s: string): string {
+/** Decode the HTML entities we care about (numeric + the common named ones). */
+function decodeEntities(s: string): string {
   return s
-    .replace(/<[^>]+>/g, "")
     .replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(Number(n)); } catch { return ""; } })
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => { try { return String.fromCodePoint(parseInt(n, 16)); } catch { return ""; } })
     .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ");
+}
+
+function stripTags(s: string): string {
+  return decodeEntities(s.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
+}
+
+/** Deterministic HTML -> compact Markdown, NO model call: keep headings, links, lists, emphasis, quotes,
+ * and code; drop chrome/scripts; decode entities. Preserves the structure (esp. links) that a flat tag-strip
+ * throws away, at similar-or-smaller size - the "code converts verbatim, no model needed" read. (Technique
+ * learned from lightweight browser scrapers; this implementation is our own, no code copied.) */
+export function htmlToMarkdown(html: string): string {
+  let s = readableHtml(html)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<hr\s*\/?>/gi, "\n\n---\n\n")
+    // inline (convert while the tags still exist), stripping any nested tags from the inner text
+    .replace(/<a\b[^>]*\bhref="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, t) => {
+      const txt = t.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+      return txt ? `[${txt}](${href})` : "";
+    })
+    .replace(/<img\b[^>]*\balt="([^"]*)"[^>]*\bsrc="([^"]*)"[^>]*>/gi, (_, alt, src) => (alt ? `![${alt}](${src})` : ""))
+    .replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_, __, t) => "**" + t.replace(/<[^>]+>/g, "").trim() + "**")
+    .replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_, __, t) => "*" + t.replace(/<[^>]+>/g, "").trim() + "*")
+    .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_, t) => "`" + t.replace(/<[^>]+>/g, "").trim() + "`")
+    // block
+    .replace(/<h([1-6])\b[^>]*>/gi, (_, n) => "\n\n" + "#".repeat(Number(n)) + " ")
+    .replace(/<li\b[^>]*>/gi, "\n- ")
+    .replace(/<blockquote\b[^>]*>/gi, "\n> ")
+    .replace(/<\/(p|div|section|ul|ol|li|tr|table|h[1-6]|blockquote|pre|article|main)>/gi, "\n\n");
+  s = decodeEntities(s.replace(/<[^>]+>/g, "")); // strip remaining tags, keep newlines
+  return s.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** DuckDuckGo HTML endpoint (no API key, zero-config). Best-effort markup parse. */
@@ -985,7 +1013,7 @@ async function toolWebFetch(_root: string, args: Record<string, any>): Promise<s
     return `Error: fetch failed: ${(error as Error).message}`;
   }
   if (contentType.includes("html")) {
-    text = stripTags(readableHtml(text));
+    text = htmlToMarkdown(text); // deterministic HTML -> compact markdown (keeps links/headings/lists, no model call)
   }
   return text.length > MAX_READ_CHARS ? text.slice(0, MAX_READ_CHARS) + "\n... (truncated)" : text;
 }
