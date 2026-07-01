@@ -6,6 +6,16 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+- **Streaming no longer scroll-jumps to the top; list/footer/run-indicator polish** — the live streaming
+  preview used to render the whole growing reply (up to ~60 lines), which overflows the terminal so Ink can't
+  update it in place and **redraws from the top every frame** — the classic "it keeps scrolling to the top
+  while generating" bug. The preview is now **clamped to the viewport height** (wrap-aware, tracks terminal
+  rows) and rendered in a `compact` markdown mode (predictable height); the full reply still commits to the
+  scrollback verbatim when it finishes. Also: a **`**Label**` line followed by bullets** is no longer glued to
+  them (a list is treated as one block with a blank line around it); the **footer mode indicator** gets a `⏵⏵`
+  chevron + indent; and the **in-flight tool dot** is blue and blinking. Unit-tested (`clampToRows`, list-block
+  separation, compact-vs-normal height).
+
 - **The `bash` tool runs real bash on Windows (not cmd.exe)** — an unsandboxed bash command used to spawn
   through `cmd.exe` on Windows, so the Unix idioms a model naturally emits (heredocs like `python - <<'PY'`,
   single-quoting, `$VAR`, pipelines) failed with `"<< was unexpected at this time"` and wasted agent steps.

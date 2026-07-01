@@ -39,6 +39,20 @@ lifts completion/answer-rate; crossing the pass threshold needs a stronger model
   (user / tool_call / info) had no margin, so a prompt glued to the previous turn's completion line and to the
   tool call below it. Gave the user line + each tool_call line a blank line above — prompts now stand clear and
   each tool call groups with its result.
+- **List blocks + streaming scroll-jump + footer + run dot** (round 2, from more screenshots + the Claude Code
+  source):
+  - **List separation:** a `**Label**` line followed by bullets was glued to them. A run of list items is now
+    one block (blank around the run, tight between items), so section labels stand clear.
+  - **Streaming "scroll jumps to the top":** the live preview rendered `renderTail(stream, 4000 chars)` — up to
+    ~60 lines, taller than the viewport, so Ink couldn't update in place and redrew from the top every frame.
+    Fixed by clamping the preview to the terminal height (`clampToRows`, wrap-aware, tracks `rows`) and rendering
+    it in a new `compact` Markdown mode (no added blank-line rhythm → predictable height). The full reply still
+    commits to `<Static>` verbatim when the stream ends. (Same root cause + fix shape as Claude Code's
+    `disableRenderCap` / `visibleStreamingText`.)
+  - **Footer:** the mode indicator gets a `⏵⏵` chevron + a left indent (matches Claude Code's `figures.pointer`
+    mode line).
+  - **Run indicator:** the in-flight tool dot is now blue (`RunningLine`), blinking, per request. (Very fast
+    tools finish before a blink cycle; it's clearly visible on real work like a build.)
 - **Ctrl+O is now a toggle** (`ui/chat.tsx`): it used to APPEND a full copy each press (never collapsing,
   because `<Static>` lines are immutable). Now it toggles an `expandedId` and shows the peeked result in the
   live region (below `<Static>`), so a second Ctrl+O collapses cleanly — no duplication.
