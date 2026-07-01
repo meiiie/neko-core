@@ -19,15 +19,16 @@ const FRAMES = ["·", "✢", "*", "✶", "✻", "✽", "✻", "✶", "*", "✢"]
  * visibly "running". When the call finishes it commits to the transcript (transcript.tsx) with a
  * solid dot and no blink — so the presence/absence of the blink is the running-vs-done signal.
  * Self-animated (own ~0.5s clock; unmounts when the call finishes and this leaves the live region). */
+const RUN_BLUE = "#4d9fff";
 export function RunningLine({ text }: { text: string }) {
   const [on, setOn] = useState(true);
   useEffect(() => {
-    const id = setInterval(() => setOn((v) => !v), 450);
+    const id = setInterval(() => setOn((v) => !v), 400);
     return () => clearInterval(id);
   }, []);
   return (
     <Text>
-      <Text color="gray">{on ? "● " : "  "}</Text>
+      <Text color={RUN_BLUE}>{on ? "● " : "  "}</Text>
       <Text color="gray">{text}</Text>
     </Text>
   );

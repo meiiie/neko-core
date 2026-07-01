@@ -124,13 +124,14 @@ function inline(raw: string): ReactNode[] {
   return out.length ? out : [s];
 }
 
-export function Markdown({ text, width }: { text: string; width?: number }): ReactNode {
+export function Markdown({ text, width, compact }: { text: string; width?: number; compact?: boolean }): ReactNode {
   const maxWidth = Math.max(24, width ?? 80);
   const lines = text.replace(/\r/g, "").split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
   let key = 0;
   let prevBlank = true; // start "blank" so there is no leading empty row
+  let inList = false; // a run of list items is ONE block: no blank BETWEEN items, but a blank around the run
 
   // Ink collapses an empty <Text> to height 0, so a blank markdown line rendered as <Text>{""}</Text>
   // just disappears — which is why paragraphs looked cramped. A single space is what actually renders
@@ -139,7 +140,16 @@ export function Markdown({ text, width }: { text: string; width?: number }): Rea
   const spacer = () => {
     if (!prevBlank) { blocks.push(<Text key={key++}> </Text>); prevBlank = true; }
   };
-  const push = (node: ReactNode) => { blocks.push(node); prevBlank = false; };
+  // `rhythm` is the *added* inter-block spacing (above headings, around lists/tables). It is skipped in
+  // `compact` mode — used for the live streaming preview, where the rendered height must stay predictable
+  // so the dynamic region can be clamped to the terminal (source blank lines still render via spacer()).
+  const rhythm = compact ? () => {} : spacer;
+  // push a non-list block: if we were in a list, close it with a blank so the list doesn't glue to the
+  // following paragraph/heading (this is what kept "**Label**" stuck to its bullets).
+  const push = (node: ReactNode) => { if (inList) rhythm(); blocks.push(node); prevBlank = false; inList = false; };
+  // push a list item: open the list with a blank the first time (separates it from the prior paragraph),
+  // but keep consecutive items tight.
+  const pushItem = (node: ReactNode) => { if (!inList) rhythm(); blocks.push(node); prevBlank = false; inList = true; };
 
   while (i < lines.length) {
     const line = lines[i];
@@ -152,7 +162,7 @@ export function Markdown({ text, width }: { text: string; width?: number }): Rea
         i++;
       }
       i++; // skip closing fence
-      spacer();
+      rhythm();
       push(
         <Box key={key++} flexDirection="column" paddingLeft={2}>
           {code.map((c, j) => (
@@ -174,14 +184,14 @@ export function Markdown({ text, width }: { text: string; width?: number }): Rea
         rows.push(splitRow(lines[i]));
         i++;
       }
-      spacer();
+      rhythm();
       push(renderTable(header, rows, key++, maxWidth));
       continue;
     }
 
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
-      spacer(); // breathing room above a heading even if the source left no blank line
+      rhythm(); // breathing room above a heading even if the source left no blank line
       push(<Text key={key++} bold color="cyan">{inline(heading[2])}</Text>);
       i++;
       continue;
@@ -203,14 +213,14 @@ export function Markdown({ text, width }: { text: string; width?: number }): Rea
 
     const bullet = line.match(/^(\s*)[-*]\s+(.*)$/);
     if (bullet) {
-      push(<Text key={key++}>{bullet[1]}- {inline(bullet[2])}</Text>);
+      pushItem(<Text key={key++}>{bullet[1]}- {inline(bullet[2])}</Text>);
       i++;
       continue;
     }
 
     const numbered = line.match(/^(\s*)(\d+)\.\s+(.*)$/);
     if (numbered) {
-      push(<Text key={key++}>{numbered[1]}{numbered[2]}. {inline(numbered[3])}</Text>);
+      pushItem(<Text key={key++}>{numbered[1]}{numbered[2]}. {inline(numbered[3])}</Text>);
       i++;
       continue;
     }

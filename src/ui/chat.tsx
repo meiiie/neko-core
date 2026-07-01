@@ -90,10 +90,30 @@ export function renderTail(s: string, maxChars = 4000): string {
   return "...\n" + (cut >= 0 ? s.slice(cut + 1) : s.slice(s.length - maxChars));
 }
 
+/** Clamp streamed text to the last `maxRows` terminal rows (wrap-aware). The live streaming region must
+ * never grow TALLER than the viewport: when it does, Ink can't update it in place and redraws from the
+ * top every frame — the "scroll jumps back to the top while streaming" bug. The full text still commits
+ * to <Static> verbatim when the stream finishes, so nothing shown here is lost. */
+export function clampToRows(text: string, maxRows: number, cols: number): string {
+  if (maxRows <= 0) return "";
+  const w = Math.max(1, cols);
+  const lines = text.split("\n");
+  let used = 0;
+  const kept: string[] = [];
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const h = Math.max(1, Math.ceil(([...lines[i]].length || 1) / w)); // rows this line takes once wrapped
+    if (used + h > maxRows) { kept.unshift("..."); break; }
+    kept.unshift(lines[i]);
+    used += h;
+  }
+  return kept.join("\n");
+}
+
 export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider }: ChatProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [cols, setCols] = useState(stdout?.columns ?? 80);
+  const [rows, setRows] = useState(stdout?.rows ?? 24);
   const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
   const [started, setStarted] = useState(false); // once a turn has run, drop the input placeholder
   const rcRef = useRef<RemoteControl | null>(null);
@@ -360,6 +380,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (!stdout) return;
     const onResize = () => {
       setCols(stdout.columns ?? 80);
+      setRows(stdout.rows ?? 24);
       setResizeKey((k) => k + 1);
       stdout.write("\x1b[2J\x1b[3J\x1b[H"); // clear screen + scrollback + home
     };
@@ -768,7 +789,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           when streaming finishes and flushStream moves it into <Static>. */}
       {stream ? (
         <Box flexDirection="column" marginTop={1} marginBottom={1}>
-          <Markdown text={renderTail(stream)} width={cols} />
+          {/* Clamp the live preview to the viewport height (compact = no extra blank-line rhythm, so the
+              height is predictable) — otherwise a long streamed reply grows past the terminal and Ink
+              redraws from the top each frame. The full reply commits to <Static> when the stream ends. */}
+          <Markdown text={clampToRows(renderTail(stream), Math.max(6, rows - 12), cols)} width={cols} compact />
         </Box>
       ) : null}
 
@@ -864,7 +888,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           ) : (
             <Box justifyContent="space-between">
               <Text>
-                <Text color={MODE_COLOR[mode]}>{mode}</Text>
+                <Text color={MODE_COLOR[mode]}>{" ⏵⏵ "}{mode}</Text>
                 <Text dimColor> · shift+tab to cycle</Text>
                 {rcOn ? <Text color="magenta"> · /rc active</Text> : null}
               </Text>

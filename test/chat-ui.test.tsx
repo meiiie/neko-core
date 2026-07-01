@@ -3,7 +3,17 @@ import { render } from "ink-testing-library";
 
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
-import { ApprovalBox, ChatApp, renderTail } from "../src/ui/chat.tsx";
+import { ApprovalBox, ChatApp, clampToRows, renderTail } from "../src/ui/chat.tsx";
+
+test("clampToRows bounds the live stream to the viewport height (fixes streaming scroll-jump)", () => {
+  const text = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
+  const out = clampToRows(text, 10, 80);
+  expect(out.split("\n").length).toBeLessThanOrEqual(11); // ~10 rows + the "..." marker
+  expect(out).toContain("line 99"); // keeps the latest (tail)
+  expect(out.startsWith("...")).toBe(true); // marks truncation
+  const wide = "x".repeat(240) + "\nshort"; // 240/80 = 3 wrapped rows
+  expect(clampToRows(wide, 2, 80).includes("x".repeat(240))).toBe(false); // 3 rows > 2 budget -> dropped
+});
 
 test("renderTail bounds live-stream rendering to O(1) so the event loop can't stall on huge output", () => {
   expect(renderTail("short text")).toBe("short text"); // under cap -> unchanged

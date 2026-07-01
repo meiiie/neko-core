@@ -39,6 +39,24 @@ test("runs of blank lines collapse to one; list items stay tight", () => {
   expect(io).toBe(ib + 2); // 3 source blanks collapse to a single blank row
 });
 
+test("a section label glued to its list gets a blank between them (list is its own block)", () => {
+  const out = strip(render(<Markdown text={"**Rec**\n- a\n- b\nNext."} />).lastFrame());
+  const lines = out.split("\n");
+  const iL = lines.findIndex((l) => l.includes("Rec"));
+  const iA = lines.findIndex((l) => l.includes("- a"));
+  const ib = lines.findIndex((l) => l.includes("- b"));
+  const iN = lines.findIndex((l) => l.includes("Next"));
+  expect(iA).toBe(iL + 2); // blank between the label and its first bullet (no longer glued)
+  expect(ib).toBe(iA + 1); // bullets tight
+  expect(iN).toBe(ib + 2); // blank after the list before the next paragraph
+});
+
+test("compact markdown packs tighter than normal (predictable height for the stream clamp)", () => {
+  const md = "## Head\nPara.\n- a\n- b\nMore.";
+  const nRows = (c?: boolean) => strip(render(<Markdown text={md} compact={c} />).lastFrame()).split("\n").length;
+  expect(nRows(true)).toBeLessThan(nRows(false)); // compact omits the added blank-line rhythm
+});
+
 test("markdown table draws aligned box borders and truncates an over-wide cell", () => {
   const md = [
     "| Mode | Behavior |",
