@@ -36,6 +36,10 @@ Name the site type first, then pick the strategy:
   **Markdown** (headings, links, lists preserved) - a deterministic HTML->markdown, no model call, no raw
   400K blob. Add a `prompt`/`schema` only when you need a SPECIFIC field extracted; otherwise the markdown
   itself is the answer. (No browser needed.)
+- **Public JS page / SPA, headless (no browser MCP):** if config has `scrape_backend: "jina"`, `web_fetch`
+  routes through Jina Reader (r.jina.ai) which renders the JS server-side and returns markdown in one call -
+  free + keyless for light use. PUBLIC pages only (anonymous - no login/session), and React-heavy feeds may
+  still come back thin; for those, or anything logged-in, use the browser MCP path below.
 - **Heavy SPA that only renders client-side (a real Chrome via the browser MCP is required):** navigate,
   let it settle, then run `skills/web-reading/scripts/page-to-markdown.js` via `browser_evaluate` - it walks
   the RENDERED DOM and returns compact Markdown (the SPA equivalent of web_fetch). Grab once; slice/dedupe on

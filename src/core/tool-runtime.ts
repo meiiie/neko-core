@@ -102,6 +102,8 @@ export class ToolRegistry {
    * key) -> agent search; else DuckDuckGo (free, zero-config). `searchBackend` forces one. */
   searxngUrl = "";
   searchBackend = ""; // "" = auto-pick by what's configured
+  /** Optional hosted scrape backend for web_fetch (renders JS/SPAs -> markdown). "" = direct fetch; "jina" = r.jina.ai. */
+  scrapeBackend = "";
   /** Bash commands moved to the background (Ctrl+B); output keeps accumulating. Read via /bashes. */
   backgrounds: { id: string; command: string; output: string; done: boolean; code?: number | null }[] = [];
   private bgCounter = 0;
@@ -294,7 +296,7 @@ export class ToolRegistry {
     // web_fetch: fetch the page, then (if a prompt + summarizer are available) extract just what
     // was asked via a single model pass — instead of dumping the whole page into context.
     if (name === "web_fetch") {
-      const md = await toolWebFetch(this.root, args);
+      const md = await toolWebFetch(this.root, args, this.scrapeBackend);
       if (md.startsWith("Error")) return md;
       const prompt = String(args.prompt ?? "");
       // schema-guided extraction: a JSON Schema forces the extractor to fill a shape (e.g. enumerate
@@ -1011,22 +1013,29 @@ const WEB_SMALL_PAGE = 5_000; // <= this many chars: the markdown IS the answer,
 /** Fetch a URL and return its FULL content as compact Markdown (HTML) or text. Cached briefly so pagination
  * (page 2, 3...) serves from memory. NOT truncated here - the caller paginates on demand (save locally +
  * page, don't silently lose content). */
-async function toolWebFetch(_root: string, args: Record<string, any>): Promise<string> {
+async function toolWebFetch(_root: string, args: Record<string, any>, backend = ""): Promise<string> {
   const url = requireArg(args, "url");
   if (!/^https?:\/\//i.test(url)) return "Error: url must start with http:// or https://";
   const hit = webCache.get(url);
   if (hit && Date.now() - hit.ts < WEB_CACHE_TTL) return hit.md;
+  // Opt-in hosted scrape backend: Jina Reader (r.jina.ai) renders JS/SPAs and returns markdown in one call
+  // (free + keyless for light use; JINA_API_KEY lifts the rate limit). PUBLIC pages only (anonymous bot -
+  // no login/session; use the browser MCP for authenticated / hardest SPAs).
+  const jina = backend === "jina";
   let text: string;
   let contentType: string;
   try {
-    const res = await fetch(url, { headers: WEB_HEADERS, signal: AbortSignal.timeout(20000) });
+    const headers: Record<string, string> = { ...WEB_HEADERS };
+    if (jina && process.env.JINA_API_KEY) headers["Authorization"] = "Bearer " + process.env.JINA_API_KEY;
+    if (jina) headers["X-Return-Format"] = "markdown";
+    const res = await fetch(jina ? "https://r.jina.ai/" + url : url, { headers, signal: AbortSignal.timeout(jina ? 45000 : 20000) });
     contentType = res.headers.get("content-type") ?? "";
     text = await res.text();
   } catch (error) {
     return `Error: fetch failed: ${(error as Error).message}`;
   }
-  if (contentType.includes("html")) {
-    text = htmlToMarkdown(text); // deterministic HTML -> compact markdown (keeps links/headings/lists, no model call)
+  if (!jina && contentType.includes("html")) {
+    text = htmlToMarkdown(text); // our deterministic HTML -> markdown (Jina already returns markdown)
   }
   webCache.set(url, { md: text, ts: Date.now() });
   return text;

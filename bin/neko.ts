@@ -137,6 +137,7 @@ async function buildAgent(
   registry.sandboxAllowNetwork = cfg.sandboxNetwork;
   registry.searxngUrl = cfg.searxngUrl;
   registry.searchBackend = cfg.searchBackend;
+  registry.scrapeBackend = cfg.scrapeBackend;
   registry.vision = cfg.vision;
   registry.noTools = noTools;
   registry.loadSkill = (name) => { const s = loadSkill(name); return s ? { body: s.body, dir: s.dir } : null; };
@@ -145,6 +146,7 @@ async function buildAgent(
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
     subReg.searxngUrl = cfg.searxngUrl;
     subReg.searchBackend = cfg.searchBackend;
+    subReg.scrapeBackend = cfg.scrapeBackend;
     subReg.vision = cfg.vision;
     const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT;
     return await new Agent({ provider: getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps }).run(prompt);

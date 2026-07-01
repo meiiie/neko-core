@@ -172,6 +172,9 @@ export class NekoConfig {
   get searxngUrl(): string { return String(this.data.searxng_url ?? ""); }
   /** Force a web_search backend ("searxng" | "tavily" | "duckduckgo"); "" = auto-pick. */
   get searchBackend(): string { return String(this.data.search_backend ?? ""); }
+  /** Optional hosted scrape backend for web_fetch: "" = direct fetch (our HTML->markdown, no JS render);
+   * "jina" = r.jina.ai (renders JS/SPAs, returns markdown; free + keyless for light use, PUBLIC pages only). */
+  get scrapeBackend(): string { return String(this.data.scrape_backend ?? "").trim().toLowerCase(); }
   /** Address /remote-control binds to. Default 127.0.0.1 (loopback, safe). Set to a TRUSTED private
    * address (e.g. a Tailscale IP) to drive Neko from another device — never a public-facing one. */
   get remoteBind(): string { return String(this.data.remote_bind ?? "127.0.0.1"); }

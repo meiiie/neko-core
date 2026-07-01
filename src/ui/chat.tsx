@@ -210,6 +210,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     registryRef.current.sandboxAllowNetwork = cfg.sandboxNetwork;
     registryRef.current.searxngUrl = cfg.searxngUrl;
     registryRef.current.searchBackend = cfg.searchBackend;
+    registryRef.current.scrapeBackend = cfg.scrapeBackend;
     registryRef.current.presence = cfg.computerUseOverlay;
     registryRef.current.inputBackend = cfg.computerUseInput;
     registryRef.current.loadSkill = (name) => { const s = loadSkill(name); return s ? { body: s.body, dir: s.dir } : null; };
