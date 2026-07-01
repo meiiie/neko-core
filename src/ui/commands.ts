@@ -33,7 +33,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
   { name: "/cost", desc: "token usage this session" },
   { name: "/model", desc: "show / list / switch model (/model list · /model <id>)" },
-  { name: "/provider", desc: "switch provider live: picker of profiles + presets (/provider <name> · /provider list)" },
+  { name: "/provider", desc: "switch provider (account) then pick its model - picker or /provider <name>" },
   { name: "/tools", desc: "list / toggle tools (/tools bash)" },
   { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
   { name: "/init", desc: "scaffold ./.neko-core/config.json" },
@@ -116,31 +116,66 @@ function openResumePicker(ctx: CommandCtx, scope: "cwd" | "all"): void {
 
 /** Switch the active provider profile LIVE: persist it as the default (no --profile flag, no config edit),
  * rebuild the provider (new endpoint + key + model), swap it into the running agent, and adopt the settings
- * into the in-session cfg. If the profile has no key yet, point the user at /login (which saves to it). */
-function switchProfile(ctx: CommandCtx, name: string): void {
+ * into the in-session cfg. Returns true when the new provider HAS a key (so the caller may chain the model
+ * picker); false when it errored or the provider still needs /login. */
+function switchProfile(ctx: CommandCtx, name: string): boolean {
   const { cfg, agent, addLine } = ctx;
   if (!cfg.profiles[name]) {
-    return addLine("error", `no provider "${name}". Known: ${Object.keys(cfg.profiles).sort().join(", ")}`);
+    addLine("error", `no provider "${name}". Known: ${Object.keys(cfg.profiles).sort().join(", ")}`);
+    return false;
   }
   setActiveProfile(name); // persist as default for next session too
   cfg.adopt(loadConfig({ profile: name })); // in-session cfg now = the new provider (endpoint+model+key)
   agent.setProvider(getProvider(cfg)); // the running agent calls the new endpoint from the next turn
   addLine("info", `provider -> ${name}  (${cfg.provider} · ${cfg.model})`);
-  if (!cfg.apiKey) addLine("info", `note: provider "${name}" has no API key yet - type /login to add it (it saves to this provider).`);
+  if (!cfg.apiKey) {
+    addLine("info", `note: provider "${name}" has no API key yet - type /login to add it (it saves to this provider).`);
+    return false;
+  }
+  return true;
 }
 
-/** Open the provider picker: configured profiles + built-in presets (all already in cfg.profiles). */
+/** Open the model picker for the CURRENT provider (lists that endpoint's models; selecting persists it). */
+async function openModelPicker(ctx: CommandCtx): Promise<void> {
+  const { cfg, addLine } = ctx;
+  ctx.setBusy(true);
+  try {
+    const models = await listModels(cfg);
+    ctx.setBusy(false);
+    if (!models.length) return addLine("info", "no models returned by this provider");
+    ctx.setOverlay({
+      title: `Select model  (${cfg.profile ?? cfg.provider})`,
+      items: models.map((m) => ({ id: m, label: m, detail: m === cfg.model ? "(current)" : undefined })),
+      onSelect: (it) => {
+        ctx.setOverlay(null);
+        cfg.data.model = it.id;
+        setModel(it.id); // persist across sessions
+        addLine("info", `model -> ${it.id}`);
+      },
+    });
+  } catch (error) {
+    ctx.setBusy(false);
+    addLine("error", `listing models: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+/** Provider picker (account first). On select, switch to it and CHAIN straight into its model picker, so the
+ * flow is one smooth "pick account -> pick its model" — provider stays the primary axis (it's the account /
+ * quota that costs money), and the same model name on two providers never gets confused. */
 function openProviderPicker(ctx: CommandCtx): void {
   const { cfg } = ctx;
   const names = Object.keys(cfg.profiles).sort();
   ctx.setOverlay({
-    title: "Select provider (endpoint + model + key)",
+    title: "Select provider (account) - then pick its model",
     items: names.map((n) => {
       const p: any = cfg.profiles[n] ?? {};
       const cur = n === cfg.profile ? "  (current)" : "";
       return { id: n, label: n, detail: `${p.provider ?? "?"} · ${p.model ?? "?"}${cur}` };
     }),
-    onSelect: (it) => { ctx.setOverlay(null); switchProfile(ctx, it.id); },
+    onSelect: async (it) => {
+      ctx.setOverlay(null);
+      if (switchProfile(ctx, it.id)) await openModelPicker(ctx); // account -> its model, one flow
+    },
   });
 }
 
@@ -163,25 +198,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         setModel(arg); // remember it for the next session/folder too
         return addLine("info", `model -> ${arg}`);
       }
-      ctx.setBusy(true);
-      try {
-        const models = await listModels(cfg);
-        ctx.setBusy(false);
-        if (!models.length) return addLine("info", "no models returned by the endpoint");
-        ctx.setOverlay({
-          title: "Select model",
-          items: models.map((m) => ({ id: m, label: m, detail: m === cfg.model ? "(current)" : undefined })),
-          onSelect: (it) => {
-            ctx.setOverlay(null);
-            cfg.data.model = it.id;
-            setModel(it.id); // persist across sessions
-            addLine("info", `model -> ${it.id}`);
-          },
-        });
-      } catch (error) {
-        ctx.setBusy(false);
-        addLine("error", `listing models: ${error instanceof Error ? error.message : error}`);
-      }
+      await openModelPicker(ctx); // model of the CURRENT provider (quick swap without changing account)
       return;
     }
     case "/provider":
@@ -189,8 +206,8 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/profiles": {
       const arg = input.slice(cmd.length).trim();
       if (arg === "list") return addLine("info", "providers: " + Object.keys(cfg.profiles).sort().join(", "));
-      if (arg) return switchProfile(ctx, arg); // /provider zai  -> switch directly
-      openProviderPicker(ctx); // /provider  -> guided picker
+      if (arg) { switchProfile(ctx, arg); return; } // /provider zai  -> switch directly (no model picker)
+      openProviderPicker(ctx); // /provider  -> guided picker: account -> its model
       return;
     }
     case "/tools": {
