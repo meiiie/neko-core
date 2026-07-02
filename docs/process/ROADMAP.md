@@ -4,6 +4,26 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
+## Current status (2026-07-02) — session handoff
+Neko Code is a **working terminal coding agent** — Phases A→G below are done (agentic core, Ink TUI, project
+intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool parity).
+Default model: **glm-5.2** via the Z.ai GLM coding plan (`anthropic` provider, `--profile zai`).
+
+- **Branch:** `self-improve` (~63 commits ahead of `main`; `main` is UNTOUCHED). All green: typecheck + ~251
+  tests + policy + build. A couple of async-tool UI tests flake under heavy machine load but pass in isolation.
+- **Last session (Jul 2) — real-terminal UX/UI polish + dogfooding:** idle timeout (long generations no longer
+  abort mid-stream); streaming no longer jumps to the top (progressive commit); Vietnamese word-wrap fixed;
+  LaTeX→Unicode math; bordered width-aware tables + emoji column alignment; keycap-emoji normalize + a no-emoji
+  system-prompt rule; markdown rhythm/spacing + a left/right gutter; `---` declutter; readable elapsed
+  (`3m 14s`); Ctrl+O expand/collapse toggle; blue in-flight tool dot; Windows `bash` tool → real Git-Bash.
+  Also **dogfooded GeneBench-Pro** (OpenAI's comp-bio agent benchmark) via a runner at `E:\Sach\Sua\genebench-pro\`
+  — proved Neko can be scored on it (harness-lift measured; model is the ceiling).
+- **Tried + REVERTED:** a fullscreen/alt-screen scroll mode — stock Ink can't clip a viewport (Claude Code
+  needs a *patched* Ink), so it was reverted; the polished **inline** mode is the single experience. (WORKLOG.)
+- **Next:** a new, owner-directed task (TBD). **Rule: never merge to `main` or push without the owner's explicit
+  OK.** Orientation for a fresh session: `WORKLOG.md` (journal, newest first) · `RULES.md` (how we work) ·
+  `CLAUDE.md` (codebase map) · `docs/self-improve/` (the Neko-improves-Neko loop + its idea `BACKLOG.md`).
+
 ## Naming
 - **Neko Code** = the product / CLI experience (the Claude-Code analog).
 - **Neko Core** = the engine/library at the heart of it (package `neko-core`, `src/`).
@@ -235,3 +255,18 @@ cost/token tracking · MCP client · single-binary distribution.
   an `mcp_load` meta-tool pulls schemas on demand -- no flooding context with dozens of unused schemas.
   *(+13 tests incl. a real stdio MCP fixture server for lazy loading; tool-runtime 39/0, policy +
   architecture PASS, full suite green.)*
+
+## Phase H — real-terminal UX/UI polish (July 2026)
+- [x] **H1** Dogfood-driven polish to Claude-Code quality on a real terminal (full list in the "Current
+  status" block above + WORKLOG): **rendering** — Vietnamese word-wrap (no mid-word breaks), LaTeX→Unicode
+  math, bordered width-aware tables + emoji-aware column widths, keycap-emoji normalize, markdown rhythm +
+  a left/right gutter, `---` declutter, readable `Xm YYs` elapsed; **behaviour** — streaming no longer jumps
+  to the top (progressive commit), idle (not total) request timeout so long generations finish, Ctrl+O
+  expand/collapse toggle, blue in-flight tool dot, a no-emoji output rule in the system prompt; **platform**
+  — the Windows `bash` tool runs real Git-Bash instead of cmd.exe.
+- [~] **H2** Fullscreen / alt-screen scroll mode — **tried, then REVERTED.** Stock Ink has no real scroll
+  region (`overflow:hidden` samples rows, doesn't clip); Claude Code only gets it smooth via a *patched* Ink
+  renderer + custom ScrollBox. Forking Ink is disproportionate (weeks, risky, threatens the single binary),
+  and the earlier progressive-commit fix already removed the reported jump — so the polished **inline** mode
+  stays the single experience. (Lesson recorded in WORKLOG: don't chase a Claude-Code feature that depends on
+  their forked Ink.)

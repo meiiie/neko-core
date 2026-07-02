@@ -4,10 +4,15 @@
 what's measured, and the last few moves — not a full history (that's `docs/process/WORKLOG.md`).*
 
 ## Current focus
-Stand up **continuous, measured self-improvement** (Neko improving Neko), then let it run on the Z.ai GLM
-coding plan. Bench coding tasks are **saturated** (glm-5.2 = 11/11), so the live signal is the **codebase
-itself** (bug/test/robustness/perf/security/harness/docs), with the bench as a **no-regression guard + metrics
-tracker**.
+**Owner-directed work, not the autonomous loop** (as of 2026-07-02). The self-improve loop is built + ran (it
+produced ~4 real wins then plateaued — a disciplined assistant, not perpetual motion), and its idea `BACKLOG.md`
+(~46 items) + `RESEARCH.md` stay as the queue for when it runs again. The last stretch was **hands-on UX/UI
+polish to real-terminal / Claude-Code quality** (see `../process/ROADMAP.md` Phase H + `../process/WORKLOG.md`),
+done interactively with the owner — not by the loop. **Next = a new owner-directed task (TBD).**
+
+The loop's original framing still holds for when it resumes: bench coding tasks are **saturated** (glm-5.2 =
+11/11), so the live signal is the **codebase itself** (bug/test/robustness/perf/security/harness/docs), with the
+bench as a **no-regression guard + metrics tracker**.
 
 ## What's in place
 - **Provider:** `anthropic` provider → Z.ai GLM coding-plan endpoint; `--profile zai` = glm-5.2; effort →
@@ -28,6 +33,10 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-02] (owner-directed, NOT the loop) real-terminal UX/UI polish — rendering (wrap/math/tables/emoji/
+  spacing/gutter/rules), streaming scroll-jump fix, idle timeout, Windows bash→Git-Bash; + GeneBench-Pro
+  dogfood. A fullscreen scroll mode was tried and reverted (stock Ink can't clip a viewport). Full detail in
+  `../process/ROADMAP.md` Phase H + `../process/WORKLOG.md`.
 - [2026-07-01] bash seatbelt (dangerousCommand) was bypassable by QUOTING the target: `rm -rf "$HOME"`, `rm -rf "/"`, `rm -rf '~'` all slipped past the `rm -rf` guard because the target regex required the token immediately after whitespace -- a quote char broke the match. Made the token match quote-aware (optional `["']?`); added a test asserting the four quoted forms are Refused AND that quoting a normal relative path (`rm -rf "build"`) is still allowed. Verify gate green: typecheck + 227/0 tests + policy PASS. Left uncommitted for the harness.
 - [2026-06-30] compact() lean-tail clip now also triggers by char count (LEAN_TAIL_CHARS=8000), so dense few-line tool results (minified JSON/base64/packed logs) — long in chars but short in lines — are actually clipped instead of passing through fully intact and freeing no context; committed a76ec45.
 - [2026-06-30] estimateTokens now counts assistant tool_calls so the in-loop overflow guard isn't undercounted on tool-heavy turns (e.g. several large write_file calls); committed 620aed2.
