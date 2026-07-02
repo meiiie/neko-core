@@ -10,8 +10,25 @@ permissions:
   contents: write
 
 jobs:
+  # The release is created ONCE, before any build. When every matrix job created it
+  # instead (softprops/action-gh-release), two jobs racing on a fresh tag could each
+  # create one; the duplicate was discarded and its asset upload 404'd -- v0.5.0
+  # shipped without neko-linux-arm64 until a manual re-run. gh is synchronous: when
+  # this job ends, the release exists and is discoverable.
+  release:
+    name: create release
+    runs-on: ubuntu-latest
+    steps:
+      - name: create the GitHub release for the tag (idempotent for re-runs)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" ||
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes
+
   build:
     name: build ${{ matrix.asset }}
+    needs: release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -33,7 +50,7 @@ jobs:
       - name: compile
         run: bun build --compile --target=${{ matrix.target }} --outfile ${{ matrix.asset }} bin/neko.ts
       - name: attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ matrix.asset }}
-          generate_release_notes: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "${{ matrix.asset }}" --repo "$GITHUB_REPOSITORY" --clobber
