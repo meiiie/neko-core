@@ -6,6 +6,8 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-02
+
 - **Streaming stops jumping to the top; declutter + emoji alignment** — (1) **scroll jump** — a live region
   taller than the viewport made the terminal redraw from the top every frame while a long reply streamed. The
   reply now **progressively commits** its completed paragraphs to scrollback (via `<Static>`) once it outgrows
