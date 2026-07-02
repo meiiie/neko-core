@@ -3,6 +3,34 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-02 — Post-release hardening: the dropped-'y' approval race + the release-asset race
+
+The v0.5.0 post-release check found BOTH pipelines red, each hiding a real bug:
+
+- **CI red — the two approval UI tests were NOT "flaky under load"; they were a real race, deterministic on
+  slow machines.** Root-caused end to end: the approval y/a/n handler lived in its own
+  `useInput({ isActive: approval !== null })` hook. Ink paints the frame at React *commit*, but a toggled
+  hook's listener only attaches in a later *passive effect* — so a 'y' typed the instant the box appears
+  falls in that gap and is silently dropped; the box hangs forever. Proof chain: `git bisect` (first bad =
+  492e010, the `<Static>` width-cap, which widened the commit-to-effect window past the tests' 20ms poll);
+  a probe that passed with +300ms before 'y'; instrumenting ink's `use-input.js` showed the subscribe
+  landing after the keypress (and the console.error itself un-raced it — a Heisenbug). Fix at the right
+  layer: approval keys move into the ALWAYS-mounted global hotkey hook (subscribed from app mount; ink 7's
+  `useEffectEvent` invokes the latest render's closure, so it sees `approval` the moment the box shows) and
+  the toggling hook is deleted. TextInput is unmounted during an approval, so no double-handling. The two
+  tests went from ~13s (full poll budget burned) to instant; 5x reruns green; full suite 253/0. Lesson
+  recorded: an `isActive`-toggled `useInput` can never catch a keypress that races its own activation —
+  handle state-gated keys in an always-on hook instead.
+- **Release incomplete — v0.5.0 shipped missing `neko-linux-arm64`.** Every matrix job ran
+  softprops/action-gh-release; two jobs racing on the fresh tag each created a release, the duplicate was
+  discarded, and its upload 404'd. Healed the live release by re-running the failed job (5/5 assets now
+  up), then fixed the workflow: a tiny first job creates the release ONCE via `gh release create`
+  (idempotent for re-runs), and the build matrix `needs:` it and only does `gh release upload --clobber`.
+  No third-party release action left.
+
+Also noted for the next backlog pass: the "broad doom-loop detection" BACKLOG item is already implemented
+and tested (the BROAD loop guard tests in `test/agent.test.ts`) — the checkbox is stale.
+
 ## 2026-07-02 — Fullscreen scroll mode: attempted, then REVERTED (a lesson)
 
 Tried the fullscreen/alt-screen scroll mode (scroll up while a reply streams + jump-to-bottom, like Claude

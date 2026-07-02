@@ -33,6 +33,10 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-02] (owner-directed) post-release hardening: root-caused + fixed the dropped-'y' approval race
+  (the "flaky" approval UI tests were a real Ink commit-vs-effect race; keys now in the always-mounted hook)
+  and the release-asset race (release created once, matrix only uploads; v0.5.0 healed to 5/5 assets via
+  re-run). Suite 253/0. NOT pushed - awaiting owner OK.
 - [2026-07-02] (owner-directed, NOT the loop) real-terminal UX/UI polish — rendering (wrap/math/tables/emoji/
   spacing/gutter/rules), streaming scroll-jump fix, idle timeout, Windows bash→Git-Bash; + GeneBench-Pro
   dogfood. A fullscreen scroll mode was tried and reverted (stock Ink can't clip a viewport). Full detail in

@@ -9,8 +9,12 @@ Neko Code is a **working terminal coding agent** — Phases A→G below are done
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool parity).
 Default model: **glm-5.2** via the Z.ai GLM coding plan (`anthropic` provider, `--profile zai`).
 
-- **Branch:** `self-improve` (~63 commits ahead of `main`; `main` is UNTOUCHED). All green: typecheck + ~251
-  tests + policy + build. A couple of async-tool UI tests flake under heavy machine load but pass in isolation.
+- **Branch:** `self-improve`. v0.5.0 released to `main` + public (owner-approved). All green: typecheck +
+  253/0 tests + policy + build. (The two "flaky" approval UI tests were a REAL dropped-keypress race —
+  root-caused and fixed on 2026-07-02, see WORKLOG; they are deterministic now.)
+- **Post-release hardening (Jul 2, on `self-improve`, not yet pushed):** fixed the approval dropped-'y' race
+  (keys now in the always-mounted input hook) and the release-asset race (release created once, the build
+  matrix only uploads). The live v0.5.0 release was healed to 5/5 assets by re-running the failed arm64 job.
 - **Last session (Jul 2) — real-terminal UX/UI polish + dogfooding:** idle timeout (long generations no longer
   abort mid-stream); streaming no longer jumps to the top (progressive commit); Vietnamese word-wrap fixed;
   LaTeX→Unicode math; bordered width-aware tables + emoji column alignment; keycap-emoji normalize + a no-emoji
