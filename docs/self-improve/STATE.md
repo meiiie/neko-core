@@ -33,6 +33,11 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-02] (owner-directed) prompt-prefix cache work -> committed 7fa916d: env block = session snapshot
+  (no per-turn dirty-count), todos out of the system message, anthropic cache_control breakpoints (default
+  ON, self-healed), cached_tokens measured in cost/bench. Honest: Z.ai attributes 0 cache reads today;
+  the win is documented on Anthropic-semantics endpoints + stable-prefix for implicit-caching providers.
+  BACKLOG reconciled (volatile-field item ticked; stale broad-doom-loop checkbox ticked).
 - [2026-07-02] (owner-directed) post-release hardening: root-caused + fixed the dropped-'y' approval race
   (the "flaky" approval UI tests were a real Ink commit-vs-effect race; keys now in the always-mounted hook)
   and the release-asset race (release created once, matrix only uploads; v0.5.0 healed to 5/5 assets via

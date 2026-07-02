@@ -45,7 +45,9 @@ one never blocks another.
   "structured note-taking / agentic memory"; Claude Code preserves decisions across compaction.)
   Verify: a long-horizon test that forces compaction still correctly acts on an early
   architectural decision (regression — fails without notes, passes with); bench tokens not worse.
-- [ ] **Broad doom-loop detection (per-file edit cap + repeated-failure nudge).** The current
+- [x] **Broad doom-loop detection (per-file edit cap + repeated-failure nudge).** *(already landed via the
+  loop - `editsPerPath` + `consecutiveUnproductive` in core/agent.ts with BROAD-loop-guard tests in
+  test/agent.test.ts; checkbox reconciled 2026-07-02.)* The current
   `lastSig`/`repeats` guard only catches the *exact same* tool call 3× in a row — it misses the
   far more common loop where the agent edits the same file `N` times with *different* args chasing
   a stubborn build error, or re-runs a failing `bash`/test 3× with tiny tweaks. Track (a) edits per
@@ -454,7 +456,11 @@ one never blocks another.
   gate behind an opt-in profile flag; the detector needs ≥1 `todo_write` to exist (no plan = no
   divergence to detect), so it composes naturally with the existing `todo_write` tool.
 
-- [ ] **Volatile-field stabilization of the system-prompt prefix (Don't Break the Cache).**
+- [x] **Volatile-field stabilization of the system-prompt prefix (Don't Break the Cache).** *(done 7fa916d,
+  2026-07-02, owner-directed: env block = session-start snapshot (dirty-count dropped, memoized), todos out
+  of the system message (recited in-stream by todo_write), + beyond the item's scope: explicit Anthropic
+  cache breakpoints w/ self-heal and cached_tokens metrics in cost/bench. Honest live verdict: Z.ai accepts
+  cache_control but attributes 0 cache reads today - the win is measured on providers that report it.)*
   `adapters/context.ts` `environmentBlock()` (line ~103) injects a `Date: <today>` line AND a
   `git status --porcelain` dirty-count into the `<env>` block that is concatenated into the
   SYSTEM PROMPT — so that prefix CHANGES EVERY TURN (the date ticks; a single edit flips the

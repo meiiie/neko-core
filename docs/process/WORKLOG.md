@@ -3,6 +3,41 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-02 — Prompt-prefix cache: stable prefix + explicit breakpoints + measured (7fa916d)
+
+The sprint's highest-leverage BACKLOG item, done research-first (Anthropic prompt-caching docs; Manus
+"Context Engineering for AI Agents" — KV-cache hit rate as THE production metric, stable prefix, no
+timestamps, append-only; *Don't Break the Cache*, arXiv 2601.06007 — 41-80% agent-cost cut, dynamic
+content at the END; Z.ai context-caching docs — implicit caching, `cache_read_input_tokens` in usage).
+Neko's cache-hostility, fixed at each layer it owns:
+
+- **The head of every request churned per turn.** `environmentBlock()` recomputed a `git status`
+  dirty-count (flips on every edit) + the date INSIDE the system message, and `dynamicContext` re-injected
+  the todo list (changes on every `todo_write`) — so the provider's prompt-prefix cache died for the whole
+  conversation, every turn. Now: the env block is a **session-start snapshot** (memoized per
+  cwd+model+provider, labeled so the model runs `git status` itself for live state — also kills 1-2 git
+  spawns per turn), and todos are OUT of the system message (the `todo_write` result already recites the
+  plan into the message stream — the Manus recitation pattern, append-only and cache-friendly).
+- **The anthropic provider sent no cache breakpoints** (Anthropic-format caching is explicit — without
+  `cache_control` nothing caches at all on a real Anthropic endpoint). Now: a breakpoint at the end of the
+  system prompt (one entry covers tools + system per the tools→system→messages hierarchy) + a **rolling**
+  breakpoint on the last message block (the API's 20-block lookback re-reads the previous step's prefix, so
+  a 40-step turn pays each step's tail, not the whole history). ON by default; `prompt_cache: false` opts
+  out; endpoints that reject `cache_control` are self-healed (strip + one retry — the reasoning_effort
+  pattern). Unit-tested: add/strip round-trip + a fetch-mock heal test.
+- **Measurement first**: `Usage`/`CostTracker`/bench now carry `cached_tokens` (Anthropic
+  `cache_read/creation_input_tokens` folded back into prompt_tokens — Anthropic's `input_tokens` EXCLUDES
+  them; OpenAI `prompt_tokens_details.cached_tokens` normalized). `/cost`, the bench summary, and
+  `bench-log.jsonl` report the hit rate, so the self-improve loop can DIFF it.
+
+**Honest live verdict (probed, not assumed):** Z.ai's coding-plan anthropic endpoint ACCEPTS
+`cache_control` (HTTP 200, with or without the old beta header) and returns `cache_read_input_tokens` —
+but attributes **0 reads** even on byte-identical back-to-back calls (call-2 latency halved, 3212→1300ms,
+so infra-level reuse likely exists without usage attribution). So the falsifiable prediction "cached>0 on
+Z.ai turn 2" is NOT MET on Z.ai today; the breakpoints stand on the documented Anthropic/Bedrock 90% read
+discount + the verified self-heal, and the stable prefix benefits every implicit-caching provider (OpenAI,
+DeepSeek, vLLM). 260/0 tests; typecheck + policy + build green.
+
 ## 2026-07-02 — Post-release hardening: the dropped-'y' approval race + the release-asset race
 
 The v0.5.0 post-release check found BOTH pipelines red, each hiding a real bug:
