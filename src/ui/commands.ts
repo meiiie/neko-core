@@ -53,7 +53,6 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/mcp", desc: "list connected MCP tools + prompts" },
   { name: "/mcp-prompt", desc: "run an MCP prompt (/mcp-prompt <server> <name> [k=v])" },
   { name: "/paste", desc: "attach an image from the clipboard (or Alt+V)" },
-  { name: "/fullscreen", desc: "scroll mode: read back while it streams (PageUp/PageDown · Home/End) · alias /fs" },
   { name: "/remote-control", desc: "toggle a local HTTP control server (/rc) - drive Neko from elsewhere" },
   { name: "/relay", desc: "/relay <url> - drive Neko from any phone via your relay (no open port)" },
   { name: "/login", desc: "enter + save your API key" },

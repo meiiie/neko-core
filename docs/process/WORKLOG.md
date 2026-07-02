@@ -3,23 +3,22 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
-## 2026-07-02 — Fullscreen scroll mode (`/fullscreen`)
+## 2026-07-02 — Fullscreen scroll mode: attempted, then REVERTED (a lesson)
 
-Built the fullscreen mode the owner asked for (scroll up while a reply streams + jump-to-bottom, like Claude
-Code). Reading Claude Code's source showed its fullscreen relies on a **patched Ink renderer + a custom
-ScrollBox** (they clamp negative-y / drive a DECSTBM scroll region in `render-node-to-output.ts`); Neko is on
-stock Ink, and I verified stock Ink can't clip a viewport (`overflow:hidden` samples rows instead of clipping).
-So rather than fork Ink, built it on a **display-row model**:
-- `richwrap.tsx` (`toRichLines`/`wrapSegs`/`RichRow`): markdown/text -> styled, `<=`width one-terminal-row lines
-  (bold/italic/code/link/math preserved across wraps; over-long tokens hard-split). Because every element is
-  exactly one row, a viewport is just `rows[top..top+height]` — no clipping, exact scroll math.
-- `fullscreen.tsx` (`lineToRows`/`linesToRows` with a per-id cache, `ScrollView`, alt-screen enter/leave).
-- `chat.tsx`: a `fullscreen` mode (toggle `/fullscreen`|`/fs`) that enters the alt-screen, flattens the
-  transcript (+ streaming reply) to rows, and renders a scroll window with the prompt pinned bottom. PageUp/
-  PageDown scroll; a `↓ N rows below` pill + Esc/PageDown/sending a message jump to the latest; `scrollUp` is
-  clamped to the top via a render-set ref. The default inline mode is untouched (fallback).
-Unit-tested (row width/style-across-wrap/hard-split; viewport slice + padding; `/fullscreen` toggle + pill).
-(Alt-screen behaviour needs a real terminal to fully judge — installed for live acceptance.)
+Tried the fullscreen/alt-screen scroll mode (scroll up while a reply streams + jump-to-bottom, like Claude
+Code) on a display-row model (`richwrap.tsx` + `fullscreen.tsx`, a `/fullscreen` toggle). It **worked and
+unit-tested green**, but dogfooding on a real terminal showed the micro-interactions were **not good enough**
+(alt-screen full-frame flicker, page-jump not smooth, no mouse-wheel, broken selection, transcript vanishes on
+exit). Root cause is structural, not a fixable bug: **stock Ink has no real scroll region** (verified —
+`overflow:hidden` samples rows instead of clipping), so the whole thing fought the framework. Claude Code only
+gets it smooth by **patching Ink's renderer + a custom ScrollBox** (DECSTBM scroll region, negative-y clamp) —
+and even THEY keep fullscreen opt-in / internal-default for the public (`isFullscreenEnvEnabled` = env var or
+`USER_TYPE==='ant'`, auto-off under tmux -CC). Reaching that quality means forking Ink: weeks, risky, and it
+threatens the single-binary build — disproportionate to a nice-to-have already ~90% covered by the earlier
+progressive-commit fix (which removed the reported top-jump). Per our own rule ("no patchwork; do it right or
+don't ship it"), **reverted the whole feature** (`richwrap.tsx`, `fullscreen.tsx`, the `chat.tsx` mode, the
+`/fullscreen` command) and kept the polished **inline** mode as the single experience. Lesson: don't chase a
+Claude-Code feature that depends on their forked Ink — verify the framework can do it *well* before building.
 
 ## 2026-07-02 — Streaming scroll-jump, declutter, emoji alignment
 

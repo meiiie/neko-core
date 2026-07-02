@@ -18,8 +18,6 @@ import { SelectList, type Overlay } from "./select-list.tsx";
 import { TextInput } from "./text-input.tsx";
 import { RunningLine, ThinkingLine, VERBS } from "./thinking-line.tsx";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
-import { enterAltScreen, leaveAltScreen, linesToRows, ScrollView } from "./fullscreen.tsx";
-import { type Row, toRichLines } from "./richwrap.tsx";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
 import { loadConfig } from "../adapters/config.ts";
@@ -172,10 +170,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null); // ctrl+o: which tool_result is peeked in full (toggle)
-  const [fullscreen, setFullscreen] = useState(false); // /fullscreen: alt-screen scroll mode (vs the default inline mode)
-  const [scrollUp, setScrollUp] = useState(0); // rows scrolled up from the bottom (0 = following the latest)
-  const rowCacheRef = useRef(new Map<number, Row[]>()); // committed line -> display rows (cache; committed lines never change)
-  const maxScrollRef = useRef(0); // set each render so the key handler can clamp scrollUp to the top
   // Tool calls in flight: shown LIVE with a blinking dot, then committed to <Static> (solid dot) with
   // their result. A keyed list (not one value) because the agent's concurrent path fires all tool_calls
   // before any tool_result. Ref = source of truth for the event handler; state mirrors it for render.
@@ -407,17 +401,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     return () => void stdout.off("resize", onResize);
   }, [stdout]);
 
-  // Fullscreen rows are cached by line id; a width change invalidates the wrap, so drop the cache.
-  useEffect(() => { rowCacheRef.current.clear(); }, [cols]);
-
-  // Enter/leave the alternate screen buffer when fullscreen toggles (restores the terminal on exit).
-  useEffect(() => {
-    if (!stdout || !fullscreen) return;
-    enterAltScreen((s) => stdout.write(s));
-    setResizeKey((k) => k + 1); // repaint cleanly into the fresh buffer
-    return () => leaveAltScreen((s) => stdout.write(s));
-  }, [fullscreen, stdout]);
-
   // Elapsed timer while a turn runs.
   useEffect(() => {
     if (!busy) return;
@@ -458,18 +441,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (registryRef.current?.detachRunningBash()) addLine("info", "(bash moved to background - /bashes to check)");
       return;
     }
-    // Fullscreen scroll — works even while a reply streams (that's the point): read back without being
-    // yanked to the bottom. End/PageDown-to-0/Esc resume following the latest; Home jumps to the top.
-    if (fullscreen && (key.pageUp || key.pageDown || key.home || key.end)) {
-      const page = Math.max(1, (stdout?.rows ?? 24) - 6);
-      setScrollUp((s) =>
-        key.home ? maxScrollRef.current
-        : key.end ? 0
-        : key.pageUp ? Math.min(maxScrollRef.current, s + page)
-        : Math.max(0, s - page));
-      return;
-    }
-    if (fullscreen && key.escape && scrollUp > 0) { setScrollUp(0); return; } // Esc also jumps to the bottom
     if (approval || overlay) return; // let their own handlers own the rest of the keys
     if (key.ctrl && char === "o") { // toggle: expand the most recent collapsed tool output, press again to collapse
       // Match the collapse logic in TranscriptLine: summarized reads collapse at >1 line, plain
@@ -575,12 +546,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     if (text === "/paste") {
       pasteImage();
-      return;
-    }
-    if (text === "/fullscreen" || text === "/fs") {
-      setScrollUp(0);
-      setFullscreen((f) => !f);
-      addLine("info", fullscreen ? "(inline mode)" : "(fullscreen: PageUp/PageDown scroll · Home/End top/bottom · /fullscreen to exit)");
       return;
     }
     if (text === "/rc" || text === "/remote-control") {
@@ -802,7 +767,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setPendingMulti(false);
     if (!text) return;
     setExpandedId(null); // a new turn: drop any ctrl+o peek panel
-    setScrollUp(0); // follow the latest again when you send a message
     historyRef.current.push(text);
     historyPos.current = historyRef.current.length;
     if (busyRef.current) {
@@ -821,150 +785,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // tables, dividers, the stream clamp) uses `contentCols` = the padded inner width.
   const gutter = 2;
   const contentCols = Math.max(20, cols - gutter * 2);
-
-  // Bottom slot — an overlay picker, an approval box, or the prompt input + status footer. Shared by the
-  // inline and fullscreen layouts.
-  const inputArea = (
-    <Box flexDirection="column">
-      {pastedCount > 0 ? <Text color="magenta">  [{pastedCount} image attached - will send with your next message]</Text> : null}
-      <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
-      <Box>
-        <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{awaitingKey ? "key> " : pendingMulti ? "... " : "> "}</Text>
-        <TextInput
-          value={input}
-          onChange={setInput}
-          onSubmit={onSubmit}
-          mask={awaitingKey}
-          placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
-        />
-      </Box>
-      <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
-      {slashMatches.length ? (
-        <Box flexDirection="column" paddingLeft={2}>
-          {slashMatches.slice(0, SLASH_CAP).map((c, i) => (
-            <Text key={c.name} color={i === slashSel ? "cyan" : "gray"}>
-              {i === slashSel ? "> " : "  "}{c.name}  <Text dimColor>{c.desc}</Text>
-            </Text>
-          ))}
-          <Text dimColor>
-            {"  up/down to select, tab to complete"}
-            {slashMatches.length > SLASH_CAP ? `   (+${slashMatches.length - SLASH_CAP} more, keep typing)` : ""}
-          </Text>
-        </Box>
-      ) : (
-        <Box justifyContent="space-between">
-          <Text>
-            <Text color={MODE_COLOR[mode]}>{" ⏵⏵ "}{mode}</Text>
-            <Text dimColor> · shift+tab to cycle</Text>
-            {fullscreen ? <Text dimColor> · fullscreen</Text> : null}
-            {rcOn ? <Text color="magenta"> · /rc active</Text> : null}
-          </Text>
-          {(() => {
-            const cost = agentRef.current!.cost;
-            const pct = ctxPercent(cost.lastPrompt, cfg.contextWindow);
-            const ctxColor = pct >= 85 ? "red" : pct >= 60 ? "yellow" : "#9a9a9a";
-            return (
-              <Text color="#9a9a9a">
-                {(cfg.model || "").split("/").pop()} · <Text color={ctxColor}>{pct}% ctx</Text>
-              </Text>
-            );
-          })()}
-        </Box>
-      )}
-    </Box>
-  );
-  const bottomArea = overlay ? (
-    <SelectList
-      title={overlay.title}
-      items={overlay.items}
-      cols={contentCols}
-      onSelect={overlay.onSelect}
-      onCtrlA={overlay.onCtrlA}
-      ctrlAHint={overlay.ctrlAHint}
-      onRename={overlay.onRename}
-      onCancel={() => {
-        setOverlay(null);
-        addLine("info", "(cancelled)");
-      }}
-    />
-  ) : approval ? (
-    <ApprovalBox approval={approval} />
-  ) : (
-    inputArea
-  );
-
-  // Live status above the input: todos, the last thinking lines (until the answer streams), running tools,
-  // and the spinner. Shared, but fullscreen renders a compact spinner-only version (below).
-  const statusArea = (
-    <>
-      {busy && todos.length ? (
-        <Box flexDirection="column" marginTop={1}>
-          {todos.map((t, i) => (
-            <Text key={i} color={t.status === "completed" ? "green" : t.status === "in_progress" ? "yellow" : "gray"}>
-              {t.status === "completed" ? " [x] " : t.status === "in_progress" ? " [~] " : " [ ] "}
-              {t.content}
-            </Text>
-          ))}
-        </Box>
-      ) : null}
-      {busy && !approval && !stream && reasoning.trim() ? (
-        <Box flexDirection="column" marginTop={1}>
-          {reasoning.trim().split("\n").slice(-6).map((l, i) => (
-            <Text key={i} color="gray" italic>{"  " + (l.length > contentCols - 4 ? l.slice(0, contentCols - 5) + "…" : l)}</Text>
-          ))}
-        </Box>
-      ) : null}
-      {inflight.length ? (
-        <Box flexDirection="column" marginTop={1}>
-          {inflight.map((t) => <RunningLine key={t.key} text={t.text} />)}
-        </Box>
-      ) : null}
-      {busy && !approval ? (
-        <Box marginTop={1} flexDirection="column">
-          <ThinkingLine
-            verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}
-            elapsed={elapsed}
-            tokens={0}
-            liveTokens={() =>
-              Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current) +
-              Math.ceil((streamRef.current.length + reasoningRef.current.length + toolStreamRef.current.length) / 4)
-            }
-            step={step}
-            queued={queued}
-            effort={cfg.effort}
-          />
-          {registryRef.current?.bashRunning() ? <Text dimColor>{"  (ctrl+b to run in background)"}</Text> : null}
-        </Box>
-      ) : null}
-    </>
-  );
-
-  if (fullscreen) {
-    // Flatten the transcript (+ the streaming reply) to fixed display rows, then show a scroll window with
-    // the input pinned to the bottom. Committed lines are cached; only the streaming reply re-flattens.
-    const streamRows = stream ? toRichLines(stream, contentCols) : [];
-    const allRows = [...linesToRows(lines, contentCols, cfg, rowCacheRef.current), ...streamRows];
-    const pillOn = scrollUp > 0;
-    // A single spinner row when busy; todos/reasoning stay out of the compact bottom (they're in the scroll).
-    const bottomH = 4 + (busy ? 1 : 0) + (pillOn ? 1 : 0) + (pastedCount > 0 ? 1 : 0);
-    const viewportH = Math.max(3, rows - bottomH);
-    const maxTop = Math.max(0, allRows.length - viewportH);
-    maxScrollRef.current = maxTop;
-    const top = Math.max(0, maxTop - scrollUp);
-    return (
-      <Box flexDirection="column" height={rows} paddingLeft={gutter}>
-        <ScrollView rows={allRows} top={top} height={viewportH} />
-        {pillOn ? <Text color="cyan">{`  ↓ ${scrollUp} row${scrollUp === 1 ? "" : "s"} below — End / PageDown / Esc for the latest`}</Text> : null}
-        {busy && !approval ? (
-          <ThinkingLine verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current} elapsed={elapsed} tokens={0}
-            liveTokens={() => Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current) + Math.ceil((streamRef.current.length + reasoningRef.current.length + toolStreamRef.current.length) / 4)}
-            step={step} queued={queued} effort={cfg.effort} />
-        ) : null}
-        {bottomArea}
-      </Box>
-    );
-  }
-
   return (
     <Box flexDirection="column" paddingLeft={gutter} paddingRight={gutter}>
       {/* Each item is width-capped to contentCols: <Static> renders items at the FULL terminal width by
@@ -987,16 +807,129 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         );
       })()}
 
-      {/* Live streaming preview, clamped to the viewport so a long reply can't push the frame past the
-          terminal (which makes Ink redraw from the top). The full reply commits to <Static> at the end. */}
+      {/* Same margins as the committed assistant line (transcript.tsx) so the text doesn't jump a row
+          when streaming finishes and flushStream moves it into <Static>. */}
       {stream ? (
         <Box flexDirection="column" marginTop={1} marginBottom={1}>
+          {/* Clamp the live preview to the viewport height (compact = no extra blank-line rhythm, so the
+              height is predictable) — otherwise a long streamed reply grows past the terminal and Ink
+              redraws from the top each frame. The full reply commits to <Static> when the stream ends. */}
           <Markdown text={clampToRows(renderTail(stream), Math.max(6, rows - 12), contentCols)} width={contentCols} compact />
         </Box>
       ) : null}
 
-      {statusArea}
-      {bottomArea}
+      {/* Live todo tracker: only WHILE a turn runs. When idle the committed "Update Todos" tool result
+          is the record — showing the sticky list too would duplicate it (a plan printed twice). */}
+      {busy && todos.length ? (
+        <Box flexDirection="column" marginTop={1}>
+          {todos.map((t, i) => (
+            <Text key={i} color={t.status === "completed" ? "green" : t.status === "in_progress" ? "yellow" : "gray"}>
+              {t.status === "completed" ? " [x] " : t.status === "in_progress" ? " [~] " : " [ ] "}
+              {t.content}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+
+      {busy && !approval && !stream && reasoning.trim() ? ( // hide stale thinking once the answer streams (frees viewport)
+        <Box flexDirection="column" marginTop={1}>
+          {reasoning.trim().split("\n").slice(-6).map((l, i) => (
+            <Text key={i} color="gray" italic>{"  " + (l.length > contentCols - 4 ? l.slice(0, contentCols - 5) + "…" : l)}</Text>
+          ))}
+        </Box>
+      ) : null}
+
+      {inflight.length ? (
+        <Box flexDirection="column" marginTop={1}>
+          {inflight.map((t) => <RunningLine key={t.key} text={t.text} />)}
+        </Box>
+      ) : null}
+
+      {busy && !approval ? (
+        <Box marginTop={1} flexDirection="column">
+          <ThinkingLine
+            verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}
+            elapsed={elapsed}
+            tokens={0}
+            // Re-read every 80ms frame: counted tokens from completed steps this turn + a live
+            // ~4-chars/token estimate of whatever is streaming NOW (content, reasoning, or a big
+            // tool-call's args) — so the meter counts up even while a large write_file generates.
+            liveTokens={() =>
+              Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current) +
+              Math.ceil((streamRef.current.length + reasoningRef.current.length + toolStreamRef.current.length) / 4)
+            }
+            step={step}
+            queued={queued}
+            effort={cfg.effort}
+          />
+          {registryRef.current?.bashRunning() ? <Text dimColor>{"  (ctrl+b to run in background)"}</Text> : null}
+        </Box>
+      ) : null}
+
+      {overlay ? (
+        <SelectList
+          title={overlay.title}
+          items={overlay.items}
+          cols={contentCols}
+          onSelect={overlay.onSelect}
+          onCtrlA={overlay.onCtrlA}
+          ctrlAHint={overlay.ctrlAHint}
+          onRename={overlay.onRename}
+          onCancel={() => {
+            setOverlay(null);
+            addLine("info", "(cancelled)");
+          }}
+        />
+      ) : approval ? (
+        <ApprovalBox approval={approval} />
+      ) : (
+        <Box flexDirection="column">
+          {pastedCount > 0 ? <Text color="magenta">  [{pastedCount} image attached - will send with your next message]</Text> : null}
+          <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
+          <Box>
+            <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{awaitingKey ? "key> " : pendingMulti ? "... " : "> "}</Text>
+            <TextInput
+              value={input}
+              onChange={setInput}
+              onSubmit={onSubmit}
+              mask={awaitingKey}
+              placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
+            />
+          </Box>
+          <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
+          {slashMatches.length ? (
+            <Box flexDirection="column" paddingLeft={2}>
+              {slashMatches.slice(0, SLASH_CAP).map((c, i) => (
+                <Text key={c.name} color={i === slashSel ? "cyan" : "gray"}>
+                  {i === slashSel ? "> " : "  "}{c.name}  <Text dimColor>{c.desc}</Text>
+                </Text>
+              ))}
+              <Text dimColor>
+                {"  up/down to select, tab to complete"}
+                {slashMatches.length > SLASH_CAP ? `   (+${slashMatches.length - SLASH_CAP} more, keep typing)` : ""}
+              </Text>
+            </Box>
+          ) : (
+            <Box justifyContent="space-between">
+              <Text>
+                <Text color={MODE_COLOR[mode]}>{" ⏵⏵ "}{mode}</Text>
+                <Text dimColor> · shift+tab to cycle</Text>
+                {rcOn ? <Text color="magenta"> · /rc active</Text> : null}
+              </Text>
+              {(() => {
+                const cost = agentRef.current!.cost;
+                const pct = ctxPercent(cost.lastPrompt, cfg.contextWindow);
+                const ctxColor = pct >= 85 ? "red" : pct >= 60 ? "yellow" : "#9a9a9a";
+                return (
+                  <Text color="#9a9a9a">
+                    {(cfg.model || "").split("/").pop()} · <Text color={ctxColor}>{pct}% ctx</Text>
+                  </Text>
+                );
+              })()}
+            </Box>
+          )}
+        </Box>
+      )}
     </Box>
   );
 }
