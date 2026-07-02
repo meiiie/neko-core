@@ -6,6 +6,16 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+- **`/fullscreen` — a scrollable alt-screen mode (scroll up while it streams; jump back to the latest)** —
+  toggle with `/fullscreen` (or `/fs`). The REPL enters the terminal's alternate screen with the prompt pinned
+  to the bottom and a scrollable transcript above it, so you can **PageUp to read earlier output while a reply
+  is still streaming** without being yanked to the bottom; a `↓ N rows below` pill shows when you're scrolled
+  up, and **PageDown / Esc** (or sending a message) jumps back to the latest. Stock Ink can't clip a viewport
+  (verified — which is why Claude Code patched its renderer), so this is built on a **display-row model**: the
+  transcript is pre-wrapped to fixed one-terminal-row lines (styling preserved, cached per line) and the
+  viewport is an exact `rows[top..top+height]` slice — no clipping, exact scroll math, nothing leaked to
+  scrollback. The default inline mode is unchanged. Unit-tested (row model, viewport slice, toggle + pill).
+
 - **Streaming stops jumping to the top; declutter + emoji alignment** — (1) **scroll jump** — a live region
   taller than the viewport made the terminal redraw from the top every frame while a long reply streamed. The
   reply now **progressively commits** its completed paragraphs to scrollback (via `<Static>`) once it outgrows
