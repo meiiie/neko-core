@@ -441,7 +441,34 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (registryRef.current?.detachRunningBash()) addLine("info", "(bash moved to background - /bashes to check)");
       return;
     }
-    if (approval || overlay) return; // let their own handlers own the rest of the keys
+    // Approval keys live HERE, in the always-mounted hook, NOT in a separate
+    // `isActive: approval !== null` hook: Ink paints the frame at React commit, but a
+    // toggled hook's listener only attaches in a later passive effect — so a 'y' typed
+    // the instant the box appears fell in that gap and was silently dropped (the exact
+    // deterministic CI failure). This hook is subscribed from mount; Ink's
+    // useEffectEvent always calls the latest render's closure, so it sees `approval`
+    // the moment the box is visible.
+    if (approval) {
+      const c = char.toLowerCase();
+      if (c === "y") {
+        // Approving a plan exits plan mode into accept-edits so the agent can implement it.
+        if (approval.toolName === "exit_plan_mode" && registryRef.current!.mode === "plan") {
+          registryRef.current!.mode = "accept-edits";
+          setMode("accept-edits");
+        }
+        approval.resolve(true);
+        setApproval(null);
+      } else if (c === "a") {
+        alwaysApproved.current.add(approval.toolName);
+        approval.resolve(true);
+        setApproval(null);
+      } else if (c === "n" || key.escape) {
+        approval.resolve(false);
+        setApproval(null);
+      }
+      return;
+    }
+    if (overlay) return; // let its own handlers own the rest of the keys
     if (key.ctrl && char === "o") { // toggle: expand the most recent collapsed tool output, press again to collapse
       // Match the collapse logic in TranscriptLine: summarized reads collapse at >1 line, plain
       // results at >8 — so the "(ctrl+o to expand)" hint and this finder never disagree.
@@ -457,34 +484,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (key.ctrl && char === "l") return setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
     if (key.escape && !busy && input) return setInput("");
   });
-
-  // Approval keys.
-  useInput(
-    (char, key) => {
-      if (!approval) return;
-      const c = char.toLowerCase();
-      // Approving a plan exits plan mode into accept-edits so the agent can implement it.
-      const approvePlan = () => {
-        if (approval.toolName === "exit_plan_mode" && registryRef.current!.mode === "plan") {
-          registryRef.current!.mode = "accept-edits";
-          setMode("accept-edits");
-        }
-      };
-      if (c === "y") {
-        approvePlan();
-        approval.resolve(true);
-        setApproval(null);
-      } else if (c === "a") {
-        alwaysApproved.current.add(approval.toolName);
-        approval.resolve(true);
-        setApproval(null);
-      } else if (c === "n" || key.escape) {
-        approval.resolve(false);
-        setApproval(null);
-      }
-    },
-    { isActive: approval !== null },
-  );
 
   // Esc interrupts a running turn.
   useInput(
