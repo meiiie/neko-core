@@ -63,6 +63,7 @@ const CONCURRENCY_SAFE = new Set(["read_file", "search", "glob", "ls", "web_sear
 // when the args differ (the common "chase a build error across N edits" loop the exact-repeat
 // guard misses). Normalized path = the `path` arg (write_file/edit) or that of multi_edit's file.
 const EDIT_TOOLS = new Set(["write_file", "edit", "multi_edit"]);
+const MUTATING_TOOLS = new Set(["bash", ...EDIT_TOOLS]); // tools whose FAILURE warrants a recovery directive (read misses are benign exploration)
 // Thresholds for the BROAD doom-loop guard (distinct from the exact-repeat guard above).
 const EDIT_PER_PATH_CAP = 6;   // edits to ONE path in a run before a ONE-TIME soft nudge (warns, does NOT
                                // block -- legitimate coding edits a file several times: write, test, fix, fix)
@@ -362,6 +363,7 @@ export class Agent {
 
     let lastSig = ""; // loop guard: detect the model repeating the same tool call (a stuck loop)
     let repeats = 0;
+    let mutErrored = false; // tool-error recovery is EDGE-triggered: re-armed by a mutating-tool success
     for (let step = 0; step < this.maxSteps; step++) {
       this.emit("step", step + 1);
       if (signal?.aborted) return "[interrupted]";
@@ -429,6 +431,22 @@ export class Agent {
             this.consecutiveUnproductive = Agent.isUnproductiveResult(observation) ? this.consecutiveUnproductive + 1 : 0;
             this.emit("tool_result", { call, observation });
             this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
+            // Tool-error recovery (Self-Harness pattern, arXiv 2606.09498 - the paper's single biggest win
+            // was a recovery directive injected AT the point of a tool error): on the FIRST failure of a
+            // MUTATING tool, tell the model HOW to recover - models otherwise flail (blind re-runs, deleting
+            // the partial artifact they still need). Edge-triggered so it never nags: a mutating success
+            // re-arms it, and PERSISTENT failure is the unproductive-streak guard's job below (fires at N).
+            const mutFailed = MUTATING_TOOLS.has(call.name) && typeof observation === "string" &&
+              (observation.startsWith(`Error running ${call.name}`) || Agent.isFailedRunResult(observation));
+            if (mutFailed && !mutErrored && repeats < 2) {
+              this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content:
+                `[recovery] That ${call.name} FAILED. Don't blindly re-run it, and don't delete partial ` +
+                "work it may still need. Recover deliberately: (1) DIAGNOSE - read the error above and " +
+                "inspect the actual state (the file, the directory, the command output); (2) REPAIR - fix " +
+                "the root cause or recreate the missing artifact; (3) VALIDATE - re-run the failed check " +
+                "and confirm it passes; then continue the task." });
+            }
+            if (MUTATING_TOOLS.has(call.name)) mutErrored = mutFailed;
             // BROAD edit-loop guard (warn, don't block): the edit RAN above; append a one-time nudge so the
             // model steps back instead of micro-editing one file forever. Skipped when the exact-repeat guard
             // already blocked this step (repeats >= 2) to avoid double-nudging.

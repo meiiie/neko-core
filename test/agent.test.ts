@@ -311,6 +311,40 @@ test("BROAD loop guard resets the failing streak on a successful bash (no false 
   expect(agent.messages.some((m: any) => String(m.content).includes("[loop guard]"))).toBe(false);
 });
 
+test("tool-error recovery fires ONCE on the first mutating failure, re-arms after a success", async () => {
+  // Self-Harness pattern: the FIRST bash failure gets a diagnose->repair->validate directive; the
+  // SECOND consecutive failure must NOT re-fire (no nagging - persistence belongs to the streak
+  // guard); a success re-arms, so a LATER failure fires again.
+  const script = [
+    { content: null, tool_calls: [{ id: "b1", name: "bash", arguments: { command: "f1" } }] }, // fail -> fires
+    { content: null, tool_calls: [{ id: "b2", name: "bash", arguments: { command: "f2" } }] }, // fail -> silent
+    { content: null, tool_calls: [{ id: "b3", name: "bash", arguments: { command: "ok" } }] }, // success -> re-arms
+    { content: null, tool_calls: [{ id: "b4", name: "bash", arguments: { command: "f3" } }] }, // fail -> fires again
+    { content: "done", tool_calls: [] },
+  ];
+  let n = 0;
+  const tools = {
+    schemas: () => [],
+    execute: async () => { n++; return n === 3 ? "(exit 0)\nok" : "(exit 1 -- command FAILED)\nerr"; },
+  };
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
+  await agent.run("go");
+  const recoveries = agent.messages.filter((m: any) => String(m.content).startsWith("[recovery]"));
+  expect(recoveries.length).toBe(2); // steps 1 and 4 - not step 2
+  expect(String(recoveries[0].content)).toContain("DIAGNOSE"); // recovery-oriented, not just "reconsider"
+});
+
+test("tool-error recovery ignores read-tool misses (benign exploration, not a failure)", async () => {
+  const script = [
+    { content: null, tool_calls: [{ id: "r1", name: "read_file", arguments: { path: "missing.txt" } }] },
+    { content: "done", tool_calls: [] },
+  ];
+  const tools = { schemas: () => [], execute: async () => { throw new Error("no such file"); } };
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 4 });
+  await agent.run("go");
+  expect(agent.messages.some((m: any) => String(m.content).startsWith("[recovery]"))).toBe(false);
+});
+
 test("max_steps cap fires", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ag-"));
   const loop = { content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "missing" } }] };
