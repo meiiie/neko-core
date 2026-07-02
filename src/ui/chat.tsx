@@ -459,13 +459,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     // Fullscreen scroll — works even while a reply streams (that's the point): read back without being
-    // yanked to the bottom. Esc (or reaching the bottom) resumes following the latest.
-    if (fullscreen && (key.pageUp || key.pageDown)) {
+    // yanked to the bottom. End/PageDown-to-0/Esc resume following the latest; Home jumps to the top.
+    if (fullscreen && (key.pageUp || key.pageDown || key.home || key.end)) {
       const page = Math.max(1, (stdout?.rows ?? 24) - 6);
-      setScrollUp((s) => (key.pageUp ? Math.min(maxScrollRef.current, s + page) : Math.max(0, s - page)));
+      setScrollUp((s) =>
+        key.home ? maxScrollRef.current
+        : key.end ? 0
+        : key.pageUp ? Math.min(maxScrollRef.current, s + page)
+        : Math.max(0, s - page));
       return;
     }
-    if (fullscreen && key.escape && scrollUp > 0) { setScrollUp(0); return; } // jump to bottom
+    if (fullscreen && key.escape && scrollUp > 0) { setScrollUp(0); return; } // Esc also jumps to the bottom
     if (approval || overlay) return; // let their own handlers own the rest of the keys
     if (key.ctrl && char === "o") { // toggle: expand the most recent collapsed tool output, press again to collapse
       // Match the collapse logic in TranscriptLine: summarized reads collapse at >1 line, plain
@@ -576,7 +580,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (text === "/fullscreen" || text === "/fs") {
       setScrollUp(0);
       setFullscreen((f) => !f);
-      addLine("info", fullscreen ? "(inline mode)" : "(fullscreen: PageUp/PageDown to scroll, End to jump to the bottom; /fullscreen to exit)");
+      addLine("info", fullscreen ? "(inline mode)" : "(fullscreen: PageUp/PageDown scroll · Home/End top/bottom · /fullscreen to exit)");
       return;
     }
     if (text === "/rc" || text === "/remote-control") {
@@ -950,7 +954,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     return (
       <Box flexDirection="column" height={rows} paddingLeft={gutter}>
         <ScrollView rows={allRows} top={top} height={viewportH} />
-        {pillOn ? <Text color="cyan">{`  ↓ ${scrollUp} row${scrollUp === 1 ? "" : "s"} below — PageDown / Esc for the latest`}</Text> : null}
+        {pillOn ? <Text color="cyan">{`  ↓ ${scrollUp} row${scrollUp === 1 ? "" : "s"} below — End / PageDown / Esc for the latest`}</Text> : null}
         {busy && !approval ? (
           <ThinkingLine verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current} elapsed={elapsed} tokens={0}
             liveTokens={() => Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current) + Math.ceil((streamRef.current.length + reasoningRef.current.length + toolStreamRef.current.length) / 4)}

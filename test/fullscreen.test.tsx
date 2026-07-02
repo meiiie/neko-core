@@ -20,6 +20,8 @@ test("/fullscreen toggles the scroll mode and PageUp shows the 'rows below' pill
   expect(await until(() => seen("· fullscreen"))).toBe(true); // toggled into fullscreen
   stdin.write("\x1b[5~"); // PageUp
   expect(await until(() => seen("rows below"))).toBe(true); // scrolled up -> the jump-to-bottom pill
+  stdin.write("\x1b[F"); // End -> jump back to the latest
+  expect(await until(() => !seen("rows below"))).toBe(true); // pill gone: following the bottom again
   unmount();
 }, 15000);
 

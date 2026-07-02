@@ -83,12 +83,13 @@ export function linesToRows(lines: Line[], cols: number, cfg: NekoConfig, cache:
 /** A fixed-height window over `rows` starting at `top` (each row is exactly one terminal line). */
 export function ScrollView({ rows, top, height }: { rows: Row[]; top: number; height: number }): ReactNode {
   const slice = rows.slice(top, top + height);
-  // pad so the input stays pinned to the bottom even when the transcript is shorter than the viewport
+  // Content is top-aligned (chat-standard: it grows down from the top); the trailing blanks + the fixed
+  // height reserve the viewport so the input below stays pinned to the bottom even on a short transcript.
   const pad = Math.max(0, height - slice.length);
   return (
     <Box flexDirection="column" height={height} flexShrink={0}>
-      {Array.from({ length: pad }, (_, i) => <Text key={`p${i}`}> </Text>)}
       {slice.map((r, i) => <RichRow key={top + i} row={r} />)}
+      {Array.from({ length: pad }, (_, i) => <Text key={`p${i}`}> </Text>)}
     </Box>
   );
 }
