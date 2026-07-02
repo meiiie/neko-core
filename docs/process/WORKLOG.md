@@ -3,6 +3,22 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-02 — Tool-error recovery directive at the point of failure (29e7c95)
+
+Sprint item 2 (Self-Harness, arXiv 2606.09498 — its single biggest win was a recovery-oriented prompt
+injected WHEN a tool errors; +16pp Terminal-Bench-2 on a mid-size model). Neko's static F2 rule ("read the
+result, diagnose, fix") fades under attention decay on long runs; the fix lands the directive NEXT TO the
+error. On the FIRST failure of a mutating tool (bash/write_file/edit/multi_edit — read misses are benign
+exploration), the loop appends a `[recovery]` observation: DIAGNOSE the actual state -> REPAIR the root
+cause / recreate the artifact -> VALIDATE by re-running the failed check. Edge-triggered (a mutating
+success re-arms; a second consecutive failure stays silent — persistence is the unproductive-streak
+guard's job), and appended as a tool message so the prompt prefix stays cacheable. +2 unit tests (fires
+once + re-arms; silent on read misses). Suite 261/0.
+
+**Sprint status / next-up:** the remaining reliability items (pre-flight arg validation - Gecko;
+pre-completion verify gate) are both opt-in and lower-leverage; deliberately deferred to a fresh session
+rather than shipped tired. The queue lives in `docs/self-improve/BACKLOG.md`.
+
 ## 2026-07-02 — Prompt-prefix cache: stable prefix + explicit breakpoints + measured (7fa916d)
 
 The sprint's highest-leverage BACKLOG item, done research-first (Anthropic prompt-caching docs; Manus

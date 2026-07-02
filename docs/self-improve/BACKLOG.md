@@ -271,7 +271,11 @@ one never blocks another.
   benchmark for "don't re-run the tool"); (3) `compact()` still reduces token count (the summary
   still replaces the head in-context; recovery is opt-in). Bench: `in` tokens flat-or-down (recovery
   fires rarely) at flat-or-up pass-rate; the win is correctness on tasks that today force a re-run.
-- [ ] **Tool-error-triggered recovery middleware (Self-Harness "artifact middleware").** Neko's doom-loop
+- [x] **Tool-error-triggered recovery middleware (Self-Harness "artifact middleware").** *(done 29e7c95,
+  2026-07-02, owner-directed: [recovery] diagnose->repair->validate directive on the FIRST failure of a
+  mutating tool (bash/write/edit; read misses stay benign), edge-triggered - a success re-arms, persistent
+  failure stays the unproductive-streak guard's job; appended as a tool message so the prompt prefix stays
+  cacheable. +2 unit tests.)* Neko's doom-loop
   guard trips only on the *exact same* tool call 3× — but the common, costly loop is subtler: a tool
   *errors*, the agent flails (retries, edits around it, deletes the partial output it needs), and
   burns the budget without ever being told how to *recover*. Self-Harness (arXiv 2606.09498) found

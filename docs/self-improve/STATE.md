@@ -33,6 +33,9 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-02] (owner-directed) tool-error recovery directive -> committed 29e7c95 (Self-Harness: [recovery]
+  diagnose->repair->validate on the first mutating-tool failure, edge-triggered, cache-friendly append).
+  Sprint next-up (deferred fresh): Gecko pre-flight arg validation; pre-completion verify gate.
 - [2026-07-02] (owner-directed) prompt-prefix cache work -> committed 7fa916d: env block = session snapshot
   (no per-turn dirty-count), todos out of the system message, anthropic cache_control breakpoints (default
   ON, self-healed), cached_tokens measured in cost/bench. Honest: Z.ai attributes 0 cache reads today;
