@@ -158,8 +158,8 @@ const TASKS: BenchTask[] = [
   },
 ];
 
-export interface BenchResult { id: string; passes: number; trials: number; tokens: number; inTok: number; outTok: number; calls: number; ms: number; }
-export interface BenchReport { model: string; effort: string; trials: number; results: BenchResult[]; passed: number; total: number; tokens: number; inTok: number; outTok: number; calls: number; seconds: number; }
+export interface BenchResult { id: string; passes: number; trials: number; tokens: number; inTok: number; cachedTok: number; outTok: number; calls: number; ms: number; }
+export interface BenchReport { model: string; effort: string; trials: number; results: BenchResult[]; passed: number; total: number; tokens: number; inTok: number; cachedTok: number; outTok: number; calls: number; seconds: number; }
 
 /** Run the benchmark against the configured model. Each task runs `trials` times (single-run pass@1
  * is noisy — reliability science), each in its own temp dir. */
@@ -170,7 +170,7 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number } = {}, 
   const results: BenchResult[] = [];
   try {
     for (const task of TASKS) {
-      let passes = 0, tokens = 0, inTok = 0, outTok = 0, calls = 0, ms = 0;
+      let passes = 0, tokens = 0, inTok = 0, cachedTok = 0, outTok = 0, calls = 0, ms = 0;
       for (let t = 0; t < trials; t++) {
         const dir = join(root, `${task.id}-${t}`);
         mkdirSync(dir, { recursive: true });
@@ -183,12 +183,12 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number } = {}, 
         try { await agent.run(task.prompt); pass = task.verify(dir); } catch (e) { err = e instanceof Error ? e.message : String(e); }
         ms += Date.now() - tStart;
         if (pass) passes++;
-        tokens += agent.cost.totalTokens; inTok += agent.cost.promptTokens; outTok += agent.cost.completionTokens; calls += agent.cost.calls;
+        tokens += agent.cost.totalTokens; inTok += agent.cost.promptTokens; cachedTok += agent.cost.cachedTokens; outTok += agent.cost.completionTokens; calls += agent.cost.calls;
         // Surface a thrown error (e.g. HTTP 401/timeout) — a swallowed exception used to read as a plain
         // "0/1 fail", which hid real problems (a bad key looked like the model failing).
         if (err) onProgress?.(`    ! ${task.id} ERRORED: ${err.replace(/\s+/g, " ").slice(0, 140)}`);
       }
-      results.push({ id: task.id, passes, trials, tokens, inTok, outTok, calls, ms });
+      results.push({ id: task.id, passes, trials, tokens, inTok, cachedTok, outTok, calls, ms });
       const tps = ms > 0 ? Math.round((outTok / ms) * 1000) : 0;
       onProgress?.(`  ${task.id} -> ${passes}/${trials}  ${(ms / trials / 1000).toFixed(1)}s  ${tokens} tok (${outTok} out, ${tps} tok/s)  ${(calls / trials).toFixed(0)} calls`);
     }
@@ -199,7 +199,7 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number } = {}, 
   const report: BenchReport = {
     model: cfg.model, effort: cfg.effort || "off", trials, results,
     passed: sum((r) => r.passes), total: sum((r) => r.trials),
-    tokens: sum((r) => r.tokens), inTok: sum((r) => r.inTok), outTok: sum((r) => r.outTok), calls: sum((r) => r.calls),
+    tokens: sum((r) => r.tokens), inTok: sum((r) => r.inTok), cachedTok: sum((r) => r.cachedTok), outTok: sum((r) => r.outTok), calls: sum((r) => r.calls),
     seconds: (Date.now() - t0) / 1000,
   };
   appendBenchLog(report);
@@ -214,9 +214,9 @@ function appendBenchLog(r: BenchReport): void {
     mkdirSync(dir, { recursive: true });
     const rec = {
       ts: new Date().toISOString(), model: r.model, effort: r.effort, pass: r.passed, total: r.total,
-      seconds: Math.round(r.seconds), tokens: r.tokens, inTok: r.inTok, outTok: r.outTok, calls: r.calls,
+      seconds: Math.round(r.seconds), tokens: r.tokens, inTok: r.inTok, cachedTok: r.cachedTok, outTok: r.outTok, calls: r.calls,
       tokPerSec: r.seconds > 0 ? Math.round(r.outTok / r.seconds) : 0,
-      tasks: r.results.map((x) => ({ id: x.id, pass: x.passes, trials: x.trials, ms: x.ms, inTok: x.inTok, outTok: x.outTok, calls: x.calls })),
+      tasks: r.results.map((x) => ({ id: x.id, pass: x.passes, trials: x.trials, ms: x.ms, inTok: x.inTok, cachedTok: x.cachedTok, outTok: x.outTok, calls: x.calls })),
     };
     appendFileSync(join(dir, "bench-log.jsonl"), JSON.stringify(rec) + "\n", "utf8");
   } catch { /* a logging failure must never break the bench */ }
@@ -291,5 +291,5 @@ export function renderBenchReport(r: BenchReport): string {
   }).join("\n");
   const pct = r.total ? Math.round((r.passed / r.total) * 100) : 0;
   const tps = r.seconds > 0 ? Math.round(r.outTok / r.seconds) : 0;
-  return `Neko-bench :: ${r.model} (effort ${r.effort}, ${r.trials} trial${r.trials > 1 ? "s" : ""}/task)\n${rows}\n  --------------------------------------------------------------\n  pass@1: ${r.passed}/${r.total} (${pct}%)   ${r.tokens} tok (in ${r.inTok}/out ${r.outTok})   ${tps} tok/s   ${r.calls} steps   ${r.seconds.toFixed(0)}s\n  (metrics appended to ~/.neko-core/bench-log.jsonl)`;
+  return `Neko-bench :: ${r.model} (effort ${r.effort}, ${r.trials} trial${r.trials > 1 ? "s" : ""}/task)\n${rows}\n  --------------------------------------------------------------\n  pass@1: ${r.passed}/${r.total} (${pct}%)   ${r.tokens} tok (in ${r.inTok}${r.cachedTok > 0 ? `, ${Math.round((100 * r.cachedTok) / Math.max(1, r.inTok))}% cached` : ""}/out ${r.outTok})   ${tps} tok/s   ${r.calls} steps   ${r.seconds.toFixed(0)}s\n  (metrics appended to ~/.neko-core/bench-log.jsonl)`;
 }

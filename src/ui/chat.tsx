@@ -38,7 +38,7 @@ import { memoryIndexBlock } from "../core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
 import { playbookContextBlock } from "../core/playbook.ts";
 import { loadSkill, matchSkill, skillsContextBlock } from "../adapters/skills.ts";
-import { ToolRegistry, todosContextBlock, WEB_EXTRACT_PROMPT } from "../core/tool-runtime.ts";
+import { ToolRegistry, WEB_EXTRACT_PROMPT } from "../core/tool-runtime.ts";
 import { describeToolCall } from "../core/tools.ts";
 
 export { ApprovalBox, type Approval }; // re-exported for tests
@@ -295,7 +295,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>
-        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), registryRef.current?.mcp?.indexBlock?.() ?? "", todosContextBlock(registryRef.current!.todos)]
+        // NO per-turn-volatile blocks here: this text lands in the system message (the head of every
+        // request), so anything that changes between turns kills the provider's prompt-prefix cache for
+        // the whole conversation. Todos deliberately NOT included — the todo_write tool result already
+        // recites the plan into the message stream (append-only, cache-friendly).
+        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), registryRef.current?.mcp?.indexBlock?.() ?? ""]
           .filter(Boolean)
           .join("\n\n"),
       onDelta: (t, kind) => {

@@ -39,6 +39,12 @@ export class AnthropicProvider implements Provider {
       delete payload.temperature; // extended thinking requires the default temperature (can't set it)
     }
 
+    // Prompt caching (Anthropic-style explicit breakpoints). Z.ai's compatible endpoint accepts
+    // them (Claude Code clients send them on every request); an endpoint that rejects them is
+    // healed below by stripping + one retry, so this is safe-by-default (`prompt_cache: false` opts out).
+    let cacheOn = this.cfg.promptCache;
+    if (cacheOn) addCacheBreakpoints(payload);
+
     const url = `${this.cfg.baseUrl.replace(/\/+$/, "")}/v1/messages`;
     const headers: Record<string, string> = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
     if (key) { headers["x-api-key"] = key; headers["authorization"] = `Bearer ${key}`; } // x-api-key (Anthropic) + Bearer (Z.ai)
@@ -79,6 +85,13 @@ export class AnthropicProvider implements Provider {
       }
       if (idleTimer) clearTimeout(idleTimer);
       const body = await res.text().catch(() => "");
+      // Self-heal: a compat endpoint that rejects cache_control gets one retry without it
+      // (mirrors the reasoning_effort self-heal in providers.ts).
+      if (cacheOn && res.status >= 400 && res.status < 500 && /cache_control/i.test(body)) {
+        cacheOn = false;
+        stripCacheBreakpoints(payload);
+        continue;
+      }
       if (RETRYABLE_STATUS.has(res.status) && httpAttempt < this.cfg.maxRetries) {
         httpAttempt++;
         const ra = res.headers.get("retry-after");
@@ -142,6 +155,37 @@ export function toAnthropicTools(tools: any[]): any[] {
   return tools.map((t) => ({ name: t.function?.name, description: t.function?.description ?? "", input_schema: t.function?.parameters ?? { type: "object", properties: {} } }));
 }
 
+/** Prompt-caching breakpoints (Anthropic explicit caching; docs order the cache tools -> system ->
+ * messages). Two breakpoints: (1) end of the system prompt — one entry covers tools + system, which
+ * after the stable-prefix work stay byte-identical across turns; (2) rolling, on the last block of the
+ * last message — each request re-reads the previous request's conversation prefix via the API's
+ * 20-block lookback, so a 40-step agent turn pays for each step's tail only, not the whole history.
+ * A last message that is a plain string is lifted to block form (cache_control is block-only). */
+export function addCacheBreakpoints(payload: Record<string, any>): void {
+  if (typeof payload.system === "string" && payload.system) {
+    payload.system = [{ type: "text", text: payload.system, cache_control: { type: "ephemeral" } }];
+  }
+  const last = payload.messages?.[payload.messages.length - 1];
+  if (!last) return;
+  if (typeof last.content === "string") {
+    if (last.content) last.content = [{ type: "text", text: last.content, cache_control: { type: "ephemeral" } }];
+  } else if (Array.isArray(last.content) && last.content.length) {
+    const b = last.content[last.content.length - 1];
+    // Thinking blocks and empty text blocks can't carry cache_control.
+    if (b && b.type !== "thinking" && !(b.type === "text" && !b.text)) b.cache_control = { type: "ephemeral" };
+  }
+}
+
+/** Undo addCacheBreakpoints (the self-heal path for endpoints that reject cache_control). */
+export function stripCacheBreakpoints(payload: Record<string, any>): void {
+  if (Array.isArray(payload.system) && payload.system.length === 1 && payload.system[0]?.type === "text") {
+    payload.system = payload.system[0].text;
+  }
+  for (const m of payload.messages ?? []) {
+    if (Array.isArray(m.content)) for (const b of m.content) if (b && typeof b === "object") delete b.cache_control;
+  }
+}
+
 /** Neko reasoning effort -> Anthropic extended-thinking budget (tokens). 0 = no extended thinking (fast).
  *  Matches the effort ladder low|medium|high|xhigh|max (and "off"/unset). */
 export function thinkingBudget(effort: string): number {
@@ -182,7 +226,7 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
   const usage: Usage = {};
   for await (const ev of sseEvents(res, onActivity)) {
     switch (ev.type) {
-      case "message_start": { const u = ev.message?.usage ?? {}; if (u.input_tokens != null) usage.prompt_tokens = u.input_tokens; if (u.output_tokens != null) usage.completion_tokens = u.output_tokens; break; }
+      case "message_start": { const u = ev.message?.usage ?? {}; const su = usageOf(u); if (u.input_tokens != null) usage.prompt_tokens = su.prompt_tokens; if (u.output_tokens != null) usage.completion_tokens = su.completion_tokens; if (su.cached_tokens) usage.cached_tokens = su.cached_tokens; if (su.cache_write_tokens) usage.cache_write_tokens = su.cache_write_tokens; break; }
       case "content_block_start": blocks[ev.index] = { type: ev.content_block?.type, id: ev.content_block?.id, name: ev.content_block?.name, json: "" }; break;
       case "content_block_delta": {
         const d = ev.delta;
@@ -206,8 +250,14 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
 }
 
 function usageOf(u: any): Usage {
-  const input = u?.input_tokens ?? 0, output = u?.output_tokens ?? 0;
-  return { prompt_tokens: input, completion_tokens: output, total_tokens: input + output };
+  // Anthropic's input_tokens EXCLUDES cache reads/writes; sum them back so prompt_tokens is the
+  // true context size, and surface the cache split so the cost tracker can report the hit rate.
+  const read = u?.cache_read_input_tokens ?? 0, write = u?.cache_creation_input_tokens ?? 0;
+  const input = (u?.input_tokens ?? 0) + read + write, output = u?.output_tokens ?? 0;
+  const usage: Usage = { prompt_tokens: input, completion_tokens: output, total_tokens: input + output };
+  if (read) usage.cached_tokens = read;
+  if (write) usage.cache_write_tokens = write;
+  return usage;
 }
 
 /** Yield the parsed JSON of each `data:` line in an Anthropic SSE stream (the `event:` line is redundant — the

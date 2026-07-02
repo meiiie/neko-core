@@ -180,6 +180,10 @@ export class NekoConfig {
   get remoteBind(): string { return String(this.data.remote_bind ?? "127.0.0.1"); }
   /** Default relay URL for /relay (your deployed cloudflare/relay Worker), so `/relay` needs no argument. */
   get relayUrl(): string { return String(this.data.relay_url ?? ""); }
+  /** Prompt caching (anthropic provider): send cache_control breakpoints so the stable prefix
+   * (tools + system) and the growing conversation are cached across steps/turns. ON by default —
+   * an endpoint that rejects cache_control is self-healed with one retry; `prompt_cache: false` opts out. */
+  get promptCache(): boolean { return this.data.prompt_cache !== false; }
   /** When true, read_file returns image files as vision content (needs a vision-capable model). Off by
    * default so text-only models never receive image content in a tool result (which some endpoints reject). */
   get vision(): boolean { return Boolean(this.data.vision); }
