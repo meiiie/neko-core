@@ -47,10 +47,14 @@ test("CostTracker counts cached tokens from both usage shapes and reports the hi
   t.add({ prompt_tokens: 200, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 150 } }); // OpenAI shape
   expect(t.cachedTokens).toBe(230);
   expect(t.lastCached).toBe(150);
+  t.add({ prompt_tokens: 100, completion_tokens: 10, prompt_cache_hit_tokens: 60 }); // DeepSeek shape
+  expect(t.cachedTokens).toBe(290);
+  t.add({ prompt_tokens: 100, completion_tokens: 10, prompt_tokens_details: null as any }); // NVIDIA sends null details -> safe 0
+  expect(t.cachedTokens).toBe(290);
   t.add({ prompt_tokens: 50, completion_tokens: 5 }); // no cache info -> lastCached resets, total holds
-  expect(t.cachedTokens).toBe(230);
+  expect(t.cachedTokens).toBe(290);
   expect(t.lastCached).toBe(0);
-  expect(t.summary()).toContain("230 cached"); // surfaced, with a share of prompt tokens
+  expect(t.summary()).toContain("290 cached"); // surfaced, with a share of prompt tokens
   const noCache = new CostTracker();
   noCache.add({ prompt_tokens: 10, completion_tokens: 1 });
   expect(noCache.summary()).not.toContain("cached"); // silent when the provider reports none

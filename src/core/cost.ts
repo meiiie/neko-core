@@ -15,6 +15,8 @@ export interface Usage {
   cache_write_tokens?: number;
   /** OpenAI-compat passthrough (providers.ts forwards usage verbatim). */
   prompt_tokens_details?: { cached_tokens?: number };
+  /** DeepSeek's cache-hit shape (they pioneered context caching with their own field name). */
+  prompt_cache_hit_tokens?: number;
 }
 
 export class CostTracker {
@@ -31,7 +33,7 @@ export class CostTracker {
     if (!usage) return;
     const prompt = usage.prompt_tokens ?? 0;
     const completion = usage.completion_tokens ?? 0;
-    const cached = usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0;
+    const cached = usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
     this.promptTokens += prompt;
     this.completionTokens += completion;
     this.totalTokens += usage.total_tokens ?? prompt + completion;
