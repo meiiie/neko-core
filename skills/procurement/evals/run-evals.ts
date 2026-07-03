@@ -54,6 +54,17 @@ const INTRO = "Dưới đây là dữ liệu đã có sẵn. KHÔNG tra web, KH�
 type Eval = { id: string; ask: string; data?: string; check: (out: string, dir: string) => string | null };
 const buildPrompt = (e: Eval) => `${INTRO}\n\n${e.data ?? OFFERS}\n\nYêu cầu: ${e.ask}`;
 const norm = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").replace(/[,.\s₫đ]/g, "").toLowerCase();
+
+/** The model's FINAL answer only. Checking the whole transcript graded ECHOED tool output too —
+ * price-table.ts prints its ascending table first, so order-sensitive checks failed runs whose
+ * final answer was perfectly correct (and flaked with transcript clipping). Tool-call lines and
+ * their result echoes are indented by the renderer; the final message starts at column 0. */
+const finalAnswer = (out: string) => {
+  const lines = out.replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+  let cut = 0;
+  for (let i = 0; i < lines.length; i++) if (/^\s{2,}(->\s|\S)/.test(lines[i])) cut = i + 1;
+  return lines.slice(cut).join("\n");
+};
 const before = (out: string, a: string, b: string) => out.indexOf(a) >= 0 && out.indexOf(a) < out.indexOf(b);
 
 const EVALS: Eval[] = [
@@ -96,8 +107,17 @@ const EVALS: Eval[] = [
   {
     id: "filter-official",
     ask: "Chỉ giữ các nguồn CHÍNH HÃNG cho iPhone 16 Pro (loại bỏ chợ/trôi nổi). Liệt kê.",
-    check: (out) => (/(tgdd|thế giới|the gioi)/i.test(out) && /cellphones/i.test(out) && !/shopre247/i.test(out)
-      ? null : "lọc chính hãng sai (phải còn TGDD + CellphoneS, bỏ ShopRe247)"),
+    // Measure the LOGIC, not the phrasing: the skill's golden rules MANDATE saying what was excluded
+    // ("Đã loại: ShopRe247 ⚠️"), so a whole-output !/shopre247/ check punished correct transparency.
+    // Fail only when ShopRe247 appears in a KEPT row (a table/list line that isn't an exclusion note).
+    check: (out) => {
+      const rows = out.split("\n").filter((l) => /^\s*(\||-|\*|\d+\.)/.test(l));
+      const keptBad = rows.some((l) => /shopre247/i.test(l) && !/loại|bỏ|chợ|trôi nổi|excluded|removed/i.test(l));
+      // Accept the source under any of its legitimate names: the table says "TGDD", but models
+      // legitimately render it "TGĐ" / "Thế Giới Di Động" / via the thegioididong.com link.
+      return /(tgdd|tgđ|thế giới|the gioi|thegioididong)/i.test(out) && /cellphones/i.test(out) && !keptBad
+        ? null : "lọc chính hãng sai (danh sách giữ lại phải có TGDD + CellphoneS và KHÔNG có dòng ShopRe247)";
+    },
   },
   {
     id: "export",
@@ -115,15 +135,17 @@ const EVALS: Eval[] = [
   },
 ];
 
-function runOne(e: Eval): { id: string; pass: boolean; detail: string } {
+function runOne(e: Eval): { id: string; pass: boolean; detail: string; snippet: string } {
   const dir = mkdtempSync(join(tmpdir(), "neko-proc-"));
   try {
     const r = spawnSync(process.execPath, [NEKO, "run", buildPrompt(e), "--yolo"], { cwd: dir, encoding: "utf-8", timeout: 180000 });
     const out = (r.stdout || "") + (r.stderr || "");
-    const fail = e.check(out, dir);
-    return { id: e.id, pass: !fail, detail: fail || "ok" };
+    const fail = e.check(finalAnswer(out), dir); // grade the model's answer, not tool echoes
+    // Keep the tail of the ACTUAL output so a failure is debuggable from the report alone
+    // (an eval that hides the evidence forces a manual re-run just to see what happened).
+    return { id: e.id, pass: !fail, detail: fail || "ok", snippet: out.replace(/\x1b\[[0-9;]*m/g, "").slice(-700) };
   } catch (err) {
-    return { id: e.id, pass: false, detail: `crashed: ${(err as Error).message}` };
+    return { id: e.id, pass: false, detail: `crashed: ${(err as Error).message}`, snippet: "" };
   } finally {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
   }
@@ -141,14 +163,16 @@ let solid = 0;
 for (const e of todo) {
   let p = 0;
   let lastDetail = "ok";
+  let lastSnippet = "";
   for (let t = 0; t < trials; t++) {
     const res = runOne(e);
     if (res.pass) p++;
-    else lastDetail = res.detail;
+    else { lastDetail = res.detail; lastSnippet = res.snippet; }
   }
   const verdict = p === trials ? "PASS" : p === 0 ? "FAIL" : "FLAKY";
   if (verdict === "PASS") solid++;
   console.log(`  ${verdict.padEnd(5)} ${e.id}  (${p}/${trials})${verdict === "PASS" ? "" : "  -> " + lastDetail}`);
+  if (verdict !== "PASS" && lastSnippet) console.log(`        --- failing output (tail) ---\n${lastSnippet.split("\n").map((l) => "        " + l).join("\n")}\n        ---`);
 }
 console.log(`\n${solid}/${todo.length} solid (passed every trial)`);
 process.exit(solid === todo.length ? 0 : 1);

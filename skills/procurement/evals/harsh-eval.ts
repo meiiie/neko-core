@@ -26,12 +26,14 @@ const SCHEMA = {
 };
 const RULES =
   "Rules: (1) If the page's product is NOT the requested one (different model/year), set matches_query=false. " +
-  "(2) The price is ONLY the phone's actual selling price - NEVER a discount amount, monthly installment, " +
-  "trade-in credit, deposit, or a bundle/combo price. (3) If there is no real price (out of stock, 'contact', " +
-  "specs-only), set price_found=false and lowest_price_vnd=0 - do NOT invent a number. (4) List every " +
-  "color/variant price for the requested config; lowest_price_vnd = the smallest real variant price. " +
-  "All prices are FULL INTEGERS in dong, e.g. 24099000 - Vietnamese pages use '.' as the thousands " +
-  "separator, so '24.099.000' = 24099000 (never 24.099).";
+  "(2) The price is ONLY a price the buyer actually PAYS for the phone - NEVER a discount amount, monthly " +
+  "installment, a trade-in CREDIT (the deduction for handing in an old device), a deposit, or a bundle/combo " +
+  "price. But a labeled PROGRAM price the buyer really pays (e.g. 'Thu cu doi moi 24.099.000d' = the price " +
+  "under the trade-in program) IS a real price - include it as a variant with its label. (3) If there is no " +
+  "real price (out of stock, 'contact', specs-only), set price_found=false and lowest_price_vnd=0 - do NOT " +
+  "invent a number. (4) List every color/variant/program price for the requested config; lowest_price_vnd = " +
+  "the smallest real price listed. All prices are FULL INTEGERS in dong, e.g. 24099000 - Vietnamese pages " +
+  "use '.' as the thousands separator, so '24.099.000' = 24099000 (never 24.099).";
 
 type Case = { id: string; fixture: string; query: string; check: (p: any) => string | null };
 const CASES: Case[] = [

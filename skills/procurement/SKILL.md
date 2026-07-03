@@ -94,6 +94,10 @@ Lỗi hay gặp: chỉ hỏi FPT/TGĐ/CellphoneS → ra **giá niêm yết cao**
    - **Lưới an toàn:** `price-table.ts` tự **gắn cờ ⚠️** mọi giá lệch xa median + dòng không đọc được — **đọc lại đúng các dòng ⚠️** đó rồi mới chốt. (Trích đúng từ đầu vẫn hơn dựa vào lưới.)
 
 ## Đa dạng truy vấn — làm đúng cái được hỏi
+**MỞ ĐẦU câu trả lời bằng ĐÚNG kết quả được hỏi** — hỏi "sắp xếp GIẢM DẦN" → bảng giảm-dần đứng ĐẦU
+(đừng dán bảng tăng-dần của script lên trước); hỏi "lọc X" → bảng đã-lọc đứng đầu. Thống kê bổ sung và
+ghi chú "đã loại..." đặt SAU kết quả chính — người dùng đọc từ trên xuống, cái được hỏi phải thấy trước.
+
 **MỘT khảo sát trả lời TRỌN BỘ (mặc định — đo thực: nhanh hơn ~40% so với hỏi 2 lần):** `price-table.ts`
 đã tính sẵn min/max/trung bình/median/băng giá trong MỘT lần chạy — nên dù người dùng chỉ hỏi "rẻ nhất",
 hãy trình bày luôn cả ĐẮT NHẤT + median/băng thị trường (2 dòng thêm, 0 công thêm). Khi họ hỏi tiếp biến
