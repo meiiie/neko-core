@@ -476,3 +476,74 @@ test("stream-eager: order safety - a read AFTER a mutating call is NOT eager-sta
   // Nothing executed during generation; the loop then ran write BEFORE read (sequence semantics kept).
   expect(log).toEqual(["provider-resolved", "exec:write_file", "exec:read_file"]);
 });
+
+test("pre-flight arg validation: a call missing a required key is NOT executed; a schema hint is fed back", async () => {
+  let execCount = 0;
+  const tools = {
+    schemas: () => [{ type: "function", function: { name: "web_fetch", parameters: { type: "object", required: ["url"], properties: { url: { type: "string", description: "the page URL" } } } } }],
+    execute: async () => { execCount++; return "ran"; },
+  };
+  const script = [
+    { content: null, tool_calls: [{ id: "c1", name: "web_fetch", arguments: {} }] }, // missing url
+    { content: null, tool_calls: [{ id: "c2", name: "web_fetch", arguments: { url: "http://x" } }] }, // repaired
+    { content: "done", tool_calls: [] },
+  ];
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 6 });
+  expect(await agent.run("go")).toBe("done");
+  expect(execCount).toBe(1); // only the repaired call executed; the invalid one never reached execute()
+  const obs = agent.messages.filter((m: any) => m.role === "tool").map((m: any) => String(m.content));
+  expect(obs[0]).toMatch(/validation failed.*url.*page URL/i); // hint names the key + its description
+  expect(obs[1]).toBe("ran");
+});
+
+test("pre-flight validation does NOT reject a call whose required args are all present", async () => {
+  const tools = {
+    schemas: () => [{ type: "function", function: { name: "read_file", parameters: { type: "object", required: ["path"], properties: { path: { type: "string" } } } } }],
+    execute: async () => "content",
+  };
+  const script = [
+    { content: null, tool_calls: [{ id: "c1", name: "read_file", arguments: { path: "a.txt" } }] },
+    { content: "done", tool_calls: [] },
+  ];
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 4 });
+  await agent.run("go");
+  expect(String(agent.messages.find((m: any) => m.role === "tool").content)).toBe("content"); // ran normally
+});
+
+test("compact() carries the ORIGINAL task verbatim ahead of the summary (survives the prune)", async () => {
+  const agent = new Agent({
+    provider: new ScriptedProvider([{ content: "SUMMARY", tool_calls: [] }]) as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "Build me a landing page with a contact form and deploy it" }, // original -> in the head
+    { role: "assistant", content: "a1" },
+    { role: "user", content: "o2" }, { role: "assistant", content: "a2" },
+    { role: "user", content: "r1" }, { role: "assistant", content: "a3" },
+    { role: "user", content: "r2" }, { role: "assistant", content: "a4" },
+    { role: "user", content: "r3" }, { role: "assistant", content: "a5" },
+    { role: "user", content: "RECENT" }, { role: "assistant", content: "ra" },
+  ];
+  await agent.compact();
+  const summ = agent.messages.find((m: any) => String(m.content).includes("SUMMARY"));
+  expect(String(summ.content)).toContain("ORIGINAL TASK (verbatim): Build me a landing page"); // task preserved by CODE, not the summarizer
+});
+
+test("verify_before_exit gate fires once, then lets the model finish (off by default)", async () => {
+  // OFF: the first tool-less answer returns immediately.
+  const offScript = [{ content: "done-immediately", tool_calls: [] }];
+  const off = new Agent({ provider: new ScriptedProvider(offScript) as any, tools: { schemas: () => [], execute: async () => "" } as any, maxSteps: 6 });
+  expect(await off.run("go")).toBe("done-immediately");
+
+  // ON: the first tool-less answer is intercepted once; the model re-inspects, then finishes.
+  const onScript = [
+    { content: "looks done", tool_calls: [] }, // premature -> gate fires
+    { content: "verified and done", tool_calls: [] }, // after re-inspection
+  ];
+  const on = new Agent({ provider: new ScriptedProvider(onScript) as any, tools: { schemas: () => [], execute: async () => "" } as any, maxSteps: 6, verifyBeforeExit: true });
+  expect(await on.run("go")).toBe("verified and done");
+  const gate = on.messages.find((m: any) => m.role === "user" && String(m.content).includes("VERIFY BEFORE FINISHING"));
+  expect(gate).toBeTruthy(); // the gate turn was injected exactly once
+  expect(on.messages.filter((m: any) => String(m.content).includes("VERIFY BEFORE FINISHING")).length).toBe(1);
+});

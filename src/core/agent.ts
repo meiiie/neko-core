@@ -124,6 +124,10 @@ export interface AgentOptions {
   /** Model context window (tokens). The loop compacts IN-LOOP before a request would overflow it,
    * so a single long turn (e.g. many huge browser snapshots) can't blow past the window. */
   maxContextTokens?: number;
+  /** Opt-in pre-completion gate: the FIRST tool-less final answer of a run is intercepted once and
+   * the model is told to re-inspect the ACTUAL state against the goal before finishing - catching
+   * the "declared done without re-running the check" failure mode. (Config: `verify_before_exit`.) */
+  verifyBeforeExit?: boolean;
 }
 
 export class Agent {
@@ -135,6 +139,7 @@ export class Agent {
   private readonly onDelta?: DeltaHook;
   private readonly dynamicContext?: () => string;
   private readonly maxContextTokens: number;
+  private readonly verifyBeforeExit: boolean;
   readonly cost = new CostTracker();
   messages: any[] = [];
   /** The single system message is `<base prompt>` + DYN_MARK + `<live session context>`.
@@ -159,6 +164,7 @@ export class Agent {
     this.onDelta = opts.onDelta;
     this.dynamicContext = opts.dynamicContext;
     this.maxContextTokens = opts.maxContextTokens ?? 131072;
+    this.verifyBeforeExit = Boolean(opts.verifyBeforeExit);
   }
 
   /** Swap the LLM provider live (used by the REPL's /provider command to switch endpoint+key between turns,
@@ -212,7 +218,17 @@ export class Agent {
         }
         return m;
       });
-    this.messages = [...sys, { role: "user", content: `[Summary of earlier conversation]\n${summary}` }, ...leanTail];
+    // The ORIGINAL instruction must survive every prune VERBATIM - summarizers compress away the one
+    // thing the whole run is anchored to (instruction fade-out / Governance Decay, arXiv 2606.22528,
+    // 2603.05344). Deterministic code, not a summarizer promise: when the first user turn is in the
+    // summarized head, carry its text (clipped) ahead of the model summary.
+    const firstUser = head.find((m) => m.role === "user");
+    const task = typeof firstUser?.content === "string" ? firstUser.content.slice(0, 600) : "";
+    this.messages = [
+      ...sys,
+      { role: "user", content: `[Summary of earlier conversation]\n${task ? `ORIGINAL TASK (verbatim): ${task}\n\n` : ""}${summary}` },
+      ...leanTail,
+    ];
     return summary;
   }
 
@@ -309,6 +325,19 @@ export class Agent {
      * rejecting the whole turn. The loop is built on "feed errors back so the model adapts" — this enforces it
      * for every tool, not just the ones already wrapped inside execute(). */
     private async safeExecute(call: { name: string; arguments: Record<string, any> }, signal?: AbortSignal): Promise<string | any[]> {
+      // Pre-flight argument validation (Gecko, arXiv 2602.19218): a call missing a REQUIRED key
+      // would execute, throw, and burn the round-trip on a vague error - catch it BEFORE execution
+      // and feed back the schema hint so the model self-repairs in one step. Presence-only (null/
+      // undefined), never type pedantry: nothing that executes today is rejected, and an unknown
+      // schema (e.g. an unloaded MCP tool) fails open to the executor's own checks.
+      const spec = this.tools.schemas().find((s: any) => s.function?.name === call.name)?.function?.parameters;
+      const missing = (spec?.required ?? []).filter((k: string) => call.arguments?.[k] == null);
+      if (missing.length) {
+        const hint = missing
+          .map((k: string) => `'${k}' (${spec.properties?.[k]?.type ?? "value"}${spec.properties?.[k]?.description ? ` - ${String(spec.properties[k].description).slice(0, 80)}` : ""})`)
+          .join(", ");
+        return `Error: argument validation failed for ${call.name} - missing required ${hint}. Re-emit the call with the missing argument(s) filled in.`;
+      }
       try {
         return await this.tools.execute(call.name, call.arguments, signal);
       } catch (error) {
@@ -372,6 +401,7 @@ export class Agent {
     let lastSig = ""; // loop guard: detect the model repeating the same tool call (a stuck loop)
     let repeats = 0;
     let mutErrored = false; // tool-error recovery is EDGE-triggered: re-armed by a mutating-tool success
+    let verifiedExit = false; // the pre-completion verify gate fires at most once per run
     for (let step = 0; step < this.maxSteps; step++) {
       this.emit("step", step + 1);
       if (signal?.aborted) return "[interrupted]";
@@ -413,6 +443,21 @@ export class Agent {
       if (!toolCalls.length) {
         const final = response.content ?? "";
         this.messages.push({ role: "assistant", content: final });
+        // Pre-completion gate (opt-in): intercept the FIRST tool-less final once and force a
+        // re-inspection of the ACTUAL state - the "declared done without re-running the check"
+        // failure mode (LangChain PreCompletionChecklist; ACE reflection-before-exit). Fires at
+        // most once per run, and never on the last step (the wrap-up must be able to finish).
+        if (this.verifyBeforeExit && !verifiedExit && step < this.maxSteps - 1) {
+          verifiedExit = true;
+          this.messages.push({
+            role: "user",
+            content: "VERIFY BEFORE FINISHING: re-inspect the ACTUAL current state against the original goal " +
+              "(re-run the failing check / re-read the changed file / re-test the command) - judge what IS, " +
+              "not your memory of what you intended. If the goal is fully met, restate the final answer. " +
+              "If anything is missing, keep working now.",
+          });
+          continue;
+        }
         this.emit("final", final);
         return final;
       }

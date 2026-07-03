@@ -292,6 +292,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       tools: registryRef.current,
       maxSteps: cfg.maxSteps,
       maxContextTokens: cfg.contextWindow,
+      verifyBeforeExit: cfg.verifyBeforeExit,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>

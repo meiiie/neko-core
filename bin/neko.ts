@@ -179,6 +179,7 @@ async function buildAgent(
         .join("\n\n"),
     onEvent: printEvent,
     onDelta,
+    verifyBeforeExit: cfg.verifyBeforeExit,
   });
   return { agent, close: () => hub.close() };
 }

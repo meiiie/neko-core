@@ -180,6 +180,9 @@ export class NekoConfig {
   get remoteBind(): string { return String(this.data.remote_bind ?? "127.0.0.1"); }
   /** Default relay URL for /relay (your deployed cloudflare/relay Worker), so `/relay` needs no argument. */
   get relayUrl(): string { return String(this.data.relay_url ?? ""); }
+  /** Opt-in pre-completion gate: intercept the first tool-less final answer once and force a
+   * re-inspection of the actual state before finishing (quality over speed; +1 turn when it fires). */
+  get verifyBeforeExit(): boolean { return Boolean(this.data.verify_before_exit); }
   /** Prompt caching (anthropic provider): send cache_control breakpoints so the stable prefix
    * (tools + system) and the growing conversation are cached across steps/turns. ON by default —
    * an endpoint that rejects cache_control is self-healed with one retry; `prompt_cache: false` opts out. */
