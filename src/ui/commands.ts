@@ -10,7 +10,7 @@ import { initProject } from "../adapters/project.ts";
 import { getProvider, listModels } from "../adapters/providers.ts";
 import { setActiveProfile, setEffort, setModel } from "../adapters/project.ts";
 import { fillRecipe, listRecipes, loadRecipe } from "../adapters/recipes.ts";
-import { listSessions, loadSession, renameSession, sessionTitle, type Session } from "../adapters/session.ts";
+import { listSessionMetas, loadSession, renameSession, sessionTitle, type Session } from "../adapters/session.ts";
 import { listSkills, loadSkill } from "../adapters/skills.ts";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { listTools } from "../core/tools.ts";
@@ -83,7 +83,9 @@ export interface CommandCtx {
 
 /** Open the resume picker for a scope; Ctrl+A flips between this project and all projects. */
 function openResumePicker(ctx: CommandCtx, scope: "cwd" | "all"): void {
-  const all = listSessions();
+  // Metadata only (no full transcript parse) - listing 2860 sessions this way is ~50ms of stat calls
+  // vs ~600ms of JSON parsing, which is what made the picker lag ~1s to open.
+  const all = listSessionMetas();
   const list = scope === "cwd" ? all.filter((s) => s.cwd === process.cwd()) : all;
   if (!list.length) {
     // This directory has no sessions. If OTHER projects do, open the all-projects picker directly
@@ -103,15 +105,20 @@ function openResumePicker(ctx: CommandCtx, scope: "cwd" | "all"): void {
     items: list.map((s) => ({
       id: s.id,
       label: sessionTitle(s),
-      detail: `${relativeTime(s.updatedAt)} · ${s.messages.length} msgs` +
+      detail: `${relativeTime(s.updatedAt)} · ${s.msgCount} msgs` +
         (s.branch ? ` · ${s.branch}` : "") + (s.bytes ? ` · ${fmtBytes(s.bytes)}` : "") +
         (scope === "all" ? ` · ${s.cwd.replace(/\\/g, "/").split("/").pop()}` : ""),
-      preview: s.messages
+    })),
+    // Preview is built LAZILY (Space on the highlighted item) - only THEN is that one transcript loaded.
+    getPreview: (it) => {
+      const s = loadSession(it.id);
+      if (!s) return "(could not load)";
+      return s.messages
         .filter((m: any) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
         .slice(-4)
         .map((m: any) => (m.role === "user" ? "> " : "  ") + trunc(String(m.content), 100))
-        .join("\n"),
-    })),
+        .join("\n") || "(no text messages)";
+    },
     onSelect: (it) => {
       ctx.setOverlay(null);
       const target = loadSession(it.id);
@@ -289,7 +296,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       agent.messages = [];
       return addLine("info", "(conversation reset)");
     case "/sessions": {
-      const mine = listSessions().filter((s) => s.cwd === process.cwd());
+      const mine = listSessionMetas().filter((s) => s.cwd === process.cwd());
       return addLine(
         "info",
         mine.length
@@ -305,7 +312,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         else ctx.resumeInto(target);
         return;
       }
-      if (!listSessions().length) return addLine("info", "no saved sessions yet");
+      if (!listSessionMetas().length) return addLine("info", "no saved sessions yet");
       return openResumePicker(ctx, "cwd");
     }
     case "/effort": {

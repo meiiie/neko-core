@@ -20,6 +20,8 @@ export interface Overlay {
   onCtrlA?: () => void; // optional secondary action (e.g. /resume "all projects")
   ctrlAHint?: string;
   onRename?: (item: SelectItem, newName: string) => void; // Ctrl+R rename
+  getPreview?: (item: SelectItem) => string; // computed LAZILY (only when Space is pressed) - avoids
+  // building a preview for every item upfront (e.g. loading every session transcript to show a menu).
 }
 
 export function SelectList(props: {
@@ -32,11 +34,13 @@ export function SelectList(props: {
   onCtrlA?: () => void;
   ctrlAHint?: string;
   onRename?: (item: SelectItem, newName: string) => void;
+  getPreview?: (item: SelectItem) => string;
 }) {
-  const { title, items, onSelect, onCancel, cols, search = true, onCtrlA, ctrlAHint, onRename } = props;
+  const { title, items, onSelect, onCancel, cols, search = true, onCtrlA, ctrlAHint, onRename, getPreview } = props;
   const [index, setIndex] = useState(0);
   const [query, setQuery] = useState("");
   const [showPreview, setShowPreview] = useState(false);
+  const [lazyPreview, setLazyPreview] = useState<Record<string, string>>({}); // id -> preview, filled on demand
   const [renaming, setRenaming] = useState<string | null>(null); // rename buffer; null = not renaming
 
   const filtered = query
@@ -63,7 +67,13 @@ export function SelectList(props: {
     }
     if (key.upArrow) return setIndex(Math.max(0, idx - 1));
     if (key.downArrow) return setIndex(Math.min(filtered.length - 1, idx + 1));
-    if (input === " ") return setShowPreview((p) => !p); // Space toggles the preview panel
+    if (input === " ") { // Space toggles the preview panel (computing this item's preview lazily on first view)
+      const it = filtered[idx];
+      if (it && getPreview && lazyPreview[it.id] === undefined) {
+        setLazyPreview((m) => ({ ...m, [it.id]: getPreview(it) }));
+      }
+      return setShowPreview((p) => !p);
+    }
     if (onCtrlA && key.ctrl && (input === "a" || input === "\x01")) return onCtrlA();
     if (onRename && key.ctrl && (input === "r" || input === "\x12")) return setRenaming(filtered[idx]?.label ?? "");
     if (search) {
@@ -105,14 +115,19 @@ export function SelectList(props: {
         );
       })}
       <Text dimColor>{rule}</Text>
-      {showPreview && filtered[idx]?.preview ? (
-        <Box flexDirection="column" marginBottom={1}>
-          {filtered[idx].preview!.split("\n").slice(0, 12).map((l, i) => (
-            <Text key={i} dimColor>{l}</Text>
-          ))}
-          <Text dimColor>{rule}</Text>
-        </Box>
-      ) : null}
+      {(() => {
+        if (!showPreview || !filtered[idx]) return null;
+        const pv = filtered[idx].preview ?? lazyPreview[filtered[idx].id];
+        if (!pv) return null;
+        return (
+          <Box flexDirection="column" marginBottom={1}>
+            {pv.split("\n").slice(0, 12).map((l, i) => (
+              <Text key={i} dimColor>{l}</Text>
+            ))}
+            <Text dimColor>{rule}</Text>
+          </Box>
+        );
+      })()}
       <Text dimColor>
         {renaming !== null
           ? "Enter save · Esc cancel rename"

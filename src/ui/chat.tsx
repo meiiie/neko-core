@@ -895,6 +895,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           onCtrlA={overlay.onCtrlA}
           ctrlAHint={overlay.ctrlAHint}
           onRename={overlay.onRename}
+          getPreview={overlay.getPreview}
           onCancel={() => {
             setOverlay(null);
             addLine("info", "(cancelled)");
