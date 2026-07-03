@@ -3,6 +3,25 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-03 — UX/UI + micro-interaction audit (slash-menu Enter, /resume dead-end, approval preview)
+
+Owner tested `neko --yolo` live and hit a "freeze" on `/resume`; asked for a deep UX/micro-interaction
+audit. Done directly (solo). Found + fixed three real issues; verified the rest works via a headless
+interaction smoke test:
+- **Slash-menu Enter ignored the arrow selection.** Only Tab used `slashSel`; Enter submitted the RAW
+  partial, so "/resu"+Enter ran the unknown command "/resu" and down+Enter didn't pick the highlight. Enter
+  now completes a bare "/tok" to the highlighted/nearest match and runs it (Claude-Code behavior); a
+  command with an arg ("/model gpt-4") is untouched.
+- **`/resume` dead-ended** in a dir with no local sessions: it printed "…Ctrl+A shows all projects" with no
+  picker on screen to press Ctrl+A on (read as a freeze). Now it opens the all-projects picker directly
+  when other projects have sessions.
+- **Approval-box diff preview** still drew flat green/red while the committed transcript diff is now
+  per-token syntax-highlighted; the preview now matches (marker green, removed red, added highlighted).
+- Verified OK (headless smoke): Vietnamese typing + mid-string cursor insert + backspace, Ctrl+U clear,
+  slash menu open/↓/Tab-complete, Shift+Tab mode cycle - no crash, no dead key. Noted latent (not worth
+  churning): text-input NFC-on-insert can misplace the cursor by one on a rare combining sequence (clamped,
+  never crashes; the common Vietnamese-IME path works). +1 test; suite 281/0.
+
 ## 2026-07-03 — Syntax-highlight code inside diffs (Claude-Code-grade tool-result rendering)
 
 Owner compared Neko's Write/Edit tool output to Claude Code (screenshots): Neko rendered every diff line
