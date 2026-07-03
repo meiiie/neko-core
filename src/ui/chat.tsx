@@ -198,7 +198,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       out.push(...replaySessionLines(resumedRef.current.messages, () => idRef.current++));
       out.push({ id: idRef.current++, kind: "info", text: `(resumed ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)` });
       const left = recoverTodos(resumedRef.current.messages).filter((t) => t.status !== "completed").length;
-      if (left) out.push({ id: idRef.current++, kind: "info", text: `${left} task${left > 1 ? "s" : ""} still open - /continue to pick up where you left off.` });
+      if (left) out.push({ id: idRef.current++, kind: "info", text: `Picking up where you left off - ${left} task${left > 1 ? "s" : ""} still open. Just tell me to keep going (in your own words), or /continue.` });
     }
     if (!cfg.apiKey && !cfg.isLocalEndpoint) {
       out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
@@ -438,7 +438,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     registryRef.current!.todos = todos;
     setTodos(todos);
     const left = todos.filter((t) => t.status !== "completed").length;
-    if (left) replay.push({ id: idRef.current++, kind: "info", text: `${left} task${left > 1 ? "s" : ""} still open - /continue to pick up where you left off.` });
+    if (left) replay.push({ id: idRef.current++, kind: "info", text: `Picking up where you left off - ${left} task${left > 1 ? "s" : ""} still open. Just tell me to keep going (in your own words), or /continue.` });
     setLines((prev) => [...prev, ...replay]);
     setStarted(true);
   };
