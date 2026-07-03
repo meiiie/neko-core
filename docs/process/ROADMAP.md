@@ -9,9 +9,10 @@ Neko Code is a **working terminal coding agent** — Phases A→G below are done
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool parity).
 Default model: **glm-5.2** via the Z.ai GLM coding plan (`anthropic` provider, `--profile zai`).
 
-- **Branch:** `self-improve`. v0.5.0 released to `main` + public (owner-approved). All green: typecheck +
-  253/0 tests + policy + build. (The two "flaky" approval UI tests were a REAL dropped-keypress race —
-  root-caused and fixed on 2026-07-02, see WORKLOG; they are deterministic now.)
+- **Branch:** `self-improve`. **v0.5.1 released 2026-07-03** (owner-approved; main == self-improve at the
+  tag; CI + release both green FIRST try — 5/5 binaries, the create-once workflow fix proved itself). All
+  green: typecheck + 262/0 tests + policy + build. (The two "flaky" approval UI tests were a REAL
+  dropped-keypress race — root-caused and fixed 2026-07-02; deterministic now.)
 - **Post-release hardening (Jul 2, on `self-improve`, not yet pushed):** fixed the approval dropped-'y' race
   (keys now in the always-mounted input hook) and the release-asset race (release created once, the build
   matrix only uploads). The live v0.5.0 release was healed to 5/5 assets by re-running the failed arm64 job.

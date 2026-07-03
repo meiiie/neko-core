@@ -33,6 +33,9 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-03] (owner-directed) **v0.5.1 RELEASED** (497345f, tag pushed): approval dropped-'y' fix, release
+  race fix (proved itself - 5/5 assets first try), 529 retry, prefix-cache work + cached metrics, tool-error
+  recovery, procurement INDEX->VERIFY. Next arcs (owner): performance + computer-use ("0.6.0 material").
 - [2026-07-02] (owner-directed) tool-error recovery directive -> committed 29e7c95 (Self-Harness: [recovery]
   diagnose->repair->validate on the first mutating-tool failure, edge-triggered, cache-friendly append).
   Sprint next-up (deferred fresh): Gecko pre-flight arg validation; pre-completion verify gate.
