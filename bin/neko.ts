@@ -74,6 +74,7 @@ function parseArgs(argv: string[]): Args {
       const next = argv[i + 1];
       if (next && !next.startsWith("-")) args.resumeId = argv[++i]; // `--resume <id>` resumes that session
     }
+    else if (a === "--continue" || a === "-c") args.resume = true; // Claude-Code parity: resume the latest session for this dir
     else if (a === "--version" || a === "-v") args.version = true;
     else if (a === "--help" || a === "-h") args.help = true;
     else if (a.startsWith("-")) { /* ignore unknown flags */ }
@@ -222,6 +223,7 @@ Options:
   --image <path>     (run) attach an image (repeatable); perception mode, no tools. Use a VISION model,
                      e.g. NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko run --image pkg.jpg "what is this?"
   --resume [id]      (chat) resume a session by id, or the latest for this directory
+  --continue, -c     (chat) resume the latest session for this directory (then /continue to pick up)
   --version          print version`;
 
 function cmdConfig(args: Args): number {

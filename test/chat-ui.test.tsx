@@ -3,7 +3,7 @@ import { render } from "ink-testing-library";
 
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
-import { ApprovalBox, ChatApp, clampToRows, renderTail } from "../src/ui/chat.tsx";
+import { ApprovalBox, ChatApp, clampToRows, recoverTodos, renderTail } from "../src/ui/chat.tsx";
 
 test("clampToRows bounds the live stream to the viewport height (fixes streaming scroll-jump)", () => {
   const text = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
@@ -203,3 +203,17 @@ test("slash menu: Enter completes a PARTIAL command to the highlighted match and
   expect(out.replace(/\x1b\[[0-9;]*m/g, "")).toMatch(/help|commands|\/model|\/resume/i);
   unmount();
 }, 15000);
+
+test("recoverTodos: rebuilds the todo tracker from the last todo_write in saved messages", () => {
+  const msgs = [
+    { role: "user", content: "build X" },
+    { role: "assistant", content: "", tool_calls: [{ function: { name: "todo_write", arguments: JSON.stringify({ todos: [{ content: "a", status: "completed" }, { content: "b", status: "pending" }] }) } }] },
+    { role: "tool", tool_call_id: "1", content: "Update Todos" },
+    // a LATER todo_write supersedes the earlier one
+    { role: "assistant", content: "", tool_calls: [{ function: { name: "todo_write", arguments: JSON.stringify({ todos: [{ content: "a", status: "completed" }, { content: "b", status: "in_progress" }, { content: "c", status: "pending" }] }) } }] },
+  ];
+  const todos = recoverTodos(msgs);
+  expect(todos.length).toBe(3); // the LATEST plan
+  expect(todos.map((t) => t.status)).toEqual(["completed", "in_progress", "pending"]);
+  expect(recoverTodos([{ role: "user", content: "no todos here" }])).toEqual([]); // none -> empty
+});

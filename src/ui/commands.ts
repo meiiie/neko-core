@@ -21,7 +21,7 @@ import type { Line, LineKind } from "./transcript.tsx";
 export const HELP = [
   "Commands:",
   "  /help /cost /model /provider /tools /skill(s) /init /clear /compact /reset /exit",
-  "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /effort · /context",
+  "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /continue · /retry · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
   "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line.",
@@ -44,6 +44,8 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/auto", desc: "closed loop: work + self-review until done (/auto <goal>)" },
   { name: "/sessions", desc: "list saved sessions here" },
   { name: "/resume", desc: "resume a session (/resume [id])" },
+  { name: "/continue", desc: "pick up an interrupted task where it left off" },
+  { name: "/retry", desc: "re-run the last message (e.g. after an error)" },
   { name: "/effort", desc: "reasoning effort (/effort low|medium|high|off)" },
   { name: "/context", desc: "context window usage" },
   { name: "/memory", desc: "show NEKO.md memory/context files" },
@@ -314,6 +316,29 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       }
       if (!listSessionMetas().length) return addLine("info", "no saved sessions yet");
       return openResumePicker(ctx, "cwd");
+    }
+    case "/continue": {
+      // Pick up an interrupted/incomplete task. The trajectory (sealed) + the todo list are already in
+      // context - so tell the agent to resume the first unfinished todo and keep going, not restart.
+      // A single run() naturally loops through steps until the work is done (or it needs you again).
+      ctx.runText(
+        "Continue the task from where it was interrupted. Review your current todo list and the recent " +
+        "tool results above, then resume the FIRST incomplete todo and keep working until every todo is " +
+        "done. If a tool call was cut off, re-run it. Do NOT restart from scratch or re-ask what the task " +
+        "is - it is already established above.",
+      );
+      return;
+    }
+    case "/retry": {
+      // Re-run the last user turn (after a transient error / a bad result). rewind() drops that turn and
+      // its response from context, then we resubmit the same text so it runs fresh.
+      const lastUser = [...agent.messages].reverse().find((m) => m.role === "user");
+      const text = typeof lastUser?.content === "string" ? lastUser.content
+        : Array.isArray(lastUser?.content) ? lastUser!.content.map((p: any) => p?.text ?? "").join("") : "";
+      if (!text.trim()) return addLine("info", "nothing to retry");
+      agent.rewind();
+      ctx.runText(text);
+      return;
     }
     case "/effort": {
       const arg = input.split(/\s+/)[1]?.toLowerCase();

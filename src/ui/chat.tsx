@@ -111,6 +111,23 @@ function replaySessionLines(messages: any[], nextId: () => number): Line[] {
   return out;
 }
 
+/** Recover the todo list from saved messages: the last todo_write tool_call carries the plan in its
+ * arguments. The registry (rebuilt on resume) starts with empty todos, so without this a resumed
+ * session loses its task tracker - the "handoff state" that lets you (and the agent) pick up the
+ * interrupted work (Handoff Debt, arXiv 2606.02875). Returns [] if the session had no todos. */
+export function recoverTodos(messages: any[]): { content: string; status: string }[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    for (const tc of messages[i]?.tool_calls ?? []) {
+      if (tc.function?.name !== "todo_write") continue;
+      try {
+        const args = typeof tc.function.arguments === "string" ? JSON.parse(tc.function.arguments) : tc.function.arguments;
+        if (Array.isArray(args?.todos)) return args.todos.map((t: any) => ({ content: String(t?.content ?? ""), status: String(t?.status ?? "pending") }));
+      } catch { /* keep scanning */ }
+    }
+  }
+  return [];
+}
+
 /** Cap live-streamed text to a bounded tail so re-parsing + re-rendering it every frame stays O(1),
  * not O(n): a long reasoning trace or a huge answer must NEVER block the event loop, or Esc/Ctrl+C
  * go dead and the only escape is killing the terminal. The full text is still committed to the
@@ -180,6 +197,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       // FULL thread incl. tool calls/results, so an interrupted coding task's work isn't lost from view.
       out.push(...replaySessionLines(resumedRef.current.messages, () => idRef.current++));
       out.push({ id: idRef.current++, kind: "info", text: `(resumed ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)` });
+      const left = recoverTodos(resumedRef.current.messages).filter((t) => t.status !== "completed").length;
+      if (left) out.push({ id: idRef.current++, kind: "info", text: `${left} task${left > 1 ? "s" : ""} still open - /continue to pick up where you left off.` });
     }
     if (!cfg.apiKey && !cfg.isLocalEndpoint) {
       out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
@@ -199,7 +218,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const reasoningRef = useRef("");
   const toolStreamRef = useRef(""); // streamed tool-call args this turn (counted, not displayed)
   const turnTokensStartRef = useRef(0); // cost.totalTokens at turn start -> spinner shows this turn only
-  const [todos, setTodos] = useState<{ content: string; status: string }[]>([]);
+  // Recover the todo tracker for a session resumed AT STARTUP (--resume/--continue), so its plan shows.
+  const [todos, setTodos] = useState<{ content: string; status: string }[]>(() =>
+    resumedRef.current ? recoverTodos(resumedRef.current.messages) : [],
+  );
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null); // ctrl+o: which tool_result is peeked in full (toggle)
   // Tool calls in flight: shown LIVE with a blinking dot, then committed to <Static> (solid dot) with
@@ -276,6 +298,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const registryRef = useRef<ToolRegistry | null>(null);
   if (!registryRef.current) {
     registryRef.current = new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub);
+    if (resumedRef.current) registryRef.current.todos = recoverTodos(resumedRef.current.messages); // keep the tracker + registry in sync on startup resume
     registryRef.current.hooks = cfg.hooks;
     registryRef.current.allowDangerousBash = cfg.allowDangerousBash;
     registryRef.current.sandboxBash = cfg.sandbox;
@@ -410,6 +433,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       { id: idRef.current++, kind: "info", text: `-- resumed ${target.id} (${target.messages.length} messages) --` },
       ...replaySessionLines(target.messages, () => idRef.current++),
     ];
+    // Recover the todo tracker so the interrupted plan is visible; if anything's unfinished, hint /continue.
+    const todos = recoverTodos(target.messages);
+    registryRef.current!.todos = todos;
+    setTodos(todos);
+    const left = todos.filter((t) => t.status !== "completed").length;
+    if (left) replay.push({ id: idRef.current++, kind: "info", text: `${left} task${left > 1 ? "s" : ""} still open - /continue to pick up where you left off.` });
     setLines((prev) => [...prev, ...replay]);
     setStarted(true);
   };
