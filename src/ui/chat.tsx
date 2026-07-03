@@ -16,6 +16,7 @@ import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { loadPrefs, savePrefs } from "../adapters/prefs.ts";
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
+import { TranscriptViewer } from "./transcript-viewer.tsx";
 import { TextInput } from "./text-input.tsx";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
@@ -88,7 +89,9 @@ function resultSummary(name: string | undefined, obs: string): string | undefine
  * the agent context was intact. This reconstructs it exactly as it looked live. */
 const REPLAY_MAX_LINES = 80; // display cap on a resumed thread - the agent keeps ALL messages in context
 const RESUME_SUMMARY_AT = 0.6; // offer resume-from-summary once a session would fill >60% of the window
-function replaySessionLines(messages: any[], nextId: () => number): Line[] {
+/** Reconstruct the FULL transcript (every message -> a Line) with NO display bound. Used both by the
+ * bounded resume replay below and by the /transcript viewer, which shows the whole thread on demand. */
+export function buildReplayLines(messages: any[], nextId: () => number): Line[] {
   const out: Line[] = [];
   const toolById = new Map<string, string>(); // tool_call_id -> tool name (to summarize its result)
   for (const m of messages) {
@@ -111,12 +114,20 @@ function replaySessionLines(messages: any[], nextId: () => number): Line[] {
       out.push({ id: nextId(), kind: "tool_result", text: obs, summary: resultSummary(name, obs) });
     }
   }
+  return out;
+}
+
+function replaySessionLines(messages: any[], nextId: () => number): Line[] {
+  const out = buildReplayLines(messages, nextId);
   // Bound the DISPLAY to the most recent lines: rendering a very long thread's hundreds of <Static>
   // items at once is what lagged the picker after selecting. The whole conversation is still in the
-  // agent's context (this only trims what's re-printed on screen).
+  // agent's context (this only trims what's re-printed on screen); /transcript shows all of it, and a
+  // terminal's own scrollback holds whatever WAS printed. (Native scrollback can't be prepended into -
+  // an inline <Static> app never receives scroll events - so "load more above on scroll up" isn't
+  // possible here the way a GUI chat app does it; the viewer is the terminal-native answer.)
   if (out.length > REPLAY_MAX_LINES) {
     const hidden = out.length - REPLAY_MAX_LINES;
-    return [{ id: nextId(), kind: "info", text: `... ${hidden} earlier line${hidden > 1 ? "s" : ""} resumed (in context, not re-printed) ...` }, ...out.slice(-REPLAY_MAX_LINES)];
+    return [{ id: nextId(), kind: "info", text: `... ${hidden} earlier line${hidden > 1 ? "s" : ""} in context (not re-printed) - /transcript to view the full thread ...` }, ...out.slice(-REPLAY_MAX_LINES)];
   }
   return out;
 }
@@ -242,6 +253,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     resumedRef.current ? recoverTodos(resumedRef.current.messages) : [],
   );
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
   const [compacting, setCompacting] = useState<{ start: number } | null>(null); // shows the compacting progress bar
   const compactingRef = useRef(false); // guard: never overlap two compactions
   const [expandedId, setExpandedId] = useState<number | null>(null); // ctrl+o: which tool_result is peeked in full (toggle)
@@ -513,6 +525,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Entry point for the /resume picker. For a LARGE session, first offer to resume from a summary
   // (claude-parity, image #15) - resuming a huge thread in full immediately eats a big slice of the
   // context window. Small sessions (or a persisted "don't ask again") resume in full silently.
+  // Open the full-thread viewer (/transcript). Built from agent.messages - the source of truth for the
+  // WHOLE conversation (resumed history + every turn since) - so it shows everything, incl. the earlier
+  // lines the bounded resume replay didn't re-print.
+  const openTranscript = () => {
+    const full = buildReplayLines(agentRef.current!.messages, () => idRef.current++);
+    if (!full.length) { addLine("info", "(nothing in the conversation yet)"); return; }
+    setViewer(full);
+  };
+
   const resumeInto = (target: Session) => {
     const est = estimateTokens(target.messages);
     const big = est > RESUME_SUMMARY_AT * cfg.contextWindow;
@@ -633,7 +654,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       return;
     }
-    if (overlay) return; // let its own handlers own the rest of the keys
+    if (overlay || viewer) return; // let the overlay / transcript viewer own the rest of the keys
     if (key.ctrl && char === "o") { // toggle: expand the most recent collapsed tool output, press again to collapse
       // Match the collapse logic in TranscriptLine: summarized reads collapse at >1 line, plain
       // results at >8 — so the "(ctrl+o to expand)" hint and this finder never disagree.
@@ -808,6 +829,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         resumeInto,
         runText: handle,
         compact: runCompaction,
+        openTranscript,
         exit,
       });
       return;
@@ -1048,7 +1070,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         </Box>
       ) : null}
 
-      {overlay ? (
+      {viewer ? (
+        <TranscriptViewer lines={viewer} cols={contentCols} rows={rows} onClose={() => setViewer(null)} />
+      ) : overlay ? (
         <SelectList
           title={overlay.title}
           items={overlay.items}

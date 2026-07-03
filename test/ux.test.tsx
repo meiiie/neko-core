@@ -9,7 +9,8 @@ import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { ChatApp } from "../src/ui/chat.tsx";
 import { CompactingLine, fmtElapsed, RunningLine, ThinkingLine } from "../src/ui/thinking-line.tsx";
 import { ApprovalBox } from "../src/ui/approval-box.tsx";
-import { TranscriptLine } from "../src/ui/transcript.tsx";
+import { TranscriptLine, type Line } from "../src/ui/transcript.tsx";
+import { TranscriptViewer } from "../src/ui/transcript-viewer.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
 
 const CFG = new NekoConfig({}, null, {}, "");
@@ -88,6 +89,33 @@ test("resume-from-summary: a large session prompts to summarize, a small one res
     process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("TranscriptViewer opens at the bottom, then type-to-search filters", async () => {
+  const lines: Line[] = [];
+  for (let i = 0; i < 40; i++) lines.push({ id: i, kind: i % 2 ? "assistant" : "user", text: `message number ${i}` });
+  lines.push({ id: 999, kind: "user", text: "NEEDLE unique marker" });
+  const c = render(<TranscriptViewer lines={lines} cols={80} rows={20} onClose={() => {}} />);
+  const f = strip(c.lastFrame());
+  expect(f).toContain("Conversation");
+  expect(f).toContain("41 entries");
+  expect(f).toContain("NEEDLE");        // opens at the bottom -> the last entry is visible
+  c.stdin.write("NEEDLE");              // type-to-search
+  expect(await until(c, (fr) => /found 1/.test(fr))).toBe(true);
+  c.unmount();
+});
+
+test("/transcript opens the full-thread viewer over the resumed session", async () => {
+  const s: any = { id: "t", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [
+    { role: "user", content: "first earlier question" },
+    { role: "assistant", content: "an earlier answer" },
+  ] };
+  const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+  await tick(60);
+  c.stdin.write("/transcript");
+  c.stdin.write("\r");
+  expect(await until(c, (f) => /Conversation/.test(f) && /first earlier question/.test(f))).toBe(true);
+  c.unmount();
 });
 
 test("ApprovalBox renders an edit diff preview (- old / + new)", () => {

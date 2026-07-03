@@ -232,6 +232,6 @@ test("resumed session: ctx% reflects loaded context (not a misleading 0%) + disp
   const f = (lastFrame() ?? "").replace(/\x1b\[[0-9;]*m/g, "");
   const pct = Number(f.match(/(\d+)% ctx/)?.[1] ?? "0");
   expect(pct).toBeGreaterThan(0); // estimated from the loaded messages, not 0 before the first API call
-  expect(f).toMatch(/earlier line.*resumed.*in context/); // display bounded, rest still in context
+  expect(f).toMatch(/earlier line.*in context.*\/transcript/); // display bounded, rest in context + how to view it all
   unmount();
 }, 15000);

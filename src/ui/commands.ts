@@ -21,7 +21,7 @@ import type { Line, LineKind } from "./transcript.tsx";
 
 export const HELP = [
   "Commands:",
-  "  /help /cost /model /provider /tools /skill(s) /init /clear /compact /reset /exit",
+  "  /help /cost /model /provider /tools /skill(s) /init /clear /compact /transcript /reset /exit",
   "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /continue · /retry · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
@@ -40,6 +40,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/init", desc: "scaffold ./.neko-core/config.json" },
   { name: "/clear", desc: "clear transcript + context" },
   { name: "/compact", desc: "summarize the conversation to free context" },
+  { name: "/transcript", desc: "scroll + search the full conversation (incl. earlier resumed lines)" },
   { name: "/goal", desc: "set an ongoing goal (/goal <text>)" },
   { name: "/loop", desc: "run a task N times (/loop <n> <task>)" },
   { name: "/auto", desc: "closed loop: work + self-review until done (/auto <goal>)" },
@@ -82,6 +83,7 @@ export interface CommandCtx {
   resumeInto: (s: Session) => void;
   runText: (text: string) => void;
   compact: (reason: "manual" | "auto" | "resume") => Promise<string>; // shows the compacting progress bar
+  openTranscript: () => void; // open the full-thread scroll+search viewer (/transcript)
   exit: () => void;
 }
 
@@ -285,6 +287,10 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       }
       return;
     }
+    case "/transcript":
+    case "/history":
+      ctx.openTranscript();
+      return;
     case "/compact":
       // Route through the REPL's compaction runner so it shows the progress bar + a "freed ~Nk" line.
       try {
