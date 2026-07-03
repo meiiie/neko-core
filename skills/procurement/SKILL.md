@@ -48,8 +48,10 @@ recall trần (nhất là khi rơi về DuckDuckGo); **aggregator là tầng IND
 
 1. **INDEX — BẮT BUỘC mở màn mọi khảo giá** (rẻ nhất / đắt nhất / giá thị trường đều cần cả PHÂN BỐ):
    `web_fetch` **`https://websosanh.vn/s/<từ+khoá+nối+bằng+dấu+cộng>.htm`** (server-rendered, đọc thẳng
-   không cần browser) với `schema` bóc **MỌI chào giá**: `{offers:[{title, merchant, price(CHUỖI nguyên
-   văn), url}]}`. Đổ HẾT vào `baogia.json` (Nguồn=merchant, ghi chú `⚠️ chưa verify`).
+   không cần browser). **web_fetch tự trả về BẢNG OFFERS deterministic cho URL này** (parser bằng code —
+   title | giá nguyên văn | merchant | link; không cần `schema`, không tốn token trích xuất, không bao
+   giờ đọc sai giá). **Query theo MÃ/SKU khi có** (`/s/mz-v9s2t0bw.htm` — sạch rác hơn hẳn query tên).
+   Đổ HẾT vào `baogia.json` (Nguồn=merchant, ghi chú `⚠️ chưa verify`).
    **ĐỪNG tin sort của trang** (đo thực: `?sort=...` không có tác dụng) — `price-table.ts` sắp mới chuẩn.
 2. **VERIFY — theo đúng LOẠI câu hỏi** (aggregator có giá cũ/rác — 359k/880k trong index thật ra là SKU
    khác/phụ kiện — nên **KHÔNG BAO GIỜ chốt min/max thẳng từ index**):
@@ -92,6 +94,13 @@ Lỗi hay gặp: chỉ hỏi FPT/TGĐ/CellphoneS → ra **giá niêm yết cao**
    - **Lưới an toàn:** `price-table.ts` tự **gắn cờ ⚠️** mọi giá lệch xa median + dòng không đọc được — **đọc lại đúng các dòng ⚠️** đó rồi mới chốt. (Trích đúng từ đầu vẫn hơn dựa vào lưới.)
 
 ## Đa dạng truy vấn — làm đúng cái được hỏi
+**MỘT khảo sát trả lời TRỌN BỘ (mặc định — đo thực: nhanh hơn ~40% so với hỏi 2 lần):** `price-table.ts`
+đã tính sẵn min/max/trung bình/median/băng giá trong MỘT lần chạy — nên dù người dùng chỉ hỏi "rẻ nhất",
+hãy trình bày luôn cả ĐẮT NHẤT + median/băng thị trường (2 dòng thêm, 0 công thêm). Khi họ hỏi tiếp biến
+thể khác ("vậy đắt nhất?"), **TÁI DÙNG `baogia_norm.json` đã có** (chỉ verify bổ sung đúng các dòng tầng
+giá chưa verify) — ĐỪNG khảo sát lại từ đầu. Verify cả HAI đầu bảng ngay từ vòng đầu nếu ngân sách bước
+cho phép: top 2-3 + bottom 2-3.
+
 Sau khi có bảng, đáp ứng linh hoạt (đây chỉ là ví dụ, suy luận thêm theo yêu cầu thật):
 - **Giá thấp nhất / cao nhất** (mỗi mặt hàng hoặc toàn bảng): min/max theo `Giá` → nêu rõ nguồn + link.
 - **Sắp xếp**: tăng dần / giảm dần theo `Giá` (hoặc theo cột khác). Trình bày bảng đã sắp.
