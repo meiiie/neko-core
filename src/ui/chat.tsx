@@ -81,6 +81,36 @@ function resultSummary(name: string | undefined, obs: string): string | undefine
   }
 }
 
+/** Rebuild the FULL transcript from saved messages - including tool CALLS and RESULTS, not just user +
+ * assistant text. An interrupted coding turn is almost all tool_calls + tool results with no final
+ * assistant text, so skipping them made a resumed session look empty ("the work is gone") even though
+ * the agent context was intact. This reconstructs it exactly as it looked live. */
+function replaySessionLines(messages: any[], nextId: () => number): Line[] {
+  const out: Line[] = [];
+  const toolById = new Map<string, string>(); // tool_call_id -> tool name (to summarize its result)
+  for (const m of messages) {
+    if (m.role === "user") {
+      const t = contentToText(m.content);
+      if (t.trim()) out.push({ id: nextId(), kind: "user", text: t });
+    } else if (m.role === "assistant") {
+      const t = contentToText(m.content);
+      if (t.trim()) out.push({ id: nextId(), kind: "assistant", text: t });
+      for (const tc of m.tool_calls ?? []) {
+        let args: Record<string, any> = {};
+        try { args = typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments) : (tc.function?.arguments ?? {}); } catch { /* keep {} */ }
+        const name = tc.function?.name ?? "";
+        if (tc.id) toolById.set(tc.id, name);
+        out.push({ id: nextId(), kind: "tool_call", text: describeToolCall(name, args) });
+      }
+    } else if (m.role === "tool") {
+      const name = toolById.get(m.tool_call_id);
+      const obs = String(m.content ?? "").split("\n").slice(0, 400).join("\n");
+      out.push({ id: nextId(), kind: "tool_result", text: obs, summary: resultSummary(name, obs) });
+    }
+  }
+  return out;
+}
+
 /** Cap live-streamed text to a bounded tail so re-parsing + re-rendering it every frame stays O(1),
  * not O(n): a long reasoning trace or a huge answer must NEVER block the event loop, or Esc/Ctrl+C
  * go dead and the only escape is killing the terminal. The full text is still committed to the
@@ -146,13 +176,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [lines, setLines] = useState<Line[]>(() => {
     const out: Line[] = [{ id: idRef.current++, kind: "welcome", text: "" }];
     if (resumedRef.current) {
-      // Replay the prior conversation so it looks exactly like before you quit (Claude-style),
-      // not just a "(resumed N messages)" note. Show user + assistant turns; skip system/tool noise.
-      for (const m of resumedRef.current.messages) {
-        const text = contentToText(m.content);
-        if (m.role === "user" && text.trim()) out.push({ id: idRef.current++, kind: "user", text });
-        else if (m.role === "assistant" && text.trim()) out.push({ id: idRef.current++, kind: "assistant", text });
-      }
+      // Replay the prior conversation so it looks exactly like before you quit (Claude-style) - the
+      // FULL thread incl. tool calls/results, so an interrupted coding task's work isn't lost from view.
+      out.push(...replaySessionLines(resumedRef.current.messages, () => idRef.current++));
       out.push({ id: idRef.current++, kind: "info", text: `(resumed ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)` });
     }
     if (!cfg.apiKey && !cfg.isLocalEndpoint) {
@@ -378,12 +404,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // APPEND the replayed thread to the existing transcript (Static is append-only) instead of a
     // raw screen-wipe + remount. The wipe used a raw escape that froze real terminals (see clearTerm);
     // appending is the framework-safe way - the resumed thread renders below, old scrollback stays.
-    const replay: Line[] = [{ id: idRef.current++, kind: "info", text: `-- resumed ${target.id} (${target.messages.length} messages) --` }];
-    for (const m of target.messages) {
-      const text = contentToText(m.content);
-      if (m.role === "user" && text.trim()) replay.push({ id: idRef.current++, kind: "user", text });
-      else if (m.role === "assistant" && text.trim()) replay.push({ id: idRef.current++, kind: "assistant", text });
-    }
+    // Reconstruct the FULL thread (tool calls + results too), so an interrupted coding task's work
+    // is visible on resume, not just the prompt.
+    const replay: Line[] = [
+      { id: idRef.current++, kind: "info", text: `-- resumed ${target.id} (${target.messages.length} messages) --` },
+      ...replaySessionLines(target.messages, () => idRef.current++),
+    ];
     setLines((prev) => [...prev, ...replay]);
     setStarted(true);
   };

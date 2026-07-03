@@ -547,3 +547,36 @@ test("verify_before_exit gate fires once, then lets the model finish (off by def
   expect(gate).toBeTruthy(); // the gate turn was injected exactly once
   expect(on.messages.filter((m: any) => String(m.content).includes("VERIFY BEFORE FINISHING")).length).toBe(1);
 });
+
+test("sealDanglingToolCalls: an interrupted turn's unanswered tool_call gets a synthetic result", () => {
+  const agent = new Agent({ provider: { complete: async () => ({ content: "x", tool_calls: [] }) } as any, tools: { schemas: () => [], execute: async () => "" } as any });
+  agent.messages = [
+    { role: "system", content: "s" },
+    { role: "user", content: "do it" },
+    { role: "assistant", content: "", tool_calls: [{ id: "a", type: "function", function: { name: "write_file", arguments: "{}" } }] },
+    { role: "tool", tool_call_id: "a", content: "wrote" },
+    { role: "assistant", content: "", tool_calls: [{ id: "b", type: "function", function: { name: "bash", arguments: "{}" } }] },
+    // 'b' has NO tool result -> interrupted mid-bash
+  ];
+  agent.sealDanglingToolCalls();
+  const toolMsgs = agent.messages.filter((m: any) => m.role === "tool");
+  expect(toolMsgs.length).toBe(2); // the synthetic result for 'b' was added
+  expect(toolMsgs.find((m: any) => m.tool_call_id === "b")?.content).toMatch(/interrupted/i);
+  // Every tool_call now has a matching tool result -> the provider won't reject the next request.
+  const callIds = agent.messages.flatMap((m: any) => (m.tool_calls ?? []).map((tc: any) => tc.id));
+  const resultIds = new Set(agent.messages.filter((m: any) => m.role === "tool").map((m: any) => m.tool_call_id));
+  expect(callIds.every((id: string) => resultIds.has(id))).toBe(true);
+});
+
+test("sealDanglingToolCalls: a fully-answered history is left untouched", () => {
+  const agent = new Agent({ provider: { complete: async () => ({ content: "x", tool_calls: [] }) } as any, tools: { schemas: () => [], execute: async () => "" } as any });
+  agent.messages = [
+    { role: "user", content: "q" },
+    { role: "assistant", content: "", tool_calls: [{ id: "a", function: { name: "read_file", arguments: "{}" } }] },
+    { role: "tool", tool_call_id: "a", content: "content" },
+    { role: "assistant", content: "done" },
+  ];
+  const before = JSON.stringify(agent.messages);
+  agent.sealDanglingToolCalls();
+  expect(JSON.stringify(agent.messages)).toBe(before); // no synthetic result added
+});

@@ -385,6 +385,32 @@ export class Agent {
       return val === "" || val === "[]" || val === "{}" || val === "null" || val === "undefined" || val === '""' || val === "0";
     }
 
+  /** Seal any tool_call left UNANSWERED by an interrupted turn (Esc/abort can stop the loop right after
+   * the model emitted tool_calls, before their results are appended). A resumed session with a dangling
+   * tool_call makes the provider reject the very next request ("tool_use with no tool_result"), which
+   * looked like a broken/lost session. Add a synthetic result for each missing call so the trajectory
+   * stays valid. Only the most-recent assistant tool-call batch can dangle. */
+  sealDanglingToolCalls(): void {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const m = this.messages[i];
+      if (m.role === "user") return; // a later user turn means earlier calls were all answered
+      if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+        const answered = new Set<string>();
+        let insertAt = i + 1;
+        for (let j = i + 1; j < this.messages.length; j++) {
+          if (this.messages[j].role === "tool") { answered.add(this.messages[j].tool_call_id); insertAt = j + 1; }
+          else break; // tool results directly follow their assistant message
+        }
+        const missing = m.tool_calls.filter((tc: any) => !answered.has(tc.id || tc.function?.name));
+        if (missing.length) {
+          const synthetic = missing.map((tc: any) => ({ role: "tool", tool_call_id: tc.id || tc.function?.name, content: "[interrupted before this tool ran]" }));
+          this.messages.splice(insertAt, 0, ...synthetic);
+        }
+        return;
+      }
+    }
+  }
+
   /** Run the loop until the model is done or maxSteps is hit. Returns the final text.
    * Pass an AbortSignal to support Esc-to-interrupt (stops cleanly between/within steps).
    * `images` (data: URLs) attach as OpenAI vision content — used by paste-image (needs a vision model). */
@@ -392,6 +418,7 @@ export class Agent {
     if (!this.messages.length) {
       this.messages.push({ role: "system", content: this.systemPrompt });
     }
+    this.sealDanglingToolCalls(); // an interrupted/resumed turn can leave tool_calls unanswered
     this.refreshDynamicContext();
     const content = images && images.length
       ? [{ type: "text", text: instruction }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))]
