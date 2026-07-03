@@ -101,6 +101,27 @@ test("addCacheBreakpoints: a plain-string last message is lifted to block form; 
   expect(p2.system).toBe("");
 });
 
+test("HTTP 529 (Anthropic overloaded_error) is retried, not fatal - found live on Z.ai", async () => {
+  const orig = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    if (calls === 1) {
+      return new Response(JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "overloaded" } }), { status: 529, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as any;
+  try {
+    const cfg = new NekoConfig({ provider: "anthropic", base_url: "http://x", model: "m", reasoning_effort: "off", retry_base_delay_seconds: 0.01 }, null, {}, "k");
+    const provider = new AnthropicProvider(cfg);
+    const res = await provider.complete([{ role: "user", content: "hi" }]);
+    expect(res.content).toBe("ok");
+    expect(calls).toBe(2); // 529 -> one backoff retry -> success (used to throw immediately)
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 test("self-heals when an endpoint rejects cache_control: strips the breakpoints, retries once", async () => {
   const orig = globalThis.fetch;
   const sawCache: boolean[] = [];

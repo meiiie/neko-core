@@ -15,7 +15,7 @@ import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall }
 // Re-export the port types so callers can keep importing them from the provider adapter.
 export type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic-style overloaded_error (Z.ai sends it too)
 
 const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"];
 /** Clamp a configured reasoning effort down to the endpoint's declared ceiling. Unknown tiers pass through. */

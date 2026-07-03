@@ -8,7 +8,7 @@ import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 import { NekoConfig } from "./config.ts";
 
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic's documented overloaded_error
 
 export class AnthropicProvider implements Provider {
   constructor(private readonly cfg: NekoConfig) {}
