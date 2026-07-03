@@ -15,8 +15,12 @@ deterministic code — instruction fade-out / Governance Decay (2606.22528, 2603
 anchor when the summarizer compresses the head. (3) **Opt-in pre-completion verify gate**
 (`verify_before_exit`): intercepts the first tool-less final once, forces a re-inspection of the ACTUAL
 state vs the goal, then finishes (LangChain PreCompletionChecklist; ACE); off by default, +1 turn only
-when it fires, never on the last step. +4 tests; 276/0. Full no-regression battery run after (bench 16 +
-run-evals + harsh) — quality is the gate.
+when it fires, never on the last step. +4 tests; 276/0.
+
+**Full no-regression battery (quality is the gate — all green, NO metric regressed):** unit **276/0** ·
+bench **16/16 (100%)**, 92% cached, 61 steps (baseline 59), 447s · run-evals **6/6 solid** · harsh-eval
+**8/8 solid** at 2 trials. This session's perf/robustness work (stream-eager execution + the three levers
+above) ships with correctness held flat and the cache/overlap benefits intact.
 
 ## 2026-07-03 — Stream-eager tool execution: the loop's floor drops to max(generation, execution)
 

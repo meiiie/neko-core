@@ -33,6 +33,11 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-03] (owner-directed) perf+robustness deep-dive: stream-eager execution (overlap read tools with
+  generation, EAYG/AsyncFC), MCP lazy-CONNECT (513->233MB RAM), pre-flight arg validation (Gecko),
+  original-task carry across compact(), opt-in verify gate. Full battery ALL GREEN, no regression: unit
+  276/0 · bench 16/16 (92% cached) · run-evals 6/6 · harsh 8/8. ~18 commits ahead of main on self-improve,
+  NOT pushed (awaiting owner OK). Perf frontier documented; remaining ceiling = provider tok/s.
 - [2026-07-03] (owner-directed) speed sprint + full battery: websosanh parser (LLM-free INDEX), W&D batch
   nudge, one-survey-all-answers; bench 16/16 w/ **94% cached on Z.ai** (prefix-cache work proven live);
   harsh-eval 0/8 exposed responseSchema missing on the anthropic provider -> forced-tool-call impl ->
