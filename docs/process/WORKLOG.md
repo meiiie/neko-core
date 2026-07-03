@@ -17,13 +17,20 @@ immediately. Ships AS a skill (SKILL.md) — exactly Neko's G1 extension model. 
 loopback + token IPC). **Live-verified end-to-end on this machine:** `uv tool install browser-harness` ->
 launched a throwaway Chrome with `--remote-debugging-port` + temp profile -> `BU_CDP_URL=... browser-harness`
 drove it (new_tab, wait_for_load, page_info, js('h1.textContent')) — worked first try; cleaned up after.
-**Verdict:** adopt as an OPTIONAL skill-based backend alongside Playwright MCP (zero core change, config/
-skill-first): browser-harness for real-Chrome/logged-in/anti-bot/iframe-heavy work + token-lean flows;
-Playwright MCP stays for headless a11y-tree flows on text-only models. Its zero-schema CLI design also
-validates our "Tools Tax" backlog thesis. Caveats recorded: screenshot-first wants a vision model (the
-js()/selector path is fully text-only), local Chrome needs the user to enable remote debugging once
-(chrome://inspect), and it's a Python/uv dependency — optional, like ripgrep/pdftotext. NOT wired into a
-bundled skill yet — awaiting the owner's go.
+**Verdict (revised after owner pushback — the right call):** **HOLD, don't adopt now (YAGNI).** Neko's
+existing stack already covers the real workloads — proven by dogfooding (attached to the owner's Chrome,
+read their X feed, summarized the first 100 posts; procurement sources live VN retail sites): layer 1
+`web_fetch` + schema extraction + deterministic routes, layer 2 Playwright MCP against real Chrome
+(config-only), layer 3 skills routing (web-reach). A second browser stack = a new Python daemon dependency
++ split maintenance for capabilities we already have. **Adoption triggers recorded** (revisit browser-harness
+only when one actually fires): (a) a real site where a11y-snapshot refs break (cross-origin iframes /
+shadow-DOM) and coordinates would win; (b) measured snapshot/token costs that mcp_lazy + the queued BACKLOG
+compaction items (TACO, stale-read elision) can't cover; (c) needing agent-authored browser helpers beyond
+what workflows/skills give. The refs clone + this analysis stay for that day.
+**The measured, already-shipped fix instead:** the owner's config runs the 23-tool browser MCP below the
+lazy threshold (30), so its schemas cost **~3,991 tokens EVERY LLM call**; `mcp_lazy: true` (built in G12)
+drops that to ~634 (meta-tool + name index) — **~3,357 tokens/call saved**, ~100-170k on a long browse
+session — one config line, no code. Recommended to the owner.
 
 ## 2026-07-02 — Tool-error recovery directive at the point of failure (29e7c95)
 
