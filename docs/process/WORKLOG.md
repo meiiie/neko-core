@@ -3,6 +3,22 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-03 — Cross-model verification + local-perf profile (owner question: "other models? CPU/GPU/RAM?")
+
+**Cross-model:** harsh-eval re-run on gpt-oss/NVIDIA (the OpenAI wire format, `response_format`
+constrained decoding) = **8/8 solid** — schema extraction is now green on BOTH provider families
+(anthropic-format via forced tool call on glm-5.2, openai-format via response_format on gpt-oss), each
+with its own self-heal. Cache metrics likewise normalized across 3 usage shapes; the stable prefix
+benefits every implicit-caching endpoint by construction.
+
+**Local perf profile (measured, not asserted):** binary 112.7MB; startup 0.5-1.0s; live-run tree 513MB
+RAM with CPU <15% of one core (I/O-bound as designed; GPU unused by design — the model is remote, local
+inference is a config choice where our stable-prefix work speeds server-side APC). The one real local
+finding: **~277MB of that RAM is the browser-MCP server spawned even when a run never touches a browser
+tool** — mcp_lazy removed the token tax, the process tax remains. Queued as the top local-perf BACKLOG
+item (MCP lazy-CONNECT), alongside the orphan-hygiene fix. The G0-era hot-path fixes (O(1) render,
+bounded buffers, fd-prefix reads, cached git status) remain the load-bearing local optimizations.
+
 ## 2026-07-03 — Speed sprint + full no-regression battery (two big finds)
 
 **Speed sprint (owner-directed), all shipped:** (1) deterministic **websosanh offers parser** in web_fetch

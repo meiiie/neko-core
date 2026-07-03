@@ -26,6 +26,13 @@ one never blocks another.
   README + a first-run hint; consider a gentle in-chat hint when searxng_url is configured but unreachable
   ("start Docker Desktop or remove searxng_url"). Verify: docs render + the hint fires only in that state.
 
+- [ ] **MCP lazy-CONNECT (spawn on first call) — the top LOCAL-perf item.** Measured 2026-07-03: a live
+  `neko run` tree = 513MB RAM, of which **~277MB is the browser-MCP server spawned even when the run never
+  calls a browser tool** (bunx runner 161MB + node 116MB), plus its spawn latency on EVERY run. `mcp_lazy`
+  removed the TOKEN tax; the PROCESS tax remains. Fix: defer `connectAll` per server until its first
+  tool/schema request (mcp_load or a call); doctor/`neko mcp` still connect eagerly to enumerate. Verify:
+  a run that uses no MCP tool spawns no MCP child (assert via process list in a test or a spawn-count
+  hook); a run that calls one connects lazily and works; RAM of a trivial run drops ~250MB+.
 - [ ] **MCP child-process cleanup (orphan hygiene).** Found 2026-07-03: 28 orphaned `node mcp/server`
   processes saturating the machine (flaked the queue UI test) — every `neko run` spawns stdio MCP
   children (the browser MCP from config), and a killed/timed-out neko (eval spawnSync timeout, Ctrl+C,
