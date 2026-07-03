@@ -3,6 +3,32 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-03 — Procurement recall gap fixed: INDEX (websosanh) -> VERIFY architecture (A/B live-proven)
+
+Owner caught a REAL wrong answer: asked "SSD 990 EVO 2TB MZ-V9E2T0BW, GIA DAT NHAT o VN" — Neko said 9.99tr
+(HACOM) while ChatGPT+search found laptopworld.vn at ~14tr. Root causes, in impact order: (1) the skill had
+no INDEX tier — websosanh.vn was one passive search suggestion, so coverage = whatever search returned
+(7 shops); (2) SearXNG was down (Docker Desktop off) -> DuckDuckGo fallback with measurably weaker recall;
+(3) the source MAP had no PC-components category (laptopworld/An Phat/Mai Hoang/Nguyen Cong PC missing).
+
+Fix at the SKILL layer (zero core change — domain = pluggable skill): a mandatory **two-stage
+INDEX -> VERIFY** section in `skills/procurement/SKILL.md`. INDEX: every price survey STARTS with
+`websosanh.vn/s/<query>.htm` (probed: server-rendered, one web_fetch = ~600 offers spanning 360k->14tr+;
+`?sort=` params do nothing, so harvest ALL offers verbatim and let `price-table.ts` sort — LLM extracts,
+code computes). VERIFY: by query type — "dat nhat" verifies the top 3-5 on the merchant page (product-match
++ live price + stock), "re nhat" the bottom 3-5 (junk lives there: 359k/880k index rows were accessories/
+wrong SKU), "gia thi truong" = median after dropping wrong-SKU rows. GAP-FILL: MAP + search (+ a new
+PC-components MAP section). Also restarted Docker -> `neko-searxng` auto-revived (restart=unless-stopped),
+doctor shows `web_search: searxng` again.
+
+**A/B proof (same errand, same day):** OLD strategy -> 7 sources, max 9.99tr (WRONG), 75k tok / 13 calls.
+NEW strategy, run in DEGRADED mode (DDG — searxng came up mid-run): found laptopworld VIA the index,
+verified live on the merchant page -> **12,990,000d in stock = correct answer**, dropped 5 ghost index rows
+(404s) + stale prices (websosanh's 14.289tr for laptopworld was an OLD price — likely the very number
+ChatGPT reported unverified), and flagged that market band is really 3.95-5.2tr. Cost: **50k tok / 12 calls
+— cheaper AND correct** (the index replaces blind per-shop fetches). Also gitignored the
+`skills/procurement/baogia*.json` artifacts dogfood runs drop in the repo.
+
 ## 2026-07-03 — Researched Browser Use CLI 3.0 / browser-harness (clean-room, live-verified)
 
 Owner asked whether Browser Use CLI 3.0 changes our browser story (G7 chose Playwright MCP; G10 stealth via

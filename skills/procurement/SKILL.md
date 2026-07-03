@@ -41,9 +41,28 @@ Search theo tên chung ("USB SanDisk 16GB") ra kết quả mơ hồ + giá cao; 
 2. **Search THEO SKU** (`"SDCZ50-016G-B35 giá"`, `"Cruzer Blade CZ50 16GB"`) → mỗi nguồn cùng một mã = so sánh táo-với-táo.
 3. **Chưa chốt được mã** (không ảnh/không vision) → search theo mô tả + **ghi rõ "chưa chốt SKU, giá tham khảo theo dòng"**, đừng giả vờ chính xác.
 
+## ⭐⭐ KIẾN TRÚC 2 TẦNG cho MỌI khảo giá: INDEX (aggregator) → VERIFY (trang shop)
+Bài học đo thật (2026-07-03, SSD 990 EVO 2TB): đi thẳng search→shop chỉ ra 7 nguồn, max 9,99tr — **miss
+laptopworld.vn 12,99tr**; trong khi MỘT fetch websosanh.vn trả ~600 chào giá phủ 360k→14tr+. Search có
+recall trần (nhất là khi rơi về DuckDuckGo); **aggregator là tầng INDEX, trang shop là tầng VERIFY**:
+
+1. **INDEX — BẮT BUỘC mở màn mọi khảo giá** (rẻ nhất / đắt nhất / giá thị trường đều cần cả PHÂN BỐ):
+   `web_fetch` **`https://websosanh.vn/s/<từ+khoá+nối+bằng+dấu+cộng>.htm`** (server-rendered, đọc thẳng
+   không cần browser) với `schema` bóc **MỌI chào giá**: `{offers:[{title, merchant, price(CHUỖI nguyên
+   văn), url}]}`. Đổ HẾT vào `baogia.json` (Nguồn=merchant, ghi chú `⚠️ chưa verify`).
+   **ĐỪNG tin sort của trang** (đo thực: `?sort=...` không có tác dụng) — `price-table.ts` sắp mới chuẩn.
+2. **VERIFY — theo đúng LOẠI câu hỏi** (aggregator có giá cũ/rác — 359k/880k trong index thật ra là SKU
+   khác/phụ kiện — nên **KHÔNG BAO GIỜ chốt min/max thẳng từ index**):
+   - Hỏi **ĐẮT NHẤT** → mở **top 3-5 giá CAO nhất** trên trang shop gốc: product-match đúng MÃ/SKU, giá
+     ĐANG BÁN (không phải gạch-ngang/niêm yết ảo), còn hàng. Sai mã/hết hàng → loại, verify dòng kế.
+   - Hỏi **RẺ NHẤT** → verify **bottom 3-5** (đa số rác nằm ở đáy: sai SKU, phụ kiện, máy cũ không nhãn).
+   - Hỏi **GIÁ THỊ TRƯỜNG** → loại dòng sai SKU rồi lấy median/băng giá từ `price-table.ts`.
+3. **BÙ NGUỒN**: aggregator không phủ 100% (nhiều chuỗi lớn không lên websosanh) → quét thêm MAP đúng
+   ngành hàng + search. SearXNG chết/rơi về DDG thì tầng INDEX càng BẮT BUỘC (DDG recall yếu — đo thực).
+
 ## ⭐ Chiến lược tìm GIÁ TỐT NHẤT (đừng neo vào chuỗi lớn)
 Lỗi hay gặp: chỉ hỏi FPT/TGĐ/CellphoneS → ra **giá niêm yết cao**; shop nhỏ/cạnh tranh thường rẻ hơn vài triệu. Một purchasing officer giỏi **đào tới giá thấp nhất thực sự**:
-1. **Search rộng theo giá**: ngoài tên sản phẩm, search thêm `"<sản phẩm> giá rẻ nhất"`, `"<sản phẩm> khuyến mãi"`, `"<sản phẩm> cũ likenew giá"`, và trang so giá **websosanh.vn**. Mở **nhiều shop**, gồm cả shop nhỏ giá tốt (xem MAP mở rộng).
+1. **Search rộng theo giá**: ngoài tên sản phẩm, search thêm `"<sản phẩm> giá rẻ nhất"`, `"<sản phẩm> khuyến mãi"`, `"<sản phẩm> cũ likenew giá"` — SAU KHI đã đi tầng INDEX websosanh ở trên. Mở **nhiều shop**, gồm cả shop nhỏ giá tốt (xem MAP mở rộng).
    - **DÙNG SearXNG, đừng để DuckDuckGo** (đo thực tế): cùng gpt-oss, DuckDuckGo bỏ lỡ phân khúc cũ → "rẻ nhất" sai cao (vd iPhone 14 Pro: DDG ra 18,3tr); **SearXNG surface được Chợ Tốt/24hStore/ClickBuy → ra 7,99tr.** Bật MỘT lần: `searxng_url` trong config (xem `docs/process/WEB.md` cho recipe Docker JSON). Đây là **đòn bẩy lớn nhất** cho "tìm giá rẻ nhất".
    - **Hàng ĐỜI CŨ / ngừng bán** (iPhone 14 Pro, máy 2-3 năm tuổi...): đáy giá KHÔNG nằm ở chuỗi lớn (chỉ bán máy mới giá cao / hết hàng) mà ở **C2C (Chợ Tốt) + shop likenew** — BẮT BUỘC quét cả phân khúc này, nếu không sẽ ra giá "rẻ nhất" cao gấp đôi thực tế. Phân biệt rõ: **cá nhân/chợ (rẻ nhất, không BH)** vs **shop likenew (có BH, đắt hơn ~2-4tr)** vs **mới chính hãng**.
 2. **BÓC GIÁ THEO BIẾN THỂ + TÌNH TRẠNG** (quan trọng nhất — giá nằm SẴN trong HTML, đừng bỏ sót): một trang sản phẩm thường liệt kê **nhiều màu / dung lượng / tình trạng (Mới · Cũ-thu-cũ · Trả góp) giá KHÁC NHAU** (vd S26 Ultra 12/256: Tím Cobalt 25.999.000đ nhưng Bạc Shadow 28.199.000đ; bản "thu cũ đổi mới" 24.099.000đ). **Liệt kê ĐỦ MỌI giá, mỗi cái một dòng có nhãn `Tình trạng`** — đừng vớ một số headline.
@@ -95,6 +114,10 @@ Khi người dùng muốn bảng giá / Excel / file để gửi đi:
 - **CellphoneS** cellphones.com.vn · **ShopDunk** shopdunk.com (Apple) · **Điện Máy Xanh** dienmayxanh.com · **Nguyễn Kim** nguyenkim.com · **Hoàng Hà Mobile** hoanghamobile.com · **Di Động Việt** didongviet.vn
 - **Shop giá tốt / cạnh tranh** (thường rẻ hơn chuỗi lớn — nhớ check uy tín): **Viettablet** viettablet.com · **Minh Tuấn Mobile** minhtuanmobile.com · **Clickbuy** clickbuy.com.vn · **Di Động Mỹ** didongmy.com · **Bạch Long Mobile** bachlongmobile.com · **24hStore** 24hstore.vn · **Hnam Mobile** hnammobile.com · **XTmobile** xtmobile.vn · + **websosanh.vn** (so giá)
 - *(TGDĐ + FPT ≈ 75% điểm bán Apple ủy quyền — an toàn cho iPhone/MacBook chính hãng. Nhưng giá rẻ nhất hay nằm ở shop cạnh tranh — luôn khảo thêm.)*
+
+**Linh kiện PC / SSD / RAM / màn hình / gaming gear** (ngành hàng RIÊNG — các chuỗi điện thoại ở trên
+thường KHÔNG bán hoặc chỉ bán bản khác dòng):
+- **HACOM** hacom.vn · **Phong Vũ** phongvu.vn · **GearVN** gearvn.com · **An Phát Computer** anphatpc.com.vn · **Mai Hoàng** maihoang.com.vn · **Nguyễn Công PC** nguyencongpc.vn · **laptopworld** laptopworld.vn · **TNC** tnc.com.vn · **Phúc Anh** phucanh.vn · **Memoryzone** memoryzone.com.vn (SSD/RAM) · shop SSD chuyên (ssdmemory.vn, lagihitech.vn...)
 
 **Máy CŨ / likenew / C2C** (đáy giá cho hàng đời cũ — ĐỪNG bỏ qua khi tìm "rẻ nhất"; ghi rõ tình trạng + BH):
 - **Chợ Tốt** chotot.com (C2C cá nhân — **rẻ nhất**, không BH, kiểm kỹ người bán) · **websosanh.vn** (so giá đa sàn) · **24hStore** 24hstore.vn · **ClickBuy** clickbuy.com.vn · **Di Động Việt** (máy cũ) · **Bạch Long / Minh Tuấn / Hnam / XTmobile** (đều có mục "máy cũ/likenew") · các store likenew chuyên (Nhí Store, Didongthongminh...).

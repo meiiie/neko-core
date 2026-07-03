@@ -51,6 +51,8 @@ Thumbs.db
 /.playwright-mcp/
 /baogia*.json
 /baogia*.xlsx
+skills/procurement/baogia*.json
+skills/procurement/baogia*.xlsx
 /*_snapshot.yml
 /*_snapshot.txt
 /temp.png
