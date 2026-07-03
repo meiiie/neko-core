@@ -58,6 +58,7 @@ interface ChatProps {
   sessionId?: string;
   mcpHub?: McpHub;
   provider?: Provider; // injected in tests; production uses getProvider(cfg)
+  clearScreen?: () => void; // Ink's synchronized clear (app.clear), threaded from runChat
 }
 
 /** Flatten a message's content (string or vision-array) to display text. */
@@ -109,9 +110,14 @@ export function clampToRows(text: string, maxRows: number, cols: number): string
   return kept.join("\n");
 }
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen }: ChatProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
+  // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
+  // sequences, so writing a raw `\x1b[2J\x1b[3J\x1b[H` to stdout mid-frame DESYNCS Ink and freezes the
+  // TUI on real terminals (Windows Terminal / PowerShell were dead after /resume). `app.clear()` clears
+  // through Ink's own log-update so the frame stays consistent. Falls back to a no-op in tests.
+  const clearTerm = () => { try { clearScreen?.(); } catch { /* headless */ } };
   const [cols, setCols] = useState(stdout?.columns ?? 80);
   const [rows, setRows] = useState(stdout?.rows ?? 24);
   const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
@@ -190,7 +196,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const MAX_LINES = 3000;
   useEffect(() => {
     if (lines.length <= MAX_LINES) return;
-    stdout?.write("\x1b[2J\x1b[3J\x1b[H"); // clear screen + scrollback so the remount re-prints cleanly
+    clearTerm(); // Ink-safe clear (was a raw escape that froze real terminals)
     setLines((prev) => [
       { id: idRef.current++, kind: "info", text: "(... earlier transcript trimmed to keep the session fast ...)" },
       ...prev.slice(prev.length - 2000),
@@ -369,16 +375,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     agentRef.current!.refreshSystemPrompt(); // apply the current prompt to the resumed session
     sessionIdRef.current = target.id;
     createdAtRef.current = target.createdAt;
-    const replay: Line[] = [{ id: idRef.current++, kind: "welcome", text: "" }];
+    // APPEND the replayed thread to the existing transcript (Static is append-only) instead of a
+    // raw screen-wipe + remount. The wipe used a raw escape that froze real terminals (see clearTerm);
+    // appending is the framework-safe way - the resumed thread renders below, old scrollback stays.
+    const replay: Line[] = [{ id: idRef.current++, kind: "info", text: `-- resumed ${target.id} (${target.messages.length} messages) --` }];
     for (const m of target.messages) {
       const text = contentToText(m.content);
       if (m.role === "user" && text.trim()) replay.push({ id: idRef.current++, kind: "user", text });
       else if (m.role === "assistant" && text.trim()) replay.push({ id: idRef.current++, kind: "assistant", text });
     }
-    replay.push({ id: idRef.current++, kind: "info", text: `(resumed ${target.id} - ${target.messages.length} messages)` });
-    stdout?.write("\x1b[2J\x1b[3J\x1b[H"); // wipe the old screen so the thread doesn't duplicate
-    setResizeKey((k) => k + 1); // remount <Static> -> re-emit only the replayed thread
-    setLines(replay);
+    setLines((prev) => [...prev, ...replay]);
     setStarted(true);
   };
 
@@ -396,11 +402,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // bump the <Static> key, which makes Ink reset fullStaticOutput and re-emit the transcript fresh.
   useEffect(() => {
     if (!stdout) return;
+    // On resize, just update the width/height state -> the LIVE region re-renders at the new width
+    // (tables/dividers/stream clamp read `cols`). We do NOT remount <Static> or clear: committed
+    // scrollback never reflows in a terminal (standard), and the old raw-clear+remount is what froze
+    // real terminals. Letting Ink own the reflow is both correct and safe.
     const onResize = () => {
       setCols(stdout.columns ?? 80);
       setRows(stdout.rows ?? 24);
-      setResizeKey((k) => k + 1);
-      stdout.write("\x1b[2J\x1b[3J\x1b[H"); // clear screen + scrollback + home
     };
     stdout.on("resize", onResize);
     return () => void stdout.off("resize", onResize);
@@ -956,10 +964,14 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const id = resumed?.id ?? newSessionId();
   const cfg = loadConfig({ profile: opts.profile });
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);
+  // Ink's own synchronized clear (app.clear) threaded in via a holder - the app instance doesn't exist
+  // until render() returns, so ChatApp calls the holder, which we point at app.clear right after.
+  const clearHolder = { fn: () => {} };
   const app = render(
-    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} />,
+    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} />,
     { exitOnCtrlC: false }, // we require a double Ctrl-C
   );
+  clearHolder.fn = () => app.clear();
   try {
     await app.waitUntilExit();
   } finally {
