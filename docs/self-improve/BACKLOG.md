@@ -57,6 +57,17 @@ one never blocks another.
   the structure-grounded computer-use strategy (a11y tree = the phone's DOM). iOS: relay client only;
   full third-party phone control is blocked by platform policy (Shortcuts bridge at most — be honest).
 
+- [ ] **Long-horizon benchmark tier (the real capability discriminator).** Found 2026-07-03: BOTH the easy
+  (16/16) and the new hard (12/12) bench tiers saturate at 100% for glm-5.2 — bounded coding pass-rate no
+  longer discriminates harness quality. Per METR HCAST (task horizon = the SOTA metric: longest task at 50%
+  success, doubling ~every 4mo), the discriminating signal is MUCH longer horizon: a multi-file feature
+  with interacting parts + a full test suite (15-25 steps), a migration across N call sites, a bug that
+  only surfaces after a refactor. Build 3-5 such tasks (deterministic verifiers) where even a strong model
+  fails ~30-60% — THEN harness improvements (TDD/debugging skills, verify gate) show measurable lift.
+  Complementary: wire skill-context into the bench so `test-driven-development`/`systematic-debugging` lift
+  is measurable (bench currently runs skill-less). Verify: a task set where glm-5.2 is <100% and a harness
+  change moves it.
+
 ## Research-seeded (turn into "Now" items as they're scoped)
 - [ ] Archive/population self-improvement (DGM): keep N improved branches, benchmark each, keep the best —
   parallel exploration instead of one linear branch.
