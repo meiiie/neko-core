@@ -32,8 +32,10 @@ export function ApprovalBox({ approval }: { approval: Approval }) {
     const content = String(args.content ?? "");
     const lines = content.split("\n");
     preview.push(<Text key="p" color="gray">write {args.path} ({lines.length} lines, {content.length} chars)</Text>);
-    // Syntax-highlight the added code (marker green, tokens colored) - same look as the committed diff.
-    lines.slice(0, 8).forEach((l, i) => preview.push(<Text key={`l${i}`}><Text color="green">{"+ "}</Text>{highlightLine(l)}</Text>));
+    // Line number (dim) + green marker + syntax-highlighted code - same look as the committed diff.
+    lines.slice(0, 8).forEach((l, i) => preview.push(
+      <Text key={`l${i}`}><Text dimColor>{String(i + 1).padStart(4)} </Text><Text color="green">{"+ "}</Text>{highlightLine(l)}</Text>,
+    ));
     if (lines.length > 8) preview.push(<Text key="more" dimColor>{`  … +${lines.length - 8} more lines`}</Text>);
   } else if (toolName === "edit") {
     preview.push(<Text key="p" color="gray">edit {args.path}</Text>);

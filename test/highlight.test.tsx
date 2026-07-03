@@ -45,12 +45,13 @@ test("highlightLine treats a whole-line comment as a comment (gray), preserves i
   expect(String(highlightLine("    x = 1")[0]).startsWith("    ")).toBe(true);
 });
 
-test("Write diff renders code content + indentation (marker preserved)", () => {
-  const text = "Wrote Landing.tsx  (overwrote, +2)\n+ import { Link } from 'react-router-dom';\n+   GraduationCap,";
+test("Write diff shows LINE NUMBERS + code content + indentation (like Claude Code)", () => {
+  // tool-runtime.ts write format: "NNNN + code" (right-aligned line number, then marker).
+  const text = "Wrote Landing.tsx  (overwrote, +2)\n   1 + import { Link } from 'react-router-dom';\n   2 +   GraduationCap,";
   const { lastFrame } = render(<TranscriptLine line={{ id: 1, kind: "tool_result", text }} cfg={cfg} cols={100} />);
   const clean = strip(lastFrame());
-  expect(clean).toContain("+ import { Link } from 'react-router-dom';");
-  expect(clean).toContain("+   GraduationCap,"); // 3-space code indent survives
+  expect(clean).toContain("1 + import { Link } from 'react-router-dom';"); // line number 1 shown
+  expect(clean).toContain("2 +   GraduationCap,"); // line number 2 + 3-space code indent survives
 });
 
 test("Edit diff keeps line numbers and the +/- markers", () => {

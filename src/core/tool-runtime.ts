@@ -705,9 +705,12 @@ function toolWriteFile(root: string, args: Record<string, any>): string {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, String(content), "utf-8");
   const lines = String(content).split("\n");
+  // Claude-style row: line number (1-based, right-aligned), then the "+" marker, then the content -
+  // same format editDiff uses, so a written file's preview shows line numbers like an edit's does.
+  const num = (i: number) => String(i + 1).padStart(4);
   return [
     `Wrote ${raw}  (${existed ? "overwrote, " : ""}+${lines.length})`,
-    ...lines.slice(0, 16).map((l) => `+ ${l}`),
+    ...lines.slice(0, 16).map((l, i) => `${num(i)} + ${l}`),
   ].join("\n");
 }
 
