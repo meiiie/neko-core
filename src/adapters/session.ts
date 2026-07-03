@@ -160,21 +160,6 @@ export function latestSession(cwd: string): Session | null {
   return meta ? loadSession(meta.id) : null;
 }
 
-/** True when a session was left MID-TURN (interrupted before a final answer): it doesn't end with a
- * plain assistant TEXT message. A completed turn ends with the assistant's answer; an interrupted one
- * ends on a user message, a tool result, or an assistant that's still calling tools. Used to decide
- * whether a bare `neko` should auto-resume so you pick up exactly where you left off (no flag). */
-export function wasInterrupted(session: Session): boolean {
-  const msgs = session.messages.filter((m) => m.role !== "system");
-  const last = msgs[msgs.length - 1];
-  if (!last) return false;
-  if (last.role !== "assistant") return true; // ends on a user/tool turn -> mid-work
-  const text = typeof last.content === "string" ? last.content.trim()
-    : Array.isArray(last.content) ? last.content.map((p: any) => p?.text ?? "").join("").trim() : "";
-  const hasToolCalls = Array.isArray(last.tool_calls) && last.tool_calls.length > 0;
-  return !text || hasToolCalls; // no final text, or still mid-tool-call -> interrupted
-}
-
 export function sessionTitle(session: Session | SessionMeta): string {
   if (session.title) return session.title;
   if ("titleText" in session) return session.titleText; // SessionMeta (precomputed)

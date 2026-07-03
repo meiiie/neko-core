@@ -33,7 +33,7 @@ import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
-import { latestSession, loadSession, newSessionId, saveSession, wasInterrupted, type Session } from "../adapters/session.ts";
+import { latestSession, loadSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
 import { memoryIndexBlock } from "../core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
 import { playbookContextBlock } from "../core/playbook.ts";
@@ -1010,21 +1010,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   );
 }
 
-export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean; resumeId?: string; fresh?: boolean }): Promise<void> {
+export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean; resumeId?: string }): Promise<void> {
   if (!process.stdin.isTTY) {
     console.error('neko needs an interactive terminal (TTY) for the session. Use `neko run "<task>"` for one-shot.');
     return;
   }
-  let resumed = opts.resumeId ? loadSession(opts.resumeId) : opts.resume ? latestSession(process.cwd()) : null;
+  // Bare `neko` starts FRESH; you pick up an interrupted task explicitly with /resume (or --resume/-c).
+  // The resumed session shows its full thread + recovers todos, and typing anything continues it.
+  const resumed = opts.resumeId ? loadSession(opts.resumeId) : opts.resume ? latestSession(process.cwd()) : null;
   if (opts.resumeId && !resumed) console.error(`neko: no session '${opts.resumeId}' - starting fresh.`);
-  // Seamless continue (no flag): a bare `neko` auto-resumes this dir's latest session if it was
-  // left MID-TASK and recently, so you land exactly where you interrupted and just type to continue.
-  // `--new` forces a fresh session; a session that ended cleanly never auto-resumes.
-  if (!resumed && !opts.fresh) {
-    const latest = latestSession(process.cwd());
-    const recentMs = latest ? Date.now() - Date.parse(latest.updatedAt || "") : Infinity;
-    if (latest && wasInterrupted(latest) && recentMs < 12 * 3600 * 1000) resumed = latest;
-  }
   const id = resumed?.id ?? newSessionId();
   const cfg = loadConfig({ profile: opts.profile });
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);

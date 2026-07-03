@@ -47,7 +47,6 @@ interface Args {
   yolo: boolean;
   resume: boolean;
   resumeId?: string;
-  fresh?: boolean; // --new: force a fresh session (skip auto-resume of an interrupted one)
   loop: boolean;
   once: boolean;
   noTools?: boolean;
@@ -76,7 +75,6 @@ function parseArgs(argv: string[]): Args {
       if (next && !next.startsWith("-")) args.resumeId = argv[++i]; // `--resume <id>` resumes that session
     }
     else if (a === "--continue" || a === "-c") args.resume = true; // Claude-Code parity: resume the latest session for this dir
-    else if (a === "--new") args.fresh = true; // force a fresh session (skip auto-resume of an interrupted one)
     else if (a === "--version" || a === "-v") args.version = true;
     else if (a === "--help" || a === "-h") args.help = true;
     else if (a.startsWith("-")) { /* ignore unknown flags */ }
@@ -226,7 +224,6 @@ Options:
                      e.g. NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko run --image pkg.jpg "what is this?"
   --resume [id]      (chat) resume a session by id, or the latest for this directory
   --continue, -c     (chat) resume the latest session for this directory (then /continue to pick up)
-  --new              (chat) force a fresh session (skip auto-resume of an interrupted one)
   --version          print version`;
 
 function cmdConfig(args: Args): number {
@@ -295,7 +292,7 @@ function cmdContext(): number {
 async function cmdChat(args: Args): Promise<number> {
   // Lazy import: keep Ink/React out of the startup path for non-chat commands.
   const { runChat } = await import("../src/ui/chat.tsx");
-  await runChat({ profile: args.profile, yolo: args.yolo, resume: args.resume, resumeId: args.resumeId, fresh: args.fresh });
+  await runChat({ profile: args.profile, yolo: args.yolo, resume: args.resume, resumeId: args.resumeId });
   return 0;
 }
 
