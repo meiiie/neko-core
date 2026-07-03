@@ -3,6 +3,28 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-04 — Interaction-perf sweep: session index (/resume 577->140ms) + a whole-store audit
+
+Owner: after the /resume freeze, sweep the whole codebase for OTHER functions that lag the interaction
+the way /resume did (synchronous heavy I/O blocking the UI thread). Done + measured:
+- **/resume + /sessions (the real find):** `listSessions()` parsed EVERY session file to show a menu -
+  2860 files / 34MB = **577ms** of blocking JSON.parse, plus a preview built for every listed session.
+  Fixed with a mtime-validated metadata index (`listSessionMetas`, `.index.json`) + lazy preview:
+  **577ms -> 140ms** steady state, zero transcripts loaded on open (see the session-index commit).
+- **Ruled out with measurements (NOT lag, left alone per ponytail):** the full per-turn dynamicContext
+  build (skills+memory+workflows+playbook+agents blocks + matchSkill/matchWorkflow) = **11ms/turn**,
+  fully masked by the seconds-long model round-trip. Other file stores are tiny (workflows 3, memory 5,
+  recipes 1) - no 2860-scale outlier. Startup ~600ms is Bun's compiled-binary runtime boot, inherent.
+  Diff rendering is bounded (write/edit results capped to ~16-34 lines before highlightLine runs). Stream
+  render is O(1) (renderTail, G0). No other eager-heavy picker exists (/model = async+busy, /provider +
+  /effort build from in-memory data).
+- **Crash sweep:** fired every read-only slash command (/help /cost /sessions /context /memory /tools
+  /skills /recipes /bashes) headlessly - all run, none crash or hang.
+
+Honest conclusion: the /resume path was the one real interaction-lag offender (scale of the session store);
+the rest of the interactive surface is within bounds. 140ms is below the ~200ms "instant" threshold, so a
+further micro-opt (e.g. a directory-mtime fast path) wasn't worth the added staleness risk (YAGNI).
+
 ## 2026-07-03 — UX/UI + micro-interaction audit (slash-menu Enter, /resume dead-end, approval preview)
 
 Owner tested `neko --yolo` live and hit a "freeze" on `/resume`; asked for a deep UX/micro-interaction
