@@ -3,6 +3,37 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-03 — Speed sprint + full no-regression battery (two big finds)
+
+**Speed sprint (owner-directed), all shipped:** (1) deterministic **websosanh offers parser** in web_fetch
+(904eafc) — the procurement INDEX tier is now CODE-parsed: 32/32 offers from the live page, zero LLM
+tokens, can't misread a price, graceful fallback on redesign; (2) **parallel-width nudge** (d8822d4, W&D
+arXiv 2602.07359) — batch independent reads in one turn (the fan-out machinery existed; the prompt now
+tells the model to use it); (3) skill: **one survey answers min+max+median** + reuse baogia_norm.json for
+follow-ups + SKU-querying the index (c372258). Combined-question errand now runs at 8-9 calls vs 30 for
+the ask-twice pattern. (4) Effort A/B (max vs medium, same errand): medium was NOT faster (471s vs 342s,
+n=1, provider-latency dominated) — default effort kept; wall-clock levers are call count + cache, not the
+thinking budget. Honest record.
+
+**Benchmark battery (owner mandate: prove no "improved but worse").** Suite green at every step; two REAL
+finds, both invisible without the battery:
+- **`neko bench` 16/16, calls 64->59, and the first true cache picture: 94% of input tokens were cache
+  READS on Z.ai** (256.5k in, 240.4k cached) — the prefix-cache + rolling-breakpoints work measurably
+  engages in real agent loops (the earlier isolated 2-call probe showing 0 was not representative), and
+  the old "in tokens" numbers were UNDERCOUNTS (Anthropic input_tokens excludes cache reads; the old
+  adapter never added them back).
+- **harsh-eval collapsed 0/8 on glm-5.2 -> exposed that `responseSchema` was never implemented on the
+  anthropic provider** (G4 built it for openai_compat only; the model switch silently degraded ALL schema
+  extraction to free text). Fixed with the format's standard structured-output pattern: forced tool call
+  (schema = input_schema, thinking skipped - incompatible + unneeded), self-heal to prompt-JSON +
+  extractJsonLoose. 0/8 -> **8/8 solid**.
+- run-evals 4/6 -> **6/6 solid** after fixing the MEASUREMENT layer (grade the final answer, not tool
+  echoes; negative checks on kept rows only; accept legitimate source aliases; clarify the trade-in
+  credit-vs-program rule per G5 intent; print the failing output tail). The A/B against the pre-sprint
+  skill proved these were pre-existing false alarms + model drift, NOT today's regressions.
+- Final suite 267/0 after killing 28 ORPHANED MCP server processes (eval spawnSync timeouts kill neko but
+  orphan its stdio children -> machine saturation -> the queue-test flake). Hygiene item queued in BACKLOG.
+
 ## 2026-07-03 — Procurement recall gap fixed: INDEX (websosanh) -> VERIFY architecture (A/B live-proven)
 
 Owner caught a REAL wrong answer: asked "SSD 990 EVO 2TB MZ-V9E2T0BW, GIA DAT NHAT o VN" — Neko said 9.99tr

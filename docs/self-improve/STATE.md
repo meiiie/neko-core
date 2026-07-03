@@ -33,6 +33,11 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-03] (owner-directed) speed sprint + full battery: websosanh parser (LLM-free INDEX), W&D batch
+  nudge, one-survey-all-answers; bench 16/16 w/ **94% cached on Z.ai** (prefix-cache work proven live);
+  harsh-eval 0/8 exposed responseSchema missing on the anthropic provider -> forced-tool-call impl ->
+  8/8; run-evals 6/6 after measurement-layer fixes (grade final answer, not echoes). Suite 267/0.
+  New backlog: MCP orphan hygiene; Android mobile arc (3 phases).
 - [2026-07-03] (owner-directed) **v0.5.1 RELEASED** (497345f, tag pushed): approval dropped-'y' fix, release
   race fix (proved itself - 5/5 assets first try), 529 retry, prefix-cache work + cached metrics, tool-error
   recovery, procurement INDEX->VERIFY. Next arcs (owner): performance + computer-use ("0.6.0 material").

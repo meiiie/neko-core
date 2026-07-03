@@ -26,6 +26,21 @@ one never blocks another.
   README + a first-run hint; consider a gentle in-chat hint when searxng_url is configured but unreachable
   ("start Docker Desktop or remove searxng_url"). Verify: docs render + the hint fires only in that state.
 
+- [ ] **MCP child-process cleanup (orphan hygiene).** Found 2026-07-03: 28 orphaned `node mcp/server`
+  processes saturating the machine (flaked the queue UI test) — every `neko run` spawns stdio MCP
+  children (the browser MCP from config), and a killed/timed-out neko (eval spawnSync timeout, Ctrl+C,
+  crash) orphans them. Fix: tie child lifetime to the parent (Windows Job Objects / POSIX process
+  groups + kill-on-exit in McpHub.close and a signal handler), so no run can leak servers. Verify: spawn
+  a run with a connected MCP, SIGKILL it, assert no `mcp/server` child survives; plus McpHub.close kills
+  children on normal exit.
+- [ ] **Mobile arc: Neko on Android (owner discussion 2026-07-03).** Phase 1 MVP: run the existing
+  `neko-linux-arm64` release binary under Termux+proot, storage via termux-setup-storage, chat via the
+  relay web client pointed at localhost -> "find/summarize documents on the phone" works with ZERO new
+  code. Phase 2: termux-api + adb-wireless-loopback as a `phone` skill/MCP (config-first). Phase 3 (big):
+  an AccessibilityService companion app exposing ui-snapshot/tap/type as MCP tools — the mobile leg of
+  the structure-grounded computer-use strategy (a11y tree = the phone's DOM). iOS: relay client only;
+  full third-party phone control is blocked by platform policy (Shortcuts bridge at most — be honest).
+
 ## Research-seeded (turn into "Now" items as they're scoped)
 - [ ] Archive/population self-improvement (DGM): keep N improved branches, benchmark each, keep the best —
   parallel exploration instead of one linear branch.
@@ -329,7 +344,10 @@ one never blocks another.
   `reasoning_effort` already self-heal (the adapter omits the field) — verify that path still
   works under per-step changes.
 
-- [ ] **Parallel-tool-width nudge for independent reads (W&D).** Neko already fan-outs a tool
+- [x] **Parallel-tool-width nudge for independent reads (W&D).** *(done d8822d4, 2026-07-03, owner-directed
+  speed sprint: BATCH-independent-reads rule in the system prompt; fan-out machinery + tests already
+  existed. Live effect tracked via the errand A/B — the item's stub-provider turns-test isn't meaningful
+  with a scripted stub, recorded honestly.)* Neko already fan-outs a tool
   batch IF *every* call in it is concurrency-safe (the `CONCURRENCY_SAFE` set in `core/agent.ts`:
   `read_file/search/glob/ls/web_search/web_fetch/task`) — but whether the model *emits* a
   parallel batch at all is left entirely to the model's own judgment, and nothing in the system
