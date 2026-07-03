@@ -56,6 +56,11 @@ recall trần (nhất là khi rơi về DuckDuckGo); **aggregator là tầng IND
    - Hỏi **ĐẮT NHẤT** → mở **top 3-5 giá CAO nhất** trên trang shop gốc: product-match đúng MÃ/SKU, giá
      ĐANG BÁN (không phải gạch-ngang/niêm yết ảo), còn hàng. Sai mã/hết hàng → loại, verify dòng kế.
    - Hỏi **RẺ NHẤT** → verify **bottom 3-5** (đa số rác nằm ở đáy: sai SKU, phụ kiện, máy cũ không nhãn).
+     **KỂ CẢ khi hỏi "rẻ nhất trong nguồn UY TÍN" — vẫn PHẢI mở 2-3 dòng đáy trước khi bác bỏ cả cụm**:
+     thị trường linh kiện VN thường có HAI TẦNG giá (hàng nhập/BH-shop ~giá quốc tế vs chính hãng phân
+     phối ở chuỗi lớn, chênh 2-3x) — đo thực 2026-07-03 (990 EVO Plus 2TB): đáy 4,15tr hugotech CÒN HÀNG
+     + ghi BH 60 tháng (khớp giá quốc tế ~$150) bị bác oan là "không mua được", trong khi chuỗi lớn treo
+     13,99-16tr. Trả lời đúng = nêu CẢ HAI TẦNG + nhãn rõ (nguồn gốc/BH khác nhau), để người mua chọn.
    - Hỏi **GIÁ THỊ TRƯỜNG** → loại dòng sai SKU rồi lấy median/băng giá từ `price-table.ts`.
 3. **BÙ NGUỒN**: aggregator không phủ 100% (nhiều chuỗi lớn không lên websosanh) → quét thêm MAP đúng
    ngành hàng + search. SearXNG chết/rơi về DDG thì tầng INDEX càng BẮT BUỘC (DDG recall yếu — đo thực).
