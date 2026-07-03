@@ -12,7 +12,8 @@ import { readFileSync } from "node:fs";
 
 import { ApprovalBox, type Approval } from "./approval-box.tsx";
 import { runSlashCommand, SLASH } from "./commands.ts";
-import { ctxPercent, fmtDuration, fmtTok, trunc } from "./format.ts";
+import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
+import { loadPrefs, savePrefs } from "../adapters/prefs.ts";
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TextInput } from "./text-input.tsx";
@@ -86,6 +87,7 @@ function resultSummary(name: string | undefined, obs: string): string | undefine
  * assistant text, so skipping them made a resumed session look empty ("the work is gone") even though
  * the agent context was intact. This reconstructs it exactly as it looked live. */
 const REPLAY_MAX_LINES = 80; // display cap on a resumed thread - the agent keeps ALL messages in context
+const RESUME_SUMMARY_AT = 0.6; // offer resume-from-summary once a session would fill >60% of the window
 function replaySessionLines(messages: any[], nextId: () => number): Line[] {
   const out: Line[] = [];
   const toolById = new Map<string, string>(); // tool_call_id -> tool name (to summarize its result)
@@ -198,9 +200,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const sessionIdRef = useRef(sessionId ?? resumedRef.current?.id ?? newSessionId());
   const createdAtRef = useRef(resumedRef.current?.createdAt ?? new Date().toISOString());
 
+  // A LARGE startup resume (--resume/-c) defers its replay to a mount effect that offers the
+  // resume-from-summary prompt (same gate as the /resume picker), rather than inline-replaying a huge
+  // thread and dropping you into a near-full window with no choice.
+  const startupNeedsChoiceRef = useRef(
+    !!resumedRef.current &&
+      estimateTokens(resumedRef.current.messages) > RESUME_SUMMARY_AT * cfg.contextWindow &&
+      !loadPrefs().resumeAlwaysFull,
+  );
   const [lines, setLines] = useState<Line[]>(() => {
     const out: Line[] = [{ id: idRef.current++, kind: "welcome", text: "" }];
-    if (resumedRef.current) {
+    if (resumedRef.current && !startupNeedsChoiceRef.current) {
       // Replay the prior conversation so it looks exactly like before you quit (Claude-style) - the
       // FULL thread incl. tool calls/results, so an interrupted coding task's work isn't lost from view.
       out.push(...replaySessionLines(resumedRef.current.messages, () => idRef.current++));
@@ -470,28 +480,59 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   };
 
-  const resumeInto = (target: Session) => {
+  // Load a session into the agent and replay it. `mode: "summary"` compacts BEFORE replaying, so a
+  // huge old session doesn't drop you straight into a near-full context window (image #16's flow:
+  // pick session -> compacting bar -> the condensed thread). Todos are recovered from the ORIGINAL
+  // messages (pre-compaction), so an interrupted plan survives even if it lived in the summarized head.
+  const doResume = async (target: Session, mode: "summary" | "full") => {
     agentRef.current!.messages = [...target.messages];
     agentRef.current!.refreshSystemPrompt(); // apply the current prompt to the resumed session
     sessionIdRef.current = target.id;
     createdAtRef.current = target.createdAt;
-    // APPEND the replayed thread to the existing transcript (Static is append-only) instead of a
-    // raw screen-wipe + remount. The wipe used a raw escape that froze real terminals (see clearTerm);
-    // appending is the framework-safe way - the resumed thread renders below, old scrollback stays.
-    // Reconstruct the FULL thread (tool calls + results too), so an interrupted coding task's work
-    // is visible on resume, not just the prompt.
-    const replay: Line[] = [
-      { id: idRef.current++, kind: "info", text: `-- resumed ${target.id} (${target.messages.length} messages) --` },
-      ...replaySessionLines(target.messages, () => idRef.current++),
-    ];
-    // Recover the todo tracker so the interrupted plan is visible; if anything's unfinished, hint /continue.
-    const todos = recoverTodos(target.messages);
+    const todos = recoverTodos(target.messages); // from the FULL thread, before any compaction
     registryRef.current!.todos = todos;
     setTodos(todos);
+    setStarted(true);
+    // APPEND the replayed thread to the existing transcript (Static is append-only) instead of a raw
+    // screen-wipe + remount. The wipe used a raw escape that froze real terminals; appending is the
+    // framework-safe way - the resumed thread renders below, old scrollback stays.
+    if (mode === "summary") {
+      setLines((prev) => [...prev, { id: idRef.current++, kind: "info", text: `-- resuming ${target.id} from a summary (${target.messages.length} messages) --` }]);
+      await runCompaction("resume"); // shows the compacting bar; rewrites agent.messages to the summary + recent tail
+    } else {
+      setLines((prev) => [...prev, { id: idRef.current++, kind: "info", text: `-- resumed ${target.id} (${target.messages.length} messages) --` }]);
+    }
+    // Replay from the CURRENT agent messages (post-compaction if summarized), so what's on screen
+    // matches what's in context. Reconstruct the FULL thread (tool calls + results) too.
+    const replay: Line[] = replaySessionLines(agentRef.current!.messages, () => idRef.current++);
     const left = todos.filter((t) => t.status !== "completed").length;
     if (left) replay.push({ id: idRef.current++, kind: "info", text: `Picking up where you left off - ${left} task${left > 1 ? "s" : ""} still open. Just tell me to keep going (in your own words), or /continue.` });
     setLines((prev) => [...prev, ...replay]);
-    setStarted(true);
+  };
+
+  // Entry point for the /resume picker. For a LARGE session, first offer to resume from a summary
+  // (claude-parity, image #15) - resuming a huge thread in full immediately eats a big slice of the
+  // context window. Small sessions (or a persisted "don't ask again") resume in full silently.
+  const resumeInto = (target: Session) => {
+    const est = estimateTokens(target.messages);
+    const big = est > RESUME_SUMMARY_AT * cfg.contextWindow;
+    if (!big || loadPrefs().resumeAlwaysFull) {
+      void doResume(target, "full");
+      return;
+    }
+    setOverlay({
+      title: `This session is ${fmtAge(target.createdAt)} old and ~${fmtTok(est)} tokens (~${ctxPercent(est, cfg.contextWindow)}% of the window). Resuming in full uses that much context up front.`,
+      items: [
+        { id: "summary", label: "Resume from a summary (recommended)", detail: "condense older turns first, keep recent ones" },
+        { id: "full", label: "Resume the full session as-is", detail: "load every message verbatim" },
+        { id: "never", label: "Always resume full - don't ask again", detail: "skip this prompt from now on" },
+      ],
+      onSelect: (it) => {
+        setOverlay(null);
+        if (it.id === "never") { savePrefs({ resumeAlwaysFull: true }); void doResume(target, "full"); }
+        else void doResume(target, it.id === "summary" ? "summary" : "full");
+      },
+    });
   };
 
   // Stop the remote-control server when the app exits.
@@ -501,6 +542,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     if (!cfg.autoUpdateCheck) return;
     void checkForUpdate().then((v) => { if (v) addLine("info", `a newer Neko (${v}) is available - run \`neko update\``); }).catch(() => {});
+  }, []);
+  // A large startup resume defers to here so it can offer the resume-from-summary choice (the initial
+  // render skipped its replay). resumeInto opens the picker; doResume then replays (summarized or full).
+  useEffect(() => {
+    if (startupNeedsChoiceRef.current && resumedRef.current) resumeInto(resumedRef.current);
   }, []);
 
   // Re-layout on terminal resize. Ink only clears the screen when the width DECREASES; enlarging

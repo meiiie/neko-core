@@ -27,6 +27,17 @@ export function fmtBytes(n: number): string {
   return n < 1024 ? `${n}B` : n < 1048576 ? `${(n / 1024).toFixed(1)}KB` : `${(n / 1048576).toFixed(1)}MB`;
 }
 
+/** Compact age "6d 23h" / "3h 12m" / "12m" — for the resume-from-summary prompt (claude-style header). */
+export function fmtAge(iso: string): string {
+  const then = Date.parse(iso);
+  if (!then) return "";
+  const s = Math.max(0, (Date.now() - then) / 1000);
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (d) return h ? `${d}d ${h}h` : `${d}d`;
+  if (h) return m ? `${h}h ${m}m` : `${h}h`;
+  return `${m}m`;
+}
+
 /** "16 hours ago" / "1 week ago" — for the /resume picker. */
 export function relativeTime(iso: string): string {
   const then = Date.parse(iso);

@@ -1,6 +1,9 @@
 /** UX/UI coverage: status bar, thinking line, reasoning, hotkeys, diff preview, completion line. */
 import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { ChatApp } from "../src/ui/chat.tsx";
@@ -61,6 +64,30 @@ test("CompactingLine shows the progress bar, percent, and a tip", () => {
   expect(f).toContain("0%");            // frame 0: elapsed 0 -> 0%
   expect(f).toContain("▱");             // empty bar segments visible
   expect(f).toContain("tip:");
+});
+
+test("resume-from-summary: a large session prompts to summarize, a small one resumes directly", async () => {
+  const saved = { up: process.env.USERPROFILE, home: process.env.HOME };
+  const home = mkdtempSync(join(tmpdir(), "neko-resume-home-")); // isolate prefs.json (loadPrefs reads HOME)
+  process.env.USERPROFILE = home; process.env.HOME = home;
+  try {
+    // >60% of the default 131072-token window: estimateTokens = chars/4, so ~340k chars ~= 85k tokens.
+    const big: any = { id: "big", createdAt: new Date(Date.now() - 2 * 86400 * 1000).toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [{ role: "user", content: "x".repeat(340_000) }] };
+    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={big} />);
+    expect(await until(c, (f) => /Resume from a summary/i.test(f))).toBe(true);
+    c.unmount();
+
+    const small: any = { id: "small", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [{ role: "user", content: "hi there small session" }] };
+    const c2 = render(<ChatApp yolo provider={new Echo()} resumedSession={small} />);
+    await tick(150);
+    const f2 = strip(c2.frames.join("\n"));
+    expect(/Resume from a summary/i.test(f2)).toBe(false); // no prompt for a small session
+    expect(f2).toContain("hi there small session");        // replayed directly
+    c2.unmount();
+  } finally {
+    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("ApprovalBox renders an edit diff preview (- old / + new)", () => {
