@@ -3,6 +3,28 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-03 — Researched Browser Use CLI 3.0 / browser-harness (clean-room, live-verified)
+
+Owner asked whether Browser Use CLI 3.0 changes our browser story (G7 chose Playwright MCP; G10 stealth via
+config). Cloned both repos to `../neko-refs/` and read the core. **Findings:** CLI 3.0 is their autonomous
+agent product; the reusable piece is **browser-harness** — a ~1.4k-line Python CLI (helpers 508 + daemon 427
++ ipc 201) speaking **raw CDP to a running Chrome**, invoked via bash heredocs (`browser-harness <<'PY' ...`).
+Architecture is the "bitter lesson" applied to browser tools: NO tool schemas, NO accessibility-tree dumps —
+a small pre-imported helper API (page_info/click_at_xy/js/cdp/screenshot/tabs/waits), screenshot-first +
+coordinate clicks that pass through iframes/shadow-DOM at the compositor level, `js()` for text-only
+extraction, and **self-healing**: the agent writes missing helpers into `agent_helpers.py` and uses them
+immediately. Ships AS a skill (SKILL.md) — exactly Neko's G1 extension model. Windows is first-class (TCP
+loopback + token IPC). **Live-verified end-to-end on this machine:** `uv tool install browser-harness` ->
+launched a throwaway Chrome with `--remote-debugging-port` + temp profile -> `BU_CDP_URL=... browser-harness`
+drove it (new_tab, wait_for_load, page_info, js('h1.textContent')) — worked first try; cleaned up after.
+**Verdict:** adopt as an OPTIONAL skill-based backend alongside Playwright MCP (zero core change, config/
+skill-first): browser-harness for real-Chrome/logged-in/anti-bot/iframe-heavy work + token-lean flows;
+Playwright MCP stays for headless a11y-tree flows on text-only models. Its zero-schema CLI design also
+validates our "Tools Tax" backlog thesis. Caveats recorded: screenshot-first wants a vision model (the
+js()/selector path is fully text-only), local Chrome needs the user to enable remote debugging once
+(chrome://inspect), and it's a Python/uv dependency — optional, like ripgrep/pdftotext. NOT wired into a
+bundled skill yet — awaiting the owner's go.
+
 ## 2026-07-02 — Tool-error recovery directive at the point of failure (29e7c95)
 
 Sprint item 2 (Self-Harness, arXiv 2606.09498 — its single biggest win was a recovery-oriented prompt
