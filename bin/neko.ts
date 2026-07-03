@@ -358,6 +358,7 @@ async function cmdMcp(args: Args): Promise<number> {
     return 0;
   }
   const hub = await buildMcpHub(cfg.mcpServers);
+  await hub.connectPending(); // diagnostics must show the LIVE surface, not the lazy-connect cache
   console.log(renderMcp(hub));
   await hub.close();
   return 0;

@@ -8,7 +8,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
+import { atomicWriteFileSync } from "../shared/atomic.ts";
+import { homeDir } from "../shared/home.ts";
 import { VERSION } from "../shared/version.ts";
 import { connectWithOAuth } from "./mcp-oauth.ts";
 
@@ -51,6 +57,30 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([p.finally(() => clearTimeout(timer)), timeout]);
 }
 
+/** Spec cache: tool schemas/resources/prompts per server-config, so a hub can register a server's
+ * tools WITHOUT spawning it (lazy-CONNECT — measured 2026-07-03: the browser MCP costs ~277MB RAM +
+ * spawn latency on EVERY run even when no browser tool is ever called). Keyed by name+config hash, so
+ * any config change is a clean miss; entries refresh on every real connect. */
+const SPEC_CACHE_FILE = () => join(homeDir(), ".neko-core", "mcp-specs.json");
+type SpecCacheEntry = { specs: any[]; resourceSpecs: any[]; prompts: string[]; meta: { type: string; tools: number; resources: number; prompts: number } };
+function specCacheKey(name: string, cfg: McpServerConfig): string {
+  return `${name}:${createHash("sha1").update(JSON.stringify(cfg)).digest("hex").slice(0, 16)}`;
+}
+function readSpecCache(): Record<string, SpecCacheEntry> {
+  try {
+    const data = JSON.parse(readFileSync(SPEC_CACHE_FILE(), "utf-8"));
+    return data.v === 1 ? (data.servers ?? {}) : {};
+  } catch { return {}; }
+}
+function writeSpecCacheEntry(key: string, entry: SpecCacheEntry): void {
+  try {
+    const servers = readSpecCache();
+    servers[key] = entry;
+    mkdirSync(join(homeDir(), ".neko-core"), { recursive: true });
+    atomicWriteFileSync(SPEC_CACHE_FILE(), JSON.stringify({ v: 1, servers }));
+  } catch { /* a cache write failure must never break MCP */ }
+}
+
 /** The synthetic meta-tool exposed in lazy mode so the model can pull tool schemas on demand. */
 const MCP_LOAD_SPEC = {
   type: "function",
@@ -76,6 +106,7 @@ export class McpHub {
   private resourceTools = new Map<string, string>(); // synthetic mcp__<server>__read_resource -> server
   private prompts = new Map<string, string[]>(); // server -> prompt names
   private configs = new Map<string, McpServerConfig>(); // kept so a dead server can be reconnected
+  private transports = new Map<string, any>(); // stdio transports kept for pid -> tree-kill on close
   constructor(private filter: { allow?: string[]; deny?: string[] } = {}) {}
 
   /** Tool passes the allow/deny filters (patterns match server / tool / "server__tool" / "*"). */
@@ -96,52 +127,114 @@ export class McpHub {
     }
     const made = makeTransport(cfg);
     await client.connect(made.transport);
+    this.transports.set(name, made.transport); // kept for pid -> tree-kill on close
     return { client, type: made.type };
   }
 
+  /** Register a server's tool surface WITHOUT spawning it (specs from the cache). The first actual
+   * tool call / resource read / prompt get connects on demand via ensureClient(). */
+  private registerFromCache(name: string, entry: SpecCacheEntry): void {
+    for (const spec of entry.specs) {
+      const prefixed = String(spec.function?.name ?? "");
+      const bare = prefixed.replace(`mcp__${name}__`, "");
+      if (!this.allowed(name, bare)) continue;
+      this.toolMap.set(prefixed, { server: name, tool: bare });
+      this.specs.push(spec);
+    }
+    for (const spec of entry.resourceSpecs) {
+      this.resourceTools.set(String(spec.function?.name ?? ""), name);
+      this.specs.push(spec);
+    }
+    if (entry.prompts.length) this.prompts.set(name, entry.prompts);
+    this.meta.set(name, { ...entry.meta, type: `${entry.meta.type} (cached, connects on first use)` });
+  }
+
+  /** Connect ONE server and (re)build its registered surface from the LIVE server; refresh the cache. */
+  private async connectOne(name: string): Promise<Client> {
+    const cfg = this.configs.get(name);
+    if (!cfg) throw new Error(`no MCP server '${name}' configured`);
+    // Drop any cache-registered entries for this server; the live listing below replaces them.
+    this.specs = this.specs.filter((s) => !String(s.function?.name ?? "").startsWith(`mcp__${name}__`));
+    for (const key of [...this.toolMap.keys()]) if (this.toolMap.get(key)!.server === name) this.toolMap.delete(key);
+    for (const key of [...this.resourceTools.keys()]) if (this.resourceTools.get(key) === name) this.resourceTools.delete(key);
+
+    // OAuth is user-paced (browser authorize) so it must NOT be timed out; everything else is bounded.
+    const connect = this.makeClient(name, cfg);
+    const { client, type } = cfg.oauth ? await connect : await withTimeout(connect, MCP_CONNECT_TIMEOUT_MS, `MCP '${name}' connect`);
+    const res: any = await withTimeout(client.listTools(), MCP_CONNECT_TIMEOUT_MS, `MCP '${name}' listTools`);
+    const cachedSpecs: any[] = [];
+    let tools = 0;
+    for (const tool of res.tools ?? []) {
+      const prefixed = `mcp__${name}__${tool.name}`;
+      const spec = {
+        type: "function",
+        function: {
+          name: prefixed,
+          description: tool.description ?? "",
+          parameters: tool.inputSchema ?? { type: "object", properties: {} },
+        },
+      };
+      cachedSpecs.push(spec); // cache the FULL surface; allow/deny filters apply per-hub below
+      if (!this.allowed(name, tool.name)) continue; // mcp_allow/mcp_deny filter
+      this.toolMap.set(prefixed, { server: name, tool: tool.name });
+      this.specs.push(spec);
+      tools++;
+    }
+    // Resources are part of full MCP: expose a synthetic read_resource tool the agent can use.
+    let resourceList: any[] = [];
+    try { resourceList = ((await client.listResources()) as any).resources ?? []; } catch { /* unsupported */ }
+    const resourceSpecs: any[] = [];
+    if (resourceList.length) {
+      const rt = `mcp__${name}__read_resource`;
+      const spec = {
+        type: "function",
+        function: {
+          name: rt,
+          description: `Read a resource from MCP server '${name}'. Available URIs: ${resourceList.slice(0, 25).map((r: any) => r.uri).join(", ")}`,
+          parameters: { type: "object", properties: { uri: { type: "string", description: "The resource URI to read." } }, required: ["uri"] },
+        },
+      };
+      resourceSpecs.push(spec);
+      this.resourceTools.set(rt, name);
+      this.specs.push(spec);
+    }
+    let promptNames: string[] = [];
+    try { promptNames = (((await client.listPrompts()) as any).prompts ?? []).map((p: any) => p.name); } catch { /* unsupported */ }
+    if (promptNames.length) this.prompts.set(name, promptNames);
+    const meta = { type, tools, resources: resourceList.length, prompts: promptNames.length };
+    this.meta.set(name, meta);
+    this.clients.set(name, client);
+    writeSpecCacheEntry(specCacheKey(name, cfg), { specs: cachedSpecs, resourceSpecs, prompts: promptNames, meta });
+    return client;
+  }
+
+  /** The connected client for a server, connecting ON DEMAND if it was registered from the cache. */
+  private async ensureClient(name: string): Promise<Client> {
+    return this.clients.get(name) ?? (await this.connectOne(name));
+  }
+
+  /** Connect every still-pending (cache-registered) server — for diagnostics (`neko mcp`, doctor)
+   * that must report the REAL live surface, not the cached one. */
+  async connectPending(): Promise<void> {
+    for (const name of this.configs.keys()) {
+      if (this.clients.has(name)) continue;
+      try { await this.connectOne(name); } catch (error) {
+        console.error(`neko: MCP server '${name}' failed to connect: ${(error as Error).message}`);
+      }
+    }
+  }
+
   async connectAll(servers: Record<string, McpServerConfig>): Promise<void> {
+    const cache = readSpecCache();
     for (const [name, cfg] of Object.entries(servers ?? {})) {
       try {
         this.configs.set(name, cfg);
-        // OAuth is user-paced (browser authorize) so it must NOT be timed out; everything else is bounded.
-        const connect = this.makeClient(name, cfg);
-        const { client, type } = cfg.oauth ? await connect : await withTimeout(connect, MCP_CONNECT_TIMEOUT_MS, `MCP '${name}' connect`);
-        const res: any = await withTimeout(client.listTools(), MCP_CONNECT_TIMEOUT_MS, `MCP '${name}' listTools`);
-        let tools = 0;
-        for (const tool of res.tools ?? []) {
-          if (!this.allowed(name, tool.name)) continue; // mcp_allow/mcp_deny filter
-          const prefixed = `mcp__${name}__${tool.name}`;
-          this.toolMap.set(prefixed, { server: name, tool: tool.name });
-          this.specs.push({
-            type: "function",
-            function: {
-              name: prefixed,
-              description: tool.description ?? "",
-              parameters: tool.inputSchema ?? { type: "object", properties: {} },
-            },
-          });
-          tools++;
-        }
-        // Resources are part of full MCP: expose a synthetic read_resource tool the agent can use.
-        let resourceList: any[] = [];
-        try { resourceList = ((await client.listResources()) as any).resources ?? []; } catch { /* unsupported */ }
-        if (resourceList.length) {
-          const rt = `mcp__${name}__read_resource`;
-          this.resourceTools.set(rt, name);
-          this.specs.push({
-            type: "function",
-            function: {
-              name: rt,
-              description: `Read a resource from MCP server '${name}'. Available URIs: ${resourceList.slice(0, 25).map((r: any) => r.uri).join(", ")}`,
-              parameters: { type: "object", properties: { uri: { type: "string", description: "The resource URI to read." } }, required: ["uri"] },
-            },
-          });
-        }
-        let promptNames: string[] = [];
-        try { promptNames = (((await client.listPrompts()) as any).prompts ?? []).map((p: any) => p.name); } catch { /* unsupported */ }
-        if (promptNames.length) this.prompts.set(name, promptNames);
-        this.meta.set(name, { type, tools, resources: resourceList.length, prompts: promptNames.length });
-        this.clients.set(name, client);
+        const hit = cache[specCacheKey(name, cfg)];
+        // Cache hit -> register the tool surface WITHOUT spawning the server (lazy-CONNECT: no
+        // process, no RAM, no startup latency until a tool is actually called). Miss (first run
+        // with this config) -> connect eagerly, which also writes the cache for next time.
+        if (hit) this.registerFromCache(name, hit);
+        else await this.connectOne(name);
       } catch (error) {
         console.error(`neko: MCP server '${name}' failed to connect: ${(error as Error).message}`);
       }
@@ -194,8 +287,8 @@ export class McpHub {
     // Synthetic resource reader (mcp__<server>__read_resource).
     const resourceServer = this.resourceTools.get(name);
     if (resourceServer) {
-      const client = this.clients.get(resourceServer)!;
       try {
+        const client = await this.ensureClient(resourceServer);
         const res: any = await client.readResource({ uri: String(args.uri ?? "") });
         const parts = (res.contents ?? []).map((c: any) => (c?.text != null ? c.text : c?.uri ?? JSON.stringify(c)));
         return parts.join("\n") || "(empty resource)";
@@ -222,7 +315,7 @@ export class McpHub {
   }
 
   private async invoke(server: string, tool: string, args: Record<string, any>): Promise<string> {
-    const client = this.clients.get(server)!;
+    const client = await this.ensureClient(server); // connects on demand when registered from cache
     const res: any = await client.callTool({ name: tool, arguments: args });
     const parts = (res.content ?? []).map((c: any) => (c?.type === "text" ? c.text : JSON.stringify(c)));
     return parts.join("\n") || "(no content)";
@@ -235,9 +328,9 @@ export class McpHub {
   }
 
   async getPrompt(server: string, name: string, args: Record<string, any>): Promise<string> {
-    const client = this.clients.get(server);
-    if (!client) return `Error: no MCP server '${server}'`;
+    if (!this.configs.has(server)) return `Error: no MCP server '${server}'`;
     try {
+      const client = await this.ensureClient(server);
       const res: any = await client.getPrompt({ name, arguments: args });
       return (res.messages ?? [])
         .map((m: any) => (typeof m.content === "string" ? m.content : m.content?.text ?? JSON.stringify(m.content)))
@@ -255,6 +348,18 @@ export class McpHub {
         /* ignore */
       }
     }
+    // Belt-and-braces: SDK close kills its DIRECT child, but a launcher chain (bunx -> node) can
+    // orphan the grandchild on Windows (observed live: 28 leaked `node mcp/server` processes
+    // saturating the machine). Kill the whole tree by pid so no run can leak servers.
+    for (const t of this.transports.values()) {
+      const pid = t?.pid;
+      if (!pid) continue;
+      try {
+        if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { timeout: 5000 });
+        else process.kill(pid, "SIGKILL");
+      } catch { /* already gone */ }
+    }
+    this.transports.clear();
     this.clients.clear();
   }
 }
