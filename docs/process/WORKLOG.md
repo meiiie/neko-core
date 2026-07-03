@@ -30,7 +30,9 @@ what workflows/skills give. The refs clone + this analysis stay for that day.
 **The measured, already-shipped fix instead:** the owner's config runs the 23-tool browser MCP below the
 lazy threshold (30), so its schemas cost **~3,991 tokens EVERY LLM call**; `mcp_lazy: true` (built in G12)
 drops that to ~634 (meta-tool + name index) — **~3,357 tokens/call saved**, ~100-170k on a long browse
-session — one config line, no code. Recommended to the owner.
+session — one config line, no code. **Applied 2026-07-03** (owner-approved): `"mcp_lazy": true` in
+`~/.neko-core/config.json` (backup: `config.json.bak-mcp-lazy`); verified via the chat wiring path —
+`hub.lazy=true`, wire schemas 15,962 -> 486 chars + a 2,048-char name index, `mcp_load` exposed.
 
 ## 2026-07-02 — Tool-error recovery directive at the point of failure (29e7c95)
 
