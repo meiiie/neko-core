@@ -3,6 +3,29 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-04 — Seamless resume/continue: interrupt a task, come back, just keep typing (Claude-Code parity)
+
+Owner: interrupting a coding task mid-tool then resuming lost the whole chat; and it shouldn't need a
+flag - Claude Code lands you exactly at the interrupt point and you just type to continue. Studied
+claude-code/src/utils/conversationRecovery.ts clean-room (detectTurnInterruption filters orphaned
+tool_uses + appends a synthetic "Continue from where you left off"). Built the equivalent across four
+commits:
+1. **Full-thread replay + seal** (earlier commit): resume rebuilds the whole transcript incl. tool
+   calls/results (not just user+assistant text - an interrupted coding turn is almost all tool activity),
+   and sealDanglingToolCalls() adds a synthetic result for any tool_call left unanswered by the abort so
+   the provider doesn't reject the next request.
+2. **Continue mechanism**: recoverTodos() rebuilds the todo tracker from the last todo_write so the
+   handoff state (done/in-progress/left) survives; a "N tasks open" hint; `/continue` (resume the first
+   incomplete todo), `/retry` (re-run the last turn), `-c`/`--continue` (Claude-Code parity).
+3. **Auto-resume (the owner's "no flag")**: a bare `neko` now auto-resumes this dir's latest session when
+   it was left MID-TURN and recent (<12h) - `wasInterrupted()` = doesn't end on a final assistant TEXT
+   answer. So you interrupt, come back, and you're back at the interrupt point; just type to continue (the
+   sealed context makes any next message pick up). A clean-ended session never auto-resumes; `--new`
+   forces fresh. This is the seamless flow, matching Claude Code, without requiring a flag.
+
+Also fixed along the way: raw `\x1b[2J\x1b[3J\x1b[H` escapes that froze real terminals (Ink 7 owns its
+synchronized output) - resume/trim/resize now use Ink's app.clear() or append-only Static. Suite 286/0.
+
 ## 2026-07-04 — Interaction-perf sweep: session index (/resume 577->140ms) + a whole-store audit
 
 Owner: after the /resume freeze, sweep the whole codebase for OTHER functions that lag the interaction
