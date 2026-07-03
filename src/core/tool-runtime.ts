@@ -1045,11 +1045,47 @@ async function toolWebFetch(_root: string, args: Record<string, any>, backend = 
     if (/application\/(rss|atom|xml)|text\/xml/i.test(contentType) || /^﻿?\s*(<\?xml|<rss\b|<feed\b)/i.test(text.slice(0, 400))) {
       text = rssToMarkdown(text);
     } else if (contentType.includes("html")) {
-      text = htmlToMarkdown(text); // our deterministic HTML -> markdown
+      // Site-specific deterministic parser first (LLM-free, never misreads a price), generic
+      // HTML->markdown otherwise. websosanh.vn search pages are the procurement INDEX tier: one
+      // fetch = dozens of offers with a fixed structure - exactly the "structure is certain, so
+      // CODE extracts" case (the LLM only handles the fuzzy parts of a task, per our extraction rule).
+      const wss = /websosanh\.vn\/s\//i.test(url) ? wssOffersTable(text) : null;
+      text = wss ?? htmlToMarkdown(text); // our deterministic HTML -> markdown
     }
   }
   webCache.set(url, { md: text, ts: Date.now() });
   return text;
+}
+
+/** websosanh.vn search page -> a deterministic offers table (title | verbatim price | merchant | link).
+ * The listing is server-rendered with a fixed shape (`product-single-name` / `-price` / `merchant-name`),
+ * so CODE parses it - zero LLM tokens, zero misread prices - and the caller's price-table.ts does the
+ * math. Returns null when the page doesn't look like a real result list (caller falls back to the
+ * generic HTML->markdown), so a site redesign degrades gracefully instead of breaking the INDEX tier. */
+export function wssOffersTable(html: string): string | null {
+  // Split ONLY on the offer container (`product-single` followed by a space or closing quote) -
+  // `\b` alone would also split on product-single-info / -price-box and shred every offer.
+  const blocks = html.split(/<div class="product-single[" ]/).slice(1);
+  const rows: string[] = [];
+  for (const b of blocks) {
+    const name = b.match(/product-single-name"><a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+    const price = b.match(/product-single-price">([^<]+)</i);
+    if (!name || !price) continue; // ad slots / lazy placeholders have no price - skip
+    const merchant = b.match(/merchant-name">([\s\S]*?)<\/div>/i);
+    const link = name[1].startsWith("http") ? name[1] : `https://websosanh.vn${name[1]}`;
+    rows.push(`| ${stripTags(name[2])} | ${stripTags(price[1])} | ${merchant ? stripTags(merchant[1]) : "?"} | ${link} |`);
+  }
+  if (rows.length < 3) return null; // not a real result list (redesign / empty / captcha) -> generic path
+  const total = html.match(/product-count">(?:&nbsp;|\s)*([\d.,]+)/i);
+  return [
+    `# websosanh.vn - ${rows.length} offers parsed deterministically${total ? ` (page reports ${stripTags(total[1])} total)` : ""}`,
+    "",
+    "NOTE: aggregator prices can be STALE or wrong-SKU - verify the rows that answer the question on the merchant page before concluding.",
+    "",
+    "| Offer | Price (verbatim) | Merchant | Link |",
+    "|---|---|---|---|",
+    ...rows,
+  ].join("\n");
 }
 
 /** Route a URL to the best free backend if it's a known platform; else null (caller does a normal fetch). */

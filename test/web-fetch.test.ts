@@ -57,3 +57,32 @@ test("rssToMarkdown: RSS/Atom XML -> compact item list (title+link, CDATA/tags s
   expect(md).toContain("Hello there");           // CDATA unwrapped + <b> stripped
   expect(md).toContain("[Second](https://x.io/2)");
 });
+
+// --- websosanh deterministic INDEX parser (procurement tier-1) ---
+import { wssOffersTable } from "../src/core/tool-runtime.ts";
+
+const WSS_BLOCK = (title: string, href: string, price: string, merchant: string) =>
+  `<div class="product-single border-top"><div class="product-single-info"><h2 class="product-single-name">` +
+  `<a href="${href}" target="_blank" rel="nofollow">${title}</a></h2>` +
+  `<div class="product-single-price-box"><span class="product-single-price">${price}</span></div>` +
+  `<div class="product-single-merchant direct"><div class="merchant-name">${merchant}</div></div></div></div>`;
+
+test("wssOffersTable parses offers deterministically (title/price/merchant/link), decodes entities", () => {
+  const html =
+    `<strong class="product-count">&nbsp;295&nbsp;</strong>` +
+    WSS_BLOCK("&#x1ED4; c&#x1EE9;ng SSD Samsung 990 EVO Plus 2TB", "/o-cung/123/direct.htm", "5.392.000 &#x111;", "ben.com.vn") +
+    WSS_BLOCK("SSD Samsung 990 EVO Plus 2TB NVMe", "https://websosanh.vn/x/456.htm", "4.150.000 đ", "hugotech.vn") +
+    `<div class="product-single ad-slot">no price here</div>` + // ad/lazy block -> skipped, not a crash
+    WSS_BLOCK("SSD Samsung 990 EVO Plus 2TB M.2", "/y/789.htm", "15.999.000 đ", "anphatpc.com.vn");
+  const out = wssOffersTable(html)!;
+  expect(out).toContain("3 offers parsed deterministically");
+  expect(out).toContain("(page reports 295 total)");
+  expect(out).toContain("| Ổ cứng SSD Samsung 990 EVO Plus 2TB | 5.392.000 đ | ben.com.vn | https://websosanh.vn/o-cung/123/direct.htm |"); // entities decoded + relative link absolutized
+  expect(out).toContain("| 15.999.000 đ | anphatpc.com.vn |");
+  expect(out).toContain("verify the rows"); // staleness warning survives for the model
+});
+
+test("wssOffersTable returns null on a non-result page (fallback to generic markdown)", () => {
+  expect(wssOffersTable("<html><body>Không có kết quả phù hợp</body></html>")).toBeNull();
+  expect(wssOffersTable(WSS_BLOCK("only one", "/a.htm", "1.000 đ", "x.vn"))).toBeNull(); // <3 offers -> not a list
+});
