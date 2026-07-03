@@ -90,7 +90,7 @@ export class AnthropicProvider implements Provider {
       }
       if (res.ok) {
         try {
-          const out = stream ? await parseStream(res, onDelta!, bumpIdle) : parseMessage(await res.json());
+          const out = stream ? await parseStream(res, onDelta!, bumpIdle, opts?.onToolCallReady) : parseMessage(await res.json());
           if (!schemaMode && !payload.tool_choice) return out;
           // Schema mode: the forced tool's validated input IS the result; in the healed (prompt-JSON)
           // fallback the model may fence/pad the JSON, so extract it loosely before returning.
@@ -257,7 +257,7 @@ export function parseMessage(data: any): ProviderResponse {
 
 /** Streamed (SSE) Anthropic response: text_delta -> content, thinking_delta -> reasoning, input_json_delta
  * accumulates a tool_use's args. */
-async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () => void): Promise<ProviderResponse> {
+async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () => void, onToolCallReady?: (call: ToolCall) => void): Promise<ProviderResponse> {
   if (!res.body) throw new Error("anthropic streaming response had no body");
   let content = "", reasoning = "";
   const blocks: Record<number, { type: string; id?: string; name?: string; json: string }> = {};
@@ -276,7 +276,15 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
       }
       case "content_block_stop": {
         const b = blocks[ev.index];
-        if (b?.type === "tool_use") { let input: any = {}; try { input = b.json ? JSON.parse(b.json) : {}; } catch { input = { _raw: b.json }; } toolCalls.push({ id: b.id ?? "", name: b.name ?? "", arguments: input }); }
+        if (b?.type === "tool_use") {
+          let input: any = {};
+          try { input = b.json ? JSON.parse(b.json) : {}; } catch { input = { _raw: b.json }; }
+          const call = { id: b.id ?? "", name: b.name ?? "", arguments: input };
+          toolCalls.push(call);
+          // The call is complete while the rest of the response still streams - let the agent
+          // start a read-only execution NOW (stream-eager execution). Errors must not kill the stream.
+          try { onToolCallReady?.(call); } catch { /* an eager-start failure never breaks parsing */ }
+        }
         break;
       }
       case "message_delta": { const u = ev.usage ?? {}; if (u.output_tokens != null) usage.completion_tokens = u.output_tokens; if (u.input_tokens != null) usage.prompt_tokens = u.input_tokens; break; }

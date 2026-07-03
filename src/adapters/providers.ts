@@ -164,7 +164,7 @@ export class OpenAICompatProvider implements Provider {
         // Committed (no mid-stream retry). Keep the idle timer live through the body read — bumpIdle on
         // each chunk resets it — and clear it once the stream is fully consumed.
         try {
-          return stream ? await parseStream(res, onDelta!, bumpIdle) : parseOpenAIMessage(await res.json());
+          return stream ? await parseStream(res, onDelta!, bumpIdle, opts?.onToolCallReady) : parseOpenAIMessage(await res.json());
         } finally {
           if (idleTimer) clearTimeout(idleTimer);
         }
@@ -299,13 +299,27 @@ function splitThink(text: string | null | undefined): { content: string | null; 
 }
 
 /** Parse a streamed (SSE) chat completion, calling onDelta for each content chunk. */
-async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () => void): Promise<ProviderResponse> {
+async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () => void, onToolCallReady?: (call: ToolCall) => void): Promise<ProviderResponse> {
   if (!res.body) throw new Error("streaming response had no body (the endpoint returned a 200 with an empty stream)");
   let content = "";
   let reasoning = "";
   let usage: Usage | undefined;
   const acc: { id: string; name: string; argString: string }[] = [];
   const announced = new Set<number>(); // tool calls whose name we've already surfaced
+  // OpenAI streams tool calls as index-keyed deltas with no end-of-call marker: call i is complete
+  // when a delta for a DIFFERENT index arrives (or the stream ends). Finalize exactly once per index
+  // and fire onToolCallReady so the agent can overlap read-only execution with the rest of the stream.
+  const finalized = new Map<number, ToolCall>();
+  const finalize = (i: number): void => {
+    const t = acc[i];
+    if (!t || finalized.has(i)) return;
+    let args: Record<string, any>;
+    try { args = t.argString ? JSON.parse(t.argString) : {}; } catch { args = { _raw: t.argString }; }
+    const call = { id: t.id, name: t.name, arguments: args };
+    finalized.set(i, call);
+    try { onToolCallReady?.(call); } catch { /* an eager-start failure never breaks parsing */ }
+  };
+  let openIndex = -1; // the tool-call index currently receiving deltas
   const think = makeThinkSplitter(
     (s) => { content += s; onDelta(s); },
     (s) => { reasoning += s; onDelta(s, "reasoning"); },
@@ -332,6 +346,8 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
     }
     for (const tc of delta.tool_calls ?? []) {
       const i = tc.index ?? 0;
+      if (openIndex >= 0 && openIndex !== i) finalize(openIndex); // previous call is complete
+      openIndex = i;
       acc[i] ??= { id: "", name: "", argString: "" };
       if (tc.id) acc[i].id = tc.id;
       if (tc.function?.name) {
@@ -346,15 +362,10 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
   }
   think.flush(); // emit any buffered tail (e.g. trailing content with no closing tag)
 
-  const toolCalls: ToolCall[] = acc.filter(Boolean).map((t) => {
-    let args: Record<string, any>;
-    try {
-      args = t.argString ? JSON.parse(t.argString) : {};
-    } catch {
-      args = { _raw: t.argString };
-    }
-    return { id: t.id, name: t.name, arguments: args };
-  });
+  // Finalize every accumulated call (fires onToolCallReady for the last/open one) and build the
+  // response from the SAME finalized objects so eager consumers and the loop see identical calls.
+  acc.forEach((_t, i) => finalize(i));
+  const toolCalls: ToolCall[] = acc.map((_t, i) => finalized.get(i)!).filter(Boolean);
   return { content: content || null, tool_calls: toolCalls, usage, reasoning: reasoning || undefined };
 }
 

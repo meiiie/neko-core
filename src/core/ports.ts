@@ -26,6 +26,10 @@ export type DeltaHook = (text: string, kind?: "content" | "reasoning" | "tool") 
  * e.g. enumerating every product variant instead of collapsing to one value. */
 export interface CompleteOptions {
   responseSchema?: Record<string, any>;
+  /** Fired the moment a STREAMED tool call is fully parsed - long before the whole response finishes.
+   * Lets the agent overlap read-only tool execution with the rest of the generation ("Executing as
+   * You Generate", arXiv 2604.00491). Best-effort: non-streaming responses may never fire it. */
+  onToolCallReady?: (call: ToolCall) => void;
 }
 
 /** The LLM port. One method; `OpenAICompatProvider` is the adapter. */

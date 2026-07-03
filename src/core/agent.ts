@@ -62,6 +62,10 @@ export const DEFAULT_SYSTEM_PROMPT =
 // Tools safe to run concurrently in one turn: read-only inspection + sub-agent tasks (the
 // "fleet"). Mutating tools (write_file/edit/bash) are excluded so they stay ordered + gated.
 const CONCURRENCY_SAFE = new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "task"]);
+// Tools that may start executing WHILE the response is still streaming (stream-eager execution).
+// Read-only only; `task` is excluded - eagerly spawning a sub-agent on a half-streamed turn is too
+// aggressive a bet (its own model calls) for a speculative start.
+const EAGER_SAFE = new Set([...CONCURRENCY_SAFE].filter((n) => n !== "task"));
 
 // File-mutating tools. The broad doom-loop guard counts repeated edits to the SAME path even
 // when the args differ (the common "chase a build error across N edits" loop the exact-repeat
@@ -380,9 +384,25 @@ export class Agent {
         // clip the oldest observations in place first, and only summarize if that found nothing to clip.
         if (!this.shrinkOldObservations()) await this.compact();
       }
+      // Stream-eager execution ("Executing as You Generate", arXiv 2604.00491; AsyncFC 2605.15077):
+      // a streamed tool call is fully parsed long before the whole response finishes, so READ-ONLY
+      // calls start executing DURING generation - a turn's floor drops from generation+execution
+      // toward max(generation, execution). Strictly order-safe: eager-starting STOPS at the first
+      // non-read call in emission order (a read after a write must observe the write), gated tools
+      // are never eager (approval semantics untouched), everything runs under the same abort signal,
+      // and results are consumed by key below - never re-executed.
+      const eager = new Map<string, Promise<string | any[]>>();
+      const eagerKey = (c: { id?: string; name: string; arguments?: Record<string, any> }) =>
+        c.id || `${c.name}:${JSON.stringify(c.arguments ?? {})}`;
+      let eagerOk = true;
+      const onToolCallReady = (call: { id: string; name: string; arguments: Record<string, any> }) => {
+        if (!EAGER_SAFE.has(call.name)) { eagerOk = false; return; }
+        if (!eagerOk || signal?.aborted || eager.has(eagerKey(call))) return;
+        eager.set(eagerKey(call), this.safeExecute(call, signal));
+      };
       let response;
       try {
-        response = await this.provider.complete(this.messages, this.tools.schemas(), this.onDelta, signal);
+        response = await this.provider.complete(this.messages, this.tools.schemas(), this.onDelta, signal, { onToolCallReady });
       } catch (error) {
         if (signal?.aborted) return "[interrupted]";
         throw error;
@@ -406,7 +426,7 @@ export class Agent {
       if (toolCalls.length > 1 && toolCalls.every((c) => CONCURRENCY_SAFE.has(c.name))) {
         lastSig = ""; // a parallel fan-out breaks any single-call repeat chain
         toolCalls.forEach((call) => this.emit("tool_call", call));
-        const observations = await Promise.all(toolCalls.map((call) => this.safeExecute(call, signal)));
+        const observations = await Promise.all(toolCalls.map((call) => eager.get(eagerKey(call)) ?? this.safeExecute(call, signal)));
         toolCalls.forEach((call, i) => {
           this.emit("tool_result", { call, observation: observations[i] });
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observations[i]) });
@@ -427,7 +447,7 @@ export class Agent {
             const broad = this.broadLoopNudge(call);
             const observation = repeats >= 2
               ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
-              : await this.safeExecute(call, signal);
+              : await (eager.get(eagerKey(call)) ?? this.safeExecute(call, signal));
             // Track consecutive UNPRODUCTIVE results (failed OR empty) from ANY tool; a productive result
             // resets the streak. Catches the doom-loop the exact-repeat + edit guards structurally miss:
             // probing a heavy/obfuscated page with a DIFFERENT selector each time, every one returning []

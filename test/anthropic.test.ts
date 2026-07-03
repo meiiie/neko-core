@@ -203,3 +203,33 @@ test("responseSchema self-heals when tool_choice is rejected: prompt-JSON fallba
     globalThis.fetch = orig;
   }
 });
+
+test("anthropic stream fires onToolCallReady at content_block_stop, BEFORE the stream ends", async () => {
+  const events = [
+    { type: "message_start", message: { usage: { input_tokens: 1 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t1", name: "read_file" } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path":"a"}' } },
+    { type: "content_block_stop", index: 0 },
+    { type: "content_block_start", index: 1, content_block: { type: "text" } },
+    { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "tail-after-tool" } },
+    { type: "content_block_stop", index: 1 },
+    { type: "message_stop" },
+  ];
+  const body = events.map((e) => `data: ${JSON.stringify(e)}\n`).join("");
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(body, { status: 200 })) as any;
+  const order: string[] = [];
+  try {
+    const cfg = new NekoConfig({ provider: "anthropic", base_url: "http://x", model: "m", reasoning_effort: "off" }, null, {}, "k");
+    const res = await new AnthropicProvider(cfg).complete(
+      [{ role: "user", content: "hi" }], undefined,
+      (t, k) => { if (!k) order.push(`delta:${t}`); }, undefined,
+      { onToolCallReady: (c) => order.push(`ready:${c.name}:${JSON.stringify(c.arguments)}`) },
+    );
+    expect(order[0]).toBe('ready:read_file:{"path":"a"}'); // fired at block stop, before the text tail streamed
+    expect(order).toContain("delta:tail-after-tool");
+    expect(res.tool_calls).toEqual([{ id: "t1", name: "read_file", arguments: { path: "a" } }]);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});

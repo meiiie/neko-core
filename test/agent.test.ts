@@ -421,3 +421,58 @@ test("unproductive-result guard nudges after N empty/failed results in a row (an
     String(m.content).includes("[loop guard]") && String(m.content).includes("empty or failed"));
   expect(nudges.length).toBeGreaterThanOrEqual(1); // fired at the 3rd empty result in a row
 });
+
+test("stream-eager execution: a ready read-only call starts DURING generation, never re-executes", async () => {
+  const log: string[] = [];
+  let step = 0;
+  const provider = {
+    complete: async (_m: any[], _t: any, _d: any, _s: any, opts: any) => {
+      step++;
+      if (step === 1) {
+        // The stream parsed a complete read call; the rest of the response takes 60ms more.
+        opts.onToolCallReady({ id: "e1", name: "read_file", arguments: { path: "a.txt" } });
+        await new Promise((r) => setTimeout(r, 60));
+        log.push("provider-resolved");
+        return { content: null, tool_calls: [{ id: "e1", name: "read_file", arguments: { path: "a.txt" } }] };
+      }
+      return { content: "done", tool_calls: [] };
+    },
+  };
+  let execCount = 0;
+  const tools = {
+    schemas: () => [],
+    execute: async () => { execCount++; log.push("exec-start"); await new Promise((r) => setTimeout(r, 20)); return "CONTENT"; },
+  };
+  const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 4 });
+  expect(await agent.run("go")).toBe("done");
+  expect(execCount).toBe(1); // the eager promise was CONSUMED, not re-executed
+  expect(log.indexOf("exec-start")).toBeLessThan(log.indexOf("provider-resolved")); // overlapped with generation
+  const obs = agent.messages.find((m: any) => m.role === "tool");
+  expect(String(obs.content)).toBe("CONTENT"); // the eager result is the observation
+});
+
+test("stream-eager: order safety - a read AFTER a mutating call is NOT eager-started", async () => {
+  const log: string[] = [];
+  let step = 0;
+  const provider = {
+    complete: async (_m: any[], _t: any, _d: any, _s: any, opts: any) => {
+      step++;
+      if (step === 1) {
+        opts.onToolCallReady({ id: "w1", name: "write_file", arguments: { path: "x", content: "1" } }); // mutating -> stops eager
+        opts.onToolCallReady({ id: "r1", name: "read_file", arguments: { path: "x" } }); // must NOT start early
+        await new Promise((r) => setTimeout(r, 30));
+        log.push("provider-resolved");
+        return { content: null, tool_calls: [
+          { id: "w1", name: "write_file", arguments: { path: "x", content: "1" } },
+          { id: "r1", name: "read_file", arguments: { path: "x" } },
+        ] };
+      }
+      return { content: "done", tool_calls: [] };
+    },
+  };
+  const tools = { schemas: () => [], execute: async (name: string) => { log.push(`exec:${name}`); return "ok"; } };
+  const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 4 });
+  expect(await agent.run("go")).toBe("done");
+  // Nothing executed during generation; the loop then ran write BEFORE read (sequence semantics kept).
+  expect(log).toEqual(["provider-resolved", "exec:write_file", "exec:read_file"]);
+});

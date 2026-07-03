@@ -300,3 +300,28 @@ test("parse captures usage", () => {
   const out = parseOpenAIMessage({ choices: [{ message: { content: "x" } }], usage: { total_tokens: 5 } });
   expect(out.usage?.total_tokens).toBe(5);
 });
+
+test("openai stream finalizes tool call i when the index advances (onToolCallReady mid-stream)", async () => {
+  const chunks = [
+    { choices: [{ delta: { tool_calls: [{ index: 0, id: "a", function: { name: "read_file", arguments: '{"path":"x"}' } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 1, id: "b", function: { name: "search", arguments: '{"pattern":"y"}' } }] } }] },
+  ];
+  const body = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n";
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })) as any;
+  const ready: string[] = [];
+  try {
+    const c = new NekoConfig({ provider: "openai_compat", base_url: "http://x/v1", model: "m", reasoning_effort: "off" }, null, {}, "k");
+    const res = await new OpenAICompatProvider(c).complete(
+      [{ role: "user", content: "hi" }], undefined, () => {}, undefined,
+      { onToolCallReady: (call) => ready.push(call.name) },
+    );
+    expect(ready).toEqual(["read_file", "search"]); // call 0 finalized when index 1 appeared; last at stream end
+    expect(res.tool_calls).toEqual([
+      { id: "a", name: "read_file", arguments: { path: "x" } },
+      { id: "b", name: "search", arguments: { pattern: "y" } },
+    ]);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
