@@ -2,8 +2,39 @@ import { Box, Text } from "ink";
 
 import type { NekoConfig } from "../adapters/config.ts";
 import { VERSION } from "../shared/version.ts";
+import { highlightLine } from "./highlight.tsx";
 import { Logo } from "./logo.tsx";
 import { Markdown } from "./markdown.tsx";
+
+/** Parse one diff result line into its parts. Two formats are produced by tool-runtime.ts:
+ *  Write: "+ <code>" / "- <code>"; Edit: "NNNN <sign> <code>" (right-padded line number, then +/-/space).
+ *  marker "" means a plain (non-diff) result line -> the caller leaves it un-highlighted. */
+function parseDiffLine(l: string): { lineNo?: string; marker: "+" | "-" | " " | ""; code: string } {
+  const edit = l.match(/^(\s*\d+) ([+\- ]) (.*)$/);
+  if (edit) return { lineNo: edit[1], marker: edit[2] as "+" | "-" | " ", code: edit[3] };
+  const write = l.match(/^([+\-]) (.*)$/);
+  if (write) return { marker: write[1] as "+" | "-", code: write[2] };
+  return { marker: "", code: l };
+}
+
+/** Render one diff/result line: the +/- marker (green/red) + line number (dim) carry the diff signal,
+ *  and the CODE is syntax-highlighted per token (like real code) instead of one flat color. Removed
+ *  lines stay red (they're going away, readability matters less); added/context lines are highlighted.
+ *  A plain result line (no marker) is rendered dim, unchanged. */
+function DiffLine({ raw, indent, isError }: { raw: string; indent: string; isError: boolean }) {
+  const disp = raw.length > 200 ? raw.slice(0, 200) + "…" : raw;
+  if (isError) return <Text color="red">{indent + disp}</Text>;
+  const { lineNo, marker, code } = parseDiffLine(disp);
+  if (marker === "") return <Text dimColor>{indent + code}</Text>; // plain result line -> dim, no highlight
+  const markerColor = marker === "+" ? "green" : marker === "-" ? "red" : undefined;
+  return (
+    <Text>
+      <Text dimColor>{indent}{lineNo ? `${lineNo} ` : ""}</Text>
+      <Text color={markerColor} dimColor={!markerColor}>{marker} </Text>
+      {marker === "-" ? <Text color="red" dimColor>{code}</Text> : highlightLine(code)}
+    </Text>
+  );
+}
 
 export type LineKind = "welcome" | "user" | "assistant" | "tool_call" | "tool_result" | "tool_result_full" | "info" | "error";
 export interface Line {
@@ -81,19 +112,12 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
       return (
         <Box flexDirection="column">
           {shown.map((l, i) => {
-            const m = l.match(/^\s*\d+ ([+-]) /); // Claude-style "  20 - ..." (line number, then marker)
-            const add = l.startsWith("+") || m?.[1] === "+";
-            const del = l.startsWith("-") || m?.[1] === "-";
-            const disp = l.length > 200 ? l.slice(0, 200) + "…" : l;
-            if (i === 0 && !isError && /\([^)]*[+-]\d+[^)]*\)/.test(disp)) {
+            const indent = i === 0 ? "  └ " : "     ";
+            if (i === 0 && !isError && /\([^)]*[+-]\d+[^)]*\)/.test(l)) {
               // Edit/write header: dim, but color the +N green and -M red (Claude-style).
-              return <Text key={i} dimColor>{"  └ "}<HeaderCounts text={disp} /></Text>;
+              return <Text key={i} dimColor>{indent}<HeaderCounts text={l.length > 200 ? l.slice(0, 200) + "…" : l} /></Text>;
             }
-            return (
-              <Text key={i} color={isError ? "red" : add ? "green" : del ? "red" : undefined} dimColor={!isError && !add && !del}>
-                {(i === 0 ? "  └ " : "     ") + disp}
-              </Text>
-            );
+            return <DiffLine key={i} raw={l} indent={indent} isError={isError} />;
           })}
           {hidden > 0 ? <Text dimColor>{`     … +${hidden} lines (ctrl+o to expand)`}</Text> : null}
         </Box>
@@ -102,16 +126,9 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
     case "tool_result_full":
       return (
         <Box flexDirection="column">
-          {line.text.split("\n").map((l, i) => {
-            const m = l.match(/^\s*\d+ ([+-]) /); // Claude-style "  20 - ..." (line number, then marker)
-            const add = l.startsWith("+") || m?.[1] === "+";
-            const del = l.startsWith("-") || m?.[1] === "-";
-            return (
-              <Text key={i} color={add ? "green" : del ? "red" : undefined} dimColor={!add && !del}>
-                {(i === 0 ? "  └ " : "     ") + l}
-              </Text>
-            );
-          })}
+          {line.text.split("\n").map((l, i) => (
+            <DiffLine key={i} raw={l} indent={i === 0 ? "  └ " : "     "} isError={false} />
+          ))}
         </Box>
       );
     case "error":

@@ -10,11 +10,14 @@ const KEYWORDS = new Set(
   (
     "const let var function func fn def return if else elif for while do switch case break " +
     "continue import export from as class struct interface type enum impl trait new async await " +
-    "yield public private protected static void extends implements package use pub mut match in " +
+    "yield public private protected static extends implements package use pub mut match in " +
     "of is true false null nil None True False undefined self this super throw try catch finally " +
     "with lambda go defer chan"
   ).split(" "),
 );
+
+// Built-in/primitive TYPES color like class/type names (cyan) - matches how Claude Code renders types.
+const TYPES = new Set("void string number boolean bigint symbol object any unknown never Promise Record Array Map Set".split(" "));
 
 export function highlightLine(line: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -54,15 +57,26 @@ export function highlightLine(line: string): ReactNode[] {
       continue;
     }
 
-    const id = rest.match(/^[A-Za-z_]\w*/);
+    const id = rest.match(/^[A-Za-z_$][\w$]*/);
     if (id) {
-      if (KEYWORDS.has(id[0])) {
+      const word = id[0];
+      const after = rest.slice(word.length);
+      // Color, in priority order: keyword (magenta) > type/Capitalized-or-builtin (cyan) >
+      // function call, i.e. an identifier immediately followed by "(" (blue) > property/plain.
+      // This is the per-token coloring that makes a diff read like real code, not one flat green.
+      if (KEYWORDS.has(word)) {
         flush();
-        out.push(<Text key={key++} color="magenta">{id[0]}</Text>);
+        out.push(<Text key={key++} color="magenta">{word}</Text>);
+      } else if (TYPES.has(word) || /^[A-Z]/.test(word)) {
+        flush();
+        out.push(<Text key={key++} color="cyan">{word}</Text>);
+      } else if (after.startsWith("(")) {
+        flush();
+        out.push(<Text key={key++} color="blue">{word}</Text>);
       } else {
-        plain += id[0];
+        plain += word;
       }
-      i += id[0].length;
+      i += word.length;
       continue;
     }
 
