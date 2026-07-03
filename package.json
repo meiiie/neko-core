@@ -1,6 +1,6 @@
 {
   "name": "neko-core",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "A local-first agentic CLI in the spirit of Claude Code / Codex CLI. Config-first, offline-capable.",
   "type": "module",
   "license": "MIT",

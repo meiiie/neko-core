@@ -6,6 +6,50 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-07-03
+
+Reliability + efficiency patch, driven by real dogfooding (every fix traces to a live failure).
+
+### Fixed
+- **Approval box no longer swallows a fast `y`** — the y/a/n handler lived in a `useInput` hook that only
+  activated *with* the approval box; Ink paints the frame at React commit but attaches a toggled hook's
+  listener in a later passive effect, so a key pressed the instant the box appeared fell into that gap and
+  the box hung forever (this was also why two "flaky" CI tests failed deterministically on slow runners —
+  root-caused via `git bisect` + instrumenting Ink). Approval keys now live in the always-mounted global
+  hotkey hook: no activation window, no dropped keys.
+- **Release builds can't lose an asset anymore** — every matrix job used to create the GitHub release
+  concurrently; two jobs racing on a fresh tag each created one, the duplicate was discarded and its upload
+  404'd (v0.5.0 shipped without `neko-linux-arm64` until a manual re-run). The release is now created ONCE
+  by a first job (`gh release create`, idempotent) and the build matrix only uploads (`--clobber`).
+- **HTTP 529 (`overloaded_error`) is retried, not fatal** — Z.ai returned Anthropic's documented overload
+  status and the run died instantly; 529 joined the retryable set in both providers (with backoff), locked
+  by a fetch-mock test.
+
+### Added / Changed
+- **Prompt-prefix cache stability + measurement** (research-grounded: Anthropic prompt-caching docs, Manus
+  context engineering, *Don't Break the Cache* arXiv 2601.06007) — the `<env>` block is now a session-start
+  SNAPSHOT (the per-turn `git status` dirty-count that invalidated the provider's prefix cache on every
+  edit is gone; the model runs `git status` itself for live state), todos moved out of the system message
+  (the `todo_write` result already recites the plan in-stream), and the anthropic provider sends explicit
+  `cache_control` breakpoints (system-end + rolling last-message; ON by default, `prompt_cache: false`
+  opts out, strip-and-retry self-heal for endpoints that reject them). Cache reads/writes are now measured:
+  `/cost`, the bench summary and `bench-log.jsonl` report `cached` tokens across provider shapes
+  (Anthropic `cache_read_input_tokens`, OpenAI `prompt_tokens_details.cached_tokens`, DeepSeek
+  `prompt_cache_hit_tokens`).
+- **Tool-error recovery directive** (Self-Harness, arXiv 2606.09498) — the FIRST failure of a mutating tool
+  (bash/write_file/edit) injects a `[recovery]` observation at the point of error: DIAGNOSE the actual
+  state → REPAIR the root cause → VALIDATE by re-running the failed check. Edge-triggered (a success
+  re-arms it; persistent failure stays the unproductive-streak guard's job), append-only so the prompt
+  prefix stays cacheable.
+- **Procurement skill: two-stage INDEX → VERIFY sourcing** — price surveys now START from a comparison
+  aggregator (websosanh.vn; one server-rendered fetch ≈ hundreds of offers), then verify the offers that
+  answer the question (top-N for "most expensive", bottom-N for "cheapest", median band for "market
+  price") on the merchant page (product-match + live price + stock), then gap-fill via the source MAP +
+  search — with a new PC-components MAP section (HACOM, Phong Vũ, GearVN, An Phát, laptopworld…). A/B on a
+  real errand: the old strategy answered a "highest price" query wrong (9.99M₫) at 75k tokens; the new one
+  found the true answer (12.99M₫, verified live) at 50k tokens — cheaper and correct, even with the search
+  backend degraded.
+
 ## [0.5.0] — 2026-07-02
 
 - **Streaming stops jumping to the top; declutter + emoji alignment** — (1) **scroll jump** — a live region
