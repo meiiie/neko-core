@@ -13,7 +13,7 @@ const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthr
 export class AnthropicProvider implements Provider {
   constructor(private readonly cfg: NekoConfig) {}
 
-  async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, _opts?: CompleteOptions): Promise<ProviderResponse> {
+  async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
     if (!this.cfg.baseUrl) throw new Error("anthropic provider needs a base_url (e.g. https://api.z.ai/api/anthropic).");
     if (!this.cfg.model) throw new Error("anthropic provider needs a model (e.g. glm-4.6).");
     const key = this.cfg.apiKey;
@@ -30,9 +30,21 @@ export class AnthropicProvider implements Provider {
     };
     if (system) payload.system = system;
     if (tools && tools.length) payload.tools = toAnthropicTools(tools);
+    // Schema-constrained structured output (CompleteOptions.responseSchema): the Anthropic format has no
+    // `response_format`, so use its STANDARD structured-output pattern - a FORCED tool call whose
+    // input_schema IS the schema; the validated tool_use input comes back as the JSON result. Without
+    // this, schema extraction silently degrades to free-text on anthropic-format endpoints (found by
+    // the harsh-eval going 0/8 on glm-5.2: markdown-fenced replies crashed JSON.parse downstream).
+    let schemaMode = Boolean(opts?.responseSchema);
+    if (schemaMode) {
+      payload.tools = [{ name: "emit_extraction", description: "Return the extraction result in the required schema.", input_schema: opts!.responseSchema }];
+      payload.tool_choice = { type: "tool", name: "emit_extraction" };
+    }
     // Reasoning EFFORT on the Anthropic API = extended thinking. Map Neko's effort -> a `thinking` budget so
     // low..max actually deepen GLM's reasoning on Z.ai (the OpenAI `reasoning_effort` field doesn't apply here).
-    const budget = thinkingBudget(this.cfg.effort);
+    // Forced tool_choice is incompatible with extended thinking -> schema calls skip the budget
+    // (extraction needs precision, not depth; it's also faster).
+    const budget = schemaMode ? 0 : thinkingBudget(this.cfg.effort);
     if (budget > 0) {
       payload.thinking = { type: "enabled", budget_tokens: budget };
       payload.max_tokens = Math.max(payload.max_tokens, budget + 8192); // room for the answer AFTER thinking
@@ -78,7 +90,14 @@ export class AnthropicProvider implements Provider {
       }
       if (res.ok) {
         try {
-          return stream ? await parseStream(res, onDelta!, bumpIdle) : parseMessage(await res.json());
+          const out = stream ? await parseStream(res, onDelta!, bumpIdle) : parseMessage(await res.json());
+          if (!schemaMode && !payload.tool_choice) return out;
+          // Schema mode: the forced tool's validated input IS the result; in the healed (prompt-JSON)
+          // fallback the model may fence/pad the JSON, so extract it loosely before returning.
+          const call = out.tool_calls?.[0];
+          return call
+            ? { ...out, content: JSON.stringify(call.arguments ?? {}), tool_calls: [] }
+            : { ...out, content: extractJsonLoose(out.content ?? "") };
         } finally {
           if (idleTimer) clearTimeout(idleTimer);
         }
@@ -90,6 +109,16 @@ export class AnthropicProvider implements Provider {
       if (cacheOn && res.status >= 400 && res.status < 500 && /cache_control/i.test(body)) {
         cacheOn = false;
         stripCacheBreakpoints(payload);
+        continue;
+      }
+      // Self-heal: an endpoint that rejects forced tool_choice falls back to prompt-JSON (the reply is
+      // then loose-extracted above). One retry, same pattern as the other heals.
+      if (payload.tool_choice && res.status >= 400 && res.status < 500 && /tool_choice|tool choice/i.test(body)) {
+        delete payload.tool_choice;
+        delete payload.tools;
+        const extra = `\n\nReply with ONLY a single JSON object matching this JSON Schema (no prose, no code fences):\n${JSON.stringify(opts!.responseSchema)}`;
+        if (Array.isArray(payload.system)) payload.system.push({ type: "text", text: extra });
+        else payload.system = `${payload.system ?? ""}${extra}`;
         continue;
       }
       if (RETRYABLE_STATUS.has(res.status) && httpAttempt < this.cfg.maxRetries) {
@@ -174,6 +203,16 @@ export function addCacheBreakpoints(payload: Record<string, any>): void {
     // Thinking blocks and empty text blocks can't carry cache_control.
     if (b && b.type !== "thinking" && !(b.type === "text" && !b.text)) b.cache_control = { type: "ephemeral" };
   }
+}
+
+/** Best-effort JSON extraction from a model reply that may fence or pad it (the healed prompt-JSON
+ * fallback of schema mode). Prefers a fenced block, else the first-to-last-brace slice; returns the
+ * trimmed input when no braces exist so the caller's JSON.parse fails loudly (correct - no silent {}). */
+export function extractJsonLoose(s: string): string {
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = fence ? fence[1] : s;
+  const a = body.indexOf("{"), b = body.lastIndexOf("}");
+  return a >= 0 && b > a ? body.slice(a, b + 1).trim() : body.trim();
 }
 
 /** Undo addCacheBreakpoints (the self-heal path for endpoints that reject cache_control). */

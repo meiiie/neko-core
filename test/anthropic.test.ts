@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { addCacheBreakpoints, AnthropicProvider, parseMessage, stripCacheBreakpoints, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
+import { addCacheBreakpoints, AnthropicProvider, extractJsonLoose, parseMessage, stripCacheBreakpoints, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
 
 test("thinkingBudget maps the effort ladder; off/unset => 0 (no extended thinking)", () => {
@@ -139,6 +139,66 @@ test("self-heals when an endpoint rejects cache_control: strips the breakpoints,
     const res = await provider.complete([{ role: "system", content: "S" }, { role: "user", content: "hi" }]);
     expect(res.content).toBe("ok");
     expect(sawCache).toEqual([true, false]); // first try with breakpoints, healed retry without
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("extractJsonLoose: fences, padding, and no-braces pass-through", () => {
+  expect(extractJsonLoose('```json\n{"a":1}\n```')).toBe('{"a":1}');
+  expect(extractJsonLoose('Here you go:\n{"a": {"b": 2}}\nHope that helps!')).toBe('{"a": {"b": 2}}');
+  expect(extractJsonLoose("no json here")).toBe("no json here"); // caller's JSON.parse fails loudly
+});
+
+test("responseSchema on the anthropic provider = forced tool call, no thinking; input comes back as JSON", async () => {
+  const orig = globalThis.fetch;
+  let sent: any;
+  globalThis.fetch = (async (_url: string, init: any) => {
+    sent = JSON.parse(init.body);
+    return new Response(JSON.stringify({
+      content: [{ type: "tool_use", id: "t", name: "emit_extraction", input: { lowest_price_vnd: 18990000, matches_query: true } }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as any;
+  try {
+    const cfg = new NekoConfig({ provider: "anthropic", base_url: "http://x", model: "m", reasoning_effort: "high" }, null, {}, "k");
+    const res = await new AnthropicProvider(cfg).complete(
+      [{ role: "user", content: "extract" }], undefined, undefined, undefined,
+      { responseSchema: { type: "object", properties: { lowest_price_vnd: { type: "integer" } } } },
+    );
+    expect(sent.tool_choice).toEqual({ type: "tool", name: "emit_extraction" }); // FORCED
+    expect(sent.tools[0].input_schema.properties.lowest_price_vnd.type).toBe("integer"); // schema IS the tool input
+    expect(sent.thinking).toBeUndefined(); // forced tool_choice is incompatible with extended thinking
+    expect(JSON.parse(res.content!)).toEqual({ lowest_price_vnd: 18990000, matches_query: true });
+    expect(res.tool_calls).toEqual([]); // consumed as the structured result, not surfaced as a tool call
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("responseSchema self-heals when tool_choice is rejected: prompt-JSON fallback + loose extraction", async () => {
+  const orig = globalThis.fetch;
+  const bodies: any[] = [];
+  globalThis.fetch = (async (_url: string, init: any) => {
+    const sent = JSON.parse(init.body);
+    bodies.push(sent);
+    if (sent.tool_choice) {
+      return new Response(JSON.stringify({ error: { message: "tool_choice is not supported" } }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      content: [{ type: "text", text: 'Sure!\n```json\n{"price_found": false}\n```' }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as any;
+  try {
+    const cfg = new NekoConfig({ provider: "anthropic", base_url: "http://x", model: "m", reasoning_effort: "off" }, null, {}, "k");
+    const res = await new AnthropicProvider(cfg).complete(
+      [{ role: "system", content: "S" }, { role: "user", content: "extract" }], undefined, undefined, undefined,
+      { responseSchema: { type: "object" } },
+    );
+    expect(bodies[1].tool_choice).toBeUndefined(); // healed retry dropped the force
+    expect(JSON.stringify(bodies[1].system)).toContain("ONLY a single JSON object"); // fallback instruction appended
+    expect(res.content).toBe('{"price_found": false}'); // fenced reply loose-extracted to clean JSON
   } finally {
     globalThis.fetch = orig;
   }
