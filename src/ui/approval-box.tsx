@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 
 import { trunc } from "./format.ts";
+import { highlightLine } from "./highlight.tsx";
 import { Markdown } from "./markdown.tsx";
 
 export interface Approval {
@@ -31,12 +32,13 @@ export function ApprovalBox({ approval }: { approval: Approval }) {
     const content = String(args.content ?? "");
     const lines = content.split("\n");
     preview.push(<Text key="p" color="gray">write {args.path} ({lines.length} lines, {content.length} chars)</Text>);
-    lines.slice(0, 8).forEach((l, i) => preview.push(<Text key={`l${i}`} color="green">{"+ "}{l}</Text>));
+    // Syntax-highlight the added code (marker green, tokens colored) - same look as the committed diff.
+    lines.slice(0, 8).forEach((l, i) => preview.push(<Text key={`l${i}`}><Text color="green">{"+ "}</Text>{highlightLine(l)}</Text>));
     if (lines.length > 8) preview.push(<Text key="more" dimColor>{`  … +${lines.length - 8} more lines`}</Text>);
   } else if (toolName === "edit") {
     preview.push(<Text key="p" color="gray">edit {args.path}</Text>);
-    preview.push(<Text key="o" color="red">{"- "}{trunc(args.old_string, 160)}</Text>);
-    preview.push(<Text key="n" color="green">{"+ "}{trunc(args.new_string, 160)}</Text>);
+    preview.push(<Text key="o"><Text color="red">{"- "}{trunc(args.old_string, 160)}</Text></Text>);
+    preview.push(<Text key="n"><Text color="green">{"+ "}</Text>{highlightLine(trunc(args.new_string, 160))}</Text>);
   } else {
     preview.push(<Text key="a" color="gray">{trunc(JSON.stringify(args), 200)}</Text>);
   }
