@@ -3,6 +3,25 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-03 — Stream-eager tool execution: the loop's floor drops to max(generation, execution)
+
+Owner asked for the next performance frontier (research-first, or invent one). Post-sprint cost structure
+made it obvious: the agent loop was STRICTLY sequential (generate -> execute -> generate) while generation
+(~10 tok/s on glm-5.2) and tool execution (1-8s each) are overlappable. Research converged on exactly this
+lever: **"Executing as You Generate"** (arXiv 2604.00491 — hides execution behind generation, up to -37.3%
+end-to-end latency), **AsyncFC** (arXiv 2605.15077 — future-based decode/execute overlap, "concurrency
+without model changes"), and the tool-use survey (arXiv 2603.22862 — parallel / async-decoupling /
+speculative as the three efficiency paradigms).
+
+Built it at the ports/adapters seam: `CompleteOptions.onToolCallReady` fires the moment a STREAMED tool
+call is fully parsed (anthropic: `content_block_stop`; openai: index-advance, finalize-once). The loop
+eager-starts READ-ONLY calls (EAGER_SAFE = CONCURRENCY_SAFE minus `task`) while the rest of the response
+still streams, with strict order safety: eager-starting stops at the first non-read call in emission order
+(a read after a write must observe the write), gated tools keep approval semantics untouched, the same
+abort signal governs everything, and results are consumed by key (never re-executed). In a batch of N
+reads, call 1 runs while calls 2..N stream - at 10 tok/s that window is seconds per turn on read-heavy
+work (web_fetch batches, file exploration). +4 tests locking the contract on both wire formats. 272/0.
+
 ## 2026-07-03 — MCP lazy-CONNECT + orphan tree-kill: local RAM 513MB -> 233MB (-55%)
 
 Went from profile to fix the same day (owner: "dieu tra sau phan toi uu di"). Experiments first: normal
