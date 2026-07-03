@@ -19,7 +19,7 @@ import { TextInput } from "./text-input.tsx";
 import { RunningLine, ThinkingLine, VERBS } from "./thinking-line.tsx";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
-import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
+import { Agent, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
 import { loadConfig } from "../adapters/config.ts";
 import { agentsContextBlock, loadAgent } from "../adapters/agents.ts";
 import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
@@ -85,6 +85,7 @@ function resultSummary(name: string | undefined, obs: string): string | undefine
  * assistant text. An interrupted coding turn is almost all tool_calls + tool results with no final
  * assistant text, so skipping them made a resumed session look empty ("the work is gone") even though
  * the agent context was intact. This reconstructs it exactly as it looked live. */
+const REPLAY_MAX_LINES = 80; // display cap on a resumed thread - the agent keeps ALL messages in context
 function replaySessionLines(messages: any[], nextId: () => number): Line[] {
   const out: Line[] = [];
   const toolById = new Map<string, string>(); // tool_call_id -> tool name (to summarize its result)
@@ -107,6 +108,13 @@ function replaySessionLines(messages: any[], nextId: () => number): Line[] {
       const obs = String(m.content ?? "").split("\n").slice(0, 400).join("\n");
       out.push({ id: nextId(), kind: "tool_result", text: obs, summary: resultSummary(name, obs) });
     }
+  }
+  // Bound the DISPLAY to the most recent lines: rendering a very long thread's hundreds of <Static>
+  // items at once is what lagged the picker after selecting. The whole conversation is still in the
+  // agent's context (this only trims what's re-printed on screen).
+  if (out.length > REPLAY_MAX_LINES) {
+    const hidden = out.length - REPLAY_MAX_LINES;
+    return [{ id: nextId(), kind: "info", text: `... ${hidden} earlier line${hidden > 1 ? "s" : ""} resumed (in context, not re-printed) ...` }, ...out.slice(-REPLAY_MAX_LINES)];
   }
   return out;
 }
@@ -994,7 +1002,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
               </Text>
               {(() => {
                 const cost = agentRef.current!.cost;
-                const pct = ctxPercent(cost.lastPrompt, cfg.contextWindow);
+                // Before the first API call of a session (e.g. right after /resume), lastPrompt is 0 -
+                // but the context ISN'T empty. Estimate from the loaded messages so a resumed session
+                // shows its real ~N% immediately instead of a misleading 0% that jumps on the next turn.
+                const used = cost.lastPrompt || estimateTokens(agentRef.current!.messages);
+                const pct = ctxPercent(used, cfg.contextWindow);
                 const ctxColor = pct >= 85 ? "red" : pct >= 60 ? "yellow" : "#9a9a9a";
                 return (
                   <Text color="#9a9a9a">

@@ -217,3 +217,21 @@ test("recoverTodos: rebuilds the todo tracker from the last todo_write in saved 
   expect(todos.map((t) => t.status)).toEqual(["completed", "in_progress", "pending"]);
   expect(recoverTodos([{ role: "user", content: "no todos here" }])).toEqual([]); // none -> empty
 });
+
+test("resumed session: ctx% reflects loaded context (not a misleading 0%) + display is bounded", async () => {
+  const msgs: any[] = [{ role: "system", content: "s".repeat(4000) }];
+  for (let i = 0; i < 90; i++) {
+    msgs.push({ role: "user", content: "task " + i });
+    msgs.push({ role: "assistant", content: "", tool_calls: [{ id: "c" + i, type: "function", function: { name: "write_file", arguments: JSON.stringify({ path: "f" + i, content: "x".repeat(300) }) } }] });
+    msgs.push({ role: "tool", tool_call_id: "c" + i, content: "Wrote f" + i });
+  }
+  const sess = { id: "s-long", createdAt: "", updatedAt: new Date().toISOString(), cwd: process.cwd(), model: "glm-5.2", messages: msgs };
+  const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+  const { lastFrame, unmount } = render(<ChatApp yolo provider={provider} resumedSession={sess as any} sessionId="s-long" />);
+  await tick(120);
+  const f = (lastFrame() ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+  const pct = Number(f.match(/(\d+)% ctx/)?.[1] ?? "0");
+  expect(pct).toBeGreaterThan(0); // estimated from the loaded messages, not 0 before the first API call
+  expect(f).toMatch(/earlier line.*resumed.*in context/); // display bounded, rest still in context
+  unmount();
+}, 15000);
