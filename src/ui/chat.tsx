@@ -749,6 +749,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   const onSubmit = (value: string) => {
     setInput("");
+    // Slash menu open: Enter runs the HIGHLIGHTED / nearest-matching command, not the raw partial
+    // the user typed. So "/resu"+Enter runs /resume, and ↓+Enter runs the arrow-selected one -
+    // mirroring Tab-completion but also submitting (the behavior Claude Code's slash menu has).
+    // Only when it's a bare command token (no space yet) so "/model gpt-4" keeps its argument.
+    if (!awaitingKey && value.length >= 2 && value.startsWith("/") && !/\s/.test(value)) {
+      const matches = SLASH.filter((c) => c.name.startsWith(value));
+      if (matches.length) value = (matches[Math.min(slashSel, matches.length - 1)] ?? matches[0]).name;
+    }
     // /login key capture: save it, never echo or store in history, don't run a turn.
     if (awaitingKey) {
       setAwaitingKey(false);

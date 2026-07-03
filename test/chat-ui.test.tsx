@@ -187,3 +187,19 @@ test("ApprovalBox shows an edit diff preview", () => {
   expect(out).toContain("+ const x = 2");
   unmount();
 });
+
+test("slash menu: Enter completes a PARTIAL command to the highlighted match and runs it", async () => {
+  const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+  const { stdin, lastFrame, unmount } = render(<ChatApp yolo provider={provider} />);
+  await tick();
+  stdin.write("/hel"); // partial - the menu highlights /help
+  await tick();
+  expect(lastFrame() ?? "").toContain("up/down to select, tab to complete"); // menu open on the partial
+  stdin.write("\r"); // Enter: before the fix this submitted the raw "/hel" (unknown); now it runs /help
+  await tick(120);
+  const out = (lastFrame() ?? "");
+  expect(out).not.toContain("up/down to select"); // menu closed - a command ran
+  // /help prints the help text; its header line proves the completed command executed, not "/hel".
+  expect(out.replace(/\x1b\[[0-9;]*m/g, "")).toMatch(/help|commands|\/model|\/resume/i);
+  unmount();
+}, 15000);

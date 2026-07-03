@@ -85,7 +85,13 @@ export interface CommandCtx {
 function openResumePicker(ctx: CommandCtx, scope: "cwd" | "all"): void {
   const all = listSessions();
   const list = scope === "cwd" ? all.filter((s) => s.cwd === process.cwd()) : all;
-  if (!list.length) return ctx.addLine("info", "no saved sessions here - Ctrl+A shows all projects");
+  if (!list.length) {
+    // This directory has no sessions. If OTHER projects do, open the all-projects picker directly
+    // (don't dead-end on a "Ctrl+A" hint when there's no picker on screen to press it on - which read
+    // as a freeze). Only when nothing exists anywhere is an info line the right answer.
+    if (scope === "cwd" && all.length) return openResumePicker(ctx, "all");
+    return ctx.addLine("info", "no saved sessions yet");
+  }
   ctx.setOverlay({
     title: scope === "all" ? "Resume session (all projects)" : "Resume session",
     ctrlAHint: scope === "all" ? "this project" : "all projects",
