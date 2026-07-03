@@ -47,10 +47,11 @@ test("status bar shows mode + context %", () => {
   c.unmount();
 });
 
-test("ThinkingLine shows effort + per-turn tokens", () => {
-  const f = strip(render(<ThinkingLine verb="Thinking" elapsed={11} tokens={1200} step={1} queued={0} effort="xhigh" />).lastFrame());
+test("ThinkingLine shows effort + per-turn tokens split input/output", () => {
+  const f = strip(render(<ThinkingLine verb="Thinking" elapsed={11} liveIn={() => 1200} liveOut={() => 340} step={1} queued={0} effort="xhigh" />).lastFrame());
   expect(f).toContain("xhigh effort");
-  expect(f).toContain("1.2k tok");
+  expect(f).toContain("↑1.2k");   // input (context sent)
+  expect(f).toContain("↓340");    // output (generated)
   expect(f).toContain("esc to interrupt");
 });
 

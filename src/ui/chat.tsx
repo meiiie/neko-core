@@ -16,7 +16,7 @@ import { ctxPercent, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TextInput } from "./text-input.tsx";
-import { RunningLine, ThinkingLine, VERBS } from "./thinking-line.tsx";
+import { DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
@@ -225,7 +225,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [reasoning, setReasoning] = useState(""); // live model thinking (shown while busy, then cleared)
   const reasoningRef = useRef("");
   const toolStreamRef = useRef(""); // streamed tool-call args this turn (counted, not displayed)
-  const turnTokensStartRef = useRef(0); // cost.totalTokens at turn start -> spinner shows this turn only
+  const turnInStartRef = useRef(0); // cost.promptTokens at turn start  -> live INPUT (up) counter, this turn's delta
+  const turnOutStartRef = useRef(0); // cost.completionTokens at turn start -> live OUTPUT (down) counter, this turn's delta
   // Recover the todo tracker for a session resumed AT STARTUP (--resume/--continue), so its plan shows.
   const [todos, setTodos] = useState<{ content: string; status: string }[]>(() =>
     resumedRef.current ? recoverTodos(resumedRef.current.messages) : [],
@@ -755,7 +756,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       addLine("info", `workflow: ${wf.name}`);
     }
     const turnStart = Date.now();
-    turnTokensStartRef.current = agentRef.current!.cost.totalTokens; // baseline -> show THIS turn's tokens
+    // Baselines at turn start -> the spinner shows THIS turn's tokens (delta), split input/output.
+    turnInStartRef.current = agentRef.current!.cost.promptTokens;
+    turnOutStartRef.current = agentRef.current!.cost.completionTokens;
     busyRef.current = true; // sync now so a keystroke landing this instant queues (not just after render)
     setBusy(true);
     const controller = new AbortController();
@@ -770,9 +773,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       else {
         if (!streamed && result.trim()) addLine("assistant", result); // non-streaming provider
         const secs = Math.round((Date.now() - turnStart) / 1000);
-        // Whole-turn tokens (matches what the spinner counted up to), not just the last step's output.
-        const turnTokens = Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current);
-        addLine("info", `${verbRef.current} for ${fmtDuration(secs)} · ${fmtTok(turnTokens)} tokens`);
+        // Whole-turn tokens split by direction (input up / output down), matching the live spinner.
+        const inTok = Math.max(0, agentRef.current!.cost.promptTokens - turnInStartRef.current);
+        const outTok = Math.max(0, agentRef.current!.cost.completionTokens - turnOutStartRef.current);
+        addLine("info", `${verbRef.current} for ${fmtDuration(secs)} · ${UP}${fmtTok(inTok)} ${DOWN}${fmtTok(outTok)} tokens`);
       }
       // Auto-compact when the context window is nearly full (Claude-style).
       if (result !== "[interrupted]" && agentRef.current!.cost.lastPrompt > 0.85 * cfg.contextWindow) {
@@ -933,12 +937,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           <ThinkingLine
             verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}
             elapsed={elapsed}
-            tokens={0}
-            // Re-read every 80ms frame: counted tokens from completed steps this turn + a live
-            // ~4-chars/token estimate of whatever is streaming NOW (content, reasoning, or a big
-            // tool-call's args) — so the meter counts up even while a large write_file generates.
-            liveTokens={() =>
-              Math.max(0, agentRef.current!.cost.totalTokens - turnTokensStartRef.current) +
+            // Both re-read every 80ms frame so the meters count up live.
+            // liveIn: input (context) tokens billed this turn — grows each step as history is re-sent.
+            liveIn={() => Math.max(0, agentRef.current!.cost.promptTokens - turnInStartRef.current)}
+            // liveOut: output tokens counted this turn + a ~4-chars/token estimate of whatever is
+            // streaming NOW (content, reasoning, or a big tool-call's args) — so it climbs even mid-write.
+            liveOut={() =>
+              Math.max(0, agentRef.current!.cost.completionTokens - turnOutStartRef.current) +
               Math.ceil((streamRef.current.length + reasoningRef.current.length + toolStreamRef.current.length) / 4)
             }
             step={step}

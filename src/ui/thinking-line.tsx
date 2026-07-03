@@ -11,6 +11,10 @@ export const VERBS = [
 
 const ORANGE = "#e6932e";
 const SHIMMER = "#ffd9a0";
+// Token direction glyphs: input (context fed in) / output (generated). Text arrows (U+2191/2193),
+// not emoji - they render as text on Windows Terminal (like the other TUI glyphs), unlike keycaps.
+export const UP = "↑";
+export const DOWN = "↓";
 // Pulse glyph: dot -> star -> sparkle and back. Plain "*" (not ✳, which renders as an emoji
 // on Windows — same swap claude-code makes for non-darwin).
 const FRAMES = ["·", "✢", "*", "✶", "✻", "✽", "✻", "✶", "*", "✢"];
@@ -43,9 +47,10 @@ export function RunningLine({ text }: { text: string }) {
 
 /** A pulsing star (fixed-width, no text shift) + a verb with a shimmer band sweeping across it,
  * then dim meta in parens. Self-animated (own 80ms clock; unmounts when idle). */
-export function ThinkingLine(props: { verb: string; elapsed: number; tokens: number; step: number; queued: number; effort?: string; liveTokens?: () => number }) {
+export function ThinkingLine(props: { verb: string; elapsed: number; step: number; queued: number; effort?: string; liveIn: () => number; liveOut: () => number }) {
   const { verb, elapsed, step, queued, effort } = props;
-  const tokens = props.liveTokens ? props.liveTokens() : props.tokens; // re-read each 80ms frame -> counts up live
+  const inTok = props.liveIn();   // input (context sent) this turn - re-read each 80ms frame, counts up live
+  const outTok = props.liveOut(); // output (generated) this turn
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setFrame((f) => (f + 1) % 100000), 80);
@@ -60,7 +65,7 @@ export function ThinkingLine(props: { verb: string; elapsed: number; tokens: num
     `${fmtElapsed(elapsed)}` +
     (effort ? ` · ${effort} effort` : "") +
     (step > 1 ? ` · step ${step}` : "") +
-    ` · ${fmtTok(tokens)} tok` +
+    ` · ${UP}${fmtTok(inTok)} ${DOWN}${fmtTok(outTok)}` +
     (queued > 0 ? ` · ${queued} queued` : "") +
     " · esc to interrupt";
 
