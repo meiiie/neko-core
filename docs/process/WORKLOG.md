@@ -3,6 +3,26 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-03 — MCP lazy-CONNECT + orphan tree-kill: local RAM 513MB -> 233MB (-55%)
+
+Went from profile to fix the same day (owner: "dieu tra sau phan toi uu di"). Experiments first: normal
+exit and a controlled hard-kill did NOT leak (the 28-orphan pile was a nondeterministic race in the
+bunx->node launcher chain — the SDK kills only its direct child), and the process tax was deterministic:
+every run spawned the browser MCP (~277MB across bunx+node) even when no browser tool was ever called.
+
+Fix at the adapter (zero core change): (a) **spec cache** `~/.neko-core/mcp-specs.json` keyed by
+name+config-hash — a hub registers a server's full tool surface (specs/resources/prompts/meta) WITHOUT
+spawning it; the existing reconnect seam became `ensureClient` (connect on first actual use, refresh the
+cache); config change = cache miss = eager as before; `neko mcp` calls `connectPending()` so diagnostics
+never show stale cache. (b) **close() tree-kills** stdio children by transport pid (`taskkill /T` on
+Windows) — closes the launcher-chain leak. Honest residual: a hard-killed run that was actively browsing
+can still orphan (nothing in-process survives SIGKILL); lazy-connect shrinks that surface to near zero
+since non-browsing runs spawn nothing.
+
+**Measured after:** trivial live run 513MB/3 processes -> **233MB/1 process**, zero MCP children; cache
+16.6KB; on-demand connect works end-to-end (fixture-server unit tests: cache-hit no-spawn, first-call
+connect, config-change invalidation). Suite 268/0; policy + build green.
+
 ## 2026-07-03 — Cross-model verification + local-perf profile (owner question: "other models? CPU/GPU/RAM?")
 
 **Cross-model:** harsh-eval re-run on gpt-oss/NVIDIA (the OpenAI wire format, `response_format`

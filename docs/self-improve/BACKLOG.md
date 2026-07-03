@@ -26,14 +26,23 @@ one never blocks another.
   README + a first-run hint; consider a gentle in-chat hint when searxng_url is configured but unreachable
   ("start Docker Desktop or remove searxng_url"). Verify: docs render + the hint fires only in that state.
 
-- [ ] **MCP lazy-CONNECT (spawn on first call) — the top LOCAL-perf item.** Measured 2026-07-03: a live
+- [x] **MCP lazy-CONNECT (spawn on first call) — the top LOCAL-perf item.** *(done same day — spec cache
+  keyed by name+config-hash registers the tool surface without spawning; ensureClient connects on first
+  use; `neko mcp` stays live via connectPending. Measured: 513MB/3 processes -> 233MB/1 process (-55%),
+  zero children for non-browsing runs. Unit-tested incl. cache-hit no-spawn + config-change miss.)*
+  Original finding: a live
   `neko run` tree = 513MB RAM, of which **~277MB is the browser-MCP server spawned even when the run never
   calls a browser tool** (bunx runner 161MB + node 116MB), plus its spawn latency on EVERY run. `mcp_lazy`
   removed the TOKEN tax; the PROCESS tax remains. Fix: defer `connectAll` per server until its first
   tool/schema request (mcp_load or a call); doctor/`neko mcp` still connect eagerly to enumerate. Verify:
   a run that uses no MCP tool spawns no MCP child (assert via process list in a test or a spawn-count
   hook); a run that calls one connects lazily and works; RAM of a trivial run drops ~250MB+.
-- [ ] **MCP child-process cleanup (orphan hygiene).** Found 2026-07-03: 28 orphaned `node mcp/server`
+- [x] **MCP child-process cleanup (orphan hygiene).** *(done same day, honest scope: close() now
+  TREE-kills stdio children by transport pid — the SDK killed only its direct child and the bunx->node
+  chain orphaned grandchildren; plus lazy-connect removes the spawn entirely for non-browsing runs, so
+  the observed leak paths are closed. NOT covered: a hard-killed run that was actively browsing can
+  still orphan — no in-process fix exists for SIGKILL; acceptable residual.)* Found 2026-07-03: 28
+  orphaned `node mcp/server`
   processes saturating the machine (flaked the queue UI test) — every `neko run` spawns stdio MCP
   children (the browser MCP from config), and a killed/timed-out neko (eval spawnSync timeout, Ctrl+C,
   crash) orphans them. Fix: tie child lifetime to the parent (Windows Job Objects / POSIX process
