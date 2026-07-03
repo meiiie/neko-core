@@ -3,6 +3,23 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-03 — Syntax-highlight code inside diffs (Claude-Code-grade tool-result rendering)
+
+Owner compared Neko's Write/Edit tool output to Claude Code (screenshots): Neko rendered every diff line
+in ONE flat color (green add / red del / dim) so code read as a monochrome blob, while Claude Code colors
+the code TOKENS (keywords, types, strings, functions) like real code with indentation. Root cause: Neko
+already had a per-token highlighter (`highlight.tsx`) but it was only wired into markdown code blocks, never
+into the diff renderer. (This is a RENDERING gap, NOT a "code skill" — the owner asked if a skill was
+needed; it isn't, the fix lives in `src/ui/`.)
+
+Fix: a `DiffLine` component in `transcript.tsx` parses the two tool-runtime diff formats (Write `+ code`;
+Edit `NNNN <sign> code`), colors the marker (green +/red -) + line number (dim) to carry the diff signal,
+and runs the CODE through `highlightLine` so tokens get real colors while indentation survives; removed
+lines stay red, plain non-diff results (search/ls) stay dim/un-highlighted. Extended `highlight.tsx` with
+type/class coloring (cyan for builtin types + Capitalized identifiers) and function-call coloring (blue),
+matching Claude Code's palette. Proven on a real render (FORCE_COLOR): magenta keywords + cyan types + blue
+calls + green strings all emit on one diff line, indent intact. +9 tests; suite 280/0; binary reinstalled.
+
 ## 2026-07-03 — HARD benchmark tier + an honest finding (also 100%) + 2 coding skills (Superpowers, clean-room)
 
 Built `neko bench hard` (6 multi-file/algorithm/verification-biting tasks: layered-bug root-cause tracing,
