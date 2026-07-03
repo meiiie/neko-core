@@ -19,6 +19,13 @@ one never blocks another.
   bench (no-regression) on changes touching `src/core` or `src/adapters/providers`. Verify: gate catches a
   deliberate token/pass regression.
 
+- [ ] **End-user search onboarding ladder (Docker optional) — docs + UX.** (Owner, 2026-07-03: "để sau".)
+  Today's finding: Docker Desktop idles ~5.7GB RAM for SearXNG; the INDEX->VERIFY skill architecture makes
+  DDG-only correct for catalog price surveys, so Docker is a per-session power-up, not a dependency. TODO
+  when picked up: document the 3-tier ladder (default DDG / TAVILY_API_KEY / `neko setup web` + Docker) in
+  README + a first-run hint; consider a gentle in-chat hint when searxng_url is configured but unreachable
+  ("start Docker Desktop or remove searxng_url"). Verify: docs render + the hint fires only in that state.
+
 ## Research-seeded (turn into "Now" items as they're scoped)
 - [ ] Archive/population self-improvement (DGM): keep N improved branches, benchmark each, keep the best —
   parallel exploration instead of one linear branch.
