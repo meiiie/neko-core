@@ -16,10 +16,10 @@ import { ctxPercent, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TextInput } from "./text-input.tsx";
-import { DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
+import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
-import { Agent, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
+import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
 import { loadConfig } from "../adapters/config.ts";
 import { agentsContextBlock, loadAgent } from "../adapters/agents.ts";
 import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
@@ -232,6 +232,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     resumedRef.current ? recoverTodos(resumedRef.current.messages) : [],
   );
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [compacting, setCompacting] = useState<{ start: number } | null>(null); // shows the compacting progress bar
+  const compactingRef = useRef(false); // guard: never overlap two compactions
   const [expandedId, setExpandedId] = useState<number | null>(null); // ctrl+o: which tool_result is peeked in full (toggle)
   // Tool calls in flight: shown LIVE with a blinking dot, then committed to <Static> (solid dot) with
   // their result. A keyed list (not one value) because the agent's concurrent path fires all tool_calls
@@ -406,6 +408,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           setTodos([...registryRef.current!.todos]); // reflect todo_write changes
         } else if (kind === "step") {
           setStep(data);
+        } else if (kind === "compact") {
+          // In-loop safety-net compaction (a single huge turn). Show the same progress bar; the agent
+          // emits compact_done when its summarizer call returns.
+          flushStream();
+          setCompacting({ start: Date.now() });
+        } else if (kind === "compact_done") {
+          setCompacting(null);
         }
       },
     });
@@ -428,6 +437,39 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   // Load a session's history into the live agent AND replay it into the transcript (like opening a
   // chat thread — you see the whole prior conversation, not just a note).
+  // Run a compaction with the visible progress bar (image #16 parity). Standalone - not tied to a
+  // turn's busy flag - so it also drives /compact, the post-turn auto-compact, and resume-from-summary.
+  const runCompaction = async (reason: "manual" | "auto" | "resume"): Promise<string> => {
+    if (compactingRef.current) return ""; // already compacting -> don't stack two summarizer calls
+    compactingRef.current = true;
+    setCompacting({ start: Date.now() });
+    try {
+      const before = estimateTokens(agentRef.current!.messages);
+      const summary = await agentRef.current!.compact();
+      const freed = Math.max(0, before - estimateTokens(agentRef.current!.messages));
+      if (summary) {
+        const why = reason === "auto" ? "context was nearly full" : reason === "resume" ? "resumed from a summary" : "on request";
+        addLine("info", `Compacted - freed ~${fmtTok(freed)} tokens (${why}).`);
+      } else if (reason === "manual") {
+        addLine("info", "(nothing old enough to compact yet)");
+      }
+      return summary;
+    } finally {
+      compactingRef.current = false;
+      setCompacting(null);
+      // Drain input queued DURING a standalone compaction (/compact or resume-from-summary). For "auto"
+      // the compaction runs inside handle(), whose own finally drains - draining here too would run two
+      // turns at once on the same messages array.
+      if (reason !== "auto" && !busyRef.current) {
+        const next = queueRef.current.shift();
+        if (next !== undefined) {
+          setQueued(queueRef.current.length);
+          void handle(next).catch((e) => addLine("error", e instanceof Error ? e.message : String(e)));
+        }
+      }
+    }
+  };
+
   const resumeInto = (target: Session) => {
     agentRef.current!.messages = [...target.messages];
     agentRef.current!.refreshSystemPrompt(); // apply the current prompt to the resumed session
@@ -719,6 +761,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setQueued,
         resumeInto,
         runText: handle,
+        compact: runCompaction,
         exit,
       });
       return;
@@ -778,10 +821,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const outTok = Math.max(0, agentRef.current!.cost.completionTokens - turnOutStartRef.current);
         addLine("info", `${verbRef.current} for ${fmtDuration(secs)} · ${UP}${fmtTok(inTok)} ${DOWN}${fmtTok(outTok)} tokens`);
       }
-      // Auto-compact when the context window is nearly full (Claude-style).
-      if (result !== "[interrupted]" && agentRef.current!.cost.lastPrompt > 0.85 * cfg.contextWindow) {
-        addLine("info", "(context nearly full - auto-compacting)");
-        await agentRef.current!.compact();
+      // Auto-compact when the context window is nearly full (Claude-style), on the ACCURATE last-request
+      // token count. runCompaction shows the progress bar + a "freed ~Nk" line, so no bare notice needed.
+      if (result !== "[interrupted]" && agentRef.current!.cost.lastPrompt > COMPACT_AT * cfg.contextWindow) {
+        await runCompaction("auto");
       }
     } catch (error) {
       flushStream();
@@ -856,8 +899,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setExpandedId(null); // a new turn: drop any ctrl+o peek panel
     historyRef.current.push(text);
     historyPos.current = historyRef.current.length;
-    if (busyRef.current) {
-      // Queue input typed while a turn is running; drained when it finishes.
+    if (busyRef.current || compactingRef.current) {
+      // Queue input typed while a turn is running OR a compaction is in flight (a turn must not mutate
+      // agent.messages while compact() is rewriting it); drained when the current work finishes.
       queueRef.current.push(text);
       setQueued(queueRef.current.length);
       addLine("info", `queued: ${trunc(text, 60)}`);
@@ -932,7 +976,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         </Box>
       ) : null}
 
-      {busy && !approval ? (
+      {compacting ? (
+        <Box marginTop={1}>
+          <CompactingLine start={compacting.start} />
+        </Box>
+      ) : busy && !approval ? (
         <Box marginTop={1} flexDirection="column">
           <ThinkingLine
             verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}

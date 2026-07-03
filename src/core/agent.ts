@@ -85,6 +85,14 @@ export const MAX_OBS_CHARS = 48000;
 /** On compaction, also clip a kept-tail tool result once it exceeds this many CHARS — catches dense
  * few-line output (minified JSON, base64, packed log lines) that the line-count guard misses. */
 export const LEAN_TAIL_CHARS = 8000;
+/** Auto-compaction thresholds, as a FRACTION of the model's context window. Two on purpose:
+ *  - COMPACT_AT (primary): checked BETWEEN turns against the last request's ACTUAL input-token count
+ *    (cost.lastPrompt) - the accurate signal, so this is where the user normally sees a compaction.
+ *  - COMPACT_SAFETY_AT (safety net): checked INSIDE one long turn against the rough char-based estimate,
+ *    which can undercount, so it fires a little earlier to keep headroom before a request would 400 on a
+ *    negative max_tokens. A single huge turn (many browser snapshots) is the case this exists for. */
+export const COMPACT_AT = 0.85;
+export const COMPACT_SAFETY_AT = 0.80;
 export function clampObservation(obs: string | any[]): string | any[] {
   if (typeof obs !== "string" || obs.length <= MAX_OBS_CHARS) return obs;
   const head = obs.slice(0, MAX_OBS_CHARS - 2000);
@@ -435,11 +443,16 @@ export class Agent {
       // In-loop overflow guard: within ONE turn (e.g. many huge browser snapshots) context can grow
       // past the window with no chance for the between-turn UI compaction to run. Compact here BEFORE a
       // request would overflow -- otherwise the server computes a negative max_tokens and 400s the turn.
-      if (estimateTokens(this.messages) > 0.8 * this.maxContextTokens) {
-        this.emit("compact", "auto");
+      if (estimateTokens(this.messages) > COMPACT_SAFETY_AT * this.maxContextTokens) {
         // One long turn has a single user message, so compact()'s snap-to-user boundary frees nothing;
-        // clip the oldest observations in place first, and only summarize if that found nothing to clip.
-        if (!this.shrinkOldObservations()) await this.compact();
+        // clip the oldest observations in place first (cheap, synchronous), and only pay for a summarizer
+        // call if that found nothing to clip. The compact/compact_done events bracket ONLY that slow path,
+        // so the UI's compacting indicator shows for the model call, not the instant in-place clip.
+        if (!this.shrinkOldObservations()) {
+          this.emit("compact", "auto");
+          await this.compact();
+          this.emit("compact_done", "auto");
+        }
       }
       // Stream-eager execution ("Executing as You Generate", arXiv 2604.00491; AsyncFC 2605.15077):
       // a streamed tool call is fully parsed long before the whole response finishes, so READ-ONLY

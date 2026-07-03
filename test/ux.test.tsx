@@ -4,7 +4,7 @@ import { render } from "ink-testing-library";
 
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { ChatApp } from "../src/ui/chat.tsx";
-import { fmtElapsed, RunningLine, ThinkingLine } from "../src/ui/thinking-line.tsx";
+import { CompactingLine, fmtElapsed, RunningLine, ThinkingLine } from "../src/ui/thinking-line.tsx";
 import { ApprovalBox } from "../src/ui/approval-box.tsx";
 import { TranscriptLine } from "../src/ui/transcript.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
@@ -53,6 +53,14 @@ test("ThinkingLine shows effort + per-turn tokens split input/output", () => {
   expect(f).toContain("↑1.2k");   // input (context sent)
   expect(f).toContain("↓340");    // output (generated)
   expect(f).toContain("esc to interrupt");
+});
+
+test("CompactingLine shows the progress bar, percent, and a tip", () => {
+  const f = strip(render(<CompactingLine start={1_000_000} />).lastFrame());
+  expect(f).toContain("Compacting conversation");
+  expect(f).toContain("0%");            // frame 0: elapsed 0 -> 0%
+  expect(f).toContain("▱");             // empty bar segments visible
+  expect(f).toContain("tip:");
 });
 
 test("ApprovalBox renders an edit diff preview (- old / + new)", () => {

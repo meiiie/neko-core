@@ -4,6 +4,7 @@
  * render, and this file owns "what the commands do".
  */
 import type { Agent } from "../core/agent.ts";
+import { COMPACT_AT } from "../core/agent.ts";
 import { loadConfig, type NekoConfig } from "../adapters/config.ts";
 import { rememberNote, renderContext } from "../adapters/context.ts";
 import { initProject } from "../adapters/project.ts";
@@ -80,6 +81,7 @@ export interface CommandCtx {
   setQueued: (n: number) => void;
   resumeInto: (s: Session) => void;
   runText: (text: string) => void;
+  compact: (reason: "manual" | "auto" | "resume") => Promise<string>; // shows the compacting progress bar
   exit: () => void;
 }
 
@@ -284,14 +286,11 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return;
     }
     case "/compact":
-      ctx.setBusy(true);
+      // Route through the REPL's compaction runner so it shows the progress bar + a "freed ~Nk" line.
       try {
-        await agent.compact();
-        addLine("info", "(context compacted)");
+        await ctx.compact("manual");
       } catch (error) {
         addLine("error", `${error instanceof Error ? error.message : error}`);
-      } finally {
-        ctx.setBusy(false);
       }
       return;
     case "/reset":
@@ -367,7 +366,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       const pct = Math.min(100, Math.max(0, Math.round((100 * used) / win)));
       return addLine(
         "info",
-        `context: ${used} / ${win} tokens used (${pct}%; auto-compacts past 85%) · last turn ${agent.cost.lastPrompt} in / ${agent.cost.lastCompletion} out`,
+        `context: ${used} / ${win} tokens used (${pct}%; auto-compacts past ${Math.round(COMPACT_AT * 100)}%) · last turn ${agent.cost.lastPrompt} in / ${agent.cost.lastCompletion} out`,
       );
     }
     case "/remember": {
