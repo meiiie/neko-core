@@ -15,7 +15,7 @@ import { environmentBlock, projectContextBlock, renderContext } from "../src/ada
 import { collectChecks, render } from "../src/adapters/doctor.ts";
 import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
-import { renderBenchReport, renderLiftReport, runBench, runHarnessLift } from "../src/adapters/bench.ts";
+import { HARD_TASKS, renderBenchReport, renderLiftReport, runBench, runHarnessLift } from "../src/adapters/bench.ts";
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
@@ -446,8 +446,11 @@ async function cmdBench(args: Args): Promise<number> {
     return 0;
   }
   const trials = args.trials ?? 1;
-  console.log(`Running Neko-bench against ${cfg.model} (${trials} trial(s)/task, auto-approve)...`);
-  const report = await runBench(cfg, { trials }, (m) => console.log(m));
+  // `neko bench hard`: the multi-file / real-algorithm / verification-biting tier - a non-saturated
+  // score that actually measures capability (the easy tier is blind at 100%).
+  const hard = args.positionals[0] === "hard";
+  console.log(`Running Neko-bench${hard ? " (HARD tier)" : ""} against ${cfg.model} (${trials} trial(s)/task, auto-approve)...`);
+  const report = await runBench(cfg, hard ? { trials, tasks: HARD_TASKS, suite: "hard" } : { trials }, (m) => console.log(m));
   console.log("\n" + renderBenchReport(report));
   return 0;
 }

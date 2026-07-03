@@ -158,18 +158,115 @@ const TASKS: BenchTask[] = [
   },
 ];
 
+// ---- HARD tier (`neko bench hard`): multi-file, real algorithms, verification-biting. The easy
+// tier saturates at 100% on a capable model, so it can only measure tokens/speed - it is BLIND to
+// capability regressions. These tasks are meant to NOT be 100%: a non-saturated score is the live
+// signal a harness change actually helped or hurt reasoning/tool-use, and where harness lift (10-20
+// pts on SWE-bench, per Harness-Bench arXiv 2605.27922) becomes visible. Deterministic verifiers only.
+export const HARD_TASKS: BenchTask[] = [
+  {
+    // Root-cause tracing across a data-flow chain: the failing OUTPUT is in summary.mjs, but the bug
+    // (age kept as a string) is one layer up in parse.mjs. The fix MUST land in parse.mjs - the
+    // verifier asserts the two downstream files are byte-unchanged, so a band-aid in summary won't pass.
+    id: "layered-bug",
+    files: {
+      "parse.mjs": "export function parse(csv) {\n  return csv.trim().split('\\n').map((line) => {\n    const [name, age] = line.split(',');\n    return { name, age };\n  });\n}\n",
+      "summary.mjs": "import { parse } from './parse.mjs';\nexport function summary(csv) {\n  const rows = parse(csv);\n  const total = rows.reduce((s, r) => s + r.age, 0);\n  return `total age: ${total}`;\n}\n",
+      "st.mjs": "import assert from 'node:assert';\nimport { summary } from './summary.mjs';\nassert.strictEqual(summary('Alice,30\\nBob,25'), 'total age: 55');\nassert.strictEqual(summary('X,10'), 'total age: 10');\nconsole.log('ok');\n",
+    },
+    prompt: "`bun st.mjs` fails: the totals concatenate instead of adding. Trace the data flow and fix the ROOT CAUSE in parse.mjs (age must be a number). Do NOT modify summary.mjs or st.mjs.",
+    verify: (d) => runJs(d, "st.mjs").out.includes("ok")
+      && (read(d, "summary.mjs") ?? "").includes("s + r.age") // downstream untouched
+      && (read(d, "st.mjs") ?? "").includes("total age: 55"),
+  },
+  {
+    // Three INDEPENDENT bugs in one util file, each caught by a different assertion -> forces a
+    // read-fix-rerun loop (the verification-biting pattern); a single fix leaves the run failing.
+    id: "multi-bug",
+    files: {
+      "util.mjs": "export function clamp(x, lo, hi) { return Math.max(lo, x); }\n" +
+        "export function last(arr) { return arr[arr.length]; }\n" +
+        "export function repeat(s, n) { let r = ''; for (let i = 0; i < n; i++) r += r; return r; }\n",
+      "ut.mjs": "import assert from 'node:assert';\nimport { clamp, last, repeat } from './util.mjs';\n" +
+        "assert.strictEqual(clamp(5, 0, 3), 3);\nassert.strictEqual(clamp(-1, 0, 3), 0);\nassert.strictEqual(clamp(2, 0, 3), 2);\n" +
+        "assert.strictEqual(last([1, 2, 3]), 3);\nassert.strictEqual(last(['a']), 'a');\n" +
+        "assert.strictEqual(repeat('ab', 3), 'ababab');\nassert.strictEqual(repeat('x', 0), '');\nconsole.log('ok');\n",
+    },
+    prompt: "`bun ut.mjs` fails. There are THREE independent bugs in util.mjs (clamp ignores the upper bound, last is off by one, repeat doubles the wrong thing). Fix all three so every assertion passes. Do NOT modify ut.mjs.",
+    verify: (d) => runJs(d, "ut.mjs").out.includes("ok") && (read(d, "ut.mjs") ?? "").includes("repeat('ab', 3)"),
+  },
+  {
+    // Add a feature WITHOUT breaking existing behavior (regression guard): the extended test re-checks
+    // push/pop AND the new peek/size. Easy to break the private-field encapsulation while extending.
+    id: "feature-no-regression",
+    files: {
+      "stack.mjs": "export class Stack {\n  #items = [];\n  push(x) { this.#items.push(x); }\n  pop() { return this.#items.pop(); }\n}\n",
+      "sk.mjs": "import assert from 'node:assert';\nimport { Stack } from './stack.mjs';\nconst s = new Stack();\ns.push(1); s.push(2);\n" +
+        "assert.strictEqual(s.size(), 2);\nassert.strictEqual(s.peek(), 2);\nassert.strictEqual(s.size(), 2);\n" + // peek does not remove
+        "assert.strictEqual(s.pop(), 2);\nassert.strictEqual(s.size(), 1);\nassert.strictEqual(s.peek(), 1);\nconsole.log('ok');\n",
+    },
+    prompt: "Extend the Stack class in stack.mjs: add peek() (return the top item WITHOUT removing it) and size() (return the number of items). Keep push() and pop() working. Make `bun sk.mjs` pass; do NOT modify sk.mjs.",
+    verify: (d) => runJs(d, "sk.mjs").out.includes("ok"),
+  },
+  {
+    // A real algorithm: topological sort with cycle detection. Naive attempts miss the diamond
+    // ordering or don't detect the cycle.
+    id: "toposort",
+    files: {
+      "dt.mjs": "import assert from 'node:assert';\nimport { resolveOrder } from './deps.mjs';\n" +
+        "const o = resolveOrder({ a: ['b', 'c'], b: ['d'], c: ['d'], d: [] });\n" +
+        "assert.ok(o.indexOf('d') < o.indexOf('b'), 'd before b');\nassert.ok(o.indexOf('d') < o.indexOf('c'), 'd before c');\n" +
+        "assert.ok(o.indexOf('b') < o.indexOf('a'), 'b before a');\nassert.ok(o.indexOf('c') < o.indexOf('a'), 'c before a');\n" +
+        "assert.strictEqual(o.length, 4);\n" +
+        "let threw = false; try { resolveOrder({ x: ['y'], y: ['x'] }); } catch { threw = true; }\nassert.ok(threw, 'must throw on a cycle');\nconsole.log('ok');\n",
+    },
+    prompt: "Create deps.mjs exporting resolveOrder(graph): graph maps each node to an array of nodes it DEPENDS ON. Return an array of all nodes where every node appears AFTER its dependencies (a topological order). THROW an Error if the graph has a cycle. Make `bun dt.mjs` pass.",
+    verify: (d) => runJs(d, "dt.mjs").out.includes("ok"),
+  },
+  {
+    // Recursive-descent / precedence parsing: naive left-to-right evaluation fails 2+3*4 and nesting.
+    id: "expr-eval",
+    files: {
+      "et.mjs": "import assert from 'node:assert';\nimport { evaluate } from './expr.mjs';\n" +
+        "assert.strictEqual(evaluate('2+3*4'), 14);\nassert.strictEqual(evaluate('(2+3)*4'), 20);\n" +
+        "assert.strictEqual(evaluate('10-2-3'), 5);\nassert.strictEqual(evaluate('2*(3+4)-5'), 9);\n" +
+        "assert.strictEqual(evaluate('100/5/2'), 10);\nassert.strictEqual(evaluate('((1+2)*(3+4))'), 21);\nconsole.log('ok');\n",
+    },
+    prompt: "Create expr.mjs exporting evaluate(expr): evaluate an integer arithmetic expression string with + - * / (usual precedence, LEFT associativity) and parentheses. E.g. evaluate('2+3*4') === 14, evaluate('(2+3)*4') === 20, evaluate('10-2-3') === 5. Make `bun et.mjs` pass.",
+    verify: (d) => runJs(d, "et.mjs").out.includes("ok"),
+  },
+  {
+    // Floating-point correctness in a shared helper used across files: the bug (no rounding) only
+    // shows with prices that don't represent exactly in binary. The fix belongs in money.mjs.
+    id: "float-money",
+    files: {
+      "money.mjs": "export function cents(dollars) {\n  return dollars * 100;\n}\n",
+      "cart.mjs": "import { cents } from './money.mjs';\nexport function cartTotal(items) {\n  return items.reduce((s, i) => s + cents(i.price), 0);\n}\n",
+      "ct.mjs": "import assert from 'node:assert';\nimport { cartTotal } from './cart.mjs';\n" +
+        "assert.strictEqual(cartTotal([{ price: 1.99 }]), 199);\n" +
+        "assert.strictEqual(cartTotal([{ price: 0.1 }, { price: 0.2 }]), 30);\nconsole.log('ok');\n",
+    },
+    prompt: "`bun ct.mjs` fails by tiny fractions (floating-point): cents(1.99) is 198.99999... not 199. Fix cents() in money.mjs to return an exact integer number of cents (round correctly). Do NOT modify cart.mjs or ct.mjs.",
+    verify: (d) => runJs(d, "ct.mjs").out.includes("ok")
+      && (read(d, "cart.mjs") ?? "").includes("s + cents(i.price)")
+      && (read(d, "ct.mjs") ?? "").includes("price: 1.99"),
+  },
+];
+
 export interface BenchResult { id: string; passes: number; trials: number; tokens: number; inTok: number; cachedTok: number; outTok: number; calls: number; ms: number; }
 export interface BenchReport { model: string; effort: string; trials: number; results: BenchResult[]; passed: number; total: number; tokens: number; inTok: number; cachedTok: number; outTok: number; calls: number; seconds: number; }
 
 /** Run the benchmark against the configured model. Each task runs `trials` times (single-run pass@1
  * is noisy — reliability science), each in its own temp dir. */
-export async function runBench(cfg: NekoConfig, opts: { trials?: number } = {}, onProgress?: (msg: string) => void): Promise<BenchReport> {
+export async function runBench(cfg: NekoConfig, opts: { trials?: number; tasks?: BenchTask[]; suite?: string } = {}, onProgress?: (msg: string) => void): Promise<BenchReport> {
   const trials = Math.max(1, opts.trials ?? 1);
+  const tasks = opts.tasks ?? TASKS;
+  const suite = opts.suite ?? "easy";
   const t0 = Date.now();
   const root = mkdtempSync(join(tmpdir(), "neko-bench-"));
   const results: BenchResult[] = [];
   try {
-    for (const task of TASKS) {
+    for (const task of tasks) {
       let passes = 0, tokens = 0, inTok = 0, cachedTok = 0, outTok = 0, calls = 0, ms = 0;
       for (let t = 0; t < trials; t++) {
         const dir = join(root, `${task.id}-${t}`);
@@ -202,18 +299,18 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number } = {}, 
     tokens: sum((r) => r.tokens), inTok: sum((r) => r.inTok), cachedTok: sum((r) => r.cachedTok), outTok: sum((r) => r.outTok), calls: sum((r) => r.calls),
     seconds: (Date.now() - t0) / 1000,
   };
-  appendBenchLog(report);
+  appendBenchLog(report, suite);
   return report;
 }
 
 /** Dev-log: append each bench run as one JSON line to ~/.neko-core/bench-log.jsonl, so self-improvement is
  * MEASURABLE over time — diff two runs to see if a harness change moved pass-rate, tokens, speed, or steps. */
-function appendBenchLog(r: BenchReport): void {
+function appendBenchLog(r: BenchReport, suite = "easy"): void {
   try {
     const dir = join(homeDir(), ".neko-core");
     mkdirSync(dir, { recursive: true });
     const rec = {
-      ts: new Date().toISOString(), model: r.model, effort: r.effort, pass: r.passed, total: r.total,
+      ts: new Date().toISOString(), suite, model: r.model, effort: r.effort, pass: r.passed, total: r.total,
       seconds: Math.round(r.seconds), tokens: r.tokens, inTok: r.inTok, cachedTok: r.cachedTok, outTok: r.outTok, calls: r.calls,
       tokPerSec: r.seconds > 0 ? Math.round(r.outTok / r.seconds) : 0,
       tasks: r.results.map((x) => ({ id: x.id, pass: x.passes, trials: x.trials, ms: x.ms, inTok: x.inTok, cachedTok: x.cachedTok, outTok: x.outTok, calls: x.calls })),
