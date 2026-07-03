@@ -3,6 +3,30 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-03 — HARD benchmark tier + an honest finding (also 100%) + 2 coding skills (Superpowers, clean-room)
+
+Built `neko bench hard` (6 multi-file/algorithm/verification-biting tasks: layered-bug root-cause tracing,
+multi-bug 3-independent-bugs, feature-no-regression, toposort, expr-eval recursive-descent, float-money)
+to escape the easy tier's 16/16 saturation — every reference solution verified solvable + every buggy
+fixture verified failing before wiring. **Honest result: glm-5.2 scored 12/12 (100%) on the hard tier
+too** (90% cached, 56 steps, 503s). The model is genuinely strong on BOUNDED coding — pass-rate saturates
+even here. The real read: at this capability level pass-rate is the wrong discriminator; the SOTA-relevant
+signals are LONG-HORIZON task success (METR HCAST — where even frontier models fail ~50%) and harness LIFT
+(raw vs +harness on tool-requiring tasks), not more bounded pass/fail. Recorded rather than papered over;
+the hard tier stays as a higher-bar no-regression guard.
+
+**Researched Superpowers** (github.com/obra/superpowers, MIT) at the owner's request — a mature
+methodology-as-skills system (~14 skills: brainstorm->worktrees->plans->subagent-driven-dev->TDD->review).
+Verdict: Neko already has the *infrastructure* (skills + progressive disclosure) and most Superpowers
+skills either duplicate Neko (verification-before-completion ~= the new verify gate) or contradict its
+thin-single-agent thesis (subagent-driven-dev, worktrees) or fight cache stability (the "1%->MUST invoke"
+bootstrap). But Neko had ZERO general coding-methodology skills (all 7 are domain-specific), so two
+genuinely general, non-duplicative pieces were adapted CLEAN-ROOM (ideas, not text) into Neko's format:
+`test-driven-development` and `systematic-debugging`. Progressive-disclosure (only load when relevant), so
+~zero cost when not triggered. Honest caveat: their benefit is on real long-horizon work, NOT a bench
+number (the bench is saturated + runs skill-less) — justified on quality + near-zero cost, verified by the
+full battery holding flat (no regression).
+
 ## 2026-07-03 — Robustness/quality levers: pre-flight validation, task-carry, verify gate
 
 Three research-grounded harness levers, quality-first (each keeps or raises correctness; none regresses
