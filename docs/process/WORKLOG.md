@@ -3,6 +3,21 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-03 — Robustness/quality levers: pre-flight validation, task-carry, verify gate
+
+Three research-grounded harness levers, quality-first (each keeps or raises correctness; none regresses
+the default). (1) **Pre-flight arg validation** (Gecko, arXiv 2602.19218) in `safeExecute`: a call missing
+a REQUIRED key is caught BEFORE execution and fed a schema hint (key + type + description) so the model
+self-repairs in one step instead of execute->throw->vague-error a round-trip later; presence-only (never
+type pedantry), unknown schema fails open, covers the eager path (same seam). (2) **Original-task carry
+across compact()**: the first user turn is preserved VERBATIM (clipped) ahead of the model summary by
+deterministic code — instruction fade-out / Governance Decay (2606.22528, 2603.05344) can't drop the
+anchor when the summarizer compresses the head. (3) **Opt-in pre-completion verify gate**
+(`verify_before_exit`): intercepts the first tool-less final once, forces a re-inspection of the ACTUAL
+state vs the goal, then finishes (LangChain PreCompletionChecklist; ACE); off by default, +1 turn only
+when it fires, never on the last step. +4 tests; 276/0. Full no-regression battery run after (bench 16 +
+run-evals + harsh) — quality is the gate.
+
 ## 2026-07-03 — Stream-eager tool execution: the loop's floor drops to max(generation, execution)
 
 Owner asked for the next performance frontier (research-first, or invent one). Post-sprint cost structure
