@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { latestSession, listSessionMetas, listSessions, loadSession, newSessionId, saveSession } from "../src/adapters/session.ts";
+import { latestSession, listSessionMetas, listSessions, loadSession, newSessionId, saveSession, wasInterrupted } from "../src/adapters/session.ts";
 
 // Isolate from the user's real ~/.neko-core: these tests WRITE session files, so point HOME at a throwaway
 // dir for their duration. Otherwise they pollute the user's real session history AND get slowed by it —
@@ -73,4 +73,13 @@ test("listSessionMetas: lightweight metadata, mtime-cached index, self-heals on 
   } finally {
     rmSync(join(homedir(), ".neko-core", "sessions", `${id}.json`), { force: true });
   }
+});
+
+test("wasInterrupted: mid-turn (dangling call / tool end) is interrupted; a clean final answer is not", () => {
+  const base = (last: any) => ({ id: "x", createdAt: "", updatedAt: "", cwd: "/t", model: "m",
+    messages: [{ role: "system", content: "s" }, { role: "user", content: "do" }, ...last] } as any);
+  expect(wasInterrupted(base([{ role: "assistant", content: "", tool_calls: [{ id: "a", function: { name: "bash", arguments: "{}" } }] }]))).toBe(true);
+  expect(wasInterrupted(base([{ role: "assistant", content: "", tool_calls: [{ id: "a", function: { name: "x", arguments: "{}" } }] }, { role: "tool", tool_call_id: "a", content: "r" }]))).toBe(true);
+  expect(wasInterrupted(base([{ role: "assistant", content: "All done." }]))).toBe(false); // clean final answer
+  expect(wasInterrupted({ messages: [{ role: "system", content: "s" }] } as any)).toBe(false); // nothing yet
 });
