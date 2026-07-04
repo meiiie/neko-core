@@ -48,7 +48,12 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: compile
-        run: bun build --compile --target=${{ matrix.target }} --outfile ${{ matrix.asset }} bin/neko.ts
+        # shell:bash on every runner (incl. windows) so the --define quoting is identical everywhere.
+        # The NODE_ENV define is CRITICAL: without it `bun build --compile` bakes development mode and
+        # the released binary runs React with ~5x render overhead on every platform (measured; see
+        # scripts/bench-ui.ts + WORKLOG 2026-07-04). Must match the package.json build script.
+        shell: bash
+        run: bun build --compile --define 'process.env.NODE_ENV="production"' --target=${{ matrix.target }} --outfile ${{ matrix.asset }} bin/neko.ts
       - name: attach to release
         shell: bash
         env:

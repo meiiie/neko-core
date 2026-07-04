@@ -423,6 +423,11 @@ export class ToolRegistry {
    * scripts. Reads/acts on a window BY NAME (no vision); pointer acts use touch injection (no mouse hijack).
    * Unicode element names go through a temp UTF-8 file (@file) -- the cp1252 console mangles non-ASCII args. */
   private runComputer(args: Record<string, any>): string {
+    // The computer tool drives Windows UI Automation via PowerShell scripts - Windows-only by design.
+    // Fail honestly and immediately on other platforms instead of a confusing spawn error 90s later.
+    if (process.platform !== "win32") {
+      return "Error: the computer tool is Windows-only (it drives Windows UI Automation via PowerShell). It is not available on this platform.";
+    }
     const action = String(args.action ?? "");
     const skill = this.loadSkill?.("computer-use");
     const scriptsDir = skill ? join(skill.dir, "scripts") : join(this.root, "skills", "computer-use", "scripts");

@@ -6,8 +6,14 @@ on:
   pull_request:
 
 jobs:
+  # The full verify loop on every OS we ship binaries for - a Linux-only CI can't guarantee the
+  # macOS/Windows builds actually work (the owner develops on Windows; CI covers the other two).
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -18,5 +24,5 @@ jobs:
       - run: bun test
       - name: policy audit (safe/gated boundary)
         run: bun bin/neko.ts policy
-      - name: build the single binary
+      - name: build the single binary (bakes NODE_ENV=production - see package.json)
         run: bun run build
