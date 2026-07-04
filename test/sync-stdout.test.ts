@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { BSU, ESU, isSyncOutputSupported, wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
+import { BSU, ESU, isSyncOutputSupported, parseDecrpm2026, wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
+
+test("parseDecrpm2026: DECRPM reply -> supported/unsupported/none", () => {
+  expect(parseDecrpm2026("\x1b[?2026;1$y")).toBe(true);  // set -> supported
+  expect(parseDecrpm2026("\x1b[?2026;2$y")).toBe(true);  // reset (but recognized) -> supported
+  expect(parseDecrpm2026("\x1b[?2026;0$y")).toBe(false); // not recognized -> unsupported
+  expect(parseDecrpm2026("garbage")).toBe(null);         // no reply yet
+});
 
 test("isSyncOutputSupported: env allowlist + overrides", () => {
   expect(isSyncOutputSupported({ WT_SESSION: "1" } as any)).toBe(true);       // Windows Terminal
@@ -25,16 +32,18 @@ function fakeTty(isTTY: boolean) {
 
 test("wrapStdoutForSync: brackets each write in BSU..ESU when supported", () => {
   const { stream, writes } = fakeTty(true);
-  const wrapped = wrapStdoutForSync(stream, { WT_SESSION: "1" } as any);
+  const wrapped = wrapStdoutForSync(stream, { env: { WT_SESSION: "1" } as any });
   wrapped.write("frame-A");
   wrapped.write("frame-B");
   expect(writes).toEqual([BSU + "frame-A" + ESU, BSU + "frame-B" + ESU]);
   expect(wrapped.columns).toBe(120); // non-write props read through
 });
 
-test("wrapStdoutForSync: no-op when unsupported or not a TTY", () => {
+test("wrapStdoutForSync: no-op when unsupported or not a TTY; probe override wins", () => {
   const a = fakeTty(true);
-  expect(wrapStdoutForSync(a.stream, { TERM: "dumb" } as any)).toBe(a.stream); // unsupported -> same object
+  expect(wrapStdoutForSync(a.stream, { env: { TERM: "dumb" } as any })).toBe(a.stream); // unsupported -> same object
   const b = fakeTty(false);
-  expect(wrapStdoutForSync(b.stream, { WT_SESSION: "1" } as any)).toBe(b.stream); // not a TTY -> same object
+  expect(wrapStdoutForSync(b.stream, { env: { WT_SESSION: "1" } as any })).toBe(b.stream); // not a TTY -> same object
+  const c = fakeTty(true);
+  expect(wrapStdoutForSync(c.stream, { env: { TERM: "dumb" } as any, supported: true })).not.toBe(c.stream); // probe says yes
 });

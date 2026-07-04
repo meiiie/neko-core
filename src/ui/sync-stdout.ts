@@ -22,6 +22,50 @@ export const BSU = "\x1b[?2026h";
 export const ESU = "\x1b[?2026l";
 
 /**
+ * Parse a DECRPM reply to our DEC-2026 query out of a buffer: `CSI ? 2026 ; Ps $ y`. Ps 0 = not
+ * recognized (unsupported); 1/2/3/4 = recognized (set/reset/perm-set/perm-reset) = SUPPORTED. Returns
+ * true/false when a reply is present, else null (no reply yet). Pure - unit-testable without a terminal.
+ */
+export function parseDecrpm2026(buf: string): boolean | null {
+  const m = /\x1b\[\?2026;(\d)\$y/.exec(buf);
+  if (!m) return null;
+  return m[1] !== "0";
+}
+
+/**
+ * Ask the terminal directly whether it supports DEC 2026 (DECRQM `CSI ? 2026 $ p`, reply on stdin). This
+ * catches terminals the env allowlist misses - notably over SSH, where TERM_PROGRAM isn't forwarded. Runs
+ * BEFORE Ink takes over stdin, restores raw-mode + pauses on the way out, and times out fast so an
+ * unresponsive terminal costs at most `timeoutMs`. Returns null when it can't probe (no TTY) or no reply.
+ */
+export function probeSyncOutput(timeoutMs = 120): Promise<boolean | null> {
+  const stdin: any = process.stdin;
+  const stdout: any = process.stdout;
+  if (!stdin.isTTY || !stdout.isTTY || process.env.TMUX) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let buf = "";
+    const wasRaw = stdin.isRaw;
+    const finish = (result: boolean | null) => {
+      clearTimeout(timer);
+      stdin.off("data", onData);
+      try { stdin.setRawMode?.(wasRaw ?? false); } catch { /* ignore */ }
+      stdin.pause();
+      resolve(result);
+    };
+    const onData = (d: Buffer) => {
+      buf += d.toString("latin1");
+      const r = parseDecrpm2026(buf);
+      if (r !== null) finish(r);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    try { stdin.setRawMode?.(true); } catch { /* ignore */ }
+    stdin.on("data", onData);
+    stdin.resume();
+    stdout.write("\x1b[?2026$p"); // DECRQM
+  });
+}
+
+/**
  * True if this terminal is known to implement DEC mode 2026 (synchronized output).
  * `NEKO_SYNC=0` forces off, `NEKO_SYNC=1` forces on - escape hatches over the detection.
  */
@@ -66,8 +110,11 @@ export function isSyncOutputSupported(env: NodeJS.ProcessEnv = process.env): boo
  * (columns/rows/isTTY) reads through, and every forwarded method is bound to the real stream so
  * EventEmitter calls like `on("resize")` register on the actual stdout (not the Proxy).
  */
-export function wrapStdoutForSync<T extends Writable>(base: T, env: NodeJS.ProcessEnv = process.env): T {
-  if (!(base as any).isTTY || !isSyncOutputSupported(env)) return base;
+export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: NodeJS.ProcessEnv; supported?: boolean } = {}): T {
+  const env = opts.env ?? process.env;
+  // `supported` from a runtime probe (SSH) wins; otherwise fall back to the env allowlist.
+  const supported = opts.supported ?? isSyncOutputSupported(env);
+  if (!(base as any).isTTY || !supported) return base;
 
   const wrappedWrite = (chunk: any, ...args: any[]): boolean => {
     if (typeof chunk === "string" && chunk.length > 0) {

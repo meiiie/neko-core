@@ -42,6 +42,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/compact", desc: "summarize the conversation to free context" },
   { name: "/transcript", desc: "scroll + search the full conversation (incl. earlier resumed lines)" },
   { name: "/fullscreen", desc: "toggle fullscreen: alt-screen scrollable viewport (PgUp/PgDn to scroll)" },
+  { name: "/copy", desc: "copy the last response to the clipboard (/copy all = whole conversation)" },
   { name: "/goal", desc: "set an ongoing goal (/goal <text>)" },
   { name: "/loop", desc: "run a task N times (/loop <n> <task>)" },
   { name: "/auto", desc: "closed loop: work + self-review until done (/auto <goal>)" },
@@ -86,6 +87,7 @@ export interface CommandCtx {
   compact: (reason: "manual" | "auto" | "resume") => Promise<string>; // shows the compacting progress bar
   openTranscript: () => void; // open the full-thread scroll+search viewer (/transcript)
   toggleFullscreen: () => void; // toggle fullscreen (alt-screen scrollable viewport) mode
+  copy: (arg: string) => void; // copy last response / whole conversation to the clipboard (OSC 52)
   exit: () => void;
 }
 
@@ -296,6 +298,9 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/fullscreen":
     case "/fs":
       ctx.toggleFullscreen();
+      return;
+    case "/copy":
+      ctx.copy(input.slice("/copy".length).trim());
       return;
     case "/compact":
       // Route through the REPL's compaction runner so it shows the progress bar + a "freed ~Nk" line.

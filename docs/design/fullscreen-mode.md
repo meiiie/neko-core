@@ -3,14 +3,20 @@
 Status: **SHIPPED P1-P5** (built after the research below). Date: 2026-07-04.
 Author: Claude (clean-room study of the local claude-code reference + web research).
 
-**Implemented:** P1 synchronized output (`src/ui/sync-stdout.ts`) · P2 alt-screen + scroll viewport
-(`src/ui/altscreen.ts`, `src/ui/scroll.tsx`, gated by `/fullscreen` · `cfg.fullscreen` · `NEKO_FULLSCREEN`)
-· P3 mouse wheel + input hardening (`src/ui/mouse.ts`, `src/ui/text-input.tsx`) · P4 in-viewport find
-(Ctrl+F, `src/ui/scroll.tsx` highlight) · P5 suitability guard + degradation (`canFullscreen`).
-Default OFF (inline keeps native scrollback + copy-paste). Env: `NEKO_FULLSCREEN`, `NEKO_DISABLE_MOUSE`,
-`NEKO_SYNC`. **Deferred (future):** rich variable-height virtualization of scrollback (currently flattened
-fixed-height rows), a runtime DECRQM/XTVERSION sync-probe for SSH into unknown terminals (env allowlist
-covers local terminals today), tmux-passthrough sync, and own-selection/OSC-52 copy under mouse capture.
+**Implemented:** P1 synchronized output + **DECRQM probe** for SSH (`src/ui/sync-stdout.ts`) · P2 alt-screen
++ scroll viewport (`src/ui/altscreen.ts`, `src/ui/scroll.tsx`, gated by `/fullscreen` · `cfg.fullscreen` ·
+`NEKO_FULLSCREEN`) · P3 mouse wheel + input hardening (`src/ui/mouse.ts`, `src/ui/text-input.tsx`) · P4
+in-viewport find (Ctrl+F, `src/ui/scroll.tsx`) · P5 suitability guard + degradation (`canFullscreen`) ·
+**rich scrollback** (`src/ui/rich-transcript.tsx` - real markdown/diffs/syntax, memoized, capped at 300
+mounted lines) · **OSC-52 clipboard** `/copy` (`src/ui/clipboard.ts` - the keyboard copy path when mouse
+capture blocks native select). Default OFF (inline keeps native scrollback + copy-paste). Env:
+`NEKO_FULLSCREEN`, `NEKO_DISABLE_MOUSE`, `NEKO_SYNC`.
+
+**Still deferred (low value / niche):** full drag-to-select region highlighting (the `/copy` command covers
+the practical copy need); tmux-passthrough sync (needs the user's tmux `allow-passthrough on` + tmux 3.4+,
+and a setup we don't currently target); windowed virtualization of rich scrollback beyond 300 lines (older
+history is one `/transcript` away). These are consciously not built - they'd be speculative code for setups
+outside the target, against YAGNI.
 
 ## 0. Why
 

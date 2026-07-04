@@ -19,11 +19,12 @@ import { SelectList, type Overlay } from "./select-list.tsx";
 import { TranscriptViewer } from "./transcript-viewer.tsx";
 import { TextInput } from "./text-input.tsx";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
-import { wrapStdoutForSync } from "./sync-stdout.ts";
+import { isSyncOutputSupported, probeSyncOutput, wrapStdoutForSync } from "./sync-stdout.ts";
 import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useScroll } from "./scroll.tsx";
 import { RichTranscript } from "./rich-transcript.tsx";
 import { isMouseEnabled, parseWheel } from "./mouse.ts";
+import { copyToClipboard } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
@@ -548,6 +549,19 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setViewer(full);
   };
 
+  // Copy to the terminal clipboard via OSC 52 (works over SSH/tmux and when fullscreen mouse capture has
+  // taken over native select-to-copy). `/copy` = last response; `/copy all` = the whole conversation.
+  const copyTranscript = (arg: string) => {
+    const out = (stdout as any) ?? process.stdout;
+    if (arg.trim() === "all") {
+      const text = lines.filter((l) => l.kind === "user" || l.kind === "assistant" || l.kind === "tool_result").map((l) => l.text).join("\n\n");
+      addLine("info", copyToClipboard(text, out) ? `copied the conversation (~${text.length} chars) to the clipboard` : "(nothing to copy)");
+      return;
+    }
+    const last = [...lines].reverse().find((l) => l.kind === "assistant");
+    addLine("info", last && copyToClipboard(last.text, out) ? "copied the last response to the clipboard" : "(no response to copy yet)");
+  };
+
   // Toggle fullscreen (alt-screen scrollable viewport) at runtime. The alt-screen effect reacts to the
   // state change; here we just flip it and tell the user how to scroll / get out.
   const toggleFullscreen = () => {
@@ -889,6 +903,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         compact: runCompaction,
         openTranscript,
         toggleFullscreen,
+        copy: copyTranscript,
         exit,
       });
       return;
@@ -1327,12 +1342,17 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);
   // Ink's own synchronized clear (app.clear) threaded in via a holder - the app instance doesn't exist
   // until render() returns, so ChatApp calls the holder, which we point at app.clear right after.
+  // Synchronized-output support: trust the env allowlist first (fast, covers all common local terminals);
+  // only when it's inconclusive do we ask the terminal directly (DECRQM) - this catches SSH sessions where
+  // TERM_PROGRAM isn't forwarded. The probe is skipped (no startup cost) whenever the allowlist already says yes.
+  let syncSupported = isSyncOutputSupported();
+  if (!syncSupported) syncSupported = (await probeSyncOutput()) === true;
   const clearHolder = { fn: () => {} };
   const app = render(
     <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} />,
     // Bracket each frame in BSU/ESU on terminals that support DEC 2026 (synchronized output) so
     // streaming redraws don't flicker and mid-frame cursor moves don't yank Windows scrollback.
-    { exitOnCtrlC: false, stdout: wrapStdoutForSync(process.stdout) }, // we require a double Ctrl-C
+    { exitOnCtrlC: false, stdout: wrapStdoutForSync(process.stdout, { supported: syncSupported }) }, // we require a double Ctrl-C
   );
   clearHolder.fn = () => app.clear();
   try {
