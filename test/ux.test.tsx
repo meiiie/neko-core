@@ -250,10 +250,11 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
   await tick(80);
   const before = c.frames.length;
   (c.stdout as any).emit("resize"); // terminal resized (e.g. maximized)
-  await tick(300); // past the 150ms debounce
-  const after = c.frames.slice(before).join("\n");
-  expect(after).toContain("\x1b[2J"); // the explicit viewport wipe went out
-  expect(after).toContain("resize-marker question"); // Static remounted -> transcript re-emitted fresh
+  // Poll (not a fixed sleep): the 150ms debounce + remount render can land late under suite load.
+  expect(await until(c, () => {
+    const after = c.frames.slice(before).join("\n");
+    return after.includes("\x1b[2J") && after.includes("resize-marker question");
+  }, 3000)).toBe(true); // wipe went out AND Static remounted -> transcript re-emitted fresh
   c.unmount();
 });
 

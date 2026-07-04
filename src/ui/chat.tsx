@@ -20,6 +20,7 @@ import { TranscriptViewer } from "./transcript-viewer.tsx";
 import { TextInput } from "./text-input.tsx";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { isSyncOutputSupported, probeSyncOutput, wrapStdoutForSync } from "./sync-stdout.ts";
+import { FrameDiffer } from "./frame-diff.ts";
 import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
@@ -68,6 +69,7 @@ interface ChatProps {
   mcpHub?: McpHub;
   provider?: Provider; // injected in tests; production uses getProvider(cfg)
   clearScreen?: () => void; // Ink's synchronized clear (app.clear), threaded from runChat
+  frameDiffer?: FrameDiffer; // the stdout-layer differ; ChatApp feeds it the fullscreen scroll band
 }
 
 /** Flatten a message's content (string or vision-array) to display text. */
@@ -185,7 +187,7 @@ export function clampToRows(text: string, maxRows: number, cols: number): string
   return kept.join("\n");
 }
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer }: ChatProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -628,6 +630,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     if (startupNeedsChoiceRef.current && resumedRef.current) resumeInto(resumedRef.current);
   }, []);
+  // Tell the frame differ where the scrollable band is: in fullscreen the Ink frame starts at screen
+  // row 1 (alt-screen + clear + home), so the viewport occupies absolute rows 1..viewH and a scroll can
+  // be emitted as a DECSTBM hardware shift. Inline (or on unmount): no band, plain line-diff only.
+  useEffect(() => {
+    frameDiffer?.setBand(fullscreen ? { top: 1, height: viewH } : null);
+    return () => frameDiffer?.setBand(null);
+  }, [fullscreen, viewH]);
   // If fullscreen was configured but the terminal can't host it, say why (we quietly stayed inline).
   useEffect(() => {
     if (cfg.fullscreen && !fullscreen) addLine("info", "(fullscreen off: needs an interactive terminal with room - staying inline)");
@@ -1418,17 +1427,19 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   let syncSupported = isSyncOutputSupported();
   if (!syncSupported) syncSupported = (await probeSyncOutput()) === true;
   const clearHolder = { fn: () => {} };
+  // Neko's frame differ (compositor-lite): Ink stays on its STANDARD renderer (whose payload shape is
+  // parseable), and the differ shrinks every rerender to the changed lines - or, in fullscreen, to a
+  // hardware scroll (DECSTBM+SU/SD: the terminal shifts the region, we paint only the revealed rows).
+  // This is the claude-code-class write path, built at the stdout layer instead of forking Ink.
+  // NEKO_INCR=0 disables it (plain full-frame writes).
+  const differ = process.env.NEKO_INCR === "0" ? undefined : new FrameDiffer();
   const app = render(
-    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} />,
-    // Bracket each frame in BSU/ESU on terminals that support DEC 2026 (synchronized output) so
-    // streaming redraws don't flicker and mid-frame cursor moves don't yank Windows scrollback.
-    // incrementalRendering: Ink's line-diff renderer - unchanged lines are NOT rewritten, so a
-    // keystroke rewrites ~the input line instead of the whole frame (the fullscreen lag fix; the
-    // classic Ratatui/claude-code cell-diff idea, first-party). NEKO_INCR=0 is the escape hatch.
+    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} />,
+    // Bracket each (already-minimized) write in BSU/ESU on terminals that support DEC 2026
+    // (synchronized output) so redraws are atomic - no flicker, no Windows scrollback yank.
     {
       exitOnCtrlC: false, // we require a double Ctrl-C
-      stdout: wrapStdoutForSync(process.stdout, { supported: syncSupported }),
-      incrementalRendering: process.env.NEKO_INCR !== "0",
+      stdout: wrapStdoutForSync(process.stdout, { supported: syncSupported, differ }),
     },
   );
   clearHolder.fn = () => app.clear();

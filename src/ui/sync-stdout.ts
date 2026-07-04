@@ -110,15 +110,25 @@ export function isSyncOutputSupported(env: NodeJS.ProcessEnv = process.env): boo
  * (columns/rows/isTTY) reads through, and every forwarded method is bound to the real stream so
  * EventEmitter calls like `on("resize")` register on the actual stdout (not the Proxy).
  */
-export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: NodeJS.ProcessEnv; supported?: boolean } = {}): T {
+export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: NodeJS.ProcessEnv; supported?: boolean; differ?: { process: (p: string) => string | null } } = {}): T {
   const env = opts.env ?? process.env;
   // `supported` from a runtime probe (SSH) wins; otherwise fall back to the env allowlist.
   const supported = opts.supported ?? isSyncOutputSupported(env);
-  if (!(base as any).isTTY || !supported) return base;
+  const differ = opts.differ;
+  if (!(base as any).isTTY || (!supported && !differ)) return base;
 
   const wrappedWrite = (chunk: any, ...args: any[]): boolean => {
     if (typeof chunk === "string" && chunk.length > 0) {
-      return (base as any).write(BSU + chunk + ESU, ...args);
+      // FrameDiffer first: shrink Ink's full-frame rerender to the changed lines (or a hardware
+      // scroll). "" = frame identical -> skip the write entirely; null = not a standard frame ->
+      // pass through untouched (the differ reset itself).
+      let out = chunk;
+      if (differ) {
+        const o = differ.process(chunk);
+        if (o === "") return true;
+        if (o !== null) out = o;
+      }
+      return (base as any).write(supported ? BSU + out + ESU : out, ...args);
     }
     return (base as any).write(chunk, ...args);
   };

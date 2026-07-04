@@ -1,0 +1,119 @@
+import { expect, test } from "bun:test";
+import { detectShift, FrameDiffer, parseInkPayload } from "../src/ui/frame-diff.ts";
+
+/** Minimal virtual terminal: interprets exactly the sequences the differ emits (CUP/CUU/CUD/CR-col1/
+ * EL/2K/SU/SD/DECSTBM) plus plain text + newlines, so tests can PROVE the optimized bytes reproduce
+ * the same screen a full rewrite would. */
+class Screen {
+  grid: string[];
+  r = 0; c = 0; // 0-based cursor
+  top = 0; bottom: number;
+  constructor(public h: number) { this.grid = Array.from({ length: h }, () => ""); this.bottom = h - 1; }
+  write(s: string): void {
+    let i = 0;
+    while (i < s.length) {
+      const csi = /^\x1b\[([0-9;]*)([A-Za-z])/.exec(s.slice(i));
+      if (csi) {
+        const [seq, params, fin] = [csi[0], csi[1], csi[2]];
+        const nums = params.split(";").map((x) => parseInt(x, 10));
+        const n = Number.isFinite(nums[0]) ? nums[0] : 1;
+        if (fin === "A") this.r = Math.max(0, this.r - n);
+        else if (fin === "B") this.r = Math.min(this.h - 1, this.r + n);
+        else if (fin === "G") this.c = 0;
+        else if (fin === "H") { this.r = Math.max(0, (Number.isFinite(nums[0]) ? nums[0] : 1) - 1); this.c = Math.max(0, (Number.isFinite(nums[1]) ? nums[1] : 1) - 1); }
+        else if (fin === "K") { if (params === "2") { this.grid[this.r] = ""; } else { this.grid[this.r] = this.grid[this.r].slice(0, this.c); } }
+        else if (fin === "S") { for (let k = 0; k < n; k++) { this.grid.splice(this.top, 1); this.grid.splice(this.bottom, 0, ""); } }
+        else if (fin === "T") { for (let k = 0; k < n; k++) { this.grid.splice(this.bottom, 1); this.grid.splice(this.top, 0, ""); } }
+        else if (fin === "r") { this.top = Number.isFinite(nums[0]) ? nums[0] - 1 : 0; this.bottom = Number.isFinite(nums[1]) ? nums[1] - 1 : this.h - 1; this.r = 0; this.c = 0; }
+        else if (fin === "m") { /* SGR: tests use plain text */ }
+        i += seq.length;
+        continue;
+      }
+      const ch = s[i];
+      if (ch === "\n") { this.r = Math.min(this.h - 1, this.r + 1); this.c = 0; }
+      else if (ch === "\r") this.c = 0;
+      else {
+        const line = this.grid[this.r].padEnd(this.c, " ");
+        this.grid[this.r] = line.slice(0, this.c) + ch + line.slice(this.c + 1);
+        this.c++;
+      }
+      i++;
+    }
+  }
+  lines(n: number): string[] { return this.grid.slice(0, n).map((l) => l.replace(/\s+$/, "")); }
+}
+
+const erase = (n: number) => ("\x1b[2K" + "\x1b[1A\x1b[2K".repeat(Math.max(0, n - 1))) + "\x1b[G";
+const payload = (prevCount: number, frame: string[]) => erase(prevCount) + frame.join("\n");
+
+/** Drive the differ through seed frames, then return the optimized bytes for `next`. */
+function seedAndProcess(d: FrameDiffer, a: string[], b: string[], next: string[]): string | null {
+  expect(d.process(payload(0, a) === payload(0, a) ? a.join("\n") : "")).toBe(null); // first render: no erase prefix -> passthrough
+  expect(d.process(payload(a.length, b))).toBe(null); // seeds the baseline
+  return d.process(payload(b.length, next));
+}
+
+test("parseInkPayload accepts the standard shape, rejects everything else", () => {
+  expect(parseInkPayload(erase(3) + "a\nb\nc")).toEqual({ eraseCount: 3, frame: "a\nb\nc" });
+  expect(parseInkPayload("\x1b[2J\x1b[H")).toBe(null);            // wipe
+  expect(parseInkPayload("plain first frame")).toBe(null);         // no erase prefix
+  expect(parseInkPayload(erase(2) + "x\x1b[3Ay")).toBe(null);      // cursor moves inside a "frame"
+});
+
+test("line-diff: only the changed line is rewritten, and the screen matches a full rewrite", () => {
+  const d = new FrameDiffer();
+  const A = ["r0", "r1", "r2", "r3"];
+  const B = ["r0", "r1", "r2", "> input"];
+  const C = ["r0", "r1", "r2", "> inputX"];
+  const out = seedAndProcess(d, A, B, C)!;
+  expect(out).not.toBe(null);
+  expect(out.length).toBeLessThan(payload(4, C).length / 2); // far smaller than the full rewrite
+  expect(out).not.toContain("r1");                            // unchanged lines are not resent
+  const scr = new Screen(10);
+  for (const [i, l] of B.entries()) { scr.r = i; scr.c = 0; scr.write(l); } // screen currently shows B
+  scr.r = B.length - 1; scr.c = B[B.length - 1].length;       // cursor where Ink leaves it
+  scr.write(out);
+  expect(scr.lines(4)).toEqual(C);
+  expect(scr.r).toBe(C.length - 1);                            // ends on the last frame line (Ink's assumption)
+});
+
+test("fullscreen scroll: emitted as DECSTBM hardware shift + only revealed rows painted", () => {
+  const d = new FrameDiffer();
+  d.setBand({ top: 1, height: 10 });
+  const mk = (start: number) => Array.from({ length: 10 }, (_, i) => `line-${start + i}`).concat(["chrome", "> input"]);
+  const A = mk(0), B = mk(0), C = mk(3); // scroll down by 3: content moved up
+  const out = seedAndProcess(d, A, B, C)!;
+  expect(out).toContain("\x1b[1;10r"); // scroll region = the band
+  expect(out).toContain("\x1b[3S");    // hardware scroll up by 3
+  expect(out).not.toContain("line-4"); // surviving rows are NOT rewritten...
+  expect(out).toContain("line-12");    // ...only the revealed ones are
+  const scr = new Screen(14);
+  for (const [i, l] of B.entries()) { scr.r = i; scr.c = 0; scr.write(l); }
+  scr.r = B.length - 1; scr.c = B[B.length - 1].length;
+  scr.write(out);
+  expect(scr.lines(12)).toEqual(C);
+});
+
+test("fullscreen scroll UP uses SD and paints the top rows", () => {
+  const d = new FrameDiffer();
+  d.setBand({ top: 1, height: 10 });
+  const mk = (start: number) => Array.from({ length: 10 }, (_, i) => `ln-${start + i}`).concat(["chrome"]);
+  const B = mk(5), C = mk(2); // user scrolled up by 3: content moved down
+  const out = seedAndProcess(d, mk(5), B, C)!;
+  expect(out).toContain("\x1b[3T");
+  const scr = new Screen(12);
+  for (const [i, l] of B.entries()) { scr.r = i; scr.c = 0; scr.write(l); }
+  scr.r = B.length - 1; scr.c = B[B.length - 1].length;
+  scr.write(out);
+  expect(scr.lines(11)).toEqual(C);
+});
+
+test("identical frame skips the write; height change and weird payloads pass through", () => {
+  const d = new FrameDiffer();
+  const A = ["a", "b"], B = ["a", "b"];
+  d.process(A.join("\n"));                      // first render (unparseable) -> passthrough
+  d.process(payload(2, A));                     // seed
+  expect(d.process(payload(2, B))).toBe("");    // identical -> skip entirely
+  expect(d.process(payload(2, ["a", "b", "c"]))).toBe(null); // height change -> full rewrite
+  expect(d.process("\x1b]52;c;abc\x07")).toBe(null);          // OSC (clipboard) -> untouched
+});
