@@ -8,7 +8,7 @@
  * rendering of scrollback is a later phase; this is the fast, safe base.
  */
 import { Box, Text } from "ink";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { Line, LineKind } from "./transcript.tsx";
 
@@ -62,19 +62,23 @@ export interface ScrollApi {
 
 /** Windowing state: a top offset + sticky-to-bottom. While sticky (at the bottom), new content keeps the
  * view pinned to the bottom (chat auto-follow). Scrolling up breaks sticky and holds your position as
- * content grows below; scrolling back to the bottom re-arms sticky. */
+ * content grows below; scrolling back to the bottom re-arms sticky.
+ *
+ * While sticky the offset is DERIVED (pinned to maxOffset), not chased with an effect: the old
+ * effect-based chase cost a second render per appended line during streaming (setState after paint),
+ * and pinning is a pure function of total/viewH anyway. Handlers compute from the derived `off`, so
+ * breaking sticky with a scroll-up starts exactly at the bottom, not at a stale stored offset. */
 export function useScroll(total: number, viewH: number): ScrollApi {
   const maxOffset = Math.max(0, total - viewH);
-  const [offset, setOffset] = useState(maxOffset);
+  const [offset, setOffset] = useState(0);
   const [sticky, setSticky] = useState(true);
-  useEffect(() => { if (sticky) setOffset(Math.max(0, total - viewH)); }, [total, viewH, sticky]);
-  const off = Math.min(Math.max(0, offset), maxOffset);
+  const off = sticky ? maxOffset : Math.min(Math.max(0, offset), maxOffset);
   return {
     offset: off,
     maxOffset,
     atBottom: off >= maxOffset,
-    up: (n = 1) => { setSticky(false); setOffset((o) => Math.max(0, Math.min(o, maxOffset) - n)); },
-    down: (n = 1) => setOffset((o) => { const v = Math.min(maxOffset, Math.min(o, maxOffset) + n); if (v >= maxOffset) setSticky(true); return v; }),
+    up: (n = 1) => { setSticky(false); setOffset(Math.max(0, off - n)); },
+    down: (n = 1) => { const v = Math.min(maxOffset, off + n); if (v >= maxOffset) setSticky(true); setOffset(v); },
     top: () => { setSticky(false); setOffset(0); },
     bottom: () => { setSticky(true); setOffset(maxOffset); },
     to: (row, center = true) => {

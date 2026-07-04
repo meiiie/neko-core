@@ -1080,7 +1080,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // instead of the append-only <Static>. Sticky-to-bottom auto-follows new output; PgUp/PgDn page and
   // Ctrl+up/down line-scroll (unambiguous keys that never fight typing or history). Hooks run every
   // render regardless of mode (0 rows when inline) to keep hook order stable.
-  const flat = useMemo(() => (fullscreen ? flattenLines(lines, contentCols) : []), [fullscreen, lines, contentCols]);
+  // Flat rows are ONLY needed while the find bar is open (rich reading never uses them) - computing them
+  // on every fullscreen render would re-flatten the whole transcript per appended line for nothing.
+  const flat = useMemo(() => (fullscreen && search ? flattenLines(lines, contentCols) : []), [fullscreen, search !== null, lines, contentCols]);
   // Rich reading scrolls by measured content height; find mode (flat rows) scrolls by row count.
   const scroll = useScroll(search ? flat.length : contentH, viewH);
   // Compute the matching row indices for a query over the flattened rows (case-insensitive).
@@ -1102,7 +1104,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const w = parseWheel(input); // wheel still scrolls while the find bar is open
         if (w === "up") return scroll.up(3);
         if (w === "down") return scroll.down(3);
-        if (key.escape) return setSearch(null);
+        // Esc: close find and re-pin to the bottom (back to the live tail). Predictable - staying at a
+        // flat-row offset would land somewhere slightly different in the rich view (row domains differ).
+        if (key.escape) { setSearch(null); scroll.bottom(); return; }
         if (key.return || key.downArrow) { // next match
           const idx = search.matches.length ? (search.idx + 1) % search.matches.length : 0;
           jumpToMatch(search.matches, idx); return setSearch({ ...search, idx });
@@ -1130,6 +1134,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (wheel === "down") return scroll.down(3);
       if (key.pageUp) return scroll.up(Math.max(1, viewH - 1));
       if (key.pageDown) return scroll.down(Math.max(1, viewH - 1));
+      if (key.home) return scroll.top();     // jump to the oldest visible history
+      if (key.end) return scroll.bottom();   // re-pin to the live tail
       if (key.ctrl && key.upArrow) return scroll.up(1);
       if (key.ctrl && key.downArrow) return scroll.down(1);
     },
@@ -1194,8 +1200,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         <Box flexDirection="column" marginTop={1} marginBottom={1}>
           {/* Clamp the live preview to the viewport height (compact = no extra blank-line rhythm, so the
               height is predictable) — otherwise a long streamed reply grows past the terminal and Ink
-              redraws from the top each frame. The full reply commits to <Static> when the stream ends. */}
-          <Markdown text={clampToRows(renderTail(stream), Math.max(6, rows - 12), contentCols)} width={contentCols} compact />
+              redraws from the top each frame. The full reply commits to <Static> when the stream ends.
+              In fullscreen, clamp much harder (~10 rows): the preview sits BELOW the transcript viewport
+              and steals its flexGrow space, so an unclamped preview would collapse the viewport and make
+              the whole screen bounce while a long reply streams. */}
+          <Markdown text={clampToRows(renderTail(stream), fullscreen ? Math.min(10, Math.max(6, rows - 12)) : Math.max(6, rows - 12), contentCols)} width={contentCols} compact />
         </Box>
       ) : null}
 
