@@ -91,32 +91,30 @@ export function useScroll(total: number, viewH: number): ScrollApi {
   };
 }
 
-export interface LineScrollApi {
-  /** Exclusive end index of the visible line slice; null = pinned to the live tail. */
-  bottom: number | null;
+export interface RowScrollApi {
+  /** Rows between the viewport bottom and the live tail. 0 = pinned to the tail. */
+  dist: number;
   scrolled: boolean;
-  /** Accumulate a scroll of `n` LINES (negative = up). Coalesced: any burst inside one frame interval
-   * flushes as ONE state update, so a fast wheel spin moves far in a single render instead of queueing
-   * a render per tick (the render-backlog "chasing the wheel" jank). */
+  /** Accumulate a scroll of `n` rows (negative = up/older). Coalesced: any burst inside one frame
+   * interval flushes as ONE state update, so a fast wheel spin moves far in a single render instead of
+   * queueing a render per tick (the render-backlog "chasing the wheel" jank). */
   by: (n: number) => void;
   top: () => void;
   toBottom: () => void;
 }
 
-/** Line-anchored scrolling over the RICH transcript: the viewport shows the K lines ending at `bottom`,
- * bottom-anchored, so scrolled-back history looks IDENTICAL to the live tail (no flat-mode flash) while
- * staying O(viewport) - only the visible slice is ever mounted. Claude Code scrolls its virtual list in
- * 40-row quanta; one LINE (1-4 rows) is finer-grained than that.
+/** Row scrolling ANCHORED FROM THE END: position is the distance (in rows) from the live tail, so when
+ * rows are inserted/upgraded ABOVE the viewport (the background ANSI warmer replacing fallback rows, or
+ * simply history growing) the reading position holds rock-steady - an index-from-start anchor would
+ * jump on every upstream change.
  *
- * Wheel/key deltas accumulate in a ref and flush on a ~30fps timer (matching Ink's own output cadence):
+ * Deltas accumulate in a ref and flush on a ~30fps timer (matching Ink's own output cadence):
  * pendingDelta-style coalescing, the same trick claude-code's ScrollBox uses to stay smooth. */
-export function useLineScroll(len: number, viewH: number): LineScrollApi {
+export function useRowScroll(totalRows: number, viewH: number): RowScrollApi {
   const [, force] = useState(0);
-  const st = useRef<{ bottom: number | null; pending: number; timer: ReturnType<typeof setTimeout> | null }>({ bottom: null, pending: 0, timer: null });
-  const lenRef = useRef(len);
-  lenRef.current = len; // flush clamps against the CURRENT length, not the one captured at schedule time
-  const floorRef = useRef(0);
-  floorRef.current = Math.min(len, viewH); // every Line renders >= 1 row, so `viewH` lines always fill the viewport
+  const st = useRef<{ dist: number; pending: number; timer: ReturnType<typeof setTimeout> | null }>({ dist: 0, pending: 0, timer: null });
+  const maxRef = useRef(0);
+  maxRef.current = Math.max(0, totalRows - viewH); // clamp against the CURRENT size at flush time
   useEffect(() => () => { if (st.current.timer) clearTimeout(st.current.timer); }, []);
 
   const flush = () => {
@@ -124,20 +122,19 @@ export function useLineScroll(len: number, viewH: number): LineScrollApi {
     const d = st.current.pending;
     st.current.pending = 0;
     if (d === 0) return;
-    const cur = st.current.bottom ?? lenRef.current;
-    const next = Math.max(floorRef.current, Math.min(lenRef.current, cur + d));
-    st.current.bottom = next >= lenRef.current ? null : next; // reaching the end re-pins to the live tail
+    // n>0 = toward the tail (dist shrinks); n<0 = up into history (dist grows).
+    st.current.dist = Math.max(0, Math.min(maxRef.current, st.current.dist - d));
     force((t) => t + 1);
   };
   return {
-    bottom: st.current.bottom,
-    scrolled: st.current.bottom !== null,
+    dist: Math.min(st.current.dist, maxRef.current),
+    scrolled: st.current.dist > 0,
     by: (n) => {
       st.current.pending += n;
       if (!st.current.timer) st.current.timer = setTimeout(flush, 33);
     },
-    top: () => { st.current.pending = 0; st.current.bottom = floorRef.current; force((t) => t + 1); },
-    toBottom: () => { st.current.pending = 0; st.current.bottom = null; force((t) => t + 1); },
+    top: () => { st.current.pending = 0; st.current.dist = maxRef.current; force((t) => t + 1); },
+    toBottom: () => { st.current.pending = 0; st.current.dist = 0; force((t) => t + 1); },
   };
 }
 

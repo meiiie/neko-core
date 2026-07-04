@@ -21,8 +21,9 @@ import { TextInput } from "./text-input.tsx";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { isSyncOutputSupported, probeSyncOutput, wrapStdoutForSync } from "./sync-stdout.ts";
 import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
-import { flattenLines, ScrollRegion, useLineScroll, useScroll } from "./scroll.tsx";
+import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
+import { clearAnsiCache, fallbackRows, getCachedRows, warmAnsiCache } from "./ansi-cache.ts";
 import { isMouseEnabled, parseClick, parseWheelAll } from "./mouse.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
@@ -584,7 +585,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       altDisposeRef.current?.();
       altDisposeRef.current = null;
       setSearch(null); // leaving fullscreen closes any open find bar
-      lineScroll.toBottom(); // ...and re-pins so re-entering starts at the live tail
+      rowScroll.toBottom(); // ...and re-pins so re-entering starts at the live tail
     }
     setFullscreen(next);
     addLine("info", next
@@ -1074,10 +1075,22 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // instead of the append-only <Static>. Sticky-to-bottom auto-follows new output; PgUp/PgDn page and
   // Ctrl+up/down line-scroll (unambiguous keys that never fight typing or history). Hooks run every
   // render regardless of mode (0 rows when inline) to keep hook order stable.
-  // Rich line-anchored scrolling (the normal fullscreen path): the SAME rich rendering at every scroll
-  // position, windowed by line index - no flat-mode flash, O(viewport) per frame. Deltas are coalesced
-  // (pendingDelta) so a fast wheel spin is one big move per frame, not a queued render per tick.
-  const lineScroll = useLineScroll(lines.length, viewH);
+  // Fullscreen transcript = PRE-RENDERED ANSI rows (ansi-cache.ts): each line's rich rendering is paid
+  // once off-screen; the viewport pastes cached string rows. Unwarmed lines show a plain fallback row
+  // and upgrade in place as the background warmer (newest-first, idle chunks) fills the cache.
+  const [warmTick, setWarmTick] = useState(0); // bumped per warm chunk -> rows rebuild with upgrades
+  const ansiRows = useMemo(() => {
+    if (!fullscreen) return [] as string[];
+    const out: string[] = [];
+    for (const l of lines) out.push(...(getCachedRows(l, contentCols) ?? fallbackRows(l)));
+    return out;
+  }, [fullscreen, lines, contentCols, warmTick]);
+  useEffect(() => {
+    if (fullscreen) warmAnsiCache(lines, contentCols, cfg, () => setWarmTick((t) => t + 1));
+  }, [fullscreen, lines, contentCols]);
+  useEffect(() => () => clearAnsiCache(), []); // free on unmount; resize re-keys by width mismatch
+  // Row scrolling anchored from the END (dist=0 -> pinned): stays put as the warmer swaps rows above.
+  const rowScroll = useRowScroll(ansiRows.length, viewH);
   // Flat rows exist ONLY for the find bar (in-place match highlighting needs row positions).
   const flat = useMemo(
     () => (fullscreen && search ? flattenLines(lines, contentCols) : []),
@@ -1086,9 +1099,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const scroll = useScroll(flat.length, viewH);
   // "New messages" pill count: activity appended since the scroll-away moment.
   useEffect(() => {
-    if (lineScroll.scrolled) scrollAwayLenRef.current = lines.length;
-  }, [lineScroll.scrolled]);
-  const newSince = lineScroll.scrolled
+    if (rowScroll.scrolled) scrollAwayLenRef.current = lines.length;
+  }, [rowScroll.scrolled]);
+  const newSince = rowScroll.scrolled
     ? lines.slice(scrollAwayLenRef.current).filter((l) => l.kind === "user" || l.kind === "assistant" || l.kind === "tool_call").length
     : 0;
   // Compute the matching row indices for a query over the flattened rows (case-insensitive).
@@ -1104,7 +1117,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Fullscreen scroll + in-viewport find. Search mode owns typing (edit the query); otherwise wheel /
   // PgUp/PgDn / Ctrl+arrows / Home scroll the rich view by LINES, and (ctrl+)End or clicking the pill
   // jumps back to the live tail.
-  const LINES_PER_NOTCH = 2; // one wheel notch ~= 2 lines (~3-5 rows): close to terminal-native feel
+  const ROWS_PER_NOTCH = 3; // one wheel notch = 3 rows: the terminal-native scroll grain
   useInput(
     (input, key) => {
       if (!fullscreen || overlay || viewer || approval) return;
@@ -1112,7 +1125,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const w = parseWheelAll(input); // wheel still scrolls the flat window while finding
         if (w) return w.dir === "up" ? scroll.up(3 * w.count) : scroll.down(3 * w.count);
         // Esc: close find and return to the live rich tail (predictable; row domains differ).
-        if (key.escape) { setSearch(null); lineScroll.toBottom(); return; }
+        if (key.escape) { setSearch(null); rowScroll.toBottom(); return; }
         if (key.return || key.downArrow) { // next match
           const idx = search.matches.length ? (search.idx + 1) % search.matches.length : 0;
           jumpToMatch(search.matches, idx); return setSearch({ ...search, idx });
@@ -1137,16 +1150,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (key.ctrl && input === "f") return setSearch({ q: "", matches: [], idx: 0 }); // open find
       // Clicking the jump pill (it sits on the row right below the viewport) returns to the tail.
       const click = parseClick(input);
-      if (click && lineScroll.scrolled && click.y === viewH + 1) return lineScroll.toBottom();
+      if (click && rowScroll.scrolled && click.y === viewH + 1) return rowScroll.toBottom();
       const wheel = parseWheelAll(input);
-      if (wheel) return lineScroll.by((wheel.dir === "up" ? -1 : 1) * LINES_PER_NOTCH * wheel.count);
-      const page = Math.max(2, Math.floor(viewH / 2)); // ~a viewport of lines (most lines render 2+ rows)
-      if (key.pageUp) return lineScroll.by(-page);
-      if (key.pageDown) return lineScroll.by(page);
-      if (key.ctrl && key.upArrow) return lineScroll.by(-1);
-      if (key.ctrl && key.downArrow) return lineScroll.by(1);
-      if (key.home) return lineScroll.top();
-      if (key.end) return lineScroll.toBottom(); // plain End AND ctrl+End (the advertised chord) both jump
+      if (wheel) return rowScroll.by((wheel.dir === "up" ? -1 : 1) * ROWS_PER_NOTCH * wheel.count);
+      const page = Math.max(1, viewH - 1); // one viewport of rows, minus a row of overlap for context
+      if (key.pageUp) return rowScroll.by(-page);
+      if (key.pageDown) return rowScroll.by(page);
+      if (key.ctrl && key.upArrow) return rowScroll.by(-1);
+      if (key.ctrl && key.downArrow) return rowScroll.by(1);
+      if (key.home) return rowScroll.top();
+      if (key.end) return rowScroll.toBottom(); // plain End AND ctrl+End (the advertised chord) both jump
     },
     { isActive: fullscreen && !overlay && !viewer && approval === null },
   );
@@ -1172,12 +1185,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 currentRow={search.matches.length ? search.matches[search.idx] : undefined}
               />
             ) : (
-              // Rich viewport at EVERY scroll position - pinned tail and scrolled-back history render
-              // identically (same TranscriptLine components), just a different line window.
-              <RichView lines={lines} bottom={lineScroll.bottom} viewH={viewH} width={contentCols} cfg={cfg} />
+              // Rich viewport at EVERY scroll position: pre-rendered ANSI rows, windowed - identical
+              // look pinned or scrolled, O(viewport) string pastes per frame.
+              <RichView rows={ansiRows} dist={rowScroll.dist} viewH={viewH} width={contentCols} />
             )}
           </Box>
-          {lineScroll.scrolled && !search ? (
+          {rowScroll.scrolled && !search ? (
             // Claude-style jump pill: CLICKABLE (it sits on the row right below the viewport; a left
             // click there jumps - see the input handler) and counts activity landing while reading.
             <Box justifyContent="center">

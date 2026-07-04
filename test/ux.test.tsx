@@ -137,25 +137,34 @@ test("fullscreen mode renders a scrollable transcript region (alt-screen), inlin
   }
 });
 
-test("RichView renders rich lines at the tail AND at a scrolled position, mounting only O(viewport)", () => {
-  const lines: Line[] = [];
-  for (let i = 0; i < 200; i++) lines.push({ id: i, kind: "assistant", text: `richline ${i}` });
-  // Pinned tail (bottom=null): newest at the bottom, top clipped.
-  const r = render(<RichView lines={lines} bottom={null} viewH={5} width={40} cfg={CFG} />);
-  const f = strip(r.lastFrame());
-  expect(f).toContain("richline 199");
-  expect(f).not.toContain("richline 0");
-  // O(viewport) bound: even the RAW frame (pre-clip render) must not contain lines outside the mounted
-  // slice (viewH + buffer) - mounting the whole thread is the lag bug this guards against.
-  expect(r.lastFrame()).not.toContain("richline 100");
+test("RichView pastes exactly the visible window of cached rows (tail and scrolled)", () => {
+  const rows = Array.from({ length: 200 }, (_, i) => `row ${i}`);
+  // Pinned tail (dist=0): last rows visible.
+  const r = render(<RichView rows={rows} dist={0} viewH={5} width={40} />);
+  const f = r.lastFrame() ?? "";
+  expect(f).toContain("row 199");
+  expect(f).not.toContain("row 194"); // only viewH rows mounted - O(viewport), the lag-bug guard
   r.unmount();
-  // Scrolled position (bottom=100): the window ends at line 99 - SAME rich rendering, different slice.
-  const r2 = render(<RichView lines={lines} bottom={100} viewH={5} width={40} cfg={CFG} />);
-  const f2 = strip(r2.lastFrame());
-  expect(f2).toContain("richline 99");
-  expect(f2).not.toContain("richline 100"); // nothing below the window
-  expect(r2.lastFrame()).not.toContain("richline 199"); // ...and the tail is not even mounted
+  // Scrolled 100 rows up: window ends 100 rows above the tail.
+  const r2 = render(<RichView rows={rows} dist={100} viewH={5} width={40} />);
+  const f2 = r2.lastFrame() ?? "";
+  expect(f2).toContain("row 99");
+  expect(f2).not.toContain("row 100"); // nothing below the window
+  expect(f2).not.toContain("row 199"); // the tail is not even mounted
   r2.unmount();
+});
+
+test("ansi-cache: renderLineRows renders a line rich once; fallback is instant plain", async () => {
+  const { renderLineRows, fallbackRows, clearAnsiCache } = await import("../src/ui/ansi-cache.ts");
+  const line: Line = { id: 90001, kind: "assistant", text: "# Tiêu đề\n\n**đậm** và `code`" };
+  const rows = renderLineRows(line, 60, CFG);
+  expect(rows.length).toBeGreaterThan(1);              // markdown produced structured rows (heading + body)
+  expect(rows.join("\n")).toContain("Tiêu đề");        // content survived the off-screen render
+  // (ANSI styling is chalk-gated on TTY detection: present in a real terminal, absent under bun test -
+  // asserting codes here would test the environment, not the cache.)
+  const fb = fallbackRows({ id: 90002, kind: "user", text: "xin chào" });
+  expect(fb[0]).toBe("> xin chào");                      // plain, glyph-prefixed, instant
+  clearAnsiCache();
 });
 
 test("fullscreen history: PgUp shows the jump pill; a new turn counts; End returns to the tail", async () => {
