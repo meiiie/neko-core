@@ -1,0 +1,80 @@
+/**
+ * Full-pipeline fullscreen simulation: the REAL ChatApp wired exactly like production (fake TTY stdout
+ * -> FrameDiffer -> BSU/ESU wrapper, raw-ish stdin), with EVERY written byte replayed into a
+ * VirtualTerminal. Asserts the screen is never left blank ("black screen") across the exact flows the
+ * owner hit: entering fullscreen, typing, growing the window, shrinking it. This is the deterministic
+ * reproduction harness for the class of bugs that only real terminals used to reveal.
+ */
+import { EventEmitter } from "node:events";
+import { expect, test } from "bun:test";
+import { render } from "ink";
+import React from "react";
+
+import { ChatApp } from "../src/ui/chat.tsx";
+import { FrameDiffer } from "../src/ui/frame-diff.ts";
+import { wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
+import { VirtualTerminal } from "./vt.ts";
+
+class FakeTtyOut extends EventEmitter {
+  isTTY = true;
+  constructor(public columns: number, public rows: number, private vt: VirtualTerminal) { super(); }
+  writes = 0;
+  write(s: string): boolean { this.writes++; this.vt.write(String(s)); return true; }
+  setSize(cols: number, rows: number): void { this.columns = cols; this.rows = rows; this.vt.resize(cols, rows); this.emit("resize"); }
+}
+class FakeStdin extends EventEmitter {
+  isTTY = true; private data: string | null = null;
+  setRawMode() {} setEncoding() {} ref() {} unref() {} pause() {} resume() {}
+  read(): string | null { const d = this.data; this.data = null; return d; }
+  push(s: string): void { this.data = s; this.emit("readable"); this.emit("data", s); }
+}
+const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+test("fullscreen sim: entry, typing, grow and shrink never leave a black screen", async () => {
+  const vt = new VirtualTerminal(100, 30);
+  const out = new FakeTtyOut(100, 30, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  const provider: any = { complete: async () => ({ content: "phan hoi ok", tool_calls: [] }) };
+  const session: any = {
+    id: "sim", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
+    messages: Array.from({ length: 8 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `noi dung sim ${i}` })),
+  };
+  delete process.env.NEKO_FULLSCREEN; // start INLINE; enter fullscreen via the real command
+  const app = render(
+    React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "sim", frameDiffer: differ }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(300);
+  expect(vt.isBlank()).toBe(false); // inline baseline on screen
+
+  // --- enter fullscreen via the slash command (the exact user flow) ---
+  stdin.push("/fullscreen");
+  await tick(60);
+  stdin.push("\r");
+  await tick(600); // alt-screen + first composed paint + warm
+  expect(vt.isBlank()).toBe(false); // ENTRY must not be black
+  expect(vt.text()).toContain("noi dung sim 7"); // the transcript tail is actually painted
+
+  // --- typing echoes ---
+  stdin.push("x"); await tick(60); stdin.push("y"); await tick(120);
+  expect(vt.text()).toContain("xy");
+
+  // --- GROW the window (maximize-like) ---
+  out.setSize(120, 36);
+  await tick(500); // debounce 150ms + repaint
+  expect(vt.isBlank()).toBe(false); // grow must not black the screen
+  expect(vt.text()).toContain("noi dung sim 7");
+
+  // --- SHRINK the window (the stale-height overflow case) ---
+  out.setSize(90, 22);
+  await tick(500);
+  expect(vt.isBlank()).toBe(false); // shrink must not black the screen
+  expect(vt.text()).toContain("noi dung sim 7");
+
+  // typing after all of it still lands
+  stdin.push("z"); await tick(150);
+  expect(vt.text()).toContain("z");
+  app.unmount();
+  await tick(50);
+}, 30000);

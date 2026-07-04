@@ -16,8 +16,8 @@ import { wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
 
 class FakeTtyOut extends EventEmitter {
   isTTY = true; columns = 120; rows = 40;
-  bytes = 0; writes = 0; log: string[] = [];
-  write(s: string): boolean { this.bytes += String(s).length; this.writes++; this.log.push(String(s)); return true; }
+  bytes = 0; writes = 0; log: string[] = []; times: number[] = [];
+  write(s: string): boolean { this.bytes += String(s).length; this.writes++; this.log.push(String(s)); this.times.push(performance.now()); return true; }
 }
 class FakeStdin extends EventEmitter {
   isTTY = true; private data: string | null = null;
@@ -98,6 +98,18 @@ async function run(label: string, useDiffer: boolean): Promise<void> {
   const scrolled = out.log.slice(si).join("");
   const hwScroll = /\x1b\[\d+;\d+r/.test(scrolled) && /\x1b\[\d+[ST]/.test(scrolled);
   console.log(`${label} · scroll: ~${scrollBytes} bytes/step, hardware-scroll(DECSTBM+SU/SD) used: ${hwScroll}`);
+
+  // Glide cadence (the FPS meter): one big flick, then measure the interval between repaint writes.
+  // Target: ~16ms hops (60fps) with no long gaps - long gaps are what "fps chưa ổn" feels like.
+  const gi = out.times.length;
+  stdin.push("\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M"); // 5-notch flick
+  await tick(600);
+  const gaps: number[] = [];
+  for (let i = gi + 1; i < out.times.length; i++) gaps.push(out.times[i] - out.times[i - 1]);
+  const glide = gaps.filter((g) => g < 200); // ignore the trailing idle gap
+  const avg = glide.length ? glide.reduce((a, b) => a + b, 0) / glide.length : 0;
+  const max = glide.length ? Math.max(...glide) : 0;
+  console.log(`${label} · glide: ${glide.length} hops, avg ${avg.toFixed(1)}ms, max ${max.toFixed(1)}ms between repaints`);
   app.unmount();
   await tick(50);
 }

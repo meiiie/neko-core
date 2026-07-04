@@ -112,24 +112,45 @@ export interface RowScrollApi {
  * at ~60fps, covering half the remaining distance per frame (exponential ease-out, min 1 row). Each hop
  * repaints as a small hardware shift, so a fast flick reads as gliding momentum - the "smooth like a
  * GUI app" feel - instead of full-page teleports. The first hop fires immediately (no start latency). */
-export function useRowScroll(totalRows: number, viewH: number): RowScrollApi {
+export function useRowScroll(totalRows: number, viewH: number, onHop?: (dist: number) => void): RowScrollApi {
   const [, force] = useState(0);
   const st = useRef<{ shown: number; target: number; timer: ReturnType<typeof setTimeout> | null }>({ shown: 0, target: 0, timer: null });
   const maxRef = useRef(0);
   maxRef.current = Math.max(0, totalRows - viewH); // clamp against the CURRENT size on every access
+  const hopRef = useRef(onHop);
+  hopRef.current = onHop; // latest-callback pattern: hops see current state without re-creating the loop
+  const lastHopAt = useRef(0);
   useEffect(() => () => { if (st.current.timer) clearTimeout(st.current.timer); }, []);
 
   const step = () => {
     st.current.timer = null;
+    // Drift-compensated cadence: timers fire LATE under load; subtract the measured overshoot from the
+    // next delay so hops average the 16ms target instead of 16ms + event-loop latency (bench: 28ms avg
+    // uncompensated).
+    const now = performance.now();
+    const late = lastHopAt.current ? Math.max(0, now - lastHopAt.current - 16) : 0;
+    lastHopAt.current = now;
     const s = st.current;
     s.target = Math.max(0, Math.min(maxRef.current, s.target));
     const d = s.target - s.shown;
     if (d === 0) return;
+    const wasPinned = s.shown === 0;
     s.shown += d > 0 ? Math.max(1, Math.floor(d / 2)) : Math.min(-1, Math.ceil(d / 2));
-    force((t) => t + 1);
-    if (s.shown !== s.target) st.current.timer = setTimeout(step, 16);
+    // The hot path: repaint DIRECTLY through the callback (differ band repaint, sub-ms) - React is cut
+    // out of the per-hop loop entirely. Bench showed render+effect per hop cost 28-51ms between
+    // repaints; direct hops run at the timer's 16ms. React still renders at the gesture EDGES (pill
+    // mounts/unmounts, settle) - the only moments its output actually changes.
+    if (hopRef.current) {
+      hopRef.current(Math.min(s.shown, maxRef.current));
+      const settled = s.shown === s.target;
+      const pinnedChanged = wasPinned !== (s.shown === 0);
+      if (settled || pinnedChanged) force((t) => t + 1);
+    } else {
+      force((t) => t + 1);
+    }
+    if (s.shown !== s.target) st.current.timer = setTimeout(step, Math.max(2, 16 - late));
   };
-  const kick = () => { if (!st.current.timer) step(); };
+  const kick = () => { lastHopAt.current = 0; if (!st.current.timer) step(); };
   return {
     dist: Math.min(st.current.shown, maxRef.current),
     scrolled: st.current.shown > 0 || st.current.target > 0,

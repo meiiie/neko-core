@@ -265,6 +265,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Start fullscreen only if configured AND the terminal can host it (a TTY with room). A non-TTY or a
   // tiny window degrades to inline rather than corrupting the screen.
   const [fullscreen, setFullscreen] = useState<boolean>(cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
+  const fullscreenRef = useRef(fullscreen); // for closures that must read the CURRENT mode (resize debounce, mount effect)
+  useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
   const [viewH, setViewH] = useState(Math.max(3, (stdout?.rows ?? 24) - 8)); // measured transcript viewport height
   const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
   const scrollAwayLenRef = useRef(0); // lines.length when the user scrolled away -> "N new messages" pill count
@@ -642,17 +644,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     if (cfg.fullscreen && !fullscreen) addLine("info", "(fullscreen off: needs an interactive terminal with room - staying inline)");
   }, []);
-  // Fullscreen mode: enter the alt-screen when it turns on, leave when it turns off or the app unmounts.
-  // installAltScreenGuard also restores on crash/SIGINT/SIGTERM so a fatal error never leaves the
-  // terminal in the alt-screen. Idempotent - the effect cleanup and the process handlers can both fire.
+  // Alt-screen lifecycle OWNERSHIP: runtime transitions live in toggleFullscreen (synchronous, ordered
+  // around React's renders). This effect handles ONLY the two edges the toggle can't: entering on MOUNT
+  // when fullscreen starts enabled (cfg/env), and restoring on UNMOUNT. Empty deps ON PURPOSE: an
+  // earlier version re-ran on [fullscreen] and its cleanup+reinstall fired AFTER the first fullscreen
+  // paint - leave alt, re-enter, 2J - wiping the freshly painted screen with nothing left dirty for Ink
+  // to repaint. That was the black-screen-on-entry bug (deterministically reproduced by fullscreen-sim).
   useEffect(() => {
-    if (fullscreen && !altDisposeRef.current) {
+    if (fullscreenRef.current && !altDisposeRef.current) {
       altDisposeRef.current = installAltScreenGuard((stdout as any) ?? process.stdout, { mouse: isMouseEnabled() });
-    } else if (!fullscreen && altDisposeRef.current) {
-      altDisposeRef.current(); altDisposeRef.current = null;
     }
     return () => { if (altDisposeRef.current) { altDisposeRef.current(); altDisposeRef.current = null; } };
-  }, [fullscreen, stdout]);
+  }, []);
   // Keep the transcript viewport height in sync with the flex-grown scroll box's ACTUAL height (it fills
   // whatever the live region + input leave). Runs every render; the !== guard makes it converge in a
   // frame or two without looping. Only meaningful in fullscreen (the box only mounts then).
@@ -674,8 +677,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // new width. In fullscreen the viewport + chrome simply repaint from state (the ANSI cache re-warms
   // at the new width via its width key).
   const resizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fullscreenRef = useRef(fullscreen); // the debounced resize closure must read the CURRENT mode
-  useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
   useEffect(() => {
     if (!stdout) return;
     const onResize = () => {
@@ -1123,7 +1124,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     return out;
   }, [fullscreen, lines, contentCols, warmTick]);
   // Row scrolling anchored from the END (dist=0 -> pinned): stays put as the warmer swaps rows above.
-  const rowScroll = useRowScroll(ansiRows.length, viewH);
+  // Glide hops repaint the band DIRECTLY through the differ (sub-ms) - React renders only at gesture
+  // edges. The refs keep the hop callback reading current values without restarting the animation.
+  const paddedRowsRef = useRef<string[]>([]);
+  const bandActiveRef = useRef(false);
+  const rowScroll = useRowScroll(ansiRows.length, viewH, (dist) => {
+    if (bandActiveRef.current) frameDiffer?.setBandContent(paddedRowsRef.current, dist);
+  });
   // Which LINE the current scroll position looks at (walk row counts from the end; O(scroll depth),
   // only while scrolled). Quantized on BOTH ends: the walk re-runs per ~120 rows of travel (not per
   // 60fps flush - a deep scroll would walk thousands of map lookups per frame otherwise), and the
@@ -1147,8 +1154,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Rows get the same left gutter the Ink tree gives everything else (the differ paints at column 1;
   // unpadded rows sat flush against the edge). Padded once per rows-change, never per scroll frame.
   const paddedRows = useMemo(() => ansiRows.map((r) => (r.length ? "  " + r : r)), [ansiRows]);
+  paddedRowsRef.current = paddedRows;
+  bandActiveRef.current = fullscreen && !search;
   useEffect(() => {
-    frameDiffer?.setBandContent(fullscreen && !search ? paddedRows : null, rowScroll.dist);
+    frameDiffer?.setBandContent(bandActiveRef.current ? paddedRows : null, rowScroll.dist);
   }, [fullscreen, search !== null, paddedRows, rowScroll.dist, viewH]);
   useEffect(() => () => clearAnsiCache(), []); // free on unmount; resize re-keys by width mismatch
   // Flat rows exist ONLY for the find bar (in-place match highlighting needs row positions).
