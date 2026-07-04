@@ -26,7 +26,7 @@ import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
-import { DISABLE_MOUSE, isMouseEnabled, parseClick, parseWheelAll } from "./mouse.ts";
+import { DISABLE_MOUSE, isMouseEnabled, parseClick, parseLastPointer, parseWheelAll } from "./mouse.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
@@ -1210,6 +1210,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const newSince = rowScroll.scrolled
     ? lines.slice(scrollAwayLenRef.current).filter((l) => l.kind === "user" || l.kind === "assistant" || l.kind === "tool_call").length
     : 0;
+  // The jump pill's label + screen hit-box (row below the viewport, centered): shared by the hover
+  // highlight and the click handler so what LIGHTS UP is exactly what's CLICKABLE.
+  const [pillHover, setPillHover] = useState(false);
+  const pillShown = fullscreen && rowScroll.scrolled && !search;
+  const pillLabel = newSince > 0 ? ` ↓ ${newSince} new message${newSince > 1 ? "s" : ""} · click or ctrl+End ` : ` Jump to bottom (ctrl+End) ↓ `;
+  const pillX1 = 2 + Math.max(0, Math.floor((contentCols - pillLabel.length) / 2)) + 1; // 1-based col
+  const pillHit = (x: number, y: number) => pillShown && y === viewH + 1 && x >= pillX1 - 2 && x <= pillX1 + pillLabel.length + 1;
+  useEffect(() => { if (!pillShown) setPillHover(false); }, [pillShown]);
   // Compute the matching row indices for a query over the flattened rows (case-insensitive).
   const findMatches = (q: string): number[] => {
     if (!q.trim()) return [];
@@ -1227,6 +1235,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useInput(
     (input, key) => {
       if (!fullscreen || overlay || viewer || approval) return;
+      // Pill hover: any-motion reports (DECSET 1003) carry coordinates - light the pill when the
+      // pointer is over it. React bails when the state is unchanged, so motion is cheap. Pure moves
+      // are consumed here; clicks/wheels fall through to their handlers below.
+      const ptr = parseLastPointer(input);
+      if (ptr) {
+        setPillHover(pillHit(ptr.x, ptr.y));
+        if (ptr.kind === "move" || ptr.kind === "release") return;
+      }
       if (search) {
         const w = parseWheelAll(input); // wheel still scrolls the flat window while finding
         if (w) return w.dir === "up" ? scroll.up(3 * w.count) : scroll.down(3 * w.count);
@@ -1254,9 +1270,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         return;
       }
       if (key.ctrl && input === "f") return setSearch({ q: "", matches: [], idx: 0 }); // open find
-      // Clicking the jump pill (it sits on the row right below the viewport) returns to the tail.
+      // Clicking the jump pill returns to the tail - same hit-box the hover highlight uses.
       const click = parseClick(input);
-      if (click && rowScroll.scrolled && click.y === viewH + 1) return rowScroll.toBottom();
+      if (click && pillHit(click.x, click.y)) return rowScroll.toBottom();
       const wheel = parseWheelAll(input);
       if (wheel) return rowScroll.by((wheel.dir === "up" ? -1 : 1) * ROWS_PER_NOTCH * wheel.count);
       const page = Math.max(1, viewH - 1); // one viewport of rows, minus a row of overlap for context
@@ -1305,12 +1321,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
               <RichView rows={ansiRows} dist={rowScroll.dist} viewH={viewH} width={contentCols} />
             )}
           </Box>
-          {rowScroll.scrolled && !search ? (
-            // Claude-style jump pill: CLICKABLE (it sits on the row right below the viewport; a left
-            // click there jumps - see the input handler) and counts activity landing while reading.
+          {pillShown ? (
+            // Claude-style jump pill: clickable, with a REAL hover state (any-motion tracking) - the
+            // highlight lights exactly the hit-box the click handler uses, so what glows is what works.
             <Box justifyContent="center">
-              <Text backgroundColor="#3d3d3d" color="white">
-                {newSince > 0 ? ` ↓ ${newSince} new message${newSince > 1 ? "s" : ""} · click or ctrl+End ` : ` Jump to bottom (ctrl+End) ↓ `}
+              <Text
+                backgroundColor={pillHover ? "#4d9fff" : "#3d3d3d"}
+                color={pillHover ? "black" : "white"}
+                bold={pillHover}
+              >
+                {pillLabel}
               </Text>
             </Box>
           ) : null}

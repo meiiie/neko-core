@@ -1,5 +1,21 @@
 import { expect, test } from "bun:test";
-import { isMouseEnabled, parseClick, parseWheelAll } from "../src/ui/mouse.ts";
+import { isMouseEnabled, parseClick, parseLastPointer, parseWheelAll } from "../src/ui/mouse.ts";
+
+test("parseLastPointer: last event of a burst wins; kinds classified (move/press/release/wheel)", () => {
+  expect(parseLastPointer("\x1b[<35;10;5M")).toEqual({ x: 10, y: 5, kind: "move" });     // any-motion, no button
+  expect(parseLastPointer("\x1b[<32;4;6M")).toEqual({ x: 4, y: 6, kind: "move" });       // motion + left held
+  expect(parseLastPointer("\x1b[<0;7;8M")).toEqual({ x: 7, y: 8, kind: "press" });
+  expect(parseLastPointer("\x1b[<0;7;8m")).toEqual({ x: 7, y: 8, kind: "release" });
+  expect(parseLastPointer("\x1b[<64;1;2M")).toEqual({ x: 1, y: 2, kind: "wheel" });
+  expect(parseLastPointer("[<35;1;1M[<35;9;9M")).toEqual({ x: 9, y: 9, kind: "move" });  // burst: LAST position
+  expect(parseLastPointer("hello")).toBe(null);
+});
+
+test("parseClick rejects motion reports (hover must not click)", () => {
+  expect(parseClick("\x1b[<32;10;5M")).toBe(null); // motion with left held is NOT a click
+  expect(parseClick("\x1b[<35;10;5M")).toBe(null); // pure motion
+  expect(parseClick("\x1b[<0;10;5M")).toEqual({ x: 10, y: 5 });
+});
 
 test("parseWheelAll: SGR wheel up/down with counts, ignoring clicks and modifiers", () => {
   expect(parseWheelAll("\x1b[<64;10;5M")).toEqual({ dir: "up", count: 1 });
