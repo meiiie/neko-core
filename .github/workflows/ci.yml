@@ -21,6 +21,8 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      - name: cross-check with stable tsc (tsgo is a 7.0 preview; drop this step once 7.0 is stable)
+        run: bun run typecheck:tsc
       - run: bun test
       - name: policy audit (safe/gated boundary)
         run: bun bin/neko.ts policy
