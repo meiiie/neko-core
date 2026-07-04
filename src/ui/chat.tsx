@@ -6,8 +6,8 @@
  * Esc-to-interrupt, slash commands, history, multiline, Shift+Tab modes). Reuses one Agent
  * for conversation memory. Kept ASCII-safe so it renders on any Windows console codepage.
  */
-import { Box, render, Static, Text, useApp, useInput, useStdout } from "ink";
-import { useEffect, useRef, useState } from "react";
+import { Box, measureElement, render, Static, Text, useApp, useInput, useStdout } from "ink";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { readFileSync } from "node:fs";
 
 import { ApprovalBox, type Approval } from "./approval-box.tsx";
@@ -20,6 +20,8 @@ import { TranscriptViewer } from "./transcript-viewer.tsx";
 import { TextInput } from "./text-input.tsx";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { wrapStdoutForSync } from "./sync-stdout.ts";
+import { installAltScreenGuard } from "./altscreen.ts";
+import { flattenLines, ScrollRegion, useScroll } from "./scroll.tsx";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
@@ -254,6 +256,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     resumedRef.current ? recoverTodos(resumedRef.current.messages) : [],
   );
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [fullscreen, setFullscreen] = useState<boolean>(cfg.fullscreen); // alt-screen scrollable viewport mode
+  const [viewH, setViewH] = useState(Math.max(3, (stdout?.rows ?? 24) - 8)); // measured transcript viewport height
+  const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
+  const altDisposeRef = useRef<null | (() => void)>(null); // alt-screen teardown (idempotent)
   const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
   const [compacting, setCompacting] = useState<{ start: number } | null>(null); // shows the compacting progress bar
   const compactingRef = useRef(false); // guard: never overlap two compactions
@@ -535,6 +541,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setViewer(full);
   };
 
+  // Toggle fullscreen (alt-screen scrollable viewport) at runtime. The alt-screen effect reacts to the
+  // state change; here we just flip it and tell the user how to scroll / get out.
+  const toggleFullscreen = () => {
+    const next = !fullscreen;
+    setFullscreen(next);
+    addLine("info", next
+      ? "fullscreen on - PgUp/PgDn to scroll, Ctrl+up/down by line; /fullscreen to exit"
+      : "fullscreen off (inline - native scrollback + copy-paste back)");
+  };
+
   const resumeInto = (target: Session) => {
     const est = estimateTokens(target.messages);
     const big = est > RESUME_SUMMARY_AT * cfg.contextWindow;
@@ -570,6 +586,25 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     if (startupNeedsChoiceRef.current && resumedRef.current) resumeInto(resumedRef.current);
   }, []);
+  // Fullscreen mode: enter the alt-screen when it turns on, leave when it turns off or the app unmounts.
+  // installAltScreenGuard also restores on crash/SIGINT/SIGTERM so a fatal error never leaves the
+  // terminal in the alt-screen. Idempotent - the effect cleanup and the process handlers can both fire.
+  useEffect(() => {
+    if (fullscreen && !altDisposeRef.current) {
+      altDisposeRef.current = installAltScreenGuard((stdout as any) ?? process.stdout);
+    } else if (!fullscreen && altDisposeRef.current) {
+      altDisposeRef.current(); altDisposeRef.current = null;
+    }
+    return () => { if (altDisposeRef.current) { altDisposeRef.current(); altDisposeRef.current = null; } };
+  }, [fullscreen, stdout]);
+  // Keep the transcript viewport height in sync with the flex-grown scroll box's ACTUAL height (it fills
+  // whatever the live region + input leave). Runs every render; the !== guard makes it converge in a
+  // frame or two without looping. Only meaningful in fullscreen (the box only mounts then).
+  useEffect(() => {
+    if (!fullscreen || !scrollBoxRef.current) return;
+    const h = measureElement(scrollBoxRef.current).height;
+    if (h > 0 && h !== viewH) setViewH(h);
+  });
 
   // Re-layout on terminal resize. Ink only clears the screen when the width DECREASES; enlarging
   // re-renders on top of the old frame -> duplicated input box. So on resize we wipe the screen and
@@ -831,6 +866,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         runText: handle,
         compact: runCompaction,
         openTranscript,
+        toggleFullscreen,
         exit,
       });
       return;
@@ -985,12 +1021,37 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // tables, dividers, the stream clamp) uses `contentCols` = the padded inner width.
   const gutter = 2;
   const contentCols = Math.max(20, cols - gutter * 2);
+  // Fullscreen: the transcript becomes an app-owned scroll region (flattened rows, windowed to viewH)
+  // instead of the append-only <Static>. Sticky-to-bottom auto-follows new output; PgUp/PgDn page and
+  // Ctrl+up/down line-scroll (unambiguous keys that never fight typing or history). Hooks run every
+  // render regardless of mode (0 rows when inline) to keep hook order stable.
+  const flat = useMemo(() => (fullscreen ? flattenLines(lines, contentCols) : []), [fullscreen, lines, contentCols]);
+  const scroll = useScroll(flat.length, viewH);
+  useInput(
+    (_input, key) => {
+      if (!fullscreen || overlay || viewer || approval) return;
+      if (key.pageUp) return scroll.up(Math.max(1, viewH - 1));
+      if (key.pageDown) return scroll.down(Math.max(1, viewH - 1));
+      if (key.ctrl && key.upArrow) return scroll.up(1);
+      if (key.ctrl && key.downArrow) return scroll.down(1);
+    },
+    { isActive: fullscreen && !overlay && !viewer && approval === null },
+  );
   return (
-    <Box flexDirection="column" paddingLeft={gutter} paddingRight={gutter}>
+    <Box flexDirection="column" paddingLeft={gutter} paddingRight={gutter} height={fullscreen ? rows : undefined}>
       {/* Each item is width-capped to contentCols: <Static> renders items at the FULL terminal width by
           default, so with the left gutter a long line would spill past the edge and the terminal would
           hard-wrap it mid-word. An explicit width makes every line wrap at our inset width instead. */}
-      <Static key={resizeKey} items={lines}>{(line) => <Box key={line.id} width={contentCols}><TranscriptLine line={line} cfg={cfg} cols={contentCols} /></Box>}</Static>
+      {fullscreen ? (
+        // App-owned, scrollable transcript (alt-screen). flexGrow fills whatever the live region + input
+        // leave; measureElement feeds that height back as viewH. overflow:hidden guards a 1-frame height
+        // lag from spilling into the input. A footer strip shows the scroll position + keys.
+        <Box ref={scrollBoxRef} flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
+          <ScrollRegion rows={flat} offset={scroll.offset} height={viewH} width={contentCols} />
+        </Box>
+      ) : (
+        <Static key={resizeKey} items={lines}>{(line) => <Box key={line.id} width={contentCols}><TranscriptLine line={line} cfg={cfg} cols={contentCols} /></Box>}</Static>
+      )}
 
       {/* Ctrl+O peek: the most-recent collapsed tool result shown in full in the live region (not
           re-appended to <Static>), so a second Ctrl+O collapses it cleanly instead of duplicating. */}
@@ -1123,6 +1184,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 <Text color={MODE_COLOR[mode]}>{" ⏵⏵ "}{mode}</Text>
                 <Text dimColor> · shift+tab to cycle</Text>
                 {rcOn ? <Text color="magenta"> · /rc active</Text> : null}
+                {fullscreen ? (
+                  scroll.atBottom
+                    ? <Text dimColor> · fullscreen</Text>
+                    : <Text color="#4d9fff"> · scrolled up (PgDn to catch up)</Text>
+                ) : null}
               </Text>
               {(() => {
                 const cost = agentRef.current!.cost;

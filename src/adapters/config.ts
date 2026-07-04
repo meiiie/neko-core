@@ -142,6 +142,15 @@ export class NekoConfig {
   get effortCeiling(): string { return String(this.data.effort_ceiling ?? "").trim().toLowerCase(); }
   /** Check for a newer release at startup (daily-cached, non-blocking). */
   get autoUpdateCheck(): boolean { return this.data.auto_update_check !== false; }
+  /** Start in fullscreen (alt-screen, scrollable viewport) mode. Off by default (inline stays default,
+   * preserving native scrollback + copy-paste); opt in via config `fullscreen: true` or NEKO_FULLSCREEN=1.
+   * Toggle at runtime with /fullscreen. */
+  get fullscreen(): boolean {
+    const env = process.env.NEKO_FULLSCREEN;
+    if (env === "1" || env === "true") return true;
+    if (env === "0" || env === "false") return false;
+    return this.data.fullscreen === true;
+  }
 
   /** Mixture-of-Agents config (when provider == "moa"): reference models analyze (no tools), an
    * aggregator synthesizes their advice and does the actual tool calls. Each ref/agg is a model id on

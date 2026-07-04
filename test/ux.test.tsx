@@ -118,6 +118,24 @@ test("/transcript opens the full-thread viewer over the resumed session", async 
   c.unmount();
 });
 
+test("fullscreen mode renders a scrollable transcript region (alt-screen), inline stays default", async () => {
+  const prev = process.env.NEKO_FULLSCREEN;
+  process.env.NEKO_FULLSCREEN = "1";
+  try {
+    const msgs: any[] = [];
+    for (let i = 0; i < 40; i++) { msgs.push({ role: "user", content: `question ${i}` }); msgs.push({ role: "assistant", content: `answer ${i}` }); }
+    const s: any = { id: "fs", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
+    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+    await tick(150);
+    const f = strip(c.frames.join("\n"));
+    expect(f).toContain("\x1b[?1049h"); // entered the alternate screen
+    expect(/[█│]/.test(f)).toBe(true);  // ScrollRegion scrollbar (content overflows the viewport)
+    c.unmount();
+  } finally {
+    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
+  }
+});
+
 test("ApprovalBox renders an edit diff preview (- old / + new)", () => {
   const f = strip(render(<ApprovalBox approval={{ toolName: "edit", args: { path: "a.ts", old_string: "let x = 1", new_string: "let x = 2" }, resolve: () => {} }} />).lastFrame());
   expect(f).toContain("- let x = 1");

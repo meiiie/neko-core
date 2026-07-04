@@ -1,0 +1,118 @@
+/**
+ * Shared scroll primitives for an app-owned viewport: flatten Lines into fixed-height display rows,
+ * a windowing hook with sticky-to-bottom auto-follow, and a ScrollRegion that renders the visible slice
+ * plus a fractional scrollbar. Used by the /transcript overlay AND (Phase 2) fullscreen mode.
+ *
+ * Fixed-height rows (wrap long lines, clip noisy entries) make windowing O(1) - render only rows[off..
+ * off+height] - so scrolling a huge thread never lays out hundreds of items. Rich variable-height
+ * rendering of scrollback is a later phase; this is the fast, safe base.
+ */
+import { Box, Text } from "ink";
+import { useEffect, useMemo, useState } from "react";
+
+import type { Line, LineKind } from "./transcript.tsx";
+
+/** Per-kind glyph + color, mirroring the live transcript so a review reads the same as the session. */
+export function styleFor(kind: LineKind): { glyph: string; color?: string; dim: boolean } {
+  switch (kind) {
+    case "user": return { glyph: "> ", color: "cyan", dim: false };
+    case "assistant": return { glyph: "  ", color: "white", dim: false };
+    case "tool_call": return { glyph: "● ", color: "green", dim: false };
+    case "tool_result": return { glyph: "  └ ", dim: true };
+    case "error": return { glyph: "✗ ", color: "red", dim: false };
+    default: return { glyph: "  ", color: "gray", dim: true }; // info
+  }
+}
+
+export interface Row { text: string; color?: string; dim: boolean }
+
+/** Flatten Lines into fixed-width display rows: wrap long lines, clip a noisy entry to a few rows with a
+ * "+N more" marker, blank separator between entries. Uniform rows -> trivial windowed scroll. */
+export function flattenLines(lines: Line[], width: number): Row[] {
+  const rows: Row[] = [];
+  for (const l of lines) {
+    if (l.kind === "welcome") continue;
+    const { glyph, color, dim } = styleFor(l.kind);
+    const body = l.kind === "tool_result" && l.summary ? l.summary : l.text;
+    const wrap = Math.max(8, width - glyph.length);
+    const segs: string[] = [];
+    for (const raw of String(body).split("\n")) {
+      if (!raw.length) { segs.push(""); continue; }
+      for (let i = 0; i < raw.length; i += wrap) segs.push(raw.slice(i, i + wrap));
+    }
+    const clip = l.kind === "user" || l.kind === "assistant" ? 12 : 4;
+    const shown = segs.slice(0, clip);
+    shown.forEach((s, i) => rows.push({ text: (i === 0 ? glyph : " ".repeat(glyph.length)) + s, color, dim }));
+    if (segs.length > clip) rows.push({ text: " ".repeat(glyph.length) + `… +${segs.length - clip} more lines`, color: "gray", dim: true });
+    rows.push({ text: "", dim: false }); // separator between entries
+  }
+  return rows;
+}
+
+export interface ScrollApi {
+  offset: number;      // top row index of the window
+  maxOffset: number;
+  atBottom: boolean;
+  up: (n?: number) => void;
+  down: (n?: number) => void;
+  top: () => void;
+  bottom: () => void;
+}
+
+/** Windowing state: a top offset + sticky-to-bottom. While sticky (at the bottom), new content keeps the
+ * view pinned to the bottom (chat auto-follow). Scrolling up breaks sticky and holds your position as
+ * content grows below; scrolling back to the bottom re-arms sticky. */
+export function useScroll(total: number, viewH: number): ScrollApi {
+  const maxOffset = Math.max(0, total - viewH);
+  const [offset, setOffset] = useState(maxOffset);
+  const [sticky, setSticky] = useState(true);
+  useEffect(() => { if (sticky) setOffset(Math.max(0, total - viewH)); }, [total, viewH, sticky]);
+  const off = Math.min(Math.max(0, offset), maxOffset);
+  return {
+    offset: off,
+    maxOffset,
+    atBottom: off >= maxOffset,
+    up: (n = 1) => { setSticky(false); setOffset((o) => Math.max(0, Math.min(o, maxOffset) - n)); },
+    down: (n = 1) => setOffset((o) => { const v = Math.min(maxOffset, Math.min(o, maxOffset) + n); if (v >= maxOffset) setSticky(true); return v; }),
+    top: () => { setSticky(false); setOffset(0); },
+    bottom: () => { setSticky(true); setOffset(maxOffset); },
+  };
+}
+
+/** Render the visible window of rows in a fixed-height box, with a 1-column fractional scrollbar on the
+ * right (thumb size + position reflect how much is off-screen). Pure view - the parent owns `offset`. */
+export function ScrollRegion({ rows, offset, height, width }: { rows: Row[]; offset: number; height: number; width: number }): React.ReactNode {
+  const view = rows.slice(offset, offset + height);
+  const total = rows.length;
+  const showBar = total > height;
+  // Thumb: proportional size + position over the track (the viewport height).
+  const thumbSize = showBar ? Math.max(1, Math.round((height * height) / total)) : 0;
+  const maxOffset = Math.max(1, total - height);
+  const thumbStart = showBar ? Math.round((offset / maxOffset) * (height - thumbSize)) : 0;
+  const bodyW = Math.max(4, width - (showBar ? 2 : 0));
+  return (
+    <Box flexDirection="row" width={width} height={height}>
+      <Box flexDirection="column" width={bodyW} height={height}>
+        {Array.from({ length: height }, (_, i) => {
+          const r = view[i];
+          return r
+            ? <Text key={i} color={r.color} dimColor={r.dim} wrap="truncate-end">{r.text || " "}</Text>
+            : <Text key={i}> </Text>;
+        })}
+      </Box>
+      {showBar ? (
+        <Box flexDirection="column" width={2} height={height}>
+          {Array.from({ length: height }, (_, i) => {
+            const on = i >= thumbStart && i < thumbStart + thumbSize;
+            return <Text key={i} color={on ? "#4d9fff" : "#3a3a3a"}>{on ? " █" : " │"}</Text>;
+          })}
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
+/** Convenience for a memoized flatten keyed on lines+width. */
+export function useFlattened(lines: Line[], width: number): Row[] {
+  return useMemo(() => flattenLines(lines, width), [lines, width]);
+}
