@@ -43,6 +43,7 @@ export class FrameDiffer {
   private prev: string[] | null = null;
   private band: ScrollBand | null = null;
   private bandRows: string[] | null = null; // full pre-wrapped row set for the band (null = Ink owns the band)
+  private bandTail: string[] = [];           // live tail (the streaming reply) appended after bandRows
   private bandDist = 0;                      // rows between the window bottom and the tail
   private writer: ((s: string) => void) | null = null; // direct emitter for imperative band repaints
 
@@ -63,8 +64,9 @@ export class FrameDiffer {
    * repaint diffs the new window against the previous one, uses the hardware scroll when it detects a
    * shift, and paints just what changed. null = Ink owns the band again (find mode, inline).
    */
-  setBandContent(rows: string[] | null, dist: number): void {
+  setBandContent(rows: string[] | null, dist: number, tail: string[] = []): void {
     this.bandRows = rows;
+    this.bandTail = tail; // the STREAMING reply renders inside the band, right under the committed rows
     this.bandDist = Math.max(0, dist);
     this.repaintBand();
   }
@@ -75,8 +77,15 @@ export class FrameDiffer {
   private windowRows(): string[] | null {
     if (!this.band || !this.bandRows) return null;
     const H = this.band.height;
-    const end = Math.max(0, this.bandRows.length - this.bandDist);
-    const slice = this.bandRows.slice(Math.max(0, end - H), end);
+    // Committed rows + the live tail form one logical scrollback; the window slices across the seam
+    // WITHOUT materializing the concat (the tail changes on every stream delta - O(H) here, not O(all)).
+    const total = this.bandRows.length + this.bandTail.length;
+    const end = Math.max(0, total - this.bandDist);
+    const start = Math.max(0, end - H);
+    const slice: string[] = [];
+    for (let i = start; i < end; i++) {
+      slice.push(i < this.bandRows.length ? this.bandRows[i] : this.bandTail[i - this.bandRows.length]);
+    }
     while (slice.length < H) slice.push("");
     return slice;
   }

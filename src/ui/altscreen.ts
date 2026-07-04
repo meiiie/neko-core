@@ -11,12 +11,23 @@
  *   ?1049h enter alt-screen · ?1049l leave · ?25l hide cursor · ?25h show cursor
  */
 import type { Writable } from "node:stream";
-import { disableMouse, enableMouse } from "./mouse.ts";
+import { DISABLE_MOUSE, disableMouse, enableMouse } from "./mouse.ts";
 
 export const ENTER_ALT = "\x1b[?1049h";
 export const LEAVE_ALT = "\x1b[?1049l";
 export const HIDE_CURSOR = "\x1b[?25l";
 export const SHOW_CURSOR = "\x1b[?25h";
+
+/** Unconditional terminal restore for ANY exit path - including crashes that get CAUGHT (a caught
+ * render error never reaches the guard's uncaughtException handler, and that exact path once left the
+ * user's shell with mouse tracking + the alt screen active, spraying "[<...M" reports into the prompt).
+ * Every sequence here is a no-op when the state is already clean, so calling it repeatedly is safe. */
+export function emergencyRestore(out: Writable = process.stdout): void {
+  try {
+    if (!(out as any).isTTY) return;
+    out.write(SHOW_CURSOR + DISABLE_MOUSE + LEAVE_ALT + "\x1b[23;0t"); // cursor, mouse off, main screen, title pop
+  } catch { /* stream gone - nothing left to protect */ }
+}
 
 /** Whether a stream can host fullscreen: an interactive TTY with room to draw. A non-TTY (piped output,
  * CI, `neko run`) or a tiny window can't - callers degrade to inline instead of corrupting the terminal. */

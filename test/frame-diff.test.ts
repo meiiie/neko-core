@@ -175,3 +175,23 @@ test("identical frame skips the write; height change and weird payloads pass thr
   expect(d.process(payload(2, ["a", "b", "c"]))).toBe(null); // height change -> full rewrite
   expect(d.process("\x1b]52;c;abc\x07")).toBe(null);          // OSC (clipboard) -> untouched
 });
+
+test("streaming tail composes INTO the band right under the committed rows (top-down, in place)", () => {
+  const d = new FrameDiffer();
+  const emitted: string[] = [];
+  d.setWriter((s) => emitted.push(s));
+  d.setBand({ top: 1, height: 6 });
+  d.setBandContent(["  cau hoi", "  tra loi cu"], 0, []);
+  const blank = ["", "", "", "", "", "", "chrome"];
+  const first = d.process(blank.join("\n"))!;
+  expect(first.split("\n").slice(0, 2)).toEqual(["  cau hoi", "  tra loi cu"]);
+  // Stream arrives: the tail appends UNDER the committed rows - no jump, no bottom-up growth.
+  emitted.length = 0;
+  d.setBandContent(["  cau hoi", "  tra loi cu"], 0, ["", "  dang go..."]);
+  expect(emitted.length).toBe(1);
+  const scr = new Screen(8);
+  scr.write(first);
+  scr.r = 6; scr.c = 6; // cursor on Ink's last line
+  scr.write(emitted[0]);
+  expect(scr.lines(4)).toEqual(["  cau hoi", "  tra loi cu", "", "  dang go..."]);
+});

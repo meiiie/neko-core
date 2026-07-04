@@ -1,7 +1,7 @@
 {
   "name": "neko-core",
   "version": "0.6.0",
-  "description": "A local-first agentic CLI in the spirit of Claude Code / Codex CLI. Config-first, offline-capable.",
+  "description": "Mot chu meo trong terminal, chi muon meo meo - va lam viec. Local-first, config-first, offline-capable.",
   "type": "module",
   "license": "MIT",
   "author": "The Wiii Lab",

@@ -524,6 +524,11 @@ async function main(): Promise<number> {
         return 2;
     }
   } catch (error) {
+    // A CAUGHT crash bypasses the alt-screen guard's uncaughtException handler - restore the terminal
+    // FIRST (leave alt, mouse off, cursor back) so the error prints on a sane screen and the user's
+    // shell isn't left eating mouse reports. Every sequence is a no-op when already clean.
+    const { emergencyRestore } = await import("../src/ui/altscreen.ts");
+    emergencyRestore();
     console.error(`neko: error: ${error instanceof Error ? error.message : error}`);
     return 1;
   }

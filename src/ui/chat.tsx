@@ -22,12 +22,12 @@ import { isEscapeResidue, TextInput } from "./text-input.tsx";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { isSyncOutputSupported, probeSyncOutput, wrapStdoutForSync } from "./sync-stdout.ts";
 import { FrameDiffer } from "./frame-diff.ts";
-import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
+import { canFullscreen, emergencyRestore, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
 import { DISABLE_MOUSE, isMouseEnabled, parseClick, parseLastPointer, parseWheelAll } from "./mouse.ts";
-import { restoreTitle, saveTitle, setTerminalTitle } from "./title.ts";
+import { saveTitle, setTerminalTitle } from "./title.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
@@ -1192,7 +1192,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const rowScroll = useRowScroll(
     ansiRows.length,
     viewH,
-    (dist) => { if (bandActiveRef.current) frameDiffer?.setBandContent(paddedRowsRef.current, dist); },
+    (dist) => { if (bandActiveRef.current) frameDiffer?.setBandContent(paddedRowsRef.current, dist, streamRowsRef.current); },
     Math.max(4, Math.round(1000 / fps)), // glide hop follows the resolved fps (live-adjustable via /fps)
   );
   // Which LINE the current scroll position looks at (walk row counts from the end; O(scroll depth),
@@ -1220,9 +1220,25 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const paddedRows = useMemo(() => ansiRows.map((r) => (r.length ? "  " + r : r)), [ansiRows]);
   paddedRowsRef.current = paddedRows;
   bandActiveRef.current = fullscreen && !search;
+  // The STREAMING reply lives IN the band, right under the committed rows - text appears exactly where
+  // it will finally sit and flows top-down, matching the inline standard (the reply used to preview in
+  // the chrome below the viewport and then JUMP into the band on commit - read as "generating bottom-
+  // up"). Plain-wrapped while live; the styled rows replace it at commit via the ANSI cache.
+  const streamRows = useMemo(() => {
+    if (!fullscreen || !stream) return [] as string[];
+    const width = Math.max(8, contentCols - 2);
+    const out: string[] = [""]; // a blank separator, like the inline stream block's top margin
+    for (const raw of stream.split("\n")) {
+      if (!raw.length) { out.push(""); continue; }
+      for (let i = 0; i < raw.length; i += width) out.push("  " + raw.slice(i, i + width));
+    }
+    return out;
+  }, [fullscreen, stream, contentCols]);
+  const streamRowsRef = useRef<string[]>([]);
+  streamRowsRef.current = streamRows;
   useEffect(() => {
-    frameDiffer?.setBandContent(bandActiveRef.current ? paddedRows : null, rowScroll.dist);
-  }, [fullscreen, search !== null, paddedRows, rowScroll.dist, viewH]);
+    frameDiffer?.setBandContent(bandActiveRef.current ? paddedRows : null, rowScroll.dist, streamRows);
+  }, [fullscreen, search !== null, paddedRows, rowScroll.dist, viewH, streamRows]);
   useEffect(() => () => clearAnsiCache(), []); // free on unmount; resize re-keys by width mismatch
   // Flat rows exist ONLY for the find bar (in-place match highlighting needs row positions).
   const flat = useMemo(
@@ -1345,7 +1361,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
               <Box height={viewH} width={contentCols} />
             ) : (
               // No differ (NEKO_INCR=0 / tests): render the viewport in-tree as before.
-              <RichView rows={ansiRows} dist={rowScroll.dist} viewH={viewH} width={contentCols} />
+              <RichView rows={streamRows.length ? [...ansiRows, ...streamRows] : ansiRows} dist={rowScroll.dist} viewH={viewH} width={contentCols} />
             )}
           </Box>
           {pillShown ? (
@@ -1383,7 +1399,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
       {/* Same margins as the committed assistant line (transcript.tsx) so the text doesn't jump a row
           when streaming finishes and flushStream moves it into <Static>. */}
-      {stream ? (
+      {stream && !fullscreen ? ( // fullscreen streams INSIDE the band (top-down, in place) - no chrome preview
         <Box flexDirection="column" marginTop={1} marginBottom={1}>
           {/* Clamp the live preview to the viewport height (compact = no extra blank-line rhythm, so the
               height is predictable) — otherwise a long streamed reply grows past the terminal and Ink
@@ -1604,8 +1620,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   try {
     await app.waitUntilExit();
   } finally {
-    process.stdout.write(DISABLE_MOUSE); // belt-and-suspenders: never leave the user's shell in mouse mode
-    restoreTitle(); // give the tab back its original title
+    emergencyRestore(); // full terminal restore (cursor, mouse, main screen, title) - idempotent on clean exits
     await hub.close();
     // Claude-style: tell the user how to pick this exact session back up.
     console.log(`\nResume this session with:\n  neko --resume ${id}\n`);

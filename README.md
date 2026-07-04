@@ -2,10 +2,10 @@
 
 # Neko Code
 
-> A **local-first, extensible terminal agent**. It codes like **Claude Code** / **Codex CLI** out of the
-> box — and through **skills, MCP, and an evolving memory** it grows into new roles, from sourcing goods
-> to driving a browser. Built on **TypeScript + Bun + Ink**, **provider-agnostic**, **offline-capable**.
-> Engine: **Neko Core**.
+> **Một chú mèo trong terminal — chỉ muốn meo meo, và làm việc.** A **local-first, extensible terminal
+> agent** that codes, browses, remembers — and through **skills, MCP, and an evolving memory** grows into
+> new roles, from sourcing goods to driving a browser. Built on **TypeScript + Bun + Ink**,
+> **provider-agnostic**, **offline-capable**. Engine: **Neko Core**.
 
 **By [The Wiii Lab](https://github.com/meiiie).** MIT-licensed — contributions welcome.
 
