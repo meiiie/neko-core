@@ -32,7 +32,10 @@ function DiffLine({ raw, indent, isError }: { raw: string; indent: string; isErr
     <Text>
       <Text color={markerColor} dimColor>{indent}{lineNo ? `${lineNo} ` : ""}</Text>
       <Text color={markerColor} dimColor={!markerColor} bold={!!markerColor}>{marker} </Text>
-      {isDel ? <Text color="red" dimColor>{code}</Text> : highlightLine(code)}
+      {/* Removed lines keep per-token syntax colors but FADED (Claude-style: "going away"), so a diff
+          stays readable instead of a wall of red - the red number + marker in the gutter carry the
+          removal signal. Added/context lines are highlighted at full strength. */}
+      {isDel ? <Text dimColor>{highlightLine(code)}</Text> : highlightLine(code)}
     </Text>
   );
 }

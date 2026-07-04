@@ -45,6 +45,18 @@ test("highlightLine colors keyword/type/string/number/function per token", () =>
   expect(colorOf(prop, "count")).toBe("cyanBright"); // property after "."
 });
 
+test("highlightLine breaks a template literal open at ${...} interpolations", () => {
+  const nodes = highlightLine("`hi ${name} there`");
+  // The interpolated identifier is highlighted as CODE, not swallowed by the string...
+  const flat = nodes.map((n) => (typeof n === "string" ? n : (n as any).props?.children)).join("|");
+  expect(flat).toContain("name");                 // the expression is a separate node
+  // ...and the literal parts stay green strings.
+  expect(nodes.some((n) => (n as any)?.props?.color === "green" && String((n as any).props.children).includes("hi"))).toBe(true);
+  // A plain (non-template) string is still ONE green token.
+  const plain = highlightLine("x = 'just text'");
+  expect(colorOf(plain, "'just text'")).toBe("green");
+});
+
 test("highlightLine treats a whole-line comment as a comment (gray), preserves indentation", () => {
   const c = highlightLine("  // a note");
   expect(colorOf(c, "// a note")).toBe("gray");

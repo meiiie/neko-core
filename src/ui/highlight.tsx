@@ -4,7 +4,7 @@
  * agnostic: comments, strings, numbers, and a common keyword set across JS/TS/Py/Go/Rust.
  */
 import { Text } from "ink";
-import type { ReactNode } from "react";
+import { cloneElement, isValidElement, type ReactNode } from "react";
 
 const KEYWORDS = new Set(
   (
@@ -47,8 +47,28 @@ export function highlightLine(line: string): ReactNode[] {
     const str = rest.match(/^("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|`(?:[^`\\]|\\.)*`?)/);
     if (str && /^["'`]/.test(str[0])) {
       flush();
-      out.push(<Text key={key++} color="green">{str[0]}</Text>);
-      i += str[0].length;
+      const s = str[0];
+      // Template literals: highlight `${expr}` interpolations as CODE (the way editors + Claude Code do)
+      // instead of dyeing the whole backtick string one flat color. The braces are dim; the inner
+      // expression is recursively highlighted. Plain "/' strings stay one green token.
+      if (s[0] === "`" && s.includes("${")) {
+        for (const part of s.split(/(\$\{[^}]*\})/)) {
+          if (!part) continue;
+          const interp = part.match(/^\$\{([^}]*)\}$/);
+          if (interp) {
+            out.push(<Text key={key++} dimColor>{"${"}</Text>);
+            for (const node of highlightLine(interp[1])) {
+              out.push(isValidElement(node) ? cloneElement(node, { key: key++ }) : <Text key={key++}>{node}</Text>);
+            }
+            out.push(<Text key={key++} dimColor>{"}"}</Text>);
+          } else {
+            out.push(<Text key={key++} color="green">{part}</Text>);
+          }
+        }
+      } else {
+        out.push(<Text key={key++} color="green">{s}</Text>);
+      }
+      i += s.length;
       continue;
     }
 
