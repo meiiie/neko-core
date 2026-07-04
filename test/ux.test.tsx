@@ -241,6 +241,22 @@ test("fullscreen find: Ctrl+F opens the find bar and typing shows a match badge"
   }
 });
 
+test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regression guard)", async () => {
+  const s: any = { id: "rz", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [
+    { role: "user", content: "resize-marker question" },
+    { role: "assistant", content: "resize-marker answer" },
+  ] };
+  const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+  await tick(80);
+  const before = c.frames.length;
+  (c.stdout as any).emit("resize"); // terminal resized (e.g. maximized)
+  await tick(300); // past the 150ms debounce
+  const after = c.frames.slice(before).join("\n");
+  expect(after).toContain("\x1b[2J"); // the explicit viewport wipe went out
+  expect(after).toContain("resize-marker question"); // Static remounted -> transcript re-emitted fresh
+  c.unmount();
+});
+
 test("ApprovalBox renders an edit diff preview (- old / + new)", () => {
   const f = strip(render(<ApprovalBox approval={{ toolName: "edit", args: { path: "a.ts", old_string: "let x = 1", new_string: "let x = 2" }, resolve: () => {} }} />).lastFrame());
   expect(f).toContain("- let x = 1");

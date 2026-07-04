@@ -652,21 +652,36 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (h > 0 && h !== viewH) setViewH(h);
   });
 
-  // Re-layout on terminal resize. Ink only clears the screen when the width DECREASES; enlarging
-  // re-renders on top of the old frame -> duplicated input box. So on resize we wipe the screen and
-  // bump the <Static> key, which makes Ink reset fullStaticOutput and re-emit the transcript fresh.
+  // Re-layout on terminal resize - and after the drag settles, do a FULL repaint. Why the full reset is
+  // required (image-verified regression): when the window is ENLARGED, the terminal rewraps the old
+  // frame's lines, but Ink only clears on width DECREASE - its cursor bookkeeping desyncs from what's
+  // really on screen and every following render paints at the wrong offset -> stacked ghost frames
+  // (duplicated input boxes + stray dividers). The incremental renderer makes it stickier still: lines
+  // it believes "unchanged" are never rewritten, so the rewrapped ghosts persist forever.
+  // Sequence after the 150ms debounce: Ink's own clear() (erases + resets the log-update counters via
+  // its safe path), an explicit viewport wipe for the ghosts Ink can't account for (goes through the
+  // BSU/ESU wrapper -> atomic), then a <Static> remount so the inline transcript re-emits fresh at the
+  // new width. In fullscreen the viewport + chrome simply repaint from state (the ANSI cache re-warms
+  // at the new width via its width key).
+  const resizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!stdout) return;
-    // On resize, just update the width/height state -> the LIVE region re-renders at the new width
-    // (tables/dividers/stream clamp read `cols`). We do NOT remount <Static> or clear: committed
-    // scrollback never reflows in a terminal (standard), and the old raw-clear+remount is what froze
-    // real terminals. Letting Ink own the reflow is both correct and safe.
     const onResize = () => {
       setCols(stdout.columns ?? 80);
       setRows(stdout.rows ?? 24);
+      if (resizeTimer.current) clearTimeout(resizeTimer.current);
+      resizeTimer.current = setTimeout(() => {
+        resizeTimer.current = null;
+        clearScreen?.();
+        (stdout as any).write?.("\x1b[2J\x1b[H");
+        setResizeKey((k) => k + 1);
+      }, 150);
     };
     stdout.on("resize", onResize);
-    return () => void stdout.off("resize", onResize);
+    return () => {
+      stdout.off("resize", onResize);
+      if (resizeTimer.current) clearTimeout(resizeTimer.current);
+    };
   }, [stdout]);
 
   // Elapsed timer while a turn runs.

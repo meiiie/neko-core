@@ -131,7 +131,12 @@ export function useRowScroll(totalRows: number, viewH: number): RowScrollApi {
     scrolled: st.current.dist > 0,
     by: (n) => {
       st.current.pending += n;
-      if (!st.current.timer) st.current.timer = setTimeout(flush, 33);
+      // LEADING-edge flush: the first tick of a gesture moves the view IMMEDIATELY (a fixed +33ms on
+      // every notch reads as input lag); the timer then holds a trailing window that coalesces the rest
+      // of the burst into one render per frame interval.
+      if (st.current.timer) return;
+      flush();
+      st.current.timer = setTimeout(flush, 33);
     },
     top: () => { st.current.pending = 0; st.current.dist = maxRef.current; force((t) => t + 1); },
     toBottom: () => { st.current.pending = 0; st.current.dist = 0; force((t) => t + 1); },

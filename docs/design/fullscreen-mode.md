@@ -23,6 +23,17 @@ by text-input's CSI-residue guard; wheel reports can't reach the prompt; alt-scr
 across React-unmount + process-signal paths; flatten indices stay stable as lines append (find-while-
 streaming safe).
 
+**Why claude-code scrolling feels smoother, honestly:** their fork owns the ENTIRE screen with a
+cell-diff compositor (screen.ts/render-to-screen) - a scroll is computed as minimal cell updates by a
+native-speed pipeline, inside BSU/ESU, with mouse deltas coalesced. Our v5 stack (ANSI row cache +
+Ink's line-diff + leading-edge coalescing) approximates it, but a scroll still changes every viewport
+line, so each step rewrites the full viewport region through Ink. **The next rung if that's still not
+smooth enough:** the damage-split - take the viewport OUT of the Ink tree (Ink renders only the bottom
+chrome, like inline), paint the region manually (DECSC/CUP/DECRC inside BSU/ESU), and use the
+terminal's OWN scroll region (DECSTBM + SU/SD) so a 3-row scroll writes just 3 new rows - hardware
+scroll, the classic curses optimization. Substantial but well-understood; do it only if the field test
+still says "not smooth".
+
 **Still deferred (low value / niche):** full drag-to-select region highlighting (the `/copy` command covers
 the practical copy need); tmux-passthrough sync (needs the user's tmux `allow-passthrough on` + tmux 3.4+,
 and a setup we don't currently target); windowed virtualization of rich scrollback beyond 300 lines (older
