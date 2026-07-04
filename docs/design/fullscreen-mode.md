@@ -12,6 +12,17 @@ mounted lines) · **OSC-52 clipboard** `/copy` (`src/ui/clipboard.ts` - the keyb
 capture blocks native select). Default OFF (inline keeps native scrollback + copy-paste). Env:
 `NEKO_FULLSCREEN`, `NEKO_DISABLE_MOUSE`, `NEKO_SYNC`.
 
+**Audit 2026-07-04** (line-by-line re-check of the whole arc): 4 real bugs found + fixed — (1) toggle-OFF
+lost the transcript (Static's one-time reprint landed in the discarded alt buffer; screen switch was in a
+post-render effect — now synchronous in the toggle, with a frame-ordering regression test); (2) Esc closing
+the find bar mid-turn also aborted the model (parallel useInput hooks — abort now gated); (3) global
+hotkeys (Ctrl+L clear!) still fired while the find bar owned the keyboard; (4) `/copy all` reported the
+unclipped length while OSC 52 clips at 60k. Also: explicit `2J+H` after `?1049h` (cursor pos unspecified
+by the spec), PgUp/PgDn over the find bar. Verified-sound under review: DECRPM late-reply bytes are caught
+by text-input's CSI-residue guard; wheel reports can't reach the prompt; alt-screen restore is idempotent
+across React-unmount + process-signal paths; flatten indices stay stable as lines append (find-while-
+streaming safe).
+
 **Still deferred (low value / niche):** full drag-to-select region highlighting (the `/copy` command covers
 the practical copy need); tmux-passthrough sync (needs the user's tmux `allow-passthrough on` + tmux 3.4+,
 and a setup we don't currently target); windowed virtualization of rich scrollback beyond 300 lines (older

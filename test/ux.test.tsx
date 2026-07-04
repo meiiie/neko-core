@@ -146,6 +146,32 @@ test("RichTranscript renders rich lines; sticky pins the newest to the bottom", 
   expect(f).not.toContain("richline 0"); // ...and clips the top
 });
 
+test("toggling fullscreen OFF leaves the alt-screen BEFORE Static reprints (transcript not lost)", async () => {
+  const prev = process.env.NEKO_FULLSCREEN;
+  process.env.NEKO_FULLSCREEN = "1";
+  try {
+    const s: any = { id: "fst", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [
+      { role: "user", content: "unique-marker-xyz question" },
+      { role: "assistant", content: "unique-marker-xyz answer" },
+    ] };
+    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+    await tick(120);
+    c.stdin.write("/fullscreen");
+    c.stdin.write("\r");
+    await tick(200);
+    const frames = c.frames;
+    const leaveIdx = frames.findIndex((f) => f.includes("\x1b[?1049l"));
+    expect(leaveIdx).toBeGreaterThanOrEqual(0); // we actually left the alt-screen
+    // The one-time <Static> reprint of the history must land AT/AFTER the leave - i.e. on the PRIMARY
+    // screen. If it lands before (old bug: leave ran in a post-render effect), the reprint went into the
+    // discarded alt buffer and the conversation vanished from the inline screen.
+    const lastContentIdx = frames.reduce((acc, f, i) => (f.includes("unique-marker-xyz") ? i : acc), -1);
+    expect(lastContentIdx).toBeGreaterThanOrEqual(leaveIdx);
+  } finally {
+    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
+  }
+});
+
 test("fullscreen find: Ctrl+F opens the find bar and typing shows a match badge", async () => {
   const prev = process.env.NEKO_FULLSCREEN;
   process.env.NEKO_FULLSCREEN = "1";

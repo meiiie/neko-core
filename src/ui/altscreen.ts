@@ -28,9 +28,13 @@ export function canFullscreen(out: Writable = process.stdout): boolean {
   return rows >= 10 && cols >= 40;
 }
 
-/** Enter the alternate screen (and hide the cursor - the app draws its own). */
+// Explicit clear + home after entering: ?1049h clears the alt buffer on most terminals but the CURSOR
+// position is unspecified - without homing, the first frame can paint mid-screen until the next redraw.
+export const CLEAR_HOME = "\x1b[2J\x1b[H";
+
+/** Enter the alternate screen (clear + home, and hide the cursor - the app draws its own). */
 export function enterAltScreen(out: Writable = process.stdout): void {
-  out.write(ENTER_ALT + HIDE_CURSOR);
+  out.write(ENTER_ALT + CLEAR_HOME + HIDE_CURSOR);
 }
 
 /** Leave the alternate screen (restoring the primary screen + scrollback) and show the cursor. */

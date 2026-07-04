@@ -9,8 +9,8 @@
 import type { Writable } from "node:stream";
 
 // Guard against pathological sizes: many terminals cap the OSC 52 payload (~74-100KB of base64). Keep
-// well under that; a copy is a convenience, not an archive.
-const MAX_COPY_CHARS = 60_000;
+// well under that; a copy is a convenience, not an archive. Exported so callers can report a clip honestly.
+export const MAX_COPY_CHARS = 60_000;
 
 export function osc52(text: string): string {
   const clipped = text.length > MAX_COPY_CHARS ? text.slice(0, MAX_COPY_CHARS) : text;

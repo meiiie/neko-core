@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { canFullscreen, ENTER_ALT, HIDE_CURSOR, installAltScreenGuard, LEAVE_ALT, SHOW_CURSOR, enterAltScreen, leaveAltScreen } from "../src/ui/altscreen.ts";
+import { canFullscreen, CLEAR_HOME, ENTER_ALT, HIDE_CURSOR, installAltScreenGuard, LEAVE_ALT, SHOW_CURSOR, enterAltScreen, leaveAltScreen } from "../src/ui/altscreen.ts";
 
 test("canFullscreen: TTY with room only", () => {
   expect(canFullscreen({ isTTY: true, rows: 40, columns: 120 } as any)).toBe(true);
@@ -16,7 +16,7 @@ function fakeOut() {
 test("enter/leave alt-screen write the right sequences", () => {
   const a = fakeOut();
   enterAltScreen(a.out);
-  expect(a.writes.join("")).toBe(ENTER_ALT + HIDE_CURSOR);
+  expect(a.writes.join("")).toBe(ENTER_ALT + CLEAR_HOME + HIDE_CURSOR);
   const b = fakeOut();
   leaveAltScreen(b.out);
   expect(b.writes.join("")).toBe(SHOW_CURSOR + LEAVE_ALT);

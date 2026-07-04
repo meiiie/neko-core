@@ -24,7 +24,7 @@ import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useScroll } from "./scroll.tsx";
 import { RichTranscript } from "./rich-transcript.tsx";
 import { isMouseEnabled, parseWheel } from "./mouse.ts";
-import { copyToClipboard } from "./clipboard.ts";
+import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
@@ -555,22 +555,38 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const out = (stdout as any) ?? process.stdout;
     if (arg.trim() === "all") {
       const text = lines.filter((l) => l.kind === "user" || l.kind === "assistant" || l.kind === "tool_result").map((l) => l.text).join("\n\n");
-      addLine("info", copyToClipboard(text, out) ? `copied the conversation (~${text.length} chars) to the clipboard` : "(nothing to copy)");
+      // Report what was ACTUALLY copied: OSC 52 payloads are clipped to MAX_COPY_CHARS (terminal caps).
+      const note = text.length > MAX_COPY_CHARS ? `first ${MAX_COPY_CHARS} of ${text.length} chars (clipped - terminals cap the payload)` : `~${text.length} chars`;
+      addLine("info", copyToClipboard(text, out) ? `copied the conversation to the clipboard - ${note}` : "(nothing to copy)");
       return;
     }
     const last = [...lines].reverse().find((l) => l.kind === "assistant");
     addLine("info", last && copyToClipboard(last.text, out) ? "copied the last response to the clipboard" : "(no response to copy yet)");
   };
 
-  // Toggle fullscreen (alt-screen scrollable viewport) at runtime. The alt-screen effect reacts to the
-  // state change; here we just flip it and tell the user how to scroll / get out.
+  // Toggle fullscreen (alt-screen scrollable viewport) at runtime. The screen switch happens
+  // SYNCHRONOUSLY here, BEFORE React re-renders for the new mode - the ordering matters both ways:
+  //  - turning OFF: the re-render remounts <Static>, which prints the whole transcript ONCE. If we were
+  //    still in the alt-screen at that moment, the print would land in the alt buffer and be DISCARDED on
+  //    leave - Static marks the lines printed and never re-emits => the conversation would vanish from
+  //    the inline screen. Leaving first makes that one-time print land on the primary screen.
+  //  - turning ON: without entering first, the first fullscreen frame would print into the primary
+  //    scrollback (one frame of viewport junk) before the effect entered the alt-screen.
+  // The mount effect stays for config-startup + unmount cleanup; both paths are idempotent.
   const toggleFullscreen = () => {
-    if (!fullscreen && !canFullscreen((stdout as any) ?? process.stdout)) {
+    const out = (stdout as any) ?? process.stdout;
+    if (!fullscreen && !canFullscreen(out)) {
       return addLine("info", "fullscreen needs an interactive terminal with room (this one is too small or not a TTY)");
     }
     const next = !fullscreen;
+    if (next) {
+      if (!altDisposeRef.current) altDisposeRef.current = installAltScreenGuard(out, { mouse: isMouseEnabled() });
+    } else {
+      altDisposeRef.current?.();
+      altDisposeRef.current = null;
+      setSearch(null); // leaving fullscreen closes any open find bar
+    }
     setFullscreen(next);
-    if (!next) setSearch(null); // leaving fullscreen closes any open find bar
     addLine("info", next
       ? `fullscreen on - scroll with the mouse wheel${isMouseEnabled() ? "" : " (disabled)"}, PgUp/PgDn, or Ctrl+up/down; Ctrl+F to find; /fullscreen to exit`
       : "fullscreen off (inline - native scrollback + copy-paste back)");
@@ -725,7 +741,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       return;
     }
-    if (overlay || viewer) return; // let the overlay / transcript viewer own the rest of the keys
+    if (overlay || viewer || search) return; // let the overlay / viewer / find bar own the rest of the keys (Ctrl+C above still works)
     if (key.ctrl && char === "o") { // toggle: expand the most recent collapsed tool output, press again to collapse
       // Match the collapse logic in TranscriptLine: summarized reads collapse at >1 line, plain
       // results at >8 — so the "(ctrl+o to expand)" hint and this finder never disagree.
@@ -742,12 +758,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (key.escape && !busy && input) return setInput("");
   });
 
-  // Esc interrupts a running turn.
+  // Esc interrupts a running turn - but NOT while the find bar or /transcript viewer owns Esc (their
+  // Esc means "close me"; both hooks fire on the same keypress, so without this gate closing the find
+  // bar mid-turn would also abort the model). Close first, then Esc again to interrupt.
   useInput(
     (_char, key) => {
       if (key.escape) controllerRef.current?.abort();
     },
-    { isActive: busy && approval === null },
+    { isActive: busy && approval === null && search === null && viewer === null },
   );
 
   // Slash-command menu: navigable suggestions. Up/Down highlight, Tab completes — so the arrows
@@ -1093,6 +1111,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           const idx = search.matches.length ? (search.idx - 1 + search.matches.length) % search.matches.length : 0;
           jumpToMatch(search.matches, idx); return setSearch({ ...search, idx });
         }
+        if (key.pageUp) return scroll.up(Math.max(1, viewH - 1));   // paging still works over the find bar
+        if (key.pageDown) return scroll.down(Math.max(1, viewH - 1));
         if (key.backspace || key.delete) {
           const q = search.q.slice(0, -1); const matches = findMatches(q); jumpToMatch(matches, 0);
           return setSearch({ q, matches, idx: 0 });
