@@ -116,6 +116,9 @@ export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: Nod
   const supported = opts.supported ?? isSyncOutputSupported(env);
   const differ = opts.differ;
   if (!(base as any).isTTY || (!supported && !differ)) return base;
+  // Imperative band repaints (scroll/append/warm) bypass Ink entirely: the differ writes straight to
+  // the base stream, atomically bracketed like everything else.
+  (differ as any)?.setWriter?.((s: string) => { if (s) (base as any).write(supported ? BSU + s + ESU : s); });
 
   const wrappedWrite = (chunk: any, ...args: any[]): boolean => {
     if (typeof chunk === "string" && chunk.length > 0) {

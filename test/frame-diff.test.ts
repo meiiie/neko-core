@@ -120,6 +120,41 @@ test("neutral control writes (Ink's own BSU/ESU, cursor hide/show) do NOT reset 
   expect(out!.length).toBeLessThan(payload(2, B).length / 2);
 });
 
+test("compose-at-write-layer: blank Ink band gets the real rows; scroll repaints via hardware shift with NO Ink frame", () => {
+  const d = new FrameDiffer();
+  const emitted: string[] = [];
+  d.setWriter((s) => emitted.push(s));
+  d.setBand({ top: 1, height: 6 });
+  const rows = Array.from({ length: 30 }, (_, i) => `content-${i}`);
+  d.setBandContent(rows, 0);
+  const blankBand = ["", "", "", "", "", ""];
+  const chrome = ["chrome-a", "> input"];
+  const F = (extra: string) => blankBand.concat([chrome[0], chrome[1] + extra]);
+  // Seed: first frame (no erase prefix) -> passthrough raw; second frame -> composed FULL repaint.
+  expect(d.process(F("").join("\n"))).toBe(null);
+  const seeded = d.process(payload(8, F("")))!;
+  expect(seeded).toContain("content-29"); // the "blank" band went out with real content spliced in
+  // Screen state after the seed:
+  const scr = new Screen(10);
+  scr.write(seeded.replace(/^(\x1b\[2K\x1b\[1A)*\x1b\[2K\x1b\[G/, "")); // apply the frame body from row 0
+  expect(scr.lines(6)).toEqual(rows.slice(24, 30));
+  scr.r = 7; scr.c = ("> input").length; // cursor at Ink's last line
+  // Keystroke: Ink frame changes ONLY the chrome; band lines stay blank in the payload.
+  const key = d.process(payload(8, F("X")))!;
+  expect(key).not.toContain("content-"); // band untouched - the write is ~just the input line
+  scr.write(key);
+  expect(scr.lines(8)).toEqual(rows.slice(24, 30).concat(["chrome-a", "> inputX"]));
+  // Scroll: NO Ink frame at all - setBandContent repaints imperatively with a hardware shift.
+  // (k=2 on a 6-row band: the shift detector needs span >= 4 surviving rows to be confident.)
+  emitted.length = 0;
+  d.setBandContent(rows, 2); // view moves up by 2 -> content shifts down -> SD
+  expect(emitted.length).toBe(1);
+  expect(emitted[0]).toContain("\x1b[2T");
+  scr.write(emitted[0]);
+  expect(scr.lines(6)).toEqual(rows.slice(22, 28));
+  expect(scr.r).toBe(7); // cursor restored to Ink's assumed row
+});
+
 test("identical frame skips the write; height change and weird payloads pass through", () => {
   const d = new FrameDiffer();
   const A = ["a", "b"], B = ["a", "b"];

@@ -39,12 +39,90 @@ export function parseInkPayload(p: string): { eraseCount: number; frame: string 
 export class FrameDiffer {
   private prev: string[] | null = null;
   private band: ScrollBand | null = null;
+  private bandRows: string[] | null = null; // full pre-wrapped row set for the band (null = Ink owns the band)
+  private bandDist = 0;                      // rows between the window bottom and the tail
+  private writer: ((s: string) => void) | null = null; // direct emitter for imperative band repaints
 
   /** The scrollable band (fullscreen viewport), in absolute rows. MUST only be set when the Ink frame
    * starts at screen row 1 (our fullscreen: alt-screen + clear + home), because scroll emission uses
    * absolute addressing. null = band detection off (inline). */
   setBand(band: ScrollBand | null): void { this.band = band; }
   reset(): void { this.prev = null; }
+
+  /** Sink for imperative repaints (wired by the stdout wrapper; wraps in BSU/ESU there). */
+  setWriter(w: ((s: string) => void) | null): void { this.writer = w; }
+
+  /**
+   * Give the differ the band's CONTENT (all rows + scroll distance) and repaint imperatively. This is
+   * the compose-at-the-write-layer design: the Ink tree renders the band as BLANK lines (so Ink pays
+   * zero squash/wrap/measure/output cost for the viewport on every keystroke), and the differ splices
+   * the real rows into each frame. A scroll changes ONLY this content - no Ink render at all: the
+   * repaint diffs the new window against the previous one, uses the hardware scroll when it detects a
+   * shift, and paints just what changed. null = Ink owns the band again (find mode, inline).
+   */
+  setBandContent(rows: string[] | null, dist: number): void {
+    this.bandRows = rows;
+    this.bandDist = Math.max(0, dist);
+    this.repaintBand();
+  }
+
+  /** The band window (bottom-anchored, blank-padded at the top), or null when composition is off. */
+  private windowRows(): string[] | null {
+    if (!this.band || !this.bandRows) return null;
+    const H = this.band.height;
+    const end = Math.max(0, this.bandRows.length - this.bandDist);
+    const slice = this.bandRows.slice(Math.max(0, end - H), end);
+    while (slice.length < H) slice.unshift("");
+    return slice;
+  }
+
+  /** Splice the band window into an Ink frame's lines (Ink rendered them blank). */
+  private compose(lines: string[]): string[] {
+    const win = this.windowRows();
+    if (!win || !this.band) return lines;
+    const out = lines.slice();
+    for (let i = 0; i < this.band.height && i < out.length; i++) out[i] = win[i];
+    return out;
+  }
+
+  /** On seed/resync frames: when composition is OFF, raw passthrough is correct and cheapest (null).
+   * When composition is ON, passing the raw payload through would paint the BLANK band Ink rendered -
+   * so emit the same full-frame write Ink would have, but with the composed lines spliced in. */
+  private fullRepaintOr(parsed: { eraseCount: number }, lines: string[]): string | null {
+    if (!this.windowRows()) return null;
+    const n = parsed.eraseCount;
+    const erase = n > 0 ? "\x1b[2K" + "\x1b[1A\x1b[2K".repeat(n - 1) + "\x1b[G" : "";
+    return erase + lines.join("\n");
+  }
+
+  /** Imperative band repaint (scroll, append, warm upgrade): diff the new window against the previous
+   * band, prefer the hardware scroll, paint the rest - without any Ink involvement. */
+  private repaintBand(): void {
+    if (!this.writer || !this.prev || !this.band) return;
+    const win = this.windowRows();
+    if (!win) return;
+    const H = Math.min(this.band.height, this.prev.length);
+    const prevBand = this.prev.slice(0, H);
+    let anyChange = false;
+    for (let i = 0; i < H; i++) if (win[i] !== prevBand[i]) { anyChange = true; break; }
+    if (!anyChange) return;
+    const top = this.band.top;
+    let out = "";
+    const shift = detectShift(prevBand, win, H);
+    if (shift) {
+      out += `${ESC}${top};${top + H - 1}r` + (shift.dir === "up" ? `${ESC}${shift.k}S` : `${ESC}${shift.k}T`) + `${ESC}r`;
+      const shifted: (string | null)[] = [];
+      for (let i = 0; i < H; i++) {
+        shifted[i] = shift.dir === "up" ? (i < H - shift.k ? prevBand[i + shift.k] : null) : (i >= shift.k ? prevBand[i - shift.k] : null);
+      }
+      for (let i = 0; i < H; i++) if (shifted[i] !== win[i]) out += `${ESC}${top + i};1H` + win[i] + EL;
+    } else {
+      for (let i = 0; i < H; i++) if (win[i] !== prevBand[i]) out += `${ESC}${top + i};1H` + win[i] + EL;
+    }
+    out += `${ESC}${this.prev.length};1H`; // restore the cursor row Ink assumes (its frame's last line)
+    for (let i = 0; i < H; i++) this.prev[i] = win[i];
+    this.writer(out);
+  }
 
   /** Optimized bytes to write INSTEAD of `payload`; "" = nothing changed (skip the write);
    * null = pass the payload through untouched (and the baseline resets/reseeds as appropriate). */
@@ -56,12 +134,14 @@ export class FrameDiffer {
     if (/^(?:\x1b\[\?[0-9;]+[hl])+$/.test(payload)) return null;
     const parsed = parseInkPayload(payload);
     if (!parsed) { this.prev = null; return null; } // not a standard rerender -> passthrough + reset
-    const lines = parsed.frame.split("\n");
+    // Compose: Ink rendered the band blank (when band content is on); splice the real window in, so
+    // both the baseline and the diff operate on what the SCREEN should actually show.
+    const lines = this.compose(parsed.frame.split("\n"));
     const prev = this.prev;
     this.prev = lines;
-    if (!prev) return null;                          // no baseline yet -> passthrough seeds it
-    if (parsed.eraseCount !== prev.length) return null; // Ink's idea of prev differs from ours -> resync
-    if (lines.length !== prev.length) return null;   // height changed -> a full rewrite is the safe move
+    if (!prev) return this.fullRepaintOr(parsed, lines); // seed: raw passthrough would show a blank band
+    if (parsed.eraseCount !== prev.length) return this.fullRepaintOr(parsed, lines); // Ink's idea of prev differs -> resync
+    if (lines.length !== prev.length) return this.fullRepaintOr(parsed, lines);      // height changed -> full rewrite
 
     const changed: number[] = [];
     for (let i = 0; i < lines.length; i++) if (lines[i] !== prev[i]) changed.push(i);

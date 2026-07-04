@@ -1126,6 +1126,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     if (fullscreen) warmAnsiCache(lines, contentCols, cfg, () => setWarmTick((t) => t + 1), scrollCenterBucket >= 0 ? scrollCenterBucket * 40 : undefined);
   }, [fullscreen, lines, contentCols, scrollCenterBucket]);
+  // Feed the differ the band CONTENT (all rows + scroll distance). Scrolls, appends and warm upgrades
+  // repaint through the differ directly - no Ink render involved. Find mode hands the band back to Ink.
+  useEffect(() => {
+    frameDiffer?.setBandContent(fullscreen && !search ? ansiRows : null, rowScroll.dist);
+  }, [fullscreen, search !== null, ansiRows, rowScroll.dist, viewH]);
   useEffect(() => () => clearAnsiCache(), []); // free on unmount; resize re-keys by width mismatch
   // Flat rows exist ONLY for the find bar (in-place match highlighting needs row positions).
   const flat = useMemo(
@@ -1225,9 +1230,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 highlight={search.q}
                 currentRow={search.matches.length ? search.matches[search.idx] : undefined}
               />
+            ) : frameDiffer ? (
+              // Compose-at-the-write-layer: Ink renders the band BLANK (zero squash/wrap/measure/output
+              // cost for the viewport on every keystroke - the typing path costs the same as inline);
+              // the differ splices the real rows into each frame and repaints scrolls itself.
+              <Box height={viewH} width={contentCols} />
             ) : (
-              // Rich viewport at EVERY scroll position: pre-rendered ANSI rows, windowed - identical
-              // look pinned or scrolled, O(viewport) string pastes per frame.
+              // No differ (NEKO_INCR=0 / tests): render the viewport in-tree as before.
               <RichView rows={ansiRows} dist={rowScroll.dist} viewH={viewH} width={contentCols} />
             )}
           </Box>
