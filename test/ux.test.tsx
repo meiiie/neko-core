@@ -154,6 +154,30 @@ test("RichView pastes exactly the visible window of cached rows (tail and scroll
   r2.unmount();
 });
 
+test("ansi-cache: warm is WINDOWED - a marathon session does not warm its distant history", async () => {
+  const { warmAnsiCache, getCachedRows, clearAnsiCache, WARM_WINDOW } = await import("../src/ui/ansi-cache.ts");
+  clearAnsiCache();
+  const many: Line[] = Array.from({ length: WARM_WINDOW + 200 }, (_, i) => ({ id: 50000 + i, kind: "info", text: `l${i}` }));
+  await new Promise<void>((resolve) => {
+    const t0 = Date.now();
+    warmAnsiCache(many, 60, CFG, () => {
+      const done = many.slice(-WARM_WINDOW).every((l) => getCachedRows(l, 60));
+      if (done || Date.now() - t0 > 20000) resolve();
+    });
+  });
+  expect(getCachedRows(many[many.length - 1], 60)).not.toBe(null); // tail warmed
+  expect(getCachedRows(many[0], 60)).toBe(null);                    // distant history NOT warmed (stays fallback)
+  // ...until the user scrolls near it: warm again with a center on the old region.
+  await new Promise<void>((resolve) => {
+    const t0 = Date.now();
+    warmAnsiCache(many, 60, CFG, () => {
+      if (getCachedRows(many[0], 60) || Date.now() - t0 > 20000) resolve();
+    }, 0);
+  });
+  expect(getCachedRows(many[0], 60)).not.toBe(null);
+  clearAnsiCache();
+}, 45000);
+
 test("ansi-cache: renderLineRows renders a line rich once; fallback is instant plain", async () => {
   const { renderLineRows, fallbackRows, clearAnsiCache } = await import("../src/ui/ansi-cache.ts");
   const line: Line = { id: 90001, kind: "assistant", text: "# Tiêu đề\n\n**đậm** và `code`" };

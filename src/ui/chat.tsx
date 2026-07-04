@@ -24,7 +24,7 @@ import { FrameDiffer } from "./frame-diff.ts";
 import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
-import { clearAnsiCache, fallbackRows, getCachedRows, warmAnsiCache } from "./ansi-cache.ts";
+import { clearAnsiCache, fallbackRows, getCachedRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
 import { isMouseEnabled, parseClick, parseWheelAll } from "./mouse.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
@@ -268,6 +268,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [viewH, setViewH] = useState(Math.max(3, (stdout?.rows ?? 24) - 8)); // measured transcript viewport height
   const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
   const scrollAwayLenRef = useRef(0); // lines.length when the user scrolled away -> "N new messages" pill count
+  const estCacheRef = useRef({ len: -1, val: 0 }); // footer ctx% estimate, recomputed only when messages count changes
   const altDisposeRef = useRef<null | (() => void)>(null); // alt-screen teardown (idempotent)
   const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
   const [search, setSearch] = useState<{ q: string; matches: number[]; idx: number } | null>(null); // fullscreen in-viewport find
@@ -1109,12 +1110,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     for (const l of lines) out.push(...(getCachedRows(l, contentCols) ?? fallbackRows(l)));
     return out;
   }, [fullscreen, lines, contentCols, warmTick]);
-  useEffect(() => {
-    if (fullscreen) warmAnsiCache(lines, contentCols, cfg, () => setWarmTick((t) => t + 1));
-  }, [fullscreen, lines, contentCols]);
-  useEffect(() => () => clearAnsiCache(), []); // free on unmount; resize re-keys by width mismatch
   // Row scrolling anchored from the END (dist=0 -> pinned): stays put as the warmer swaps rows above.
   const rowScroll = useRowScroll(ansiRows.length, viewH);
+  // Which LINE the current scroll position looks at (walk row counts from the end; O(scroll depth),
+  // only while scrolled). Bucketed so the warm effect re-fires per ~40 lines of travel, not per row.
+  const scrollCenterBucket = useMemo(() => {
+    if (!fullscreen || !rowScroll.scrolled) return -1;
+    let acc = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      acc += rowsCountFor(lines[i], contentCols);
+      if (acc >= rowScroll.dist) return Math.floor(i / 40);
+    }
+    return 0;
+  }, [fullscreen, rowScroll.scrolled, rowScroll.dist, lines, contentCols]);
+  useEffect(() => {
+    if (fullscreen) warmAnsiCache(lines, contentCols, cfg, () => setWarmTick((t) => t + 1), scrollCenterBucket >= 0 ? scrollCenterBucket * 40 : undefined);
+  }, [fullscreen, lines, contentCols, scrollCenterBucket]);
+  useEffect(() => () => clearAnsiCache(), []); // free on unmount; resize re-keys by width mismatch
   // Flat rows exist ONLY for the find bar (in-place match highlighting needs row positions).
   const flat = useMemo(
     () => (fullscreen && search ? flattenLines(lines, contentCols) : []),
@@ -1390,7 +1402,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 // Before the first API call of a session (e.g. right after /resume), lastPrompt is 0 -
                 // but the context ISN'T empty. Estimate from the loaded messages so a resumed session
                 // shows its real ~N% immediately instead of a misleading 0% that jumps on the next turn.
-                const used = cost.lastPrompt || estimateTokens(agentRef.current!.messages);
+                // Cached by message count: this renders on EVERY stream delta, and walking a multi-MB
+                // resumed transcript each time measurably dragged the first turn of a long session.
+                const msgs = agentRef.current!.messages;
+                if (estCacheRef.current.len !== msgs.length) estCacheRef.current = { len: msgs.length, val: estimateTokens(msgs) };
+                const used = cost.lastPrompt || estCacheRef.current.val;
                 const pct = ctxPercent(used, cfg.contextWindow);
                 const ctxColor = pct >= 85 ? "red" : pct >= 60 ? "yellow" : "#9a9a9a";
                 return (

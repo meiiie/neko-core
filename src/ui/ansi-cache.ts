@@ -80,18 +80,37 @@ export function clearAnsiCache(): void {
   if (warmTimer) { clearTimeout(warmTimer); warmTimer = null; }
 }
 
+/** How many lines from the tail warm eagerly. Warming an ENTIRE marathon session used to render every
+ * markdown line through the hidden instance - tens of seconds of saturated event loop that lagged
+ * EVERYTHING (scroll, typing, streaming) in fullscreen on a long session. The tail window covers the
+ * pinned view + normal scrollback; deeper history shows instant plain fallback rows and warms only
+ * when scrolled near (the `center` option). */
+export const WARM_WINDOW = 300;
+
+/** Rows this line contributes right now (cached rich rows, else the 1-row fallback). */
+export function rowsCountFor(line: Line, width: number): number {
+  return getCachedRows(line, width)?.length ?? 1;
+}
+
 /**
- * Warm the cache for `lines` at `width`, newest-first, in small async chunks so the UI thread never
- * blocks longer than one chunk. Calls `onProgress` after each chunk so the viewport can re-render with
- * the upgraded rows. Re-entrant: a new call (new lines / new width) supersedes the pending schedule.
+ * Warm the cache at `width` in time-budgeted async chunks (never blocks the UI longer than one chunk;
+ * 16ms gaps give input/stream events air between chunks). Scope: the LAST `WARM_WINDOW` lines, plus -
+ * when `center` is given (the line index the user scrolled to) - a span around it. Newest-first.
+ * Re-entrant: a new call supersedes the pending schedule. `onProgress` fires per chunk so the viewport
+ * re-renders with upgraded rows.
  */
-export function warmAnsiCache(lines: Line[], width: number, cfg: NekoConfig, onProgress: () => void): void {
+export function warmAnsiCache(lines: Line[], width: number, cfg: NekoConfig, onProgress: () => void, center?: number): void {
   if (warmTimer) { clearTimeout(warmTimer); warmTimer = null; }
-  const missing = lines.filter((l) => !getCachedRows(l, width)).reverse(); // newest first
+  const wanted = new Set<number>();
+  for (let i = Math.max(0, lines.length - WARM_WINDOW); i < lines.length; i++) wanted.add(i);
+  if (center !== undefined) {
+    for (let i = Math.max(0, center - 80); i < Math.min(lines.length, center + 80); i++) wanted.add(i);
+  }
+  const missing = [...wanted].sort((a, b) => b - a).map((i) => lines[i]).filter((l) => l && !getCachedRows(l, width));
   if (!missing.length) return;
   let i = 0;
-  const BUDGET_MS = 25; // time-budgeted chunks (not line-counted): one huge markdown line can cost
-  const step = () => {  // hundreds of ms - render at least 1, then yield as soon as the budget is spent
+  const BUDGET_MS = 12; // render at least 1 line, then yield as soon as the budget is spent
+  const step = () => {
     warmTimer = null;
     const t0 = performance.now();
     do {
@@ -99,7 +118,7 @@ export function warmAnsiCache(lines: Line[], width: number, cfg: NekoConfig, onP
       try { cache.set(l.id, { width, rows: renderLineRows(l, width, cfg) }); } catch { cache.set(l.id, { width, rows: fallbackRows(l) }); }
     } while (i < missing.length && performance.now() - t0 < BUDGET_MS);
     onProgress();
-    if (i < missing.length) warmTimer = setTimeout(step, 0);
+    if (i < missing.length) warmTimer = setTimeout(step, 16);
   };
-  warmTimer = setTimeout(step, 0);
+  warmTimer = setTimeout(step, 16);
 }
