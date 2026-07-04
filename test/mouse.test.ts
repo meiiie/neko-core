@@ -46,3 +46,11 @@ test("isMouseEnabled: on by default, off with NEKO_DISABLE_MOUSE", () => {
   expect(isMouseEnabled({ NEKO_DISABLE_MOUSE: "1" } as any)).toBe(false);
   expect(isMouseEnabled({ NEKO_DISABLE_MOUSE: "true" } as any)).toBe(false);
 });
+
+test("title sequences: OSC 2 set + xterm stack push/pop, control chars stripped", async () => {
+  const { titleSeq, PUSH_TITLE, POP_TITLE } = await import("../src/ui/title.ts");
+  expect(titleSeq("neko - fix bug")).toBe("\x1b]2;neko - fix bug\x07");
+  expect(titleSeq("bad\x1b\x07title")).toBe("\x1b]2;bad  title\x07"); // control chars can't break the OSC
+  expect(PUSH_TITLE).toBe("\x1b[22;0t");
+  expect(POP_TITLE).toBe("\x1b[23;0t");
+});

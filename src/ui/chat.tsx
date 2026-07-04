@@ -27,6 +27,7 @@ import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.ts
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
 import { DISABLE_MOUSE, isMouseEnabled, parseClick, parseLastPointer, parseWheelAll } from "./mouse.ts";
+import { restoreTitle, saveTitle, setTerminalTitle } from "./title.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
@@ -44,7 +45,7 @@ import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
-import { latestSession, loadSession, newSessionId, saveSession, type Session } from "../adapters/session.ts";
+import { latestSession, loadSession, newSessionId, renameSession, saveSession, type Session } from "../adapters/session.ts";
 import { memoryIndexBlock } from "../core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
 import { playbookContextBlock } from "../core/playbook.ts";
@@ -289,6 +290,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
   const scrollAwayLenRef = useRef(0); // lines.length when the user scrolled away -> "N new messages" pill count
   const estCacheRef = useRef({ len: -1, val: 0 }); // footer ctx% estimate, recomputed only when messages count changes
+  const titleLockedRef = useRef(false); // /title <name> pins the tab title; auto per-turn updates stop
+  const titleTaskRef = useRef(""); // the current task shown in the tab ("* ..." busy, plain when idle)
   const altDisposeRef = useRef<null | (() => void)>(null); // alt-screen teardown (idempotent)
   const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
   const [search, setSearch] = useState<{ q: string; matches: number[]; idx: number } | null>(null); // fullscreen in-viewport find
@@ -585,6 +588,21 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     const last = [...lines].reverse().find((l) => l.kind === "assistant");
     addLine("info", last && copyToClipboard(last.text, out) ? "copied the last response to the clipboard" : "(no response to copy yet)");
+  };
+
+  // /title <name>: name the SESSION (persisted - shows in /resume) and pin the TAB title to it (auto
+  // per-turn updates stop). /title alone reports the current state.
+  const applyTitle = (name: string) => {
+    if (!name) {
+      return addLine("info", titleLockedRef.current
+        ? `title: "${titleTaskRef.current}" (pinned - /title <name> to change)`
+        : `title: auto (follows the current task) - /title <name> to pin one`);
+    }
+    renameSession(sessionIdRef.current, name);
+    titleLockedRef.current = true;
+    titleTaskRef.current = trunc(name, 40);
+    setTerminalTitle(`neko - ${titleTaskRef.current}`);
+    addLine("info", `session + tab named "${trunc(name, 60)}"`);
   };
 
   // Apply a /fps choice: persist it, re-resolve (env/config still win - say so honestly), adapt the
@@ -989,6 +1007,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         toggleFullscreen,
         copy: copyTranscript,
         setFps: applyFps,
+        setTitle: applyTitle,
         exit,
       });
       return;
@@ -1026,6 +1045,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       addLine("info", `workflow: ${wf.name}`);
     }
     const turnStart = Date.now();
+    // Tab title mirrors the task (claude-code style): "* neko - <task>" while running, star dropped on
+    // finish (see finally). /title pins a manual name and stops these updates.
+    if (!titleLockedRef.current) {
+      titleTaskRef.current = trunc(toSend, 40);
+      setTerminalTitle(`* neko - ${titleTaskRef.current}`);
+    }
     // Baselines at turn start -> the spinner shows THIS turn's tokens (delta), split input/output.
     turnInStartRef.current = agentRef.current!.cost.promptTokens;
     turnOutStartRef.current = agentRef.current!.cost.completionTokens;
@@ -1063,6 +1088,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } finally {
       busyRef.current = false;
       setBusy(false);
+      if (!titleLockedRef.current && titleTaskRef.current) setTerminalTitle(`neko - ${titleTaskRef.current}`); // drop the busy star
       if (inflightRef.current.length) { inflightRef.current = []; syncInflight(); } // drop any un-resulted (aborted) blinking lines
       controllerRef.current = null;
       persist();
@@ -1540,6 +1566,10 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // not process state, so start clean unconditionally (harmless when already off) and clean up again on
   // the way out (covers our own unclean predecessors AND protects the user's shell after we exit).
   process.stdout.write(DISABLE_MOUSE);
+  // Tab title: save the user's title (stack push), brand the tab for the session; per-turn updates
+  // show the current task + busy state (see handle()); restored on exit.
+  saveTitle();
+  setTerminalTitle(`neko - ${process.cwd().split(/[\\/]/).pop() ?? "session"}`);
   let syncSupported = isSyncOutputSupported();
   if (!syncSupported) syncSupported = (await probeSyncOutput()) === true;
   const clearHolder = { fn: () => {} };
@@ -1567,6 +1597,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     await app.waitUntilExit();
   } finally {
     process.stdout.write(DISABLE_MOUSE); // belt-and-suspenders: never leave the user's shell in mouse mode
+    restoreTitle(); // give the tab back its original title
     await hub.close();
     // Claude-style: tell the user how to pick this exact session back up.
     console.log(`\nResume this session with:\n  neko --resume ${id}\n`);

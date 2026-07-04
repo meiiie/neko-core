@@ -1,0 +1,35 @@
+/**
+ * Terminal tab/window title (the claude-code touch: the tab tells you what the session is doing).
+ *
+ * OSC 2 sets the title; the xterm TITLE STACK (CSI 22;0t push / CSI 23;0t pop - supported by Windows
+ * Terminal, iTerm2, and friends) saves and restores whatever title the shell had, so exiting neko gives
+ * the user's tab back exactly as it was. Titles are written STRAIGHT to process.stdout, bypassing the
+ * frame differ (an OSC write would just reset its baseline) - titles never touch screen content.
+ *
+ * Convention: "* neko - <task>" while a turn is running, "neko - <task>" when idle - the tab itself
+ * shows busy/done at a glance (like claude-code's spinner-prefixed tab). ASCII-only for safety.
+ */
+import type { Writable } from "node:stream";
+
+export const PUSH_TITLE = "\x1b[22;0t";
+export const POP_TITLE = "\x1b[23;0t";
+
+/** OSC 2 sequence for a title (control chars stripped; kept short - tabs truncate anyway). */
+export function titleSeq(title: string): string {
+  return `\x1b]2;${title.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 80)}\x07`;
+}
+
+const out = (): Writable & { isTTY?: boolean } => process.stdout as any;
+
+/** Save the user's current title (stack push) - call once at startup, pair with restoreTitle on exit. */
+export function saveTitle(): void {
+  if (out().isTTY) out().write(PUSH_TITLE);
+}
+/** Restore the user's title (stack pop). */
+export function restoreTitle(): void {
+  if (out().isTTY) out().write(POP_TITLE);
+}
+/** Set the tab title now. No-op off-TTY (tests, pipes). */
+export function setTerminalTitle(title: string): void {
+  if (out().isTTY) out().write(titleSeq(title));
+}

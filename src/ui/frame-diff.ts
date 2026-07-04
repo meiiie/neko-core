@@ -66,13 +66,15 @@ export class FrameDiffer {
     this.repaintBand();
   }
 
-  /** The band window (bottom-anchored, blank-padded at the top), or null when composition is off. */
+  /** The band window, or null when composition is off. Content that FILLS the viewport is bottom-
+   * anchored (chat auto-follow); content SHORTER than the viewport is TOP-anchored - a fresh session's
+   * welcome belongs at the top of the screen, not floating above the input with a void over it. */
   private windowRows(): string[] | null {
     if (!this.band || !this.bandRows) return null;
     const H = this.band.height;
     const end = Math.max(0, this.bandRows.length - this.bandDist);
     const slice = this.bandRows.slice(Math.max(0, end - H), end);
-    while (slice.length < H) slice.unshift("");
+    while (slice.length < H) slice.push("");
     return slice;
   }
 

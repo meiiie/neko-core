@@ -155,6 +155,18 @@ test("compose-at-write-layer: blank Ink band gets the real rows; scroll repaints
   expect(scr.r).toBe(7); // cursor restored to Ink's assumed row
 });
 
+test("short band content is TOP-anchored (fresh session welcome at the top, not floating at the bottom)", () => {
+  const d = new FrameDiffer();
+  d.setBand({ top: 1, height: 6 });
+  d.setBandContent(["w1", "w2", "w3"], 0); // only 3 rows of content in a 6-row band
+  const blank = ["", "", "", "", "", "", "chrome"];
+  d.process(blank.join("\n"));            // first render -> passthrough (seeds nothing)
+  const seeded = d.process(payload(7, blank))!;
+  const body = seeded.replace(/^(\x1b\[2K\x1b\[1A)*\x1b\[2K\x1b\[G/, "").split("\n");
+  expect(body.slice(0, 3)).toEqual(["w1", "w2", "w3"]); // content at the TOP of the band
+  expect(body.slice(3, 6)).toEqual(["", "", ""]);        // blanks BELOW it
+});
+
 test("identical frame skips the write; height change and weird payloads pass through", () => {
   const d = new FrameDiffer();
   const A = ["a", "b"], B = ["a", "b"];

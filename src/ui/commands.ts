@@ -44,6 +44,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/fullscreen", desc: "toggle fullscreen: alt-screen scrollable viewport (PgUp/PgDn to scroll)" },
   { name: "/copy", desc: "copy the last response to the clipboard (/copy all = whole conversation)" },
   { name: "/fps", desc: "UI frame rate: auto-follow your display or set 30..240 (/fps [auto|n])" },
+  { name: "/title", desc: "name this session + pin the terminal tab title (/title <name>)" },
   { name: "/goal", desc: "set an ongoing goal (/goal <text>)" },
   { name: "/loop", desc: "run a task N times (/loop <n> <task>)" },
   { name: "/auto", desc: "closed loop: work + self-review until done (/auto <goal>)" },
@@ -90,6 +91,7 @@ export interface CommandCtx {
   toggleFullscreen: () => void; // toggle fullscreen (alt-screen scrollable viewport) mode
   copy: (arg: string) => void; // copy last response / whole conversation to the clipboard (OSC 52)
   setFps: (choice: number | "auto") => void; // /fps: persist + apply the UI frame rate
+  setTitle: (name: string) => void; // /title: name the session + pin the tab title
   exit: () => void;
 }
 
@@ -303,6 +305,9 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return;
     case "/copy":
       ctx.copy(input.slice("/copy".length).trim());
+      return;
+    case "/title":
+      ctx.setTitle(input.slice("/title".length).trim());
       return;
     case "/fps": {
       const arg = input.slice("/fps".length).trim().toLowerCase();

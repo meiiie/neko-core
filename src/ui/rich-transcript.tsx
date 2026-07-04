@@ -17,8 +17,10 @@ export const RichView = memo(function RichView({ rows, dist, viewH, width }: { r
   const end = Math.max(0, rows.length - dist);
   const start = Math.max(0, end - viewH);
   const shown = rows.slice(start, end);
+  // Short content is TOP-anchored (a fresh session's welcome sits at the top, like inline); once the
+  // viewport fills, bottom-anchor for chat auto-follow.
   return (
-    <Box height={viewH} width={width} overflow="hidden" flexDirection="column" justifyContent="flex-end">
+    <Box height={viewH} width={width} overflow="hidden" flexDirection="column" justifyContent={rows.length < viewH ? "flex-start" : "flex-end"}>
       {shown.map((r, i) => (
         <Text key={start + i} wrap="truncate-end">{r.length ? r : " "}</Text>
       ))}
