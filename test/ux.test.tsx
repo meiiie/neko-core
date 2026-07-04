@@ -11,7 +11,7 @@ import { CompactingLine, fmtElapsed, RunningLine, ThinkingLine } from "../src/ui
 import { ApprovalBox } from "../src/ui/approval-box.tsx";
 import { TranscriptLine, type Line } from "../src/ui/transcript.tsx";
 import { TranscriptViewer } from "../src/ui/transcript-viewer.tsx";
-import { RichTail } from "../src/ui/rich-transcript.tsx";
+import { RichView } from "../src/ui/rich-transcript.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
 
 const CFG = new NekoConfig({}, null, {}, "");
@@ -137,17 +137,25 @@ test("fullscreen mode renders a scrollable transcript region (alt-screen), inlin
   }
 });
 
-test("RichTail renders the last lines rich, bottom-anchored, and mounts only O(viewport)", () => {
+test("RichView renders rich lines at the tail AND at a scrolled position, mounting only O(viewport)", () => {
   const lines: Line[] = [];
   for (let i = 0; i < 200; i++) lines.push({ id: i, kind: "assistant", text: `richline ${i}` });
-  const r = render(<RichTail lines={lines} viewH={5} width={40} cfg={CFG} />);
+  // Pinned tail (bottom=null): newest at the bottom, top clipped.
+  const r = render(<RichView lines={lines} bottom={null} viewH={5} width={40} cfg={CFG} />);
   const f = strip(r.lastFrame());
-  expect(f).toContain("richline 199"); // newest pinned to the bottom (flex-end)
-  expect(f).not.toContain("richline 0"); // top clipped
-  // O(viewport) bound: even the RAW frame (pre-clip render) must not contain lines outside the
-  // mounted tail slice (viewH + buffer) - mounting the whole thread is the lag bug this guards against.
+  expect(f).toContain("richline 199");
+  expect(f).not.toContain("richline 0");
+  // O(viewport) bound: even the RAW frame (pre-clip render) must not contain lines outside the mounted
+  // slice (viewH + buffer) - mounting the whole thread is the lag bug this guards against.
   expect(r.lastFrame()).not.toContain("richline 100");
   r.unmount();
+  // Scrolled position (bottom=100): the window ends at line 99 - SAME rich rendering, different slice.
+  const r2 = render(<RichView lines={lines} bottom={100} viewH={5} width={40} cfg={CFG} />);
+  const f2 = strip(r2.lastFrame());
+  expect(f2).toContain("richline 99");
+  expect(f2).not.toContain("richline 100"); // nothing below the window
+  expect(r2.lastFrame()).not.toContain("richline 199"); // ...and the tail is not even mounted
+  r2.unmount();
 });
 
 test("fullscreen history: PgUp shows the jump pill; a new turn counts; End returns to the tail", async () => {
@@ -159,16 +167,16 @@ test("fullscreen history: PgUp shows the jump pill; a new turn counts; End retur
     const s: any = { id: "pill", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
     const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
     await tick(120);
-    c.stdin.write("\x1b[5~"); // PgUp -> enter history mode
-    expect(await until(c, (f) => /Jump to bottom \(End\)/.test(f))).toBe(true);
+    c.stdin.write("\x1b[5~"); // PgUp -> scroll up (line-anchored; flush is coalesced ~33ms)
+    expect(await until(c, (f) => /Jump to bottom \(ctrl\+End\)/.test(f))).toBe(true);
     c.stdin.write("hi there"); // type, then submit separately (one chunk with \r would read as a paste)
     await tick(60);
     c.stdin.write("\r"); // run a turn while scrolled up -> Echo replies
     expect(await until(c, (f) => /new message/.test(f))).toBe(true); // pill counts the new activity
-    c.stdin.write("\x1b[F"); // End -> back to the rich tail
+    c.stdin.write("\x1b[F"); // End -> back to the live tail
     expect(await until(c, (f) => {
       const frames = f.split("\n");
-      return frames.some((x) => x.includes("hello")) && !/Jump to bottom \(End\)/.test(frames.slice(-30).join("\n"));
+      return frames.some((x) => x.includes("hello")) && !/Jump to bottom/.test(frames.slice(-30).join("\n"));
     })).toBe(true);
     c.unmount();
   } finally {

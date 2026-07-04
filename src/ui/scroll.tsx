@@ -8,7 +8,7 @@
  * rendering of scrollback is a later phase; this is the fast, safe base.
  */
 import { Box, Text } from "ink";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Line, LineKind } from "./transcript.tsx";
 
@@ -88,6 +88,56 @@ export function useScroll(total: number, viewH: number): ScrollApi {
       const target = center ? row - Math.floor(viewH / 2) : row;
       setOffset(Math.max(0, target));
     },
+  };
+}
+
+export interface LineScrollApi {
+  /** Exclusive end index of the visible line slice; null = pinned to the live tail. */
+  bottom: number | null;
+  scrolled: boolean;
+  /** Accumulate a scroll of `n` LINES (negative = up). Coalesced: any burst inside one frame interval
+   * flushes as ONE state update, so a fast wheel spin moves far in a single render instead of queueing
+   * a render per tick (the render-backlog "chasing the wheel" jank). */
+  by: (n: number) => void;
+  top: () => void;
+  toBottom: () => void;
+}
+
+/** Line-anchored scrolling over the RICH transcript: the viewport shows the K lines ending at `bottom`,
+ * bottom-anchored, so scrolled-back history looks IDENTICAL to the live tail (no flat-mode flash) while
+ * staying O(viewport) - only the visible slice is ever mounted. Claude Code scrolls its virtual list in
+ * 40-row quanta; one LINE (1-4 rows) is finer-grained than that.
+ *
+ * Wheel/key deltas accumulate in a ref and flush on a ~30fps timer (matching Ink's own output cadence):
+ * pendingDelta-style coalescing, the same trick claude-code's ScrollBox uses to stay smooth. */
+export function useLineScroll(len: number, viewH: number): LineScrollApi {
+  const [, force] = useState(0);
+  const st = useRef<{ bottom: number | null; pending: number; timer: ReturnType<typeof setTimeout> | null }>({ bottom: null, pending: 0, timer: null });
+  const lenRef = useRef(len);
+  lenRef.current = len; // flush clamps against the CURRENT length, not the one captured at schedule time
+  const floorRef = useRef(0);
+  floorRef.current = Math.min(len, viewH); // every Line renders >= 1 row, so `viewH` lines always fill the viewport
+  useEffect(() => () => { if (st.current.timer) clearTimeout(st.current.timer); }, []);
+
+  const flush = () => {
+    st.current.timer = null;
+    const d = st.current.pending;
+    st.current.pending = 0;
+    if (d === 0) return;
+    const cur = st.current.bottom ?? lenRef.current;
+    const next = Math.max(floorRef.current, Math.min(lenRef.current, cur + d));
+    st.current.bottom = next >= lenRef.current ? null : next; // reaching the end re-pins to the live tail
+    force((t) => t + 1);
+  };
+  return {
+    bottom: st.current.bottom,
+    scrolled: st.current.bottom !== null,
+    by: (n) => {
+      st.current.pending += n;
+      if (!st.current.timer) st.current.timer = setTimeout(flush, 33);
+    },
+    top: () => { st.current.pending = 0; st.current.bottom = floorRef.current; force((t) => t + 1); },
+    toBottom: () => { st.current.pending = 0; st.current.bottom = null; force((t) => t + 1); },
   };
 }
 

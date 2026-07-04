@@ -24,18 +24,31 @@ export function enableMouse(out: Writable = process.stdout): void { out.write(EN
 export function disableMouse(out: Writable = process.stdout): void { out.write(DISABLE_MOUSE); }
 
 /**
- * Parse a wheel direction out of an input chunk that may contain an SGR mouse report. Returns "up" or
- * "down" for a wheel event, else null (a click, a non-mouse sequence, or a partial). Tolerant of the
- * report being embedded in a larger chunk. Only the FIRST wheel event in the chunk is returned - wheel
- * ticks arrive one report per chunk in practice.
+ * Parse ALL wheel events in an input chunk (a fast spin can batch several SGR reports into one chunk -
+ * counting only the first made scrolling feel like it lagged behind the wheel). Returns the NET
+ * direction + count, or null when the chunk carries no wheel events. ESC is optional (Ink often strips
+ * it and hands us just the CSI body "[<64;10;5M"). Modifier bits (shift/ctrl/meta = 4/8/16) are masked.
  */
-export function parseWheel(input: string): "up" | "down" | null {
-  // ESC is optional: Ink often strips the leading ESC and hands us just the CSI body ("[<64;10;5M").
-  const m = /\x1b?\[<(\d+);\d+;\d+[Mm]/.exec(input);
+export function parseWheelAll(input: string): { dir: "up" | "down"; count: number } | null {
+  const re = /\x1b?\[<(\d+);\d+;\d+[Mm]/g;
+  let up = 0, down = 0, m: RegExpExecArray | null;
+  while ((m = re.exec(input))) {
+    const cb = parseInt(m[1], 10);
+    if ((cb & 64) === 0) continue; // bit 6 marks a wheel event; 64 = up, 65 = down (low bit)
+    if ((cb & 1) === 0) up++; else down++;
+  }
+  const net = up - down;
+  if (net === 0) return null; // no wheel events, or an exactly-cancelling burst
+  return net > 0 ? { dir: "up", count: net } : { dir: "down", count: -net };
+}
+
+/** Parse a LEFT-button PRESS (capital-M SGR report) into 1-based terminal coordinates, else null.
+ * Used for tap targets like the jump-to-bottom pill. Modifier bits are masked; wheel bits excluded. */
+export function parseClick(input: string): { x: number; y: number } | null {
+  const m = /\x1b?\[<(\d+);(\d+);(\d+)M/.exec(input);
   if (!m) return null;
   const cb = parseInt(m[1], 10);
-  // Low 2 bits are the button; bit 6 (64) marks wheel. 64 = up, 65 = down. Modifier bits (shift/ctrl/
-  // meta = 4/8/16) may be OR'd in, so mask to the wheel button rather than compare exactly.
-  if ((cb & 64) === 0) return null;
-  return (cb & 1) === 0 ? "up" : "down";
+  if (cb & 64) return null;          // wheel, not a click
+  if ((cb & 3) !== 0) return null;   // not the left button
+  return { x: parseInt(m[2], 10), y: parseInt(m[3], 10) };
 }
