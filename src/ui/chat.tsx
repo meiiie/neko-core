@@ -1113,16 +1113,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Row scrolling anchored from the END (dist=0 -> pinned): stays put as the warmer swaps rows above.
   const rowScroll = useRowScroll(ansiRows.length, viewH);
   // Which LINE the current scroll position looks at (walk row counts from the end; O(scroll depth),
-  // only while scrolled). Bucketed so the warm effect re-fires per ~40 lines of travel, not per row.
+  // only while scrolled). Quantized on BOTH ends: the walk re-runs per ~120 rows of travel (not per
+  // 60fps flush - a deep scroll would walk thousands of map lookups per frame otherwise), and the
+  // result is bucketed per 40 lines so the warm effect re-fires per region.
+  const distQ = fullscreen && rowScroll.scrolled ? Math.floor(rowScroll.dist / 120) : -1;
   const scrollCenterBucket = useMemo(() => {
-    if (!fullscreen || !rowScroll.scrolled) return -1;
+    if (distQ < 0) return -1;
     let acc = 0;
+    const target = distQ * 120;
     for (let i = lines.length - 1; i >= 0; i--) {
       acc += rowsCountFor(lines[i], contentCols);
-      if (acc >= rowScroll.dist) return Math.floor(i / 40);
+      if (acc >= target) return Math.floor(i / 40);
     }
     return 0;
-  }, [fullscreen, rowScroll.scrolled, rowScroll.dist, lines, contentCols]);
+  }, [distQ, lines, contentCols]);
   useEffect(() => {
     if (fullscreen) warmAnsiCache(lines, contentCols, cfg, () => setWarmTick((t) => t + 1), scrollCenterBucket >= 0 ? scrollCenterBucket * 40 : undefined);
   }, [fullscreen, lines, contentCols, scrollCenterBucket]);
