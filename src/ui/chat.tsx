@@ -19,6 +19,7 @@ import { SelectList, type Overlay } from "./select-list.tsx";
 import { TranscriptViewer } from "./transcript-viewer.tsx";
 import { TextInput } from "./text-input.tsx";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
+import { wrapStdoutForSync } from "./sync-stdout.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
@@ -1162,7 +1163,9 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const clearHolder = { fn: () => {} };
   const app = render(
     <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} />,
-    { exitOnCtrlC: false }, // we require a double Ctrl-C
+    // Bracket each frame in BSU/ESU on terminals that support DEC 2026 (synchronized output) so
+    // streaming redraws don't flicker and mid-frame cursor moves don't yank Windows scrollback.
+    { exitOnCtrlC: false, stdout: wrapStdoutForSync(process.stdout) }, // we require a double Ctrl-C
   );
   clearHolder.fn = () => app.clear();
   try {

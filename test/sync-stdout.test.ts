@@ -1,0 +1,40 @@
+import { expect, test } from "bun:test";
+import { BSU, ESU, isSyncOutputSupported, wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
+
+test("isSyncOutputSupported: env allowlist + overrides", () => {
+  expect(isSyncOutputSupported({ WT_SESSION: "1" } as any)).toBe(true);       // Windows Terminal
+  expect(isSyncOutputSupported({ TERM: "xterm-kitty" } as any)).toBe(true);   // kitty
+  expect(isSyncOutputSupported({ TERM_PROGRAM: "iTerm.app" } as any)).toBe(true);
+  expect(isSyncOutputSupported({ VTE_VERSION: "6800" } as any)).toBe(true);   // VTE 0.68+
+  expect(isSyncOutputSupported({ TERM: "xterm-256color" } as any)).toBe(false); // unknown
+  expect(isSyncOutputSupported({ TMUX: "/tmp/x", WT_SESSION: "1" } as any)).toBe(false); // tmux opts out
+  expect(isSyncOutputSupported({ NEKO_SYNC: "0", WT_SESSION: "1" } as any)).toBe(false); // forced off
+  expect(isSyncOutputSupported({ NEKO_SYNC: "1" } as any)).toBe(true);        // forced on
+});
+
+function fakeTty(isTTY: boolean) {
+  const writes: string[] = [];
+  const stream: any = {
+    isTTY,
+    columns: 120,
+    rows: 40,
+    write: (s: any) => { writes.push(String(s)); return true; },
+  };
+  return { stream, writes };
+}
+
+test("wrapStdoutForSync: brackets each write in BSU..ESU when supported", () => {
+  const { stream, writes } = fakeTty(true);
+  const wrapped = wrapStdoutForSync(stream, { WT_SESSION: "1" } as any);
+  wrapped.write("frame-A");
+  wrapped.write("frame-B");
+  expect(writes).toEqual([BSU + "frame-A" + ESU, BSU + "frame-B" + ESU]);
+  expect(wrapped.columns).toBe(120); // non-write props read through
+});
+
+test("wrapStdoutForSync: no-op when unsupported or not a TTY", () => {
+  const a = fakeTty(true);
+  expect(wrapStdoutForSync(a.stream, { TERM: "dumb" } as any)).toBe(a.stream); // unsupported -> same object
+  const b = fakeTty(false);
+  expect(wrapStdoutForSync(b.stream, { WT_SESSION: "1" } as any)).toBe(b.stream); // not a TTY -> same object
+});
