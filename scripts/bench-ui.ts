@@ -65,13 +65,16 @@ let lastFrames = -1;
 while (app.stdout.frames.length !== lastFrames) { lastFrames = app.stdout.frames.length; await tick(120); }
 console.log(`background warm quiesced in ${ms(t0)}`);
 
-// per-keystroke: type, measure wall time at steady state
+// per-keystroke: type, measure wall time + BYTES WRITTEN at steady state. Bytes are the terminal-side
+// cost proxy: every byte must be parsed + painted by the real terminal (the cost fake-stdout benches
+// hide). Incremental rendering should shrink this to ~the input line instead of the whole frame.
 const before = app.stdout.frames.length;
 t0 = performance.now();
 for (const ch of "danh gia do tre go phim") { app.stdin.write(ch); await tick(1); }
 await tick(60);
 const typed = performance.now() - t0 - 23 * 1 - 60;
-console.log(`23 keystrokes (steady state): ${typed.toFixed(0)}ms (~${(typed / 23).toFixed(1)}ms/key), frames +${app.stdout.frames.length - before}`);
+const bytes = app.stdout.frames.slice(before).reduce((n: number, f: string) => n + f.length, 0);
+console.log(`23 keystrokes (steady state): ${typed.toFixed(0)}ms (~${(typed / 23).toFixed(1)}ms/key), frames +${app.stdout.frames.length - before}, ${bytes} bytes written (~${Math.round(bytes / 23)}/key)`);
 
 // scroll: 10 coalesced wheel bursts
 t0 = performance.now();

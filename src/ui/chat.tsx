@@ -1164,7 +1164,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     { isActive: fullscreen && !overlay && !viewer && approval === null },
   );
   return (
-    <Box flexDirection="column" paddingLeft={gutter} paddingRight={gutter} height={fullscreen ? rows : undefined}>
+    // Fullscreen height is rows-1 ON PURPOSE: at >= the full viewport height, Ink treats every frame as
+    // "fullscreen" and - on Windows consoles (ink #969: they scroll when the bottom-right cell is
+    // written) - falls back to CLEARING THE WHOLE TERMINAL on every render. One spare row keeps us on
+    // the incremental path: only changed lines are written, which is the difference between "redraw the
+    // entire screen per keystroke" and "rewrite the input line".
+    <Box flexDirection="column" paddingLeft={gutter} paddingRight={gutter} height={fullscreen ? Math.max(4, rows - 1) : undefined}>
       {/* Each item is width-capped to contentCols: <Static> renders items at the FULL terminal width by
           default, so with the left gutter a long line would spill past the edge and the terminal would
           hard-wrap it mid-word. An explicit width makes every line wrap at our inset width instead. */}
@@ -1402,7 +1407,14 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} />,
     // Bracket each frame in BSU/ESU on terminals that support DEC 2026 (synchronized output) so
     // streaming redraws don't flicker and mid-frame cursor moves don't yank Windows scrollback.
-    { exitOnCtrlC: false, stdout: wrapStdoutForSync(process.stdout, { supported: syncSupported }) }, // we require a double Ctrl-C
+    // incrementalRendering: Ink's line-diff renderer - unchanged lines are NOT rewritten, so a
+    // keystroke rewrites ~the input line instead of the whole frame (the fullscreen lag fix; the
+    // classic Ratatui/claude-code cell-diff idea, first-party). NEKO_INCR=0 is the escape hatch.
+    {
+      exitOnCtrlC: false, // we require a double Ctrl-C
+      stdout: wrapStdoutForSync(process.stdout, { supported: syncSupported }),
+      incrementalRendering: process.env.NEKO_INCR !== "0",
+    },
   );
   clearHolder.fn = () => app.clear();
   try {
