@@ -14,6 +14,7 @@ import { ApprovalBox, type Approval } from "./approval-box.tsx";
 import { runSlashCommand, SLASH } from "./commands.ts";
 import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { loadPrefs, savePrefs } from "../adapters/prefs.ts";
+import { clampFps, detectRefreshRate, resolveUiFps } from "../adapters/display.ts";
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TranscriptViewer } from "./transcript-viewer.tsx";
@@ -267,6 +268,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [fullscreen, setFullscreen] = useState<boolean>(cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
   const fullscreenRef = useRef(fullscreen); // for closures that must read the CURRENT mode (resize debounce, mount effect)
   useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
+  // Effective UI fps: env > config > /fps pref > detected display Hz > 60. Auto mode probes the display
+  // in the background on first run (subprocess, never blocks startup): the scroll glide adapts LIVE this
+  // session; Ink's render cap (fixed at instance creation) picks the value up from the cache next launch.
+  const [fps, setFps] = useState(() => resolveUiFps(cfg.uiFpsConfig).fps);
+  const fpsRef = useRef(fps);
+  useEffect(() => { fpsRef.current = fps; }, [fps]);
+  useEffect(() => {
+    if (resolveUiFps(cfg.uiFpsConfig).mode !== "auto") return;
+    void detectRefreshRate().then((hz) => {
+      if (!hz) return;
+      const next = clampFps(hz);
+      if (next !== fpsRef.current) {
+        setFps(next);
+        addLine("info", `display detected at ${hz}Hz - scrolling now runs at ${next}fps (input echo cap follows from the next launch)`);
+      }
+    }).catch(() => {});
+  }, []);
   const [viewH, setViewH] = useState(Math.max(3, (stdout?.rows ?? 24) - 8)); // measured transcript viewport height
   const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
   const scrollAwayLenRef = useRef(0); // lines.length when the user scrolled away -> "N new messages" pill count
@@ -567,6 +585,21 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     const last = [...lines].reverse().find((l) => l.kind === "assistant");
     addLine("info", last && copyToClipboard(last.text, out) ? "copied the last response to the clipboard" : "(no response to copy yet)");
+  };
+
+  // Apply a /fps choice: persist it, re-resolve (env/config still win - say so honestly), adapt the
+  // scroll glide NOW; Ink's render cap follows next launch (fixed at instance creation).
+  const applyFps = (choice: number | "auto") => {
+    savePrefs({ uiFps: choice === "auto" ? "auto" : clampFps(choice) });
+    const r = resolveUiFps(cfg.uiFpsConfig);
+    setFps(r.fps);
+    if (r.source === "NEKO_FPS" || r.source === "config ui_fps") {
+      return addLine("info", `saved, but ${r.source} overrides it - effective rate stays ${r.fps}fps`);
+    }
+    addLine("info", choice === "auto"
+      ? `fps: auto - ${r.detected ? `display ~${r.detected}Hz -> ${r.fps}fps` : `no display reading yet, using ${r.fps}fps (probing in background)`}`
+      : `fps: ${r.fps} - scrolling adapts now; the typing-echo cap follows from the next launch`);
+    if (choice === "auto" && !r.detected) void detectRefreshRate().then((hz) => { if (hz) { setFps(clampFps(hz)); addLine("info", `display detected at ${hz}Hz - now ${clampFps(hz)}fps`); } }).catch(() => {});
   };
 
   // Toggle fullscreen (alt-screen scrollable viewport) at runtime. The screen switch happens
@@ -955,6 +988,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         openTranscript,
         toggleFullscreen,
         copy: copyTranscript,
+        setFps: applyFps,
         exit,
       });
       return;
@@ -1132,7 +1166,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     ansiRows.length,
     viewH,
     (dist) => { if (bandActiveRef.current) frameDiffer?.setBandContent(paddedRowsRef.current, dist); },
-    Math.max(4, Math.round(1000 / cfg.uiFps)), // glide hop matches the configured frame rate
+    Math.max(4, Math.round(1000 / fps)), // glide hop follows the resolved fps (live-adjustable via /fps)
   );
   // Which LINE the current scroll position looks at (walk row counts from the end; O(scroll depth),
   // only while scrolled). Quantized on BOTH ends: the walk re-runs per ~120 rows of travel (not per
@@ -1497,9 +1531,9 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
       exitOnCtrlC: false, // we require a double Ctrl-C
       stdout: wrapStdoutForSync(process.stdout, { supported: syncSupported, differ }),
       // Ink defaults to 30fps (a ~34ms render throttle - felt as typing latency). The chrome frame is
-      // tiny (the viewport band is blank in Ink; the differ owns it), so the configured rate - 60 by
-      // default, 120+ for high-refresh displays via ui_fps/NEKO_FPS - is comfortably within budget.
-      maxFps: cfg.uiFps,
+      // tiny (the viewport band is blank in Ink; the differ owns it), so the resolved rate - the
+      // detected display Hz in auto mode, or the user's /fps / ui_fps / NEKO_FPS choice - fits easily.
+      maxFps: resolveUiFps(cfg.uiFpsConfig).fps,
     },
   );
   clearHolder.fn = () => app.clear();

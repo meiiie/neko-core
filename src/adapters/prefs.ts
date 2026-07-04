@@ -13,6 +13,8 @@ import { homeDir } from "../shared/home.ts";
 export interface Prefs {
   /** "Don't ask again" on the resume-from-summary prompt: resume large sessions in full without asking. */
   resumeAlwaysFull?: boolean;
+  /** /fps choice: a fixed rate, or "auto" (follow the detected display refresh rate). Unset = auto. */
+  uiFps?: number | "auto";
 }
 
 function prefsPath(): string {

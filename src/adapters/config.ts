@@ -151,6 +151,9 @@ export class NekoConfig {
     const v = Number.isFinite(env) && env > 0 ? env : Number(this.data.ui_fps ?? 60);
     return Math.min(240, Math.max(30, Math.round(v)));
   }
+  /** The config file's EXPLICIT ui_fps, or null when unset - the display resolver (adapters/display.ts)
+   * layers env > this > the /fps pref > the detected display Hz > 60. */
+  get uiFpsConfig(): number | null { return this.data.ui_fps != null ? Number(this.data.ui_fps) : null; }
   /** Start in fullscreen (alt-screen, scrollable viewport) mode. Off by default (inline stays default,
    * preserving native scrollback + copy-paste); opt in via config `fullscreen: true` or NEKO_FULLSCREEN=1.
    * Toggle at runtime with /fullscreen. */

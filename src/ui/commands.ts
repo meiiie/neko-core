@@ -43,6 +43,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/transcript", desc: "scroll + search the full conversation (incl. earlier resumed lines)" },
   { name: "/fullscreen", desc: "toggle fullscreen: alt-screen scrollable viewport (PgUp/PgDn to scroll)" },
   { name: "/copy", desc: "copy the last response to the clipboard (/copy all = whole conversation)" },
+  { name: "/fps", desc: "UI frame rate: auto-follow your display or set 30..240 (/fps [auto|n])" },
   { name: "/goal", desc: "set an ongoing goal (/goal <text>)" },
   { name: "/loop", desc: "run a task N times (/loop <n> <task>)" },
   { name: "/auto", desc: "closed loop: work + self-review until done (/auto <goal>)" },
@@ -88,6 +89,7 @@ export interface CommandCtx {
   openTranscript: () => void; // open the full-thread scroll+search viewer (/transcript)
   toggleFullscreen: () => void; // toggle fullscreen (alt-screen scrollable viewport) mode
   copy: (arg: string) => void; // copy last response / whole conversation to the clipboard (OSC 52)
+  setFps: (choice: number | "auto") => void; // /fps: persist + apply the UI frame rate
   exit: () => void;
 }
 
@@ -302,6 +304,30 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/copy":
       ctx.copy(input.slice("/copy".length).trim());
       return;
+    case "/fps": {
+      const arg = input.slice("/fps".length).trim().toLowerCase();
+      if (arg === "auto") return ctx.setFps("auto");
+      if (arg) {
+        const n = parseInt(arg, 10);
+        if (!Number.isFinite(n) || n < 30 || n > 240) return addLine("info", "usage: /fps [auto|30..240]   (auto follows your display's refresh rate)");
+        return ctx.setFps(n);
+      }
+      // No argument: a picker with a machine-aware recommendation.
+      const { resolveUiFps } = await import("../adapters/display.ts");
+      const r = resolveUiFps(cfg.uiFpsConfig);
+      const auto = r.detected ? `follow your display (~${r.detected}Hz)` : "follow your display (probing runs in background)";
+      ctx.setOverlay({
+        title: `UI frame rate - currently ${r.fps}fps via ${r.source}. Higher than your display's refresh shows nothing extra.`,
+        items: [
+          { id: "auto", label: "auto (recommended)", detail: auto },
+          { id: "60", label: "60 fps", detail: "standard displays - lowest overhead" },
+          { id: "120", label: "120 fps", detail: "high-refresh displays (120Hz+)" },
+          { id: "144", label: "144 fps", detail: "144Hz displays" },
+        ],
+        onSelect: (it) => { ctx.setOverlay(null); ctx.setFps(it.id === "auto" ? "auto" : parseInt(it.id, 10)); },
+      });
+      return;
+    }
     case "/compact":
       // Route through the REPL's compaction runner so it shows the progress bar + a "freed ~Nk" line.
       try {
