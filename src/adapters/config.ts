@@ -154,14 +154,16 @@ export class NekoConfig {
   /** The config file's EXPLICIT ui_fps, or null when unset - the display resolver (adapters/display.ts)
    * layers env > this > the /fps pref > the detected display Hz > 60. */
   get uiFpsConfig(): number | null { return this.data.ui_fps != null ? Number(this.data.ui_fps) : null; }
-  /** Start in fullscreen (alt-screen, scrollable viewport) mode. Off by default (inline stays default,
-   * preserving native scrollback + copy-paste); opt in via config `fullscreen: true` or NEKO_FULLSCREEN=1.
-   * Toggle at runtime with /fullscreen. */
+  /** Start in fullscreen (alt-screen, scrollable viewport) mode. ON by default (it is the better
+   * experience: real scrolling, glide, hover, flicker-free) - opt OUT with config `fullscreen: false`
+   * or NEKO_FULLSCREEN=0 for permanent inline (native scrollback + terminal-native copy-paste).
+   * /fullscreen toggles for the current session. Unfit terminals (non-TTY/tiny) fall back to inline
+   * automatically regardless (canFullscreen). */
   get fullscreen(): boolean {
     const env = process.env.NEKO_FULLSCREEN;
     if (env === "1" || env === "true") return true;
     if (env === "0" || env === "false") return false;
-    return this.data.fullscreen === true;
+    return this.data.fullscreen !== false;
   }
 
   /** Mixture-of-Agents config (when provider == "moa"): reference models analyze (no tools), an

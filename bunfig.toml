@@ -1,0 +1,5 @@
+[test]
+# Tests run with INLINE as the baseline: fullscreen is the product default (config.ts), but the suite's
+# rendering assertions were written against inline output, and ink-testing's fake stdout would otherwise
+# auto-qualify for fullscreen. Fullscreen-specific tests opt in per-test with NEKO_FULLSCREEN=1.
+preload = ["./test/setup.ts"]

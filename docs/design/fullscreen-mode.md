@@ -5,7 +5,9 @@ Author: Claude (clean-room study of the local claude-code reference + web resear
 
 **Implemented:** P1 synchronized output + **DECRQM probe** for SSH (`src/ui/sync-stdout.ts`) · P2 alt-screen
 + scroll viewport (`src/ui/altscreen.ts`, `src/ui/scroll.tsx`, gated by `/fullscreen` · `cfg.fullscreen` ·
-`NEKO_FULLSCREEN`) · P3 mouse wheel + input hardening (`src/ui/mouse.ts`, `src/ui/text-input.tsx`) · P4
+`NEKO_FULLSCREEN`; **DEFAULT ON since 2026-07-05** - opt out with `fullscreen: false` / `NEKO_FULLSCREEN=0`;
+unfit terminals still fall back to inline via `canFullscreen`) · P3 mouse wheel + input hardening
+(`src/ui/mouse.ts`, `src/ui/text-input.tsx`) · P4
 in-viewport find (Ctrl+F, `src/ui/scroll.tsx`) · P5 suitability guard + degradation (`canFullscreen`) ·
 **rich scrollback** (`src/ui/rich-transcript.tsx` - real markdown/diffs/syntax, memoized, capped at 300
 mounted lines) · **OSC-52 clipboard** `/copy` (`src/ui/clipboard.ts` - the keyboard copy path when mouse

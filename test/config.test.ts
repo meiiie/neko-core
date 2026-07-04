@@ -132,6 +132,21 @@ test("contextWindow is per-model (model_context wins over the global default)", 
   expect(other.contextWindow).toBe(100000); // falls back to the global window
 });
 
+test("fullscreen: ON by default; config false or NEKO_FULLSCREEN=0 opts out; env wins", () => {
+  const prev = process.env.NEKO_FULLSCREEN;
+  delete process.env.NEKO_FULLSCREEN;
+  try {
+    expect(loadConfig({ path: tmpConfig({}) }).fullscreen).toBe(true);                      // the default
+    expect(loadConfig({ path: tmpConfig({ fullscreen: false }) }).fullscreen).toBe(false);  // permanent opt-out
+    process.env.NEKO_FULLSCREEN = "0";
+    expect(loadConfig({ path: tmpConfig({}) }).fullscreen).toBe(false);                     // env opt-out
+    process.env.NEKO_FULLSCREEN = "1";
+    expect(loadConfig({ path: tmpConfig({ fullscreen: false }) }).fullscreen).toBe(true);   // env beats config
+  } finally {
+    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
+  }
+});
+
 test("uiFps: default 60, config + NEKO_FPS override, clamped 30..240", () => {
   const prev = process.env.NEKO_FPS;
   delete process.env.NEKO_FPS;

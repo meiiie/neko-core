@@ -40,7 +40,7 @@ test("fullscreen sim: entry, typing, grow and shrink never leave a black screen"
     id: "sim", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: Array.from({ length: 8 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `noi dung sim ${i}` })),
   };
-  delete process.env.NEKO_FULLSCREEN; // start INLINE; enter fullscreen via the real command
+  process.env.NEKO_FULLSCREEN = "0"; // start INLINE explicitly (fullscreen is the product default); enter via the real command
   const app = render(
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "sim", frameDiffer: differ }),
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },

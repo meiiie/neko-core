@@ -646,7 +646,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setFullscreen(next);
     addLine("info", next
       ? `fullscreen on - scroll with the mouse wheel${isMouseEnabled() ? "" : " (disabled)"}, PgUp/PgDn, or Ctrl+up/down; Ctrl+F to find; /fullscreen to exit`
-      : "fullscreen off (inline - native scrollback + copy-paste back)");
+      : 'fullscreen off for this session (inline - native scrollback + copy-paste back). To make inline the default: "fullscreen": false in config, or NEKO_FULLSCREEN=0.');
   };
 
   const resumeInto = (target: Session) => {
