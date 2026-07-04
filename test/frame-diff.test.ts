@@ -108,6 +108,18 @@ test("fullscreen scroll UP uses SD and paints the top rows", () => {
   expect(scr.lines(11)).toEqual(C);
 });
 
+test("neutral control writes (Ink's own BSU/ESU, cursor hide/show) do NOT reset the baseline", () => {
+  const d = new FrameDiffer();
+  const A = ["x", "y"], B = ["x", "y2"];
+  d.process(A.join("\n"));                 // first render -> passthrough
+  d.process(payload(2, A));                // seed baseline
+  expect(d.process("\x1b[?2026h")).toBe(null); // Ink's BSU as its own write - must be neutral
+  expect(d.process("\x1b[?25l")).toBe(null);   // cursor hide - neutral too
+  const out = d.process(payload(2, B));    // baseline SURVIVED -> this optimizes
+  expect(out).not.toBe(null);
+  expect(out!.length).toBeLessThan(payload(2, B).length / 2);
+});
+
 test("identical frame skips the write; height change and weird payloads pass through", () => {
   const d = new FrameDiffer();
   const A = ["a", "b"], B = ["a", "b"];

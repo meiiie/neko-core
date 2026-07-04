@@ -49,6 +49,11 @@ export class FrameDiffer {
   /** Optimized bytes to write INSTEAD of `payload`; "" = nothing changed (skip the write);
    * null = pass the payload through untouched (and the baseline resets/reseeds as appropriate). */
   process(payload: string): string | null {
+    // NEUTRAL control writes: Ink 7 brackets every frame with its own BSU/ESU as SEPARATE writes
+    // (write-synchronized.js), and hides/shows the cursor the same way. These carry no screen content -
+    // pass them through but DO NOT reset the baseline, or the differ is blinded on every single frame
+    // (exactly the bug the TTY bench caught: differ ON produced identical bytes to differ OFF).
+    if (/^(?:\x1b\[\?[0-9;]+[hl])+$/.test(payload)) return null;
     const parsed = parseInkPayload(payload);
     if (!parsed) { this.prev = null; return null; } // not a standard rerender -> passthrough + reset
     const lines = parsed.frame.split("\n");
