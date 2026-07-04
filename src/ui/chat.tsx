@@ -22,6 +22,7 @@ import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./th
 import { wrapStdoutForSync } from "./sync-stdout.ts";
 import { installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useScroll } from "./scroll.tsx";
+import { isMouseEnabled, parseWheel } from "./mouse.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
@@ -547,7 +548,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const next = !fullscreen;
     setFullscreen(next);
     addLine("info", next
-      ? "fullscreen on - PgUp/PgDn to scroll, Ctrl+up/down by line; /fullscreen to exit"
+      ? `fullscreen on - scroll with the mouse wheel${isMouseEnabled() ? "" : " (disabled)"}, PgUp/PgDn, or Ctrl+up/down; /fullscreen to exit`
       : "fullscreen off (inline - native scrollback + copy-paste back)");
   };
 
@@ -591,7 +592,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // terminal in the alt-screen. Idempotent - the effect cleanup and the process handlers can both fire.
   useEffect(() => {
     if (fullscreen && !altDisposeRef.current) {
-      altDisposeRef.current = installAltScreenGuard((stdout as any) ?? process.stdout);
+      altDisposeRef.current = installAltScreenGuard((stdout as any) ?? process.stdout, { mouse: isMouseEnabled() });
     } else if (!fullscreen && altDisposeRef.current) {
       altDisposeRef.current(); altDisposeRef.current = null;
     }
@@ -1028,8 +1029,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const flat = useMemo(() => (fullscreen ? flattenLines(lines, contentCols) : []), [fullscreen, lines, contentCols]);
   const scroll = useScroll(flat.length, viewH);
   useInput(
-    (_input, key) => {
+    (input, key) => {
       if (!fullscreen || overlay || viewer || approval) return;
+      // Mouse wheel (SGR report; Ink may strip the ESC, so parseWheel accepts "[<..." too). text-input
+      // drops the same residue so it never reaches the prompt; here we turn it into a scroll.
+      const wheel = parseWheel(input);
+      if (wheel === "up") return scroll.up(3);
+      if (wheel === "down") return scroll.down(3);
       if (key.pageUp) return scroll.up(Math.max(1, viewH - 1));
       if (key.pageDown) return scroll.down(Math.max(1, viewH - 1));
       if (key.ctrl && key.upArrow) return scroll.up(1);

@@ -11,6 +11,7 @@
  *   ?1049h enter alt-screen · ?1049l leave · ?25l hide cursor · ?25h show cursor
  */
 import type { Writable } from "node:stream";
+import { disableMouse, enableMouse } from "./mouse.ts";
 
 export const ENTER_ALT = "\x1b[?1049h";
 export const LEAVE_ALT = "\x1b[?1049l";
@@ -33,12 +34,12 @@ export function leaveAltScreen(out: Writable = process.stdout): void {
  * exit handler fire) so we never double-write or leave the screen half-restored. Fatal signals re-raise
  * after cleanup so the process still terminates with the right code.
  */
-export function installAltScreenGuard(out: Writable = process.stdout): () => void {
+export function installAltScreenGuard(out: Writable = process.stdout, opts: { mouse?: boolean } = {}): () => void {
   let restored = false;
   const restore = (): void => {
     if (restored) return;
     restored = true;
-    try { leaveAltScreen(out); } catch { /* stream may be gone at exit - best effort */ }
+    try { if (opts.mouse) disableMouse(out); leaveAltScreen(out); } catch { /* stream may be gone at exit - best effort */ }
     process.off("exit", onExit);
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
@@ -50,6 +51,7 @@ export function installAltScreenGuard(out: Writable = process.stdout): () => voi
   const onFatal = (err: unknown) => { restore(); throw err; }; // restore first, then let it crash normally
 
   enterAltScreen(out);
+  if (opts.mouse) enableMouse(out);
   process.once("exit", onExit);
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);

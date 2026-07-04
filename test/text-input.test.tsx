@@ -44,6 +44,24 @@ test("a multi-line paste inserts without submitting early", async () => {
   c.unmount();
 });
 
+test("ignores stray escape sequences (mouse reports) - never leak into the text", async () => {
+  let out = "";
+  let last = "";
+  function H3() {
+    const [v, setV] = useState("");
+    last = v;
+    return <TextInput value={v} onChange={setV} onSubmit={(x) => (out = x)} />;
+  }
+  const c = render(<H3 />);
+  c.stdin.write("hi");
+  await tick();
+  c.stdin.write("\x1b[<64;10;5M"); // an SGR mouse wheel report
+  await tick();
+  expect(last).toBe("hi");            // the mouse bytes did not land in the line
+  expect(last).not.toContain("64;10;5");
+  c.unmount();
+});
+
 test("end-typing stays codepoint/NFC correct (IME path)", async () => {
   let out = "";
   const c = render(<Harness cb={(v) => (out = v)} />);

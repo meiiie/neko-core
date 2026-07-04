@@ -13,6 +13,13 @@
 import { Text, useInput } from "ink";
 import { useRef, useState } from "react";
 
+// A CSI escape-sequence residue (mouse report like "[<64;10;5M", a cursor key, etc.). Ink splits the
+// leading ESC off as its own keypress and can deliver the REST as literal text, which would corrupt the
+// line. This matches the full CSI grammar (ESC optional) so we can drop it. A real keystroke is a single
+// printable char and never matches; the only false-positive is pasting a string shaped exactly like a
+// CSI sequence, which is vanishingly rare and not worth a heuristic for.
+const CSI_RESIDUE = /^\x1b?\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]$/;
+
 export function TextInput(props: {
   value: string;
   onChange: (v: string) => void;
@@ -60,8 +67,10 @@ export function TextInput(props: {
       }
       return;
     }
-    if (input && !key.ctrl && !key.meta && !key.tab && !key.escape &&
+    if (input && !input.startsWith("\x1b") && !CSI_RESIDUE.test(input) && !key.ctrl && !key.meta && !key.tab && !key.escape &&
         !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow) {
+      // Never insert a stray escape sequence (mouse report, unknown CSI, etc.) as literal text - Ink may
+      // strip the ESC and hand us just the CSI body ("[<64;10;5M"), which CSI_RESIDUE catches.
       const ins = [...(isPaste ? input.replace(/\r\n?/g, "\n") : input)];
       chars.splice(cur.current, 0, ...ins);
       cur.current += ins.length;
