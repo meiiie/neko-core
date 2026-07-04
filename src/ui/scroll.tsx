@@ -112,7 +112,7 @@ export interface RowScrollApi {
  * at ~60fps, covering half the remaining distance per frame (exponential ease-out, min 1 row). Each hop
  * repaints as a small hardware shift, so a fast flick reads as gliding momentum - the "smooth like a
  * GUI app" feel - instead of full-page teleports. The first hop fires immediately (no start latency). */
-export function useRowScroll(totalRows: number, viewH: number, onHop?: (dist: number) => void): RowScrollApi {
+export function useRowScroll(totalRows: number, viewH: number, onHop?: (dist: number) => void, hopMs = 16): RowScrollApi {
   const [, force] = useState(0);
   const st = useRef<{ shown: number; target: number; timer: ReturnType<typeof setTimeout> | null }>({ shown: 0, target: 0, timer: null });
   const maxRef = useRef(0);
@@ -125,10 +125,10 @@ export function useRowScroll(totalRows: number, viewH: number, onHop?: (dist: nu
   const step = () => {
     st.current.timer = null;
     // Drift-compensated cadence: timers fire LATE under load; subtract the measured overshoot from the
-    // next delay so hops average the 16ms target instead of 16ms + event-loop latency (bench: 28ms avg
-    // uncompensated).
+    // next delay so hops average the hopMs target instead of hopMs + event-loop latency (bench: 28ms
+    // avg uncompensated at a 16ms target).
     const now = performance.now();
-    const late = lastHopAt.current ? Math.max(0, now - lastHopAt.current - 16) : 0;
+    const late = lastHopAt.current ? Math.max(0, now - lastHopAt.current - hopMs) : 0;
     lastHopAt.current = now;
     const s = st.current;
     s.target = Math.max(0, Math.min(maxRef.current, s.target));
@@ -148,7 +148,7 @@ export function useRowScroll(totalRows: number, viewH: number, onHop?: (dist: nu
     } else {
       force((t) => t + 1);
     }
-    if (s.shown !== s.target) st.current.timer = setTimeout(step, Math.max(2, 16 - late));
+    if (s.shown !== s.target) st.current.timer = setTimeout(step, Math.max(2, hopMs - late));
   };
   const kick = () => { lastHopAt.current = 0; if (!st.current.timer) step(); };
   return {

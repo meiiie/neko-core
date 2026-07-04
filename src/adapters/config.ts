@@ -142,6 +142,15 @@ export class NekoConfig {
   get effortCeiling(): string { return String(this.data.effort_ceiling ?? "").trim().toLowerCase(); }
   /** Check for a newer release at startup (daily-cached, non-blocking). */
   get autoUpdateCheck(): boolean { return this.data.auto_update_check !== false; }
+  /** UI frame rate cap (Ink renders + scroll-glide hops). Default 60 - matches most displays and the
+   * conpty/WT floor. High-refresh monitors (120/144Hz) can raise it via `ui_fps` (or NEKO_FPS); the
+   * render pipeline is cheap enough (sub-ms hops, ~250-byte repaints) that 120 costs nothing. Above
+   * the display's refresh the extra frames are simply never shown. Clamped 30..240. */
+  get uiFps(): number {
+    const env = Number(process.env.NEKO_FPS);
+    const v = Number.isFinite(env) && env > 0 ? env : Number(this.data.ui_fps ?? 60);
+    return Math.min(240, Math.max(30, Math.round(v)));
+  }
   /** Start in fullscreen (alt-screen, scrollable viewport) mode. Off by default (inline stays default,
    * preserving native scrollback + copy-paste); opt in via config `fullscreen: true` or NEKO_FULLSCREEN=1.
    * Toggle at runtime with /fullscreen. */

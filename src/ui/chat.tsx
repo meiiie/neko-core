@@ -1128,9 +1128,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // edges. The refs keep the hop callback reading current values without restarting the animation.
   const paddedRowsRef = useRef<string[]>([]);
   const bandActiveRef = useRef(false);
-  const rowScroll = useRowScroll(ansiRows.length, viewH, (dist) => {
-    if (bandActiveRef.current) frameDiffer?.setBandContent(paddedRowsRef.current, dist);
-  });
+  const rowScroll = useRowScroll(
+    ansiRows.length,
+    viewH,
+    (dist) => { if (bandActiveRef.current) frameDiffer?.setBandContent(paddedRowsRef.current, dist); },
+    Math.max(4, Math.round(1000 / cfg.uiFps)), // glide hop matches the configured frame rate
+  );
   // Which LINE the current scroll position looks at (walk row counts from the end; O(scroll depth),
   // only while scrolled). Quantized on BOTH ends: the walk re-runs per ~120 rows of travel (not per
   // 60fps flush - a deep scroll would walk thousands of map lookups per frame otherwise), and the
@@ -1493,10 +1496,10 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     {
       exitOnCtrlC: false, // we require a double Ctrl-C
       stdout: wrapStdoutForSync(process.stdout, { supported: syncSupported, differ }),
-      // Ink defaults to 30fps (a ~34ms render throttle - felt as typing latency). The v7 chrome frame
-      // is tiny (the viewport band is blank in Ink; the differ owns it), so 60fps is comfortably
-      // within budget and halves the worst-case echo delay.
-      maxFps: 60,
+      // Ink defaults to 30fps (a ~34ms render throttle - felt as typing latency). The chrome frame is
+      // tiny (the viewport band is blank in Ink; the differ owns it), so the configured rate - 60 by
+      // default, 120+ for high-refresh displays via ui_fps/NEKO_FPS - is comfortably within budget.
+      maxFps: cfg.uiFps,
     },
   );
   clearHolder.fn = () => app.clear();

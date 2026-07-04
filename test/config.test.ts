@@ -132,6 +132,21 @@ test("contextWindow is per-model (model_context wins over the global default)", 
   expect(other.contextWindow).toBe(100000); // falls back to the global window
 });
 
+test("uiFps: default 60, config + NEKO_FPS override, clamped 30..240", () => {
+  const prev = process.env.NEKO_FPS;
+  delete process.env.NEKO_FPS;
+  try {
+    expect(loadConfig({ path: tmpConfig({}) }).uiFps).toBe(60);
+    expect(loadConfig({ path: tmpConfig({ ui_fps: 120 }) }).uiFps).toBe(120);
+    expect(loadConfig({ path: tmpConfig({ ui_fps: 500 }) }).uiFps).toBe(240); // clamped high
+    expect(loadConfig({ path: tmpConfig({ ui_fps: 5 }) }).uiFps).toBe(30);    // clamped low
+    process.env.NEKO_FPS = "90";
+    expect(loadConfig({ path: tmpConfig({ ui_fps: 60 }) }).uiFps).toBe(90);   // env wins
+  } finally {
+    if (prev === undefined) delete process.env.NEKO_FPS; else process.env.NEKO_FPS = prev;
+  }
+});
+
 test("NekoConfig.adopt swaps provider/model/endpoint/key IN PLACE (the /provider live-switch)", () => {
   const a = new NekoConfig({ provider: "openai_compat", model: "gpt-oss", base_url: "https://nvidia/v1" }, "nvidia", {}, "NKEY");
   const b = new NekoConfig({ provider: "anthropic", model: "glm-5.2", base_url: "https://z.ai" }, "zai", {}, "ZKEY");
