@@ -11,6 +11,7 @@ import { CompactingLine, fmtElapsed, RunningLine, ThinkingLine } from "../src/ui
 import { ApprovalBox } from "../src/ui/approval-box.tsx";
 import { TranscriptLine, type Line } from "../src/ui/transcript.tsx";
 import { TranscriptViewer } from "../src/ui/transcript-viewer.tsx";
+import { RichTranscript } from "../src/ui/rich-transcript.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
 
 const CFG = new NekoConfig({}, null, {}, "");
@@ -129,11 +130,20 @@ test("fullscreen mode renders a scrollable transcript region (alt-screen), inlin
     await tick(150);
     const f = strip(c.frames.join("\n"));
     expect(f).toContain("\x1b[?1049h"); // entered the alternate screen
-    expect(/[█│]/.test(f)).toBe(true);  // ScrollRegion scrollbar (content overflows the viewport)
+    expect(f).toContain("answer 39");   // rich transcript, sticky-bottom -> newest content visible
     c.unmount();
   } finally {
     if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
   }
+});
+
+test("RichTranscript renders rich lines; sticky pins the newest to the bottom", () => {
+  const lines: Line[] = [];
+  for (let i = 0; i < 20; i++) lines.push({ id: i, kind: "assistant", text: `richline ${i}` });
+  const ref = { current: null } as any;
+  const f = strip(render(<RichTranscript lines={lines} offset={0} viewH={5} width={40} cfg={CFG} total={20} sticky contentRef={ref} />).lastFrame());
+  expect(f).toContain("richline 19"); // sticky (flex-end) shows the last lines
+  expect(f).not.toContain("richline 0"); // ...and clips the top
 });
 
 test("fullscreen find: Ctrl+F opens the find bar and typing shows a match badge", async () => {

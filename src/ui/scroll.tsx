@@ -85,6 +85,23 @@ export function useScroll(total: number, viewH: number): ScrollApi {
   };
 }
 
+/** A 1-column fractional scrollbar: thumb size + position reflect how much is off-screen. Shared by the
+ * flat ScrollRegion and the rich transcript so both look the same. Renders nothing when it all fits. */
+export function ScrollBar({ offset, viewH, total }: { offset: number; viewH: number; total: number }): React.ReactNode {
+  if (total <= viewH) return <Box width={2} height={viewH} />; // keep the gutter so body width is stable
+  const thumbSize = Math.max(1, Math.round((viewH * viewH) / total));
+  const maxOffset = Math.max(1, total - viewH);
+  const thumbStart = Math.round((Math.min(offset, maxOffset) / maxOffset) * (viewH - thumbSize));
+  return (
+    <Box flexDirection="column" width={2} height={viewH}>
+      {Array.from({ length: viewH }, (_, i) => {
+        const on = i >= thumbStart && i < thumbStart + thumbSize;
+        return <Text key={i} color={on ? "#4d9fff" : "#3a3a3a"}>{on ? " █" : " │"}</Text>;
+      })}
+    </Box>
+  );
+}
+
 /** Split a row's text around case-insensitive matches of `q`, marking each match inverse (the current
  * match, at `currentRow`, gets a brighter inverse). Returns styled Text spans. */
 function highlightRow(r: Row, q: string, isCurrent: boolean): React.ReactNode {
@@ -110,12 +127,7 @@ function highlightRow(r: Row, q: string, isCurrent: boolean): React.ReactNode {
 export function ScrollRegion({ rows, offset, height, width, highlight = "", currentRow }: { rows: Row[]; offset: number; height: number; width: number; highlight?: string; currentRow?: number }): React.ReactNode {
   const view = rows.slice(offset, offset + height);
   const total = rows.length;
-  const showBar = total > height;
-  // Thumb: proportional size + position over the track (the viewport height).
-  const thumbSize = showBar ? Math.max(1, Math.round((height * height) / total)) : 0;
-  const maxOffset = Math.max(1, total - height);
-  const thumbStart = showBar ? Math.round((offset / maxOffset) * (height - thumbSize)) : 0;
-  const bodyW = Math.max(4, width - (showBar ? 2 : 0));
+  const bodyW = Math.max(4, width - 2); // reserve the scrollbar gutter (stable width -> stable wrapping)
   return (
     <Box flexDirection="row" width={width} height={height}>
       <Box flexDirection="column" width={bodyW} height={height}>
@@ -125,14 +137,7 @@ export function ScrollRegion({ rows, offset, height, width, highlight = "", curr
           return <Box key={i}>{highlightRow(r, highlight, offset + i === currentRow)}</Box>;
         })}
       </Box>
-      {showBar ? (
-        <Box flexDirection="column" width={2} height={height}>
-          {Array.from({ length: height }, (_, i) => {
-            const on = i >= thumbStart && i < thumbStart + thumbSize;
-            return <Text key={i} color={on ? "#4d9fff" : "#3a3a3a"}>{on ? " █" : " │"}</Text>;
-          })}
-        </Box>
-      ) : null}
+      <ScrollBar offset={offset} viewH={height} total={total} />
     </Box>
   );
 }

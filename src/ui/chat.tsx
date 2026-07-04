@@ -22,6 +22,7 @@ import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./th
 import { wrapStdoutForSync } from "./sync-stdout.ts";
 import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useScroll } from "./scroll.tsx";
+import { RichTranscript } from "./rich-transcript.tsx";
 import { isMouseEnabled, parseWheel } from "./mouse.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
@@ -261,7 +262,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // tiny window degrades to inline rather than corrupting the screen.
   const [fullscreen, setFullscreen] = useState<boolean>(cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
   const [viewH, setViewH] = useState(Math.max(3, (stdout?.rows ?? 24) - 8)); // measured transcript viewport height
+  const [contentH, setContentH] = useState(0); // measured height of the rich transcript content (for scroll math)
   const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
+  const richContentRef = useRef<any>(null); // the rich content column, measured for contentH
   const altDisposeRef = useRef<null | (() => void)>(null); // alt-screen teardown (idempotent)
   const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
   const [search, setSearch] = useState<{ q: string; matches: number[]; idx: number } | null>(null); // fullscreen in-viewport find
@@ -613,9 +616,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // whatever the live region + input leave). Runs every render; the !== guard makes it converge in a
   // frame or two without looping. Only meaningful in fullscreen (the box only mounts then).
   useEffect(() => {
-    if (!fullscreen || !scrollBoxRef.current) return;
-    const h = measureElement(scrollBoxRef.current).height;
-    if (h > 0 && h !== viewH) setViewH(h);
+    if (!fullscreen) return;
+    if (scrollBoxRef.current) {
+      const h = measureElement(scrollBoxRef.current).height;
+      if (h > 0 && h !== viewH) setViewH(h);
+    }
+    if (richContentRef.current) {
+      const ch = measureElement(richContentRef.current).height; // total rich content height for scroll math
+      if (ch > 0 && ch !== contentH) setContentH(ch);
+    }
   });
 
   // Re-layout on terminal resize. Ink only clears the screen when the width DECREASES; enlarging
@@ -1039,7 +1048,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Ctrl+up/down line-scroll (unambiguous keys that never fight typing or history). Hooks run every
   // render regardless of mode (0 rows when inline) to keep hook order stable.
   const flat = useMemo(() => (fullscreen ? flattenLines(lines, contentCols) : []), [fullscreen, lines, contentCols]);
-  const scroll = useScroll(flat.length, viewH);
+  // Rich reading scrolls by measured content height; find mode (flat rows) scrolls by row count.
+  const scroll = useScroll(search ? flat.length : contentH, viewH);
   // Compute the matching row indices for a query over the flattened rows (case-insensitive).
   const findMatches = (q: string): number[] => {
     if (!q.trim()) return [];
@@ -1100,14 +1110,29 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // leave; measureElement feeds that height back as viewH. overflow:hidden guards a 1-frame height
         // lag from spilling into the input. A footer strip shows the scroll position + keys.
         <Box ref={scrollBoxRef} flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
-          <ScrollRegion
-            rows={flat}
-            offset={scroll.offset}
-            height={viewH}
-            width={contentCols}
-            highlight={search?.q ?? ""}
-            currentRow={search && search.matches.length ? search.matches[search.idx] : undefined}
-          />
+          {search ? (
+            // Find mode: flat rows so matches can be highlighted in place + jumped to.
+            <ScrollRegion
+              rows={flat}
+              offset={scroll.offset}
+              height={viewH}
+              width={contentCols}
+              highlight={search.q}
+              currentRow={search.matches.length ? search.matches[search.idx] : undefined}
+            />
+          ) : (
+            // Reading: the SAME rich TranscriptLine as inline (markdown/diffs/syntax), scrollable.
+            <RichTranscript
+              lines={lines}
+              offset={scroll.offset}
+              viewH={viewH}
+              width={contentCols}
+              cfg={cfg}
+              total={contentH}
+              sticky={scroll.atBottom}
+              contentRef={richContentRef}
+            />
+          )}
         </Box>
       ) : (
         <Static key={resizeKey} items={lines}>{(line) => <Box key={line.id} width={contentCols}><TranscriptLine line={line} cfg={cfg} cols={contentCols} /></Box>}</Static>
