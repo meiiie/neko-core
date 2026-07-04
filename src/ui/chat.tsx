@@ -18,7 +18,7 @@ import { clampFps, detectRefreshRate, resolveUiFps } from "../adapters/display.t
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TranscriptViewer } from "./transcript-viewer.tsx";
-import { TextInput } from "./text-input.tsx";
+import { isEscapeResidue, TextInput } from "./text-input.tsx";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { isSyncOutputSupported, probeSyncOutput, wrapStdoutForSync } from "./sync-stdout.ts";
 import { FrameDiffer } from "./frame-diff.ts";
@@ -26,7 +26,7 @@ import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
-import { isMouseEnabled, parseClick, parseWheelAll } from "./mouse.ts";
+import { DISABLE_MOUSE, isMouseEnabled, parseClick, parseWheelAll } from "./mouse.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
@@ -1246,8 +1246,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           const q = search.q.slice(0, -1); const matches = findMatches(q); jumpToMatch(matches, 0);
           return setSearch({ q, matches, idx: 0 });
         }
-        // Append typed text, but never a control/CSI residue (mouse report, cursor key echo).
-        if (input && !key.ctrl && !key.meta && !/^\x1b/.test(input) && !/^\[[\d;<>?]*[A-Za-z~]$/.test(input)) {
+        // Append typed text, but never a control/CSI residue (mouse report bursts, cursor key echoes).
+        if (input && !key.ctrl && !key.meta && !input.startsWith("\x1b") && !isEscapeResidue(input)) {
           const q = search.q + input; const matches = findMatches(q); jumpToMatch(matches, 0);
           return setSearch({ q, matches, idx: 0 });
         }
@@ -1514,6 +1514,12 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // Synchronized-output support: trust the env allowlist first (fast, covers all common local terminals);
   // only when it's inconclusive do we ask the terminal directly (DECRQM) - this catches SSH sessions where
   // TERM_PROGRAM isn't forwarded. The probe is skipped (no startup cost) whenever the allowlist already says yes.
+  // Terminal-state hygiene: a crashed/killed previous session (taskkill, closed window mid-run) can
+  // leave MOUSE TRACKING enabled on the terminal - the shell then prints "[<64;97;33M" garbage on every
+  // wheel/move, and it leaks into this session's inputs too. Mouse enable/disable is TERMINAL state,
+  // not process state, so start clean unconditionally (harmless when already off) and clean up again on
+  // the way out (covers our own unclean predecessors AND protects the user's shell after we exit).
+  process.stdout.write(DISABLE_MOUSE);
   let syncSupported = isSyncOutputSupported();
   if (!syncSupported) syncSupported = (await probeSyncOutput()) === true;
   const clearHolder = { fn: () => {} };
@@ -1540,6 +1546,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   try {
     await app.waitUntilExit();
   } finally {
+    process.stdout.write(DISABLE_MOUSE); // belt-and-suspenders: never leave the user's shell in mouse mode
     await hub.close();
     // Claude-style: tell the user how to pick this exact session back up.
     console.log(`\nResume this session with:\n  neko --resume ${id}\n`);

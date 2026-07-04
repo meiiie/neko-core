@@ -44,6 +44,17 @@ test("a multi-line paste inserts without submitting early", async () => {
   c.unmount();
 });
 
+test("isEscapeResidue: single sequences AND concatenated bursts; never real text", async () => {
+  const { isEscapeResidue } = await import("../src/ui/text-input.tsx");
+  expect(isEscapeResidue("[<64;97;33M")).toBe(true);                       // one mouse report, ESC stripped
+  expect(isEscapeResidue("\x1b[<64;97;33M")).toBe(true);                   // with ESC
+  expect(isEscapeResidue("[<0;97;33M[<0;97;33m[<64;97;33M")).toBe(true);   // BURST (the leak from the field)
+  expect(isEscapeResidue("[A")).toBe(true);                                // cursor-key residue
+  expect(isEscapeResidue("hello")).toBe(false);
+  expect(isEscapeResidue("a")).toBe(false);
+  expect(isEscapeResidue("[bracketed text]")).toBe(false);                 // real text with brackets
+});
+
 test("ignores stray escape sequences (mouse reports) - never leak into the text", async () => {
   let out = "";
   let last = "";

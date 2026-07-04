@@ -5,6 +5,8 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 
+import { isEscapeResidue } from "./text-input.tsx";
+
 export interface SelectItem {
   id: string;
   label: string;
@@ -57,7 +59,7 @@ export function SelectList(props: {
       }
       if (key.escape) return setRenaming(null);
       if (key.backspace || key.delete) return setRenaming((r) => [...(r ?? "")].slice(0, -1).join(""));
-      if (input && !key.ctrl && !key.meta && !key.tab) return setRenaming((r) => (r ?? "") + input);
+      if (input && !key.ctrl && !key.meta && !key.tab && !input.startsWith("\x1b") && !isEscapeResidue(input)) return setRenaming((r) => (r ?? "") + input);
       return;
     }
     if (key.escape) return onCancel();
@@ -82,7 +84,10 @@ export function SelectList(props: {
         setIndex(0);
         return;
       }
-      if (input && !key.ctrl && !key.meta && !key.tab) {
+      // Type-to-filter, but NEVER a stray escape sequence: with mouse tracking on (or left on by a
+      // crashed session), wheel/move reports arrive as "[<64;97;33M" bursts and used to pile up in the
+      // filter (image-verified). Same guard as TextInput.
+      if (input && !key.ctrl && !key.meta && !key.tab && !input.startsWith("\x1b") && !isEscapeResidue(input)) {
         setQuery((q) => q + input);
         setIndex(0);
       }

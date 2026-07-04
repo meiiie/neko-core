@@ -13,12 +13,16 @@
 import { Text, useInput } from "ink";
 import { useRef, useState } from "react";
 
-// A CSI escape-sequence residue (mouse report like "[<64;10;5M", a cursor key, etc.). Ink splits the
-// leading ESC off as its own keypress and can deliver the REST as literal text, which would corrupt the
-// line. This matches the full CSI grammar (ESC optional) so we can drop it. A real keystroke is a single
-// printable char and never matches; the only false-positive is pasting a string shaped exactly like a
-// CSI sequence, which is vanishingly rare and not worth a heuristic for.
-const CSI_RESIDUE = /^\x1b?\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]$/;
+/** Escape-sequence residue that must NEVER be inserted as text: mouse reports ("[<64;10;5M"), cursor
+ * keys, private-mode echoes - alone or as a BURST of several sequences concatenated in one chunk (a
+ * fast wheel flick delivers exactly that, and it used to leak past the single-sequence guard). Ink
+ * splits the leading ESC off as its own keypress and can deliver the rest as literal text, so the ESC
+ * is optional per sequence. A real keystroke is a single printable char and never matches; the only
+ * false-positive is pasting a string shaped exactly like raw CSI sequences - vanishingly rare.
+ * Shared by every type-to-filter/type-to-edit surface (TextInput, SelectList, the fullscreen find bar). */
+export function isEscapeResidue(s: string): boolean {
+  return /^(?:\x1b?\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e])+$/.test(s);
+}
 
 export function TextInput(props: {
   value: string;
@@ -67,10 +71,10 @@ export function TextInput(props: {
       }
       return;
     }
-    if (input && !input.startsWith("\x1b") && !CSI_RESIDUE.test(input) && !key.ctrl && !key.meta && !key.tab && !key.escape &&
+    if (input && !input.startsWith("\x1b") && !isEscapeResidue(input) && !key.ctrl && !key.meta && !key.tab && !key.escape &&
         !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow) {
       // Never insert a stray escape sequence (mouse report, unknown CSI, etc.) as literal text - Ink may
-      // strip the ESC and hand us just the CSI body ("[<64;10;5M"), which CSI_RESIDUE catches.
+      // strip the ESC and hand us just the CSI body ("[<64;10;5M"), incl. multi-report bursts.
       const ins = [...(isPaste ? input.replace(/\r\n?/g, "\n") : input)];
       chars.splice(cur.current, 0, ...ins);
       cur.current += ins.length;
