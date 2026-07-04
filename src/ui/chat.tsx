@@ -72,6 +72,7 @@ interface ChatProps {
   provider?: Provider; // injected in tests; production uses getProvider(cfg)
   clearScreen?: () => void; // Ink's synchronized clear (app.clear), threaded from runChat
   frameDiffer?: FrameDiffer; // the stdout-layer differ; ChatApp feeds it the fullscreen scroll band
+  preAltDispose?: (() => void) | null; // alt-screen guard installed by runChat BEFORE the first render (startup fullscreen)
 }
 
 /** Flatten a message's content (string or vision-array) to display text. */
@@ -189,7 +190,7 @@ export function clampToRows(text: string, maxRows: number, cols: number): string
   return kept.join("\n");
 }
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose }: ChatProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -292,7 +293,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const estCacheRef = useRef({ len: -1, val: 0 }); // footer ctx% estimate, recomputed only when messages count changes
   const titleLockedRef = useRef(false); // /title <name> pins the tab title; auto per-turn updates stop
   const titleTaskRef = useRef(""); // the current task shown in the tab ("* ..." busy, plain when idle)
-  const altDisposeRef = useRef<null | (() => void)>(null); // alt-screen teardown (idempotent)
+  const altDisposeRef = useRef<null | (() => void)>(preAltDispose ?? null); // alt-screen teardown (adopts runChat's pre-render guard)
   const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
   const [search, setSearch] = useState<{ q: string; matches: number[]; idx: number } | null>(null); // fullscreen in-viewport find
   const [compacting, setCompacting] = useState<{ start: number } | null>(null); // shows the compacting progress bar
@@ -1579,8 +1580,15 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // This is the claude-code-class write path, built at the stdout layer instead of forking Ink.
   // NEKO_INCR=0 disables it (plain full-frame writes).
   const differ = process.env.NEKO_INCR === "0" ? undefined : new FrameDiffer();
+  // STARTUP-fullscreen must enter the alt-screen BEFORE Ink's first render. The toggle path learned
+  // this in v9 (paint first, switch after = the switch wipes the paint and Ink, believing its frame is
+  // on screen, never repaints -> black until a keypress). Same physics here: enter first, then render -
+  // the first frame paints INTO the alt screen. ChatApp adopts the disposer (prop) so /fullscreen off
+  // and unmount tear it down exactly as if the mount effect had installed it.
+  const startFullscreen = cfg.fullscreen && canFullscreen(process.stdout);
+  const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
   const app = render(
-    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} />,
+    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} />,
     // Bracket each (already-minimized) write in BSU/ESU on terminals that support DEC 2026
     // (synchronized output) so redraws are atomic - no flicker, no Windows scrollback yank.
     {

@@ -48,15 +48,15 @@ const payload = (prevCount: number, frame: string[]) => erase(prevCount) + frame
 
 /** Drive the differ through seed frames, then return the optimized bytes for `next`. */
 function seedAndProcess(d: FrameDiffer, a: string[], b: string[], next: string[]): string | null {
-  expect(d.process(payload(0, a) === payload(0, a) ? a.join("\n") : "")).toBe(null); // first render: no erase prefix -> passthrough
-  expect(d.process(payload(a.length, b))).toBe(null); // seeds the baseline
+  d.process(a.join("\n"));            // first render (no erase prefix) seeds the baseline now
+  d.process(payload(a.length, b));    // second frame diffs/updates the baseline
   return d.process(payload(b.length, next));
 }
 
-test("parseInkPayload accepts the standard shape, rejects everything else", () => {
+test("parseInkPayload accepts the standard shape (erase prefix OPTIONAL), rejects control writes", () => {
   expect(parseInkPayload(erase(3) + "a\nb\nc")).toEqual({ eraseCount: 3, frame: "a\nb\nc" });
+  expect(parseInkPayload("plain first frame")).toEqual({ eraseCount: 0, frame: "plain first frame" }); // Ink's very first frame
   expect(parseInkPayload("\x1b[2J\x1b[H")).toBe(null);            // wipe
-  expect(parseInkPayload("plain first frame")).toBe(null);         // no erase prefix
   expect(parseInkPayload(erase(2) + "x\x1b[3Ay")).toBe(null);      // cursor moves inside a "frame"
 });
 
@@ -130,13 +130,13 @@ test("compose-at-write-layer: blank Ink band gets the real rows; scroll repaints
   const blankBand = ["", "", "", "", "", ""];
   const chrome = ["chrome-a", "> input"];
   const F = (extra: string) => blankBand.concat([chrome[0], chrome[1] + extra]);
-  // Seed: first frame (no erase prefix) -> passthrough raw; second frame -> composed FULL repaint.
-  expect(d.process(F("").join("\n"))).toBe(null);
-  const seeded = d.process(payload(8, F("")))!;
+  // The very FIRST frame (no erase prefix) already goes out COMPOSED - a fullscreen start paints the
+  // band immediately instead of leaving it blank until render #2 (the startup-black regression).
+  const seeded = d.process(F("").join("\n"))!;
   expect(seeded).toContain("content-29"); // the "blank" band went out with real content spliced in
   // Screen state after the seed:
   const scr = new Screen(10);
-  scr.write(seeded.replace(/^(\x1b\[2K\x1b\[1A)*\x1b\[2K\x1b\[G/, "")); // apply the frame body from row 0
+  scr.write(seeded); // no erase prefix on a first frame - applies from row 0
   expect(scr.lines(6)).toEqual(rows.slice(24, 30));
   scr.r = 7; scr.c = ("> input").length; // cursor at Ink's last line
   // Keystroke: Ink frame changes ONLY the chrome; band lines stay blank in the payload.
@@ -160,9 +160,8 @@ test("short band content is TOP-anchored (fresh session welcome at the top, not 
   d.setBand({ top: 1, height: 6 });
   d.setBandContent(["w1", "w2", "w3"], 0); // only 3 rows of content in a 6-row band
   const blank = ["", "", "", "", "", "", "chrome"];
-  d.process(blank.join("\n"));            // first render -> passthrough (seeds nothing)
-  const seeded = d.process(payload(7, blank))!;
-  const body = seeded.replace(/^(\x1b\[2K\x1b\[1A)*\x1b\[2K\x1b\[G/, "").split("\n");
+  const seeded = d.process(blank.join("\n"))!; // first frame goes out composed
+  const body = seeded.split("\n");
   expect(body.slice(0, 3)).toEqual(["w1", "w2", "w3"]); // content at the TOP of the band
   expect(body.slice(3, 6)).toEqual(["", "", ""]);        // blanks BELOW it
 });

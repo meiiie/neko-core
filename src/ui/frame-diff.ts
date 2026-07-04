@@ -24,14 +24,17 @@ export interface ScrollBand { top: number; height: number } // 1-based absolute 
 const ESC = "\x1b[";
 const EL = `${ESC}K`; // erase to end of line
 
-/** Parse Ink's standard rerender payload: eraseLines(prev) + frame. Returns null for anything else. */
+/** Parse Ink's standard rerender payload: eraseLines(prev) + frame. The erase prefix is OPTIONAL -
+ * Ink's very FIRST frame has none (prev count 0), and the differ must seed/compose from it too, or a
+ * fullscreen start would show a blank band until the second render. Returns null for anything else. */
 export function parseInkPayload(p: string): { eraseCount: number; frame: string } | null {
-  const m = /^((?:\x1b\[2K\x1b\[1A)*\x1b\[2K\x1b\[G)/.exec(p);
-  if (!m) return null;
-  const eraseCount = (m[1].match(/\x1b\[2K/g) ?? []).length;
-  const frame = p.slice(m[1].length);
+  const m = /^((?:\x1b\[2K\x1b\[1A)*\x1b\[2K\x1b\[G)?/.exec(p)!;
+  const eraseCount = m[1] ? (m[1].match(/\x1b\[2K/g) ?? []).length : 0;
+  const frame = p.slice(m[1]?.length ?? 0);
+  if (frame.length === 0) return null;
   // A frame is text + SGR color codes + newlines. Any cursor-movement/erase/scroll CSI inside means
-  // this is NOT a plain frame (or Ink changed shape) - refuse to optimize rather than risk corruption.
+  // this is NOT a plain frame (alt-screen switches, wipes, Ink's clear...) - refuse to optimize rather
+  // than risk corruption. (OSC-only writes never reach here: titles bypass the wrapper.)
   if (/\x1b\[[0-9;]*[ABCDEFGHJKSTr]/.test(frame)) return null;
   return { eraseCount, frame };
 }

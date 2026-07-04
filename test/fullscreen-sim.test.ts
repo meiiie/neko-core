@@ -12,6 +12,7 @@ import React from "react";
 
 import { ChatApp } from "../src/ui/chat.tsx";
 import { FrameDiffer } from "../src/ui/frame-diff.ts";
+import { installAltScreenGuard } from "../src/ui/altscreen.ts";
 import { wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
 import { VirtualTerminal } from "./vt.ts";
 
@@ -77,4 +78,37 @@ test("fullscreen sim: entry, typing, grow and shrink never leave a black screen"
   expect(vt.text()).toContain("z");
   app.unmount();
   await tick(50);
+}, 30000);
+
+test("STARTUP-fullscreen sim: alt entered BEFORE the first render - content visible with zero input", async () => {
+  // The regression the toggle-path sim missed: with fullscreen as the DEFAULT, `neko --yolo` boots
+  // straight into fullscreen. If the alt-screen is entered AFTER the first paint (mount effect), the
+  // switch wipes the frame and Ink never repaints -> black until a keypress. This reproduces runChat's
+  // exact startup order: guard installed pre-render, first Ink frame paints INTO the alt screen.
+  const vt = new VirtualTerminal(100, 30);
+  const out = new FakeTtyOut(100, 30, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  const provider: any = { complete: async () => ({ content: "ok", tool_calls: [] }) };
+  const session: any = {
+    id: "boot", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
+    messages: [{ role: "user", content: "boot-marker cau hoi" }, { role: "assistant", content: "boot-marker tra loi" }],
+  };
+  const prev = process.env.NEKO_FULLSCREEN;
+  process.env.NEKO_FULLSCREEN = "1";
+  try {
+    const preAltDispose = installAltScreenGuard(out as any, { mouse: false }); // runChat's pre-render order
+    const app = render(
+      React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "boot", frameDiffer: differ, preAltDispose }),
+      { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+    );
+    await tick(500); // startup + warm settle - NO input at all
+    expect(vt.isBlank()).toBe(false);                 // the screen is NOT black
+    expect(vt.text()).toContain("boot-marker tra loi"); // the transcript is actually painted
+    expect(vt.text()).toContain(">");                  // the input chrome too
+    app.unmount();
+    await tick(50);
+  } finally {
+    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
+  }
 }, 30000);
