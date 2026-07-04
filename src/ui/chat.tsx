@@ -1465,6 +1465,10 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     {
       exitOnCtrlC: false, // we require a double Ctrl-C
       stdout: wrapStdoutForSync(process.stdout, { supported: syncSupported, differ }),
+      // Ink defaults to 30fps (a ~34ms render throttle - felt as typing latency). The v7 chrome frame
+      // is tiny (the viewport band is blank in Ink; the differ owns it), so 60fps is comfortably
+      // within budget and halves the worst-case echo delay.
+      maxFps: 60,
     },
   );
   clearHolder.fn = () => app.clear();
