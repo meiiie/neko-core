@@ -56,12 +56,12 @@ test("flattenLines: glyphs, wrapping, entry clip", () => {
   expect(noisy.some((r) => /\+\d+ more lines/.test(r.text))).toBe(true);
 });
 
-test("ScrollRegion renders the visible window + a scrollbar when content overflows", () => {
+test("ScrollRegion renders exactly the visible window (single column, no scrollbar)", () => {
   const rows = Array.from({ length: 50 }, (_, i) => ({ text: `row-${i}`, dim: false }));
   const f = strip(render(<ScrollRegion rows={rows} offset={10} height={5} width={20} />).lastFrame());
   expect(f).toContain("row-10");
   expect(f).toContain("row-14");
   expect(f).not.toContain("row-9");   // above the window
   expect(f).not.toContain("row-15");  // below the window
-  expect(f).toMatch(/[█│]/);          // scrollbar present (content overflows)
+  expect(f).not.toMatch(/[█│]/);      // no scrollbar column (the jump pill is the affordance)
 });

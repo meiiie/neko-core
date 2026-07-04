@@ -22,7 +22,7 @@ import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./th
 import { isSyncOutputSupported, probeSyncOutput, wrapStdoutForSync } from "./sync-stdout.ts";
 import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useScroll } from "./scroll.tsx";
-import { RichTranscript } from "./rich-transcript.tsx";
+import { RichTail } from "./rich-transcript.tsx";
 import { isMouseEnabled, parseWheel } from "./mouse.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
@@ -263,9 +263,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // tiny window degrades to inline rather than corrupting the screen.
   const [fullscreen, setFullscreen] = useState<boolean>(cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
   const [viewH, setViewH] = useState(Math.max(3, (stdout?.rows ?? 24) - 8)); // measured transcript viewport height
-  const [contentH, setContentH] = useState(0); // measured height of the rich transcript content (for scroll math)
   const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
-  const richContentRef = useRef<any>(null); // the rich content column, measured for contentH
+  const [scrolledUp, setScrolledUp] = useState(false); // fullscreen: viewing history (flat window) vs pinned rich tail
+  const scrollAwayLenRef = useRef(0); // lines.length when the user scrolled away -> "N new messages" pill count
   const altDisposeRef = useRef<null | (() => void)>(null); // alt-screen teardown (idempotent)
   const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
   const [search, setSearch] = useState<{ q: string; matches: number[]; idx: number } | null>(null); // fullscreen in-viewport find
@@ -585,6 +585,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       altDisposeRef.current?.();
       altDisposeRef.current = null;
       setSearch(null); // leaving fullscreen closes any open find bar
+      setScrolledUp(false); // ...and drops history mode
     }
     setFullscreen(next);
     addLine("info", next
@@ -646,15 +647,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // whatever the live region + input leave). Runs every render; the !== guard makes it converge in a
   // frame or two without looping. Only meaningful in fullscreen (the box only mounts then).
   useEffect(() => {
-    if (!fullscreen) return;
-    if (scrollBoxRef.current) {
-      const h = measureElement(scrollBoxRef.current).height;
-      if (h > 0 && h !== viewH) setViewH(h);
-    }
-    if (richContentRef.current) {
-      const ch = measureElement(richContentRef.current).height; // total rich content height for scroll math
-      if (ch > 0 && ch !== contentH) setContentH(ch);
-    }
+    if (!fullscreen || !scrollBoxRef.current) return;
+    const h = measureElement(scrollBoxRef.current).height;
+    if (h > 0 && h !== viewH) setViewH(h);
   });
 
   // Re-layout on terminal resize. Ink only clears the screen when the width DECREASES; enlarging
@@ -1080,11 +1075,28 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // instead of the append-only <Static>. Sticky-to-bottom auto-follows new output; PgUp/PgDn page and
   // Ctrl+up/down line-scroll (unambiguous keys that never fight typing or history). Hooks run every
   // render regardless of mode (0 rows when inline) to keep hook order stable.
-  // Flat rows are ONLY needed while the find bar is open (rich reading never uses them) - computing them
-  // on every fullscreen render would re-flatten the whole transcript per appended line for nothing.
-  const flat = useMemo(() => (fullscreen && search ? flattenLines(lines, contentCols) : []), [fullscreen, search !== null, lines, contentCols]);
-  // Rich reading scrolls by measured content height; find mode (flat rows) scrolls by row count.
-  const scroll = useScroll(search ? flat.length : contentH, viewH);
+  // Flat rows exist ONLY while viewing history or finding (the pinned rich tail never uses them) -
+  // computing them on every fullscreen render would re-flatten the whole transcript per append.
+  const historyOpen = scrolledUp || search !== null;
+  const flat = useMemo(
+    () => (fullscreen && historyOpen ? flattenLines(lines, contentCols) : []),
+    [fullscreen, historyOpen, lines, contentCols],
+  );
+  const scroll = useScroll(flat.length, viewH);
+  // "New messages" while scrolled away: user/assistant/tool_call lines appended since scroll-away.
+  const newSince = scrolledUp
+    ? lines.slice(scrollAwayLenRef.current).filter((l) => l.kind === "user" || l.kind === "assistant" || l.kind === "tool_call").length
+    : 0;
+  // Enter history mode: materialize the flat rows NOW (the memo reuses them next render) and land `page`
+  // rows above the bottom, so the first gesture up shows what was just above the tail.
+  const enterHistory = (page: number) => {
+    const rows = flattenLines(lines, contentCols);
+    scrollAwayLenRef.current = lines.length;
+    setScrolledUp(true);
+    scroll.to(Math.max(0, rows.length - viewH - page), false);
+  };
+  // Back to the live tail: rich rendering again, pill gone, flat rows freed.
+  const leaveHistory = () => { setScrolledUp(false); scroll.bottom(); };
   // Compute the matching row indices for a query over the flattened rows (case-insensitive).
   const findMatches = (q: string): number[] => {
     if (!q.trim()) return [];
@@ -1095,8 +1107,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   };
   const jumpToMatch = (matches: number[], idx: number) => { if (matches.length) scroll.to(matches[idx], true); };
 
-  // Fullscreen scroll + in-viewport find. Search mode owns typing (edit the query); otherwise wheel/
-  // PgUp/PgDn/Ctrl-arrows scroll and Ctrl+F opens find.
+  // Fullscreen scroll + in-viewport find. Search mode owns typing (edit the query). At the tail, any
+  // up-gesture enters history mode; in history, reaching the bottom (or End) returns to the rich tail.
   useInput(
     (input, key) => {
       if (!fullscreen || overlay || viewer || approval) return;
@@ -1104,9 +1116,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const w = parseWheel(input); // wheel still scrolls while the find bar is open
         if (w === "up") return scroll.up(3);
         if (w === "down") return scroll.down(3);
-        // Esc: close find and re-pin to the bottom (back to the live tail). Predictable - staying at a
-        // flat-row offset would land somewhere slightly different in the rich view (row domains differ).
-        if (key.escape) { setSearch(null); scroll.bottom(); return; }
+        // Esc: close find and return to the live rich tail (predictable; row domains differ).
+        if (key.escape) { setSearch(null); leaveHistory(); return; }
         if (key.return || key.downArrow) { // next match
           const idx = search.matches.length ? (search.idx + 1) % search.matches.length : 0;
           jumpToMatch(search.matches, idx); return setSearch({ ...search, idx });
@@ -1128,16 +1139,31 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         }
         return;
       }
-      if (key.ctrl && input === "f") return setSearch({ q: "", matches: [], idx: 0 }); // open find
+      if (key.ctrl && input === "f") { // open find (from the tail too - it needs the flat rows)
+        if (!scrolledUp) scrollAwayLenRef.current = lines.length;
+        setScrolledUp(true);
+        return setSearch({ q: "", matches: [], idx: 0 });
+      }
       const wheel = parseWheel(input);
+      const page = Math.max(1, viewH - 1);
+      if (!scrolledUp) {
+        // Pinned tail: up-gestures enter history; down-gestures are no-ops (already at the bottom).
+        if (wheel === "up") return enterHistory(3);
+        if (key.pageUp) return enterHistory(page);
+        if (key.ctrl && key.upArrow) return enterHistory(1);
+        if (key.home) { enterHistory(0); scroll.top(); return; }
+        return;
+      }
       if (wheel === "up") return scroll.up(3);
-      if (wheel === "down") return scroll.down(3);
-      if (key.pageUp) return scroll.up(Math.max(1, viewH - 1));
-      if (key.pageDown) return scroll.down(Math.max(1, viewH - 1));
-      if (key.home) return scroll.top();     // jump to the oldest visible history
-      if (key.end) return scroll.bottom();   // re-pin to the live tail
+      if (key.pageUp) return scroll.up(page);
       if (key.ctrl && key.upArrow) return scroll.up(1);
-      if (key.ctrl && key.downArrow) return scroll.down(1);
+      if (key.home) return scroll.top();
+      // Down-gestures: leave history the moment the bottom would be reached.
+      const downBy = wheel === "down" ? 3 : key.pageDown ? page : key.ctrl && key.downArrow ? 1 : key.end ? Infinity : 0;
+      if (downBy > 0) {
+        if (scroll.offset + downBy >= scroll.maxOffset) return leaveHistory();
+        return scroll.down(downBy);
+      }
     },
     { isActive: fullscreen && !overlay && !viewer && approval === null },
   );
@@ -1150,30 +1176,34 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // App-owned, scrollable transcript (alt-screen). flexGrow fills whatever the live region + input
         // leave; measureElement feeds that height back as viewH. overflow:hidden guards a 1-frame height
         // lag from spilling into the input. A footer strip shows the scroll position + keys.
-        <Box ref={scrollBoxRef} flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
-          {search ? (
-            // Find mode: flat rows so matches can be highlighted in place + jumped to.
-            <ScrollRegion
-              rows={flat}
-              offset={scroll.offset}
-              height={viewH}
-              width={contentCols}
-              highlight={search.q}
-              currentRow={search.matches.length ? search.matches[search.idx] : undefined}
-            />
-          ) : (
-            // Reading: the SAME rich TranscriptLine as inline (markdown/diffs/syntax), scrollable.
-            <RichTranscript
-              lines={lines}
-              offset={scroll.offset}
-              viewH={viewH}
-              width={contentCols}
-              cfg={cfg}
-              total={contentH}
-              sticky={scroll.atBottom}
-              contentRef={richContentRef}
-            />
-          )}
+        <Box flexDirection="column" flexGrow={1} minHeight={0}>
+          <Box ref={scrollBoxRef} flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
+            {search ? (
+              // Find mode: flat rows so matches can be highlighted in place + jumped to.
+              <ScrollRegion
+                rows={flat}
+                offset={scroll.offset}
+                height={viewH}
+                width={contentCols}
+                highlight={search.q}
+                currentRow={search.matches.length ? search.matches[search.idx] : undefined}
+              />
+            ) : scrolledUp ? (
+              // History: the flat O(viewport) window - instant, cannot break the layout.
+              <ScrollRegion rows={flat} offset={scroll.offset} height={viewH} width={contentCols} />
+            ) : (
+              // Pinned tail (the normal state): rich rendering, O(viewport) - same look as inline.
+              <RichTail lines={lines} viewH={viewH} width={contentCols} cfg={cfg} />
+            )}
+          </Box>
+          {scrolledUp && !search ? (
+            // Claude-style jump pill; counts activity that arrived while reading history.
+            <Box justifyContent="center">
+              <Text backgroundColor="#3d3d3d" color="white">
+                {newSince > 0 ? ` ↓ ${newSince} new message${newSince > 1 ? "s" : ""} · End to jump ` : ` Jump to bottom (End) ↓ `}
+              </Text>
+            </Box>
+          ) : null}
         </Box>
       ) : (
         <Static key={resizeKey} items={lines}>{(line) => <Box key={line.id} width={contentCols}><TranscriptLine line={line} cfg={cfg} cols={contentCols} /></Box>}</Static>
@@ -1329,11 +1359,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 <Text color={MODE_COLOR[mode]}>{" ⏵⏵ "}{mode}</Text>
                 <Text dimColor> · shift+tab to cycle</Text>
                 {rcOn ? <Text color="magenta"> · /rc active</Text> : null}
-                {fullscreen ? (
-                  scroll.atBottom
-                    ? <Text dimColor> · fullscreen</Text>
-                    : <Text color="#4d9fff"> · scrolled up (PgDn to catch up)</Text>
-                ) : null}
+                {fullscreen ? <Text dimColor> · fullscreen</Text> : null}
               </Text>
               {(() => {
                 const cost = agentRef.current!.cost;

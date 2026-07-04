@@ -1,61 +1,38 @@
 /**
- * Rich, scrollable transcript for fullscreen mode: renders the real TranscriptLine components (markdown,
- * diffs, syntax highlight - same as inline) inside an app-owned viewport, so scrolled-back history reads
- * exactly like the live conversation. Not the flattened rows of ScrollRegion.
+ * RichTail — the fullscreen transcript while pinned to the bottom (the normal state): the LAST few lines
+ * rendered with the real TranscriptLine components (markdown, diffs, syntax highlight - same as inline),
+ * bottom-anchored with flex-end so the newest content is always visible and the top simply clips.
  *
- * How it scrolls without forking Ink's layout engine:
- *   - The viewport is a fixed-height Box with overflow:hidden.
- *   - Sticky-to-bottom (the common case) uses justifyContent:flex-end so the newest content pins to the
- *     bottom with NO height measurement and NO one-frame lag - the top simply clips.
- *   - When scrolled up, the content column gets marginTop:-offset (rows); Ink clips the overflow above.
- *   - `contentRef` is measured by the parent (measureElement) to learn the total height, for the
- *     scrollbar + the max scroll offset.
+ * The per-frame cost is O(viewport), NOT O(conversation): only the last TAIL_BUFFER-past-the-viewport
+ * lines are mounted, so a 121-message (or 10,000-message) session streams as smoothly as an empty one.
+ * That bound is the whole design - the earlier approach mounted the entire thread rich and re-laid it
+ * out every frame, which froze real sessions. Scrolled-back reading is the flat O(viewport) window in
+ * scroll.tsx (ScrollRegion); this component never scrolls.
  *
- * Each line is memoized so scrolling (a margin change) doesn't re-parse markdown, and only a newly
- * appended line pays render cost. Layout of all mounted lines still runs each frame, which is fine for
- * the compaction-bounded threads this targets; virtualization (mount only the visible slice) is the
- * documented next step if huge threads ever need it.
+ * Each line is memoized so an append only pays for the new line's markdown; a slice shift re-uses the
+ * other elements (stable ids + object identity).
  */
-import { Box, Text } from "ink";
-import { memo, type RefObject } from "react";
+import { Box } from "ink";
+import { memo } from "react";
 
 import type { NekoConfig } from "../adapters/config.ts";
-import { ScrollBar } from "./scroll.tsx";
 import { TranscriptLine, type Line } from "./transcript.tsx";
 
-// Cap the rich (mounted) lines: unlike the append-only <Static>, every mounted TranscriptLine is
-// re-laid-out each frame, so an unbounded thread would make streaming janky. We mount the most recent
-// MAX_RICH_LINES richly (plenty of scrollback) and point at /transcript for older history. A resumed
-// thread already arrives bounded, so this only bites a very long live session.
-const MAX_RICH_LINES = 300;
+// How many lines past the viewport height to mount: every Line renders >= 1 row (most render 2+ with
+// margins), so viewH + 8 lines always over-fills the viewport when that much history exists.
+const TAIL_BUFFER = 8;
 
 const MemoLine = memo(function MemoLine({ line, cfg, cols }: { line: Line; cfg: NekoConfig; cols: number }) {
   return <Box width={cols}><TranscriptLine line={line} cfg={cfg} cols={cols} /></Box>;
 });
 
-export function RichTranscript({ lines, offset, viewH, width, cfg, total, sticky, contentRef }: {
-  lines: Line[];
-  offset: number;
-  viewH: number;
-  width: number;
-  cfg: NekoConfig;
-  total: number; // measured content height (rows); for the scrollbar + effective bottom offset
-  sticky: boolean;
-  contentRef: RefObject<any>;
-}): React.ReactNode {
-  const bodyW = Math.max(10, width - 2); // reserve the scrollbar gutter so wrapping (and height) is stable
-  const maxOffset = Math.max(0, total - viewH);
-  const hidden = Math.max(0, lines.length - MAX_RICH_LINES);
-  const shown = hidden ? lines.slice(-MAX_RICH_LINES) : lines;
+export function RichTail({ lines, viewH, width, cfg }: { lines: Line[]; viewH: number; width: number; cfg: NekoConfig }): React.ReactNode {
+  const shown = lines.slice(-(viewH + TAIL_BUFFER));
   return (
-    <Box flexDirection="row" width={width} height={viewH}>
-      <Box height={viewH} width={bodyW} overflow="hidden" flexDirection="column" justifyContent={sticky ? "flex-end" : "flex-start"}>
-        <Box ref={contentRef} flexDirection="column" flexShrink={0} marginTop={sticky ? 0 : -offset}>
-          {hidden ? <Text dimColor>{`... ${hidden} earlier line${hidden > 1 ? "s" : ""} - /transcript for the full history ...`}</Text> : null}
-          {shown.map((l) => <MemoLine key={l.id} line={l} cfg={cfg} cols={bodyW} />)}
-        </Box>
+    <Box height={viewH} width={width} overflow="hidden" flexDirection="column" justifyContent="flex-end">
+      <Box flexDirection="column" flexShrink={0}>
+        {shown.map((l) => <MemoLine key={l.id} line={l} cfg={cfg} cols={width} />)}
       </Box>
-      <ScrollBar offset={sticky ? maxOffset : offset} viewH={viewH} total={total} />
     </Box>
   );
 }

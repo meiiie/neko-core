@@ -8,7 +8,7 @@
  * rendering of scrollback is a later phase; this is the fast, safe base.
  */
 import { Box, Text } from "ink";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import type { Line, LineKind } from "./transcript.tsx";
 
@@ -82,28 +82,13 @@ export function useScroll(total: number, viewH: number): ScrollApi {
     top: () => { setSticky(false); setOffset(0); },
     bottom: () => { setSticky(true); setOffset(maxOffset); },
     to: (row, center = true) => {
+      // No upper clamp here: the derive above clamps at RENDER time, so a jump issued in the same frame
+      // that `total` changes (e.g. entering history mode, which materializes the rows) lands right.
       setSticky(false);
       const target = center ? row - Math.floor(viewH / 2) : row;
-      setOffset(Math.max(0, Math.min(target, maxOffset)));
+      setOffset(Math.max(0, target));
     },
   };
-}
-
-/** A 1-column fractional scrollbar: thumb size + position reflect how much is off-screen. Shared by the
- * flat ScrollRegion and the rich transcript so both look the same. Renders nothing when it all fits. */
-export function ScrollBar({ offset, viewH, total }: { offset: number; viewH: number; total: number }): React.ReactNode {
-  if (total <= viewH) return <Box width={2} height={viewH} />; // keep the gutter so body width is stable
-  const thumbSize = Math.max(1, Math.round((viewH * viewH) / total));
-  const maxOffset = Math.max(1, total - viewH);
-  const thumbStart = Math.round((Math.min(offset, maxOffset) / maxOffset) * (viewH - thumbSize));
-  return (
-    <Box flexDirection="column" width={2} height={viewH}>
-      {Array.from({ length: viewH }, (_, i) => {
-        const on = i >= thumbStart && i < thumbStart + thumbSize;
-        return <Text key={i} color={on ? "#4d9fff" : "#3a3a3a"}>{on ? " █" : " │"}</Text>;
-      })}
-    </Box>
-  );
 }
 
 /** Split a row's text around case-insensitive matches of `q`, marking each match inverse (the current
@@ -125,28 +110,20 @@ function highlightRow(r: Row, q: string, isCurrent: boolean): React.ReactNode {
   return <Text wrap="truncate-end">{parts}</Text>;
 }
 
-/** Render the visible window of rows in a fixed-height box, with a 1-column fractional scrollbar on the
- * right (thumb size + position reflect how much is off-screen). Optionally highlights `highlight` matches
- * and marks the row at `currentRow`. Pure view - the parent owns `offset`. */
+/** Render the visible window of rows in a fixed-height, single-column box. One Row = exactly one
+ * terminal row (wrap="truncate-end"), so the layout CANNOT break or wrap sideways - this is what makes
+ * scrolled-back history O(viewport) and misalignment-proof. No scrollbar (the jump-to-bottom pill is the
+ * position affordance). Optionally highlights `highlight` matches and marks the row at `currentRow`. */
 export function ScrollRegion({ rows, offset, height, width, highlight = "", currentRow }: { rows: Row[]; offset: number; height: number; width: number; highlight?: string; currentRow?: number }): React.ReactNode {
   const view = rows.slice(offset, offset + height);
-  const total = rows.length;
-  const bodyW = Math.max(4, width - 2); // reserve the scrollbar gutter (stable width -> stable wrapping)
   return (
-    <Box flexDirection="row" width={width} height={height}>
-      <Box flexDirection="column" width={bodyW} height={height}>
-        {Array.from({ length: height }, (_, i) => {
-          const r = view[i];
-          if (!r) return <Text key={i}> </Text>;
-          return <Box key={i}>{highlightRow(r, highlight, offset + i === currentRow)}</Box>;
-        })}
-      </Box>
-      <ScrollBar offset={offset} viewH={height} total={total} />
+    <Box flexDirection="column" width={width} height={height}>
+      {Array.from({ length: height }, (_, i) => {
+        const r = view[i];
+        if (!r) return <Text key={i}> </Text>;
+        return <Box key={i}>{highlightRow(r, highlight, offset + i === currentRow)}</Box>;
+      })}
     </Box>
   );
 }
 
-/** Convenience for a memoized flatten keyed on lines+width. */
-export function useFlattened(lines: Line[], width: number): Row[] {
-  return useMemo(() => flattenLines(lines, width), [lines, width]);
-}

@@ -11,7 +11,7 @@ import { CompactingLine, fmtElapsed, RunningLine, ThinkingLine } from "../src/ui
 import { ApprovalBox } from "../src/ui/approval-box.tsx";
 import { TranscriptLine, type Line } from "../src/ui/transcript.tsx";
 import { TranscriptViewer } from "../src/ui/transcript-viewer.tsx";
-import { RichTranscript } from "../src/ui/rich-transcript.tsx";
+import { RichTail } from "../src/ui/rich-transcript.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
 
 const CFG = new NekoConfig({}, null, {}, "");
@@ -137,13 +137,43 @@ test("fullscreen mode renders a scrollable transcript region (alt-screen), inlin
   }
 });
 
-test("RichTranscript renders rich lines; sticky pins the newest to the bottom", () => {
+test("RichTail renders the last lines rich, bottom-anchored, and mounts only O(viewport)", () => {
   const lines: Line[] = [];
-  for (let i = 0; i < 20; i++) lines.push({ id: i, kind: "assistant", text: `richline ${i}` });
-  const ref = { current: null } as any;
-  const f = strip(render(<RichTranscript lines={lines} offset={0} viewH={5} width={40} cfg={CFG} total={20} sticky contentRef={ref} />).lastFrame());
-  expect(f).toContain("richline 19"); // sticky (flex-end) shows the last lines
-  expect(f).not.toContain("richline 0"); // ...and clips the top
+  for (let i = 0; i < 200; i++) lines.push({ id: i, kind: "assistant", text: `richline ${i}` });
+  const r = render(<RichTail lines={lines} viewH={5} width={40} cfg={CFG} />);
+  const f = strip(r.lastFrame());
+  expect(f).toContain("richline 199"); // newest pinned to the bottom (flex-end)
+  expect(f).not.toContain("richline 0"); // top clipped
+  // O(viewport) bound: even the RAW frame (pre-clip render) must not contain lines outside the
+  // mounted tail slice (viewH + buffer) - mounting the whole thread is the lag bug this guards against.
+  expect(r.lastFrame()).not.toContain("richline 100");
+  r.unmount();
+});
+
+test("fullscreen history: PgUp shows the jump pill; a new turn counts; End returns to the tail", async () => {
+  const prev = process.env.NEKO_FULLSCREEN;
+  process.env.NEKO_FULLSCREEN = "1";
+  try {
+    const msgs: any[] = [];
+    for (let i = 0; i < 30; i++) { msgs.push({ role: "user", content: `q ${i}` }); msgs.push({ role: "assistant", content: `a ${i}` }); }
+    const s: any = { id: "pill", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
+    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+    await tick(120);
+    c.stdin.write("\x1b[5~"); // PgUp -> enter history mode
+    expect(await until(c, (f) => /Jump to bottom \(End\)/.test(f))).toBe(true);
+    c.stdin.write("hi there"); // type, then submit separately (one chunk with \r would read as a paste)
+    await tick(60);
+    c.stdin.write("\r"); // run a turn while scrolled up -> Echo replies
+    expect(await until(c, (f) => /new message/.test(f))).toBe(true); // pill counts the new activity
+    c.stdin.write("\x1b[F"); // End -> back to the rich tail
+    expect(await until(c, (f) => {
+      const frames = f.split("\n");
+      return frames.some((x) => x.includes("hello")) && !/Jump to bottom \(End\)/.test(frames.slice(-30).join("\n"));
+    })).toBe(true);
+    c.unmount();
+  } finally {
+    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
+  }
 });
 
 test("toggling fullscreen OFF leaves the alt-screen BEFORE Static reprints (transcript not lost)", async () => {
