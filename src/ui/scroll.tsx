@@ -108,38 +108,37 @@ export interface RowScrollApi {
  * simply history growing) the reading position holds rock-steady - an index-from-start anchor would
  * jump on every upstream change.
  *
- * Deltas accumulate in a ref and flush on a ~30fps timer (matching Ink's own output cadence):
- * pendingDelta-style coalescing, the same trick claude-code's ScrollBox uses to stay smooth. */
+ * Motion is a GLIDE, not a jump: wheel/key gestures move the TARGET; the shown position eases toward it
+ * at ~60fps, covering half the remaining distance per frame (exponential ease-out, min 1 row). Each hop
+ * repaints as a small hardware shift, so a fast flick reads as gliding momentum - the "smooth like a
+ * GUI app" feel - instead of full-page teleports. The first hop fires immediately (no start latency). */
 export function useRowScroll(totalRows: number, viewH: number): RowScrollApi {
   const [, force] = useState(0);
-  const st = useRef<{ dist: number; pending: number; timer: ReturnType<typeof setTimeout> | null }>({ dist: 0, pending: 0, timer: null });
+  const st = useRef<{ shown: number; target: number; timer: ReturnType<typeof setTimeout> | null }>({ shown: 0, target: 0, timer: null });
   const maxRef = useRef(0);
-  maxRef.current = Math.max(0, totalRows - viewH); // clamp against the CURRENT size at flush time
+  maxRef.current = Math.max(0, totalRows - viewH); // clamp against the CURRENT size on every access
   useEffect(() => () => { if (st.current.timer) clearTimeout(st.current.timer); }, []);
 
-  const flush = () => {
+  const step = () => {
     st.current.timer = null;
-    const d = st.current.pending;
-    st.current.pending = 0;
+    const s = st.current;
+    s.target = Math.max(0, Math.min(maxRef.current, s.target));
+    const d = s.target - s.shown;
     if (d === 0) return;
-    // n>0 = toward the tail (dist shrinks); n<0 = up into history (dist grows).
-    st.current.dist = Math.max(0, Math.min(maxRef.current, st.current.dist - d));
+    s.shown += d > 0 ? Math.max(1, Math.floor(d / 2)) : Math.min(-1, Math.ceil(d / 2));
     force((t) => t + 1);
+    if (s.shown !== s.target) st.current.timer = setTimeout(step, 16);
   };
+  const kick = () => { if (!st.current.timer) step(); };
   return {
-    dist: Math.min(st.current.dist, maxRef.current),
-    scrolled: st.current.dist > 0,
-    by: (n) => {
-      st.current.pending += n;
-      // LEADING-edge flush: the first tick of a gesture moves the view IMMEDIATELY (a fixed wait on
-      // every notch reads as input lag); the timer then holds a trailing window that coalesces the rest
-      // of the burst. 16ms = ~60fps, matching the render pipeline (repaints are a few hundred bytes now).
-      if (st.current.timer) return;
-      flush();
-      st.current.timer = setTimeout(flush, 16);
+    dist: Math.min(st.current.shown, maxRef.current),
+    scrolled: st.current.shown > 0 || st.current.target > 0,
+    by: (n) => { // n>0 = toward the tail (dist shrinks); n<0 = up into history (dist grows)
+      st.current.target = Math.max(0, Math.min(maxRef.current, st.current.target - n));
+      kick();
     },
-    top: () => { st.current.pending = 0; st.current.dist = maxRef.current; force((t) => t + 1); },
-    toBottom: () => { st.current.pending = 0; st.current.dist = 0; force((t) => t + 1); },
+    top: () => { st.current.target = maxRef.current; kick(); },
+    toBottom: () => { st.current.target = 0; kick(); },
   };
 }
 

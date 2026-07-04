@@ -674,6 +674,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // new width. In fullscreen the viewport + chrome simply repaint from state (the ANSI cache re-warms
   // at the new width via its width key).
   const resizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fullscreenRef = useRef(fullscreen); // the debounced resize closure must read the CURRENT mode
+  useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
   useEffect(() => {
     if (!stdout) return;
     const onResize = () => {
@@ -682,9 +684,19 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (resizeTimer.current) clearTimeout(resizeTimer.current);
       resizeTimer.current = setTimeout(() => {
         resizeTimer.current = null;
-        clearScreen?.();
-        (stdout as any).write?.("\x1b[2J\x1b[H");
-        setResizeKey((k) => k + 1);
+        if (fullscreenRef.current) {
+          // Fullscreen: NO wipe. clearScreen()'s log.sync makes Ink believe its frame is still painted,
+          // so after a 2J nothing gets rewritten until the next output-changing keypress - the "black
+          // screen until you type" bug (image-verified). The alt screen has no rewrap ghosts to wipe;
+          // resetting the differ makes the next frame a full composed rewrite, which repaints everything.
+          // Band content stays as-is: the dimension change re-renders Ink, the differ (baseline gone)
+          // emits a full COMPOSED rewrite, and everything - band + chrome - repaints in one write.
+          frameDiffer?.reset();
+        } else {
+          clearScreen?.();
+          (stdout as any).write?.("\x1b[2J\x1b[H");
+          setResizeKey((k) => k + 1);
+        }
       }, 150);
     };
     stdout.on("resize", onResize);
@@ -1132,9 +1144,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   }, [fullscreen, lines, contentCols, scrollCenterBucket]);
   // Feed the differ the band CONTENT (all rows + scroll distance). Scrolls, appends and warm upgrades
   // repaint through the differ directly - no Ink render involved. Find mode hands the band back to Ink.
+  // Rows get the same left gutter the Ink tree gives everything else (the differ paints at column 1;
+  // unpadded rows sat flush against the edge). Padded once per rows-change, never per scroll frame.
+  const paddedRows = useMemo(() => ansiRows.map((r) => (r.length ? "  " + r : r)), [ansiRows]);
   useEffect(() => {
-    frameDiffer?.setBandContent(fullscreen && !search ? ansiRows : null, rowScroll.dist);
-  }, [fullscreen, search !== null, ansiRows, rowScroll.dist, viewH]);
+    frameDiffer?.setBandContent(fullscreen && !search ? paddedRows : null, rowScroll.dist);
+  }, [fullscreen, search !== null, paddedRows, rowScroll.dist, viewH]);
   useEffect(() => () => clearAnsiCache(), []); // free on unmount; resize re-keys by width mismatch
   // Flat rows exist ONLY for the find bar (in-place match highlighting needs row positions).
   const flat = useMemo(

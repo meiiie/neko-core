@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import { Text } from "ink";
 import { useEffect } from "react";
-import { flattenLines, ScrollRegion, useScroll, type ScrollApi } from "../src/ui/scroll.tsx";
+import { flattenLines, ScrollRegion, useRowScroll, useScroll, type RowScrollApi, type ScrollApi } from "../src/ui/scroll.tsx";
 import type { Line } from "../src/ui/transcript.tsx";
 
 const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
@@ -35,6 +35,29 @@ test("useScroll: scrolling up breaks sticky FROM the current bottom and holds pl
   api!.down(50); // overshoot to the bottom -> clamps + re-arms sticky
   await tick();
   expect(strip(c.lastFrame())).toContain("bottom=true");
+  c.unmount();
+});
+
+function RowProbe({ total, viewH, grab }: { total: number; viewH: number; grab?: (api: RowScrollApi) => void }) {
+  const api = useRowScroll(total, viewH);
+  useEffect(() => { grab?.(api); });
+  return <Text>{`dist=${api.dist};scrolled=${api.scrolled}`}</Text>;
+}
+
+test("useRowScroll glides toward the target (ease-out) instead of jumping", async () => {
+  let api: RowScrollApi | null = null;
+  const c = render(<RowProbe total={200} viewH={20} grab={(a) => (api = a)} />);
+  await tick();
+  api!.by(-40); // scroll 40 rows up in one gesture
+  await tick(5);
+  const early = Number(/dist=(\d+)/.exec(strip(c.lastFrame()))?.[1]);
+  expect(early).toBeGreaterThan(0);   // first hop fired immediately...
+  expect(early).toBeLessThan(40);     // ...but NOT the whole distance (glide, not teleport)
+  await tick(300);                     // let the animation settle
+  expect(strip(c.lastFrame())).toContain("dist=40;scrolled=true");
+  api!.toBottom();
+  await tick(300);
+  expect(strip(c.lastFrame())).toContain("dist=0;scrolled=false");
   c.unmount();
 });
 
