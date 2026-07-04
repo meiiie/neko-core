@@ -262,6 +262,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
   const altDisposeRef = useRef<null | (() => void)>(null); // alt-screen teardown (idempotent)
   const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
+  const [search, setSearch] = useState<{ q: string; matches: number[]; idx: number } | null>(null); // fullscreen in-viewport find
   const [compacting, setCompacting] = useState<{ start: number } | null>(null); // shows the compacting progress bar
   const compactingRef = useRef(false); // guard: never overlap two compactions
   const [expandedId, setExpandedId] = useState<number | null>(null); // ctrl+o: which tool_result is peeked in full (toggle)
@@ -547,8 +548,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const toggleFullscreen = () => {
     const next = !fullscreen;
     setFullscreen(next);
+    if (!next) setSearch(null); // leaving fullscreen closes any open find bar
     addLine("info", next
-      ? `fullscreen on - scroll with the mouse wheel${isMouseEnabled() ? "" : " (disabled)"}, PgUp/PgDn, or Ctrl+up/down; /fullscreen to exit`
+      ? `fullscreen on - scroll with the mouse wheel${isMouseEnabled() ? "" : " (disabled)"}, PgUp/PgDn, or Ctrl+up/down; Ctrl+F to find; /fullscreen to exit`
       : "fullscreen off (inline - native scrollback + copy-paste back)");
   };
 
@@ -758,7 +760,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         }
       }
     },
-    { isActive: !busy && approval === null && overlay === null },
+    // Not while a find bar or the /transcript viewer owns Up/Down (their nav would double with history).
+    { isActive: !busy && approval === null && overlay === null && viewer === null && search === null },
   );
 
   const handle = async (text: string) => {
@@ -1028,11 +1031,46 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // render regardless of mode (0 rows when inline) to keep hook order stable.
   const flat = useMemo(() => (fullscreen ? flattenLines(lines, contentCols) : []), [fullscreen, lines, contentCols]);
   const scroll = useScroll(flat.length, viewH);
+  // Compute the matching row indices for a query over the flattened rows (case-insensitive).
+  const findMatches = (q: string): number[] => {
+    if (!q.trim()) return [];
+    const ql = q.toLowerCase();
+    const out: number[] = [];
+    for (let i = 0; i < flat.length; i++) if (flat[i].text.toLowerCase().includes(ql)) out.push(i);
+    return out;
+  };
+  const jumpToMatch = (matches: number[], idx: number) => { if (matches.length) scroll.to(matches[idx], true); };
+
+  // Fullscreen scroll + in-viewport find. Search mode owns typing (edit the query); otherwise wheel/
+  // PgUp/PgDn/Ctrl-arrows scroll and Ctrl+F opens find.
   useInput(
     (input, key) => {
       if (!fullscreen || overlay || viewer || approval) return;
-      // Mouse wheel (SGR report; Ink may strip the ESC, so parseWheel accepts "[<..." too). text-input
-      // drops the same residue so it never reaches the prompt; here we turn it into a scroll.
+      if (search) {
+        const w = parseWheel(input); // wheel still scrolls while the find bar is open
+        if (w === "up") return scroll.up(3);
+        if (w === "down") return scroll.down(3);
+        if (key.escape) return setSearch(null);
+        if (key.return || key.downArrow) { // next match
+          const idx = search.matches.length ? (search.idx + 1) % search.matches.length : 0;
+          jumpToMatch(search.matches, idx); return setSearch({ ...search, idx });
+        }
+        if (key.upArrow) { // prev match
+          const idx = search.matches.length ? (search.idx - 1 + search.matches.length) % search.matches.length : 0;
+          jumpToMatch(search.matches, idx); return setSearch({ ...search, idx });
+        }
+        if (key.backspace || key.delete) {
+          const q = search.q.slice(0, -1); const matches = findMatches(q); jumpToMatch(matches, 0);
+          return setSearch({ q, matches, idx: 0 });
+        }
+        // Append typed text, but never a control/CSI residue (mouse report, cursor key echo).
+        if (input && !key.ctrl && !key.meta && !/^\x1b/.test(input) && !/^\[[\d;<>?]*[A-Za-z~]$/.test(input)) {
+          const q = search.q + input; const matches = findMatches(q); jumpToMatch(matches, 0);
+          return setSearch({ q, matches, idx: 0 });
+        }
+        return;
+      }
+      if (key.ctrl && input === "f") return setSearch({ q: "", matches: [], idx: 0 }); // open find
       const wheel = parseWheel(input);
       if (wheel === "up") return scroll.up(3);
       if (wheel === "down") return scroll.down(3);
@@ -1053,7 +1091,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // leave; measureElement feeds that height back as viewH. overflow:hidden guards a 1-frame height
         // lag from spilling into the input. A footer strip shows the scroll position + keys.
         <Box ref={scrollBoxRef} flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
-          <ScrollRegion rows={flat} offset={scroll.offset} height={viewH} width={contentCols} />
+          <ScrollRegion
+            rows={flat}
+            offset={scroll.offset}
+            height={viewH}
+            width={contentCols}
+            highlight={search?.q ?? ""}
+            currentRow={search && search.matches.length ? search.matches[search.idx] : undefined}
+          />
         </Box>
       ) : (
         <Static key={resizeKey} items={lines}>{(line) => <Box key={line.id} width={contentCols}><TranscriptLine line={line} cfg={cfg} cols={contentCols} /></Box>}</Static>
@@ -1157,6 +1202,22 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         />
       ) : approval ? (
         <ApprovalBox approval={approval} />
+      ) : fullscreen && search ? (
+        <Box flexDirection="column">
+          <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
+          <Text>
+            <Text color="#4d9fff">{" find: "}</Text>
+            <Text>{search.q}</Text><Text inverse> </Text>
+            <Text dimColor>
+              {"  "}
+              {search.q.trim()
+                ? (search.matches.length ? `${search.idx + 1}/${search.matches.length}` : "no matches")
+                : ""}
+              {"  · enter/↑↓ next/prev · esc exit"}
+            </Text>
+          </Text>
+          <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
+        </Box>
       ) : (
         <Box flexDirection="column">
           {pastedCount > 0 ? <Text color="magenta">  [{pastedCount} image attached - will send with your next message]</Text> : null}

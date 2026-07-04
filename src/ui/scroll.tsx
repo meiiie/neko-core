@@ -57,6 +57,7 @@ export interface ScrollApi {
   down: (n?: number) => void;
   top: () => void;
   bottom: () => void;
+  to: (row: number, center?: boolean) => void; // scroll so `row` is visible (optionally centered)
 }
 
 /** Windowing state: a top offset + sticky-to-bottom. While sticky (at the bottom), new content keeps the
@@ -76,12 +77,37 @@ export function useScroll(total: number, viewH: number): ScrollApi {
     down: (n = 1) => setOffset((o) => { const v = Math.min(maxOffset, Math.min(o, maxOffset) + n); if (v >= maxOffset) setSticky(true); return v; }),
     top: () => { setSticky(false); setOffset(0); },
     bottom: () => { setSticky(true); setOffset(maxOffset); },
+    to: (row, center = true) => {
+      setSticky(false);
+      const target = center ? row - Math.floor(viewH / 2) : row;
+      setOffset(Math.max(0, Math.min(target, maxOffset)));
+    },
   };
 }
 
+/** Split a row's text around case-insensitive matches of `q`, marking each match inverse (the current
+ * match, at `currentRow`, gets a brighter inverse). Returns styled Text spans. */
+function highlightRow(r: Row, q: string, isCurrent: boolean): React.ReactNode {
+  if (!q) return <Text color={r.color} dimColor={r.dim} wrap="truncate-end">{r.text || " "}</Text>;
+  const text = r.text;
+  const lower = text.toLowerCase();
+  const ql = q.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let i = 0, k = 0;
+  while (i <= text.length) {
+    const hit = lower.indexOf(ql, i);
+    if (hit < 0) { parts.push(<Text key={k++} color={r.color} dimColor={r.dim}>{text.slice(i)}</Text>); break; }
+    if (hit > i) parts.push(<Text key={k++} color={r.color} dimColor={r.dim}>{text.slice(i, hit)}</Text>);
+    parts.push(<Text key={k++} inverse color={isCurrent ? "#e6932e" : undefined}>{text.slice(hit, hit + q.length)}</Text>);
+    i = hit + q.length;
+  }
+  return <Text wrap="truncate-end">{parts}</Text>;
+}
+
 /** Render the visible window of rows in a fixed-height box, with a 1-column fractional scrollbar on the
- * right (thumb size + position reflect how much is off-screen). Pure view - the parent owns `offset`. */
-export function ScrollRegion({ rows, offset, height, width }: { rows: Row[]; offset: number; height: number; width: number }): React.ReactNode {
+ * right (thumb size + position reflect how much is off-screen). Optionally highlights `highlight` matches
+ * and marks the row at `currentRow`. Pure view - the parent owns `offset`. */
+export function ScrollRegion({ rows, offset, height, width, highlight = "", currentRow }: { rows: Row[]; offset: number; height: number; width: number; highlight?: string; currentRow?: number }): React.ReactNode {
   const view = rows.slice(offset, offset + height);
   const total = rows.length;
   const showBar = total > height;
@@ -95,9 +121,8 @@ export function ScrollRegion({ rows, offset, height, width }: { rows: Row[]; off
       <Box flexDirection="column" width={bodyW} height={height}>
         {Array.from({ length: height }, (_, i) => {
           const r = view[i];
-          return r
-            ? <Text key={i} color={r.color} dimColor={r.dim} wrap="truncate-end">{r.text || " "}</Text>
-            : <Text key={i}> </Text>;
+          if (!r) return <Text key={i}> </Text>;
+          return <Box key={i}>{highlightRow(r, highlight, offset + i === currentRow)}</Box>;
         })}
       </Box>
       {showBar ? (
