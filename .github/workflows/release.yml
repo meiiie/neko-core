@@ -34,13 +34,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,  target: bun-linux-x64,    asset: neko-linux-x64 }
-          - { os: ubuntu-latest,  target: bun-linux-arm64,  asset: neko-linux-arm64 }
-          - { os: macos-latest,   target: bun-darwin-arm64, asset: neko-macos-arm64 }
+          # smoke: run the built artifact's __uiprobe when the runner can execute it (same OS/arch) -
+          # catches artifact-only breakage the source-run test suite cannot (e.g. the jsxDEV crash).
+          - { os: ubuntu-latest,  target: bun-linux-x64,    asset: neko-linux-x64,       smoke: true }
+          - { os: ubuntu-latest,  target: bun-linux-arm64,  asset: neko-linux-arm64,     smoke: false }
+          - { os: macos-latest,   target: bun-darwin-arm64, asset: neko-macos-arm64,     smoke: true }
           # Intel macOS: cross-compile from the (arm64) macos-latest runner — macos-13 Intel runners
           # queue indefinitely. fail-fast:false means a cross-compile hiccup won't block the others.
-          - { os: macos-latest,   target: bun-darwin-x64,   asset: neko-macos-x64 }
-          - { os: windows-latest, target: bun-windows-x64,  asset: neko-windows-x64.exe }
+          - { os: macos-latest,   target: bun-darwin-x64,   asset: neko-macos-x64,       smoke: false }
+          - { os: windows-latest, target: bun-windows-x64,  asset: neko-windows-x64.exe, smoke: true }
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -51,9 +53,15 @@ jobs:
         # shell:bash on every runner (incl. windows) so the --define quoting is identical everywhere.
         # The NODE_ENV define is CRITICAL: without it `bun build --compile` bakes development mode and
         # the released binary runs React with ~5x render overhead on every platform (measured; see
-        # scripts/bench-ui.ts + WORKLOG 2026-07-04). Must match the package.json build script.
+        # scripts/bench-ui.ts + WORKLOG 2026-07-04). The tsconfig OVERRIDE is equally critical: with the
+        # repo tsconfig's jsx:react-jsx, bun emits DEV jsx callsites (jsxDEV) that crash against
+        # production React (see tsconfig.build.json). Must match the package.json build script.
         shell: bash
-        run: bun build --compile --define 'process.env.NODE_ENV="production"' --target=${{ matrix.target }} --outfile ${{ matrix.asset }} bin/neko.ts
+        run: bun build --compile --tsconfig-override tsconfig.build.json --define 'process.env.NODE_ENV="production"' --target=${{ matrix.target }} --outfile ${{ matrix.asset }} bin/neko.ts
+      - name: smoke-test the artifact (renders a real Ink/JSX tree)
+        if: ${{ matrix.smoke }}
+        shell: bash
+        run: ./${{ matrix.asset }} __uiprobe
       - name: attach to release
         shell: bash
         env:

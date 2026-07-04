@@ -1,0 +1,4 @@
+{
+  "//": "bun build override ONLY (see package.json build). bun 1.3.x emits the DEV jsx transform (jsxDEV) whenever the tsconfig sets jsx:react-jsx - even with NODE_ENV=production defined - while the define resolves react's jsx-dev-runtime to its production build, which exports no jsxDEV: the compiled binary then crashes at first render. With no jsx field here, bun picks the transform from the define (production -> react/jsx-runtime). tsc keeps using tsconfig.json (it needs jsx for typechecking).",
+  "compilerOptions": {}
+}

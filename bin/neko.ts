@@ -501,6 +501,20 @@ async function main(): Promise<number> {
       case "login": return await cmdLogin(args);
       case "logout": return cmdLogout();
       case "update": { const { selfUpdate } = await import("../src/adapters/update.ts"); return (await selfUpdate(console.log)) ? 0 : 1; }
+      // Hidden build-time smoke probe: render a real Ink/JSX tree headlessly. The test suite runs from
+      // SOURCE, so a transform/runtime mismatch baked into the COMPILED binary (e.g. dev-jsx callsites
+      // against production React - the jsxDEV crash) is invisible to it; this catches that class in the
+      // artifact itself. `bun run build` and CI run it right after compiling.
+      case "__uiprobe": {
+        const { render } = await import("ink");
+        const { probeTree } = await import("../src/ui/logo.tsx");
+        const out: any = { columns: 60, rows: 30, buf: "", write(s: string) { out.buf += s; }, on() {}, off() {}, removeListener() {} };
+        const app = render(probeTree(), { stdout: out, patchConsole: false, exitOnCtrlC: false, debug: true });
+        app.unmount();
+        if (!out.buf.includes("neko-ui-ok")) { console.error("uiprobe FAILED: rendered frame missing marker"); return 1; }
+        console.log(`ui-ok (NODE_ENV=${process.env.NODE_ENV ?? "unset"})`);
+        return 0;
+      }
       case "mcp": return await cmdMcp(args);
       case "run": return await cmdRun(args);
       case "setup": { const { setupWeb } = await import("../src/adapters/setup.ts"); return await setupWeb(args.positionals[0] ?? "web", (m) => console.log(m)); }

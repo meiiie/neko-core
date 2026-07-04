@@ -12,7 +12,7 @@
   },
   "scripts": {
     "neko": "bun bin/neko.ts",
-    "build": "bun build --compile --define process.env.NODE_ENV=\"'production'\" --outfile dist/neko bin/neko.ts",
+    "build": "bun build --compile --tsconfig-override tsconfig.build.json --define process.env.NODE_ENV=\"'production'\" --outfile dist/neko bin/neko.ts && dist/neko __uiprobe",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
