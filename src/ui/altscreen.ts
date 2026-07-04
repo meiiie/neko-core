@@ -18,6 +18,16 @@ export const LEAVE_ALT = "\x1b[?1049l";
 export const HIDE_CURSOR = "\x1b[?25l";
 export const SHOW_CURSOR = "\x1b[?25h";
 
+/** Whether a stream can host fullscreen: an interactive TTY with room to draw. A non-TTY (piped output,
+ * CI, `neko run`) or a tiny window can't - callers degrade to inline instead of corrupting the terminal. */
+export function canFullscreen(out: Writable = process.stdout): boolean {
+  const s = out as any;
+  if (s.isTTY === false) return false; // explicitly not a TTY (piped/redirected)
+  const rows = s.rows === undefined ? 24 : s.rows; // dims may be absent on some streams - assume a sane default
+  const cols = s.columns === undefined ? 80 : s.columns;
+  return rows >= 10 && cols >= 40;
+}
+
 /** Enter the alternate screen (and hide the cursor - the app draws its own). */
 export function enterAltScreen(out: Writable = process.stdout): void {
   out.write(ENTER_ALT + HIDE_CURSOR);

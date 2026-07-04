@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { ENTER_ALT, HIDE_CURSOR, installAltScreenGuard, LEAVE_ALT, SHOW_CURSOR, enterAltScreen, leaveAltScreen } from "../src/ui/altscreen.ts";
+import { canFullscreen, ENTER_ALT, HIDE_CURSOR, installAltScreenGuard, LEAVE_ALT, SHOW_CURSOR, enterAltScreen, leaveAltScreen } from "../src/ui/altscreen.ts";
+
+test("canFullscreen: TTY with room only", () => {
+  expect(canFullscreen({ isTTY: true, rows: 40, columns: 120 } as any)).toBe(true);
+  expect(canFullscreen({ isTTY: false, rows: 40, columns: 120 } as any)).toBe(false); // piped / not a TTY
+  expect(canFullscreen({ isTTY: true, rows: 5, columns: 120 } as any)).toBe(false);   // too short
+  expect(canFullscreen({ isTTY: true, rows: 40, columns: 20 } as any)).toBe(false);   // too narrow
+});
 
 function fakeOut() {
   const writes: string[] = [];

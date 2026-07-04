@@ -20,7 +20,7 @@ import { TranscriptViewer } from "./transcript-viewer.tsx";
 import { TextInput } from "./text-input.tsx";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { wrapStdoutForSync } from "./sync-stdout.ts";
-import { installAltScreenGuard } from "./altscreen.ts";
+import { canFullscreen, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useScroll } from "./scroll.tsx";
 import { isMouseEnabled, parseWheel } from "./mouse.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
@@ -257,7 +257,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     resumedRef.current ? recoverTodos(resumedRef.current.messages) : [],
   );
   const [overlay, setOverlay] = useState<Overlay | null>(null);
-  const [fullscreen, setFullscreen] = useState<boolean>(cfg.fullscreen); // alt-screen scrollable viewport mode
+  // Start fullscreen only if configured AND the terminal can host it (a TTY with room). A non-TTY or a
+  // tiny window degrades to inline rather than corrupting the screen.
+  const [fullscreen, setFullscreen] = useState<boolean>(cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
   const [viewH, setViewH] = useState(Math.max(3, (stdout?.rows ?? 24) - 8)); // measured transcript viewport height
   const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
   const altDisposeRef = useRef<null | (() => void)>(null); // alt-screen teardown (idempotent)
@@ -546,6 +548,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Toggle fullscreen (alt-screen scrollable viewport) at runtime. The alt-screen effect reacts to the
   // state change; here we just flip it and tell the user how to scroll / get out.
   const toggleFullscreen = () => {
+    if (!fullscreen && !canFullscreen((stdout as any) ?? process.stdout)) {
+      return addLine("info", "fullscreen needs an interactive terminal with room (this one is too small or not a TTY)");
+    }
     const next = !fullscreen;
     setFullscreen(next);
     if (!next) setSearch(null); // leaving fullscreen closes any open find bar
@@ -588,6 +593,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // render skipped its replay). resumeInto opens the picker; doResume then replays (summarized or full).
   useEffect(() => {
     if (startupNeedsChoiceRef.current && resumedRef.current) resumeInto(resumedRef.current);
+  }, []);
+  // If fullscreen was configured but the terminal can't host it, say why (we quietly stayed inline).
+  useEffect(() => {
+    if (cfg.fullscreen && !fullscreen) addLine("info", "(fullscreen off: needs an interactive terminal with room - staying inline)");
   }, []);
   // Fullscreen mode: enter the alt-screen when it turns on, leave when it turns off or the app unmounts.
   // installAltScreenGuard also restores on crash/SIGINT/SIGTERM so a fatal error never leaves the
