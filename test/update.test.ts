@@ -1,6 +1,22 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { assetName, isNewer } from "../src/adapters/update.ts";
+import { assetName, cleanupStaleUpdate, isNewer } from "../src/adapters/update.ts";
+
+test("cleanupStaleUpdate removes the leftover <exe>.old; no-op when absent", () => {
+  const dir = mkdtempSync(join(tmpdir(), "neko-upd-"));
+  const exe = join(dir, "neko.exe");
+  try {
+    writeFileSync(`${exe}.old`, "stale");
+    cleanupStaleUpdate(exe);
+    expect(existsSync(`${exe}.old`)).toBe(false); // swept
+    cleanupStaleUpdate(exe); // absent -> silent no-op
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("isNewer compares versions numerically, ignoring a leading v", () => {
   expect(isNewer("v0.3.0", "0.2.0")).toBe(true);

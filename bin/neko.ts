@@ -458,6 +458,9 @@ async function cmdBench(args: Args): Promise<number> {
 }
 
 async function main(): Promise<number> {
+  // Sweep the stale `<exe>.old` a previous self-update left behind (Windows keeps the old exe locked
+  // during the update itself, so only the NEXT launch can delete it). Lazy import keeps startup lean.
+  void import("../src/adapters/update.ts").then((u) => u.cleanupStaleUpdate()).catch(() => {});
   const args = parseArgs(process.argv.slice(2));
   const cmd = args.command;
 

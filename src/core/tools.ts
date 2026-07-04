@@ -240,6 +240,10 @@ export const TOOL_SPECS: ToolSpec[] = [
 ];
 
 export function listTools(): ToolSpec[] {
+  // The computer tool drives Windows UI Automation (PowerShell scripts) - on other platforms the model
+  // should never even SEE it in the schema, rather than call it and get a refusal. (tool-runtime keeps
+  // a runtime guard as the backstop for anything that slips through, e.g. a resumed session replaying.)
+  if (process.platform !== "win32") return TOOL_SPECS.filter((t) => t.name !== "computer");
   return TOOL_SPECS;
 }
 

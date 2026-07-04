@@ -48,6 +48,13 @@ export async function latestVersion(): Promise<string | null> {
 
 const cachePath = () => join(homeDir(), ".neko-core", ".update-check.json");
 
+/** Remove the stale `<exe>.old` left by a previous self-update. On Windows the old exe is still LOCKED
+ * by the running process during the update itself, so the swap can't delete it - only the NEXT launch
+ * (this call) can. Cheap no-op when there's nothing to clean; never throws. Called from startup. */
+export function cleanupStaleUpdate(exe = process.execPath): void {
+  try { rmSync(`${exe}.old`, { force: true }); } catch { /* still locked or permission - try again next launch */ }
+}
+
 /** Daily-cached check: returns the newer version string if one exists, else null. Never throws. */
 export async function checkForUpdate(now = Date.now()): Promise<string | null> {
   try {
