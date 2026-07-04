@@ -18,6 +18,9 @@ const KEYWORDS = new Set(
 
 // Built-in/primitive TYPES color like class/type names (cyan) - matches how Claude Code renders types.
 const TYPES = new Set("void string number boolean bigint symbol object any unknown never Promise Record Array Map Set".split(" "));
+// Language constants / literals get their own accent (bright yellow) - true/false/null read as VALUES,
+// not keywords, matching editor themes.
+const LITERALS = new Set("true false null nil None True False undefined void NaN Infinity self this super".split(" "));
 
 export function highlightLine(line: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -61,10 +64,15 @@ export function highlightLine(line: string): ReactNode[] {
     if (id) {
       const word = id[0];
       const after = rest.slice(word.length);
-      // Color, in priority order: keyword (magenta) > type/Capitalized-or-builtin (cyan) >
-      // function call, i.e. an identifier immediately followed by "(" (blue) > property/plain.
-      // This is the per-token coloring that makes a diff read like real code, not one flat green.
-      if (KEYWORDS.has(word)) {
+      // Color, in priority order (matches how editor/Claude themes read): literal value (bright yellow)
+      // > keyword (magenta) > type/Capitalized-or-builtin (cyan) > function call, i.e. immediately
+      // followed by "(" (blue) > property after a "." (subtle) > plain. Per-token coloring makes a diff
+      // read like real code, not one flat green.
+      const before = i > 0 ? line[i - 1] : ""; // the char just before this identifier (for "foo.bar")
+      if (LITERALS.has(word)) {
+        flush();
+        out.push(<Text key={key++} color="yellowBright">{word}</Text>);
+      } else if (KEYWORDS.has(word)) {
         flush();
         out.push(<Text key={key++} color="magenta">{word}</Text>);
       } else if (TYPES.has(word) || /^[A-Z]/.test(word)) {
@@ -73,6 +81,9 @@ export function highlightLine(line: string): ReactNode[] {
       } else if (after.startsWith("(")) {
         flush();
         out.push(<Text key={key++} color="blue">{word}</Text>);
+      } else if (before === ".") {
+        flush();
+        out.push(<Text key={key++} color="cyanBright">{word}</Text>); // property access (foo.BAR)
       } else {
         plain += word;
       }

@@ -17,21 +17,22 @@ function parseDiffLine(l: string): { lineNo?: string; marker: "+" | "-" | " " | 
   return { marker: "", code: l };
 }
 
-/** Render one diff/result line: the +/- marker (green/red) + line number (dim) carry the diff signal,
- *  and the CODE is syntax-highlighted per token (like real code) instead of one flat color. Removed
- *  lines stay red (they're going away, readability matters less); added/context lines are highlighted.
- *  A plain result line (no marker) is rendered dim, unchanged. */
+/** Render one diff/result line, Claude-Code-style: the line number is COLORED by change kind (added =
+ *  green, removed = red, both dim so they read as a gutter, not as content), then the +/- marker in the
+ *  full color, then per-token syntax-highlighted code (added/context) or dim-red code (removed). The
+ *  number carries the signal too, so a wall of edits scans at a glance. Plain result lines stay dim. */
 function DiffLine({ raw, indent, isError }: { raw: string; indent: string; isError: boolean }) {
   const disp = raw.length > 200 ? raw.slice(0, 200) + "…" : raw;
   if (isError) return <Text color="red">{indent + disp}</Text>;
   const { lineNo, marker, code } = parseDiffLine(disp);
   if (marker === "") return <Text dimColor>{indent + code}</Text>; // plain result line -> dim, no highlight
-  const markerColor = marker === "+" ? "green" : marker === "-" ? "red" : undefined;
+  const isAdd = marker === "+", isDel = marker === "-";
+  const markerColor = isAdd ? "green" : isDel ? "red" : undefined;
   return (
     <Text>
-      <Text dimColor>{indent}{lineNo ? `${lineNo} ` : ""}</Text>
-      <Text color={markerColor} dimColor={!markerColor}>{marker} </Text>
-      {marker === "-" ? <Text color="red" dimColor>{code}</Text> : highlightLine(code)}
+      <Text color={markerColor} dimColor>{indent}{lineNo ? `${lineNo} ` : ""}</Text>
+      <Text color={markerColor} dimColor={!markerColor} bold={!!markerColor}>{marker} </Text>
+      {isDel ? <Text color="red" dimColor>{code}</Text> : highlightLine(code)}
     </Text>
   );
 }

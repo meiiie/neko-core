@@ -36,6 +36,13 @@ test("highlightLine colors keyword/type/string/number/function per token", () =>
 
   const nums = highlightLine("x = 42");
   expect(colorOf(nums, "42")).toBe("yellow");
+
+  // Literals read as VALUES (bright yellow), distinct from keywords; property access after "." accented.
+  const lit = highlightLine("return true;");
+  expect(colorOf(lit, "return")).toBe("magenta");
+  expect(colorOf(lit, "true")).toBe("yellowBright");
+  const prop = highlightLine("obj.count");
+  expect(colorOf(prop, "count")).toBe("cyanBright"); // property after "."
 });
 
 test("highlightLine treats a whole-line comment as a comment (gray), preserves indentation", () => {
