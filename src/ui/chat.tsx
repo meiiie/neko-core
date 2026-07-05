@@ -73,7 +73,6 @@ interface ChatProps {
   clearScreen?: () => void; // Ink's synchronized clear (app.clear), threaded from runChat
   frameDiffer?: FrameDiffer; // the stdout-layer differ; ChatApp feeds it the fullscreen scroll band
   preAltDispose?: (() => void) | null; // alt-screen guard installed by runChat BEFORE the first render (startup fullscreen)
-  scrollbackHolder?: { fn: () => string }; // runChat fills this to echo the transcript tail on fullscreen exit
 }
 
 /** Flatten a message's content (string or vision-array) to display text. */
@@ -191,7 +190,7 @@ export function clampToRows(text: string, maxRows: number, cols: number): string
   return kept.join("\n");
 }
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, scrollbackHolder }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose }: ChatProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -745,17 +744,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => () => frameDiffer?.setBand(null), []);
   // (Leaving fullscreen no longer reprints the thread; see toggleFullscreen + inlineBaseline. The
   // terminal's alt-screen restore owns the primary, so there's nothing to wipe or re-emit here.)
-  // Fill the scrollback echo (see runChat): the last ~24 transcript lines as plain text, so leaving
-  // fullscreen leaves the recent conversation on the primary screen instead of a blank prompt. Only in
-  // fullscreen (inline already lives in the scrollback); a ref read at teardown, no per-render cost.
-  const linesRef = useRef(lines);
-  linesRef.current = lines;
-  useEffect(() => {
-    if (!scrollbackHolder) return;
-    scrollbackHolder.fn = () => (fullscreen
-      ? linesRef.current.filter((l) => l.kind !== "welcome").slice(-24).map((l) => contentToText(l.summary ?? l.text)).join("\n").trim()
-      : "");
-  }, [fullscreen]);
+  // NO transcript echo on exit (claude-code-clean teardown, image #65 vs #66): the alt-screen restore
+  // returns the primary EXACTLY as it was before neko ran; dumping a raw-text tail on top of it printed
+  // unformatted markdown around the shell's old cursor - the junk of image #66. The conversation lives in
+  // the session file; runChat prints only the "Resume this session with" hint.
   // If fullscreen was configured but the terminal can't host it, say why (we quietly stayed inline).
   useEffect(() => {
     if (cfg.fullscreen && !fullscreen) addLine("info", "(fullscreen off: needs an interactive terminal with room - staying inline)");
@@ -857,7 +849,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (input) { setInput(""); ctrlC.current = false; return; }
       if (ctrlC.current) return exit();
       ctrlC.current = true;
-      addLine("info", "(press Ctrl-C again to exit)");
+      // Ephemeral hint in the reserved note row (claude-style) - NOT an addLine: a transcript line would
+      // persist in the session and got dumped on exit with the old scrollback echo (image #66 junk).
+      flashCopyNote("press ctrl+c again to exit");
       setTimeout(() => { ctrlC.current = false; }, 2000);
       return;
     }
@@ -1704,9 +1698,6 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   let syncSupported = isSyncOutputSupported();
   if (!syncSupported) syncSupported = (await probeSyncOutput()) === true;
   const clearHolder = { fn: () => {} };
-  // On exit from FULLSCREEN, ChatApp fills this so runChat can echo the transcript tail to the primary
-  // scrollback before leaving the alt screen (so the conversation doesn't vanish from view).
-  const scrollbackHolder = { fn: (): string => "" };
   // Neko's frame differ (compositor-lite): Ink stays on its STANDARD renderer (whose payload shape is
   // parseable), and the differ shrinks every rerender to the changed lines - or, in fullscreen, to a
   // hardware scroll (DECSTBM+SU/SD: the terminal shifts the region, we paint only the revealed rows).
@@ -1720,7 +1711,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const startFullscreen = cfg.fullscreen && canFullscreen(process.stdout);
   const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
   const app = render(
-    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} scrollbackHolder={scrollbackHolder} />,
+    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} />,
     // Bracket each (already-minimized) write in BSU/ESU on terminals that support DEC 2026
     // (synchronized output) so redraws are atomic - no flicker, no Windows scrollback yank.
     {
@@ -1736,17 +1727,12 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   try {
     await app.waitUntilExit();
   } finally {
-    // Restore FIRST (leaves the alt screen -> back on the primary), THEN echo the transcript tail to the
-    // primary scrollback. Order matters: writing before leaving would land in the alt buffer and vanish
-    // with it. This leaves the recent conversation on screen so exiting fullscreen doesn't feel like the
-    // session disappeared. Best-effort; guarded so it can never block teardown.
+    // Claude-code-clean teardown (image #65): restore the terminal (leave alt -> the primary comes back
+    // EXACTLY as it was before neko ran), then print ONLY the resume hint at the shell's own cursor. No
+    // transcript echo - a raw-text dump interleaved with the shell prompt was the junk of image #66; the
+    // conversation lives in the session file, one `neko --resume` away.
     emergencyRestore(); // full terminal restore (cursor, mouse, main screen, title) - idempotent on clean exits
-    try {
-      const tail = scrollbackHolder.fn();
-      if (tail) process.stdout.write("\n" + tail + "\n");
-    } catch { /* teardown must not throw */ }
     await hub.close();
-    // Claude-style: tell the user how to pick this exact session back up.
     console.log(`\nResume this session with:\n  neko --resume ${id}\n`);
   }
 }

@@ -126,7 +126,16 @@ export function listSessionMetas(): SessionMeta[] {
     let mtime = 0, fsize = 0;
     try { const st = statSync(path); mtime = st.mtimeMs; fsize = st.size; } catch { continue; }
     const cached = index[id];
-    if (cached && cached.mtime === mtime && cached.fsize === fsize) { next[id] = cached; out.push(cached); continue; }
+    if (cached && cached.mtime === mtime && (cached.fsize === fsize || cached.fsize === undefined)) {
+      // fsize undefined = a legacy (pre-fsize) index entry. mtime matching was the OLD freshness key, so
+      // it is exactly as trustworthy as it ever was - MIGRATE by stamping the size instead of re-parsing.
+      // Without this, the first /resume after upgrading re-parsed EVERY session (thousands of real files,
+      // a seconds-long one-time picker stall - the "resume lag"). fsize still guards same-ms rewrites
+      // for every entry written from now on.
+      const m = cached.fsize === undefined ? { ...cached, fsize } : cached;
+      if (m !== cached) dirty = true;
+      next[id] = m; out.push(m); continue;
+    }
     // New or changed file -> parse it once and (re)build its meta.
     try {
       const s = JSON.parse(readFileSync(path, "utf-8")) as Session;

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -70,6 +70,16 @@ test("listSessionMetas: lightweight metadata, mtime-cached index, self-heals on 
     // Change the session (more messages, new mtime) -> the meta re-parses, not stale.
     saveSession({ ...sess, messages: [...sess.messages, { role: "user", content: "more" }] });
     expect(listSessionMetas().find((x) => x.id === id)?.msgCount).toBe(3);
+
+    // LEGACY index migration: entries without fsize (pre-upgrade) must be reused + stamped, NOT re-parsed
+    // en masse (the one-time /resume picker stall after upgrading). Simulate by stripping fsize.
+    const idxPath = join(TEST_HOME, ".neko-core", "sessions", ".index.json");
+    const idx = JSON.parse(readFileSync(idxPath, "utf-8"));
+    for (const k of Object.keys(idx.metas)) delete idx.metas[k].fsize;
+    writeFileSync(idxPath, JSON.stringify(idx));
+    expect(listSessionMetas().find((x) => x.id === id)?.msgCount).toBe(3); // still served
+    const migrated = JSON.parse(readFileSync(idxPath, "utf-8"));
+    expect(typeof migrated.metas[id].fsize).toBe("number"); // ...and the entry was stamped in place
   } finally {
     rmSync(join(TEST_HOME, ".neko-core", "sessions", `${id}.json`), { force: true });
   }
