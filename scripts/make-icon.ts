@@ -12,32 +12,31 @@
 import { deflateSync } from "node:zlib";
 import { writeFileSync } from "node:fs";
 
-// 16x16 pixel art: o = brand orange, k = dark (eyes/mouth), . = transparent.
-// Symmetric rows are BUILT from segments - literal strings are too easy to miscount by one, which put a
-// notch on the face the first time around. Head spans cols 2..13; eyes at 4-5/10-11; mouth at 7-8.
-const eyes = ".." + "oo" + "kk" + "oooo" + "kk" + "oo" + "..";
-const mouth = ".." + "ooooo" + "kk" + "ooooo" + "..";
+// 16x16 pixel art of the mascot ハ・・マ itself (owner: the kaomoji IS the brand - keep it verbatim,
+// not a filled cat head). Thin 1px strokes + negative space = the refined look of the banner/logo:
+//   ハ  two strokes splaying outward     ・・  two dot eyes      マ  top bar + diagonal
+// o = brand orange, . = transparent. Rows are 16 chars, asserted below.
 const ART = [
   "................",
-  "..o..........o..",
-  "..oo........oo..",
-  "..ooo......ooo..",
-  "..oooooooooooo..",
-  "..oooooooooooo..",
-  "..oooooooooooo..",
-  eyes,
-  eyes,
-  "..oooooooooooo..",
-  mouth,
-  "..oooooooooooo..",
-  "..oooooooooooo..",
-  "...oooooooooo...",
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "...oo......oooo.", // ハ apex               マ top bar
+  "..o..o.......o..", // ハ splays             マ diagonal
+  "..o..o.o.o..o...", // ハ        ・ ・       マ diagonal end
+  ".o....o.........", // ハ
+  ".o....o.........", // ハ feet
+  "................",
+  "................",
+  "................",
   "................",
   "................",
 ];
 const COLORS: Record<string, [number, number, number, number]> = {
   o: [0xe6, 0x93, 0x2e, 0xff], // brand orange (logo.tsx)
-  k: [0x1e, 0x1e, 0x26, 0xff], // dark eyes/mouth
+  k: [0x1e, 0x1e, 0x26, 0xff], // (unused in the kaomoji art; kept for future variants)
   ".": [0, 0, 0, 0],           // transparent
 };
 for (const [i, row] of ART.entries()) if (row.length !== 16) throw new Error(`ART row ${i} is ${row.length} chars, want 16`);

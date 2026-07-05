@@ -6,6 +6,13 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-07-06
+
+### Changed
+- The executable icon is now the mascot itself — the kaomoji ハ・・マ in brand orange, thin strokes and
+  negative space, exactly as it appears in the banner and the in-app logo (owner call: the kaomoji IS the
+  brand; the interim filled cat face is gone).
+
 ## [0.7.1] — 2026-07-06
 
 ### Added
