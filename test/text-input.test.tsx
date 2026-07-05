@@ -104,6 +104,24 @@ test("caret blinks when idle but stays solid while typing", async () => {
   c.unmount();
 }, 15000);
 
+test("mouse activity (scroll/motion) does NOT keep the caret solid - only keys do", async () => {
+  const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+  const c = render(<Harness cb={() => {}} />);
+  c.stdin.write("ab");
+  await tick();
+  expect(strip(c.lastFrame())).toContain("ab▏");
+  // Feed a continuous stream of mouse reports (wheel + any-motion) while otherwise idle. If these counted
+  // as activity they'd freeze the blink solid forever; the caret must still reach an off frame.
+  let sawOff = false;
+  for (let i = 0; i < 40 && !sawOff; i++) {
+    c.stdin.write("\x1b[<35;5;5M"); // an any-motion mouse report
+    await tick(60);
+    if (!strip(c.lastFrame()).includes("ab▏")) sawOff = true;
+  }
+  expect(sawOff).toBe(true); // blinked off despite the mouse traffic
+  c.unmount();
+}, 15000);
+
 test("end-typing stays codepoint/NFC correct (IME path)", async () => {
   let out = "";
   const c = render(<Harness cb={(v) => (out = v)} />);

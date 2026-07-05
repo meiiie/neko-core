@@ -55,8 +55,11 @@ export function TextInput(props: {
   }, []);
 
   useInput((input, key) => {
-    lastActivity.current = Date.now(); // keep the caret solid while actively typing
-    setCaretOn(true);
+    // Only KEYBOARD activity keeps the caret solid - NOT mouse reports (wheel scroll + any-motion) that
+    // Ink also funnels through useInput. Stamping on those froze the blink: the caret stayed lit the whole
+    // time the mouse moved/scrolled. isEscapeResidue flags mouse/CSI residue; real keys - including arrows,
+    // which arrive as input="" - don't match it, so they still keep it solid while you type/edit.
+    if (!isEscapeResidue(input)) { lastActivity.current = Date.now(); setCaretOn(true); }
     // Ink delivers a paste as one call with the whole string; if it carries a line break, treat it
     // as a paste (insert, don't submit) rather than an Enter.
     const isPaste = input.length > 1 && /[\r\n]/.test(input);
