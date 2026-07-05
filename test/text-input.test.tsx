@@ -87,6 +87,23 @@ test("caret is a ▏ bar FLUSH before the char at the cursor (not a block, not a
   c.unmount();
 });
 
+test("caret blinks when idle but stays solid while typing", async () => {
+  const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+  const c = render(<Harness cb={() => {}} />);
+  c.stdin.write("ab");
+  await tick();
+  expect(strip(c.lastFrame())).toContain("ab▏");    // solid immediately after a keystroke
+  // Idle: within a couple of blink periods the caret must reach an OFF frame (rendered as a space, so the
+  // columns don't move) - i.e. the bar is no longer hugging the text.
+  let sawOff = false;
+  for (let i = 0; i < 40 && !sawOff; i++) { await tick(60); if (!strip(c.lastFrame()).includes("ab▏")) sawOff = true; }
+  expect(sawOff).toBe(true);                          // it blinked off
+  c.stdin.write("c");                                // typing re-solidifies it at once
+  await tick();
+  expect(strip(c.lastFrame())).toContain("abc▏");
+  c.unmount();
+}, 15000);
+
 test("end-typing stays codepoint/NFC correct (IME path)", async () => {
   let out = "";
   const c = render(<Harness cb={(v) => (out = v)} />);

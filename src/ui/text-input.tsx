@@ -11,7 +11,7 @@
  * tick to force a re-render (the value didn't change, so onChange wouldn't).
  */
 import { Text, useInput } from "ink";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** Escape-sequence residue that must NEVER be inserted as text: mouse reports ("[<64;10;5M"), cursor
  * keys, private-mode echoes - alone or as a BURST of several sequences concatenated in one chunk (a
@@ -42,7 +42,21 @@ export function TextInput(props: {
   const [, setTick] = useState(0);
   const rerender = () => setTick((t) => t + 1);
 
+  // Caret blink, like a real terminal / Word / Claude Code: SOLID while you type (so it never disappears
+  // mid-keystroke), then it blinks once idle - the "waiting for input" signal. A keystroke stamps
+  // `lastActivity`; the interval keeps the caret on for one blink period after the last key, then toggles.
+  // Toggling is a single-cell change, so the off phase renders a SPACE (not nothing) - the text never jitters.
+  const BLINK_MS = 530; // classic caret cadence
+  const [caretOn, setCaretOn] = useState(true);
+  const lastActivity = useRef(0);
+  useEffect(() => {
+    const id = setInterval(() => setCaretOn((on) => (Date.now() - lastActivity.current < BLINK_MS ? true : !on)), BLINK_MS);
+    return () => clearInterval(id);
+  }, []);
+
   useInput((input, key) => {
+    lastActivity.current = Date.now(); // keep the caret solid while actively typing
+    setCaretOn(true);
     // Ink delivers a paste as one call with the whole string; if it carries a line break, treat it
     // as a paste (insert, don't submit) rather than an Enter.
     const isPaste = input.length > 1 && /[\r\n]/.test(input);
@@ -90,7 +104,7 @@ export function TextInput(props: {
   // character exactly like a real bar cursor. Green so it reads as the live insertion point.
   const cps = [...value];
   const shown = mask ? cps.map(() => "•") : cps;
-  const caret = <Text color="green">▏</Text>;
+  const caret = <Text color="green">{caretOn ? "▏" : " "}</Text>;
   if (cps.length === 0) {
     return (
       <Text>
