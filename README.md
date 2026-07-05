@@ -34,7 +34,11 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
   in the background; `read_file` pages large files and reads images/PDFs. Path-escape is refused.
 - **Permission modes** — `default` / `accept-edits` / `plan` / `auto`, cycled with **Shift+Tab** (a
   *named* bounded-autonomy state, audited by `neko policy`); a seatbelt blocks catastrophic shell.
-- **Ink TUI** — streaming chat with slash commands, history, multiline, `/rewind`.
+- **Fullscreen terminal UI** — an app-owned, flicker-free viewport (alt-screen, like vim/htop):
+  markdown renders live *as it streams*, scrolling is hardware-smooth at your display's refresh rate
+  (auto-detected; `/fps`), the mouse wheel scrolls, drag selects + copies (or `Ctrl+C` / `/copy`),
+  `Ctrl+F` finds in the transcript, and the tab title tracks your session (a pulsing dot while it
+  works). Exit leaves your shell exactly as it was — plus a one-line resume hint.
 - **Sessions** — conversations persist; resume with `neko --resume`.
 - **MCP** — connect Model Context Protocol servers (stdio / http / sse + OAuth) and use their tools;
   lazy schema loading keeps a big MCP surface out of context until needed.

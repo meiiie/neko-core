@@ -4,29 +4,28 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-02) — session handoff
-Neko Code is a **working terminal coding agent** — Phases A→G below are done (agentic core, Ink TUI, project
-intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool parity).
+## Current status (2026-07-06) — session handoff
+Neko Code is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
+intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
+parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Default model: **glm-5.2** via the Z.ai GLM coding plan (`anthropic` provider, `--profile zai`).
 
-- **Branch:** `self-improve`. **v0.5.1 released 2026-07-03** (owner-approved; main == self-improve at the
-  tag; CI + release both green FIRST try — 5/5 binaries, the create-once workflow fix proved itself). All
-  green: typecheck + 262/0 tests + policy + build. (The two "flaky" approval UI tests were a REAL
-  dropped-keypress race — root-caused and fixed 2026-07-02; deterministic now.)
-- **Post-release hardening (Jul 2, on `self-improve`, not yet pushed):** fixed the approval dropped-'y' race
-  (keys now in the always-mounted input hook) and the release-asset race (release created once, the build
-  matrix only uploads). The live v0.5.0 release was healed to 5/5 assets by re-running the failed arm64 job.
-- **Last session (Jul 2) — real-terminal UX/UI polish + dogfooding:** idle timeout (long generations no longer
-  abort mid-stream); streaming no longer jumps to the top (progressive commit); Vietnamese word-wrap fixed;
-  LaTeX→Unicode math; bordered width-aware tables + emoji column alignment; keycap-emoji normalize + a no-emoji
-  system-prompt rule; markdown rhythm/spacing + a left/right gutter; `---` declutter; readable elapsed
-  (`3m 14s`); Ctrl+O expand/collapse toggle; blue in-flight tool dot; Windows `bash` tool → real Git-Bash.
-  Also **dogfooded GeneBench-Pro** (OpenAI's comp-bio agent benchmark) via a runner at `E:\Sach\Sua\genebench-pro\`
-  — proved Neko can be scored on it (harness-lift measured; model is the ceiling).
-- **Tried + REVERTED:** a fullscreen/alt-screen scroll mode — stock Ink can't clip a viewport (Claude Code
-  needs a *patched* Ink), so it was reverted; the polished **inline** mode is the single experience. (WORKLOG.)
-- **Next:** a new, owner-directed task (TBD). **Rule: never merge to `main` or push without the owner's explicit
-  OK.** Orientation for a fresh session: `WORKLOG.md` (journal, newest first) · `RULES.md` (how we work) ·
+- **Branch:** `self-improve`. **v0.7.0 released 2026-07-06** (owner-approved push; 0.6.0 was an internal
+  milestone, never published). All green: typecheck (TS 7.0.1-rc native) + 360/0 tests + policy + build
+  on Windows, and the FULL verify loop natively on Linux (359/0; the one win32-gated test skipped).
+- **The v0.7.0 arc (Jul 3-6) — fullscreen became THE interface:** app-owned alt-screen viewport with a
+  stdout-layer FrameDiffer (line-diff + DECSTBM hardware scroll, absolute-addressed, VT-verified), ANSI
+  row cache + windowed warmer, live-markdown streaming tail, ease-out glide scroll at the display's
+  detected refresh rate (`/fps`), drag-to-select + copy (solid rectangle, Ctrl+C, OSC 52 + native
+  clipboard), session tab titles (🐱 name, pulsing busy dot, ConPTY clobber-healing), editor-style
+  blinking caret, layout-stable chrome (flexShrink pins + a reserved status row), claude-clean exit
+  (no transcript dump; just the resume hint), and the `/fullscreen` toggle REMOVED — fullscreen is the
+  sole mode, inline is only the automatic unfit-terminal fallback. Session-index freshness key hardened
+  to mtime+size with in-place legacy migration (no `/resume` stall after upgrade).
+- **Earlier this arc (Jul 2-3, released as v0.5.1):** approval dropped-'y' race fixed, release-asset
+  race fixed (create-once), prompt-cache stability + measurement, 529 retry, tool-error recovery.
+- **Next:** a new, owner-directed task (TBD). **Rule: never merge to `main` or push without the owner's
+  explicit OK.** Orientation for a fresh session: `WORKLOG.md` (journal) · `RULES.md` (how we work) ·
   `CLAUDE.md` (codebase map) · `docs/self-improve/` (the Neko-improves-Neko loop + its idea `BACKLOG.md`).
 
 ## Naming

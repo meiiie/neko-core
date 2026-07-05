@@ -1,18 +1,24 @@
 # Fullscreen mode — research + architecture (scrollable, virtualized transcript)
 
-Status: **SHIPPED P1-P5** (built after the research below). Date: 2026-07-04.
-Author: Claude (clean-room study of the local claude-code reference + web research).
+Status: **SHIPPED — fullscreen is the SOLE interactive mode** (since 2026-07-05; the `/fullscreen`
+toggle was removed, which retired the whole alt-screen↔inline transition bug class). Inline exists only
+as an automatic fallback for terminals that can't host the alt screen (`canFullscreen`: non-TTY / too
+small); `NEKO_FULLSCREEN=0` / `fullscreen: false` remain as an internal escape hatch + the test-suite
+baseline, not a user-facing option. Author: Claude (clean-room study of the local claude-code reference
++ web research). Last updated: 2026-07-06 (v0.7.0).
 
-**Implemented:** P1 synchronized output + **DECRQM probe** for SSH (`src/ui/sync-stdout.ts`) · P2 alt-screen
-+ scroll viewport (`src/ui/altscreen.ts`, `src/ui/scroll.tsx`, gated by `/fullscreen` · `cfg.fullscreen` ·
-`NEKO_FULLSCREEN`; **DEFAULT ON since 2026-07-05** - opt out with `fullscreen: false` / `NEKO_FULLSCREEN=0`;
-unfit terminals still fall back to inline via `canFullscreen`) · P3 mouse wheel + input hardening
-(`src/ui/mouse.ts`, `src/ui/text-input.tsx`) · P4
-in-viewport find (Ctrl+F, `src/ui/scroll.tsx`) · P5 suitability guard + degradation (`canFullscreen`) ·
-**rich scrollback** (`src/ui/rich-transcript.tsx` - real markdown/diffs/syntax, memoized, capped at 300
-mounted lines) · **OSC-52 clipboard** `/copy` (`src/ui/clipboard.ts` - the keyboard copy path when mouse
-capture blocks native select). Default OFF (inline keeps native scrollback + copy-paste). Env:
-`NEKO_FULLSCREEN`, `NEKO_DISABLE_MOUSE`, `NEKO_SYNC`.
+**Implemented:** P1 synchronized output + **DECRQM probe** for SSH (`src/ui/sync-stdout.ts`) · P2
+alt-screen + scroll viewport (`src/ui/altscreen.ts`, `src/ui/scroll.tsx`) · P3 mouse wheel + input
+hardening (`src/ui/mouse.ts`, `src/ui/text-input.tsx`) · P4 in-viewport find (Ctrl+F) · P5 suitability
+guard + degradation (`canFullscreen`) · **FrameDiffer** (`src/ui/frame-diff.ts` — compositor-lite at the
+stdout layer: line-diff + DECSTBM/SU/SD hardware scroll + band compose + selection overlay; all
+fullscreen writes ABSOLUTE, drift-proof) · **ANSI row cache** (`src/ui/ansi-cache.ts` — render-once rows,
+windowed background warmer) · **rich scrollback** (`src/ui/rich-transcript.tsx`) · **live-markdown
+streaming tail** (formats as it streams) · **drag-to-select + copy** (solid rectangle, persists for
+Ctrl+C, "copied N chars" note) · **clipboard** `/copy` = OSC 52 + native (clip.exe/pbcopy/wl-copy/xclip)
+· **auto fps** (display Hz detected, `/fps`) · **session tab title** (`src/ui/title.ts` — 🐱 name,
+pulsing busy dot, Windows ConPTY clobber-healing). Env: `NEKO_FULLSCREEN`, `NEKO_DISABLE_MOUSE`,
+`NEKO_SYNC`, `NEKO_FPS`, `NEKO_INCR=0` (differ off).
 
 **Audit 2026-07-04** (line-by-line re-check of the whole arc): 4 real bugs found + fixed — (1) toggle-OFF
 lost the transcript (Static's one-time reprint landed in the discarded alt buffer; screen switch was in a

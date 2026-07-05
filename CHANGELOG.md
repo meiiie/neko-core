@@ -6,6 +6,63 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-06
+
+The fullscreen release: Neko's terminal UI became an app-owned, flicker-free viewport — built through
+nine measured optimization rounds and a week of daily dogfooding on a real 144Hz Windows terminal, then
+verified natively on Linux. (0.6.0 was an internal milestone on the way and was never published.)
+
+### Added
+- **Fullscreen UI as THE interface** (alt-screen, like vim/htop). The transcript is an app-owned
+  scrollable viewport: mouse wheel + PgUp/PgDn + Ctrl+arrows scroll with an ease-out glide, Ctrl+F finds
+  in-transcript, a clickable "jump to bottom" pill (with a real hover state) appears when scrolled away,
+  and markdown formats **live as it streams** (bold/headers/tables render mid-stream, not on commit).
+  Terminals that can't host it (non-TTY / tiny) fall back to inline automatically.
+- **FrameDiffer — a compositor-lite at the stdout layer.** Ink's full-frame rerenders are intercepted and
+  shrunk to the changed lines, or to a real hardware scroll (DECSTBM + SU/SD: the terminal shifts the
+  region; only revealed rows are painted). Keystrokes cost ~178 bytes instead of whole-screen rewrites;
+  every emitted byte sequence is verified against a virtual terminal in tests. All fullscreen writes use
+  absolute addressing — immune to real-terminal cursor drift (the class of "ghost input row" bugs).
+- **ANSI row cache** — each transcript line renders to styled rows ONCE (hidden Ink instance), giving the
+  viewport `<Static>`-like economics; a windowed background warmer (newest-first, time-budgeted chunks)
+  keeps long sessions responsive.
+- **Refresh-rate-aware rendering** — the display's Hz is auto-detected (Windows/macOS/Linux, cached) and
+  drives the UI frame cap; `/fps [auto|30..240]` overrides.
+- **Drag-to-select + copy** (fullscreen captures the mouse, so native selection can't reach the alt
+  screen): a left-drag paints a solid selection rectangle, copies on release, persists for the habitual
+  Ctrl+C, and confirms with a reserved-row "copied N chars" note that never shifts the layout. `/copy`
+  (last reply) and `/copy all` write BOTH OSC 52 and the native clipboard (clip.exe UTF-16LE / pbcopy /
+  wl-copy / xclip) — works on terminals that ignore OSC 52.
+- **Session-aware tab title** — `🐱 <session>` (named once from the first message, stable across turns;
+  `/title` pins), a pulsing `●`/`○` dot while a turn runs, restored on exit. Windows quirks defeated:
+  the title stack is skipped (WT restores it mid-session) and a 1s keeper heals SetConsoleTitle clobbers
+  from console children.
+- **Editor-style input caret** — a thin green `▏` flush against the text, blinking when idle, solid while
+  typing (mouse traffic doesn't hold it solid).
+
+### Changed
+- **Fullscreen is the sole interactive mode** — the `/fullscreen` toggle is gone (an entire class of
+  alt-screen↔inline transition bugs went with it); `NEKO_FULLSCREEN=0` remains as an internal escape
+  hatch, not a user-facing option.
+- **Claude-clean exit** — leaving Neko restores the shell exactly as it was and prints only the
+  `Resume this session with: neko --resume <id>` hint; the raw transcript echo is gone, and the
+  "press ctrl+c again to exit" hint is an ephemeral status, not a transcript line.
+- **Input chrome is layout-stable** — a reserved status row (paste hint / copy note), and the prompt box,
+  find bar, pickers and approval boxes can never be flex-squashed on short windows.
+- **TypeScript 7.0.1-rc (native Go compiler)** is the typecheck gate (~4x faster); CI cross-checks
+  against 5.9 on all three OSes until 7.0 GA.
+- **NODE_ENV=production baked into the compiled binary** (React dev-mode overhead was shipping — ~5x per
+  frame) with a `__uiprobe` smoke test in CI so it can't regress.
+
+### Fixed
+- Session-index freshness key is now mtime+size (same-millisecond rewrites were served stale on ext4),
+  with in-place migration for legacy indexes (no full re-parse stall on first `/resume` after upgrade).
+- The `/resume` picker renders intact when scrolled (flex-squash mangled names) and the band re-composes
+  on geometry changes (stale transcript rows could freeze over the picker).
+- Mouse tracking can no longer leak into the shell: all 7 DEC mouse modes reset on exit, at process
+  entry (self-heal after a hard kill), and via an unbypassable `process.on("exit")` restore.
+- Verified natively on Linux (full suite + compiled binary); three Windows-centric tests made portable.
+
 ## [0.5.1] — 2026-07-03
 
 Reliability + efficiency patch, driven by real dogfooding (every fix traces to a live failure).
