@@ -63,6 +63,21 @@ test("brandTitle: cat icon + name, a busy dot while a turn runs", async () => {
   expect(brandTitle("my session", true)).toBe("● \u{1F431} my session"); // ● busy dot
 });
 
+test("title stack push is SKIPPED on Windows (its restore reverts the tab mid-session)", async () => {
+  const { saveTitle } = await import("../src/ui/title.ts");
+  const writes: string[] = [];
+  const orig = process.stdout.write, origTTY = (process.stdout as any).isTTY;
+  (process.stdout as any).isTTY = true;
+  (process.stdout as any).write = (s: any) => { writes.push(String(s)); return true; };
+  try {
+    saveTitle();
+    if (process.platform === "win32") expect(writes.join("")).toBe("");           // no push -> nothing to revert to
+    else expect(writes.join("")).toBe("\x1b[22;0t");                              // other terminals still get the stack
+  } finally {
+    (process.stdout as any).write = orig; (process.stdout as any).isTTY = origTTY;
+  }
+});
+
 test("DISABLE_MOUSE resets EVERY standard mouse mode (not just the 3 we enable) - stale-mode safety", async () => {
   const { DISABLE_MOUSE, ENABLE_MOUSE } = await import("../src/ui/mouse.ts");
   for (const mode of [1000, 1002, 1003, 1005, 1006, 1015, 1016]) {

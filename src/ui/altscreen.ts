@@ -25,7 +25,10 @@ export const SHOW_CURSOR = "\x1b[?25h";
 export function emergencyRestore(out: Writable = process.stdout): void {
   try {
     if (!(out as any).isTTY) return;
-    out.write(SHOW_CURSOR + DISABLE_MOUSE + LEAVE_ALT + "\x1b[23;0t"); // cursor, mouse off, main screen, title pop
+    // No title pop on Windows: we never pushed there (WT's title stack reverts the tab mid-session; see
+    // title.ts). Elsewhere, pop to restore the user's shell title on exit.
+    const titlePop = process.platform === "win32" ? "" : "\x1b[23;0t";
+    out.write(SHOW_CURSOR + DISABLE_MOUSE + LEAVE_ALT + titlePop); // cursor, mouse off, main screen, (title)
   } catch { /* stream gone - nothing left to protect */ }
 }
 
