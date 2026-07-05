@@ -35,7 +35,7 @@ import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../cor
 import { loadConfig } from "../adapters/config.ts";
 import { agentsContextBlock, loadAgent } from "../adapters/agents.ts";
 import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
-import { readClipboardImage } from "../adapters/clipboard.ts";
+import { readClipboardImage, writeClipboardText } from "../adapters/clipboard.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
 import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
 import { startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
@@ -582,19 +582,25 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setViewer(full);
   };
 
-  // Copy to the terminal clipboard via OSC 52 (works over SSH/tmux and when fullscreen mouse capture has
-  // taken over native select-to-copy). `/copy` = last response; `/copy all` = the whole conversation.
+  // Copy to the clipboard TWO ways so it works everywhere fullscreen mouse-capture disables native
+  // select-to-copy: OSC 52 (the terminal/SSH clipboard - covers Windows Terminal, iTerm, kitty, tmux...),
+  // AND a native OS write (clip.exe/pbcopy/xclip - covers legacy Windows conhost, which ignores OSC 52).
+  // `/copy` = last response; `/copy all` = the whole conversation.
+  const copyBoth = (text: string): boolean => {
+    if (!copyToClipboard(text, (stdout as any) ?? process.stdout)) return false; // OSC 52; false on empty
+    writeClipboardText(text); // + local OS clipboard, best-effort
+    return true;
+  };
   const copyTranscript = (arg: string) => {
-    const out = (stdout as any) ?? process.stdout;
     if (arg.trim() === "all") {
       const text = lines.filter((l) => l.kind === "user" || l.kind === "assistant" || l.kind === "tool_result").map((l) => l.text).join("\n\n");
       // Report what was ACTUALLY copied: OSC 52 payloads are clipped to MAX_COPY_CHARS (terminal caps).
       const note = text.length > MAX_COPY_CHARS ? `first ${MAX_COPY_CHARS} of ${text.length} chars (clipped - terminals cap the payload)` : `~${text.length} chars`;
-      addLine("info", copyToClipboard(text, out) ? `copied the conversation to the clipboard - ${note}` : "(nothing to copy)");
+      addLine("info", copyBoth(text) ? `copied the conversation to the clipboard - ${note}` : "(nothing to copy)");
       return;
     }
     const last = [...lines].reverse().find((l) => l.kind === "assistant");
-    addLine("info", last && copyToClipboard(last.text, out) ? "copied the last response to the clipboard" : "(no response to copy yet)");
+    addLine("info", last && copyBoth(last.text) ? "copied the last response to the clipboard" : "(no response to copy yet)");
   };
 
   // /title <name>: name the SESSION (persisted - shows in /resume) and pin the TAB title to it (auto

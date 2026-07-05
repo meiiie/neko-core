@@ -8,6 +8,27 @@ import { existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/**
+ * Write plain TEXT to the system clipboard via the OS's native tool. This is the LOCAL copy path (the OSC
+ * 52 escape only works when the terminal implements it - notably NOT legacy Windows conhost). Returns
+ * whether the write succeeded. Windows: clip.exe fed UTF-16LE (round-trips Vietnamese/em-dash reliably;
+ * the console codepage does not). macOS: pbcopy. Linux: wl-copy (Wayland) then xclip. Best-effort.
+ */
+export function writeClipboardText(text: string): boolean {
+  try {
+    if (process.platform === "win32") {
+      return spawnSync("clip", [], { input: Buffer.from(text, "utf16le") }).status === 0;
+    }
+    if (process.platform === "darwin") {
+      return spawnSync("pbcopy", [], { input: text }).status === 0;
+    }
+    if (spawnSync("wl-copy", [], { input: text }).status === 0) return true;
+    return spawnSync("xclip", ["-selection", "clipboard"], { input: text }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
 export function readClipboardImage(): string | null {
   const dest = join(tmpdir(), `neko-paste-${Date.now()}.png`);
   try {

@@ -21,3 +21,13 @@ test("copyToClipboard writes the sequence, no-op on empty", () => {
   expect(copyToClipboard("", out)).toBe(false);
   expect(writes.length).toBe(1);
 });
+
+// Native OS clipboard write - the local copy path for terminals that don't implement OSC 52 (legacy
+// Windows conhost). Smoke-test the platform tool actually runs; the manual round-trip confirmed UTF-16LE
+// carries Vietnamese/em-dash intact. macOS/Linux need pbcopy/xclip present, so scope this to Windows.
+if (process.platform === "win32") {
+  test("writeClipboardText writes to the Windows clipboard via clip.exe", async () => {
+    const { writeClipboardText } = await import("../src/adapters/clipboard.ts");
+    expect(writeClipboardText("neko clipboard probe - tiếng Việt")).toBe(true);
+  });
+}
