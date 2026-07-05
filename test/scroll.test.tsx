@@ -38,25 +38,32 @@ test("useScroll: scrolling up breaks sticky FROM the current bottom and holds pl
   c.unmount();
 });
 
-function RowProbe({ total, viewH, grab }: { total: number; viewH: number; grab?: (api: RowScrollApi) => void }) {
-  const api = useRowScroll(total, viewH);
+function RowProbe({ total, viewH, grab, onHop }: { total: number; viewH: number; grab?: (api: RowScrollApi) => void; onHop?: (d: number) => void }) {
+  const api = useRowScroll(total, viewH, onHop);
   useEffect(() => { grab?.(api); });
   return <Text>{`dist=${api.dist};scrolled=${api.scrolled}`}</Text>;
 }
 
 test("useRowScroll glides toward the target (ease-out) instead of jumping", async () => {
   let api: RowScrollApi | null = null;
-  const c = render(<RowProbe total={200} viewH={20} grab={(a) => (api = a)} />);
+  const hops: number[] = [];
+  // Read the glide from the onHop CALLBACK, not the rendered dist. dist is derived from a ref that the hop
+  // timers advance; under a load spike the timers burst ahead of React's flush, so every captured render
+  // reads the ref already at its final value (the old wall-clock snapshot's flake). onHop fires
+  // synchronously inside each hop with that hop's exact dist - immune to render timing.
+  const c = render(<RowProbe total={200} viewH={20} grab={(a) => (api = a)} onHop={(d) => hops.push(d)} />);
   await tick();
   api!.by(-40); // scroll 40 rows up in one gesture
-  await tick(5);
-  const early = Number(/dist=(\d+)/.exec(strip(c.lastFrame()))?.[1]);
-  expect(early).toBeGreaterThan(0);   // first hop fired immediately...
-  expect(early).toBeLessThan(40);     // ...but NOT the whole distance (glide, not teleport)
-  await tick(300);                     // let the animation settle
+  await tick(400);                     // let the whole animation run; each hop pushes its dist
+  // Glide, not teleport: more than one hop, stepping through an INTERMEDIATE distance before landing on 40.
+  expect(hops.length).toBeGreaterThan(1);
+  expect(hops.some((d) => d > 0 && d < 40)).toBe(true);
+  expect(hops[hops.length - 1]).toBe(40); // settled exactly on the target
   expect(strip(c.lastFrame())).toContain("dist=40;scrolled=true");
+  hops.length = 0;
   api!.toBottom();
-  await tick(300);
+  await tick(400);
+  expect(hops[hops.length - 1]).toBe(0);  // glided back to the tail
   expect(strip(c.lastFrame())).toContain("dist=0;scrolled=false");
   c.unmount();
 });

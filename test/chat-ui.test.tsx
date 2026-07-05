@@ -156,7 +156,10 @@ test("input typed while busy is queued, then drained", async () => {
     async complete(): Promise<ProviderResponse> {
       this.i++;
       if (this.i === 1) {
-        await new Promise((r) => setTimeout(r, 250));
+        // Hold turn 1 busy for a wide window: the test must observe "busy" and submit task two WHILE the
+        // first turn is still running. A tight 250ms window can close under a load spike before the second
+        // submit lands, so task two runs immediately instead of queuing (the flake). 1500ms is ample.
+        await new Promise((r) => setTimeout(r, 1500));
         return { content: "first", tool_calls: [] };
       }
       return { content: "second", tool_calls: [] };
