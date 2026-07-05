@@ -19,8 +19,8 @@ import { VirtualTerminal } from "./vt.ts";
 class FakeTtyOut extends EventEmitter {
   isTTY = true;
   constructor(public columns: number, public rows: number, private vt: VirtualTerminal) { super(); }
-  writes = 0;
-  write(s: string): boolean { this.writes++; this.vt.write(String(s)); return true; }
+  writes = 0; all = "";
+  write(s: string): boolean { this.writes++; this.all += String(s); this.vt.write(String(s)); return true; }
   setSize(cols: number, rows: number): void { this.columns = cols; this.rows = rows; this.vt.resize(cols, rows); this.emit("resize"); }
 }
 class FakeStdin extends EventEmitter {
@@ -109,4 +109,39 @@ test("STARTUP-fullscreen sim: alt entered BEFORE the first render - content visi
   } finally {
     if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
   }
+}, 30000);
+
+test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for Ctrl+C", async () => {
+  const vt = new VirtualTerminal(100, 30);
+  const out = new FakeTtyOut(100, 30, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  const provider: any = { complete: async () => ({ content: "ok", tool_calls: [] }) };
+  const session: any = {
+    id: "sel", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
+    messages: [{ role: "user", content: "SELECTME a unique line" }, { role: "assistant", content: "a reply here" }],
+  };
+  process.env.NEKO_FULLSCREEN = "1";
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = render(
+    React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "sel", frameDiffer: differ, preAltDispose }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(500);
+  const ls = vt.lines();
+  const y = ls.findIndex((l) => l.includes("SELECTME")) + 1; // 1-based screen row of the line
+  expect(y).toBeGreaterThan(0);
+  const x0 = ls[y - 1].indexOf("SELECTME") + 1, x1 = x0 + "SELECTME".length;
+  out.all = "";
+  stdin.push(`\x1b[<0;${x0};${y}M`); await tick(30);   // press left
+  stdin.push(`\x1b[<32;${x1};${y}M`); await tick(30);  // drag right
+  stdin.push(`\x1b[<0;${x1};${y}m`); await tick(90);   // release
+  expect(out.all).toContain("\x1b[48;5;25m"); // UNIFORM solid-blue highlight (not per-char inverse)
+  expect(out.all).toContain("\x1b]52;");       // copied on release via OSC 52
+  expect(vt.text()).toContain("copied");        // "copied N chars to clipboard" confirmation
+  out.all = "";
+  stdin.push("\x03"); await tick(80);           // the habit: the selection persists, Ctrl+C copies it
+  expect(out.all).toContain("\x1b]52;");        // Ctrl+C copied the still-active selection
+  app.unmount();
+  await tick(50);
 }, 30000);

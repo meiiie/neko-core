@@ -122,12 +122,14 @@ test("selection: screenText extracts on-screen text; setSelection highlights the
   // screenText reads the COMPOSED screen (1-based rows), stripped of SGR - what a copy should see.
   expect(d.screenText(1, 1)[0]).toBe("  hello world");
   expect(d.screenText(1, 3)).toEqual(["  hello world", "  second line", "  third row"]);
-  // A selection over row 1, screen cols 3..7 = "hello" (after the 2-col gutter) must emit inverse video.
+  // A selection over row 1, screen cols 3..7 = "hello" (after the 2-col gutter) paints the UNIFORM
+  // selection colour (solid blue bg + white fg), not per-char inverse.
   writes.length = 0;
   d.setSelection({ r0: 1, c0: 3, r1: 1, c1: 7 });
   const out = writes.join("");
-  expect(out).toContain("\x1b[7m");   // inverse opened at the selection start
-  expect(out).toContain("\x1b[27m");  // and closed at its end
+  expect(out).toContain("\x1b[48;5;25m"); // solid blue background opened at the selection start
+  expect(out).toContain("\x1b[97m");       // bright-white text
+  expect(out).toContain("\x1b[0m");        // block reset at its end
   // Clearing repaints the row WITHOUT inverse.
   writes.length = 0;
   d.setSelection(null);

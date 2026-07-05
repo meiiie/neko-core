@@ -15,7 +15,7 @@ import { installAltScreenGuard } from "../src/ui/altscreen.ts";
 import { wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
 import { VirtualTerminal } from "../test/vt.ts";
 
-class Out extends EventEmitter { isTTY = true; bytes = 0; osc52 = false; constructor(public columns: number, public rows: number, private vt: VirtualTerminal) { super(); } write(s: string) { const str = String(s); this.bytes += str.length; if (str.includes("\x1b]52;")) this.osc52 = true; this.vt.write(str); return true; } setSize(c: number, r: number) { this.columns = c; this.rows = r; this.vt.resize(c, r); this.emit("resize"); } }
+class Out extends EventEmitter { isTTY = true; bytes = 0; osc52 = false; selBg = false; constructor(public columns: number, public rows: number, private vt: VirtualTerminal) { super(); } write(s: string) { const str = String(s); this.bytes += str.length; if (str.includes("\x1b]52;")) this.osc52 = true; if (str.includes("\x1b[48;5;25m")) this.selBg = true; this.vt.write(str); return true; } setSize(c: number, r: number) { this.columns = c; this.rows = r; this.vt.resize(c, r); this.emit("resize"); } }
 class In extends EventEmitter { isTTY = true; data: string | null = null; setRawMode() {} setEncoding() {} ref() {} unref() {} pause() {} resume() {} read() { const d = this.data; this.data = null; return d; } push(s: string) { this.data = s; this.emit("readable"); this.emit("data", s); } }
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -65,12 +65,16 @@ console.log(`\nstream wall time: ${streamMs.toFixed(0)}ms for ${MD.length} chars
   const y = ls.findIndex((l) => l.includes("Nga - Ukraine")) + 1; // 1-based screen row
   const x0 = ls[y - 1].indexOf("Nga") + 1;                        // 1-based col of "Nga"
   const x1 = x0 + "Nga - Ukraine".length;
-  out.osc52 = false;
+  out.osc52 = false; out.selBg = false;
   stdin.push(`\x1b[<0;${x0};${y}M`); await tick(20);   // press left
   stdin.push(`\x1b[<32;${x1};${y}M`); await tick(20);  // drag right (motion + left held)
-  stdin.push(`\x1b[<0;${x1};${y}m`); await tick(90);   // release -> copy
+  stdin.push(`\x1b[<0;${x1};${y}m`); await tick(90);   // release -> copy + persist highlight
   dump("AFTER DRAG-SELECT + COPY (expect 'copied N chars' note near input)", vt);
-  console.log(`selected row ${y} cols ${x0}..${x1}; OSC52 clipboard write emitted: ${out.osc52}`);
+  console.log(`selected row ${y} cols ${x0}..${x1}; OSC52 on release: ${out.osc52}; uniform-blue highlight painted: ${out.selBg}`);
+  // The habit: selection persists, then Ctrl+C copies it.
+  out.osc52 = false;
+  stdin.push("\x03"); await tick(60);
+  console.log(`OSC52 on Ctrl+C (select-then-copy habit): ${out.osc52}`);
 }
 
 // Scroll up, then jump back.

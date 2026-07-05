@@ -114,7 +114,7 @@ export class FrameDiffer {
         if (y < s.r0 || y > s.r1) continue;
         const from = y === s.r0 ? s.c0 - 1 : 0;                  // 1-based screen col -> 0-based, inclusive
         const to = y === s.r1 ? s.c1 : Number.MAX_SAFE_INTEGER;  // half-open end; whole row for middle rows
-        slice[i] = overlayInverse(slice[i], Math.max(0, from), to);
+        slice[i] = overlaySelection(slice[i], Math.max(0, from), to);
       }
     }
     return slice;
@@ -227,23 +227,29 @@ function moveRel(from: number, to: number): string {
   return "";
 }
 
-/** Wrap the VISIBLE columns [from, to) of a styled row in inverse video (selection highlight), preserving
- * the row's own SGR colours. Counts visible columns while passing SGR sequences through untouched, so the
- * inverse opens/closes at the right screen columns even amid colour codes. Closes at row end if `to` runs
- * past it (full-row / multi-row selections pass to = MAX). */
-function overlayInverse(row: string, from: number, to: number): string {
+const SEL_ON = `${ESC}48;5;25m${ESC}97m`; // selection: solid blue background + bright-white text
+
+/** Paint the VISIBLE columns [from, to) of a styled row with the UNIFORM selection colour (solid blue bg,
+ * white fg), like a desktop / Claude-Code text selection. Inside the range the row's OWN colour codes are
+ * DROPPED so the block is one flat colour (an inverse-video overlay looked patchy because it swapped each
+ * char's own fg/bg). Outside the range the original colours are kept, and at the end of the selection the
+ * row's colour state is reset and replayed so trailing text keeps its colour. Columns are counted while
+ * SGR sequences pass through, so the block lands on the right screen columns. `to` may run past the row
+ * (full-row / middle-of-multi-row selections pass to = MAX) - the block simply closes at the row end. */
+function overlaySelection(row: string, from: number, to: number): string {
   if (from >= to) return row;
-  let out = "", col = 0, i = 0, inv = false;
+  let out = "", col = 0, i = 0, inSel = false, sgr = "";
+  const close = () => `${ESC}0m${sgr}`; // reset the block colours, then replay the row's own colour state
   while (i < row.length) {
     if (row[i] === "\x1b" && row[i + 1] === "[") {
-      const m = /^\x1b\[[0-9;]*[A-Za-z]/.exec(row.slice(i)); // an SGR/CSI sequence - copy through, no column
-      if (m) { out += m[0]; i += m[0].length; continue; }
+      const m = /^\x1b\[[0-9;]*[A-Za-z]/.exec(row.slice(i));
+      if (m) { if (m[0].endsWith("m")) sgr += m[0]; if (!inSel) out += m[0]; i += m[0].length; continue; }
     }
-    if (col === from && !inv) { out += `${ESC}7m`; inv = true; }
-    if (col === to && inv) { out += `${ESC}27m`; inv = false; }
+    if (col === from && !inSel) { out += SEL_ON; inSel = true; }
+    if (col === to && inSel) { out += close(); inSel = false; }
     out += row[i]; col++; i++;
   }
-  if (inv) out += `${ESC}27m`; // selection reached/overran the end of the row
+  if (inSel) out += close(); // selection reached/overran the end of the row
   return out;
 }
 

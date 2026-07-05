@@ -600,6 +600,48 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     addLine("info", last && copyBoth(last.text) ? "copied the last response to the clipboard" : "(no response to copy yet)");
   };
 
+  // --- Mouse drag-to-select + copy (fullscreen captures the mouse, so the terminal's native
+  // select-to-copy is off; we provide our own, like Claude Code). A left-drag paints a solid highlight
+  // over the transcript; it PERSISTS after release so the "select, then Ctrl+C" habit works, and it also
+  // copies on release. The highlight is screen-anchored, so anything that shifts the view (scroll, new
+  // content) clears it. ---
+  const selAnchor = useRef<{ x: number; y: number } | null>(null); // where a left-drag began (1-based screen coords)
+  const selectedText = useRef("");                                 // the current persisted selection's text (for Ctrl+C)
+  const [copyNote, setCopyNote] = useState<string | null>(null);   // transient copy confirmation, auto-clears
+  const copyNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashCopyNote = (msg: string) => {
+    setCopyNote(msg);
+    if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current);
+    copyNoteTimer.current = setTimeout(() => setCopyNote(null), 2500);
+  };
+  useEffect(() => () => { if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current); }, []);
+  const clearSelection = () => { if (selectedText.current || selAnchor.current) { selectedText.current = ""; selAnchor.current = null; frameDiffer?.setSelection(null); } };
+  const copySelection = () => { if (selectedText.current) { copyBoth(selectedText.current); flashCopyNote(`copied ${selectedText.current.length} chars to clipboard`); } };
+  // Normalize anchor+focus into a reading-order selection {r0,c0 <= r1,c1}, clamped to the band rows.
+  const selFrom = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+    const cy = (y: number) => Math.max(1, Math.min(viewH, y));
+    const A = { x: a.x, y: cy(a.y) }, B = { x: b.x, y: cy(b.y) };
+    const [f, l] = A.y < B.y || (A.y === B.y && A.x <= B.x) ? [A, B] : [B, A];
+    return { r0: f.y, c0: f.x, r1: l.y, c1: l.x };
+  };
+  // Extract the selected text from the differ's composed on-screen rows: honor columns on the first/last
+  // row, take middle rows whole, trim trailing whitespace, drop trailing blank lines.
+  const selectionText = (sel: { r0: number; c0: number; r1: number; c1: number }): string => {
+    const rows = frameDiffer?.screenText(sel.r0, sel.r1) ?? [];
+    return rows
+      .map((row, k) => {
+        const y = sel.r0 + k;
+        const from = y === sel.r0 ? sel.c0 - 1 : 0;
+        const to = y === sel.r1 ? sel.c1 : row.length;
+        return row.slice(Math.max(0, from), to).replace(/\s+$/, "");
+      })
+      .join("\n")
+      .replace(/\n+$/, "");
+  };
+  // New transcript content shifts the band, so a screen-anchored highlight would land on the wrong rows -
+  // drop the selection whenever the line count changes (a new turn, a committed reply, etc.).
+  useEffect(() => { clearSelection(); }, [lines.length]);
+
   // /title <name>: name the SESSION (persisted - shows in /resume) and pin the TAB title to it (auto
   // per-turn updates stop). /title alone reports the current state.
   const applyTitle = (name: string) => {
@@ -785,6 +827,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const ctrlC = useRef(false);
   useInput((char, key) => {
     if (key.ctrl && char === "c") {
+      if (selectedText.current) { copySelection(); clearSelection(); return; } // select-then-Ctrl+C copies the selection
       if (busy) return controllerRef.current?.abort();
       if (input) { setInput(""); ctrlC.current = false; return; }
       if (ctrlC.current) return exit();
@@ -1266,39 +1309,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const pillX1 = 2 + Math.max(0, Math.floor((contentCols - pillLabel.length) / 2)) + 1; // 1-based col
   const pillHit = (x: number, y: number) => pillShown && y === viewH + 1 && x >= pillX1 - 2 && x <= pillX1 + pillLabel.length + 1;
   useEffect(() => { if (!pillShown) setPillHover(false); }, [pillShown]);
-  // --- Text selection by mouse drag (fullscreen captures the mouse, so the terminal's native
-  // select-to-copy is off; we provide our own, like Claude Code). A left-drag highlights a region of the
-  // transcript band and copies it on release, with a transient "copied N chars" confirmation. ---
-  const selAnchor = useRef<{ x: number; y: number } | null>(null); // where a left-drag began (1-based screen coords)
-  const [copyNote, setCopyNote] = useState<string | null>(null);   // transient copy confirmation, auto-clears
-  const copyNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flashCopyNote = (msg: string) => {
-    setCopyNote(msg);
-    if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current);
-    copyNoteTimer.current = setTimeout(() => setCopyNote(null), 2500);
-  };
-  useEffect(() => () => { if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current); }, []);
-  // Normalize anchor+focus into a reading-order selection {r0,c0 <= r1,c1}, clamped to the band rows.
-  const selFrom = (a: { x: number; y: number }, b: { x: number; y: number }) => {
-    const cy = (y: number) => Math.max(1, Math.min(viewH, y));
-    const A = { x: a.x, y: cy(a.y) }, B = { x: b.x, y: cy(b.y) };
-    const [f, l] = A.y < B.y || (A.y === B.y && A.x <= B.x) ? [A, B] : [B, A];
-    return { r0: f.y, c0: f.x, r1: l.y, c1: l.x };
-  };
-  // Extract the selected text from the differ's composed on-screen rows: honor columns on the first/last
-  // row, take middle rows whole, trim trailing whitespace, drop trailing blank lines.
-  const selectionText = (sel: { r0: number; c0: number; r1: number; c1: number }): string => {
-    const rows = frameDiffer?.screenText(sel.r0, sel.r1) ?? [];
-    return rows
-      .map((row, k) => {
-        const y = sel.r0 + k;
-        const from = y === sel.r0 ? sel.c0 - 1 : 0;
-        const to = y === sel.r1 ? sel.c1 : row.length;
-        return row.slice(Math.max(0, from), to).replace(/\s+$/, "");
-      })
-      .join("\n")
-      .replace(/\n+$/, "");
-  };
   // Compute the matching row indices for a query over the flattened rows (case-insensitive).
   const findMatches = (q: string): number[] => {
     if (!q.trim()) return [];
@@ -1323,9 +1333,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (ptr) {
         setPillHover(pillHit(ptr.x, ptr.y));
         if (!search && ptr.kind === "press" && ptr.left) {
+          clearSelection();                                                       // a fresh drag drops any old selection
           if (pillHit(ptr.x, ptr.y)) return rowScroll.toBottom();                 // the pill is a click target
           selAnchor.current = ptr.y >= 1 && ptr.y <= viewH ? { x: ptr.x, y: ptr.y } : null; // begin in the band only
-          frameDiffer?.setSelection(null);
           return;
         }
         if (ptr.kind === "move") {
@@ -1339,12 +1349,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             const sel = selFrom(a, ptr);
             const dragged = sel.r0 !== sel.r1 || sel.c1 > sel.c0; // a bare click is a point, not a selection
             const text = dragged ? selectionText(sel) : "";
-            frameDiffer?.setSelection(null); // clear the highlight (screen-anchored; keeping it would desync on scroll)
-            if (text.trim()) { copyBoth(text); flashCopyNote(`copied ${text.length} chars to clipboard`); }
+            if (text.trim()) {
+              frameDiffer?.setSelection(sel);  // KEEP the highlight after release (persists for Ctrl+C)
+              selectedText.current = text;      // ...and remember the text so Ctrl+C copies exactly this
+              copyBoth(text); flashCopyNote(`copied ${text.length} chars to clipboard`); // also copy right away
+            } else frameDiffer?.setSelection(null); // empty drag / click -> no selection
           }
           return;
         }
         // a wheel event falls through to the wheel handler below
+        if (ptr.kind === "wheel") clearSelection(); // scrolling shifts the view - the screen-anchored highlight is stale
       }
       if (search) {
         const w = parseWheelAll(input); // wheel still scrolls the flat window while finding
@@ -1374,7 +1388,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       if (key.ctrl && input === "f") return setSearch({ q: "", matches: [], idx: 0 }); // open find
       const wheel = parseWheelAll(input);
-      if (wheel) return rowScroll.by((wheel.dir === "up" ? -1 : 1) * ROWS_PER_NOTCH * wheel.count);
+      if (wheel) { clearSelection(); return rowScroll.by((wheel.dir === "up" ? -1 : 1) * ROWS_PER_NOTCH * wheel.count); }
+      // Any scroll shifts the view, so the screen-anchored selection highlight would go stale - drop it.
+      const scrollKey = key.pageUp || key.pageDown || (key.ctrl && (key.upArrow || key.downArrow)) || key.home || key.end;
+      if (scrollKey) clearSelection();
       const page = Math.max(1, viewH - 1); // one viewport of rows, minus a row of overlap for context
       if (key.pageUp) return rowScroll.by(-page);
       if (key.pageDown) return rowScroll.by(page);
