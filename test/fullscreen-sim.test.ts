@@ -145,3 +145,52 @@ test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for
   app.unmount();
   await tick(50);
 }, 30000);
+
+test("/resume picker while SCROLLED UP renders names intact (no flex-squash, no stale band rows)", async () => {
+  // Image #60: with the pill visible the picker lost its header + session names - Yoga flex-SQUASHED the
+  // list (label+detail overlapped on one row), and the band's stale geometry froze old transcript rows
+  // over it (Ink skips identical frames, so nothing repainted). Locks the flexShrink=0 + setBand-geometry
+  // refresh fixes end-to-end on the real composed screen.
+  const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const home = join(tmpdir(), `neko-sim-resume-${process.pid}`);
+  mkdirSync(join(home, ".neko-core", "sessions"), { recursive: true });
+  const savedEnv = { up: process.env.USERPROFILE, home: process.env.HOME };
+  process.env.USERPROFILE = home; process.env.HOME = home;
+  try {
+    for (let i = 0; i < 5; i++) {
+      const id = `2026070${i}-00000${i}-00${i}`;
+      writeFileSync(join(home, ".neko-core", "sessions", `${id}.json`), JSON.stringify({
+        id, createdAt: new Date(Date.now() - i * 3600e3).toISOString(), updatedAt: new Date(Date.now() - i * 3600e3).toISOString(),
+        cwd: process.cwd(), model: "m",
+        messages: [{ role: "user", content: `ten phien so ${i} rat de nhan` }, { role: "assistant", content: `tra loi ${i}` }],
+      }));
+    }
+    const vt = new VirtualTerminal(110, 32);
+    const out = new FakeTtyOut(110, 32, vt);
+    const stdin = new FakeStdin();
+    const differ = new FrameDiffer();
+    const msgs: any[] = [];
+    for (let i = 0; i < 30; i++) msgs.push({ role: "user", content: `cau hoi ${i}` }, { role: "assistant", content: `tra loi dai dong so ${i}` });
+    const session: any = { id: "cur", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
+    process.env.NEKO_FULLSCREEN = "1";
+    const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+    const app = render(
+      React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "", tool_calls: [] }) }, resumedSession: session, sessionId: "cur", frameDiffer: differ, preAltDispose }),
+      { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+    );
+    await tick(500);
+    stdin.push("\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M"); await tick(250); // scroll up -> pill (the #60 state)
+    stdin.push("/resume"); await tick(80); stdin.push("\r"); await tick(500);
+    const t = vt.text();
+    expect(t).toContain("Resume session");                 // the header survived (was flex-squashed to 0)
+    for (let i = 0; i < 5; i++) expect(t).toContain(`ten phien so ${i} rat de nhan`); // every NAME intact
+    expect(t).not.toMatch(/msgs\S/);                       // no label residue fused right after a detail ("msgsde nhan")
+    app.unmount();
+    await tick(50);
+  } finally {
+    process.env.USERPROFILE = savedEnv.up; process.env.HOME = savedEnv.home;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 30000);

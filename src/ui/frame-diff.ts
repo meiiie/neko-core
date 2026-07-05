@@ -48,11 +48,32 @@ export class FrameDiffer {
   private bandDist = 0;                      // rows between the window bottom and the tail
   private writer: ((s: string) => void) | null = null; // direct emitter for imperative band repaints
 
+  private lastRaw: string[] | null = null; // the last RAW Ink frame (pre-compose), for geometry refresh
+
   /** The scrollable band (fullscreen viewport), in absolute rows. MUST only be set when the Ink frame
    * starts at screen row 1 (our fullscreen: alt-screen + clear + home), because scroll emission uses
-   * absolute addressing. null = band detection off (inline). */
-  setBand(band: ScrollBand | null): void { this.band = band; }
+   * absolute addressing. null = band detection off (inline). A GEOMETRY CHANGE re-composes the last raw
+   * frame in place: Ink skips byte-identical frames entirely, so when viewH shrinks (a picker opened) the
+   * re-render often writes NOTHING - without this, the screen stays frozen with the old composition
+   * (stale transcript rows sitting over the /resume picker, image #60). */
+  setBand(band: ScrollBand | null): void {
+    const changed = this.band?.top !== band?.top || this.band?.height !== band?.height;
+    this.band = band;
+    if (changed && band) this.refreshCompose();
+  }
   reset(): void { this.prev = null; }
+
+  /** Re-compose the last raw frame under the CURRENT band geometry and paint the delta (absolute rows). */
+  private refreshCompose(): void {
+    if (!this.writer || !this.prev || !this.lastRaw) return;
+    const lines = this.compose(this.lastRaw.slice());
+    if (lines.length !== this.prev.length) return; // dimensions changed too - the next real frame reseeds
+    let out = "";
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i] !== this.prev[i]) { out += `${ESC}${i + 1};1H` + lines[i] + EL; this.prev[i] = lines[i]; }
+    }
+    if (out) this.writer(out + `${ESC}${this.prev.length};1H`);
+  }
 
   // Text selection (mouse drag-to-copy): a highlighted region over the band, in 1-based SCREEN coords.
   // Because the band rows are full screen rows (2-space gutter + content), screen column X is visible
@@ -184,7 +205,8 @@ export class FrameDiffer {
     if (!parsed) { this.prev = null; return null; } // not a standard rerender -> passthrough + reset
     // Compose: Ink rendered the band blank (when band content is on); splice the real window in, so
     // both the baseline and the diff operate on what the SCREEN should actually show.
-    const lines = this.compose(parsed.frame.split("\n"));
+    this.lastRaw = parsed.frame.split("\n"); // kept for setBand's geometry refresh (Ink skips identical frames)
+    const lines = this.compose(this.lastRaw.slice());
     const prev = this.prev;
     this.prev = lines;
     if (!prev) return this.fullRepaintOr(parsed, lines); // seed: raw passthrough would show a blank band
@@ -196,10 +218,19 @@ export class FrameDiffer {
     if (changed.length === 0) return "";             // identical frame -> skip the write entirely
 
     // --- fullscreen scroll detection over the band ---
+    // ONLY when the chrome BELOW the band is untouched: a real scroll moves band rows and nothing else.
+    // When the chrome changes shape in the same frame (an overlay/picker opens, the input grows), a
+    // near-uniform shift can still be detected across the frame - but emitScroll would hardware-shift
+    // REAL screen rows beyond its model, desyncing the baseline from the screen and leaving residue the
+    // next diffs never repair (the mangled /resume picker, image #60). Chrome changed -> plain line-diff.
     const band = this.band;
     if (band && band.height >= 8 && changed.length > band.height / 2) {
-      const scroll = detectShift(prev, lines, band.height);
-      if (scroll) return emitScroll(prev, lines, band, scroll);
+      let chromeUnchanged = true;
+      for (let i = band.height; i < lines.length; i++) if (lines[i] !== prev[i]) { chromeUnchanged = false; break; }
+      if (chromeUnchanged) {
+        const scroll = detectShift(prev, lines, band.height);
+        if (scroll) return emitScroll(prev, lines, band, scroll);
+      }
     }
 
     // --- plain line-diff ---

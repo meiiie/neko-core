@@ -27,7 +27,7 @@ import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.ts
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, renderNodeRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
 import { DISABLE_MOUSE, isMouseEnabled, parseLastPointer, parseWheelAll } from "./mouse.ts";
-import { brandTitle, installTitleKeeper, saveTitle, setTerminalTitle } from "./title.ts";
+import { brandTitle, saveTitle, setTabTitle, setTerminalTitle, stopTitleDriver } from "./title.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
@@ -276,10 +276,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Brand the tab title on mount - AFTER Ink's first render, when VT processing is on, so the OSC 2 write
   // reliably lands (a pre-render write can be dropped before the console enables VT). The session's name
   // (resumed name / first message) or "Neko Core"; it stays put - handle() only renames on the FIRST turn.
-  // The keeper then re-asserts it every 2s against console-title clobbers (see title.ts) until unmount.
+  // The driver then owns it: a blinking dot while busy, and (on Windows) a keeper re-assert against
+  // console-title clobbers (see title.ts) until unmount.
   useEffect(() => {
-    setTerminalTitle(brandTitle(titleTaskRef.current || "Neko Core"));
-    return installTitleKeeper();
+    setTabTitle(titleTaskRef.current || "Neko Core", false);
+    return stopTitleDriver;
   }, []);
   // Effective UI fps: env > config > /fps pref > detected display Hz > 60. Auto mode probes the display
   // in the background on first run (subprocess, never blocks startup): the scroll glide adapts LIVE this
@@ -560,6 +561,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     agentRef.current!.refreshSystemPrompt(); // apply the current prompt to the resumed session
     sessionIdRef.current = target.id;
     createdAtRef.current = target.createdAt;
+    // The tab follows the SWITCH: this is now the resumed session, so retitle to ITS name (saved /title
+    // name, pinned - or its first user message) instead of keeping the previous session's (image #59).
+    const fu = target.messages.find((m) => m.role === "user");
+    const tname = target.title || (typeof fu?.content === "string" ? fu.content.replace(/\s+/g, " ").trim() : "");
+    titleLockedRef.current = !!target.title;
+    titleTaskRef.current = tname ? trunc(tname, 40) : "";
+    setTabTitle(titleTaskRef.current || "Neko Core", busyRef.current);
     const todos = recoverTodos(target.messages); // from the FULL thread, before any compaction
     registryRef.current!.todos = todos;
     setTodos(todos);
@@ -667,7 +675,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     renameSession(sessionIdRef.current, name);
     titleLockedRef.current = true;
     titleTaskRef.current = trunc(name, 40);
-    setTerminalTitle(brandTitle(titleTaskRef.current));
+    setTabTitle(titleTaskRef.current, busyRef.current);
     addLine("info", `session + tab named "${trunc(name, 60)}"`);
   };
 
@@ -727,11 +735,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   }, []);
   // Tell the frame differ where the scrollable band is: in fullscreen the Ink frame starts at screen
   // row 1 (alt-screen + clear + home), so the viewport occupies absolute rows 1..viewH and a scroll can
-  // be emitted as a DECSTBM hardware shift. Inline (or on unmount): no band, plain line-diff only.
-  useEffect(() => {
-    frameDiffer?.setBand(fullscreen ? { top: 1, height: viewH } : null);
-    return () => frameDiffer?.setBand(null);
-  }, [fullscreen, viewH]);
+  // be emitted as a DECSTBM hardware shift. Inline: no band, plain line-diff only.
+  // Set IN THE RENDER BODY, not an effect: Ink writes the frame at COMMIT, before effects run - an
+  // effect-set band means every geometry change (viewH shrinking when a picker opens) composes that
+  // frame with the STALE height, and if the next frame is byte-identical the diff skips it and the
+  // mis-composed screen FREEZES (stale transcript rows over the /resume picker, image #60). A field
+  // write on a plain object - idempotent, no render loop. The effect below only clears on unmount.
+  frameDiffer?.setBand(fullscreen ? { top: 1, height: viewH } : null);
+  useEffect(() => () => frameDiffer?.setBand(null), []);
   // (Leaving fullscreen no longer reprints the thread; see toggleFullscreen + inlineBaseline. The
   // terminal's alt-screen restore owns the primary, so there's nothing to wipe or re-emit here.)
   // Fill the scrollback echo (see runChat): the last ~24 transcript lines as plain text, so leaving
@@ -1103,10 +1114,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // Tab title = the SESSION NAME, not the per-turn prompt. The session is named ONCE, from its first
     // message (matching what /resume shows); later turns keep it, so the tab doesn't churn with every
     // prompt. A leading dot marks a running turn without changing the name. /title pins a manual name.
-    if (!titleLockedRef.current) {
-      if (!titleTaskRef.current) titleTaskRef.current = trunc(toSend, 40); // name the session once
-      setTerminalTitle(brandTitle(titleTaskRef.current || "Neko Core", true));
-    }
+    if (!titleLockedRef.current && !titleTaskRef.current) titleTaskRef.current = trunc(toSend, 40); // name the session once
+    setTabTitle(titleTaskRef.current || "Neko Core", true); // busy: the cat steps away, the dot blinks
     // Baselines at turn start -> the spinner shows THIS turn's tokens (delta), split input/output.
     turnInStartRef.current = agentRef.current!.cost.promptTokens;
     turnOutStartRef.current = agentRef.current!.cost.completionTokens;
@@ -1144,7 +1153,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } finally {
       busyRef.current = false;
       setBusy(false);
-      if (!titleLockedRef.current && titleTaskRef.current) setTerminalTitle(brandTitle(titleTaskRef.current)); // drop the busy dot
+      setTabTitle(titleTaskRef.current || "Neko Core", false); // the cat returns, the dot stops
       if (inflightRef.current.length) { inflightRef.current = []; syncInflight(); } // drop any un-resulted (aborted) blinking lines
       controllerRef.current = null;
       persist();

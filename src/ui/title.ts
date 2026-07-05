@@ -18,11 +18,13 @@ export const POP_TITLE = "\x1b[23;0t";
  * (OSC 2), drawn by the terminal's own UI/emoji font, not the cp1252 screen buffer. Windows Terminal,
  * iTerm2, kitty et al. render it; a terminal that can't just shows a placeholder glyph in its own chrome. */
 export const TAB_ICON = "\u{1F431}";
-/** Branded tab title. Idle: "<icon> <name>" (the cat is home). Busy: the NAME ALONE - the cat "steps
- * away" while a turn runs and returns when it finishes, a subtle at-a-glance running cue (owner-specified,
- * Claude-Code-style restraint) instead of stacking extra glyphs. */
-export function brandTitle(name: string, busy = false): string {
-  return busy ? name : `${TAB_ICON} ${name}`;
+/** Tab title shapes (owner-specified, Claude-Code-style restraint):
+ *   idle          "🐱 <name>"   - the cat is home
+ *   busy, blink on  "● <name>"  - the cat steps away; a dot pulses so the tab reads "running" at a glance
+ *   busy, blink off   "<name>"  - the driver alternates these two once a second (a tab-title heartbeat)
+ */
+export function brandTitle(name: string, busy = false, blinkOn = true): string {
+  return busy ? `${blinkOn ? "● " : ""}${name}` : `${TAB_ICON} ${name}`;
 }
 
 /** OSC 2 sequence for a title (control chars stripped; kept short - tabs truncate anyway). */
@@ -47,26 +49,39 @@ export function restoreTitle(): void {
   if (out().isTTY && useTitleStack) out().write(POP_TITLE);
 }
 
-let lastTitle = ""; // what the tab SHOULD say right now (re-asserted by the keeper against clobbers)
-
 /** Set the tab title now. No-op off-TTY (tests, pipes). */
 export function setTerminalTitle(title: string): void {
-  lastTitle = title;
   if (out().isTTY) out().write(titleSeq(title));
 }
 
 /**
- * Windows console-title keeper. On Windows the console title is SHARED, writable-by-API state: any child
- * that attaches to our console (a powershell probe, a user-configured MCP stdio server, a shell hook) can
- * clobber it via SetConsoleTitle, and ConPTY syncs THAT to the tab - our OSC 2 title silently vanishes
- * (images #57/#58: the default title at startup until the first turn happened to re-set it). We hide our
- * own children's consoles (windowsHide), but arbitrary MCP servers aren't ours to fix - so re-assert the
- * last title on a slow heartbeat. ~30 bytes every 2s, Windows-only, only once a title has been set;
- * unref'd so it never holds the process open. Returns a disposer.
+ * The tab-title DRIVER: one state (name + busy) and one 1s heartbeat that renders it.
+ *  - busy: alternates "● <name>" / "<name>" each beat - a BLINKING dot, the terminal-title equivalent of a
+ *    spinner (a tab can't animate any other way: each blink is just an OSC 2 rewrite).
+ *  - idle: "🐱 <name>", re-asserted every beat ON WINDOWS ONLY. There the console title is SHARED,
+ *    writable-by-API state: any child attached to our console (a powershell probe, a user-configured MCP
+ *    stdio server) can clobber it via SetConsoleTitle and ConPTY syncs that to the tab, silently wiping our
+ *    OSC 2 (images #57/#58). We hide our own children (windowsHide) but can't fix arbitrary MCP servers,
+ *    so the driver self-heals the tab. ~30 bytes/s, unref'd; elsewhere idle beats write nothing.
+ * setTabTitle re-renders immediately (blink reset ON so the dot appears the instant a turn starts).
  */
-export function installTitleKeeper(intervalMs = 2000): () => void {
-  if (process.platform !== "win32") return () => {};
-  const t = setInterval(() => { if (lastTitle && out().isTTY) out().write(titleSeq(lastTitle)); }, intervalMs);
-  (t as any).unref?.();
-  return () => clearInterval(t);
+let tabName = "", tabBusy = false, blinkOn = true;
+let driver: ReturnType<typeof setInterval> | null = null;
+export function setTabTitle(name: string, busy: boolean): void {
+  tabName = name;
+  tabBusy = busy;
+  blinkOn = true;
+  setTerminalTitle(brandTitle(tabName, tabBusy, blinkOn));
+  if (!driver) {
+    driver = setInterval(() => {
+      if (!tabName) return;
+      if (tabBusy) { blinkOn = !blinkOn; setTerminalTitle(brandTitle(tabName, true, blinkOn)); }
+      else if (process.platform === "win32") setTerminalTitle(brandTitle(tabName)); // keeper re-assert
+    }, 1000);
+    (driver as any).unref?.();
+  }
+}
+/** Stop the heartbeat (unmount/exit). Idempotent. */
+export function stopTitleDriver(): void {
+  if (driver) { clearInterval(driver); driver = null; }
 }

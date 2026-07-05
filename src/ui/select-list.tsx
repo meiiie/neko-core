@@ -99,7 +99,12 @@ export function SelectList(props: {
   const rule = "─".repeat(Math.max(10, cols - 1));
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    // flexShrink 0: the picker must NEVER be flex-squashed. In fullscreen the root Box is fixed-height;
+    // when the transcript band + pill + this list overflow it by a row, Yoga shrinks the list, squashing
+    // its 2-row items into 1 (label and detail OVERLAP on one screen row - the mangled /resume of image
+    // #60) and the header into 0 - and the viewH feedback then settles in that squashed state. Pinning
+    // the list makes the flexible transcript box give up the rows instead.
+    <Box flexDirection="column" marginTop={1} flexShrink={0}>
       <Text color="cyan">{title} ({filtered.length ? idx + 1 : 0} of {filtered.length})</Text>
       {renaming !== null ? (
         <Text>  rename: <Text color="cyan">{renaming}</Text><Text inverse> </Text></Text>

@@ -55,37 +55,38 @@ test("title sequences: OSC 2 set + xterm stack push/pop, control chars stripped"
   expect(POP_TITLE).toBe("\x1b[23;0t");
 });
 
-test("brandTitle: cat icon when idle; the cat LEAVES while a turn runs (busy cue)", async () => {
+test("brandTitle: cat icon when idle; busy = blinking dot, no cat", async () => {
   const { brandTitle, TAB_ICON } = await import("../src/ui/title.ts");
   expect(TAB_ICON).toBe("\u{1F431}");                          // 🐱
   expect(brandTitle("Neko Core")).toBe("\u{1F431} Neko Core"); // idle: the cat is home
-  expect(brandTitle("my session", true)).toBe("my session");   // busy: name alone - the cat stepped away
+  expect(brandTitle("my session", true, true)).toBe("● my session"); // busy, blink on: dot + name, no cat
+  expect(brandTitle("my session", true, false)).toBe("my session");  // busy, blink off: name alone
   expect(brandTitle("my session")).toBe("\u{1F431} my session"); // done: the cat returns
 });
 
-if (process.platform === "win32") {
-  test("title keeper re-asserts the last title against console-title clobbers (Windows)", async () => {
-    const { setTerminalTitle, installTitleKeeper, titleSeq } = await import("../src/ui/title.ts");
-    const writes: string[] = [];
-    const orig = process.stdout.write, origTTY = (process.stdout as any).isTTY;
-    (process.stdout as any).isTTY = true;
-    (process.stdout as any).write = ((s: any) => { writes.push(String(s)); return true; }) as any;
-    try {
-      setTerminalTitle("🐱 Neko Core");
-      writes.length = 0;
-      const dispose = installTitleKeeper(25); // fast interval for the test; 2s in production
-      await new Promise((r) => setTimeout(r, 90));
-      dispose();
-      const reasserts = writes.filter((w) => w === titleSeq("🐱 Neko Core")).length;
-      expect(reasserts).toBeGreaterThanOrEqual(1); // the heartbeat re-writes the SAME title
-      const n = writes.length;
-      await new Promise((r) => setTimeout(r, 60));
-      expect(writes.length).toBe(n);               // disposed -> silent
-    } finally {
-      (process.stdout as any).write = orig; (process.stdout as any).isTTY = origTTY;
+test("title driver: blinks the dot while busy, restores + re-asserts the cat when idle", async () => {
+  const { setTabTitle, stopTitleDriver, titleSeq } = await import("../src/ui/title.ts");
+  const writes: string[] = [];
+  const orig = process.stdout.write, origTTY = (process.stdout as any).isTTY;
+  (process.stdout as any).isTTY = true;
+  (process.stdout as any).write = ((s: any) => { writes.push(String(s)); return true; }) as any;
+  try {
+    setTabTitle("my task", true);                            // busy
+    expect(writes[0]).toBe(titleSeq("● my task"));           // dot ON immediately
+    await new Promise((r) => setTimeout(r, 1150));           // one heartbeat (1s cadence)
+    expect(writes).toContain(titleSeq("my task"));           // ...then the blink-off shape
+    writes.length = 0;
+    setTabTitle("my task", false);                           // turn done
+    expect(writes[0]).toBe(titleSeq("\u{1F431} my task"));   // the cat returns at once
+    if (process.platform === "win32") {
+      await new Promise((r) => setTimeout(r, 1150));
+      expect(writes.filter((w) => w === titleSeq("\u{1F431} my task")).length).toBeGreaterThanOrEqual(2); // keeper re-assert
     }
-  });
-}
+  } finally {
+    stopTitleDriver();
+    (process.stdout as any).write = orig; (process.stdout as any).isTTY = origTTY;
+  }
+}, 15000);
 
 test("title stack push is SKIPPED on Windows (its restore reverts the tab mid-session)", async () => {
   const { saveTitle } = await import("../src/ui/title.ts");
