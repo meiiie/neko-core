@@ -256,6 +256,52 @@ test("toggling fullscreen OFF leaves the alt-screen BEFORE Static reprints (tran
   }
 });
 
+test("repeated /fullscreen toggles wipe the primary each time back to inline (no stacked reprints)", async () => {
+  const prev = process.env.NEKO_FULLSCREEN;
+  process.env.NEKO_FULLSCREEN = "1";
+  try {
+    const s: any = { id: "fstog", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [
+      { role: "user", content: "stack-marker question" },
+      { role: "assistant", content: "stack-marker answer" },
+    ] };
+    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+    await tick(120);
+    // Leaving the alt-screen restores the primary buffer with the PREVIOUS inline reprint; without a wipe,
+    // each toggle back to inline re-emits the whole transcript + welcome banner ON TOP (image #41). The
+    // ON->OFF edge must emit a screen clear AFTER it leaves the alt-screen so exactly one copy survives.
+    // (Counting 2J alone is fooled by the clear the alt-screen emits on ENTRY; anchor to the leave instead.)
+    // After each leave-alt, the ->inline edge must (a) wipe the primary (2J) so the thread prints once,
+    // and (b) RE-HIDE the cursor (?25l) that leaveAltScreen shows - else it blinks stray below the status
+    // bar (image #42). Both must appear AT/AFTER the leave, in that composed post-leave write.
+    const healedAfterLastLeave = () => {
+      const lastLeave = c.frames.reduce((acc, f, i) => (f.includes("\x1b[?1049l") ? i : acc), -1);
+      const after = lastLeave >= 0 ? c.frames.slice(lastLeave).join("") : "";
+      return after.includes("\x1b[2J") && after.includes("\x1b[?25l");
+    };
+    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> inline (wipe + cursor re-hide after the leave)
+    expect(await until(c, healedAfterLastLeave)).toBe(true);
+    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> fullscreen (fresh alt buffer)
+    await tick(150);
+    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> inline again (heal after THIS leave too)
+    expect(await until(c, healedAfterLastLeave)).toBe(true);
+    c.unmount();
+  } finally {
+    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
+  }
+});
+
+test("input footer: the prompt is BOXED by a rule above AND below, status beneath", () => {
+  const c = render(<ChatApp yolo provider={new Echo()} />);
+  const lines = strip(c.lastFrame()).split("\n");
+  const promptIdx = lines.findIndex((l) => l.includes("Try:"));
+  const statusIdx = lines.findIndex((l) => l.includes("shift+tab to cycle"));
+  expect(promptIdx).toBeGreaterThanOrEqual(1);
+  expect(lines[promptIdx - 1]).toMatch(/─{5,}/);   // rule ABOVE the prompt
+  expect(lines[promptIdx + 1]).toMatch(/─{5,}/);   // rule BELOW the prompt - the input stays boxed (both bars)
+  expect(statusIdx).toBe(promptIdx + 2);           // status sits just under the lower rule
+  c.unmount();
+});
+
 test("fullscreen find: Ctrl+F opens the find bar and typing shows a match badge", async () => {
   const prev = process.env.NEKO_FULLSCREEN;
   process.env.NEKO_FULLSCREEN = "1";

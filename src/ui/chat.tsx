@@ -698,6 +698,26 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     frameDiffer?.setBand(fullscreen ? { top: 1, height: viewH } : null);
     return () => frameDiffer?.setBand(null);
   }, [fullscreen, viewH]);
+  // Leaving fullscreen -> inline: wipe the primary and remount <Static> so the thread prints exactly ONCE.
+  // Leaving the alt screen restores the primary buffer to whatever it held before we entered - including
+  // the PREVIOUS toggle's inline reprint - and then <Static> (which unmounts in fullscreen) remounts and
+  // re-emits every line on top, stacking another full copy of the transcript + welcome banner on each
+  // toggle (image #41). Same wipe+remount the resize handler uses. Runs on the ON->OFF edge only; the
+  // inline->fullscreen direction enters a fresh alt buffer with nothing to stack. Skips the first mount.
+  const wasFullscreenRef = useRef(fullscreen);
+  useEffect(() => {
+    const was = wasFullscreenRef.current;
+    wasFullscreenRef.current = fullscreen;
+    if (was && !fullscreen) {
+      clearScreen?.();                                 // Ink's safe clear (resets its log-update counters)
+      // wipe the restored-primary's stale reprint, AND re-hide the cursor. leaveAltScreen (alt teardown)
+      // writes SHOW_CURSOR - right when the app EXITS, wrong on a toggle: we stay in Ink, which draws its
+      // own block caret and keeps the real cursor hidden, so a shown one just blinks stray below the status
+      // bar (the green bar in image #42). Ink hides once at mount and won't re-hide, so we do it here.
+      (stdout as any)?.write?.("\x1b[2J\x1b[H\x1b[?25l");
+      setResizeKey((k) => k + 1);                      // remount Static so it re-emits fresh on the clean screen
+    }
+  }, [fullscreen]);
   // Fill the scrollback echo (see runChat): the last ~24 transcript lines as plain text, so leaving
   // fullscreen leaves the recent conversation on the primary screen instead of a blank prompt. Only in
   // fullscreen (inline already lives in the scrollback); a ref read at teardown, no per-render cost.
