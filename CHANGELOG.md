@@ -6,6 +6,15 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-07-06
+
+### Changed
+- The executable icon is now the mascot EXACTLY as it appears in the banner: the ハ・・マ pixels are
+  extracted 1:1 from `neko-core-banner.png` (`assets/mascot-art.txt`) and rendered in brand orange -
+  no redrawn approximation. Downscaling uses coverage sampling so thin strokes survive at 16px.
+- New `assets/social-preview.png` (1280x640, dark) for the GitHub social card: the banner recolored -
+  orange mascot + white NEKO CORE (upload via Settings -> Social preview).
+
 ## [0.7.2] — 2026-07-06
 
 ### Changed
