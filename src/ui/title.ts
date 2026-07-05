@@ -39,7 +39,21 @@ export function saveTitle(): void {
 export function restoreTitle(): void {
   if (out().isTTY) out().write(POP_TITLE);
 }
+// On Windows, set the actual CONSOLE title too (not just the OSC 2 escape). Under ConPTY (Windows
+// Terminal), the shell set the console title ("Windows PowerShell 5.1") via the Win32 API, and ConPTY
+// keeps syncing THAT to the tab - overriding our OSC 2, which never touched the console title. So the tab
+// branded for a blink, then reverted. SetConsoleTitleW makes the console title OURS, so the sync agrees.
+let nativeSetTitle: ((title: string) => void) | null = null;
+if (process.platform === "win32") {
+  try {
+    const { dlopen, FFIType, ptr } = require("bun:ffi");
+    const k32 = dlopen("kernel32.dll", { SetConsoleTitleW: { args: [FFIType.ptr], returns: FFIType.i32 } });
+    nativeSetTitle = (t: string) => { try { k32.symbols.SetConsoleTitleW(ptr(Buffer.from(t + "\0", "utf16le"))); } catch { /* best effort */ } };
+  } catch { /* FFI unavailable - OSC 2 alone */ }
+}
+
 /** Set the tab title now. No-op off-TTY (tests, pipes). */
 export function setTerminalTitle(title: string): void {
   if (out().isTTY) out().write(titleSeq(title));
+  nativeSetTitle?.(title); // Windows: also set the console title so ConPTY's sync keeps it (not the shell's)
 }
