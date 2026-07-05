@@ -6,6 +6,12 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Ink is told `interactive: true` explicitly: a shell that exports `CI=true` (or any CI-ish env var) no
+  longer freezes the UI — Ink's is-in-ci detection used to stop frame writes even on a real TTY. The same
+  detection made every UI test silently blank on GitHub runners; the suite now forces interactive in its
+  render harnesses and passes identically with and without CI env vars.
+
 ## [0.7.0] — 2026-07-06
 
 The fullscreen release: Neko's terminal UI became an app-owned, flicker-free viewport — built through

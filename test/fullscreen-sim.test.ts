@@ -6,7 +6,7 @@
  * reproduction harness for the class of bugs that only real terminals used to reveal.
  */
 import { EventEmitter } from "node:events";
-import { afterAll, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { render } from "ink";
 import React from "react";
 
@@ -31,9 +31,16 @@ class FakeStdin extends EventEmitter {
 }
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// These tests force NEKO_FULLSCREEN=1; restore the suite baseline (setup.ts sets "0" = inline) afterward
-// so the flag doesn't leak into later files whose ChatApp renders assume inline mode.
-afterAll(() => { process.env.NEKO_FULLSCREEN = "0"; });
+/** render() with fullscreen latched ON + Ink forced interactive. The env flag exists only for the
+ * SYNCHRONOUS render call (the mode latches in a useState initializer at mount), then the suite baseline
+ * "0" is restored before any await - so bun's test scheduling (files can interleave at await points on
+ * CI runners, >=1.3.14) can never observe a leaked "1" from this file. `interactive: true` because Ink
+ * otherwise detects CI (is-in-ci) and stops writing frames entirely - on GitHub runners the sims'
+ * VirtualTerminal stayed BLANK and every assertion failed. */
+function renderFS(node: any, options: any) {
+  process.env.NEKO_FULLSCREEN = "1";
+  try { return render(node, { ...options, interactive: true }); } finally { process.env.NEKO_FULLSCREEN = "0"; }
+}
 
 test("fullscreen sim: startup, typing, grow and shrink never leave a black screen", async () => {
   const vt = new VirtualTerminal(100, 30);
@@ -45,9 +52,8 @@ test("fullscreen sim: startup, typing, grow and shrink never leave a black scree
     id: "sim", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: Array.from({ length: 8 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `noi dung sim ${i}` })),
   };
-  process.env.NEKO_FULLSCREEN = "1"; // fullscreen is the sole interactive mode - boot straight into it
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false }); // runChat's pre-render alt entry
-  const app = render(
+  const app = renderFS(
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "sim", frameDiffer: differ, preAltDispose }),
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
@@ -92,23 +98,17 @@ test("STARTUP-fullscreen sim: alt entered BEFORE the first render - content visi
     id: "boot", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: [{ role: "user", content: "boot-marker cau hoi" }, { role: "assistant", content: "boot-marker tra loi" }],
   };
-  const prev = process.env.NEKO_FULLSCREEN;
-  process.env.NEKO_FULLSCREEN = "1";
-  try {
-    const preAltDispose = installAltScreenGuard(out as any, { mouse: false }); // runChat's pre-render order
-    const app = render(
-      React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "boot", frameDiffer: differ, preAltDispose }),
-      { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
-    );
-    await tick(500); // startup + warm settle - NO input at all
-    expect(vt.isBlank()).toBe(false);                 // the screen is NOT black
-    expect(vt.text()).toContain("boot-marker tra loi"); // the transcript is actually painted
-    expect(vt.text()).toContain(">");                  // the input chrome too
-    app.unmount();
-    await tick(50);
-  } finally {
-    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
-  }
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false }); // runChat's pre-render order
+  const app = renderFS(
+    React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "boot", frameDiffer: differ, preAltDispose }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(500); // startup + warm settle - NO input at all
+  expect(vt.isBlank()).toBe(false);                 // the screen is NOT black
+  expect(vt.text()).toContain("boot-marker tra loi"); // the transcript is actually painted
+  expect(vt.text()).toContain(">");                  // the input chrome too
+  app.unmount();
+  await tick(50);
 }, 30000);
 
 test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for Ctrl+C", async () => {
@@ -121,9 +121,8 @@ test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for
     id: "sel", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: [{ role: "user", content: "SELECTME a unique line" }, { role: "assistant", content: "a reply here" }],
   };
-  process.env.NEKO_FULLSCREEN = "1";
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
-  const app = render(
+  const app = renderFS(
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "sel", frameDiffer: differ, preAltDispose }),
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
@@ -158,9 +157,8 @@ test("slash menu on a SHORT window keeps the input row + first items (chrome nev
   const msgs: any[] = [];
   for (let i = 0; i < 10; i++) msgs.push({ role: "user", content: `q${i}` }, { role: "assistant", content: `a${i}` });
   const session: any = { id: "slash", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
-  process.env.NEKO_FULLSCREEN = "1";
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
-  const app = render(
+  const app = renderFS(
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "slash", frameDiffer: differ, preAltDispose }),
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
@@ -201,9 +199,8 @@ test("/resume picker while SCROLLED UP renders names intact (no flex-squash, no 
     const msgs: any[] = [];
     for (let i = 0; i < 30; i++) msgs.push({ role: "user", content: `cau hoi ${i}` }, { role: "assistant", content: `tra loi dai dong so ${i}` });
     const session: any = { id: "cur", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
-    process.env.NEKO_FULLSCREEN = "1";
     const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
-    const app = render(
+    const app = renderFS(
       React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "", tool_calls: [] }) }, resumedSession: session, sessionId: "cur", frameDiffer: differ, preAltDispose }),
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
     );

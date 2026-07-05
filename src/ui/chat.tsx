@@ -1716,6 +1716,10 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     // (synchronized output) so redraws are atomic - no flicker, no Windows scrollback yank.
     {
       exitOnCtrlC: false, // we require a double Ctrl-C
+      // Explicit: Ink otherwise consults is-in-ci and DISABLES interactive rendering (stops writing
+      // frames) whenever a CI-ish env var is set - even on a real TTY. runChat already requires a TTY,
+      // so a user whose shell exports CI=true still gets the full UI instead of a frozen screen.
+      interactive: true,
       stdout: wrapStdoutForSync(process.stdout, { supported: syncSupported, differ }),
       // Ink defaults to 30fps (a ~34ms render throttle - felt as typing latency). The chrome frame is
       // tiny (the viewport band is blank in Ink; the differ owns it), so the resolved rate - the

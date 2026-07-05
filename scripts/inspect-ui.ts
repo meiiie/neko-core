@@ -41,7 +41,7 @@ process.env.NEKO_FULLSCREEN = "1";
 const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
 const app = render(
   React.createElement(ChatApp as any, { yolo: true, provider: new MdStream(), sessionId: "inspect", frameDiffer: differ, preAltDispose }),
-  { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
 );
 await tick(300);
 dump("STARTUP (fullscreen, fresh)", vt);

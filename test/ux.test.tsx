@@ -27,6 +27,15 @@ async function until(c: { frames: string[] }, pred: (allFrames: string) => boole
   return pred(strip(c.frames.join("\n")));
 }
 
+/** Render with fullscreen latched ON. The env flag exists ONLY for the synchronous render() call (the
+ * mode is read once in a useState initializer at mount), then the suite baseline "0" is restored before
+ * any await - so bun's test scheduling (files can interleave at await points on CI, >=1.3.14) can never
+ * observe a leaked "1" from this file. */
+function renderFullscreen(node: any) {
+  process.env.NEKO_FULLSCREEN = "1";
+  try { return render(node); } finally { process.env.NEKO_FULLSCREEN = "0"; }
+}
+
 class Echo implements Provider {
   async complete(_m: any, _t: any, onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
     onDelta?.("hello");
@@ -133,20 +142,16 @@ test("/transcript opens the full-thread viewer over the resumed session", async 
 });
 
 test("fullscreen mode renders a scrollable transcript region (alt-screen), inline stays default", async () => {
-  const prev = process.env.NEKO_FULLSCREEN;
-  process.env.NEKO_FULLSCREEN = "1";
-  try {
+  {
     const msgs: any[] = [];
     for (let i = 0; i < 40; i++) { msgs.push({ role: "user", content: `question ${i}` }); msgs.push({ role: "assistant", content: `answer ${i}` }); }
     const s: any = { id: "fs", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
-    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+    const c = renderFullscreen(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
     await tick(150);
     const f = strip(c.frames.join("\n"));
     expect(f).toContain("\x1b[?1049h"); // entered the alternate screen
     expect(f).toContain("answer 39");   // rich transcript, sticky-bottom -> newest content visible
     c.unmount();
-  } finally {
-    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
   }
 });
 
@@ -205,13 +210,11 @@ test("ansi-cache: renderLineRows renders a line rich once; fallback is instant p
 });
 
 test("fullscreen history: PgUp shows the jump pill; a new turn counts; End returns to the tail", async () => {
-  const prev = process.env.NEKO_FULLSCREEN;
-  process.env.NEKO_FULLSCREEN = "1";
-  try {
+  {
     const msgs: any[] = [];
     for (let i = 0; i < 30; i++) { msgs.push({ role: "user", content: `q ${i}` }); msgs.push({ role: "assistant", content: `a ${i}` }); }
     const s: any = { id: "pill", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
-    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+    const c = renderFullscreen(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
     await tick(120);
     c.stdin.write("\x1b[5~"); // PgUp -> scroll up (line-anchored; flush is coalesced ~33ms)
     expect(await until(c, (f) => /Jump to bottom \(ctrl\+End\)/.test(f))).toBe(true);
@@ -225,8 +228,6 @@ test("fullscreen history: PgUp shows the jump pill; a new turn counts; End retur
       return frames.some((x) => x.includes("hello")) && !/Jump to bottom/.test(frames.slice(-30).join("\n"));
     })).toBe(true);
     c.unmount();
-  } finally {
-    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
   }
 });
 
@@ -266,13 +267,11 @@ test("tab title is the session NAME (first message), stable - not each per-turn 
 });
 
 test("fullscreen find: Ctrl+F opens the find bar and typing shows a match badge", async () => {
-  const prev = process.env.NEKO_FULLSCREEN;
-  process.env.NEKO_FULLSCREEN = "1";
-  try {
+  {
     const msgs: any[] = [];
     for (let i = 0; i < 20; i++) { msgs.push({ role: "user", content: `question ${i}` }); msgs.push({ role: "assistant", content: `answer NEEDLE ${i}` }); }
     const s: any = { id: "fsf", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
-    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+    const c = renderFullscreen(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
     await tick(120);
     c.stdin.write("\x06"); // Ctrl+F -> open find
     await tick(60);
@@ -282,8 +281,6 @@ test("fullscreen find: Ctrl+F opens the find bar and typing shows a match badge"
     expect(f).toContain("find:");
     expect(f).toMatch(/\d+\/\d+/); // match badge like "1/20"
     c.unmount();
-  } finally {
-    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
   }
 });
 
@@ -443,11 +440,9 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
   // that from inside the main app's React commit/effect phase makes Ink defer the hidden root's commit,
   // so its "synchronous" frame comes back EMPTY - the band stayed blank until the reply committed (the
   // "stream shows nothing / raw ** until done" bug). The fix renders it on a macrotask, off the flush.
-  const prev = process.env.NEKO_FULLSCREEN;
-  process.env.NEKO_FULLSCREEN = "1";
   const provider = new MdHang();
   try {
-    const c = render(<ChatApp yolo provider={provider} />);
+    const c = renderFullscreen(<ChatApp yolo provider={provider} />);
     await tick(60);
     c.stdin.write("go");
     await tick(20);
@@ -463,6 +458,5 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     c.unmount();
   } finally {
     provider.cancelled = true; // stop the hang so no timer outlives the test
-    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
   }
 }, 15000); // generous wall-clock: streaming + per-delta hidden-instance renders can run slow under suite load
