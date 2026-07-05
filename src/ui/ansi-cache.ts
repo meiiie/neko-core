@@ -47,16 +47,20 @@ function ensureHidden(width: number): Hidden {
   return hidden;
 }
 
-/** Render one Line to its styled rows at `width`. Synchronous (the hidden Ink commits in-line). */
-export function renderLineRows(line: Line, width: number, cfg: NekoConfig): string[] {
+/** Render any React node to styled ANSI rows at `width` via the hidden Ink instance. Synchronous. */
+export function renderNodeRows(node: any, width: number): string[] {
   const h = ensureHidden(width);
   h.out.buf.length = 0;
-  h.rerender(createElement(Box, { width, flexDirection: "column" }, createElement(TranscriptLine as any, { line, cfg, cols: width })));
+  h.rerender(createElement(Box, { width, flexDirection: "column" }, node));
   const frame = h.out.buf.length ? h.out.buf[h.out.buf.length - 1] : "";
-  // Ink writes the full frame; split to rows and drop the single trailing newline artifact.
   const rows = frame.split("\n");
   while (rows.length && rows[rows.length - 1] === "") rows.pop();
   return rows.length ? rows : [" "];
+}
+
+/** Render one Line to its styled rows at `width`. Synchronous (the hidden Ink commits in-line). */
+export function renderLineRows(line: Line, width: number, cfg: NekoConfig): string[] {
+  return renderNodeRows(createElement(TranscriptLine as any, { line, cfg, cols: width }), width);
 }
 
 /** Cheap synchronous fallback for a line whose rich rows haven't been warmed yet: one plain row in the

@@ -404,3 +404,14 @@ test("Ctrl+C clears a non-empty input (does not exit)", async () => {
   expect(strip(c.lastFrame())).not.toContain("some draft text");
   c.unmount();
 });
+
+test("renderNodeRows renders live Markdown to ANSI rows (no raw ** markers) - the fullscreen stream path", async () => {
+  const { renderNodeRows } = await import("../src/ui/ansi-cache.ts");
+  const { Markdown } = await import("../src/ui/markdown.tsx");
+  const rows = renderNodeRows(<Markdown text={"# Tiêu đề\n\n**đậm** và thường"} width={40} compact />, 40);
+  const flat = rows.join("\n");
+  expect(flat).toContain("Tiêu đề");     // heading text rendered
+  expect(flat).toContain("đậm");          // bold text rendered...
+  expect(flat).not.toContain("**");       // ...WITHOUT the raw ** markers (the streaming bug)
+  expect(flat).not.toContain("# ");       // heading marker consumed too
+});

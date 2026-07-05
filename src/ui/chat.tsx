@@ -25,7 +25,7 @@ import { FrameDiffer } from "./frame-diff.ts";
 import { canFullscreen, emergencyRestore, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
-import { clearAnsiCache, fallbackRows, getCachedRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
+import { clearAnsiCache, fallbackRows, getCachedRows, renderNodeRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
 import { DISABLE_MOUSE, isMouseEnabled, parseClick, parseLastPointer, parseWheelAll } from "./mouse.ts";
 import { saveTitle, setTerminalTitle } from "./title.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
@@ -639,6 +639,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const next = !fullscreen;
     if (next) {
       if (!altDisposeRef.current) altDisposeRef.current = installAltScreenGuard(out, { mouse: isMouseEnabled() });
+      // Prime the differ's band SYNCHRONOUSLY, before the re-render, with the content we already have
+      // (ansiRows is computed every render now). Otherwise the first fullscreen frame is processed with
+      // an empty band -> a black viewport until a keypress forces the band-content effect + a repaint.
+      frameDiffer?.setBand({ top: 1, height: viewH });
+      frameDiffer?.setBandContent(paddedRowsRef.current, 0, streamRowsRef.current);
     } else {
       altDisposeRef.current?.();
       altDisposeRef.current = null;
@@ -1191,12 +1196,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // once off-screen; the viewport pastes cached string rows. Unwarmed lines show a plain fallback row
   // and upgrade in place as the background warmer (newest-first, idle chunks) fills the cache.
   const [warmTick, setWarmTick] = useState(0); // bumped per warm chunk -> rows rebuild with upgrades
+  // Computed ALWAYS (not gated on fullscreen): cheap (cached rows, else plain fallback - no markdown
+  // work), and it means the band content is READY the instant /fullscreen is toggled on, instead of
+  // being empty until the next render (which showed a black band until a keypress - image, toggle bug).
   const ansiRows = useMemo(() => {
-    if (!fullscreen) return [] as string[];
     const out: string[] = [];
     for (const l of lines) out.push(...(getCachedRows(l, contentCols) ?? fallbackRows(l)));
     return out;
-  }, [fullscreen, lines, contentCols, warmTick]);
+  }, [lines, contentCols, warmTick]);
   // Row scrolling anchored from the END (dist=0 -> pinned): stays put as the warmer swaps rows above.
   // Glide hops repaint the band DIRECTLY through the differ (sub-ms) - React renders only at gesture
   // edges. The refs keep the hop callback reading current values without restarting the animation.
@@ -1234,19 +1241,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   paddedRowsRef.current = paddedRows;
   bandActiveRef.current = fullscreen && !search;
   // The STREAMING reply lives IN the band, right under the committed rows - text appears exactly where
-  // it will finally sit and flows top-down, matching the inline standard (the reply used to preview in
-  // the chrome below the viewport and then JUMP into the band on commit - read as "generating bottom-
-  // up"). Plain-wrapped while live; the styled rows replace it at commit via the ANSI cache.
+  // it will finally sit and flows top-down, matching inline. Rendered as MARKDOWN LIVE (same compact
+  // Markdown as inline), so **bold**/##/tables format AS they stream instead of showing raw markers
+  // until commit. Rendered through the hidden Ink instance to ANSI rows; the tail is clamped so a long
+  // reply's render cost is bounded (O(viewport), not O(reply)). marginTop separator matches inline.
   const streamRows = useMemo(() => {
     if (!fullscreen || !stream) return [] as string[];
-    const width = Math.max(8, contentCols - 2);
-    const out: string[] = [""]; // a blank separator, like the inline stream block's top margin
-    for (const raw of stream.split("\n")) {
-      if (!raw.length) { out.push(""); continue; }
-      for (let i = 0; i < raw.length; i += width) out.push("  " + raw.slice(i, i + width));
-    }
-    return out;
-  }, [fullscreen, stream, contentCols]);
+    const md = clampToRows(renderTail(stream), Math.max(6, viewH - 2), contentCols);
+    const rows = renderNodeRows(<Box marginTop={1} flexDirection="column"><Markdown text={md} width={contentCols - 2} compact /></Box>, contentCols);
+    return rows.map((r) => (r.length ? "  " + r : r)); // left gutter, matching the committed rows
+  }, [fullscreen, stream, contentCols, viewH]);
   const streamRowsRef = useRef<string[]>([]);
   streamRowsRef.current = streamRows;
   useEffect(() => {
