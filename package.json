@@ -1,18 +1,25 @@
 {
   "name": "neko-core",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Mot chu meo trong terminal, chi muon meo meo - va lam viec. Local-first, config-first, offline-capable.",
   "type": "module",
   "license": "MIT",
   "author": "The Wiii Lab",
-  "keywords": ["llm", "agent", "cli", "local-first", "offline", "coding-agent"],
+  "keywords": [
+    "llm",
+    "agent",
+    "cli",
+    "local-first",
+    "offline",
+    "coding-agent"
+  ],
   "bin": {
     "neko": "bin/neko.ts",
     "neko-core": "bin/neko.ts"
   },
   "scripts": {
     "neko": "bun bin/neko.ts",
-    "build": "bun build --compile --tsconfig-override tsconfig.build.json --define process.env.NODE_ENV=\"'production'\" --outfile dist/neko bin/neko.ts && dist/neko __uiprobe",
+    "build": "bun build --compile --tsconfig-override tsconfig.build.json --define process.env.NODE_ENV=\"'production'\" --windows-icon=assets/neko.ico --windows-title=\"Neko Core\" --windows-publisher=\"The Wiii Lab\" --windows-version=$npm_package_version --windows-description=\"Neko Core\" --windows-copyright=\"MIT (c) 2026 The Wiii Lab\" --outfile dist/neko bin/neko.ts && dist/neko __uiprobe",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "typecheck:stable": "bun node_modules/typescript5/bin/tsc --noEmit"

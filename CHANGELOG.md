@@ -6,11 +6,22 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-07-06
+
+### Added
+- **Branded Windows executable** — the compiled `neko.exe` now carries proper PE metadata: Task Manager
+  shows **Neko Core** (was "Bun"), Explorer shows the pixel-cat icon, and file properties list The Wiii
+  Lab, the version, and the MIT copyright. The icon is *generated from code*
+  (`scripts/make-icon.ts` → `assets/neko.ico`, 16-256px) — reviewable pixel art in the brand orange, no
+  opaque binary blobs.
+
 ### Fixed
 - Ink is told `interactive: true` explicitly: a shell that exports `CI=true` (or any CI-ish env var) no
   longer freezes the UI — Ink's is-in-ci detection used to stop frame writes even on a real TTY. The same
   detection made every UI test silently blank on GitHub runners; the suite now forces interactive in its
   render harnesses and passes identically with and without CI env vars.
+- UI tests pass the mode explicitly (a tests-only `fullscreen` prop) — bun ≥1.3.14 test scheduling made
+  cross-file env mutation and even the bunfig preload unreliable.
 
 ## [0.7.0] — 2026-07-06
 
