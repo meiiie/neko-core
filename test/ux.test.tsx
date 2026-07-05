@@ -43,6 +43,19 @@ class Reasoner implements Provider {
   }
 }
 
+// Streams a markdown reply token-by-token, then HANGS before returning - so the reply stays LIVE
+// (uncommitted): anything the frame shows can only have come from the streaming band, not a commit.
+// `cancel` breaks the hang so the test tears down cleanly (no dangling timer to pressure other tests).
+const MD_REPLY = "Đây là **tổng hợp** hôm nay:\n\n## Nga - Ukraine\n\n- Cuộc gọi **Trump - Putin**\n\nBạn muốn đi sâu?";
+class MdHang implements Provider {
+  cancelled = false;
+  async complete(_m: any, _t: any, onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
+    for (const tok of MD_REPLY.match(/\S+\s*|\n/g) ?? []) { if (this.cancelled) break; onDelta?.(tok); await tick(6); }
+    for (let i = 0; i < 200 && !this.cancelled; i++) await tick(15); // hang until the test cancels it
+    return { content: MD_REPLY, tool_calls: [], usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 } };
+  }
+}
+
 test("status bar shows mode + context %", () => {
   const c = render(<ChatApp yolo provider={new Echo()} />);
   const f = strip(c.lastFrame());
@@ -414,4 +427,33 @@ test("renderNodeRows renders live Markdown to ANSI rows (no raw ** markers) - th
   expect(flat).toContain("đậm");          // bold text rendered...
   expect(flat).not.toContain("**");       // ...WITHOUT the raw ** markers (the streaming bug)
   expect(flat).not.toContain("# ");       // heading marker consumed too
+});
+
+test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance flush regression)", async () => {
+  // The live stream renders markdown through the SHARED hidden Ink instance (renderNodeRows). Calling
+  // that from inside the main app's React commit/effect phase makes Ink defer the hidden root's commit,
+  // so its "synchronous" frame comes back EMPTY - the band stayed blank until the reply committed (the
+  // "stream shows nothing / raw ** until done" bug). The fix renders it on a macrotask, off the flush.
+  const prev = process.env.NEKO_FULLSCREEN;
+  process.env.NEKO_FULLSCREEN = "1";
+  const provider = new MdHang();
+  try {
+    const c = render(<ChatApp yolo provider={provider} />);
+    await tick(60);
+    c.stdin.write("go");
+    await tick(20);
+    c.stdin.write("\r");
+    // Wait for the WHOLE reply to reach the live band (last line present) - provider is still hanging,
+    // nothing committed. Assert against lastFrame (current screen), so mid-stream partial markers don't leak.
+    for (let i = 0; i < 120 && !/Bạn muốn đi sâu/.test(strip(c.lastFrame())); i++) await tick(25);
+    const f = strip(c.lastFrame());
+    expect(f).toContain("Nga - Ukraine"); // ## header rendered live (not blank, not committed)
+    expect(f).toContain("tổng hợp");       // earlier **bold** rendered live
+    expect(f).not.toContain("## ");        // header marker consumed - it is FORMATTED, not raw
+    expect(f).not.toContain("**");         // all bold markers closed and rendered
+    c.unmount();
+  } finally {
+    provider.cancelled = true; // stop the hang so no timer outlives the test
+    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
+  }
 });

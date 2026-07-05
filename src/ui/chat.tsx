@@ -1240,19 +1240,29 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const paddedRows = useMemo(() => ansiRows.map((r) => (r.length ? "  " + r : r)), [ansiRows]);
   paddedRowsRef.current = paddedRows;
   bandActiveRef.current = fullscreen && !search;
-  // The STREAMING reply lives IN the band, right under the committed rows - text appears exactly where
-  // it will finally sit and flows top-down, matching inline. Rendered as MARKDOWN LIVE (same compact
-  // Markdown as inline), so **bold**/##/tables format AS they stream instead of showing raw markers
-  // until commit. Rendered through the hidden Ink instance to ANSI rows; the tail is clamped so a long
-  // reply's render cost is bounded (O(viewport), not O(reply)). marginTop separator matches inline.
-  const streamRows = useMemo(() => {
-    if (!fullscreen || !stream) return [] as string[];
-    const md = clampToRows(renderTail(stream), Math.max(6, viewH - 2), contentCols);
-    const rows = renderNodeRows(<Box marginTop={1} flexDirection="column"><Markdown text={md} width={contentCols - 2} compact /></Box>, contentCols);
-    return rows.map((r) => (r.length ? "  " + r : r)); // left gutter, matching the committed rows
-  }, [fullscreen, stream, contentCols, viewH]);
+  // The STREAMING reply lives IN the band, right under the committed rows - text appears where it will
+  // finally sit and flows top-down, matching inline. Rendered as MARKDOWN LIVE (same compact Markdown as
+  // inline), so **bold**/##/tables format AS they stream, not raw until commit. Computed in an EFFECT
+  // (not during render): renderNodeRows drives the hidden Ink instance, which is a nested render that
+  // React forbids inside the parent's render phase (the "nested updates from render" warning). The tail
+  // is clamped so per-delta cost is O(viewport). `stream` state is already throttled, so is this.
+  const [streamRows, setStreamRows] = useState<string[]>([]);
   const streamRowsRef = useRef<string[]>([]);
   streamRowsRef.current = streamRows;
+  useEffect(() => {
+    if (!fullscreen || !stream) { if (streamRowsRef.current.length) setStreamRows([]); return; }
+    const md = clampToRows(renderTail(stream), Math.max(6, viewH - 2), contentCols);
+    // Render on a macrotask, OUTSIDE React's commit/effect phase. renderNodeRows drives a SECOND Ink
+    // reconciler (the hidden instance); calling it from inside this effect leaves the main app mid-flush,
+    // and Ink defers the hidden root's commit -> its synchronous frame comes back EMPTY (bufLen=0, blank
+    // stream). setTimeout(0) runs after the main flush settles (the same trick the cache warmer relies on),
+    // so the hidden commit is synchronous and the frame is real. clearTimeout coalesces rapid deltas.
+    const id = setTimeout(() => {
+      const rows = renderNodeRows(<Box marginTop={1} flexDirection="column"><Markdown text={md} width={contentCols - 2} compact /></Box>, contentCols);
+      setStreamRows(rows.map((r) => (r.length ? "  " + r : r))); // left gutter, matching the committed rows
+    }, 0);
+    return () => clearTimeout(id);
+  }, [fullscreen, stream, contentCols, viewH]);
   useEffect(() => {
     frameDiffer?.setBandContent(bandActiveRef.current ? paddedRows : null, rowScroll.dist, streamRows);
   }, [fullscreen, search !== null, paddedRows, rowScroll.dist, viewH, streamRows]);
