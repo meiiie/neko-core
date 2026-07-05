@@ -62,10 +62,13 @@ export function parseClick(input: string): { x: number; y: number } | null {
   return { x: parseInt(m[2], 10), y: parseInt(m[3], 10) };
 }
 
-export interface PointerEvent { x: number; y: number; kind: "wheel" | "press" | "release" | "move" }
+export interface PointerEvent { x: number; y: number; kind: "wheel" | "press" | "release" | "move"; left: boolean }
 
 /** The LAST pointer event in a chunk (bursts arrive concatenated; for hover only the newest position
- * matters). Any SGR report carries coordinates - wheel and clicks update the hover position too. */
+ * matters). Any SGR report carries coordinates - wheel and clicks update the hover position too. `left`
+ * is whether the LEFT button is the one in this report (low 2 bits == 0): true for a left press, a
+ * left-drag move (Cb 32), and a left release; false for a no-button hover move (Cb 35). Lets a drag
+ * (press -> left move -> release) be told apart from a bare hover for text selection. */
 export function parseLastPointer(input: string): PointerEvent | null {
   const re = /\x1b?\[<(\d+);(\d+);(\d+)([Mm])/g;
   let m: RegExpExecArray | null;
@@ -73,7 +76,7 @@ export function parseLastPointer(input: string): PointerEvent | null {
   while ((m = re.exec(input))) {
     const cb = parseInt(m[1], 10);
     const kind: PointerEvent["kind"] = cb & 64 ? "wheel" : cb & 32 ? "move" : m[4] === "M" ? "press" : "release";
-    last = { x: parseInt(m[2], 10), y: parseInt(m[3], 10), kind };
+    last = { x: parseInt(m[2], 10), y: parseInt(m[3], 10), kind, left: (cb & 3) === 0 };
   }
   return last;
 }

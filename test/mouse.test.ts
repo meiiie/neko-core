@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 import { isMouseEnabled, parseClick, parseLastPointer, parseWheelAll } from "../src/ui/mouse.ts";
 
-test("parseLastPointer: last event of a burst wins; kinds classified (move/press/release/wheel)", () => {
-  expect(parseLastPointer("\x1b[<35;10;5M")).toEqual({ x: 10, y: 5, kind: "move" });     // any-motion, no button
-  expect(parseLastPointer("\x1b[<32;4;6M")).toEqual({ x: 4, y: 6, kind: "move" });       // motion + left held
-  expect(parseLastPointer("\x1b[<0;7;8M")).toEqual({ x: 7, y: 8, kind: "press" });
-  expect(parseLastPointer("\x1b[<0;7;8m")).toEqual({ x: 7, y: 8, kind: "release" });
-  expect(parseLastPointer("\x1b[<64;1;2M")).toEqual({ x: 1, y: 2, kind: "wheel" });
-  expect(parseLastPointer("[<35;1;1M[<35;9;9M")).toEqual({ x: 9, y: 9, kind: "move" });  // burst: LAST position
+test("parseLastPointer: last event of a burst wins; kinds classified + left-button state", () => {
+  expect(parseLastPointer("\x1b[<35;10;5M")).toEqual({ x: 10, y: 5, kind: "move", left: false }); // any-motion, no button
+  expect(parseLastPointer("\x1b[<32;4;6M")).toEqual({ x: 4, y: 6, kind: "move", left: true });    // motion + left held (drag)
+  expect(parseLastPointer("\x1b[<0;7;8M")).toEqual({ x: 7, y: 8, kind: "press", left: true });
+  expect(parseLastPointer("\x1b[<0;7;8m")).toEqual({ x: 7, y: 8, kind: "release", left: true });
+  expect(parseLastPointer("\x1b[<64;1;2M")).toEqual({ x: 1, y: 2, kind: "wheel", left: true });
+  expect(parseLastPointer("[<35;1;1M[<35;9;9M")).toEqual({ x: 9, y: 9, kind: "move", left: false }); // burst: LAST position
   expect(parseLastPointer("hello")).toBe(null);
 });
 

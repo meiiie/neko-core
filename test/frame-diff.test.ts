@@ -108,6 +108,32 @@ test("fullscreen scroll UP uses SD and paints the top rows", () => {
   expect(scr.lines(11)).toEqual(C);
 });
 
+test("parseInkPayload rejects an OSC 52 clipboard write (must pass through, not be spliced into the band)", () => {
+  expect(parseInkPayload("\x1b]52;c;" + Buffer.from("Nga - Ukraine").toString("base64") + "\x07")).toBe(null);
+});
+
+test("selection: screenText extracts on-screen text; setSelection highlights the region (inverse)", () => {
+  const d = new FrameDiffer();
+  const writes: string[] = [];
+  d.setWriter((s) => writes.push(s));
+  d.setBand({ top: 1, height: 3 });
+  d.setBandContent(["  hello world", "  second line", "  third row"], 0); // 2-space gutter + content
+  d.process(["", "", "", "> input"].join("\n"));  // Ink renders the band BLANK; compose splices the real rows into prev
+  // screenText reads the COMPOSED screen (1-based rows), stripped of SGR - what a copy should see.
+  expect(d.screenText(1, 1)[0]).toBe("  hello world");
+  expect(d.screenText(1, 3)).toEqual(["  hello world", "  second line", "  third row"]);
+  // A selection over row 1, screen cols 3..7 = "hello" (after the 2-col gutter) must emit inverse video.
+  writes.length = 0;
+  d.setSelection({ r0: 1, c0: 3, r1: 1, c1: 7 });
+  const out = writes.join("");
+  expect(out).toContain("\x1b[7m");   // inverse opened at the selection start
+  expect(out).toContain("\x1b[27m");  // and closed at its end
+  // Clearing repaints the row WITHOUT inverse.
+  writes.length = 0;
+  d.setSelection(null);
+  expect(writes.join("")).toContain("hello world");
+});
+
 test("neutral control writes (Ink's own BSU/ESU, cursor hide/show) do NOT reset the baseline", () => {
   const d = new FrameDiffer();
   const A = ["x", "y"], B = ["x", "y2"];

@@ -32,10 +32,11 @@ export function parseInkPayload(p: string): { eraseCount: number; frame: string 
   const eraseCount = m[1] ? (m[1].match(/\x1b\[2K/g) ?? []).length : 0;
   const frame = p.slice(m[1]?.length ?? 0);
   if (frame.length === 0) return null;
-  // A frame is text + SGR color codes + newlines. Any cursor-movement/erase/scroll CSI inside means
-  // this is NOT a plain frame (alt-screen switches, wipes, Ink's clear...) - refuse to optimize rather
-  // than risk corruption. (OSC-only writes never reach here: titles bypass the wrapper.)
-  if (/\x1b\[[0-9;]*[ABCDEFGHJKSTr]/.test(frame)) return null;
+  // A frame is text + SGR color codes + newlines. Any cursor-movement/erase/scroll CSI - OR an OSC
+  // introducer (ESC ]) - means this is NOT a plain frame (alt-screen switches, wipes, Ink's clear, or a
+  // /copy OSC 52 clipboard write that goes through the wrapper): refuse to optimize and pass it through
+  // untouched rather than splice the band into it and eat it.
+  if (/\x1b\[[0-9;]*[ABCDEFGHJKSTr]/.test(frame) || frame.includes("\x1b]")) return null;
   return { eraseCount, frame };
 }
 
@@ -52,6 +53,24 @@ export class FrameDiffer {
    * absolute addressing. null = band detection off (inline). */
   setBand(band: ScrollBand | null): void { this.band = band; }
   reset(): void { this.prev = null; }
+
+  // Text selection (mouse drag-to-copy): a highlighted region over the band, in 1-based SCREEN coords.
+  // Because the band rows are full screen rows (2-space gutter + content), screen column X is visible
+  // column X-1 in the row string - no gutter math. The overlay is applied in windowRows(), so BOTH the
+  // Ink-frame compose path and the imperative repaint show it, and it updates through the normal diff.
+  private selection: { r0: number; c0: number; r1: number; c1: number } | null = null;
+  /** Highlight (inverse) a selection over the band; null clears it. Repaints so it shows immediately. */
+  setSelection(sel: { r0: number; c0: number; r1: number; c1: number } | null): void {
+    this.selection = sel;
+    this.repaintBand();
+  }
+  /** Plain text (ANSI stripped) of the CURRENT on-screen rows [top..bottom], 1-based inclusive. The
+   * selection overlay is SGR, so stripping leaves the real transcript text - what a copy should yield. */
+  screenText(top: number, bottom: number): string[] {
+    const out: string[] = [];
+    for (let y = top; y <= bottom; y++) out.push((this.prev?.[y - 1] ?? "").replace(/\x1b\[[0-9;]*m/g, ""));
+    return out;
+  }
 
   /** Sink for imperative repaints (wired by the stdout wrapper; wraps in BSU/ESU there). */
   setWriter(w: ((s: string) => void) | null): void { this.writer = w; }
@@ -87,6 +106,17 @@ export class FrameDiffer {
       slice.push(i < this.bandRows.length ? this.bandRows[i] : this.bandTail[i - this.bandRows.length]);
     }
     while (slice.length < H) slice.push("");
+    // Selection highlight: invert the selected columns of each row the drag covers (screen coords).
+    if (this.selection) {
+      const s = this.selection;
+      for (let i = 0; i < slice.length; i++) {
+        const y = this.band.top + i;
+        if (y < s.r0 || y > s.r1) continue;
+        const from = y === s.r0 ? s.c0 - 1 : 0;                  // 1-based screen col -> 0-based, inclusive
+        const to = y === s.r1 ? s.c1 : Number.MAX_SAFE_INTEGER;  // half-open end; whole row for middle rows
+        slice[i] = overlayInverse(slice[i], Math.max(0, from), to);
+      }
+    }
     return slice;
   }
 
@@ -195,6 +225,26 @@ function moveRel(from: number, to: number): string {
   if (to < from) return `${ESC}${from - to}A`;
   if (to > from) return `${ESC}${to - from}B`;
   return "";
+}
+
+/** Wrap the VISIBLE columns [from, to) of a styled row in inverse video (selection highlight), preserving
+ * the row's own SGR colours. Counts visible columns while passing SGR sequences through untouched, so the
+ * inverse opens/closes at the right screen columns even amid colour codes. Closes at row end if `to` runs
+ * past it (full-row / multi-row selections pass to = MAX). */
+function overlayInverse(row: string, from: number, to: number): string {
+  if (from >= to) return row;
+  let out = "", col = 0, i = 0, inv = false;
+  while (i < row.length) {
+    if (row[i] === "\x1b" && row[i + 1] === "[") {
+      const m = /^\x1b\[[0-9;]*[A-Za-z]/.exec(row.slice(i)); // an SGR/CSI sequence - copy through, no column
+      if (m) { out += m[0]; i += m[0].length; continue; }
+    }
+    if (col === from && !inv) { out += `${ESC}7m`; inv = true; }
+    if (col === to && inv) { out += `${ESC}27m`; inv = false; }
+    out += row[i]; col++; i++;
+  }
+  if (inv) out += `${ESC}27m`; // selection reached/overran the end of the row
+  return out;
 }
 
 /** Detect a uniform vertical shift of the band: returns {dir:"up",k} when the content moved UP by k
