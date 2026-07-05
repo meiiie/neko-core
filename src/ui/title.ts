@@ -18,10 +18,11 @@ export const POP_TITLE = "\x1b[23;0t";
  * (OSC 2), drawn by the terminal's own UI/emoji font, not the cp1252 screen buffer. Windows Terminal,
  * iTerm2, kitty et al. render it; a terminal that can't just shows a placeholder glyph in its own chrome. */
 export const TAB_ICON = "\u{1F431}";
-/** Branded tab title: "<icon> <name>" (e.g. "🐱 Neko Core"), with a leading dot while a turn runs so a
- * backgrounded tab still shows activity at a glance (the claude-code touch). */
+/** Branded tab title. Idle: "<icon> <name>" (the cat is home). Busy: the NAME ALONE - the cat "steps
+ * away" while a turn runs and returns when it finishes, a subtle at-a-glance running cue (owner-specified,
+ * Claude-Code-style restraint) instead of stacking extra glyphs. */
 export function brandTitle(name: string, busy = false): string {
-  return `${busy ? "● " : ""}${TAB_ICON} ${name}`;
+  return busy ? name : `${TAB_ICON} ${name}`;
 }
 
 /** OSC 2 sequence for a title (control chars stripped; kept short - tabs truncate anyway). */
@@ -46,7 +47,26 @@ export function restoreTitle(): void {
   if (out().isTTY && useTitleStack) out().write(POP_TITLE);
 }
 
+let lastTitle = ""; // what the tab SHOULD say right now (re-asserted by the keeper against clobbers)
+
 /** Set the tab title now. No-op off-TTY (tests, pipes). */
 export function setTerminalTitle(title: string): void {
+  lastTitle = title;
   if (out().isTTY) out().write(titleSeq(title));
+}
+
+/**
+ * Windows console-title keeper. On Windows the console title is SHARED, writable-by-API state: any child
+ * that attaches to our console (a powershell probe, a user-configured MCP stdio server, a shell hook) can
+ * clobber it via SetConsoleTitle, and ConPTY syncs THAT to the tab - our OSC 2 title silently vanishes
+ * (images #57/#58: the default title at startup until the first turn happened to re-set it). We hide our
+ * own children's consoles (windowsHide), but arbitrary MCP servers aren't ours to fix - so re-assert the
+ * last title on a slow heartbeat. ~30 bytes every 2s, Windows-only, only once a title has been set;
+ * unref'd so it never holds the process open. Returns a disposer.
+ */
+export function installTitleKeeper(intervalMs = 2000): () => void {
+  if (process.platform !== "win32") return () => {};
+  const t = setInterval(() => { if (lastTitle && out().isTTY) out().write(titleSeq(lastTitle)); }, intervalMs);
+  (t as any).unref?.();
+  return () => clearInterval(t);
 }

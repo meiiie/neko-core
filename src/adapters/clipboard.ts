@@ -17,7 +17,8 @@ import { join } from "node:path";
 export function writeClipboardText(text: string): boolean {
   try {
     if (process.platform === "win32") {
-      return spawnSync("clip", [], { input: Buffer.from(text, "utf16le") }).status === 0;
+      // windowsHide: keep console children off OUR console so they can't clobber its (tab) title.
+      return spawnSync("clip", [], { input: Buffer.from(text, "utf16le"), windowsHide: true }).status === 0;
     }
     if (process.platform === "darwin") {
       return spawnSync("pbcopy", [], { input: text }).status === 0;
@@ -34,7 +35,7 @@ export function readClipboardImage(): string | null {
   try {
     if (process.platform === "win32") {
       const ps = `Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $i=[System.Windows.Forms.Clipboard]::GetImage(); if($i){ $i.Save('${dest}'); 'ok' } else { '' }`;
-      const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf-8" });
+      const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf-8", windowsHide: true });
       return r.stdout?.trim() === "ok" && existsSync(dest) ? dest : null;
     }
     if (process.platform === "darwin") {

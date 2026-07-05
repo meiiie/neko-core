@@ -45,7 +45,9 @@ function saveCache(hz: number): void {
 function probe(cmd: string, args: string[], timeoutMs = 4000): Promise<string | null> {
   return new Promise((resolve) => {
     try {
-      const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "ignore"] });
+      // windowsHide: a console child (powershell) attaching to OUR console can clobber the shared console
+      // title, which ConPTY syncs to the tab - wiping the branded title. Hidden = no console = no clobber.
+      const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
       let out = "";
       const timer = setTimeout(() => { try { child.kill(); } catch { /* */ } resolve(null); }, timeoutMs);
       child.stdout.on("data", (d) => { out += String(d); });

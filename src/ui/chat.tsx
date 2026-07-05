@@ -27,7 +27,7 @@ import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.ts
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, renderNodeRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
 import { DISABLE_MOUSE, isMouseEnabled, parseLastPointer, parseWheelAll } from "./mouse.ts";
-import { brandTitle, saveTitle, setTerminalTitle } from "./title.ts";
+import { brandTitle, installTitleKeeper, saveTitle, setTerminalTitle } from "./title.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
@@ -276,7 +276,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Brand the tab title on mount - AFTER Ink's first render, when VT processing is on, so the OSC 2 write
   // reliably lands (a pre-render write can be dropped before the console enables VT). The session's name
   // (resumed name / first message) or "Neko Core"; it stays put - handle() only renames on the FIRST turn.
-  useEffect(() => { setTerminalTitle(brandTitle(titleTaskRef.current || "Neko Core")); }, []);
+  // The keeper then re-asserts it every 2s against console-title clobbers (see title.ts) until unmount.
+  useEffect(() => {
+    setTerminalTitle(brandTitle(titleTaskRef.current || "Neko Core"));
+    return installTitleKeeper();
+  }, []);
   // Effective UI fps: env > config > /fps pref > detected display Hz > 60. Auto mode probes the display
   // in the background on first run (subprocess, never blocks startup): the scroll glide adapts LIVE this
   // session; Ink's render cap (fixed at instance creation) picks the value up from the cache next launch.

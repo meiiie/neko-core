@@ -55,13 +55,37 @@ test("title sequences: OSC 2 set + xterm stack push/pop, control chars stripped"
   expect(POP_TITLE).toBe("\x1b[23;0t");
 });
 
-test("brandTitle: cat icon + name, a busy dot while a turn runs", async () => {
+test("brandTitle: cat icon when idle; the cat LEAVES while a turn runs (busy cue)", async () => {
   const { brandTitle, TAB_ICON } = await import("../src/ui/title.ts");
   expect(TAB_ICON).toBe("\u{1F431}");                          // 🐱
-  expect(brandTitle("Neko Core")).toBe("\u{1F431} Neko Core");
-  expect(brandTitle("my session")).toBe("\u{1F431} my session");
-  expect(brandTitle("my session", true)).toBe("● \u{1F431} my session"); // ● busy dot
+  expect(brandTitle("Neko Core")).toBe("\u{1F431} Neko Core"); // idle: the cat is home
+  expect(brandTitle("my session", true)).toBe("my session");   // busy: name alone - the cat stepped away
+  expect(brandTitle("my session")).toBe("\u{1F431} my session"); // done: the cat returns
 });
+
+if (process.platform === "win32") {
+  test("title keeper re-asserts the last title against console-title clobbers (Windows)", async () => {
+    const { setTerminalTitle, installTitleKeeper, titleSeq } = await import("../src/ui/title.ts");
+    const writes: string[] = [];
+    const orig = process.stdout.write, origTTY = (process.stdout as any).isTTY;
+    (process.stdout as any).isTTY = true;
+    (process.stdout as any).write = ((s: any) => { writes.push(String(s)); return true; }) as any;
+    try {
+      setTerminalTitle("🐱 Neko Core");
+      writes.length = 0;
+      const dispose = installTitleKeeper(25); // fast interval for the test; 2s in production
+      await new Promise((r) => setTimeout(r, 90));
+      dispose();
+      const reasserts = writes.filter((w) => w === titleSeq("🐱 Neko Core")).length;
+      expect(reasserts).toBeGreaterThanOrEqual(1); // the heartbeat re-writes the SAME title
+      const n = writes.length;
+      await new Promise((r) => setTimeout(r, 60));
+      expect(writes.length).toBe(n);               // disposed -> silent
+    } finally {
+      (process.stdout as any).write = orig; (process.stdout as any).isTTY = origTTY;
+    }
+  });
+}
 
 test("title stack push is SKIPPED on Windows (its restore reverts the tab mid-session)", async () => {
   const { saveTitle } = await import("../src/ui/title.ts");
