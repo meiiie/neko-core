@@ -1595,6 +1595,13 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // not process state, so start clean unconditionally (harmless when already off) and clean up again on
   // the way out (covers our own unclean predecessors AND protects the user's shell after we exit).
   process.stdout.write(DISABLE_MOUSE);
+  // The UNBYPASSABLE restore: process 'exit' fires on EVERY termination - normal return, process.exit,
+  // an unhandled throw that escapes, Ctrl-C after raw mode is off - and runs before the process dies.
+  // React unmount / the alt-screen guard / runChat's finally can all be short-circuited (a hard exit, a
+  // throw in teardown); this handler cannot. It only does synchronous writes (allowed in 'exit') and is
+  // idempotent, so it's safe on top of the other cleanups. This is what finally stops mouse-tracking
+  // leaking into the user's shell after neko is gone (image #34).
+  process.on("exit", () => { try { emergencyRestore(); } catch { /* nothing left to protect */ } });
   // Tab title: save the user's title (stack push), brand the tab for the session; per-turn updates
   // show the current task + busy state (see handle()); restored on exit.
   saveTitle();

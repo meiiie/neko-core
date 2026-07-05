@@ -15,7 +15,11 @@ import type { Writable } from "node:stream";
 // 1006 = SGR coordinates. Motion reports are cheap for us (parsed + dropped by the shared guards) and
 // only enabled in fullscreen.
 export const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1003h\x1b[?1006h";
-export const DISABLE_MOUSE = "\x1b[?1000l\x1b[?1003l\x1b[?1006l";
+// DISABLE resets EVERY standard mouse mode, not just the three we enable: a terminal (or a stale
+// session, or WT itself) can be left in a different encoding (1015 urxvt / 1016 SGR-pixels produce the
+// large-decimal "[555;62;22M" reports seen after exit), and turning off a mode that is already off is a
+// harmless no-op. This is the canonical full reset vim/tmux emit on teardown.
+export const DISABLE_MOUSE = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l";
 
 /** Mouse on unless NEKO_DISABLE_MOUSE is set. Only consulted in fullscreen. */
 export function isMouseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

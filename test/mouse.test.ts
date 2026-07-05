@@ -54,3 +54,12 @@ test("title sequences: OSC 2 set + xterm stack push/pop, control chars stripped"
   expect(PUSH_TITLE).toBe("\x1b[22;0t");
   expect(POP_TITLE).toBe("\x1b[23;0t");
 });
+
+test("DISABLE_MOUSE resets EVERY standard mouse mode (not just the 3 we enable) - stale-mode safety", async () => {
+  const { DISABLE_MOUSE, ENABLE_MOUSE } = await import("../src/ui/mouse.ts");
+  for (const mode of [1000, 1002, 1003, 1005, 1006, 1015, 1016]) {
+    expect(DISABLE_MOUSE).toContain(`\x1b[?${mode}l`); // every mode gets an explicit reset
+  }
+  // We only ENABLE the three we actually use.
+  expect(ENABLE_MOUSE).toBe("\x1b[?1000h\x1b[?1003h\x1b[?1006h");
+});
