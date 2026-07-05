@@ -230,55 +230,6 @@ test("fullscreen history: PgUp shows the jump pill; a new turn counts; End retur
   }
 });
 
-test("the thread survives a fullscreen -> inline -> fullscreen round-trip (preserved in state)", async () => {
-  const prev = process.env.NEKO_FULLSCREEN;
-  process.env.NEKO_FULLSCREEN = "1";
-  try {
-    const s: any = { id: "fst", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [
-      { role: "user", content: "unique-marker-xyz question" },
-      { role: "assistant", content: "unique-marker-xyz answer" },
-    ] };
-    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
-    await tick(120);
-    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> inline
-    await tick(150);
-    expect(c.frames.some((f) => f.includes("\x1b[?1049l"))).toBe(true); // actually left the alt-screen
-    // Leaving does NOT reprint the thread inline (the alt-screen restore owns the primary; reprinting was
-    // the #46 stack). But the thread is not LOST - it lives in state, and re-entering fullscreen shows it.
-    expect(strip(c.lastFrame())).not.toContain("unique-marker-xyz");
-    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> fullscreen again
-    expect(await until(c, (f) => /unique-marker-xyz/.test(f))).toBe(true); // the conversation is back
-  } finally {
-    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
-  }
-});
-
-test("leaving fullscreen does NOT reprint the thread (no stacking) and re-hides the cursor", async () => {
-  const prev = process.env.NEKO_FULLSCREEN;
-  process.env.NEKO_FULLSCREEN = "1";
-  try {
-    const s: any = { id: "fstog", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [
-      { role: "user", content: "stack-marker question" },
-      { role: "assistant", content: "stack-marker answer" },
-    ] };
-    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
-    await tick(120);
-    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> inline
-    await tick(200);
-    // The alt-screen restore owns the primary; Neko must NOT reprint the thread on top of it (that is the
-    // stacked/garbled mess of images #41/#46). After the toggle, the inline screen shows only new lines -
-    // the resumed thread is gone from the CURRENT frame (still intact in state, one /fullscreen away).
-    expect(strip(c.lastFrame())).not.toContain("stack-marker");
-    // And the cursor leaveAltScreen turned on is re-hidden (else it blinks stray below the status - #42).
-    const lastLeave = c.frames.reduce((acc, f, i) => (f.includes("\x1b[?1049l") ? i : acc), -1);
-    expect(lastLeave).toBeGreaterThanOrEqual(0);
-    expect(c.frames.slice(lastLeave).join("")).toContain("\x1b[?25l");
-    c.unmount();
-  } finally {
-    if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
-  }
-});
-
 test("input footer: the prompt is BOXED by a rule above AND below, status beneath", () => {
   const c = render(<ChatApp yolo provider={new Echo()} />);
   const lines = strip(c.lastFrame()).split("\n");

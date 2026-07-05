@@ -6,7 +6,7 @@
  * reproduction harness for the class of bugs that only real terminals used to reveal.
  */
 import { EventEmitter } from "node:events";
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { render } from "ink";
 import React from "react";
 
@@ -31,7 +31,11 @@ class FakeStdin extends EventEmitter {
 }
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-test("fullscreen sim: entry, typing, grow and shrink never leave a black screen", async () => {
+// These tests force NEKO_FULLSCREEN=1; restore the suite baseline (setup.ts sets "0" = inline) afterward
+// so the flag doesn't leak into later files whose ChatApp renders assume inline mode.
+afterAll(() => { process.env.NEKO_FULLSCREEN = "0"; });
+
+test("fullscreen sim: startup, typing, grow and shrink never leave a black screen", async () => {
   const vt = new VirtualTerminal(100, 30);
   const out = new FakeTtyOut(100, 30, vt);
   const stdin = new FakeStdin();
@@ -41,20 +45,14 @@ test("fullscreen sim: entry, typing, grow and shrink never leave a black screen"
     id: "sim", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: Array.from({ length: 8 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `noi dung sim ${i}` })),
   };
-  process.env.NEKO_FULLSCREEN = "0"; // start INLINE explicitly (fullscreen is the product default); enter via the real command
+  process.env.NEKO_FULLSCREEN = "1"; // fullscreen is the sole interactive mode - boot straight into it
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false }); // runChat's pre-render alt entry
   const app = render(
-    React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "sim", frameDiffer: differ }),
+    React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "sim", frameDiffer: differ, preAltDispose }),
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
-  await tick(300);
-  expect(vt.isBlank()).toBe(false); // inline baseline on screen
-
-  // --- enter fullscreen via the slash command (the exact user flow) ---
-  stdin.push("/fullscreen");
-  await tick(60);
-  stdin.push("\r");
   await tick(600); // alt-screen + first composed paint + warm
-  expect(vt.isBlank()).toBe(false); // ENTRY must not be black
+  expect(vt.isBlank()).toBe(false); // startup fullscreen must not be black
   expect(vt.text()).toContain("noi dung sim 7"); // the transcript tail is actually painted
 
   // --- typing echoes ---

@@ -202,11 +202,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [cols, setCols] = useState(stdout?.columns ?? 80);
   const [rows, setRows] = useState(stdout?.rows ?? 24);
   const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
-  // Inline transcript starts at this index. A fresh inline session shows everything (0). Leaving fullscreen
-  // sets it to the current length so inline prints only NEW lines from that point - the alt-screen restore
-  // already put the prior primary content back, and reprinting the whole thread on top is what stacked/
-  // garbled the screen (images #41/#46). Like vim/less: the terminal's own restore owns what was there.
-  const [inlineBaseline, setInlineBaseline] = useState(0);
   const [started, setStarted] = useState(false); // once a turn has run, drop the input placeholder
   const rcRef = useRef<RemoteControl | null>(null);
   const relayRef = useRef<RemoteRelay | null>(null);
@@ -273,8 +268,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   // Start fullscreen only if configured AND the terminal can host it (a TTY with room). A non-TTY or a
   // tiny window degrades to inline rather than corrupting the screen.
-  const [fullscreen, setFullscreen] = useState<boolean>(cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
-  const fullscreenRef = useRef(fullscreen); // for closures that must read the CURRENT mode (resize debounce, mount effect)
+  // Fullscreen is the sole interactive mode: on for any capable TTY, off (inline fallback) only when the
+  // terminal can't host it (non-TTY / too small). Set once at mount - there is no runtime toggle.
+  const [fullscreen] = useState<boolean>(cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
+  const fullscreenRef = useRef(fullscreen); // for closures that read the mode (resize debounce, mount effect)
   useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
   // Effective UI fps: env > config > /fps pref > detected display Hz > 60. Auto mode probes the display
   // in the background on first run (subprocess, never blocks startup): the scroll glide adapts LIVE this
@@ -633,51 +630,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (choice === "auto" && !r.detected) void detectRefreshRate().then((hz) => { if (hz) { setFps(clampFps(hz)); addLine("info", `display detected at ${hz}Hz - now ${clampFps(hz)}fps`); } }).catch(() => {});
   };
 
-  // Toggle fullscreen (alt-screen scrollable viewport) at runtime. The screen switch happens
-  // SYNCHRONOUSLY here, BEFORE React re-renders for the new mode - the ordering matters both ways:
-  //  - turning OFF: the re-render remounts <Static>, which prints the whole transcript ONCE. If we were
-  //    still in the alt-screen at that moment, the print would land in the alt buffer and be DISCARDED on
-  //    leave - Static marks the lines printed and never re-emits => the conversation would vanish from
-  //    the inline screen. Leaving first makes that one-time print land on the primary screen.
-  //  - turning ON: without entering first, the first fullscreen frame would print into the primary
-  //    scrollback (one frame of viewport junk) before the effect entered the alt-screen.
-  // The mount effect stays for config-startup + unmount cleanup; both paths are idempotent.
-  const toggleFullscreen = () => {
-    const out = (stdout as any) ?? process.stdout;
-    if (!fullscreen && !canFullscreen(out)) {
-      return addLine("info", "fullscreen needs an interactive terminal with room (this one is too small or not a TTY)");
-    }
-    const next = !fullscreen;
-    if (next) {
-      if (!altDisposeRef.current) altDisposeRef.current = installAltScreenGuard(out, { mouse: isMouseEnabled() });
-      // Prime the differ's band SYNCHRONOUSLY, before the re-render, with the content we already have
-      // (ansiRows is computed every render now). Otherwise the first fullscreen frame is processed with
-      // an empty band -> a black viewport until a keypress forces the band-content effect + a repaint.
-      frameDiffer?.setBand({ top: 1, height: viewH });
-      frameDiffer?.setBandContent(paddedRowsRef.current, 0, streamRowsRef.current);
-    } else {
-      altDisposeRef.current?.(); // leaveAltScreen: SHOW_CURSOR + LEAVE_ALT -> terminal restores the primary
-      altDisposeRef.current = null;
-      setSearch(null); // leaving fullscreen closes any open find bar
-      rowScroll.toBottom(); // ...and re-pins so re-entering starts at the live tail
-      // Drop the differ's band + baseline synchronously, BEFORE the inline tree renders - otherwise the
-      // first inline frame is line-diffed against the STALE fullscreen frame with wrong relative cursor
-      // moves (the garbled stack of image #46).
-      frameDiffer?.setBand(null);
-      frameDiffer?.reset();
-      // Do NOT reprint the thread. Leaving the alt-screen already restored the primary to its pre-enter
-      // state; reprinting the whole transcript on top is what stacked it (images #41/#46). Instead show
-      // only lines from here on - the thread stays intact in state, one /fullscreen away. Re-hide the
-      // cursor leaveAltScreen turned on (we stay in Ink, which draws its own caret; image #42).
-      setInlineBaseline(linesRef.current.length);
-      (out as any)?.write?.("\x1b[?25l");
-    }
-    setFullscreen(next);
-    addLine("info", next
-      ? `fullscreen on - scroll with the mouse wheel${isMouseEnabled() ? "" : " (disabled)"}, PgUp/PgDn, or Ctrl+up/down; Ctrl+F to find; /fullscreen to exit`
-      : 'fullscreen off for this session (inline - native scrollback + copy-paste back). To make inline the default: "fullscreen": false in config, or NEKO_FULLSCREEN=0.');
-  };
-
+  // Fullscreen (alt-screen scrollable viewport) is the sole interactive mode - there is no runtime toggle.
+  // A capable TTY starts fullscreen (mount effect below enters the alt-screen); a terminal that can't host
+  // it (non-TTY / too small) falls back to inline automatically. Copy that native select-to-copy can't
+  // reach in fullscreen is served by /copy (OSC 52 + native clipboard).
   const resumeInto = (target: Session) => {
     const est = estimateTokens(target.messages);
     const big = est > RESUME_SUMMARY_AT * cfg.contextWindow;
@@ -1047,7 +1003,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         runText: handle,
         compact: runCompaction,
         openTranscript,
-        toggleFullscreen,
         copy: copyTranscript,
         setFps: applyFps,
         setTitle: applyTitle,
@@ -1220,9 +1175,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // once off-screen; the viewport pastes cached string rows. Unwarmed lines show a plain fallback row
   // and upgrade in place as the background warmer (newest-first, idle chunks) fills the cache.
   const [warmTick, setWarmTick] = useState(0); // bumped per warm chunk -> rows rebuild with upgrades
-  // Computed ALWAYS (not gated on fullscreen): cheap (cached rows, else plain fallback - no markdown
-  // work), and it means the band content is READY the instant /fullscreen is toggled on, instead of
-  // being empty until the next render (which showed a black band until a keypress - image, toggle bug).
+  // Computed ALWAYS (cheap: cached rows, else plain fallback - no markdown work), so the band content is
+  // READY for the very first fullscreen frame instead of being empty until the next render.
   const ansiRows = useMemo(() => {
     const out: string[] = [];
     for (const l of lines) out.push(...(getCachedRows(l, contentCols) ?? fallbackRows(l)));
@@ -1430,7 +1384,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           ) : null}
         </Box>
       ) : (
-        <Static key={resizeKey} items={inlineBaseline ? lines.slice(inlineBaseline) : lines}>{(line) => <Box key={line.id} width={contentCols}><TranscriptLine line={line} cfg={cfg} cols={contentCols} /></Box>}</Static>
+        <Static key={resizeKey} items={lines}>{(line) => <Box key={line.id} width={contentCols}><TranscriptLine line={line} cfg={cfg} cols={contentCols} /></Box>}</Static>
       )}
 
       {/* Ctrl+O peek: the most-recent collapsed tool result shown in full in the live region (not
@@ -1583,7 +1537,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 <Text color={MODE_COLOR[mode]}>{" ⏵⏵ "}{mode}</Text>
                 <Text dimColor> · shift+tab to cycle</Text>
                 {rcOn ? <Text color="magenta"> · /rc active</Text> : null}
-                {fullscreen ? <Text dimColor> · fullscreen</Text> : null}
               </Text>
               {(() => {
                 const cost = agentRef.current!.cost;
@@ -1655,11 +1608,10 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // This is the claude-code-class write path, built at the stdout layer instead of forking Ink.
   // NEKO_INCR=0 disables it (plain full-frame writes).
   const differ = process.env.NEKO_INCR === "0" ? undefined : new FrameDiffer();
-  // STARTUP-fullscreen must enter the alt-screen BEFORE Ink's first render. The toggle path learned
-  // this in v9 (paint first, switch after = the switch wipes the paint and Ink, believing its frame is
-  // on screen, never repaints -> black until a keypress). Same physics here: enter first, then render -
-  // the first frame paints INTO the alt screen. ChatApp adopts the disposer (prop) so /fullscreen off
-  // and unmount tear it down exactly as if the mount effect had installed it.
+  // Fullscreen must enter the alt-screen BEFORE Ink's first render: paint-first-switch-after wipes the
+  // paint, and Ink (believing its frame is on screen) never repaints -> black until a keypress. So enter
+  // first, then render - the first frame paints INTO the alt screen. ChatApp adopts the disposer (prop)
+  // so unmount tears it down exactly as if the mount effect had installed it.
   const startFullscreen = cfg.fullscreen && canFullscreen(process.stdout);
   const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
   const app = render(

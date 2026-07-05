@@ -154,11 +154,12 @@ export class NekoConfig {
   /** The config file's EXPLICIT ui_fps, or null when unset - the display resolver (adapters/display.ts)
    * layers env > this > the /fps pref > the detected display Hz > 60. */
   get uiFpsConfig(): number | null { return this.data.ui_fps != null ? Number(this.data.ui_fps) : null; }
-  /** Start in fullscreen (alt-screen, scrollable viewport) mode. ON by default (it is the better
-   * experience: real scrolling, glide, hover, flicker-free) - opt OUT with config `fullscreen: false`
-   * or NEKO_FULLSCREEN=0 for permanent inline (native scrollback + terminal-native copy-paste).
-   * /fullscreen toggles for the current session. Unfit terminals (non-TTY/tiny) fall back to inline
-   * automatically regardless (canFullscreen). */
+  /** Fullscreen (alt-screen, scrollable viewport) is the sole interactive mode - there is no runtime
+   * toggle; it is the main experience (real scrolling, glide, hover, flicker-free), and /copy serves the
+   * copy that fullscreen's mouse-capture keeps native selection from reaching. Terminals that can't host
+   * it (non-TTY / too small) fall back to inline automatically (canFullscreen). This flag stays as an
+   * internal escape hatch for that fallback + tests (NEKO_FULLSCREEN=0 / `fullscreen: false`), not a
+   * user-facing option. */
   get fullscreen(): boolean {
     const env = process.env.NEKO_FULLSCREEN;
     if (env === "1" || env === "true") return true;

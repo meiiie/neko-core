@@ -21,7 +21,7 @@ import type { Line, LineKind } from "./transcript.tsx";
 
 export const HELP = [
   "Commands:",
-  "  /help /cost /model /provider /tools /skill(s) /init /clear /compact /transcript /fullscreen /reset /exit",
+  "  /help /cost /model /provider /tools /skill(s) /init /clear /compact /transcript /reset /exit",
   "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /continue · /retry · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
@@ -41,7 +41,6 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/clear", desc: "clear transcript + context" },
   { name: "/compact", desc: "summarize the conversation to free context" },
   { name: "/transcript", desc: "scroll + search the full conversation (incl. earlier resumed lines)" },
-  { name: "/fullscreen", desc: "toggle fullscreen: alt-screen scrollable viewport (PgUp/PgDn to scroll)" },
   { name: "/copy", desc: "copy the last response to the clipboard (/copy all = whole conversation)" },
   { name: "/fps", desc: "UI frame rate: auto-follow your display or set 30..240 (/fps [auto|n])" },
   { name: "/title", desc: "name this session + pin the terminal tab title (/title <name>)" },
@@ -88,7 +87,6 @@ export interface CommandCtx {
   runText: (text: string) => void;
   compact: (reason: "manual" | "auto" | "resume") => Promise<string>; // shows the compacting progress bar
   openTranscript: () => void; // open the full-thread scroll+search viewer (/transcript)
-  toggleFullscreen: () => void; // toggle fullscreen (alt-screen scrollable viewport) mode
   copy: (arg: string) => void; // copy last response / whole conversation to the clipboard (OSC 52)
   setFps: (choice: number | "auto") => void; // /fps: persist + apply the UI frame rate
   setTitle: (name: string) => void; // /title: name the session + pin the tab title
@@ -298,10 +296,6 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/transcript":
     case "/history":
       ctx.openTranscript();
-      return;
-    case "/fullscreen":
-    case "/fs":
-      ctx.toggleFullscreen();
       return;
     case "/copy":
       ctx.copy(input.slice("/copy".length).trim());
