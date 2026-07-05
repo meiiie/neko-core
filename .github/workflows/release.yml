@@ -50,17 +50,12 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: compile
-        # shell:bash on every runner (incl. windows) so the --define quoting is identical everywhere.
-        # The NODE_ENV define is CRITICAL: without it `bun build --compile` bakes development mode and
-        # the released binary runs React with ~5x render overhead on every platform (measured; see
-        # scripts/bench-ui.ts + WORKLOG 2026-07-04). The tsconfig OVERRIDE is equally critical: with the
-        # repo tsconfig's jsx:react-jsx, bun emits DEV jsx callsites (jsxDEV) that crash against
-        # production React (see tsconfig.build.json). Must match the package.json build script.
-        # The --windows-* metadata brands the PE (Task Manager shows FileDescription = "Neko Core",
-        # Explorer shows the cat icon from assets/neko.ico); bun ignores these flags for non-Windows
-        # targets, so one command serves the whole matrix. Version = the tag without the leading v.
+        # scripts/build.ts is the ONE source of truth for compile flags (NODE_ENV define, tsconfig
+        # override, and - on the Windows runner only - the PE branding: Task Manager "Neko Core", the
+        # cat icon, publisher/version/copyright). bun REJECTS --windows-* off Windows, so the script
+        # gates them by host; args are passed as argv (no shell quoting fragility across runners).
         shell: bash
-        run: bun build --compile --tsconfig-override tsconfig.build.json --define 'process.env.NODE_ENV="production"' --windows-icon=assets/neko.ico --windows-title="Neko Core" --windows-publisher="The Wiii Lab" --windows-version="${GITHUB_REF_NAME#v}" --windows-description="Neko Core" --windows-copyright="MIT (c) 2026 The Wiii Lab" --target=${{ matrix.target }} --outfile ${{ matrix.asset }} bin/neko.ts
+        run: bun scripts/build.ts --target=${{ matrix.target }} --outfile=${{ matrix.asset }}
       - name: smoke-test the artifact (renders a real Ink/JSX tree)
         if: ${{ matrix.smoke }}
         shell: bash
