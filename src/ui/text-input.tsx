@@ -85,10 +85,12 @@ export function TextInput(props: {
 
   // Render the caret as a thin green bar SITTING BEFORE the character at the cursor - a text-editor
   // caret (like Claude Code), not a block that covers the character. When empty it sits before the
-  // placeholder. Green so it reads as the live insertion point.
+  // placeholder. The glyph is "▏" (LEFT ONE EIGHTH BLOCK), NOT "|": a pipe is centred in its cell, so it
+  // reads as a gap after the text; ▏ hugs the LEFT edge of its cell, sitting flush against the preceding
+  // character exactly like a real bar cursor. Green so it reads as the live insertion point.
   const cps = [...value];
   const shown = mask ? cps.map(() => "•") : cps;
-  const caret = <Text color="green">|</Text>;
+  const caret = <Text color="green">▏</Text>;
   if (cps.length === 0) {
     return (
       <Text>

@@ -73,16 +73,17 @@ test("ignores stray escape sequences (mouse reports) - never leak into the text"
   c.unmount();
 });
 
-test("caret is a | bar sitting BEFORE the char at the cursor (not a block over it)", async () => {
+test("caret is a ▏ bar FLUSH before the char at the cursor (not a block, not a gapped |)", async () => {
   const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
   const c = render(<Harness cb={() => {}} />);
-  expect(strip(c.lastFrame())).toContain("|");     // empty: caret shows before the placeholder
+  expect(strip(c.lastFrame())).toContain("▏");     // empty: caret shows before the placeholder
   c.stdin.write("ab");
   await tick();
-  expect(strip(c.lastFrame())).toContain("ab|");   // cursor at end -> bar AFTER the text
+  expect(strip(c.lastFrame())).toContain("ab▏");   // cursor at end -> bar HUGGING the text, no gap
+  expect(strip(c.lastFrame())).not.toContain("ab |"); // ...definitely not a space-gapped caret
   c.stdin.write("\x1b[D");                          // left arrow -> between a and b
   await tick();
-  expect(strip(c.lastFrame())).toContain("a|b");    // bar BEFORE the char it will insert before
+  expect(strip(c.lastFrame())).toContain("a▏b");    // bar BEFORE the char it will insert before
   c.unmount();
 });
 
