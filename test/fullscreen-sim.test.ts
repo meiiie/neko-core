@@ -146,6 +146,33 @@ test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for
   await tick(50);
 }, 30000);
 
+test("slash menu on a SHORT window keeps the input row + first items (chrome never flex-squashed)", async () => {
+  // Image #61: typing "/" on a short window opened the slash menu, and Yoga squashed the input chrome -
+  // the "> /" input row vanished and the first menu entries (incl. the selected /help) were cut. The
+  // chrome is flexShrink=0 now; the transcript band shrinks instead.
+  const vt = new VirtualTerminal(100, 18); // SHORT window - the menu + chrome dominate it
+  const out = new FakeTtyOut(100, 18, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  const provider: any = { complete: async () => ({ content: "ok", tool_calls: [] }) };
+  const msgs: any[] = [];
+  for (let i = 0; i < 10; i++) msgs.push({ role: "user", content: `q${i}` }, { role: "assistant", content: `a${i}` });
+  const session: any = { id: "slash", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
+  process.env.NEKO_FULLSCREEN = "1";
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = render(
+    React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "slash", frameDiffer: differ, preAltDispose }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(400);
+  stdin.push("/"); await tick(300);
+  const t = vt.text();
+  expect(t).toMatch(/> \S?\//);            // the input row with the typed "/" is ON SCREEN (was squashed away)
+  expect(t).toContain("/help");             // the FIRST (selected) menu entry survived too
+  app.unmount();
+  await tick(50);
+}, 30000);
+
 test("/resume picker while SCROLLED UP renders names intact (no flex-squash, no stale band rows)", async () => {
   // Image #60: with the pill visible the picker lost its header + session names - Yoga flex-SQUASHED the
   // list (label+detail overlapped on one row), and the band's stale geometry froze old transcript rows

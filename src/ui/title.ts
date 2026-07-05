@@ -19,12 +19,13 @@ export const POP_TITLE = "\x1b[23;0t";
  * iTerm2, kitty et al. render it; a terminal that can't just shows a placeholder glyph in its own chrome. */
 export const TAB_ICON = "\u{1F431}";
 /** Tab title shapes (owner-specified, Claude-Code-style restraint):
- *   idle          "🐱 <name>"   - the cat is home
+ *   idle           "🐱 <name>"  - the cat is home
  *   busy, blink on  "● <name>"  - the cat steps away; a dot pulses so the tab reads "running" at a glance
- *   busy, blink off   "<name>"  - the driver alternates these two once a second (a tab-title heartbeat)
+ *   busy, blink off "○ <name>"  - the PULSE swaps the glyph in place (solid/hollow) instead of removing it,
+ *                                 so the name never shifts sideways - a steady blink, not a jitter.
  */
 export function brandTitle(name: string, busy = false, blinkOn = true): string {
-  return busy ? `${blinkOn ? "● " : ""}${name}` : `${TAB_ICON} ${name}`;
+  return busy ? `${blinkOn ? "●" : "○"} ${name}` : `${TAB_ICON} ${name}`;
 }
 
 /** OSC 2 sequence for a title (control chars stripped; kept short - tabs truncate anyway). */

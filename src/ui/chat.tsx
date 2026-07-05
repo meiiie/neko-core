@@ -1582,7 +1582,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       ) : approval ? (
         <ApprovalBox approval={approval} />
       ) : fullscreen && search ? (
-        <Box flexDirection="column">
+        <Box flexDirection="column" flexShrink={0}>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
           <Text>
             <Text color="#4d9fff">{" find: "}</Text>
@@ -1598,7 +1598,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
         </Box>
       ) : (
-        <Box flexDirection="column">
+        // flexShrink 0: the input chrome must NEVER be flex-squashed. On a SHORT window, opening the slash
+        // menu (up to ~11 rows) overflows the fixed-height root and Yoga squashed THIS box - the "> /"
+        // input row vanished and the first menu items overlapped (image #61). The flexible transcript box
+        // gives up the rows instead (same fix as the /resume picker, image #60).
+        <Box flexDirection="column" flexShrink={0}>
           {/* One RESERVED row for ephemeral status (image-attached on the left, "copied N chars" on the
               right), always present so it never shifts the transcript when a message appears (image #52). */}
           <Box justifyContent="space-between">

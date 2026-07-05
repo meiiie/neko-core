@@ -59,8 +59,8 @@ test("brandTitle: cat icon when idle; busy = blinking dot, no cat", async () => 
   const { brandTitle, TAB_ICON } = await import("../src/ui/title.ts");
   expect(TAB_ICON).toBe("\u{1F431}");                          // 🐱
   expect(brandTitle("Neko Core")).toBe("\u{1F431} Neko Core"); // idle: the cat is home
-  expect(brandTitle("my session", true, true)).toBe("● my session"); // busy, blink on: dot + name, no cat
-  expect(brandTitle("my session", true, false)).toBe("my session");  // busy, blink off: name alone
+  expect(brandTitle("my session", true, true)).toBe("● my session"); // busy, blink on: solid dot, no cat
+  expect(brandTitle("my session", true, false)).toBe("○ my session"); // blink off: HOLLOW dot - the name never shifts
   expect(brandTitle("my session")).toBe("\u{1F431} my session"); // done: the cat returns
 });
 
@@ -72,9 +72,9 @@ test("title driver: blinks the dot while busy, restores + re-asserts the cat whe
   (process.stdout as any).write = ((s: any) => { writes.push(String(s)); return true; }) as any;
   try {
     setTabTitle("my task", true);                            // busy
-    expect(writes[0]).toBe(titleSeq("● my task"));           // dot ON immediately
+    expect(writes[0]).toBe(titleSeq("● my task"));           // solid dot immediately
     await new Promise((r) => setTimeout(r, 1150));           // one heartbeat (1s cadence)
-    expect(writes).toContain(titleSeq("my task"));           // ...then the blink-off shape
+    expect(writes).toContain(titleSeq("○ my task"));         // ...then the hollow-dot pulse
     writes.length = 0;
     setTabTitle("my task", false);                           // turn done
     expect(writes[0]).toBe(titleSeq("\u{1F431} my task"));   // the cat returns at once

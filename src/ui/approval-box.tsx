@@ -17,7 +17,7 @@ export function ApprovalBox({ approval }: { approval: Approval }) {
   // Plan review (exit_plan_mode) gets its own, richer box.
   if (toolName === "exit_plan_mode") {
     return (
-      <Box borderStyle="round" borderColor="blue" paddingX={1} flexDirection="column">
+      <Box borderStyle="round" borderColor="blue" paddingX={1} flexDirection="column" flexShrink={0}>
         <Text bold color="blue">Ready to code?</Text>
         <Markdown text={String(args.plan ?? "")} />
         <Text color="gray">[y] proceed (accept-edits)   [n] keep planning / Esc</Text>
@@ -45,7 +45,7 @@ export function ApprovalBox({ approval }: { approval: Approval }) {
     preview.push(<Text key="a" color="gray">{trunc(JSON.stringify(args), 200)}</Text>);
   }
   return (
-    <Box borderStyle="round" borderColor="yellow" paddingX={1} flexDirection="column">
+    <Box borderStyle="round" borderColor="yellow" paddingX={1} flexDirection="column" flexShrink={0}>
       <Text bold color="yellow">Approve {toolName}?</Text>
       {preview}
       <Text color="gray">[y]es   [a]lways allow {toolName}   [n]o / Esc</Text>
