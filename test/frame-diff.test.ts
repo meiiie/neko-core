@@ -194,10 +194,29 @@ test("short band content is TOP-anchored (fresh session welcome at the top, not 
   d.setBand({ top: 1, height: 6 });
   d.setBandContent(["w1", "w2", "w3"], 0); // only 3 rows of content in a 6-row band
   const blank = ["", "", "", "", "", "", "chrome"];
-  const seeded = d.process(blank.join("\n"))!; // first frame goes out composed
-  const body = seeded.split("\n");
-  expect(body.slice(0, 3)).toEqual(["w1", "w2", "w3"]); // content at the TOP of the band
-  expect(body.slice(3, 6)).toEqual(["", "", ""]);        // blanks BELOW it
+  const seeded = d.process(blank.join("\n"))!; // first frame goes out composed (absolute rows now)
+  const scr = new Screen(8);
+  scr.write(seeded);
+  expect(scr.lines(7)).toEqual(["w1", "w2", "w3", "", "", "", "chrome"]); // content at the TOP, blanks below
+});
+
+test("fullscreen seed/resync is DRIFT-PROOF: correct even when the cursor is NOT where Ink assumes", () => {
+  // Image #63: at real-terminal entry (or right after a resize) the cursor row is unreliable; the old
+  // seed used a RELATIVE erase + "\n" joins, so the whole frame slid one row - a ghosted duplicate input
+  // line that persisted. The absolute seed must paint the same screen no matter where the cursor starts.
+  const d = new FrameDiffer();
+  d.setBand({ top: 1, height: 3 });
+  d.setBandContent(["b0", "b1", "b2"], 0);
+  const frame = ["", "", "", "rule", "> input", "status"];
+  const seeded = d.process(frame.join("\n"))!;
+  const want = ["b0", "b1", "b2", "rule", "> input", "status"];
+  for (const startRow of [0, 3, 5]) { // wherever the cursor happens to be, the result is identical
+    const scr = new Screen(7);
+    scr.write("> input\n"); // stale junk a drifted first paint could have left
+    scr.r = startRow; scr.c = 2;
+    scr.write(seeded);
+    expect(scr.lines(6)).toEqual(want);
+  }
 });
 
 test("identical frame skips the write; height change and weird payloads pass through", () => {
@@ -242,8 +261,12 @@ test("streaming tail composes INTO the band right under the committed rows (top-
   d.setBand({ top: 1, height: 6 });
   d.setBandContent(["  cau hoi", "  tra loi cu"], 0, []);
   const blank = ["", "", "", "", "", "", "chrome"];
-  const first = d.process(blank.join("\n"))!;
-  expect(first.split("\n").slice(0, 2)).toEqual(["  cau hoi", "  tra loi cu"]);
+  const first = d.process(blank.join("\n"))!; // seed goes out composed (absolute rows)
+  {
+    const s0 = new Screen(8);
+    s0.write(first);
+    expect(s0.lines(2)).toEqual(["  cau hoi", "  tra loi cu"]);
+  }
   // Stream arrives: the tail appends UNDER the committed rows - no jump, no bottom-up growth.
   emitted.length = 0;
   d.setBandContent(["  cau hoi", "  tra loi cu"], 0, ["", "  dang go..."]);

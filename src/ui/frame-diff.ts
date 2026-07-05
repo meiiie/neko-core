@@ -155,13 +155,16 @@ export class FrameDiffer {
   }
 
   /** On seed/resync frames: when composition is OFF, raw passthrough is correct and cheapest (null).
-   * When composition is ON, passing the raw payload through would paint the BLANK band Ink rendered -
-   * so emit the same full-frame write Ink would have, but with the composed lines spliced in. */
+   * When composition is ON, paint the composed frame with ABSOLUTE addressing, one row at a time. This
+   * was the LAST relative path in fullscreen (erase-up-from-cursor + "\n" joins): at real-terminal entry
+   * or right after a resize the cursor row is NOT reliably where Ink assumes, so the relative erase
+   * slid the whole seed frame one row - the one-time ghosted input row at startup (images #35, #63).
+   * Absolute rows can't drift, and the trailing EL per row clears any stale content beneath. */
   private fullRepaintOr(parsed: { eraseCount: number }, lines: string[]): string | null {
     if (!this.windowRows()) return null;
-    const n = parsed.eraseCount;
-    const erase = n > 0 ? "\x1b[2K" + "\x1b[1A\x1b[2K".repeat(n - 1) + "\x1b[G" : "";
-    return erase + lines.join("\n");
+    let out = "";
+    for (let i = 0; i < lines.length; i++) out += `${ESC}${i + 1};1H` + lines[i] + EL;
+    return out + `${ESC}${lines.length};1H`;
   }
 
   /** Imperative band repaint (scroll, append, warm upgrade): diff the new window against the previous
