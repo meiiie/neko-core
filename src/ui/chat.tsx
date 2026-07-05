@@ -73,6 +73,10 @@ interface ChatProps {
   clearScreen?: () => void; // Ink's synchronized clear (app.clear), threaded from runChat
   frameDiffer?: FrameDiffer; // the stdout-layer differ; ChatApp feeds it the fullscreen scroll band
   preAltDispose?: (() => void) | null; // alt-screen guard installed by runChat BEFORE the first render (startup fullscreen)
+  /** TESTS ONLY: explicit mode override. Production resolves from config + canFullscreen; tests pass this
+   * instead of mutating NEKO_FULLSCREEN, which is racy under bun's CI test scheduling (shared process.env
+   * across file interleavings made inline tests randomly mount fullscreen on GitHub runners). */
+  fullscreen?: boolean;
 }
 
 /** Flatten a message's content (string or vision-array) to display text. */
@@ -190,7 +194,7 @@ export function clampToRows(text: string, maxRows: number, cols: number): string
   return kept.join("\n");
 }
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride }: ChatProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -269,7 +273,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // tiny window degrades to inline rather than corrupting the screen.
   // Fullscreen is the sole interactive mode: on for any capable TTY, off (inline fallback) only when the
   // terminal can't host it (non-TTY / too small). Set once at mount - there is no runtime toggle.
-  const [fullscreen] = useState<boolean>(cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
+  const [fullscreen] = useState<boolean>(fullscreenOverride ?? (cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout)));
   const fullscreenRef = useRef(fullscreen); // for closures that read the mode (resize debounce, mount effect)
   useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
   // Brand the tab title on mount - AFTER Ink's first render, when VT processing is on, so the OSC 2 write

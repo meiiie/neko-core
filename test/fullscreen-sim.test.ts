@@ -31,15 +31,12 @@ class FakeStdin extends EventEmitter {
 }
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** render() with fullscreen latched ON + Ink forced interactive. The env flag exists only for the
- * SYNCHRONOUS render call (the mode latches in a useState initializer at mount), then the suite baseline
- * "0" is restored before any await - so bun's test scheduling (files can interleave at await points on
- * CI runners, >=1.3.14) can never observe a leaked "1" from this file. `interactive: true` because Ink
- * otherwise detects CI (is-in-ci) and stops writing frames entirely - on GitHub runners the sims'
- * VirtualTerminal stayed BLANK and every assertion failed. */
+/** render() with fullscreen ON via the EXPLICIT ChatApp prop (never NEKO_FULLSCREEN mutation - racy
+ * across files under bun's CI test scheduling), and Ink forced `interactive: true`: Ink otherwise
+ * consults is-in-ci and stops writing frames entirely - on GitHub runners the sims' VirtualTerminal
+ * stayed BLANK and every assertion failed. */
 function renderFS(node: any, options: any) {
-  process.env.NEKO_FULLSCREEN = "1";
-  try { return render(node, { ...options, interactive: true }); } finally { process.env.NEKO_FULLSCREEN = "0"; }
+  return render(React.cloneElement(node, { fullscreen: true }), { ...options, interactive: true });
 }
 
 test("fullscreen sim: startup, typing, grow and shrink never leave a black screen", async () => {

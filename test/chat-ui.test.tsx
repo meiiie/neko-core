@@ -49,7 +49,7 @@ test("resume re-renders the prior conversation", () => {
     id: "s1", createdAt: "", updatedAt: "", cwd: process.cwd(), model: "m",
     messages: [{ role: "user", content: "hello before" }, { role: "assistant", content: "earlier reply" }],
   };
-  const { lastFrame, unmount } = render(<ChatApp yolo provider={provider} resumedSession={resumed as any} sessionId="s1" />);
+  const { lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} resumedSession={resumed as any} sessionId="s1" />);
   const out = lastFrame() ?? "";
   expect(out).toContain("hello before"); // prior user turn replayed
   expect(out).toContain("earlier reply"); // prior assistant turn replayed
@@ -58,7 +58,7 @@ test("resume re-renders the prior conversation", () => {
 
 test("header + input + status bar render on start", () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
-  const { lastFrame, unmount } = render(<ChatApp yolo provider={provider} />);
+  const { lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
   const out = lastFrame() ?? "";
   expect(out).toContain(VERSION); // version line under the logo
   expect(out).toContain("auto"); // mode shown in the bottom status bar
@@ -68,7 +68,7 @@ test("header + input + status bar render on start", () => {
 
 test("slash menu: Down navigates suggestions instead of rewinding the prompt; Tab completes", async () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
-  const { lastFrame, stdin, unmount } = render(<ChatApp yolo provider={provider} />);
+  const { lastFrame, stdin, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
   await tick();
   stdin.write("/"); // open the slash menu
   await tick();
@@ -90,7 +90,7 @@ test("auto mode: a safe tool call + markdown answer render end-to-end", async ()
     { content: null, tool_calls: [{ id: "c1", name: "ls", arguments: {} }] },
     { content: "Done **listing**.", tool_calls: [] },
   ]);
-  const { stdin, frames, unmount } = render(<ChatApp yolo provider={provider} />);
+  const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
   stdin.write("look around");
   await tick(20);
   stdin.write("\r"); // Enter
@@ -107,7 +107,7 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
     { content: null, tool_calls: [{ id: "c1", name: "bash", arguments: { command: "echo hi" } }] },
     { content: "Finished.", tool_calls: [] },
   ]);
-  const { stdin, lastFrame, frames, unmount } = render(<ChatApp yolo={false} provider={provider} />);
+  const { stdin, lastFrame, frames, unmount } = render(<ChatApp fullscreen={false} yolo={false} provider={provider} />);
   const seen = (s: string) => frames.join("\n").replace(/\x1b\[[0-9;]*m/g, "").includes(s);
   stdin.write("run echo");
   await tick(20);
@@ -125,7 +125,7 @@ test("plan mode: exit_plan_mode shows the plan, 'y' proceeds", async () => {
     { content: null, tool_calls: [{ id: "p", name: "exit_plan_mode", arguments: { plan: "## Plan\n1. do X" } }] },
     { content: "Implemented.", tool_calls: [] },
   ]);
-  const { stdin, lastFrame, frames, unmount } = render(<ChatApp yolo={false} provider={provider} />);
+  const { stdin, lastFrame, frames, unmount } = render(<ChatApp fullscreen={false} yolo={false} provider={provider} />);
   const seen = (s: string) => frames.join("\n").replace(/\x1b\[[0-9;]*m/g, "").includes(s);
   stdin.write("plan it");
   await tick(20);
@@ -139,7 +139,7 @@ test("plan mode: exit_plan_mode shows the plan, 'y' proceeds", async () => {
 
 test("typing '/' shows a slash-command autocomplete menu", async () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
-  const { stdin, lastFrame, unmount } = render(<ChatApp yolo provider={provider} />);
+  const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
   stdin.write("/c");
   await tick(60);
   const out = lastFrame() ?? "";
@@ -165,7 +165,7 @@ test("input typed while busy is queued, then drained", async () => {
       return { content: "second", tool_calls: [] };
     }
   }
-  const { stdin, frames, unmount } = render(<ChatApp yolo provider={new SlowMock()} />);
+  const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={new SlowMock()} />);
   const seen = (s: string) => frames.join("\n").replace(/\x1b\[[0-9;]*m/g, "").includes(s);
   const until = async (pred: () => boolean, ms = 2500) => { for (let w = 0; w < ms && !pred(); w += 20) await tick(20); return pred(); };
 
@@ -193,7 +193,7 @@ test("ApprovalBox shows an edit diff preview", () => {
 
 test("slash menu: Enter completes a PARTIAL command to the highlighted match and runs it", async () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
-  const { stdin, lastFrame, unmount } = render(<ChatApp yolo provider={provider} />);
+  const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
   await tick();
   stdin.write("/hel"); // partial - the menu highlights /help
   await tick();
@@ -230,7 +230,7 @@ test("resumed session: ctx% reflects loaded context (not a misleading 0%) + disp
   }
   const sess = { id: "s-long", createdAt: "", updatedAt: new Date().toISOString(), cwd: process.cwd(), model: "glm-5.2", messages: msgs };
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
-  const { lastFrame, unmount } = render(<ChatApp yolo provider={provider} resumedSession={sess as any} sessionId="s-long" />);
+  const { lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} resumedSession={sess as any} sessionId="s-long" />);
   await tick(120);
   const f = (lastFrame() ?? "").replace(/\x1b\[[0-9;]*m/g, "");
   const pct = Number(f.match(/(\d+)% ctx/)?.[1] ?? "0");

@@ -1,6 +1,7 @@
 /** UX/UI coverage: status bar, thinking line, reasoning, hotkeys, diff preview, completion line. */
 import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
+import { cloneElement } from "react";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,13 +28,11 @@ async function until(c: { frames: string[] }, pred: (allFrames: string) => boole
   return pred(strip(c.frames.join("\n")));
 }
 
-/** Render with fullscreen latched ON. The env flag exists ONLY for the synchronous render() call (the
- * mode is read once in a useState initializer at mount), then the suite baseline "0" is restored before
- * any await - so bun's test scheduling (files can interleave at await points on CI, >=1.3.14) can never
- * observe a leaked "1" from this file. */
+/** Render with fullscreen ON via the EXPLICIT ChatApp prop - never by mutating NEKO_FULLSCREEN, which is
+ * racy under bun's CI test scheduling (shared process.env across file interleavings made inline tests in
+ * OTHER files randomly mount fullscreen on GitHub runners). */
 function renderFullscreen(node: any) {
-  process.env.NEKO_FULLSCREEN = "1";
-  try { return render(node); } finally { process.env.NEKO_FULLSCREEN = "0"; }
+  return render(cloneElement(node, { fullscreen: true }));
 }
 
 class Echo implements Provider {
@@ -66,7 +65,7 @@ class MdHang implements Provider {
 }
 
 test("status bar shows mode + context %", () => {
-  const c = render(<ChatApp yolo provider={new Echo()} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   const f = strip(c.lastFrame());
   expect(f).toContain("auto");
   expect(f).toContain("ctx");
@@ -97,12 +96,12 @@ test("resume-from-summary: a large session prompts to summarize, a small one res
   try {
     // >60% of the default 131072-token window: estimateTokens = chars/4, so ~340k chars ~= 85k tokens.
     const big: any = { id: "big", createdAt: new Date(Date.now() - 2 * 86400 * 1000).toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [{ role: "user", content: "x".repeat(340_000) }] };
-    const c = render(<ChatApp yolo provider={new Echo()} resumedSession={big} />);
+    const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={big} />);
     expect(await until(c, (f) => /Resume from a summary/i.test(f))).toBe(true);
     c.unmount();
 
     const small: any = { id: "small", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [{ role: "user", content: "hi there small session" }] };
-    const c2 = render(<ChatApp yolo provider={new Echo()} resumedSession={small} />);
+    const c2 = render(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={small} />);
     await tick(150);
     const f2 = strip(c2.frames.join("\n"));
     expect(/Resume from a summary/i.test(f2)).toBe(false); // no prompt for a small session
@@ -133,7 +132,7 @@ test("/transcript opens the full-thread viewer over the resumed session", async 
     { role: "user", content: "first earlier question" },
     { role: "assistant", content: "an earlier answer" },
   ] };
-  const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
   await tick(60);
   c.stdin.write("/transcript");
   c.stdin.write("\r");
@@ -146,7 +145,7 @@ test("fullscreen mode renders a scrollable transcript region (alt-screen), inlin
     const msgs: any[] = [];
     for (let i = 0; i < 40; i++) { msgs.push({ role: "user", content: `question ${i}` }); msgs.push({ role: "assistant", content: `answer ${i}` }); }
     const s: any = { id: "fs", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
-    const c = renderFullscreen(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+    const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
     await tick(150);
     const f = strip(c.frames.join("\n"));
     expect(f).toContain("\x1b[?1049h"); // entered the alternate screen
@@ -214,7 +213,7 @@ test("fullscreen history: PgUp shows the jump pill; a new turn counts; End retur
     const msgs: any[] = [];
     for (let i = 0; i < 30; i++) { msgs.push({ role: "user", content: `q ${i}` }); msgs.push({ role: "assistant", content: `a ${i}` }); }
     const s: any = { id: "pill", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
-    const c = renderFullscreen(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+    const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
     await tick(120);
     c.stdin.write("\x1b[5~"); // PgUp -> scroll up (line-anchored; flush is coalesced ~33ms)
     expect(await until(c, (f) => /Jump to bottom \(ctrl\+End\)/.test(f))).toBe(true);
@@ -232,7 +231,7 @@ test("fullscreen history: PgUp shows the jump pill; a new turn counts; End retur
 });
 
 test("input footer: the prompt is BOXED by a rule above AND below, status beneath", () => {
-  const c = render(<ChatApp yolo provider={new Echo()} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   const lines = strip(c.lastFrame()).split("\n");
   const promptIdx = lines.findIndex((l) => l.includes("Try:"));
   const statusIdx = lines.findIndex((l) => l.includes("shift+tab to cycle"));
@@ -251,7 +250,7 @@ test("tab title is the session NAME (first message), stable - not each per-turn 
   const titleOf = () => { const m = [...captured.join("").matchAll(/\x1b\]2;([^\x07]*)\x07/g)].pop(); return m ? m[1] : ""; };
   const pollTitle = async (pred: (t: string) => boolean, ms = 1500) => { for (let w = 0; w < ms; w += 25) { if (pred(titleOf())) return true; await tick(25); } return pred(titleOf()); };
   try {
-    const c = render(<ChatApp yolo provider={new Echo()} />);
+    const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
     await tick(60);
     c.stdin.write("first message here"); await tick(20); c.stdin.write("\r");   // first turn NAMES the session
     expect(await pollTitle((t) => t.includes("first message here"))).toBe(true);
@@ -271,7 +270,7 @@ test("fullscreen find: Ctrl+F opens the find bar and typing shows a match badge"
     const msgs: any[] = [];
     for (let i = 0; i < 20; i++) { msgs.push({ role: "user", content: `question ${i}` }); msgs.push({ role: "assistant", content: `answer NEEDLE ${i}` }); }
     const s: any = { id: "fsf", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
-    const c = renderFullscreen(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+    const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
     await tick(120);
     c.stdin.write("\x06"); // Ctrl+F -> open find
     await tick(60);
@@ -289,7 +288,7 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
     { role: "user", content: "resize-marker question" },
     { role: "assistant", content: "resize-marker answer" },
   ] };
-  const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
   await tick(80);
   const before = c.frames.length;
   (c.stdout as any).emit("resize"); // terminal resized (e.g. maximized)
@@ -308,7 +307,7 @@ test("ApprovalBox renders an edit diff preview (- old / + new)", () => {
 });
 
 test("reasoning shows live while busy, clears when done", async () => {
-  const c = render(<ChatApp yolo provider={new Reasoner()} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Reasoner()} />);
   await tick();
   c.stdin.write("go");
   await tick(20);
@@ -320,7 +319,7 @@ test("reasoning shows live while busy, clears when done", async () => {
 });
 
 test("post-turn run-time line + placeholder drops after first turn", async () => {
-  const c = render(<ChatApp yolo provider={new Echo()} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   await tick();
   expect(strip(c.lastFrame())).toContain("Try:"); // placeholder before the first turn
   c.stdin.write("hi");
@@ -332,7 +331,7 @@ test("post-turn run-time line + placeholder drops after first turn", async () =>
 });
 
 test("Shift+Tab cycles the permission mode (auto -> default)", async () => {
-  const c = render(<ChatApp yolo provider={new Echo()} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   await tick();
   expect(strip(c.lastFrame())).toContain("auto");
   c.stdin.write("\x1b[Z"); // Shift+Tab
@@ -342,7 +341,7 @@ test("Shift+Tab cycles the permission mode (auto -> default)", async () => {
 });
 
 test("slash menu autocompletes as you type", async () => {
-  const c = render(<ChatApp yolo provider={new Echo()} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   await tick();
   c.stdin.write("/mod");
   await tick(50);
@@ -351,7 +350,7 @@ test("slash menu autocompletes as you type", async () => {
 });
 
 test("/help lists the command set", async () => {
-  const c = render(<ChatApp yolo provider={new Echo()} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   await tick();
   c.stdin.write("/help");
   await tick(20);
@@ -405,7 +404,7 @@ test("write_file approval previews size + a '+N more lines' hint", () => {
 });
 
 test("typing '/' caps the command list with a '+N more' hint", async () => {
-  const c = render(<ChatApp yolo provider={new Echo()} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   await tick();
   c.stdin.write("/");
   await tick(50);
@@ -414,7 +413,7 @@ test("typing '/' caps the command list with a '+N more' hint", async () => {
 });
 
 test("Ctrl+C clears a non-empty input (does not exit)", async () => {
-  const c = render(<ChatApp yolo provider={new Echo()} />);
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   await tick();
   c.stdin.write("some draft text");
   await tick(20);
@@ -442,7 +441,7 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
   // "stream shows nothing / raw ** until done" bug). The fix renders it on a macrotask, off the flush.
   const provider = new MdHang();
   try {
-    const c = renderFullscreen(<ChatApp yolo provider={provider} />);
+    const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={provider} />);
     await tick(60);
     c.stdin.write("go");
     await tick(20);
