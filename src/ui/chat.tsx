@@ -1575,8 +1575,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         </Box>
       ) : (
         <Box flexDirection="column">
-          {pastedCount > 0 ? <Text color="magenta">  [{pastedCount} image attached - will send with your next message]</Text> : null}
-          {copyNote ? <Box justifyContent="flex-end"><Text color="green">{copyNote + " "}</Text></Box> : null}
+          {/* One RESERVED row for ephemeral status (image-attached on the left, "copied N chars" on the
+              right), always present so it never shifts the transcript when a message appears (image #52). */}
+          <Box justifyContent="space-between">
+            <Text color="magenta">{pastedCount > 0 ? `  [${pastedCount} image attached - will send with your next message]` : ""}</Text>
+            <Text color="green">{copyNote ? copyNote + " " : " "}</Text>
+          </Box>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
           <Box>
             <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{awaitingKey ? "key> " : pendingMulti ? "... " : "> "}</Text>
