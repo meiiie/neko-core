@@ -202,6 +202,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [cols, setCols] = useState(stdout?.columns ?? 80);
   const [rows, setRows] = useState(stdout?.rows ?? 24);
   const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
+  // Inline transcript starts at this index. A fresh inline session shows everything (0). Leaving fullscreen
+  // sets it to the current length so inline prints only NEW lines from that point - the alt-screen restore
+  // already put the prior primary content back, and reprinting the whole thread on top is what stacked/
+  // garbled the screen (images #41/#46). Like vim/less: the terminal's own restore owns what was there.
+  const [inlineBaseline, setInlineBaseline] = useState(0);
   const [started, setStarted] = useState(false); // once a turn has run, drop the input placeholder
   const rcRef = useRef<RemoteControl | null>(null);
   const relayRef = useRef<RemoteRelay | null>(null);
@@ -645,10 +650,21 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       frameDiffer?.setBand({ top: 1, height: viewH });
       frameDiffer?.setBandContent(paddedRowsRef.current, 0, streamRowsRef.current);
     } else {
-      altDisposeRef.current?.();
+      altDisposeRef.current?.(); // leaveAltScreen: SHOW_CURSOR + LEAVE_ALT -> terminal restores the primary
       altDisposeRef.current = null;
       setSearch(null); // leaving fullscreen closes any open find bar
       rowScroll.toBottom(); // ...and re-pins so re-entering starts at the live tail
+      // Drop the differ's band + baseline synchronously, BEFORE the inline tree renders - otherwise the
+      // first inline frame is line-diffed against the STALE fullscreen frame with wrong relative cursor
+      // moves (the garbled stack of image #46).
+      frameDiffer?.setBand(null);
+      frameDiffer?.reset();
+      // Do NOT reprint the thread. Leaving the alt-screen already restored the primary to its pre-enter
+      // state; reprinting the whole transcript on top is what stacked it (images #41/#46). Instead show
+      // only lines from here on - the thread stays intact in state, one /fullscreen away. Re-hide the
+      // cursor leaveAltScreen turned on (we stay in Ink, which draws its own caret; image #42).
+      setInlineBaseline(linesRef.current.length);
+      (out as any)?.write?.("\x1b[?25l");
     }
     setFullscreen(next);
     addLine("info", next
@@ -698,26 +714,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     frameDiffer?.setBand(fullscreen ? { top: 1, height: viewH } : null);
     return () => frameDiffer?.setBand(null);
   }, [fullscreen, viewH]);
-  // Leaving fullscreen -> inline: wipe the primary and remount <Static> so the thread prints exactly ONCE.
-  // Leaving the alt screen restores the primary buffer to whatever it held before we entered - including
-  // the PREVIOUS toggle's inline reprint - and then <Static> (which unmounts in fullscreen) remounts and
-  // re-emits every line on top, stacking another full copy of the transcript + welcome banner on each
-  // toggle (image #41). Same wipe+remount the resize handler uses. Runs on the ON->OFF edge only; the
-  // inline->fullscreen direction enters a fresh alt buffer with nothing to stack. Skips the first mount.
-  const wasFullscreenRef = useRef(fullscreen);
-  useEffect(() => {
-    const was = wasFullscreenRef.current;
-    wasFullscreenRef.current = fullscreen;
-    if (was && !fullscreen) {
-      clearScreen?.();                                 // Ink's safe clear (resets its log-update counters)
-      // wipe the restored-primary's stale reprint, AND re-hide the cursor. leaveAltScreen (alt teardown)
-      // writes SHOW_CURSOR - right when the app EXITS, wrong on a toggle: we stay in Ink, which draws its
-      // own block caret and keeps the real cursor hidden, so a shown one just blinks stray below the status
-      // bar (the green bar in image #42). Ink hides once at mount and won't re-hide, so we do it here.
-      (stdout as any)?.write?.("\x1b[2J\x1b[H\x1b[?25l");
-      setResizeKey((k) => k + 1);                      // remount Static so it re-emits fresh on the clean screen
-    }
-  }, [fullscreen]);
+  // (Leaving fullscreen no longer reprints the thread; see toggleFullscreen + inlineBaseline. The
+  // terminal's alt-screen restore owns the primary, so there's nothing to wipe or re-emit here.)
   // Fill the scrollback echo (see runChat): the last ~24 transcript lines as plain text, so leaving
   // fullscreen leaves the recent conversation on the primary screen instead of a blank prompt. Only in
   // fullscreen (inline already lives in the scrollback); a ref read at teardown, no per-render cost.
@@ -1426,7 +1424,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           ) : null}
         </Box>
       ) : (
-        <Static key={resizeKey} items={lines}>{(line) => <Box key={line.id} width={contentCols}><TranscriptLine line={line} cfg={cfg} cols={contentCols} /></Box>}</Static>
+        <Static key={resizeKey} items={inlineBaseline ? lines.slice(inlineBaseline) : lines}>{(line) => <Box key={line.id} width={contentCols}><TranscriptLine line={line} cfg={cfg} cols={contentCols} /></Box>}</Static>
       )}
 
       {/* Ctrl+O peek: the most-recent collapsed tool result shown in full in the live region (not

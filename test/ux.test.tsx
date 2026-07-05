@@ -230,7 +230,7 @@ test("fullscreen history: PgUp shows the jump pill; a new turn counts; End retur
   }
 });
 
-test("toggling fullscreen OFF leaves the alt-screen BEFORE Static reprints (transcript not lost)", async () => {
+test("the thread survives a fullscreen -> inline -> fullscreen round-trip (preserved in state)", async () => {
   const prev = process.env.NEKO_FULLSCREEN;
   process.env.NEKO_FULLSCREEN = "1";
   try {
@@ -240,23 +240,20 @@ test("toggling fullscreen OFF leaves the alt-screen BEFORE Static reprints (tran
     ] };
     const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
     await tick(120);
-    c.stdin.write("/fullscreen");
-    c.stdin.write("\r");
-    await tick(200);
-    const frames = c.frames;
-    const leaveIdx = frames.findIndex((f) => f.includes("\x1b[?1049l"));
-    expect(leaveIdx).toBeGreaterThanOrEqual(0); // we actually left the alt-screen
-    // The one-time <Static> reprint of the history must land AT/AFTER the leave - i.e. on the PRIMARY
-    // screen. If it lands before (old bug: leave ran in a post-render effect), the reprint went into the
-    // discarded alt buffer and the conversation vanished from the inline screen.
-    const lastContentIdx = frames.reduce((acc, f, i) => (f.includes("unique-marker-xyz") ? i : acc), -1);
-    expect(lastContentIdx).toBeGreaterThanOrEqual(leaveIdx);
+    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> inline
+    await tick(150);
+    expect(c.frames.some((f) => f.includes("\x1b[?1049l"))).toBe(true); // actually left the alt-screen
+    // Leaving does NOT reprint the thread inline (the alt-screen restore owns the primary; reprinting was
+    // the #46 stack). But the thread is not LOST - it lives in state, and re-entering fullscreen shows it.
+    expect(strip(c.lastFrame())).not.toContain("unique-marker-xyz");
+    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> fullscreen again
+    expect(await until(c, (f) => /unique-marker-xyz/.test(f))).toBe(true); // the conversation is back
   } finally {
     if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
   }
 });
 
-test("repeated /fullscreen toggles wipe the primary each time back to inline (no stacked reprints)", async () => {
+test("leaving fullscreen does NOT reprint the thread (no stacking) and re-hides the cursor", async () => {
   const prev = process.env.NEKO_FULLSCREEN;
   process.env.NEKO_FULLSCREEN = "1";
   try {
@@ -266,24 +263,16 @@ test("repeated /fullscreen toggles wipe the primary each time back to inline (no
     ] };
     const c = render(<ChatApp yolo provider={new Echo()} resumedSession={s} />);
     await tick(120);
-    // Leaving the alt-screen restores the primary buffer with the PREVIOUS inline reprint; without a wipe,
-    // each toggle back to inline re-emits the whole transcript + welcome banner ON TOP (image #41). The
-    // ON->OFF edge must emit a screen clear AFTER it leaves the alt-screen so exactly one copy survives.
-    // (Counting 2J alone is fooled by the clear the alt-screen emits on ENTRY; anchor to the leave instead.)
-    // After each leave-alt, the ->inline edge must (a) wipe the primary (2J) so the thread prints once,
-    // and (b) RE-HIDE the cursor (?25l) that leaveAltScreen shows - else it blinks stray below the status
-    // bar (image #42). Both must appear AT/AFTER the leave, in that composed post-leave write.
-    const healedAfterLastLeave = () => {
-      const lastLeave = c.frames.reduce((acc, f, i) => (f.includes("\x1b[?1049l") ? i : acc), -1);
-      const after = lastLeave >= 0 ? c.frames.slice(lastLeave).join("") : "";
-      return after.includes("\x1b[2J") && after.includes("\x1b[?25l");
-    };
-    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> inline (wipe + cursor re-hide after the leave)
-    expect(await until(c, healedAfterLastLeave)).toBe(true);
-    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> fullscreen (fresh alt buffer)
-    await tick(150);
-    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> inline again (heal after THIS leave too)
-    expect(await until(c, healedAfterLastLeave)).toBe(true);
+    c.stdin.write("/fullscreen"); c.stdin.write("\r"); // -> inline
+    await tick(200);
+    // The alt-screen restore owns the primary; Neko must NOT reprint the thread on top of it (that is the
+    // stacked/garbled mess of images #41/#46). After the toggle, the inline screen shows only new lines -
+    // the resumed thread is gone from the CURRENT frame (still intact in state, one /fullscreen away).
+    expect(strip(c.lastFrame())).not.toContain("stack-marker");
+    // And the cursor leaveAltScreen turned on is re-hidden (else it blinks stray below the status - #42).
+    const lastLeave = c.frames.reduce((acc, f, i) => (f.includes("\x1b[?1049l") ? i : acc), -1);
+    expect(lastLeave).toBeGreaterThanOrEqual(0);
+    expect(c.frames.slice(lastLeave).join("")).toContain("\x1b[?25l");
     c.unmount();
   } finally {
     if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
