@@ -242,6 +242,29 @@ test("input footer: the prompt is BOXED by a rule above AND below, status beneat
   c.unmount();
 });
 
+test("tab title is the session NAME (first message), stable - not each per-turn prompt", async () => {
+  const captured: string[] = [];
+  const origWrite = process.stdout.write, origTTY = (process.stdout as any).isTTY;
+  (process.stdout as any).isTTY = true;
+  (process.stdout as any).write = ((s: any) => { captured.push(String(s)); return true; }) as any;
+  const titleOf = () => { const m = [...captured.join("").matchAll(/\x1b\]2;([^\x07]*)\x07/g)].pop(); return m ? m[1] : ""; };
+  const pollTitle = async (pred: (t: string) => boolean, ms = 1500) => { for (let w = 0; w < ms; w += 25) { if (pred(titleOf())) return true; await tick(25); } return pred(titleOf()); };
+  try {
+    const c = render(<ChatApp yolo provider={new Echo()} />);
+    await tick(60);
+    c.stdin.write("first message here"); await tick(20); c.stdin.write("\r");   // first turn NAMES the session
+    expect(await pollTitle((t) => t.includes("first message here"))).toBe(true);
+    captured.length = 0;
+    c.stdin.write("second different prompt"); await tick(20); c.stdin.write("\r"); // a later turn must NOT rename it
+    await tick(250);
+    expect(titleOf()).toContain("first message here");        // still the session name...
+    expect(titleOf()).not.toContain("second different prompt"); // ...not the new prompt
+    c.unmount();
+  } finally {
+    (process.stdout as any).write = origWrite; (process.stdout as any).isTTY = origTTY;
+  }
+});
+
 test("fullscreen find: Ctrl+F opens the find bar and typing shows a match badge", async () => {
   const prev = process.env.NEKO_FULLSCREEN;
   process.env.NEKO_FULLSCREEN = "1";

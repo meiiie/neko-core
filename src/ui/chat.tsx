@@ -274,9 +274,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const fullscreenRef = useRef(fullscreen); // for closures that read the mode (resize debounce, mount effect)
   useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
   // Brand the tab title on mount - AFTER Ink's first render, when VT processing is on, so the OSC 2 write
-  // reliably lands (a pre-render write can be dropped before the console enables VT). "Neko Core" for a
-  // fresh session, the saved name for a resumed one; per-turn updates then follow the current task.
-  useEffect(() => { setTerminalTitle(brandTitle(resumedSession?.title || "Neko Core")); }, []);
+  // reliably lands (a pre-render write can be dropped before the console enables VT). The session's name
+  // (resumed name / first message) or "Neko Core"; it stays put - handle() only renames on the FIRST turn.
+  useEffect(() => { setTerminalTitle(brandTitle(titleTaskRef.current || "Neko Core")); }, []);
   // Effective UI fps: env > config > /fps pref > detected display Hz > 60. Auto mode probes the display
   // in the background on first run (subprocess, never blocks startup): the scroll glide adapts LIVE this
   // session; Ink's render cap (fixed at instance creation) picks the value up from the cache next launch.
@@ -298,8 +298,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
   const scrollAwayLenRef = useRef(0); // lines.length when the user scrolled away -> "N new messages" pill count
   const estCacheRef = useRef({ len: -1, val: 0 }); // footer ctx% estimate, recomputed only when messages count changes
-  const titleLockedRef = useRef(false); // /title <name> pins the tab title; auto per-turn updates stop
-  const titleTaskRef = useRef(""); // the current task shown in the tab ("* ..." busy, plain when idle)
+  // Tab title = the session NAME (stable), not the per-turn prompt. A resumed session keeps its name: its
+  // /title name (pinned) or its first user message; a fresh one is named on its first turn (see handle()).
+  const titleLockedRef = useRef(!!resumedSession?.title); // a resumed /title name stays pinned
+  const titleTaskRef = useRef((() => {
+    const fu = resumedSession?.messages?.find((m) => m.role === "user");
+    const name = resumedSession?.title || (typeof fu?.content === "string" ? fu.content.replace(/\s+/g, " ").trim() : "");
+    return name ? trunc(name, 40) : "";
+  })());
   const altDisposeRef = useRef<null | (() => void)>(preAltDispose ?? null); // alt-screen teardown (adopts runChat's pre-render guard)
   const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
   const [search, setSearch] = useState<{ q: string; matches: number[]; idx: number } | null>(null); // fullscreen in-viewport find
@@ -1090,11 +1096,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       addLine("info", `workflow: ${wf.name}`);
     }
     const turnStart = Date.now();
-    // Tab title mirrors the task (claude-code style): "* neko - <task>" while running, star dropped on
-    // finish (see finally). /title pins a manual name and stops these updates.
+    // Tab title = the SESSION NAME, not the per-turn prompt. The session is named ONCE, from its first
+    // message (matching what /resume shows); later turns keep it, so the tab doesn't churn with every
+    // prompt. A leading dot marks a running turn without changing the name. /title pins a manual name.
     if (!titleLockedRef.current) {
-      titleTaskRef.current = trunc(toSend, 40);
-      setTerminalTitle(brandTitle(titleTaskRef.current, true));
+      if (!titleTaskRef.current) titleTaskRef.current = trunc(toSend, 40); // name the session once
+      setTerminalTitle(brandTitle(titleTaskRef.current || "Neko Core", true));
     }
     // Baselines at turn start -> the spinner shows THIS turn's tokens (delta), split input/output.
     turnInStartRef.current = agentRef.current!.cost.promptTokens;
