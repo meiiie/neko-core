@@ -458,6 +458,14 @@ async function cmdBench(args: Args): Promise<number> {
 }
 
 async function main(): Promise<number> {
+  // Terminal hygiene at the VERY entry point: a previous session hard-killed (taskkill, closed window,
+  // SIGKILL) can't run its cleanup, leaving mouse tracking on - the shell then spams "[<...M"/"[...M"
+  // reports on every scroll. Clear ALL mouse modes now (harmless when already off), before arg parsing,
+  // so ANY neko invocation - even one that errors early - de-pollutes the terminal immediately.
+  if ((process.stdout as any).isTTY) {
+    const { DISABLE_MOUSE } = await import("../src/ui/mouse.ts");
+    process.stdout.write(DISABLE_MOUSE);
+  }
   // Sweep the stale `<exe>.old` a previous self-update left behind (Windows keeps the old exe locked
   // during the update itself, so only the NEXT launch can delete it). Lazy import keeps startup lean.
   void import("../src/adapters/update.ts").then((u) => u.cleanupStaleUpdate()).catch(() => {});

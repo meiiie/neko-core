@@ -1574,6 +1574,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 }
 
 export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean; resumeId?: string }): Promise<void> {
+  // FIRST thing, before ANY await (MCP hub build, config load can take a beat): clear mouse tracking a
+  // previous session left stuck on the terminal, so it stops spamming "[<...M" the instant neko runs -
+  // not only after startup finishes. (bin/neko.ts also does this at process entry; belt + suspenders.)
+  if ((process.stdout as any).isTTY) process.stdout.write(DISABLE_MOUSE);
   if (!process.stdin.isTTY) {
     console.error('neko needs an interactive terminal (TTY) for the session. Use `neko run "<task>"` for one-shot.');
     return;
@@ -1590,12 +1594,6 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // Synchronized-output support: trust the env allowlist first (fast, covers all common local terminals);
   // only when it's inconclusive do we ask the terminal directly (DECRQM) - this catches SSH sessions where
   // TERM_PROGRAM isn't forwarded. The probe is skipped (no startup cost) whenever the allowlist already says yes.
-  // Terminal-state hygiene: a crashed/killed previous session (taskkill, closed window mid-run) can
-  // leave MOUSE TRACKING enabled on the terminal - the shell then prints "[<64;97;33M" garbage on every
-  // wheel/move, and it leaks into this session's inputs too. Mouse enable/disable is TERMINAL state,
-  // not process state, so start clean unconditionally (harmless when already off) and clean up again on
-  // the way out (covers our own unclean predecessors AND protects the user's shell after we exit).
-  process.stdout.write(DISABLE_MOUSE);
   // The UNBYPASSABLE restore: process 'exit' fires on EVERY termination - normal return, process.exit,
   // an unhandled throw that escapes, Ctrl-C after raw mode is off - and runs before the process dies.
   // React unmount / the alt-screen guard / runChat's finally can all be short-circuited (a hard exit, a
