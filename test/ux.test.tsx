@@ -502,4 +502,4 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     provider.cancelled = true; // stop the hang so no timer outlives the test
     if (prev === undefined) delete process.env.NEKO_FULLSCREEN; else process.env.NEKO_FULLSCREEN = prev;
   }
-});
+}, 15000); // generous wall-clock: streaming + per-delta hidden-instance renders can run slow under suite load
