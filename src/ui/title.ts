@@ -14,6 +14,16 @@ import type { Writable } from "node:stream";
 export const PUSH_TITLE = "\x1b[22;0t";
 export const POP_TITLE = "\x1b[23;0t";
 
+/** Tab icon - a cat emoji for "Neko". Safe HERE (unlike on-screen text): a tab title is a terminal TITLE
+ * (OSC 2), drawn by the terminal's own UI/emoji font, not the cp1252 screen buffer. Windows Terminal,
+ * iTerm2, kitty et al. render it; a terminal that can't just shows a placeholder glyph in its own chrome. */
+export const TAB_ICON = "\u{1F431}";
+/** Branded tab title: "<icon> <name>" (e.g. "🐱 Neko Core"), with a leading dot while a turn runs so a
+ * backgrounded tab still shows activity at a glance (the claude-code touch). */
+export function brandTitle(name: string, busy = false): string {
+  return `${busy ? "● " : ""}${TAB_ICON} ${name}`;
+}
+
 /** OSC 2 sequence for a title (control chars stripped; kept short - tabs truncate anyway). */
 export function titleSeq(title: string): string {
   return `\x1b]2;${title.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 80)}\x07`;

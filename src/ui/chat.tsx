@@ -27,7 +27,7 @@ import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.ts
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, renderNodeRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
 import { DISABLE_MOUSE, isMouseEnabled, parseLastPointer, parseWheelAll } from "./mouse.ts";
-import { saveTitle, setTerminalTitle } from "./title.ts";
+import { brandTitle, saveTitle, setTerminalTitle } from "./title.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
@@ -273,6 +273,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [fullscreen] = useState<boolean>(cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
   const fullscreenRef = useRef(fullscreen); // for closures that read the mode (resize debounce, mount effect)
   useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
+  // Brand the tab title on mount - AFTER Ink's first render, when VT processing is on, so the OSC 2 write
+  // reliably lands (a pre-render write can be dropped before the console enables VT). "Neko Core" for a
+  // fresh session, the saved name for a resumed one; per-turn updates then follow the current task.
+  useEffect(() => { setTerminalTitle(brandTitle(resumedSession?.title || "Neko Core")); }, []);
   // Effective UI fps: env > config > /fps pref > detected display Hz > 60. Auto mode probes the display
   // in the background on first run (subprocess, never blocks startup): the scroll glide adapts LIVE this
   // session; Ink's render cap (fixed at instance creation) picks the value up from the cache next launch.
@@ -653,7 +657,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     renameSession(sessionIdRef.current, name);
     titleLockedRef.current = true;
     titleTaskRef.current = trunc(name, 40);
-    setTerminalTitle(`neko - ${titleTaskRef.current}`);
+    setTerminalTitle(brandTitle(titleTaskRef.current));
     addLine("info", `session + tab named "${trunc(name, 60)}"`);
   };
 
@@ -1090,7 +1094,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // finish (see finally). /title pins a manual name and stops these updates.
     if (!titleLockedRef.current) {
       titleTaskRef.current = trunc(toSend, 40);
-      setTerminalTitle(`* neko - ${titleTaskRef.current}`);
+      setTerminalTitle(brandTitle(titleTaskRef.current, true));
     }
     // Baselines at turn start -> the spinner shows THIS turn's tokens (delta), split input/output.
     turnInStartRef.current = agentRef.current!.cost.promptTokens;
@@ -1129,7 +1133,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } finally {
       busyRef.current = false;
       setBusy(false);
-      if (!titleLockedRef.current && titleTaskRef.current) setTerminalTitle(`neko - ${titleTaskRef.current}`); // drop the busy star
+      if (!titleLockedRef.current && titleTaskRef.current) setTerminalTitle(brandTitle(titleTaskRef.current)); // drop the busy dot
       if (inflightRef.current.length) { inflightRef.current = []; syncInflight(); } // drop any un-resulted (aborted) blinking lines
       controllerRef.current = null;
       persist();
@@ -1669,7 +1673,10 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // Tab title: save the user's title (stack push), brand the tab for the session; per-turn updates
   // show the current task + busy state (see handle()); restored on exit.
   saveTitle();
-  setTerminalTitle(`neko - ${process.cwd().split(/[\\/]/).pop() ?? "session"}`);
+  // A resumed session keeps its name; a fresh one is branded "Neko Core". Set it here AND from a mount
+  // effect (below): this pre-render write reaches terminals that interpret VT before Ink turns it on
+  // (Windows Terminal), the effect covers the rest (VT is on by then), so the tab brands reliably.
+  setTerminalTitle(brandTitle(resumed?.title || "Neko Core"));
   let syncSupported = isSyncOutputSupported();
   if (!syncSupported) syncSupported = (await probeSyncOutput()) === true;
   const clearHolder = { fn: () => {} };

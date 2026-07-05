@@ -55,6 +55,14 @@ test("title sequences: OSC 2 set + xterm stack push/pop, control chars stripped"
   expect(POP_TITLE).toBe("\x1b[23;0t");
 });
 
+test("brandTitle: cat icon + name, a busy dot while a turn runs", async () => {
+  const { brandTitle, TAB_ICON } = await import("../src/ui/title.ts");
+  expect(TAB_ICON).toBe("\u{1F431}");                          // 🐱
+  expect(brandTitle("Neko Core")).toBe("\u{1F431} Neko Core");
+  expect(brandTitle("my session")).toBe("\u{1F431} my session");
+  expect(brandTitle("my session", true)).toBe("● \u{1F431} my session"); // ● busy dot
+});
+
 test("DISABLE_MOUSE resets EVERY standard mouse mode (not just the 3 we enable) - stale-mode safety", async () => {
   const { DISABLE_MOUSE, ENABLE_MOUSE } = await import("../src/ui/mouse.ts");
   for (const mode of [1000, 1002, 1003, 1005, 1006, 1015, 1016]) {
