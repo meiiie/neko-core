@@ -130,10 +130,16 @@ test("selection: screenText extracts on-screen text; setSelection highlights the
   expect(out).toContain("\x1b[48;5;25m"); // solid blue background opened at the selection start
   expect(out).toContain("\x1b[97m");       // bright-white text
   expect(out).toContain("\x1b[0m");        // block reset at its end
-  // Clearing repaints the row WITHOUT inverse.
+  // A MULTI-row selection with a width fills spanned rows out to a SOLID rectangle (not ragged): row 1 as
+  // the first row of a 2-row selection extends past its "hello world" text to the right edge (col 30).
+  writes.length = 0;
+  d.setSelection({ r0: 1, c0: 1, r1: 2, c1: 5 }, 30);
+  expect(writes.join("")).toMatch(/hello world {10,}/); // content followed by a long run of padded spaces
+  // Clearing repaints the row WITHOUT the selection colour.
   writes.length = 0;
   d.setSelection(null);
   expect(writes.join("")).toContain("hello world");
+  expect(writes.join("")).not.toContain("\x1b[48;5;25m");
 });
 
 test("neutral control writes (Ink's own BSU/ESU, cursor hide/show) do NOT reset the baseline", () => {

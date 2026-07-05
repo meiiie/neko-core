@@ -59,9 +59,13 @@ export class FrameDiffer {
   // column X-1 in the row string - no gutter math. The overlay is applied in windowRows(), so BOTH the
   // Ink-frame compose path and the imperative repaint show it, and it updates through the normal diff.
   private selection: { r0: number; c0: number; r1: number; c1: number } | null = null;
-  /** Highlight (inverse) a selection over the band; null clears it. Repaints so it shows immediately. */
-  setSelection(sel: { r0: number; c0: number; r1: number; c1: number } | null): void {
+  private selWidth = 0; // pad spanned rows out to this screen column so the block is a solid rectangle
+  /** Highlight a selection over the band; null clears it. `width` = the content right-edge column, so a
+   * multi-row selection paints as a full-width rectangle (first/middle rows extend to it, blank rows too)
+   * like a native/desktop selection - not a ragged block that stops at each line's text. Repaints at once. */
+  setSelection(sel: { r0: number; c0: number; r1: number; c1: number } | null, width = 0): void {
     this.selection = sel;
+    this.selWidth = width;
     this.repaintBand();
   }
   /** Plain text (ANSI stripped) of the CURRENT on-screen rows [top..bottom], 1-based inclusive. The
@@ -112,9 +116,9 @@ export class FrameDiffer {
       for (let i = 0; i < slice.length; i++) {
         const y = this.band.top + i;
         if (y < s.r0 || y > s.r1) continue;
-        const from = y === s.r0 ? s.c0 - 1 : 0;                  // 1-based screen col -> 0-based, inclusive
-        const to = y === s.r1 ? s.c1 : Number.MAX_SAFE_INTEGER;  // half-open end; whole row for middle rows
-        slice[i] = overlaySelection(slice[i], Math.max(0, from), to);
+        const from = y === s.r0 ? s.c0 - 1 : 0;                          // 1-based screen col -> 0-based
+        const to = y === s.r1 ? s.c1 : (this.selWidth || Number.MAX_SAFE_INTEGER); // last row stops at c1; the
+        slice[i] = overlaySelection(slice[i], Math.max(0, from), to);    // rest fill to the content right edge
       }
     }
     return slice;
@@ -238,18 +242,24 @@ const SEL_ON = `${ESC}48;5;25m${ESC}97m`; // selection: solid blue background + 
  * (full-row / middle-of-multi-row selections pass to = MAX) - the block simply closes at the row end. */
 function overlaySelection(row: string, from: number, to: number): string {
   if (from >= to) return row;
-  let out = "", col = 0, i = 0, inSel = false, sgr = "";
-  const close = () => `${ESC}0m${sgr}`; // reset the block colours, then replay the row's own colour state
-  while (i < row.length) {
-    if (row[i] === "\x1b" && row[i + 1] === "[") {
-      const m = /^\x1b\[[0-9;]*[A-Za-z]/.exec(row.slice(i));
-      if (m) { if (m[0].endsWith("m")) sgr += m[0]; if (!inSel) out += m[0]; i += m[0].length; continue; }
-    }
-    if (col === from && !inSel) { out += SEL_ON; inSel = true; }
-    if (col === to && inSel) { out += close(); inSel = false; }
+  const cap = to === Number.MAX_SAFE_INTEGER ? Infinity : to;
+  const isSgr = (): RegExpExecArray | null => (row[i] === "\x1b" && row[i + 1] === "[" ? /^\x1b\[[0-9;]*[A-Za-z]/.exec(row.slice(i)) : null);
+  let out = "", col = 0, i = 0, sgr = "";
+  // 1. content BEFORE the block: emit verbatim, tracking colour state.
+  for (let m; col < from && i < row.length; ) {
+    if ((m = isSgr())) { if (m[0].endsWith("m")) sgr += m[0]; out += m[0]; i += m[0].length; continue; }
     out += row[i]; col++; i++;
   }
-  if (inSel) out += close(); // selection reached/overran the end of the row
+  while (col < from) { out += " "; col++; } // pad if the row ended before the block starts (trailing space)
+  // 2. INSIDE the block: one flat colour - drop the row's own SGR (keep tracking state), fill to the edge.
+  out += SEL_ON;
+  for (let m; col < cap && i < row.length; ) {
+    if ((m = isSgr())) { if (m[0].endsWith("m")) sgr += m[0]; i += m[0].length; continue; }
+    out += row[i]; col++; i++;
+  }
+  if (cap !== Infinity) while (col < cap) { out += " "; col++; } // pad the block out to a solid rectangle
+  out += `${ESC}0m${sgr}`; // 3. close: reset the block, replay the row's colour state...
+  while (i < row.length) { out += row[i]; i++; } // ...then emit any content AFTER the block (last-row suffix)
   return out;
 }
 

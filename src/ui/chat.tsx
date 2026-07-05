@@ -1339,7 +1339,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
         if (ptr.kind === "move") {
-          if (selAnchor.current && ptr.left) frameDiffer?.setSelection(selFrom(selAnchor.current, ptr)); // extend the drag
+          if (selAnchor.current && ptr.left) frameDiffer?.setSelection(selFrom(selAnchor.current, ptr), gutter + contentCols); // extend the drag
           return; // a drag OR a bare hover - moves never fall through
         }
         if (ptr.kind === "release") {
@@ -1350,7 +1350,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             const dragged = sel.r0 !== sel.r1 || sel.c1 > sel.c0; // a bare click is a point, not a selection
             const text = dragged ? selectionText(sel) : "";
             if (text.trim()) {
-              frameDiffer?.setSelection(sel);  // KEEP the highlight after release (persists for Ctrl+C)
+              frameDiffer?.setSelection(sel, gutter + contentCols);  // KEEP the highlight after release (persists for Ctrl+C)
               selectedText.current = text;      // ...and remember the text so Ctrl+C copies exactly this
               copyBoth(text); flashCopyNote(`copied ${text.length} chars to clipboard`); // also copy right away
             } else frameDiffer?.setSelection(null); // empty drag / click -> no selection
