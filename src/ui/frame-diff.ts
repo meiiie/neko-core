@@ -168,15 +168,25 @@ export class FrameDiffer {
       if (scroll) return emitScroll(prev, lines, band, scroll);
     }
 
-    // --- plain line-diff (relative addressing; works wherever the frame sits on screen) ---
-    // The cursor starts on the LAST line of the previous frame (that's where Ink leaves it).
-    let cur = prev.length - 1;
+    // --- plain line-diff ---
     let out = "";
-    for (const i of changed) {
-      out += moveRel(cur, i) + `${ESC}G` + lines[i] + EL;
-      cur = i;
+    if (band) {
+      // ABSOLUTE addressing in fullscreen (the frame is pinned at screen row 1 by alt+clear+home). This
+      // is immune to cursor drift: any real-terminal quirk that leaves the cursor somewhere unexpected
+      // (async BSU/ESU flush, a preceding hardware-scroll repaint) would derail RELATIVE moves and paint
+      // a changed line one row off - the ghosted second input box seen on startup. Absolute can't drift.
+      for (const i of changed) out += `${ESC}${i + 1};1H` + lines[i] + EL;
+      out += `${ESC}${lines.length};1H`; // end on the last line - the row Ink assumes next render
+    } else {
+      // RELATIVE addressing inline: the frame floats in native scrollback, so its absolute row is
+      // unknown; the cursor starts on the LAST line of the previous frame (where Ink leaves it).
+      let cur = prev.length - 1;
+      for (const i of changed) {
+        out += moveRel(cur, i) + `${ESC}G` + lines[i] + EL;
+        cur = i;
+      }
+      out += moveRel(cur, lines.length - 1);
     }
-    out += moveRel(cur, lines.length - 1); // end on the last line - the row Ink assumes next render
     return out;
   }
 }

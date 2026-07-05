@@ -176,6 +176,31 @@ test("identical frame skips the write; height change and weird payloads pass thr
   expect(d.process("\x1b]52;c;abc\x07")).toBe(null);          // OSC (clipboard) -> untouched
 });
 
+test("fullscreen line-diff uses ABSOLUTE addressing (row-shift/cursor-drift ghost-proof); inline stays relative", () => {
+  // Fullscreen (band set): a changed chrome line is rewritten at an absolute CUP - immune to cursor
+  // drift and to the chrome shifting rows (the startup double-input-box ghost).
+  const dFS = new FrameDiffer();
+  dFS.setBand({ top: 1, height: 3 });
+  const A = ["b0", "b1", "b2", "chrome", "> "];       // band(3) + chrome
+  const B = ["b0", "b1", "b2", "chrome", "> hi"];     // only the input line changed
+  dFS.process(A.join("\n"));                           // seed
+  const outFS = dFS.process(payload(5, B))!;
+  expect(outFS).toMatch(/\x1b\[5;1H/);                 // absolute CUP to row 5 (the input)
+  expect(outFS).not.toMatch(/\x1b\[\d+[AB]/);          // NO relative up/down moves
+  // Apply to a screen and confirm exactness.
+  const scr = new Screen(6);
+  for (const [i, l] of A.entries()) { scr.r = i; scr.c = 0; scr.write(l); }
+  scr.r = 4; scr.c = 2; scr.write(outFS);
+  expect(scr.lines(5)).toEqual(B);
+
+  // Inline (no band): relative addressing, as before (frame floats in scrollback). Change a NON-last
+  // line so a relative up/down move is actually emitted.
+  const dIn = new FrameDiffer();
+  const outIn = seedAndProcess(dIn, ["r0", "r1", "r2"], ["r0", "r1", "r2"], ["r0X", "r1", "r2"])!;
+  expect(outIn).toMatch(/\x1b\[\d+[AB]/);              // relative move present
+  expect(outIn).not.toMatch(/\x1b\[\d+;1H/);           // ...and NOT absolute
+});
+
 test("streaming tail composes INTO the band right under the committed rows (top-down, in place)", () => {
   const d = new FrameDiffer();
   const emitted: string[] = [];

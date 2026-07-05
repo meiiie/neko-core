@@ -726,7 +726,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     if (!fullscreen || !scrollBoxRef.current) return;
     const h = measureElement(scrollBoxRef.current).height;
-    if (h > 0 && h !== viewH) setViewH(h);
+    if (h > 0 && h !== viewH) setViewH(h); // absolute line-diff (frame-diff.ts) makes the row-shift ghost-free
+
   });
 
   // Re-layout on terminal resize - and after the drag settles, do a FULL repaint. Why the full reset is
