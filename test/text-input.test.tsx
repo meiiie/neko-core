@@ -73,6 +73,19 @@ test("ignores stray escape sequences (mouse reports) - never leak into the text"
   c.unmount();
 });
 
+test("caret is a | bar sitting BEFORE the char at the cursor (not a block over it)", async () => {
+  const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+  const c = render(<Harness cb={() => {}} />);
+  expect(strip(c.lastFrame())).toContain("|");     // empty: caret shows before the placeholder
+  c.stdin.write("ab");
+  await tick();
+  expect(strip(c.lastFrame())).toContain("ab|");   // cursor at end -> bar AFTER the text
+  c.stdin.write("\x1b[D");                          // left arrow -> between a and b
+  await tick();
+  expect(strip(c.lastFrame())).toContain("a|b");    // bar BEFORE the char it will insert before
+  c.unmount();
+});
+
 test("end-typing stays codepoint/NFC correct (IME path)", async () => {
   let out = "";
   const c = render(<Harness cb={(v) => (out = v)} />);

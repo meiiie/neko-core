@@ -83,13 +83,16 @@ export function TextInput(props: {
     }
   });
 
-  // Render the caret (inverse block) at the cursor; when empty it sits before the placeholder.
+  // Render the caret as a thin green bar SITTING BEFORE the character at the cursor - a text-editor
+  // caret (like Claude Code), not a block that covers the character. When empty it sits before the
+  // placeholder. Green so it reads as the live insertion point.
   const cps = [...value];
   const shown = mask ? cps.map(() => "•") : cps;
+  const caret = <Text color="green">|</Text>;
   if (cps.length === 0) {
     return (
       <Text>
-        <Text inverse> </Text>
+        {caret}
         <Text dimColor>{placeholder ?? ""}</Text>
       </Text>
     );
@@ -98,8 +101,8 @@ export function TextInput(props: {
   return (
     <Text>
       {shown.slice(0, i).join("")}
-      <Text inverse>{shown[i] ?? " "}</Text>
-      {shown.slice(i + 1).join("")}
+      {caret}
+      {shown.slice(i).join("")}
     </Text>
   );
 }
