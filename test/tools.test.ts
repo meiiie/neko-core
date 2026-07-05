@@ -29,6 +29,12 @@ test("noTools (perception mode) exposes NO tool schemas — vision-only endpoint
 
 test("computer action validates inputs deterministically (no NaN/garbage reaches PowerShell)", async () => {
   const tools = new ToolRegistry(process.cwd(), "auto", () => true);
+  if (process.platform !== "win32") {
+    // The computer tool drives Windows UI Automation; elsewhere it must refuse UP FRONT with a clear
+    // platform message (not a confusing validation error for a tool that can't run anyway).
+    expect(String(await tools.execute("computer", { action: "click" }))).toContain("Windows-only");
+    return;
+  }
   // These all return BEFORE spawnSync, so no PowerShell runs — pure input validation.
   expect(String(await tools.execute("computer", { action: "click" }))).toContain("numeric");
   expect(String(await tools.execute("computer", { action: "click", x: "abc", y: 5 }))).toContain("numeric");

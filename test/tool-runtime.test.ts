@@ -206,7 +206,7 @@ test("bash returns exit code + output", async () => {
 
 test("Ctrl+B moves a running bash command to the background", async () => {
   const { reg } = makeReg("auto", () => true);
-  const p = reg.execute("bash", { command: 'node -e "setTimeout(function(){},600)"' });
+  const p = reg.execute("bash", { command: "sleep 0.6" });
   await new Promise((r) => setTimeout(r, 150));
   expect(reg.detachRunningBash()).toBe(true); // a bash is running -> detached
   const out = await p;
@@ -218,7 +218,7 @@ test("Ctrl+B moves a running bash command to the background", async () => {
 test("bash is interrupted at once when the abort signal fires (no long wait, no orphan)", async () => {
   const { reg } = makeReg("auto", () => true);
   const ctrl = new AbortController();
-  const p = reg.execute("bash", { command: 'node -e "setTimeout(function(){},5000)"' }, ctrl.signal);
+  const p = reg.execute("bash", { command: "sleep 5" }, ctrl.signal);
   setTimeout(() => ctrl.abort(), 150);
   const start = Date.now();
   const out = await p;
@@ -320,13 +320,13 @@ test("search: context shows surrounding lines", async () => {
 
 test("bash honors a per-call timeout arg (clamped to a 1s floor)", async () => {
   const { reg } = makeReg("auto", () => true);
-  const out = await reg.execute("bash", { command: 'node -e "setTimeout(function(){},9000)"', timeout: 1000 });
+  const out = await reg.execute("bash", { command: "sleep 9", timeout: 1000 });
   expect(out).toContain("timed out after 1000ms");
 });
 
 test("bash run_in_background returns at once and records the job", async () => {
   const { reg } = makeReg("auto", () => true);
-  const out = await reg.execute("bash", { command: 'node -e "setTimeout(function(){},400)"', run_in_background: true });
+  const out = await reg.execute("bash", { command: "sleep 0.4", run_in_background: true });
   expect(out).toContain("Running in background");
   expect(reg.backgrounds.length).toBe(1);
 });

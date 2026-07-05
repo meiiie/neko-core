@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { latestSession, listSessionMetas, listSessions, loadSession, newSessionId, saveSession } from "../src/adapters/session.ts";
@@ -26,7 +26,7 @@ test("sessions are isolated per folder (latestSession filters by cwd)", () => {
     expect(latestSession("/tmp/neko-folder-A")?.id).toBe(a);
     expect(latestSession("/tmp/neko-folder-B")?.id).toBe(b);
   } finally {
-    for (const id of [a, b]) rmSync(join(homedir(), ".neko-core", "sessions", `${id}.json`), { force: true });
+    for (const id of [a, b]) rmSync(join(TEST_HOME, ".neko-core", "sessions", `${id}.json`), { force: true });
   }
 });
 
@@ -46,7 +46,7 @@ test("save / load / list round-trip", () => {
     expect(loaded?.messages.length).toBe(1);
     expect(listSessions().some((s) => s.id === id)).toBe(true);
   } finally {
-    rmSync(join(homedir(), ".neko-core", "sessions", `${id}.json`), { force: true });
+    rmSync(join(TEST_HOME, ".neko-core", "sessions", `${id}.json`), { force: true });
   }
 });
 
@@ -64,14 +64,14 @@ test("listSessionMetas: lightweight metadata, mtime-cached index, self-heals on 
     expect((m as any).messages).toBeUndefined(); // it's metadata only
 
     // The index file was written; a 2nd call reads it (mtime cache) and still returns the entry.
-    expect(existsSync(join(homedir(), ".neko-core", "sessions", ".index.json"))).toBe(true);
+    expect(existsSync(join(TEST_HOME, ".neko-core", "sessions", ".index.json"))).toBe(true);
     expect(listSessionMetas().find((x) => x.id === id)?.msgCount).toBe(2);
 
     // Change the session (more messages, new mtime) -> the meta re-parses, not stale.
     saveSession({ ...sess, messages: [...sess.messages, { role: "user", content: "more" }] });
     expect(listSessionMetas().find((x) => x.id === id)?.msgCount).toBe(3);
   } finally {
-    rmSync(join(homedir(), ".neko-core", "sessions", `${id}.json`), { force: true });
+    rmSync(join(TEST_HOME, ".neko-core", "sessions", `${id}.json`), { force: true });
   }
 });
 

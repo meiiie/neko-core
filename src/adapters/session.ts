@@ -34,7 +34,9 @@ export interface SessionMeta {
   title?: string; // user-set name
   msgCount: number;
   titleText: string; // precomputed first-user-message title (so no messages needed to show a title)
-  mtime: number; // file mtimeMs at index time - the freshness key
+  mtime: number; // file mtimeMs at index time - freshness key (with fsize)
+  fsize?: number; // file size at index time. mtimeMs ALONE misses same-millisecond rewrites (ext4 saw two
+  // saves land on one tick in tests); size catches the append. rsync-style mtime+size composite check.
 }
 
 function sessionsDir(): string {
@@ -90,13 +92,13 @@ export function loadSession(id: string): Session | null {
 
 const INDEX_FILE = () => join(sessionsDir(), ".index.json");
 
-function metaOf(session: Session, mtime: number): SessionMeta {
+function metaOf(session: Session, mtime: number, fsize: number): SessionMeta {
   const firstUser = session.messages?.find((m) => m.role === "user");
   const titleText = firstUser ? String(firstUser.content).replace(/\s+/g, " ").slice(0, 60) : "(no messages)";
   return {
     id: session.id, createdAt: session.createdAt, updatedAt: session.updatedAt, cwd: session.cwd,
     model: session.model, branch: session.branch, bytes: session.bytes, title: session.title,
-    msgCount: session.messages?.length ?? 0, titleText, mtime,
+    msgCount: session.messages?.length ?? 0, titleText, mtime, fsize,
   };
 }
 
@@ -121,14 +123,14 @@ export function listSessionMetas(): SessionMeta[] {
     if (!file.endsWith(".json") || file === ".index.json") continue;
     const id = file.slice(0, -5);
     const path = join(dir, file);
-    let mtime = 0;
-    try { mtime = statSync(path).mtimeMs; } catch { continue; }
+    let mtime = 0, fsize = 0;
+    try { const st = statSync(path); mtime = st.mtimeMs; fsize = st.size; } catch { continue; }
     const cached = index[id];
-    if (cached && cached.mtime === mtime) { next[id] = cached; out.push(cached); continue; }
+    if (cached && cached.mtime === mtime && cached.fsize === fsize) { next[id] = cached; out.push(cached); continue; }
     // New or changed file -> parse it once and (re)build its meta.
     try {
       const s = JSON.parse(readFileSync(path, "utf-8")) as Session;
-      const m = metaOf(s, mtime);
+      const m = metaOf(s, mtime, fsize);
       next[id] = m; out.push(m); dirty = true;
     } catch { /* skip corrupt */ }
   }
