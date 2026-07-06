@@ -6,6 +6,14 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Installer polish (grok-class) + shadow diagnosis.** Both installers now fetch and SHOW the version
+  being installed, draw a clean single-line progress bar, run the installed binary and report its real
+  version, always state the PATH situation (Windows now PREPENDS to the User PATH), and - the important
+  one - detect OTHER `neko` executables on PATH that would shadow the fresh install and print the exact
+  removal commands. That shadow was exactly the "installed the new version but `neko --version` still
+  says 0.2" trap. Served live from `main`; no release required.
+
 ## [0.7.4] — 2026-07-06
 
 ### Added
