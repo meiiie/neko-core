@@ -30,21 +30,26 @@ jobs:
     name: build ${{ matrix.asset }}
     needs: release
     runs-on: ${{ matrix.os }}
+    # A hung runtime (the Rosetta lesson) must fail fast, not squat on a runner for 6 hours.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Every target builds NATIVELY (bun embeds ITSELF - required on canary, which publishes no
+          # Four targets build NATIVELY (bun embeds ITSELF - required on canary, which publishes no
           # cross-target downloads: "Target platform ...-v1.4.0 is not available" killed the two
-          # cross-compiled jobs at v0.7.5). Native also means every artifact gets BOTH smokes:
+          # cross-compiled jobs at v0.7.5). Native also means the artifact gets BOTH smokes:
           # __uiprobe (render) and input-probe (a real PTY hears keys - the Bun-1.3.14 class).
-          - { os: ubuntu-latest,    target: bun-linux-x64,    asset: neko-linux-x64 }
-          - { os: ubuntu-24.04-arm, target: bun-linux-arm64,  asset: neko-linux-arm64 }
-          - { os: macos-latest,     target: bun-darwin-arm64, asset: neko-macos-arm64 }
-          # Intel macOS: no Intel runners left, so the darwin-x64 bun runs under Rosetta 2 on the
-          # arm64 runner and embeds itself - a genuine x64 artifact, still natively smokable.
-          - { os: macos-latest,     target: bun-darwin-x64,   asset: neko-macos-x64,       rosetta: true }
-          - { os: windows-latest,   target: bun-windows-x64,  asset: neko-windows-x64.exe }
+          - { os: ubuntu-latest,    target: bun-linux-x64,    asset: neko-linux-x64,       smoke: true }
+          - { os: ubuntu-24.04-arm, target: bun-linux-arm64,  asset: neko-linux-arm64,     smoke: true }
+          - { os: macos-latest,     target: bun-darwin-arm64, asset: neko-macos-arm64,     smoke: true }
+          # Intel macOS: no Intel runners left, and the x64 bun HANGS under Rosetta on the arm64
+          # runner (first re-tag of v0.7.5 sat 45min in that step). So this one target cross-compiles
+          # from STABLE bun (versioned cross-target runtimes exist only for releases) and is not
+          # smoked (x64 artifacts can't run here either). The canary-fixed stdin regression is
+          # Windows-only, so a stable runtime is correct for Intel macs. Unify at the next stable.
+          - { os: macos-latest,     target: bun-darwin-x64,   asset: neko-macos-x64,       smoke: false, bun: latest }
+          - { os: windows-latest,   target: bun-windows-x64,  asset: neko-windows-x64.exe, smoke: true }
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -54,33 +59,26 @@ jobs:
           # `stdin.setRawMode(true)` probe receives ZERO key bytes while Node in the same terminal
           # receives them; bun is mid-rework of its Windows I/O - "Remove libuv on Windows" #33160).
           # A 1.3.14-compiled neko renders but cannot be typed into on such machines; the canary
-          # (1.4.0) runtime is field-verified to fix exactly that.
-          bun-version: canary
+          # (1.4.0) runtime is field-verified to fix exactly that. A matrix entry can override
+          # (darwin-x64 cross-compiles from stable - see the matrix comment).
+          bun-version: ${{ matrix.bun || 'canary' }}
       - run: bun install --frozen-lockfile
       - name: compile
         # scripts/build.ts is the ONE source of truth for compile flags (NODE_ENV define, tsconfig
         # override, and - on the Windows runner only - the PE branding: Task Manager "Neko Core", the
         # cat icon, publisher/version/copyright). bun REJECTS --windows-* off Windows, so the script
         # gates them by host; args are passed as argv (no shell quoting fragility across runners).
-        if: ${{ !matrix.rosetta }}
         shell: bash
         run: bun scripts/build.ts --target=${{ matrix.target }} --outfile=${{ matrix.asset }}
-      - name: compile darwin-x64 under Rosetta
-        # The x64 bun (same canary tag) runs under Rosetta 2 and embeds ITSELF into the artifact.
-        # node_modules from the arm64 `bun install` above are pure-JS - shared as-is.
-        if: ${{ matrix.rosetta }}
-        shell: bash
-        run: |
-          curl -fsSL -o bun-x64.zip https://github.com/oven-sh/bun/releases/download/canary/bun-darwin-x64.zip
-          unzip -q bun-x64.zip
-          ./bun-darwin-x64/bun scripts/build.ts --target=${{ matrix.target }} --outfile=${{ matrix.asset }}
       - name: smoke-test the artifact (renders a real Ink/JSX tree)
+        if: ${{ matrix.smoke }}
         shell: bash
         run: ./${{ matrix.asset }} __uiprobe
       - name: input smoke - the artifact must HEAR keys through a real PTY
         # The gate the Bun-1.3.14 field bug taught us: a runtime whose raw-stdin bridge drops keys
         # renders perfectly (__uiprobe passes) and fails ONLY here. Spawns the artifact's
         # `doctor keys` under Bun.Terminal (ConPTY/forkpty), types into it, asserts the byte lands.
+        if: ${{ matrix.smoke }}
         shell: bash
         run: bun scripts/input-probe.ts ./${{ matrix.asset }}
       - name: attach to release
