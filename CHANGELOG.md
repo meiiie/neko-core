@@ -4,7 +4,7 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
-## [Unreleased]
+## [0.7.6] — 2026-07-07
 
 ### Fixed
 - **Duplicated footer/prompt rows on Windows (ghost chrome): the frame differ is now OFF by default
