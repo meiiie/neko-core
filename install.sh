@@ -71,3 +71,5 @@ fi
 
 echo ""
 echo "Run 'neko' to get started!  (first time: 'neko init-user' to set up your API key)"
+echo "  neko doctor   - check your setup (provider / model / API key)"
+echo "  neko --yolo   - auto-approve mode: Neko runs tools without asking"

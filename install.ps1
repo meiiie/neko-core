@@ -84,14 +84,27 @@ $newVer = if ($ver -match 'neko-core\s+([0-9][0-9.]*)') { $Matches[1] } else { '
 Write-Dim  "  Installed to $dest"
 if ($ver) { Write-Ok "$ver installed" } else { Write-Ok 'Installed' }
 
-# PATH: always report the state. PREPEND so this install wins over stale copies later in the User PATH.
+# PATH: compare per ENTRY, never by substring - "...\Programs\neko-core" (the pre-v0.3 install dir)
+# CONTAINS "...\Programs\neko", so a wildcard check false-positives and the real dir never gets added.
+function Test-OnPath($pathString, $wantDir) {
+  $want = $wantDir.TrimEnd('\')
+  foreach ($e in ("$pathString" -split ';')) {
+    if ($e -and ($e.Trim().TrimEnd('\') -eq $want)) { return $true }
+  }
+  return $false
+}
+# Always report the state. PREPEND so this install wins over stale copies later in the User PATH.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($userPath -notlike "*$dir*") {
-  [Environment]::SetEnvironmentVariable('Path', "$dir;$userPath", 'User')
-  Write-Dim "  Added $dir to your User PATH (open a NEW terminal to pick it up)."
+if (-not (Test-OnPath $userPath $dir)) {
+  $newPath = if ($userPath) { "$dir;$userPath" } else { $dir }
+  [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+  Write-Dim "  Added $dir to your User PATH."
 } else {
   Write-Dim "  $dir is already on your User PATH."
 }
+# Make `neko` work in THIS shell too (iex runs in the user's session, so this sticks until it closes;
+# new terminals pick the User PATH up on their own).
+if (-not (Test-OnPath $env:Path $dir)) { $env:Path = "$dir;$env:Path" }
 
 # SHADOW HEALING - the "installed the new version but neko still says 0.2" trap: another `neko` earlier
 # on PATH wins over this install. If it IS an OLDER neko-core (verified by running `version`), remove it
@@ -117,5 +130,22 @@ try {
   }
 } catch { }
 
+# Legacy cleanup - the pre-v0.3 installer used ...\Programs\neko-core. Once no neko.exe lives there
+# (shadow healing above removes outdated ones), drop the dangling User PATH entry and the empty dir.
+try {
+  $legacy = Join-Path $env:LOCALAPPDATA 'Programs\neko-core'
+  if (-not (Test-Path (Join-Path $legacy 'neko.exe'))) {
+    if ((Test-Path $legacy) -and -not @(Get-ChildItem -Force $legacy)) { Remove-Item -Force $legacy }
+    $up = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (Test-OnPath $up $legacy) {
+      $kept = @("$up" -split ';' | Where-Object { $_ -and ($_.Trim().TrimEnd('\') -ne $legacy.TrimEnd('\')) })
+      [Environment]::SetEnvironmentVariable('Path', ($kept -join ';'), 'User')
+      Write-Dim "  Removed the stale $legacy entry from your User PATH."
+    }
+  }
+} catch { }
+
 Write-Host ''
 Write-Ok "Run 'neko' to get started!  (first time: 'neko init-user' to set up your API key)"
+Write-Dim "  neko doctor   - check your setup (provider / model / API key)"
+Write-Dim "  neko --yolo   - auto-approve mode: Neko runs tools without asking"

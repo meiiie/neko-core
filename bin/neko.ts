@@ -52,13 +52,14 @@ interface Args {
   noTools?: boolean;
   version: boolean;
   help: boolean;
+  doctor: boolean;
   trials?: number;
   images?: string[];
 }
 
 function parseArgs(argv: string[]): Args {
   const tokens: string[] = [];
-  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, once: false, version: false, help: false };
+  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, once: false, version: false, help: false, doctor: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--profile") args.profile = argv[++i];
@@ -77,6 +78,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--continue" || a === "-c") args.resume = true; // Claude-Code parity: resume the latest session for this dir
     else if (a === "--version" || a === "-v") args.version = true;
     else if (a === "--help" || a === "-h") args.help = true;
+    else if (a === "--doctor") args.doctor = true; // alias of `neko doctor` (people type both)
     else if (a.startsWith("-")) { /* ignore unknown flags */ }
     else tokens.push(a);
   }
@@ -224,6 +226,7 @@ Options:
                      e.g. NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko run --image pkg.jpg "what is this?"
   --resume [id]      (chat) resume a session by id, or the latest for this directory
   --continue, -c     (chat) resume the latest session for this directory (then /continue to pick up)
+  --doctor           alias of 'neko doctor' (setup diagnostics)
   --version          print version`;
 
 function cmdConfig(args: Args): number {
@@ -480,6 +483,7 @@ async function main(): Promise<number> {
     console.log(HELP);
     return 0;
   }
+  if (args.doctor) return cmdDoctor(args);
   // Activation: bare `neko` (or `neko code` / `neko core`) starts the interactive session.
   if (!cmd || cmd === "chat" || cmd === "code" || cmd === "core") {
     try {

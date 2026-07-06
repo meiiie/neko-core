@@ -6,6 +6,18 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Installer: PATH is now compared per ENTRY, never by substring.** The old wildcard check saw the
+  pre-v0.3 `...\Programs\neko-core` entry, decided `...\Programs\neko` was "already on PATH", and never
+  added the real install dir - so after shadow healing removed the old exe, `neko` was not recognized
+  at all. The installer now matches exact PATH entries (case/trailing-slash tolerant), prepends the
+  install dir into the CURRENT shell as well (works immediately under `irm ... | iex`), and cleans the
+  dangling `Programs\neko-core` PATH entry + empty dir left behind by the pre-v0.3 installer.
+
+### Added
+- **`neko --doctor`** as an alias of `neko doctor` (previously the flag was silently ignored and
+  dropped you into chat). Both installers now end by suggesting `neko doctor` and `neko --yolo`.
+
 ### Changed
 - **Installer polish (grok-class) + shadow diagnosis.** Both installers now fetch and SHOW the version
   being installed, draw a clean single-line progress bar, run the installed binary and report its real
