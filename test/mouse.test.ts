@@ -105,7 +105,8 @@ test("title stack push is SKIPPED on Windows (its restore reverts the tab mid-se
 
 test("DISABLE_MOUSE resets EVERY standard mouse mode (not just the 3 we enable) - stale-mode safety", async () => {
   const { DISABLE_MOUSE, ENABLE_MOUSE } = await import("../src/ui/mouse.ts");
-  for (const mode of [1000, 1002, 1003, 1005, 1006, 1015, 1016]) {
+  // 9001 = WT win32-input-mode: stuck ON, every key arrives as CSI ..._ and typing looks dead.
+  for (const mode of [1000, 1002, 1003, 1005, 1006, 1015, 1016, 9001]) {
     expect(DISABLE_MOUSE).toContain(`\x1b[?${mode}l`); // every mode gets an explicit reset
   }
   // We only ENABLE the three we actually use.

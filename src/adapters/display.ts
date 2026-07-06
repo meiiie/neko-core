@@ -21,6 +21,16 @@ const cachePath = () => join(homeDir(), ".neko-core", ".display.json");
 
 export const clampFps = (n: number): number => Math.min(240, Math.max(30, Math.round(n)));
 
+// Marketing refresh rates whose real timing is fractional (NTSC-style 59.94, 119.88, 143.86...):
+// Windows WMI and macOS report the FLOOR as an integer, so a 60Hz panel reads "59Hz" - technically
+// true, guaranteed to confuse ("my monitor is 60Hz!"). Snap n -> n+1 only when n+1 is a known rate.
+const COMMON_RATES = new Set([60, 75, 90, 100, 120, 144, 165, 240]);
+
+/** Normalize a floor-reported fractional rate (59 -> 60, 119 -> 120, 143 -> 144); exact reads pass through. */
+export function normalizeHz(hz: number): number {
+  return COMMON_RATES.has(hz + 1) ? hz + 1 : hz;
+}
+
 /** The cached detected refresh rate, or null (never detected / stale / unparseable). Sync + cheap. */
 export function cachedRefreshRate(now = Date.now()): number | null {
   try {
@@ -78,6 +88,7 @@ export async function detectRefreshRate(): Promise<number | null> {
     if (m) hz = Math.round(parseFloat(m[1]));
   }
   if (hz == null || hz < 30 || hz > 360) return null;
+  hz = normalizeHz(hz);
   saveCache(hz);
   return hz;
 }

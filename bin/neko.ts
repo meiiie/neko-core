@@ -12,7 +12,7 @@ import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent.ts";
 import { loadConfig, type NekoConfig } from "../src/adapters/config.ts";
 import { agentsContextBlock, loadAgent } from "../src/adapters/agents.ts";
 import { environmentBlock, projectContextBlock, renderContext } from "../src/adapters/context.ts";
-import { collectChecks, render } from "../src/adapters/doctor.ts";
+import { collectChecks, collectTerminalChecks, render } from "../src/adapters/doctor.ts";
 import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
 import { HARD_TASKS, renderBenchReport, renderLiftReport, runBench, runHarnessLift } from "../src/adapters/bench.ts";
@@ -194,7 +194,7 @@ Usage: neko [command] [options]
 
 Commands:
   config        show the resolved config-first settings
-  doctor        read-only diagnostics (provider/model/key)
+  doctor [keys] read-only diagnostics (provider/model/key/terminal); 'keys' = raw key-input probe
   profiles      list the named runtime profiles
   init-user     scaffold ~/.neko-core/config.json
   init          scaffold ./.neko-core/config.json (project-local)
@@ -244,7 +244,45 @@ function cmdConfig(args: Args): number {
 }
 
 function cmdDoctor(args: Args): number {
-  console.log(render(collectChecks(load(args))));
+  console.log(render([...collectChecks(load(args)), ...collectTerminalChecks()]));
+  return 0;
+}
+
+/**
+ * `neko doctor keys` - RAW key probe, deliberately OUTSIDE Ink: raw mode on, every received chunk
+ * printed as hex + printable for 10s. Triage for "the session renders but typing does nothing":
+ *   no bytes    -> keys never reach the process (terminal / ConPTY / antivirus level - not neko)
+ *   CSI ..._    -> win32-input-mode was stuck on (neko resets it at startup since 0.7.5 - restart)
+ *   plain bytes -> input arrives fine at this layer; the problem is higher up (report the output)
+ */
+async function cmdDoctorKeys(): Promise<number> {
+  const stdin: any = process.stdin;
+  if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
+    console.log("keys probe needs an interactive terminal (raw-capable TTY stdin).");
+    return 1;
+  }
+  console.log("Key probe: press some keys for 10 seconds (q or Ctrl+C stops early).");
+  console.log("Every chunk the terminal delivers is shown as hex + printable:");
+  let got = 0, sawWin32 = false;
+  stdin.setRawMode(true);
+  stdin.resume();
+  await new Promise<void>((res) => {
+    const t = setTimeout(res, 10000);
+    const onData = (d: Buffer) => {
+      got++;
+      const s = d.toString("latin1");
+      if (/\x1b\[[\d;]*_/.test(s)) sawWin32 = true; // win32-input-mode report: CSI Vk;Sc;Uc;Kd;Cs;Rc _
+      const hex = [...d].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+      console.log(`  ${hex}  "${s.replace(/[^\x20-\x7e]/g, ".")}"`);
+      if (s.includes("\x03") || s.toLowerCase().includes("q")) { clearTimeout(t); stdin.off("data", onData); res(); }
+    };
+    stdin.on("data", onData);
+  });
+  stdin.setRawMode(false);
+  stdin.pause();
+  if (!got) console.log("\nVERDICT: NO bytes arrived. The keyboard never reaches neko - that is terminal/ConPTY/antivirus territory, not the app. Try another terminal (conhost vs Windows Terminal) and check AV exclusions.");
+  else if (sawWin32) console.log("\nVERDICT: win32-input-mode sequences detected (CSI ..._). The tab had DEC 9001 stuck on; neko resets it at startup - restart neko in this tab.");
+  else console.log("\nVERDICT: input arrives normally at this layer. If the session still ignores typing, send this output when reporting.");
   return 0;
 }
 
@@ -497,7 +535,7 @@ async function main(): Promise<number> {
   try {
     switch (cmd) {
       case "config": return cmdConfig(args);
-      case "doctor": return cmdDoctor(args);
+      case "doctor": return args.positionals[0] === "keys" ? await cmdDoctorKeys() : cmdDoctor(args);
       case "profiles": return cmdProfiles(args);
       case "init-user": console.log(initUser(args.force)); return 0;
       case "init": console.log(initProject(args.force)); return 0;

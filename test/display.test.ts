@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { cachedRefreshRate, clampFps, resolveUiFps } from "../src/adapters/display.ts";
+import { cachedRefreshRate, clampFps, normalizeHz, resolveUiFps } from "../src/adapters/display.ts";
 import { savePrefs } from "../src/adapters/prefs.ts";
 
 // Isolate ~/.neko-core (display cache + prefs are read/written). See session.test.ts for the pattern.
@@ -58,4 +58,17 @@ test("clampFps bounds 30..240", () => {
   expect(clampFps(144)).toBe(144);
   expect(clampFps(10)).toBe(30);
   expect(clampFps(1000)).toBe(240);
+});
+
+test("normalizeHz snaps floor-reported fractional rates up, passes exact reads through", () => {
+  // WMI/system_profiler report the floor of NTSC-style fractional timings: 59.94 -> "59".
+  expect(normalizeHz(59)).toBe(60);
+  expect(normalizeHz(119)).toBe(120);
+  expect(normalizeHz(143)).toBe(144);
+  expect(normalizeHz(164)).toBe(165);
+  // Exact and uncommon rates are untouched - never invent a display the user doesn't have.
+  expect(normalizeHz(60)).toBe(60);
+  expect(normalizeHz(144)).toBe(144);
+  expect(normalizeHz(61)).toBe(61);
+  expect(normalizeHz(48)).toBe(48);
 });

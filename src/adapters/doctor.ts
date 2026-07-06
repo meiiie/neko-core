@@ -4,12 +4,48 @@
  */
 import type { NekoConfig } from "./config.ts";
 import { detectSandbox } from "../core/sandbox.ts";
+import { cachedRefreshRate, resolveUiFps } from "./display.ts";
 import { VERSION } from "../shared/version.ts";
 
 export interface Check {
   status: "ok" | "warn";
   name: string;
   detail: string;
+}
+
+/** Name the hosting terminal from the env (best-effort - WT/ConPTY doesn't export TERM_PROGRAM). */
+export function terminalName(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.TERM_PROGRAM) return env.TERM_PROGRAM;
+  if (env.WT_SESSION) return "Windows Terminal";
+  if (env.ConEmuANSI) return "ConEmu/Cmder";
+  if (env.TERM) return env.TERM;
+  return process.platform === "win32" ? "legacy console (conhost)" : "unknown";
+}
+
+/** Terminal/input diagnostics - the session-won't-take-keys triage lives HERE, not in guesswork:
+ * a session that renders but ignores typing is either (a) keys never reaching the process
+ * (`neko doctor keys` shows zero bytes) or (b) keys arriving in a protocol the UI doesn't speak
+ * (the probe shows the bytes). These checks surface the facts a bug report needs. */
+export function collectTerminalChecks(): Check[] {
+  const stdinTty = !!process.stdin.isTTY;
+  const rawOk = stdinTty && typeof (process.stdin as any).setRawMode === "function";
+  const r = resolveUiFps(null);
+  const hz = cachedRefreshRate();
+  return [
+    { status: "ok", name: "terminal", detail: terminalName() },
+    {
+      status: stdinTty && !!process.stdout.isTTY ? "ok" : "warn",
+      name: "tty",
+      detail: `stdin=${stdinTty ? "tty" : "NOT a tty"} stdout=${process.stdout.isTTY ? "tty" : "NOT a tty"}` +
+        (stdinTty && !rawOk ? " (raw mode UNAVAILABLE - interactive input cannot work)" : ""),
+    },
+    {
+      status: "ok",
+      name: "ui_fps",
+      detail: `${r.fps}fps via ${r.source}${hz ? ` (display ~${hz}Hz)` : ""}`,
+    },
+    { status: "ok", name: "input_probe", detail: "if the session renders but typing does NOTHING, run `neko doctor keys`" },
+  ];
 }
 
 export function collectChecks(config: NekoConfig): Check[] {

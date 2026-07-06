@@ -17,6 +17,22 @@ All notable changes to Neko Code are documented here. The format follows
 ### Added
 - **`neko --doctor`** as an alias of `neko doctor` (previously the flag was silently ignored and
   dropped you into chat). Both installers now end by suggesting `neko doctor` and `neko --yolo`.
+- **Terminal/input diagnostics.** `neko doctor` now reports the hosting terminal, stdin/stdout TTY +
+  raw-mode capability, and the effective UI fps (+ detected display Hz). New `neko doctor keys`: a raw
+  key probe OUTSIDE the UI stack - it prints every byte the terminal delivers (hex + printable) for 10s
+  and issues a verdict. This is the triage for "the session renders but typing does nothing": zero
+  bytes = the keyboard never reaches neko (terminal/ConPTY/antivirus level); `CSI ..._` bytes =
+  win32-input-mode was stuck on; plain bytes = the input layer is fine.
+
+### Fixed
+- **Stuck win32-input-mode heals at startup.** DEC private mode 9001 (Windows Terminal's
+  win32-input-mode) left ON by a previous app makes every keypress arrive as `CSI Vk;Sc;Uc;Kd;Cs;Rc _`
+  - the UI renders fine but typing looks completely dead. The terminal-hygiene reset every neko run
+  performs at entry (and teardown) now turns it off alongside the mouse modes.
+- **"display detected at 59Hz" confusion.** Windows WMI reports the floor of fractional refresh
+  timings (59.94Hz panels read "59"). Detection now snaps floor-reported rates to the marketing rate
+  (59->60, 119->120, 143->144), so a plain 60Hz monitor no longer prints a mysterious 59Hz/59fps line
+  (it prints nothing at all - 60 is already the default).
 
 ### Changed
 - **Installer polish (grok-class) + shadow diagnosis.** Both installers now fetch and SHOW the version

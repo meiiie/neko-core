@@ -19,7 +19,11 @@ export const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1003h\x1b[?1006h";
 // session, or WT itself) can be left in a different encoding (1015 urxvt / 1016 SGR-pixels produce the
 // large-decimal "[555;62;22M" reports seen after exit), and turning off a mode that is already off is a
 // harmless no-op. This is the canonical full reset vim/tmux emit on teardown.
-export const DISABLE_MOUSE = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l";
+// 9001 rides along (same class - "an input mode a previous app left on that breaks the session"):
+// Windows Terminal's win32-input-mode. Stuck ON, EVERY key arrives as `CSI Vk;Sc;Uc;Kd;Cs;Rc _`
+// instead of its plain bytes - the UI renders fine but typing looks completely dead (nothing our
+// input layer recognizes). Resetting it at entry/teardown heals a tab a previous app polluted.
+export const DISABLE_MOUSE = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l\x1b[?9001l";
 
 /** Mouse on unless NEKO_DISABLE_MOUSE is set. Only consulted in fullscreen. */
 export function isMouseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
