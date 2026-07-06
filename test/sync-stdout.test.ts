@@ -9,7 +9,9 @@ test("parseDecrpm2026: DECRPM reply -> supported/unsupported/none", () => {
 });
 
 test("isSyncOutputSupported: env allowlist + overrides", () => {
-  expect(isSyncOutputSupported({ WT_SESSION: "1" } as any)).toBe(true);       // Windows Terminal
+  // Windows Terminal advertises 2026 but corrupts under it at Neko's write cadence (the duplicated
+  // footer ghost, images #77/#78) - deliberately EXCLUDED; NEKO_SYNC=1 remains the force-on hatch.
+  expect(isSyncOutputSupported({ WT_SESSION: "1" } as any)).toBe(false);
   expect(isSyncOutputSupported({ TERM: "xterm-kitty" } as any)).toBe(true);   // kitty
   expect(isSyncOutputSupported({ TERM_PROGRAM: "iTerm.app" } as any)).toBe(true);
   expect(isSyncOutputSupported({ VTE_VERSION: "6800" } as any)).toBe(true);   // VTE 0.68+
@@ -32,7 +34,7 @@ function fakeTty(isTTY: boolean) {
 
 test("wrapStdoutForSync: brackets each write in BSU..ESU when supported", () => {
   const { stream, writes } = fakeTty(true);
-  const wrapped = wrapStdoutForSync(stream, { env: { WT_SESSION: "1" } as any });
+  const wrapped = wrapStdoutForSync(stream, { env: { TERM_PROGRAM: "WezTerm" } as any });
   wrapped.write("frame-A");
   wrapped.write("frame-B");
   expect(writes).toEqual([BSU + "frame-A" + ESU, BSU + "frame-B" + ESU]);
@@ -43,7 +45,7 @@ test("wrapStdoutForSync: no-op when unsupported or not a TTY; probe override win
   const a = fakeTty(true);
   expect(wrapStdoutForSync(a.stream, { env: { TERM: "dumb" } as any })).toBe(a.stream); // unsupported -> same object
   const b = fakeTty(false);
-  expect(wrapStdoutForSync(b.stream, { env: { WT_SESSION: "1" } as any })).toBe(b.stream); // not a TTY -> same object
+  expect(wrapStdoutForSync(b.stream, { env: { TERM_PROGRAM: "WezTerm" } as any })).toBe(b.stream); // not a TTY -> same object
   const c = fakeTty(true);
   expect(wrapStdoutForSync(c.stream, { env: { TERM: "dumb" } as any, supported: true })).not.toBe(c.stream); // probe says yes
 });

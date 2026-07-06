@@ -6,7 +6,23 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Duplicated footer/prompt rows on Windows Terminal (ghost chrome).** Mid-turn, a one-row-shifted
+  copy of the input line and status footer stayed on screen next to the live ones. Diagnosed with a
+  new REAL-ConPTY harness: the differ's bytes replay CLEAN through the reference virtual terminal
+  and through paced ConPTY replays, but Windows Terminal 1.24 corrupts the screen when the same
+  stream arrives at live cadence wrapped in DEC 2026 (synchronized output) - 6/6 runs ghosted with
+  2026 on, 3/3 clean with it off; also reproduces on the untouched v0.7.4, so this was latent, not a
+  regression. Fix: Windows Terminal is removed from the 2026 allowlist (the differ's minimal diffs
+  make flicker a non-issue there); `NEKO_SYNC=1` remains the force-on escape hatch. Hardening that
+  rode along: hardware scrolls are only emitted when the band geometry is unchanged since the model
+  was last painted (`paintedBand`), closing the scroll-across-a-layout-change window for real.
+
 ### Added
+- **Render forensics.** `NEKO_TRACE_FRAMES=<file>` taps every differ decision AND every byte that
+  reaches stdout (base64 NDJSON), and `scripts/e2e-conpty-ghost.ts` runs a real binary under a real
+  ConPTY and counts duplicated chrome rows over a live turn - together they separate "our bytes are
+  wrong" from "the terminal executed correct bytes wrongly" in minutes.
 - **`bun-stable-watch` workflow.** The canary pin is deliberate, temporary debt - and now the repo
   calls it in itself: a daily cron checks Bun's releases and files a revert issue (with the full
   payoff checklist) the day the first stable after 1.3.14 ships. No human memory involved.

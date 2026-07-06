@@ -19,10 +19,28 @@
  * to a full rewrite.
  */
 
+import { appendFileSync } from "node:fs";
+
 export interface ScrollBand { top: number; height: number } // 1-based absolute top row of the scrollable band
 
 const ESC = "\x1b[";
 const EL = `${ESC}K`; // erase to end of line
+
+// Diagnostic tap (NEKO_TRACE_FRAMES=<file>): NDJSON of every differ decision - what the model believed
+// and what rows were emitted. This is `doctor keys` for the RENDER side: model-vs-screen divergence
+// bugs (ghost rows) are invisible in unit sims and only reproducible under a real ConPTY; the tap turns
+// a field screenshot into a byte-level timeline. Zero cost when the env is unset.
+const TRACE = process.env.NEKO_TRACE_FRAMES;
+function trace(ev: Record<string, unknown>): void {
+  if (!TRACE) return;
+  try { appendFileSync(TRACE, JSON.stringify({ t: Date.now(), ...ev }) + "\n"); } catch { /* diagnostics never break rendering */ }
+}
+/** Rows targeted by the emitted bytes (from its CUP sequences) - the screen-truth of a write. */
+function rowsOf(out: string): number[] {
+  const rows: number[] = [];
+  for (const m of out.matchAll(/\x1b\[(\d+);\d*H?/g)) rows.push(Number(m[1]));
+  return rows;
+}
 
 /** Parse Ink's standard rerender payload: eraseLines(prev) + frame. The erase prefix is OPTIONAL -
  * Ink's very FIRST frame has none (prev count 0), and the differ must seed/compose from it too, or a
@@ -50,6 +68,20 @@ export class FrameDiffer {
 
   private lastRaw: string[] | null = null; // the last RAW Ink frame (pre-compose), for geometry refresh
 
+  // The band geometry under which `prev` (the screen model) was LAST painted. A hardware scroll
+  // (DECSTBM+SU/SD) moves REAL screen rows; it is only safe while model and screen agree on which
+  // rows are band. Right after setBand changes the geometry, screen rows just beyond the OLD band
+  // still hold CHROME - a scroll region sized to the NEW band would physically drag those chrome
+  // rows along while the model updates only band rows, and the divergence is permanent (the
+  // duplicated-footer ghost, images #77/#78: SD1 over rows 1..24 while screen rows 23-24 were the
+  // rule + input line). So: scroll ONLY when paintedBand === band; otherwise plain absolute rows.
+  private paintedBand: ScrollBand | null = null;
+  private markPainted(): void { this.paintedBand = this.band ? { ...this.band } : null; }
+  private sameGeometry(): boolean {
+    return !!this.band && !!this.paintedBand &&
+      this.paintedBand.top === this.band.top && this.paintedBand.height === this.band.height;
+  }
+
   /** The scrollable band (fullscreen viewport), in absolute rows. MUST only be set when the Ink frame
    * starts at screen row 1 (our fullscreen: alt-screen + clear + home), because scroll emission uses
    * absolute addressing. null = band detection off (inline). A GEOMETRY CHANGE re-composes the last raw
@@ -58,6 +90,7 @@ export class FrameDiffer {
    * (stale transcript rows sitting over the /resume picker, image #60). */
   setBand(band: ScrollBand | null): void {
     const changed = this.band?.top !== band?.top || this.band?.height !== band?.height;
+    if (changed) trace({ ev: "setBand", top: band?.top, h: band?.height, prevLen: this.prev?.length });
     this.band = band;
     if (changed && band) this.refreshCompose();
   }
@@ -67,12 +100,14 @@ export class FrameDiffer {
   private refreshCompose(): void {
     if (!this.writer || !this.prev || !this.lastRaw) return;
     const lines = this.compose(this.lastRaw.slice());
-    if (lines.length !== this.prev.length) return; // dimensions changed too - the next real frame reseeds
+    if (lines.length !== this.prev.length) { trace({ ev: "refreshCompose-skip", raw: lines.length, prev: this.prev.length }); return; } // dimensions changed too - the next real frame reseeds
     let out = "";
     for (let i = 0; i < lines.length; i++) {
       if (lines[i] !== this.prev[i]) { out += `${ESC}${i + 1};1H` + lines[i] + EL; this.prev[i] = lines[i]; }
     }
+    trace({ ev: "refreshCompose", rows: rowsOf(out) });
     if (out) this.writer(out + `${ESC}${this.prev.length};1H`);
+    this.markPainted(); // model is now consistent with the CURRENT geometry
   }
 
   // Text selection (mouse drag-to-copy): a highlighted region over the band, in 1-based SCREEN coords.
@@ -180,7 +215,10 @@ export class FrameDiffer {
     if (!anyChange) return;
     const top = this.band.top;
     let out = "";
-    const shift = detectShift(prevBand, win, H);
+    // Geometry changed since the model was last painted -> a detected "shift" is a re-anchoring
+    // artifact of the new slice, not a real scroll. Plain absolute rows only (they self-heal).
+    const shift = this.sameGeometry() ? detectShift(prevBand, win, H) : null;
+    trace({ ev: "repaintBand", top, H, prevLen: this.prev.length, shift: shift ? `${shift.dir}${shift.k}` : null, geomOk: this.sameGeometry() });
     if (shift) {
       out += `${ESC}${top};${top + H - 1}r` + (shift.dir === "up" ? `${ESC}${shift.k}S` : `${ESC}${shift.k}T`) + `${ESC}r`;
       const shifted: (string | null)[] = [];
@@ -194,6 +232,7 @@ export class FrameDiffer {
     out += `${ESC}${this.prev.length};1H`; // restore the cursor row Ink assumes (its frame's last line)
     for (let i = 0; i < H; i++) this.prev[i] = win[i];
     this.writer(out);
+    this.markPainted();
   }
 
   /** Optimized bytes to write INSTEAD of `payload`; "" = nothing changed (skip the write);
@@ -205,16 +244,18 @@ export class FrameDiffer {
     // (exactly the bug the TTY bench caught: differ ON produced identical bytes to differ OFF).
     if (/^(?:\x1b\[\?[0-9;]+[hl])+$/.test(payload)) return null;
     const parsed = parseInkPayload(payload);
-    if (!parsed) { this.prev = null; return null; } // not a standard rerender -> passthrough + reset
+    if (!parsed) { trace({ ev: "passthru-reset", head: payload.slice(0, 40) }); this.prev = null; return null; } // not a standard rerender -> passthrough + reset
     // Compose: Ink rendered the band blank (when band content is on); splice the real window in, so
     // both the baseline and the diff operate on what the SCREEN should actually show.
     this.lastRaw = parsed.frame.split("\n"); // kept for setBand's geometry refresh (Ink skips identical frames)
     const lines = this.compose(this.lastRaw.slice());
     const prev = this.prev;
+    const geomOk = this.sameGeometry(); // BEFORE the mark: was `prev` painted under this geometry?
     this.prev = lines;
-    if (!prev) return this.fullRepaintOr(parsed, lines); // seed: raw passthrough would show a blank band
-    if (parsed.eraseCount !== prev.length) return this.fullRepaintOr(parsed, lines); // Ink's idea of prev differs -> resync
-    if (lines.length !== prev.length) return this.fullRepaintOr(parsed, lines);      // height changed -> full rewrite
+    this.markPainted(); // every path below leaves the model consistent with the CURRENT geometry
+    if (!prev) { trace({ ev: "seed", n: lines.length }); return this.fullRepaintOr(parsed, lines); } // seed: raw passthrough would show a blank band
+    if (parsed.eraseCount !== prev.length) { trace({ ev: "resync-erase", erase: parsed.eraseCount, prev: prev.length, n: lines.length }); return this.fullRepaintOr(parsed, lines); } // Ink's idea of prev differs -> resync
+    if (lines.length !== prev.length) { trace({ ev: "resync-height", prev: prev.length, n: lines.length }); return this.fullRepaintOr(parsed, lines); }      // height changed -> full rewrite
 
     const changed: number[] = [];
     for (let i = 0; i < lines.length; i++) if (lines[i] !== prev[i]) changed.push(i);
@@ -227,17 +268,18 @@ export class FrameDiffer {
     // REAL screen rows beyond its model, desyncing the baseline from the screen and leaving residue the
     // next diffs never repair (the mangled /resume picker, image #60). Chrome changed -> plain line-diff.
     const band = this.band;
-    if (band && band.height >= 8 && changed.length > band.height / 2) {
+    if (band && geomOk && band.height >= 8 && changed.length > band.height / 2) {
       let chromeUnchanged = true;
       for (let i = band.height; i < lines.length; i++) if (lines[i] !== prev[i]) { chromeUnchanged = false; break; }
       if (chromeUnchanged) {
         const scroll = detectShift(prev, lines, band.height);
-        if (scroll) return emitScroll(prev, lines, band, scroll);
+        if (scroll) { trace({ ev: "hw-scroll", dir: scroll.dir, k: scroll.k, bandH: band.height, n: lines.length }); return emitScroll(prev, lines, band, scroll); }
       }
     }
 
     // --- plain line-diff ---
     let out = "";
+    trace({ ev: "diff", changed: changed.map((i) => i + 1), n: lines.length, bandH: band?.height });
     if (band) {
       // ABSOLUTE addressing in fullscreen (the frame is pinned at screen row 1 by alt+clear+home). This
       // is immune to cursor drift: any real-terminal quirk that leaves the cursor somewhere unexpected

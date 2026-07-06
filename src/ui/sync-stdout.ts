@@ -15,7 +15,17 @@
  * A runtime DECRQM/XTVERSION probe (for SSH, where TERM_PROGRAM isn't forwarded) is a later phase; the
  * env allowlist already covers the common local terminals incl. Windows Terminal.
  */
+import { appendFileSync } from "node:fs";
 import type { Writable } from "node:stream";
+
+// Diagnostic tap (NEKO_TRACE_FRAMES=<file>): every byte that reaches the REAL stdout, base64 NDJSON.
+// Replaying these bytes through the VirtualTerminal separates "our bytes are wrong" from "the
+// terminal executed correct bytes wrongly" - the discriminator for ghost-row field reports.
+const TRACE = process.env.NEKO_TRACE_FRAMES;
+function traceWrite(kind: string, s: string): void {
+  if (!TRACE) return;
+  try { appendFileSync(TRACE, JSON.stringify({ t: Date.now(), ev: "write", kind, b64: Buffer.from(s, "utf8").toString("base64") }) + "\n"); } catch { /* never break rendering */ }
+}
 
 /** Begin/End Synchronized Update. */
 export const BSU = "\x1b[?2026h";
@@ -95,7 +105,14 @@ export function isSyncOutputSupported(env: NodeJS.ProcessEnv = process.env): boo
   if (term.startsWith("foot")) return true;                        // foot / foot-extra
   if (term.includes("alacritty")) return true;
   if (env.ZED_TERM) return true;                                   // Zed (alacritty_terminal crate)
-  if (env.WT_SESSION) return true;                                 // Windows Terminal
+  // Windows Terminal is deliberately EXCLUDED despite advertising DEC 2026: WT 1.24/ConPTY corrupts
+  // the screen under synchronized-output at Neko's real write cadence - after a band-geometry change
+  // mid-turn it keeps a one-row-shifted copy of the chrome that no later diff repairs (the duplicated
+  // footer/prompt, images #77/#78; also reproduced on the untouched v0.7.4). Field-quality evidence
+  // from the ConPTY harness (scripts/e2e-conpty-ghost.ts): the same tapped bytes replay CLEAN through
+  // the reference VT and through PACED ConPTY replays; live timing with 2026 ghosts 6/6 runs, and
+  // NEKO_SYNC=0 is clean 3/3. The differ already writes minimal diffs, so unbracketed WT shows no
+  // practical flicker; NEKO_SYNC=1 stays as the force-on escape hatch if WT fixes this upstream.
 
   const vte = env.VTE_VERSION ? parseInt(env.VTE_VERSION, 10) : 0;  // GNOME Terminal/Tilix since VTE 0.68
   if (vte >= 6800) return true;
@@ -118,7 +135,7 @@ export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: Nod
   if (!(base as any).isTTY || (!supported && !differ)) return base;
   // Imperative band repaints (scroll/append/warm) bypass Ink entirely: the differ writes straight to
   // the base stream, atomically bracketed like everything else.
-  (differ as any)?.setWriter?.((s: string) => { if (s) (base as any).write(supported ? BSU + s + ESU : s); });
+  (differ as any)?.setWriter?.((s: string) => { if (s) { const out = supported ? BSU + s + ESU : s; traceWrite("imperative", out); (base as any).write(out); } });
 
   const wrappedWrite = (chunk: any, ...args: any[]): boolean => {
     if (typeof chunk === "string" && chunk.length > 0) {
@@ -131,7 +148,9 @@ export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: Nod
         if (o === "") return true;
         if (o !== null) out = o;
       }
-      return (base as any).write(supported ? BSU + out + ESU : out, ...args);
+      const final = supported ? BSU + out + ESU : out;
+      traceWrite(out === chunk ? "passthru" : "frame", final);
+      return (base as any).write(final, ...args);
     }
     return (base as any).write(chunk, ...args);
   };
