@@ -4,6 +4,15 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
+## [Unreleased]
+
+### Added
+- **`bun-stable-watch` workflow.** The canary pin is deliberate, temporary debt - and now the repo
+  calls it in itself: a daily cron checks Bun's releases and files a revert issue (with the full
+  payoff checklist) the day the first stable after 1.3.14 ships. No human memory involved.
+- **Runtime forensics.** Every release compile logs `bun --revision` first, so the exact
+  version+commit of the embedded (rolling-canary) runtime is on record for every shipped binary.
+
 ## [0.7.5] — 2026-07-06
 
 ### Added

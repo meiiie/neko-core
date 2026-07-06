@@ -35,6 +35,9 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > URL dự phòng (nếu domain không truy cập được): `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh`
 > (và `…/install.ps1`). Từ nguồn (cần [Bun](https://bun.sh)):
 > `git clone https://github.com/meiiie/neko-core && cd neko-core && bun install && bun run build`.
+> Lưu ý build-từ-nguồn trên Windows: bản release chính thức tạm build trên **bun canary** vì bun
+> stable 1.3.14 làm rơi phím trên một số máy (CHANGELOG 0.7.5); nếu binary tự build gõ không ăn phím,
+> chạy `neko doctor keys` và build lại bằng `bun upgrade --canary`.
 
 Sinh CLI `neko` (alias `neko-core`). Kiểm tra: `neko doctor`, `neko --version`.
 

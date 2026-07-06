@@ -69,7 +69,11 @@ jobs:
         # cat icon, publisher/version/copyright). bun REJECTS --windows-* off Windows, so the script
         # gates them by host; args are passed as argv (no shell quoting fragility across runners).
         shell: bash
-        run: bun scripts/build.ts --target=${{ matrix.target }} --outfile=${{ matrix.asset }}
+        # `bun --revision` first: canary is a rolling tag, so the embedded runtime's exact
+        # version+commit must be ON RECORD for every release (forensics when a field report lands).
+        run: |
+          bun --revision
+          bun scripts/build.ts --target=${{ matrix.target }} --outfile=${{ matrix.asset }}
       - name: smoke-test the artifact (renders a real Ink/JSX tree)
         if: ${{ matrix.smoke }}
         shell: bash
