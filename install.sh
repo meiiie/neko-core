@@ -38,20 +38,35 @@ chmod +x "$TARGET"
 
 # Verify the binary actually runs; report its REAL version.
 VER="$("$TARGET" version 2>/dev/null | head -1 || true)"
-echo "${VER:-Installed} -> $TARGET"
+echo "  Installed to $TARGET"
+echo "${VER:-Installed}"
 
 # PATH: always report the state.
 case ":$PATH:" in
-  *":$BIN_DIR:"*) echo "$BIN_DIR is already on your PATH." ;;
-  *) echo "Add it to your PATH:  export PATH=\"$BIN_DIR:\$PATH\"   (then restart your shell)" ;;
+  *":$BIN_DIR:"*) echo "  $BIN_DIR is already on your PATH." ;;
+  *) echo "  Add it to your PATH:  export PATH=\"$BIN_DIR:\$PATH\"   (then restart your shell)" ;;
 esac
 
-# SHADOW CHECK — an old `neko` earlier on PATH wins over this install; name it precisely.
+# SHADOW HEALING — an old `neko` earlier on PATH wins over this install. If it IS an older neko-core
+# (verified by running it), remove it automatically; anything else is only reported, never touched.
+NEWV="$(printf '%s' "$VER" | sed -n 's/^neko-core *\([0-9][0-9.]*\).*/\1/p')"
 FOUND="$(command -v neko 2>/dev/null || true)"
 if [ -n "$FOUND" ] && [ "$FOUND" != "$TARGET" ]; then
-  echo "WARNING: another neko is on your PATH and can SHADOW this install:"
-  echo "  $FOUND"
-  echo "If a new shell still reports an old version, remove it:  rm \"$FOUND\""
+  OV="$("$FOUND" version 2>/dev/null | head -1 || true)"
+  case "$OV" in neko-core*) ;; *) OV="$("$FOUND" --version 2>/dev/null | head -1 || true)" ;; esac  # pre-v0.3 CLIs only knew --version
+  OLDV="$(printf '%s' "$OV" | sed -n 's/^neko-core *\([0-9][0-9.]*\).*/\1/p')"
+  LOWEST="$(printf '%s\n%s\n' "$OLDV" "$NEWV" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)"
+  if [ -n "$OLDV" ] && [ -n "$NEWV" ] && [ "$OLDV" != "$NEWV" ] && [ "$LOWEST" = "$OLDV" ]; then
+    if rm -f "$FOUND" 2>/dev/null; then
+      echo "  Removed outdated neko-core $OLDV at $FOUND (it shadowed this install)."
+    else
+      echo "WARNING: an OLD neko ($OV) shadows this install and could not be removed:"
+      echo "  $FOUND    -> remove it:  rm \"$FOUND\""
+    fi
+  else
+    echo "NOTE: another neko executable is on your PATH and may shadow this install:"
+    echo "  $FOUND"
+  fi
 fi
 
 echo ""
