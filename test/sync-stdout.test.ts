@@ -1,5 +1,15 @@
 import { expect, test } from "bun:test";
-import { BSU, ESU, isSyncOutputSupported, parseDecrpm2026, wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
+import { BSU, ESU, isSyncOutputSupported, parseDecrpm2026, syncOutputDecision, wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
+
+test("syncOutputDecision: yes/no are DECIDED (never probed); only true unknowns probe", () => {
+  expect(syncOutputDecision({ TERM_PROGRAM: "WezTerm" } as any)).toBe("yes");
+  expect(syncOutputDecision({ NEKO_SYNC: "0", TERM_PROGRAM: "WezTerm" } as any)).toBe("no"); // forced off = no probe
+  expect(syncOutputDecision({ WT_SESSION: "1" } as any)).toBe("no");  // WT advertises 2026 but corrupts under it
+  expect(syncOutputDecision({ TMUX: "/tmp/x" } as any)).toBe("no");
+  // A bare unknown terminal: on Windows the answer is decided ("no" - conhost has no 2026, and the
+  // probe itself has hurt stdin); elsewhere it is genuinely unknown (SSH) and MAY be probed.
+  expect(syncOutputDecision({ TERM: "xterm-256color" } as any)).toBe(process.platform === "win32" ? "no" : "unknown");
+});
 
 test("parseDecrpm2026: DECRPM reply -> supported/unsupported/none", () => {
   expect(parseDecrpm2026("\x1b[?2026;1$y")).toBe(true);  // set -> supported

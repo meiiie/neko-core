@@ -58,8 +58,11 @@ export function probeSyncOutput(timeoutMs = 120): Promise<boolean | null> {
     const finish = (result: boolean | null) => {
       clearTimeout(timer);
       stdin.off("data", onData);
+      // Restore raw mode, but DO NOT pause: this is the same stdin Ink is about to take over, and
+      // under Bun on Windows a pre-render pause left the stream permanently silent - the session
+      // rendered perfectly and never heard a key again (the e2e harness's typed-echo check exists
+      // because of exactly this). A resumed-but-listenerless stdin is harmless for the few ms gap.
       try { stdin.setRawMode?.(wasRaw ?? false); } catch { /* ignore */ }
-      stdin.pause();
       resolve(result);
     };
     const onData = (d: Buffer) => {
@@ -76,18 +79,38 @@ export function probeSyncOutput(timeoutMs = 120): Promise<boolean | null> {
 }
 
 /**
- * True if this terminal is known to implement DEC mode 2026 (synchronized output).
+ * Three-state DEC 2026 decision: "yes" (known-good allowlist), "no" (known-bad or forced off -
+ * NEVER probe), "unknown" (a runtime DECRQM probe MAY settle it - SSH etc.). The split matters:
+ * probing costs a pre-Ink round-trip on the session's own stdin, so it must run only when the
+ * environment genuinely cannot tell - and never on Windows, where the answer is decided (WT is
+ * denied, conhost has no 2026) and the probe itself has hurt input.
  * `NEKO_SYNC=0` forces off, `NEKO_SYNC=1` forces on - escape hatches over the detection.
  */
-export function isSyncOutputSupported(env: NodeJS.ProcessEnv = process.env): boolean {
+export function syncOutputDecision(env: NodeJS.ProcessEnv = process.env): "yes" | "no" | "unknown" {
   const forced = env.NEKO_SYNC;
-  if (forced === "0" || forced === "false") return false;
-  if (forced === "1" || forced === "true") return true;
+  if (forced === "0" || forced === "false") return "no";
+  if (forced === "1" || forced === "true") return "yes";
+  if (env.TMUX) return "no";
+  if (isSyncAllowlisted(env)) return "yes";
+  // Windows Terminal ADVERTISES 2026 (it answers DECRQM "supported"), so the probe would turn it
+  // back on - but WT 1.24 corrupts the screen under 2026 at Neko's real write cadence (the
+  // duplicated footer/prompt ghost, images #77/#78; see the e2e harness). Hard deny, no probe.
+  if (env.WT_SESSION) return "no";
+  // Any other Windows console: conhost and friends have no DEC 2026; probing costs stdin risk for
+  // a guaranteed "no reply". Decided, not unknown.
+  if (process.platform === "win32") return "no";
+  return "unknown";
+}
 
-  // tmux proxies every byte but historically chunks output, breaking atomicity even though BSU/ESU
-  // pass through to the outer terminal. Skip (conservative) - a later phase can version-detect tmux 3.4+.
-  if (env.TMUX) return false;
+/** True if this terminal is known to implement DEC mode 2026 (synchronized output). "unknown" is
+ * false here - runChat upgrades it via the DECRQM probe only when the decision is "unknown". */
+export function isSyncOutputSupported(env: NodeJS.ProcessEnv = process.env): boolean {
+  return syncOutputDecision(env) === "yes";
+}
 
+/** The known-good allowlist (terminals whose 2026 is trusted at our write cadence). tmux is handled
+ * in syncOutputDecision (it proxies bytes but historically chunks output, breaking atomicity). */
+function isSyncAllowlisted(env: NodeJS.ProcessEnv): boolean {
   const termProgram = env.TERM_PROGRAM;
   if (
     termProgram === "iTerm.app" ||
@@ -105,14 +128,8 @@ export function isSyncOutputSupported(env: NodeJS.ProcessEnv = process.env): boo
   if (term.startsWith("foot")) return true;                        // foot / foot-extra
   if (term.includes("alacritty")) return true;
   if (env.ZED_TERM) return true;                                   // Zed (alacritty_terminal crate)
-  // Windows Terminal is deliberately EXCLUDED despite advertising DEC 2026: WT 1.24/ConPTY corrupts
-  // the screen under synchronized-output at Neko's real write cadence - after a band-geometry change
-  // mid-turn it keeps a one-row-shifted copy of the chrome that no later diff repairs (the duplicated
-  // footer/prompt, images #77/#78; also reproduced on the untouched v0.7.4). Field-quality evidence
-  // from the ConPTY harness (scripts/e2e-conpty-ghost.ts): the same tapped bytes replay CLEAN through
-  // the reference VT and through PACED ConPTY replays; live timing with 2026 ghosts 6/6 runs, and
-  // NEKO_SYNC=0 is clean 3/3. The differ already writes minimal diffs, so unbracketed WT shows no
-  // practical flicker; NEKO_SYNC=1 stays as the force-on escape hatch if WT fixes this upstream.
+  // Windows Terminal is deliberately NOT here - see syncOutputDecision (hard "no": WT advertises
+  // 2026 but corrupts the screen under it at our real write cadence; images #77/#78).
 
   const vte = env.VTE_VERSION ? parseInt(env.VTE_VERSION, 10) : 0;  // GNOME Terminal/Tilix since VTE 0.68
   if (vte >= 6800) return true;
@@ -147,6 +164,16 @@ export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: Nod
         const o = differ.process(chunk);
         if (o === "") return true;
         if (o !== null) out = o;
+      }
+      // When 2026 is denied for this terminal, NO write may carry it - Ink 7 brackets its own frames
+      // in BSU/ESU as separate writes (write-synchronized.js), so just not adding OUR brackets is not
+      // enough. This is the ghost's true mechanism (e2e divergence probe): on WT/ConPTY an update
+      // INSIDE a sync bracket is sometimes dropped (model: the new spinner glyph; screen: the old
+      // one) - rows the differ believes painted go stale, and a later layout shift leaves one-row-off
+      // duplicates of the chrome. Strip every 2026 sequence; swallow writes that were only brackets.
+      if (!supported) {
+        out = out.replaceAll(BSU, "").replaceAll(ESU, "");
+        if (out.length === 0) return true;
       }
       const final = supported ? BSU + out + ESU : out;
       traceWrite(out === chunk ? "passthru" : "frame", final);

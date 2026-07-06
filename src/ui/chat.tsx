@@ -20,7 +20,7 @@ import { SelectList, type Overlay } from "./select-list.tsx";
 import { TranscriptViewer } from "./transcript-viewer.tsx";
 import { isEscapeResidue, TextInput } from "./text-input.tsx";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
-import { isSyncOutputSupported, probeSyncOutput, wrapStdoutForSync } from "./sync-stdout.ts";
+import { probeSyncOutput, syncOutputDecision, wrapStdoutForSync } from "./sync-stdout.ts";
 import { FrameDiffer } from "./frame-diff.ts";
 import { canFullscreen, emergencyRestore, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
@@ -1711,15 +1711,31 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // effect (below): this pre-render write reaches terminals that interpret VT before Ink turns it on
   // (Windows Terminal), the effect covers the rest (VT is on by then), so the tab brands reliably.
   setTerminalTitle(brandTitle(resumed?.title || "Neko Core"));
-  let syncSupported = isSyncOutputSupported();
-  if (!syncSupported) syncSupported = (await probeSyncOutput()) === true;
+  // Three-state: "yes"/"no" are DECIDED (allowlist / known-bad / forced / Windows) - the DECRQM
+  // probe runs ONLY on "unknown" (e.g. SSH without TERM_PROGRAM). Probing on every "no" is what
+  // briefly killed typing on Windows Terminal: WT answers "supported" (re-enabling 2026 that WT
+  // itself corrupts - the ghost), and the probe's pre-Ink stdin handling silenced input under Bun.
+  const syncDecision = syncOutputDecision();
+  let syncSupported = syncDecision === "yes";
+  if (syncDecision === "unknown") syncSupported = (await probeSyncOutput()) === true;
   const clearHolder = { fn: () => {} };
   // Neko's frame differ (compositor-lite): Ink stays on its STANDARD renderer (whose payload shape is
   // parseable), and the differ shrinks every rerender to the changed lines - or, in fullscreen, to a
   // hardware scroll (DECSTBM+SU/SD: the terminal shifts the region, we paint only the revealed rows).
   // This is the claude-code-class write path, built at the stdout layer instead of forking Ink.
-  // NEKO_INCR=0 disables it (plain full-frame writes).
-  const differ = process.env.NEKO_INCR === "0" ? undefined : new FrameDiffer();
+  //
+  // OFF BY DEFAULT ON WINDOWS. ConPTY displaces differ output at real write cadence - the e2e
+  // harness (scripts/e2e-conpty-ghost.ts) shows the seed's chrome landing one row off and a
+  // duplicated footer/prompt surviving every later diff (images #77/#78), deterministically, on
+  // v0.7.4 through today; with the differ off the same runs are clean 100%. Three layers of fixes
+  // (absolute-only seeds, geometry-gated + then disabled hardware scroll, DEC 2026 stripped) each
+  // removed a real hazard yet the displacement persists - the remaining mechanism lives inside
+  // conhost's buffer/viewport handling, not in our bytes (they replay clean through the reference
+  // VT). Until that is cracked upstream-or-here, Windows takes Ink's plain full-frame writes:
+  // correctness over bytes. NEKO_INCR=1 force-enables (for experiments); NEKO_INCR=0 force-disables.
+  const incr = process.env.NEKO_INCR;
+  const differEnabled = incr === "1" ? true : incr === "0" ? false : process.platform !== "win32";
+  const differ = differEnabled ? new FrameDiffer() : undefined;
   // Fullscreen must enter the alt-screen BEFORE Ink's first render: paint-first-switch-after wipes the
   // paint, and Ink (believing its frame is on screen) never repaints -> black until a keypress. So enter
   // first, then render - the first frame paints INTO the alt screen. ChatApp adopts the disposer (prop)

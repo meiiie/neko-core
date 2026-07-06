@@ -77,6 +77,17 @@ export class FrameDiffer {
   // rule + input line). So: scroll ONLY when paintedBand === band; otherwise plain absolute rows.
   private paintedBand: ScrollBand | null = null;
   private markPainted(): void { this.paintedBand = this.band ? { ...this.band } : null; }
+  // Hardware scroll (DECSTBM+SU/SD) switch. OFF BY DEFAULT ON WINDOWS: at real write cadence,
+  // ConPTY displaces content OUTSIDE the DECSTBM region (the e2e divergence probe caught the chrome
+  // one row off right after a region scroll; paced probes pass - it takes live timing). Plain
+  // absolute row repaints cannot be displaced. Unix PTYs keep the optimization; NEKO_HWSCROLL=1/0
+  // forces either way.
+  private hwScrollEnabled(): boolean {
+    const v = process.env.NEKO_HWSCROLL;
+    if (v === "1") return true;
+    if (v === "0") return false;
+    return process.platform !== "win32";
+  }
   private sameGeometry(): boolean {
     return !!this.band && !!this.paintedBand &&
       this.paintedBand.top === this.band.top && this.paintedBand.height === this.band.height;
@@ -189,16 +200,22 @@ export class FrameDiffer {
     return out;
   }
 
-  /** On seed/resync frames: when composition is OFF, raw passthrough is correct and cheapest (null).
-   * When composition is ON, paint the composed frame with ABSOLUTE addressing, one row at a time. This
-   * was the LAST relative path in fullscreen (erase-up-from-cursor + "\n" joins): at real-terminal entry
-   * or right after a resize the cursor row is NOT reliably where Ink assumes, so the relative erase
-   * slid the whole seed frame one row - the one-time ghosted input row at startup (images #35, #63).
-   * Absolute rows can't drift, and the trailing EL per row clears any stale content beneath. */
+  /** On seed/resync frames: INLINE (no band), raw passthrough is correct and cheapest (null).
+   * In FULLSCREEN, paint the frame with ABSOLUTE addressing, one row at a time - ALWAYS, even before
+   * any band content exists. Two reasons, both learned from one-row ghosts:
+   *  - relative erase drifts when the cursor is not where Ink assumes (images #35, #63);
+   *  - a raw newline-flow frame SCROLLS the real terminal when its trailing "\n" lands on the bottom
+   *    row. That is exactly Ink's FIRST frame (no erase prefix, trailing newline) passed through
+   *    before the band content arrived: the screen scrolled one row at birth, the model stayed
+   *    pinned at row 1, and every later absolute write painted one row below the original chrome -
+   *    the duplicated footer/prompt of images #77/#78. Absolute rows cannot scroll, ever. */
   private fullRepaintOr(parsed: { eraseCount: number }, lines: string[]): string | null {
-    if (!this.windowRows()) return null;
+    if (!this.band) return null;
+    // A trailing EMPTY line (Ink frames end with "\n") would address one row PAST the screen; CUP
+    // clamps to the bottom row and its EL would erase the real last row (the footer). Skip it.
+    const n = lines.length && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
     let out = "";
-    for (let i = 0; i < lines.length; i++) out += `${ESC}${i + 1};1H` + lines[i] + EL;
+    for (let i = 0; i < n; i++) out += `${ESC}${i + 1};1H` + lines[i] + EL;
     return out + `${ESC}${lines.length};1H`;
   }
 
@@ -217,7 +234,7 @@ export class FrameDiffer {
     let out = "";
     // Geometry changed since the model was last painted -> a detected "shift" is a re-anchoring
     // artifact of the new slice, not a real scroll. Plain absolute rows only (they self-heal).
-    const shift = this.sameGeometry() ? detectShift(prevBand, win, H) : null;
+    const shift = this.hwScrollEnabled() && this.sameGeometry() ? detectShift(prevBand, win, H) : null;
     trace({ ev: "repaintBand", top, H, prevLen: this.prev.length, shift: shift ? `${shift.dir}${shift.k}` : null, geomOk: this.sameGeometry() });
     if (shift) {
       out += `${ESC}${top};${top + H - 1}r` + (shift.dir === "up" ? `${ESC}${shift.k}S` : `${ESC}${shift.k}T`) + `${ESC}r`;
@@ -268,7 +285,7 @@ export class FrameDiffer {
     // REAL screen rows beyond its model, desyncing the baseline from the screen and leaving residue the
     // next diffs never repair (the mangled /resume picker, image #60). Chrome changed -> plain line-diff.
     const band = this.band;
-    if (band && geomOk && band.height >= 8 && changed.length > band.height / 2) {
+    if (band && geomOk && this.hwScrollEnabled() && band.height >= 8 && changed.length > band.height / 2) {
       let chromeUnchanged = true;
       for (let i = band.height; i < lines.length; i++) if (lines[i] !== prev[i]) { chromeUnchanged = false; break; }
       if (chromeUnchanged) {

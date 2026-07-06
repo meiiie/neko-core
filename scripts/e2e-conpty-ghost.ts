@@ -16,11 +16,25 @@ const exe = process.argv[2] ?? "dist/neko.exe";
 const cols = 118, rows = 30;
 const vt = new VirtualTerminal(cols, rows);
 let raw = "";
+let answeredDecrqm = false;
 const term = new (Bun as any).Terminal({
   cols, rows,
-  data(_t: unknown, chunk: Uint8Array) { const s = new TextDecoder().decode(chunk); raw += s; vt.write(s); },
+  data(_t: unknown, chunk: Uint8Array) {
+    const s = new TextDecoder().decode(chunk);
+    raw += s;
+    vt.write(s);
+    // Emulate REAL Windows Terminal: answer the DECRQM 2026 query with "supported" (Ps=2, reset).
+    // WT does exactly this - a harness that stays silent lets the probe time out and tests a
+    // DIFFERENT decision path than the field (that gap hid the probe re-enabling 2026 on WT).
+    // Match on the ACCUMULATED stream: ConPTY chunking can split the query across data callbacks.
+    if (!answeredDecrqm && raw.includes("\x1b[?2026$p")) { answeredDecrqm = true; term.write("\x1b[?2026;2$y"); }
+  },
 });
-const proc = Bun.spawn({ cmd: [exe, "--yolo"], cwd: import.meta.dir + "/..", terminal: term, env: { ...process.env } } as any);
+// WT_SESSION emulates running inside Windows Terminal - the env the sync allowlist decides on.
+// NEKO_E2E_WT=0 runs the child WITHOUT it (a generic ConPTY host) for A/B triangulation.
+const childEnv: Record<string, string | undefined> = { ...process.env, WT_SESSION: "e2e-harness" };
+if (process.env.NEKO_E2E_WT === "0") delete childEnv.WT_SESSION;
+const proc = Bun.spawn({ cmd: [exe, "--yolo"], cwd: import.meta.dir + "/..", terminal: term, env: childEnv } as any);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function report(label: string) {
@@ -41,6 +55,10 @@ await sleep(4000);
 report("startup");
 term.write("xin chao");
 await sleep(800);
+// INPUT check - the other field class ("renders but typing does nothing"): the echo must be visible.
+const typedEcho = vt.text().includes("xin chao");
+console.log(`typed-echo: ${typedEcho ? "OK" : "DEAD - keys do not echo"}`);
+console.log(`decrqm-query-seen: ${answeredDecrqm}`);
 term.write("\r");
 let worst = 0;
 for (let i = 1; i <= 8; i++) {
@@ -56,4 +74,4 @@ try { proc.kill(); } catch {}
 term.close();
 console.log(worst > 1 ? "REPRODUCED: duplicated footer" : "no ghost seen in this run");
 if (process.env.NEKO_GHOST_RAW) await Bun.write(process.env.NEKO_GHOST_RAW, raw); // ConPTY's own output stream, for forensics
-process.exit(worst > 1 ? 1 : 0);
+process.exit(worst > 1 || !typedEcho ? 1 : 0);

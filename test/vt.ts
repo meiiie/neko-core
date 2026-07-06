@@ -65,6 +65,10 @@ export class VirtualTerminal {
             if (mode === 2) this.grid[this.r] = "";
             else if (mode === 1) this.grid[this.r] = " ".repeat(Math.min(this.c + 1, this.grid[this.r].length)) + this.grid[this.r].slice(this.c + 1);
             else this.grid[this.r] = this.grid[this.r].slice(0, this.c);
+          } else if (fin === "X") { // ECH: blank n chars at the cursor, no move (ConPTY emits these)
+            const count = Math.max(1, n);
+            const line = this.grid[this.r].padEnd(this.c, " ");
+            this.grid[this.r] = line.slice(0, this.c) + " ".repeat(count) + line.slice(this.c + count);
           } else if (fin === "S") this.scrollUp(Math.max(1, n));
           else if (fin === "T") this.scrollDown(Math.max(1, n));
           else if (fin === "r") {

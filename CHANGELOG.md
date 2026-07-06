@@ -7,16 +7,27 @@ All notable changes to Neko Code are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
-- **Duplicated footer/prompt rows on Windows Terminal (ghost chrome).** Mid-turn, a one-row-shifted
-  copy of the input line and status footer stayed on screen next to the live ones. Diagnosed with a
-  new REAL-ConPTY harness: the differ's bytes replay CLEAN through the reference virtual terminal
-  and through paced ConPTY replays, but Windows Terminal 1.24 corrupts the screen when the same
-  stream arrives at live cadence wrapped in DEC 2026 (synchronized output) - 6/6 runs ghosted with
-  2026 on, 3/3 clean with it off; also reproduces on the untouched v0.7.4, so this was latent, not a
-  regression. Fix: Windows Terminal is removed from the 2026 allowlist (the differ's minimal diffs
-  make flicker a non-issue there); `NEKO_SYNC=1` remains the force-on escape hatch. Hardening that
-  rode along: hardware scrolls are only emitted when the band geometry is unchanged since the model
-  was last painted (`paintedBand`), closing the scroll-across-a-layout-change window for real.
+- **Duplicated footer/prompt rows on Windows (ghost chrome): the frame differ is now OFF by default
+  on Windows.** Mid-turn, a one-row-shifted copy of the input line and status footer stayed on
+  screen next to the live ones (latent since at least v0.7.4 - reproduced deterministically on a
+  new REAL-ConPTY e2e harness). The investigation peeled four real hazards, each fixed and each
+  insufficient alone: Ink's raw newline-flow first frame could scroll the real screen (seeds/resyncs
+  now paint ABSOLUTE rows, always); hardware scrolls could fire across a band-geometry change
+  (`paintedBand` gate) and displace content outside the DECSTBM region on ConPTY (now off by default
+  on Windows, `NEKO_HWSCROLL` overrides); DEC 2026 brackets reached terminals we had denied because
+  Ink emits its own BSU/ESU (now stripped whenever 2026 is denied). The residual displacement still
+  reproduced with a pure absolute-CUP stream - it lives in conhost's buffer/viewport handling, not
+  in our bytes (they replay clean through the reference VT) - so Windows now takes Ink's plain
+  full-frame writes: with the differ off the same e2e runs are clean 100% (typing verified live in
+  every run). Unix keeps the full differ + hardware scroll. `NEKO_INCR=1` force-enables on Windows
+  for experiments.
+- **Typing dead on Windows Terminal (dev-only regression, never released).** Dropping WT from the
+  2026 allowlist sent every WT session into the DECRQM probe, whose pre-Ink stdin pause left input
+  permanently silent under Bun on Windows - AND the probe re-enabled 2026 (WT answers "supported").
+  The support decision is now three-state (`yes`/`no`/`unknown`): known answers never probe, Windows
+  never probes, `NEKO_SYNC=0` is a hard no, and the probe no longer pauses stdin. The e2e harness
+  now emulates real WT (WT_SESSION + DECRQM reply) and asserts typed keys ECHO in every run - both
+  failure modes are locked.
 
 ### Added
 - **Render forensics.** `NEKO_TRACE_FRAMES=<file>` taps every differ decision AND every byte that

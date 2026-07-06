@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import { detectShift, FrameDiffer, parseInkPayload } from "../src/ui/frame-diff.ts";
 
+// The hardware-scroll MECHANISM stays exercised here even though its default is platform-gated
+// (off on Windows - ConPTY displaces region scrolls at live cadence; see chat.tsx differ note).
+process.env.NEKO_HWSCROLL = "1";
+
 /** Minimal virtual terminal: interprets exactly the sequences the differ emits (CUP/CUU/CUD/CR-col1/
  * EL/2K/SU/SD/DECSTBM) plus plain text + newlines, so tests can PROVE the optimized bytes reproduce
  * the same screen a full rewrite would. */
