@@ -4,9 +4,17 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
-## [Unreleased]
+## [0.7.5] — 2026-07-06
 
 ### Fixed
+- **Typing dead on some Windows machines: the Bun 1.3.14 runtime, not Neko.** Field report (with an
+  agent-driven on-machine diagnosis): the session renders perfectly but no keypress ever arrives -
+  Ctrl+C included. A minimal `stdin.setRawMode(true)` probe under stable Bun 1.3.14 receives ZERO
+  bytes on the affected machine while Node in the same terminal receives them all, and the same
+  probe under Bun canary 1.4.0 works; a Neko rebuilt on the canary runtime takes input again
+  (`doctor keys` shows the bytes). Releases are now compiled on the canary runtime until the first
+  stable after 1.3.14 ships (pinned + documented in the workflows). Machine-dependent: many Windows
+  boxes are fine on 1.3.14 - if yours types, nothing changes.
 - **Installer: PATH is now compared per ENTRY, never by substring.** The old wildcard check saw the
   pre-v0.3 `...\Programs\neko-core` entry, decided `...\Programs\neko` was "already on PATH", and never
   added the real install dir - so after shadow healing removed the old exe, `neko` was not recognized
