@@ -6,6 +6,15 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [0.7.5] — 2026-07-06
 
+### Added
+- **Input smoke gate: the whole "renders but can't type" class is now caught before shipping.**
+  `scripts/input-probe.ts` spawns the compiled binary's `doctor keys` under a REAL pseudo-terminal
+  (Bun.Terminal: ConPTY on Windows, forkpty elsewhere), types into the master side, and asserts the
+  byte makes the full round trip (write -> PTY -> raw stdin -> hex echo -> verdict). Wired into
+  `bun run build` (so CI runs it on all three OSes) and into the release smoke step right next to
+  `__uiprobe` - a runtime that drops stdin renders perfectly and fails ONLY here. Verified on
+  Windows (ConPTY) and Linux (WSL) against real binaries.
+
 ### Fixed
 - **Typing dead on some Windows machines: the Bun 1.3.14 runtime, not Neko.** Field report (with an
   agent-driven on-machine diagnosis): the session renders perfectly but no keypress ever arrives -

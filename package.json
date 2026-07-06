@@ -19,7 +19,7 @@
   },
   "scripts": {
     "neko": "bun bin/neko.ts",
-    "build": "bun scripts/build.ts && dist/neko __uiprobe",
+    "build": "bun scripts/build.ts && dist/neko __uiprobe && bun scripts/input-probe.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "typecheck:stable": "bun node_modules/typescript5/bin/tsc --noEmit"

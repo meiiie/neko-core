@@ -66,6 +66,13 @@ jobs:
         if: ${{ matrix.smoke }}
         shell: bash
         run: ./${{ matrix.asset }} __uiprobe
+      - name: input smoke - the artifact must HEAR keys through a real PTY
+        # The gate the Bun-1.3.14 field bug taught us: a runtime whose raw-stdin bridge drops keys
+        # renders perfectly (__uiprobe passes) and fails ONLY here. Spawns the artifact's
+        # `doctor keys` under Bun.Terminal (ConPTY/forkpty), types into it, asserts the byte lands.
+        if: ${{ matrix.smoke }}
+        shell: bash
+        run: bun scripts/input-probe.ts ./${{ matrix.asset }}
       - name: attach to release
         shell: bash
         env:
