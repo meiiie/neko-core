@@ -1,0 +1,50 @@
+name: bun-stable-watch
+
+# The canary pin in ci.yml + release.yml is DELIBERATE, TEMPORARY debt: stable Bun 1.3.14 drops raw
+# stdin on some Windows machines (CHANGELOG 0.7.5), and the fix only exists in canary. This watcher
+# makes the repo itself call the debt: the day a stable AFTER 1.3.14 ships, it files a revert issue
+# with the full checklist - no human has to remember to check. Delete this file once the pin is gone.
+on:
+  schedule:
+    - cron: "17 3 * * *" # daily, off the whole-hour rush
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: file the revert issue when a stable after 1.3.14 ships
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          latest=$(gh api repos/oven-sh/bun/releases/latest --jq .tag_name | sed 's/^bun-v//')
+          echo "latest stable bun: $latest (pin exists because of 1.3.14)"
+          newest=$(printf '%s\n%s\n' "$latest" "1.3.14" | sort -V | tail -1)
+          if [ "$latest" = "1.3.14" ] || [ "$newest" != "$latest" ]; then
+            echo "no stable after 1.3.14 yet - the pin stays"; exit 0
+          fi
+          if gh issue list --state open --json title --jq '.[].title' | grep -q "Bun stable $latest"; then
+            echo "revert issue already filed"; exit 0
+          fi
+          gh issue create \
+            --title "Bun stable $latest is out - revert the canary pins" \
+            --body "$(cat <<EOF
+          Bun released a stable AFTER 1.3.14, so the temporary canary pin can be paid off.
+
+          Why the pin exists: stable 1.3.14 drops raw stdin on some Windows machines (renders fine,
+          typing dead - CHANGELOG 0.7.5). The fix only lived in canary at the time.
+
+          Checklist:
+          - [ ] Flip the \`bun-version\` default from \`canary\` to \`latest\` in \`.github/workflows/ci.yml\` and \`.github/workflows/release.yml\`
+          - [ ] Reconsider the release matrix: with versioned cross-targets back, \`darwin-x64\`'s \`bun: latest\` override is redundant; native-vs-cross per target is a choice again
+          - [ ] Update the pin comments + CHANGELOG
+          - [ ] Gate check: CI green on all 3 OSes - typecheck, tests, policy, and \`bun run build\` (which runs \`__uiprobe\` AND \`scripts/input-probe.ts\` - the PTY gate that catches the 1.3.14 class)
+          - [ ] Cut the next release on the stable runtime; have the affected field machine run \`neko doctor keys\` after auto-update as the final field proof
+          - [ ] Delete \`.github/workflows/bun-stable-watch.yml\` (this watcher) - the debt is paid
+          EOF
+          )"
+          echo "revert issue filed for $latest"
