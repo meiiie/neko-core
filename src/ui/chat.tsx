@@ -39,7 +39,7 @@ import { readClipboardImage, writeClipboardText } from "../adapters/clipboard.ts
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
 import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
 import { startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
-import { checkForUpdate } from "../adapters/update.ts";
+import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { randomBytes } from "node:crypto";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
@@ -726,10 +726,22 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Stop the remote-control server when the app exits.
   useEffect(() => { busyRef.current = busy; }, [busy]); // keep the ref in lockstep with the state
   useEffect(() => () => { rcRef.current?.stop(); relayRef.current?.stop(); }, []);
-  // Startup update check (daily-cached, non-blocking): notify if a newer release exists.
+  // Startup update check (daily-cached, non-blocking). With auto_update ON (the default, claude-code
+  // style) a newer release is INSTALLED in the background - selfUpdate stages the download and swaps the
+  // binary (Windows: rename-out-of-the-way trick), so it simply takes effect on the next launch; the
+  // session in progress is never touched. Opt out with `auto_update: false` / NEKO_AUTO_UPDATE=0 (notify
+  // only) or silence entirely with `auto_update_check: false`. selfUpdate itself refuses source (bun)
+  // runs and only ever moves forward (isNewer), so a dev build can't be clobbered by an older release.
   useEffect(() => {
     if (!cfg.autoUpdateCheck) return;
-    void checkForUpdate().then((v) => { if (v) addLine("info", `a newer Neko (${v}) is available - run \`neko update\``); }).catch(() => {});
+    void checkForUpdate().then(async (v) => {
+      if (!v) return;
+      if (cfg.autoUpdate) {
+        const ok = await selfUpdate(() => {}).catch(() => false);
+        if (ok) return addLine("info", `auto-updated to ${v} - takes effect the next time neko starts ("auto_update": false to disable)`);
+      }
+      addLine("info", `a newer Neko (${v}) is available - run \`neko update\``);
+    }).catch(() => {});
   }, []);
   // A large startup resume defers to here so it can offer the resume-from-summary choice (the initial
   // render skipped its replay). resumeInto opens the picker; doResume then replays (summarized or full).

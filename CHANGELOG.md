@@ -6,6 +6,17 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.4] — 2026-07-06
+
+### Added
+- **Auto-update, on by default (Claude-Code style).** The daily startup check now INSTALLS a newer
+  release in the background instead of only notifying: the download stages next to the running binary
+  and swaps in atomically (Windows uses the rename-out-of-the-way trick), taking effect on the next
+  launch - the session in progress is never touched. Opt out with `auto_update: false` or
+  `NEKO_AUTO_UPDATE=0` (notify-only), or silence checks entirely with `auto_update_check: false`.
+  `neko update` remains for manual runs. Source (bun) runs are never auto-updated, and the updater only
+  moves forward - a dev build can't be clobbered by an older release.
+
 ## [0.7.3] — 2026-07-06
 
 ### Changed

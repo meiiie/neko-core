@@ -172,3 +172,16 @@ test("NekoConfig.adopt swaps provider/model/endpoint/key IN PLACE (the /provider
   expect(a.apiKey).toBe("ZKEY"); // key swapped too -> no "new endpoint + old key" 401 after switching
   expect(a.profile).toBe("zai");
 });
+
+test("auto_update: ON by default; config false or NEKO_AUTO_UPDATE=0 opts out to notify-only", () => {
+  const prev = process.env.NEKO_AUTO_UPDATE;
+  delete process.env.NEKO_AUTO_UPDATE;
+  try {
+    expect(new NekoConfig({}, null, {}, "").autoUpdate).toBe(true);                    // the default
+    expect(new NekoConfig({ auto_update: false }, null, {}, "").autoUpdate).toBe(false); // config opt-out
+    process.env.NEKO_AUTO_UPDATE = "0";
+    expect(new NekoConfig({}, null, {}, "").autoUpdate).toBe(false);                   // env opt-out
+  } finally {
+    if (prev === undefined) delete process.env.NEKO_AUTO_UPDATE; else process.env.NEKO_AUTO_UPDATE = prev;
+  }
+});

@@ -55,7 +55,9 @@ Neko is built to take on new roles, one skill and one tool at a time:
   doing), and an always-on `playbook` it refines over time, so it gets better with use.
 - **Remote control from any device** — type `/relay`, scan the QR, and drive Neko from your phone
   anywhere; the agent **dials out** (no open port) over an **end-to-end-encrypted** relay you host.
-- **Self-update** — `neko update` pulls the latest release and swaps itself in place.
+- **Auto-update** — Neko keeps itself current like Claude Code: a daily startup check installs new
+  releases in the background (they apply on the next launch). `auto_update: false` switches to
+  notify-only; `neko update` still works manually.
 
 The direction is open-ended: an agent that can do more of your computer's work over time. The extension
 model is documented in [`docs/EXTENDING.md`](docs/EXTENDING.md).

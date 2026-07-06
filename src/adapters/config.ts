@@ -45,7 +45,8 @@ export const DEFAULTS: Record<string, any> = {
   offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
   approval: "prompt", // prompt | auto (--yolo flips gated tools to auto)
   effort_ceiling: "high", // highest reasoning_effort the endpoint accepts (OpenAI standard caps at high); a profile can raise it
-  auto_update_check: true, // notify on a newer release at startup (daily-cached; set false to silence)
+  auto_update_check: true, // check for a newer release at startup (daily-cached; set false to silence)
+  auto_update: true, // AUTO-INSTALL that newer release in the background (claude-code style); false = notify only
   mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
   active_profile: null,
   profiles: {
@@ -142,6 +143,14 @@ export class NekoConfig {
   get effortCeiling(): string { return String(this.data.effort_ceiling ?? "").trim().toLowerCase(); }
   /** Check for a newer release at startup (daily-cached, non-blocking). */
   get autoUpdateCheck(): boolean { return this.data.auto_update_check !== false; }
+  /** Auto-INSTALL a newer release found by the startup check (claude-code style: on by default; the
+   * update stages in the background and takes effect on the next launch). Opt out with config
+   * `auto_update: false` or NEKO_AUTO_UPDATE=0 - then the check only notifies. */
+  get autoUpdate(): boolean {
+    const env = process.env.NEKO_AUTO_UPDATE;
+    if (env === "0" || env === "false") return false;
+    return this.data.auto_update !== false;
+  }
   /** UI frame rate cap (Ink renders + scroll-glide hops). Default 60 - matches most displays and the
    * conpty/WT floor. High-refresh monitors (120/144Hz) can raise it via `ui_fps` (or NEKO_FPS); the
    * render pipeline is cheap enough (sub-ms hops, ~250-byte repaints) that 120 costs nothing. Above
