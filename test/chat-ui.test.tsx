@@ -3,7 +3,8 @@ import { render } from "ink-testing-library";
 
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
-import { ApprovalBox, ChatApp, clampToRows, recoverTodos, renderTail } from "../src/ui/chat.tsx";
+import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
+import { clampToRows, recoverTodos, renderTail } from "../src/ui/chat-lines.ts";
 
 test("clampToRows bounds the live stream to the viewport height (fixes streaming scroll-jump)", () => {
   const text = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
