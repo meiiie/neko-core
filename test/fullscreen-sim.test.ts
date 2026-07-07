@@ -215,3 +215,44 @@ test("/resume picker while SCROLLED UP renders names intact (no flex-squash, no 
     rmSync(home, { recursive: true, force: true });
   }
 }, 30000);
+
+test("DIFFER-LESS fullscreen (the Windows default): renders, types, and scrolls INSTANTLY", async () => {
+  // ConPTY displaces the differ's output at live cadence (the duplicated-chrome ghost), so on Windows
+  // the differ is OFF and fullscreen runs on plain Ink frames with INSTANT scrolling (no glide - a
+  // glide through React renders a full frame per hop and stutters). This sim locks that whole path:
+  // no band composition, no imperative writes, wheel gestures jump straight to the target.
+  const vt = new VirtualTerminal(100, 30);
+  const out = new FakeTtyOut(100, 30, vt);
+  const stdin = new FakeStdin();
+  const provider: any = { complete: async () => ({ content: "phan hoi", tool_calls: [] }) };
+  const session: any = {
+    id: "nodiff", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
+    messages: Array.from({ length: 40 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `noi dung dong ${i}` })),
+  };
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = renderFS(
+    React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "nodiff", preAltDispose }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(600);
+  expect(vt.isBlank()).toBe(false);
+  expect(vt.text()).toContain("noi dung dong 39"); // tail visible without any differ
+
+  // Typing echoes through the plain Ink path.
+  stdin.push("a"); await tick(60); stdin.push("b"); await tick(150);
+  expect(vt.text()).toContain("ab");
+
+  // Wheel up = INSTANT jump into history (no glide timers to wait out).
+  for (let i = 0; i < 12; i++) { stdin.push("\x1b[<64;5;5M"); await tick(20); }
+  await tick(200);
+  const scrolled = vt.text();
+  expect(scrolled).not.toContain("noi dung dong 39"); // tail left the viewport
+  expect(scrolled).toContain("noi dung dong");        // older transcript rows are on screen
+
+  // Wheel down returns to the live tail.
+  for (let i = 0; i < 20; i++) { stdin.push("\x1b[<65;5;5M"); await tick(20); }
+  await tick(200);
+  expect(vt.text()).toContain("noi dung dong 39");
+  app.unmount();
+  await tick(50);
+}, 30000);

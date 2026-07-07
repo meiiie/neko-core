@@ -4,6 +4,30 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
+## [0.7.7] — 2026-07-07
+
+### Fixed
+- **Scrolling on Windows is crisp again: INSTANT jumps instead of a stuttering glide.** The glide's
+  smoothness only ever came from the differ's sub-ms band repaints; with the differ off on Windows
+  (the ghost fix), hops burned dead time and React rendered once at settle - a gesture stuttered,
+  then JUMPED. Without a fast repaint path, `useRowScroll` now goes straight to the target: one
+  render per gesture, no dead time. Unix keeps the full glide (differ on, unchanged), and `/fps` /
+  display-Hz detection keep driving Ink's render cap on every platform.
+
+### Changed
+- **The Windows differ verdict is now final, on completed evidence.** Three exoneration attempts
+  were made after the 0.7.6 hardenings: the harness's reference terminal gained lazy autowrap
+  (clipping had shifted reconstructions below full-width rows one row up - it could manufacture the
+  ghost signature on its own) and ECH, and a differ-on ConPTY re-render was sequence-inventoried
+  against the parser (nothing unsupported remains). With a COMPLETE parser the differ-on ghost still
+  reproduces 3/3 while differ-off is clean - ConPTY genuinely displaces the differ's output at live
+  cadence. The differ stays OFF on Windows (`NEKO_INCR=1` to experiment), ON elsewhere.
+
+### Added
+- **The Windows-default path is sim-locked in CI**: a differ-less fullscreen simulation (render,
+  typing echo, instant wheel scroll into history and back) guards the exact configuration Windows
+  users run, forever.
+
 ## [0.7.6] — 2026-07-07
 
 ### Fixed
