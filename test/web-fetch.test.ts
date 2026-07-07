@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { htmlToMarkdown, paginateWeb, rssToMarkdown, vttToText } from "../src/core/tool-runtime.ts";
+import { htmlToMarkdown, paginateWeb, rssToMarkdown, vttToText } from "../src/adapters/web.ts";
 
 test("htmlToMarkdown: HTML -> compact markdown (headings/links/lists kept; scripts/nav/footer dropped)", () => {
   const html = `<html><head><style>x{color:red}</style></head><body>
@@ -59,7 +59,7 @@ test("rssToMarkdown: RSS/Atom XML -> compact item list (title+link, CDATA/tags s
 });
 
 // --- websosanh deterministic INDEX parser (procurement tier-1) ---
-import { wssOffersTable } from "../src/core/tool-runtime.ts";
+import { wssOffersTable } from "../src/adapters/web.ts";
 
 const WSS_BLOCK = (title: string, href: string, price: string, merchant: string) =>
   `<div class="product-single border-top"><div class="product-single-info"><h2 class="product-single-name">` +

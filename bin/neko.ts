@@ -23,7 +23,8 @@ import { loadSkill, matchSkill, renderSkills, skillsContextBlock } from "../src/
 import { memoryIndexBlock } from "../src/core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../src/core/workflows.ts";
 import { playbookContextBlock } from "../src/core/playbook.ts";
-import { ToolRegistry, todosContextBlock, WEB_EXTRACT_PROMPT } from "../src/core/tool-runtime.ts";
+import { ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
+import { webPort, WEB_EXTRACT_PROMPT } from "../src/adapters/web.ts";
 import {
   collectCapabilities,
   evaluatePolicy,
@@ -140,17 +141,19 @@ async function buildAgent(
   registry.sandboxAllowNetwork = cfg.sandboxNetwork;
   registry.searxngUrl = cfg.searxngUrl;
   registry.searchBackend = cfg.searchBackend;
-  registry.scrapeBackend = cfg.scrapeBackend;
-  registry.vision = cfg.vision;
-  registry.noTools = noTools;
+    registry.scrapeBackend = cfg.scrapeBackend;
+    registry.vision = cfg.vision;
+    registry.noTools = noTools;
+    registry.web = webPort;
   registry.loadSkill = (name) => { const s = loadSkill(name); return s ? { body: s.body, dir: s.dir } : null; };
   registry.subagent = async (prompt, type) => {
     const subReg = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
     subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
     subReg.searxngUrl = cfg.searxngUrl;
     subReg.searchBackend = cfg.searchBackend;
-    subReg.scrapeBackend = cfg.scrapeBackend;
-    subReg.vision = cfg.vision;
+      subReg.scrapeBackend = cfg.scrapeBackend;
+      subReg.vision = cfg.vision;
+      subReg.web = webPort;
     const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT;
     return await new Agent({ provider: getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps }).run(prompt);
   };

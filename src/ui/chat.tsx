@@ -50,7 +50,8 @@ import { memoryIndexBlock } from "../core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
 import { playbookContextBlock } from "../core/playbook.ts";
 import { loadSkill, matchSkill, skillsContextBlock } from "../adapters/skills.ts";
-import { ToolRegistry, WEB_EXTRACT_PROMPT } from "../core/tool-runtime.ts";
+import { ToolRegistry } from "../core/tool-runtime.ts";
+import { WEB_EXTRACT_PROMPT } from "../adapters/web.ts";
 import { describeToolCall } from "../core/tools.ts";
 
 export { ApprovalBox, type Approval }; // re-exported for tests

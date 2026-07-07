@@ -5,7 +5,7 @@ import { join } from "node:path";
 // The dependency rule from ARCHITECTURE.md (Ports & Adapters): dependencies point inward.
 // If this fails, a layering violation crept in - move the logic / add a port, don't loosen.
 const CORE = ["agent.ts", "tools.ts", "tool-runtime.ts", "permissions.ts", "cost.ts", "ports.ts"];
-const ADAPTERS = ["providers.ts", "anthropic.ts", "mcp.ts", "config.ts", "session.ts", "context.ts", "skills.ts", "project.ts", "doctor.ts", "registry.ts"];
+const ADAPTERS = ["providers.ts", "anthropic.ts", "mcp.ts", "config.ts", "session.ts", "context.ts", "skills.ts", "project.ts", "doctor.ts", "registry.ts", "web.ts"];
 const read = (layer: string, f: string) => readFileSync(join(import.meta.dir, "..", "src", layer, f), "utf-8");
 
 test("core depends only inward (no adapters, no ui, no UI framework)", () => {

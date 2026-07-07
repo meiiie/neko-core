@@ -49,3 +49,14 @@ export interface McpTools {
   loadTools?(names: string[]): string;
   indexBlock?(): string;
 }
+
+/** Web content acquisition (implemented by an adapter, injected by the host). */
+export interface WebPort {
+  search(query: string, opts: { searxngUrl: string; backend: string }): Promise<string>;
+  fetch(
+    root: string,
+    args: Record<string, any>,
+    backend: string,
+    summarize?: (instruction: string, content: string, schema?: Record<string, any>) => Promise<string>,
+  ): Promise<string>;
+}

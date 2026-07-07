@@ -3,9 +3,10 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
+import { webPort } from "../src/adapters/web.ts";
 
 const root = mkdtempSync(tmpdir() + "/nk-web-");
-const reg = () => new ToolRegistry(root, "auto", () => true);
+const reg = () => { const r = new ToolRegistry(root, "auto", () => true); r.web = webPort; return r; };
 const ORIG_FETCH = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = ORIG_FETCH;
