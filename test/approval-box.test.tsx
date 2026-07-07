@@ -52,6 +52,18 @@ test("plan box wraps long lines instead of letting them overflow", () => {
   c.unmount();
 });
 
+test("plan box fits even very narrow terminals (<28 cols, Markdown minWidth path)", () => {
+  const termW = 20;
+  const c = render(
+    <Box width={termW}>
+      <ApprovalBox approval={makeApproval()} flash={null} width={termW} />
+    </Box>,
+  );
+  const frame = c.lastFrame() ?? "";
+  for (const l of frame.split("\n")) expect(l.length).toBeLessThanOrEqual(termW);
+  c.unmount();
+});
+
 test("plan box shows header, footer and markdown content", () => {
   const c = render(
     <Box width={80}>

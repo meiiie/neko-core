@@ -29,11 +29,11 @@ export function ApprovalBox({ approval, flash, width }: { approval: Approval; fl
   // overflows a narrow terminal and garbles the layout — so we cap its width to the available
   // inner width (outer `width` minus border 2 + paddingX 2). Falls back to 80 when unset (tests).
   if (toolName === "exit_plan_mode") {
-    const mdWidth = width ? Math.max(24, width - 4) : undefined;
+    const mdWidth = width ? Math.max(10, width - 4) : undefined;
     return (
       <Box borderStyle="round" borderColor={color ?? "blue"} paddingX={1} flexDirection="column" flexShrink={0}>
         <Text bold color={color ?? "blue"}>{status ?? "Ready to code?"}</Text>
-        <Markdown text={String(args.plan ?? "")} width={mdWidth} />
+        <Markdown text={String(args.plan ?? "")} width={mdWidth} minWidth={10} />
         <Text color={color ?? "gray"}>{status ?? "[y] proceed (accept-edits)   [n] keep planning / Esc"}</Text>
       </Box>
     );

@@ -172,8 +172,8 @@ function inline(raw: string): ReactNode[] {
   return out.length ? out : [s];
 }
 
-export function Markdown({ text, width, compact }: { text: string; width?: number; compact?: boolean }): ReactNode {
-  const maxWidth = Math.max(24, width ?? 80);
+export function Markdown({ text, width, compact, minWidth = 24 }: { text: string; width?: number; compact?: boolean; minWidth?: number }): ReactNode {
+  const maxWidth = Math.max(minWidth, width ?? 80);
   const lines = text.replace(/\r/g, "").split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
