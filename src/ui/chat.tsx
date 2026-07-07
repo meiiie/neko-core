@@ -1554,8 +1554,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             addLine("info", "(cancelled)");
           }}
         />
-      ) : approval ? (
-        <ApprovalBox approval={approval} flash={approvalFlash} />
+        ) : approval ? (
+          <ApprovalBox approval={approval} flash={approvalFlash} width={contentCols} />
       ) : fullscreen && search ? (
         <Box flexDirection="column" flexShrink={0}>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
