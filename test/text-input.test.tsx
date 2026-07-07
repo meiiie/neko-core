@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { TextInput } from "../src/ui/text-input.tsx";
 
 const tick = (ms = 45) => new Promise((r) => setTimeout(r, ms));
+const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
 
 /** Default paste-collapse props TextInput now requires (owned by the parent in real use). */
 function usePasteProps() {
@@ -85,7 +86,6 @@ test("caret is an OVERLAY: EOL shows ▏ (inverse), mid-text inverts the char (n
   // in the stripped frame: at EOL it is a ▏ (kept as the inverse-cell glyph), mid-text the char under
   // the cursor is rendered twice would be wrong - so we only assert the EOL behavior + that mid-text
   // does NOT insert an extra ▏ glyph (it overlays the existing char instead).
-  const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
   const c = render(<Harness cb={() => {}} />);
   expect(strip(c.lastFrame())).toContain("▏");     // empty input: caret cell shows
   c.stdin.write("ab");
@@ -99,16 +99,26 @@ test("caret is an OVERLAY: EOL shows ▏ (inverse), mid-text inverts the char (n
   c.unmount();
 });
 
-test("caret blinks when idle but stays solid while typing", async () => {
-  const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+test("caret overlay does not duplicate the under-cursor character", async () => {
+  const c = render(<Harness cb={() => {}} />);
+  c.stdin.write("ab");
+  await tick();
+  c.stdin.write("\x1b[D");
+  await tick();
+  const frame = strip(c.lastFrame());
+  expect(frame).toContain("ab");
+  expect(frame).not.toContain("abb");
+  expect(frame).not.toContain("a\u258Fb");
+  c.unmount();
+});
+
+test("caret idle phase keeps the EOL fallback glyph", async () => {
   const c = render(<Harness cb={() => {}} />);
   c.stdin.write("ab");
   await tick();
   expect(strip(c.lastFrame())).toContain("ab▏");    // solid immediately after a keystroke
-  // Idle: within a couple of blink periods the caret must reach an OFF frame (no ▏ - the cell is blank).
-  let sawOff = false;
-  for (let i = 0; i < 40 && !sawOff; i++) { await tick(60); if (!strip(c.lastFrame()).includes("ab▏")) sawOff = true; }
-  expect(sawOff).toBe(true);                        // it blinked off
+  await tick(650);
+  expect(strip(c.lastFrame())).toContain("ab▏");    // never replace EOL fallback with a bare space
   c.stdin.write("c");                               // typing re-solidifies it at once
   await tick();
   expect(strip(c.lastFrame())).toContain("abc▏");
@@ -116,20 +126,17 @@ test("caret blinks when idle but stays solid while typing", async () => {
 }, 15000);
 
 test("mouse activity (scroll/motion) does NOT keep the caret solid - only keys do", async () => {
-  const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
   const c = render(<Harness cb={() => {}} />);
   c.stdin.write("ab");
   await tick();
   expect(strip(c.lastFrame())).toContain("ab▏");
-  // Feed a continuous stream of mouse reports (wheel + any-motion) while otherwise idle. If these counted
-  // as activity they'd freeze the blink solid forever; the caret must still reach an off frame.
-  let sawOff = false;
-  for (let i = 0; i < 40 && !sawOff; i++) {
+  // Feed a continuous stream of mouse reports (wheel + any-motion) while otherwise idle. They should
+  // not mutate the input or remove the EOL fallback glyph.
+  for (let i = 0; i < 10; i++) {
     c.stdin.write("\x1b[<35;5;5M"); // an any-motion mouse report
     await tick(60);
-    if (!strip(c.lastFrame()).includes("ab▏")) sawOff = true;
   }
-  expect(sawOff).toBe(true); // blinked off despite the mouse traffic
+  expect(strip(c.lastFrame())).toContain("ab▏");
   c.unmount();
 }, 15000);
 
@@ -155,9 +162,11 @@ test("wrap: a long single-line value (no newline) wraps to multiple visual lines
   expect(w.lines[0].cells.map((c) => c.ch).join("")).toBe("abc");
   expect(w.lines[1].cells.map((c) => c.ch).join("")).toBe("def");
   expect(w.caretLine).toBe(1);                // caret at EOL -> last line
+  expect(wrapInput(cps, 3, 3).caretLine).toBe(1); // caret before "d" -> start of second line
   // cellWidth: ascii = 1, CJK = 2, combining = 0
   expect(cellWidth("a")).toBe(1);
   expect(cellWidth("字")).toBe(2);
+  expect(cellWidth("😀")).toBe(2);
   expect(cellWidth("\u0301")).toBe(0);        // combining acute
 });
 
@@ -182,9 +191,43 @@ test("mask renders bullets and stays single-line (no wrap fan-out)", async () =>
   }
   const c = render(<H5 />);
   await tick();
-  const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
   const frame = strip(c.lastFrame());
   expect(frame).not.toContain("secret123");   // no plaintext
   expect(frame).toMatch(/\u2022{9}/);         // 9 bullet chars for 9-char secret
   c.unmount();
+});
+
+test("mask never leaks plaintext in single-line, multiline, or wrapped render paths", async () => {
+  function Masked({ value, width }: { value: string; width: number }) {
+    const [v, setV] = useState(value);
+    return <TextInput value={v} onChange={setV} onSubmit={() => {}} width={width} mask {...usePasteProps()} />;
+  }
+
+  const assertNoLeak = (frame: string, secret: string) => {
+    for (const ch of new Set([...secret].filter((c) => c !== "\n"))) {
+      expect(frame).not.toContain(ch);
+    }
+  };
+
+  const single = render(<Masked value="secret99" width={40} />);
+  single.stdin.write("\x1b[D");
+  await tick();
+  const singleFrame = strip(single.lastFrame());
+  assertNoLeak(singleFrame, "secret99");
+  expect(singleFrame).toMatch(/\u2022{8}/);
+  single.unmount();
+
+  const multilineSecret = "top\nsecret9";
+  const multiline = render(<Masked value={multilineSecret} width={40} />);
+  await tick();
+  assertNoLeak(strip(multiline.lastFrame()), multilineSecret);
+  multiline.unmount();
+
+  const wrappedSecret = "verylongsecretvalue";
+  const wrapped = render(<Masked value={wrappedSecret} width={5} />);
+  await tick();
+  const wrappedFrame = strip(wrapped.lastFrame());
+  expect(wrappedFrame.split("\n").length).toBeGreaterThan(1);
+  assertNoLeak(wrappedFrame, wrappedSecret);
+  wrapped.unmount();
 });

@@ -6,9 +6,9 @@
  * (no re-render between them) -> "mọi" became "moọi". Fix: keep the live value in a ref and
  * mutate it synchronously, so each keypress sees the latest. NFC + codepoint-safe.
  *
- * Cursor: a codepoint index (also a ref, for the same IME reason). Left/Right move it, Ctrl+A/
- * Ctrl+E jump to start/end, and typing/backspace act at the cursor. Cursor-only moves bump a
- * tick to force a re-render (the value didn't change, so onChange wouldn't).
+ * Cursor: a codepoint index (also a ref, for the same IME reason). Rendering uses an overlay
+ * caret: the character under the cursor is shown with inverse video. At EOL/empty input there is
+ * no under-cursor character, so the fallback cell is the thin-block glyph.
  */
 import { Text, useInput } from "ink";
 import { useEffect, useRef, useState } from "react";
@@ -19,11 +19,8 @@ import {
   shouldCollapsePaste,
 } from "../shared/paste-collapse.ts";
 
-/** Caret glyph styles. Some terminal fonts render the block-element caret (▏ U+258F, the default)
- * with internal left-padding or a wider advance, so it reads as a gap rather than flush against the
- * preceding char. Letting the user switch glyphs (the pipe/bar that sits centred, a full block, an
- * underline) is the lowest-risk cross-font fix; terminal/font detection is brittle. Set via
- * `caret_glyph` config or NEKO_CARET env. See adapters/config.ts caretGlyph. */
+/** Legacy caret glyph styles. The main caret is now an inverse-video overlay, but these exports and
+ * the prop remain for config/test back-compat. EOL/empty input still uses the thin-block fallback. */
 export type CaretStyle = "thin-block" | "bar" | "block" | "underline";
 export const CARET_GLYPHS: Record<CaretStyle, string> = {
   "thin-block": "\u258f", // ▏ LEFT ONE EIGHTH BLOCK - hugs the left edge of its cell (default)
@@ -50,7 +47,12 @@ export function isEscapeResidue(s: string): boolean {
 
 /** Display width of a single codepoint (0 for combining marks/zero-width, 1 narrow, 2 wide CJK/emoji). */
 export function cellWidth(cp: string): number {
-  const w = cp.match(/[\u0300-\u036F\u200B-\u200F\uFE00-\uFE0F]/) ? 0 : cp.charCodeAt(0) > 0x1100 && /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/.test(cp) ? 2 : 1;
+  const codePoint = cp.codePointAt(0) ?? 0;
+  const w = cp.match(/[\u0300-\u036F\u200B-\u200F\uFE00-\uFE0F]/)
+    ? 0
+    : (codePoint >= 0x1F000 || /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/u.test(cp))
+      ? 2
+      : 1;
   return w;
 }
 
@@ -68,18 +70,27 @@ export function wrapInput(cps: string[], cur: number, width: number): WrapResult
   let caretLine = 0;
   const flush = () => { lines.push({ cells: line, cols: lineCols }); line = []; lineCols = 0; };
   for (let idx = 0; idx < cps.length; idx++) {
-    if (idx === cur) caretLine = lines.length;
     const cp = cps[idx];
-    if (cp === "\n") { flush(); continue; }
+    if (cp === "\n") {
+      if (idx === cur) caretLine = lines.length;
+      flush();
+      continue;
+    }
     const w = cellWidth(cp);
-    if (w === 0) { line.push({ ch: cp, index: idx, w: 0 }); continue; }
+    if (w === 0) {
+      if (idx === cur) caretLine = lines.length;
+      line.push({ ch: cp, index: idx, w: 0 });
+      continue;
+    }
     if (lineCols + w > cols) flush();
+    if (idx === cur) caretLine = lines.length;
     line.push({ ch: cp, index: idx, w });
     lineCols += w;
   }
   if (cur >= cps.length) caretLine = lines.length;
   flush();
   if (lines.length === 0) lines.push({ cells: [], cols: 0 });
+  caretLine = Math.min(Math.max(0, caretLine), lines.length - 1);
   return { lines, caretLine };
 }
 
@@ -99,9 +110,7 @@ export function TextInput(props: {
   nextPasteId: { current: number };
     /** Called after a submit consumes staged pastes (ChatApp clears its map + counter). */
     onCommitPastes?: () => void;
-    /** Caret glyph override. "thin-block" (▏, default), "bar" (│), "block" (█), "underline" (▁).
-     * Different terminal fonts render block-elements inconsistently; this lets the user pick the
-     * glyph that sits flush in THEIR font. Configured via `caret_glyph` / NEKO_CARET. */
+    /** Legacy caret glyph override. Kept for config/API compatibility; overlay caret ignores it. */
     caretGlyph?: CaretStyle;
   }) {
     const { value, onChange, onSubmit, placeholder, mask, width = 9999, pastedContents, nextPasteId, onCommitPastes, caretGlyph = "thin-block" } = props;
@@ -121,7 +130,8 @@ export function TextInput(props: {
   // Caret blink, like a real terminal / Word / Claude Code: SOLID while you type (so it never disappears
   // mid-keystroke), then it blinks once idle - the "waiting for input" signal. A keystroke stamps
   // `lastActivity`; the interval keeps the caret on for one blink period after the last key, then toggles.
-  // Toggling is a single-cell change, so the off phase renders a SPACE (not nothing) - the text never jitters.
+  // Toggling is a single-cell change: mid-text off phase renders the normal under-cursor char; at
+  // EOL/empty it keeps the thin-block fallback rather than a bare space.
   const BLINK_MS = 530; // classic caret cadence
   const [caretOn, setCaretOn] = useState(true);
   const lastActivity = useRef(0);
@@ -189,24 +199,29 @@ export function TextInput(props: {
       }
   });
 
-  // Render the caret as a thin green bar SITTING BEFORE the character at the cursor - a text-editor
-  // caret (like Claude Code), not a block that covers the character. When empty it sits before the
-  // placeholder. The glyph is "▏" (LEFT ONE EIGHTH BLOCK), NOT "|": a pipe is centred in its cell, so it
-  // reads as a gap after the text; ▏ hugs the LEFT edge of its cell, sitting flush against the preceding
-  // character exactly like a real bar cursor. Green so it reads as the live insertion point.
+  // Overlay caret: the char UNDER the cursor in inverse video (no inserted glyph cell). At EOL or
+  // empty input there is no under-cursor char, so render the thin-block fallback glyph instead of a
+  // bare space; a one-space-only Text node breaks Ink/Yoga height after resize-down.
       const cps = [...value];
       const visibleCols = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 9999;
-      // OVERLAY caret: the char UNDER the cursor in inverse video (no inserted glyph cell). Sits flush
-      // against preceding text (unlike ▏ which fonts kern with a gap). At EOL or empty → inverse space.
+      // OVERLAY caret: the char UNDER the cursor in inverse video (no inserted glyph cell). At EOL or
+      // empty input there is no under-cursor char, so the fallback cell is the ▏ glyph — a one-space-only
+      // Text node breaks Ink/Yoga height after a resize-down. When mask is set, the overlay (and all text)
+      // shows a bullet "•" instead of the real char, so a secret NEVER leaks at any cursor position.
       const i = Math.min(cur.current, cps.length);
       const cg = "\u258F";
-      const caret = caretOn
-        ? <Text backgroundColor="green" color="black">{i < cps.length ? cps[i] : cg}</Text>
-        : <Text color="green">{" "}</Text>;
+      const bullet = "\u2022";
+      const shownChar = (ch: string) => mask ? bullet : ch;
+      const renderRange = (start: number, end: number) => cps.slice(start, end).map(shownChar).join("");
+      const renderCaret = (ch: string, forceGlyph = false) => (
+        caretOn
+          ? <Text backgroundColor="green" color="black">{ch}</Text>
+          : <Text color="green">{forceGlyph ? ch + "\u200B" : ch}</Text>
+      );
       if (cps.length === 0) {
         return (
           <Text>
-            {caret}
+            {renderCaret(cg, true)}
             <Text dimColor>{placeholder ?? ""}</Text>
           </Text>
         );
@@ -214,9 +229,13 @@ export function TextInput(props: {
       // Multiline value (a small paste kept its newlines): skip horizontal windowing — Ink renders
       // the \n as real line breaks and wraps naturally, so the box shows the 2-3 lines as typed.
       // Big pastes collapse to a single-line placeholder (no \n), so they stay under windowing.
+      // The caret OVERLAYS the char at i, so `after` starts at i+1 (not i) to avoid duplicating it.
       if (value.includes("\n")) {
-        const before = mask ? "" : cps.slice(0, i).join("");
-        const after = mask ? "" : cps.slice(i).join("");
+        const beforeEnd = caretOn ? i : cps.length;
+        const afterStart = caretOn && i < cps.length ? i + 1 : i;
+        const before = renderRange(0, beforeEnd);
+        const after = caretOn ? renderRange(afterStart, cps.length) : "";
+        const caret = caretOn || i >= cps.length ? renderCaret(i < cps.length ? shownChar(cps[i]) : cg, i >= cps.length) : null;
         return (
           <Text>
             {before}
@@ -230,37 +249,46 @@ export function TextInput(props: {
       // line is ONE <Text> of plain string; the caret, when on that line, splits it into before/overlay/
       // after. Keeping each line a flat string (not a per-codepoint <Text> fan-out) preserves Ink's
       // yoga height measurement after a resize-down (a nested-<Text> structure regressed SHRINK).
-      const wrapped = wrapInput(cps, cur.current, visibleCols);
-      if (wrapped.lines.length > 1) {
-        const startLine = Math.max(0, wrapped.caretLine - MAX_INPUT_LINES + 1);
-        const shown = wrapped.lines.slice(startLine, startLine + MAX_INPUT_LINES);
-        return (
-          <Text>
-            {shown.map((ln, li) => {
-              // caret on THIS visual line? find its column position among the cells.
-              const onThisLine = startLine + li === wrapped.caretLine;
-              let before = "";
-              let overlayCh: string | null = null;
-              let after = "";
-              for (const cell of ln.cells) {
-                if (onThisLine && cell.index === i) { overlayCh = cell.ch; continue; }
-                if (overlayCh === null && onThisLine) before += cell.ch; else after += cell.ch;
-                if (!onThisLine) before += cell.ch, after = "";
-              }
-              const caretNode = caretOn && onThisLine
-                ? <Text backgroundColor="green" color="black">{overlayCh ?? cg}</Text>
-                : null;
-              return (
-                <Text key={`l${li}`}>
-                  {before}
-                  {caretNode}
-                  {after}
-                  {li < shown.length - 1 ? "\n" : ""}
-                </Text>
-              );
-            })}
-          </Text>
-        );
+        const wrapped = wrapInput(cps, cur.current, visibleCols);
+        if (wrapped.lines.length > 1) {
+          const startLine = Math.max(0, wrapped.caretLine - MAX_INPUT_LINES + 1);
+          const shown = wrapped.lines.slice(startLine, startLine + MAX_INPUT_LINES);
+          return (
+            <Text>
+              {shown.map((ln, li) => {
+                // caret on THIS visual line? find its column position among the cells.
+                const onThisLine = startLine + li === wrapped.caretLine;
+                let before = "";
+                let overlayCh: string | null = null; // set when we pass the caret cell on this line
+                let after = "";
+                for (const cell of ln.cells) {
+                  const ch = shownChar(cell.ch); // mask → bullet
+                  if (caretOn && onThisLine && cell.index === i) {
+                    overlayCh = ch;
+                    continue;
+                  }
+                  if (!onThisLine || !caretOn) {
+                    before += ch;
+                  } else if (overlayCh === null) {
+                    before += ch;
+                  } else {
+                    after += ch;
+                  }
+                }
+                const caretNode = onThisLine && (caretOn || i >= cps.length)
+                  ? renderCaret(overlayCh ?? cg, overlayCh === null)
+                  : null;
+                return (
+                  <Text key={`l${li}`}>
+                    {before}
+                    {caretNode}
+                    {after}
+                    {li < shown.length - 1 ? "\n" : ""}
+                  </Text>
+                );
+              })}
+            </Text>
+          );
       }
       const charCols = Math.max(0, visibleCols - 1);
   const [winStart, winEnd] = cps.length < visibleCols ? [0, cps.length] : (() => {
@@ -275,9 +303,12 @@ export function TextInput(props: {
     if (end - start < charCols) start = Math.max(0, end - charCols);
     return [start, end];
   })();
-  const before = mask ? "\u2022".repeat(i - winStart) : cps.slice(winStart, i).join("");
-  const after = mask ? "\u2022".repeat(winEnd - i) : cps.slice(i, winEnd).join("");
-  return (
+  const beforeEnd = caretOn ? Math.min(i, winEnd) : winEnd;
+  const afterStart = caretOn && i < winEnd ? i + 1 : i;
+  const before = renderRange(winStart, beforeEnd);
+  const after = caretOn ? renderRange(Math.max(winStart, afterStart), winEnd) : "";
+  const caret = caretOn || i >= cps.length ? renderCaret(i < cps.length ? shownChar(cps[i]) : cg, i >= cps.length) : null;
+    return (
     <Text>
       {before}
       {caret}
