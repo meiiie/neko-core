@@ -238,12 +238,13 @@ export function TextInput(props: {
       const shownChar = (ch: string) => mask && ch !== "\n" ? bullet : ch;
       const renderRange = (start: number, end: number) => cps.slice(start, end).map(shownChar).join("");
       // Caret: a thin green bar INSERTED before the char at the cursor - a text-editor caret (like
-      // Claude Code / the 0.7.7 look the owner chose), NEVER a block over the character. It blinks by
-      // swapping the glyph <-> a space (both one column, so zero horizontal jitter). The glyph is the
-      // config `caret_glyph` / NEKO_CARET (default \u258F, which hugs the cell's left edge flush against the
-      // preceding char - a centred "|" reads as a gap after the text). The off-phase carries a ZWSP so
-      // a caret that is momentarily alone (empty input, no placeholder) can't collapse Ink/Yoga height.
-      const renderCaret = () => <Text color="green">{caretOn ? cg : " \u200B"}</Text>;
+      // Claude Code), NEVER a block over the character. The bar is ALWAYS the glyph (never a space):
+      // swapping glyph<->space opened a gap on the blink-off phase ("wo\u258Frld" -> "wo rld"), which the
+      // owner reported. It stays "wo\u258Frld" tight; the blink is a brightness PULSE (bright green while
+      // typing / on-phase, dim green on the off-phase) - alive, but zero horizontal shift. The glyph is
+      // the config `caret_glyph` / NEKO_CARET (default \u258F, hugging the cell's left edge flush after the
+      // preceding char - a centred "|" reads as a gap).
+      const renderCaret = () => <Text color="green" dimColor={!caretOn}>{cg}</Text>;
       if (cps.length === 0) {
         return (
           <Text>
