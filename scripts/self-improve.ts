@@ -34,7 +34,17 @@ function sh(cmd: string, args: string[], timeoutMs = 0) {
 }
 const log = (m: string) => { const line = `[${new Date().toISOString()}] ${m}`; console.log(line); try { appendFileSync(LOGFILE, line + "\n"); } catch {} };
 const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
-const gitDirty = () => sh("git", ["status", "--porcelain"]).out.trim().length > 0;
+// The loop's WRITE SCOPE - the only paths an iteration may see, stage, clean, or commit. Everything
+// outside (the owner's files at root, scratch, junk a worker drops) is INVISIBLE to the loop: it can
+// neither trigger an iteration (dirty-check), nor ride into history (`git add -A` once committed a
+// stray 0-byte `149` at root - iter 4), nor be deleted by revert() (a root-wide `git clean` would
+// eat the owner's untracked files). One list, used by all three git touchpoints.
+const SCOPE = [
+  "src", "test", "skills", "docs", "bin", "scripts", "assets", ".github",
+  "package.json", "bun.lock", "CHANGELOG.md", "README.md", "CLAUDE.md",
+  "tsconfig.json", "tsconfig.build.json", "bunfig.toml", "install.ps1", "install.sh",
+];
+const gitDirty = () => sh("git", ["status", "--porcelain", "--", ...SCOPE]).out.trim().length > 0;
 function ensureBranch() {
   const cur = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"]).out.trim();
   if (cur === BRANCH) return;
@@ -44,7 +54,7 @@ function ensureBranch() {
   const r = exists ? sh("git", ["checkout", BRANCH]) : sh("git", ["checkout", "-b", BRANCH]);
   log(`branch ${cur} -> ${BRANCH} (${exists ? "continue" : "new"}): ${r.ok ? "ok" : "FAILED " + r.out.slice(-120)}`);
 }
-function revert() { sh("git", ["checkout", "--", "."]); sh("git", ["clean", "-fd", "src", "test", "skills", "docs", "bin", "scripts"]); }
+function revert() { sh("git", ["checkout", "--", "."]); sh("git", ["clean", "-fd", "--", ...SCOPE]); }
 const isRateLimit = (s: string) => /\b429\b|rate.?limit|quota|too many requests|insufficient|exceeded/i.test(s);
 const isTransient = (s: string) => /\b(500|502|503|504)\b|network|ETIMEDOUT|fetch failed|socket|EAI_AGAIN|timed out/i.test(s);
 
@@ -172,7 +182,7 @@ async function main() {
     const v = verifyGate();
     if (!v.ok) { log(`VERIFY FAILED (${v.why}) -> revert. ${(v.out ?? "").replace(/\s+/g, " ").slice(0, 200)}`); revert(); noImprove++; await sleep(SLEEP_S); continue; }
 
-    sh("git", ["add", "-A"]);
+    sh("git", ["add", "-A", "--", ...SCOPE]);
     // Anti-drift: an INDEPENDENT model must agree the change is a real improvement (skip for the research
     // pass, which only refills the backlog/docs — there's no code change to review).
     if (PEER_REVIEW && !stuck) {
