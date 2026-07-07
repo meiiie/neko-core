@@ -155,7 +155,21 @@ export function useRowScroll(totalRows: number, viewH: number, onHop?: (dist: nu
     if (settled || pinnedChanged) force((t) => t + 1);
     if (s.shown !== s.target) st.current.timer = setTimeout(step, Math.max(2, hopMs - late));
   };
-  const kick = () => { lastHopAt.current = 0; if (!st.current.timer) step(); };
+  const kick = () => {
+    lastHopAt.current = 0;
+    // No fast path: leading + trailing coalescing. A wheel flick delivers 10-20 events in ~150ms and
+    // each full-Ink render costs tens of ms - rendering PER EVENT queues a backlog that keeps draining
+    // long after the wheel stops (measured 76ms first response / 391ms settle). The FIRST gesture
+    // renders immediately (instant feel); the rest of the burst folds into one trailing render per
+    // ~30ms window. Measured after: leading unchanged, settle tracks the flick instead of trailing it.
+    if (!hopRef.current) {
+      if (st.current.timer) return; // window open: target already advanced, the trailing step will land it
+      step();                       // leading render, right now
+      st.current.timer = setTimeout(() => { st.current.timer = null; step(); }, 30);
+      return;
+    }
+    if (!st.current.timer) step();
+  };
   return {
     dist: Math.min(st.current.shown, maxRef.current),
     scrolled: st.current.shown > 0 || st.current.target > 0,
