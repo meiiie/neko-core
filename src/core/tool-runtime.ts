@@ -19,6 +19,7 @@ import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
 import { wrapBash } from "./sandbox.ts";
 import { GATED, resolveTool, toolSchemas } from "./tools.ts";
+import { debug, messageOf } from "../shared/debug.ts";
 
 /** An approval gate: given (toolName, the tool's args) -> approve? (may be async).
  * Receiving args lets a UI render a preview/diff before approving. */
@@ -133,11 +134,11 @@ export class ToolRegistry {
   /** Record a file's current content (once) before it's mutated this turn. */
   private snapshotFile(absPath: string): void {
     if (this.fileSnapshots.has(absPath)) return;
-    try {
-      this.fileSnapshots.set(absPath, existsSync(absPath) ? readFileSync(absPath, "utf-8") : null);
-    } catch {
-      /* unreadable -> skip */
-    }
+      try {
+        this.fileSnapshots.set(absPath, existsSync(absPath) ? readFileSync(absPath, "utf-8") : null);
+      } catch (e) {
+        debug("checkpoint", () => `snapshotFile unreadable ${absPath}: ${messageOf(e)}`);
+      }
   }
 
   /** Restore files to their pre-checkpoint state (undo this turn's write/edit/multi_edit). Returns count. */
@@ -151,9 +152,9 @@ export class ToolRegistry {
           writeFileSync(path, content, "utf-8");
           n++;
         }
-      } catch {
-        /* skip */
-      }
+        } catch (e) {
+          debug("checkpoint", () => `restoreCheckpoint failed ${path}: ${messageOf(e)}`);
+        }
     }
     this.fileSnapshots.clear();
     return n;
@@ -485,9 +486,9 @@ export class ToolRegistry {
         shell: true, cwd: this.root, timeout: 10000,
         env: { ...process.env, NEKO_TOOL: name, NEKO_ARGS: JSON.stringify(args), NEKO_RESULT: String(result).slice(0, 4000) },
       });
-    } catch {
-      /* hooks never break the turn */
-    }
+      } catch (e) {
+        debug("hook", () => `post_tool_use hook threw for ${name}: ${messageOf(e)}`);
+      }
   }
 }
 
@@ -1115,9 +1116,10 @@ function ghRead(owner: string, repo: string, kind?: string, num?: string): strin
     const r = spawnSync("gh", args, { encoding: "utf8", timeout: 30_000, maxBuffer: 32 * 1024 * 1024 });
     if (r.error || r.status !== 0 || !r.stdout?.trim()) return null; // gh missing / not authed / not found -> fall back
     return `# GitHub: ${target}${kind ? ` (${kind} #${num})` : ""}\n\n${r.stdout.trim()}`;
-  } catch {
-    return null;
-  }
+    } catch (e) {
+      debug("web", () => `ghRead failed for ${owner}/${repo}: ${messageOf(e)}`);
+      return null;
+    }
 }
 
 /** RSS/Atom XML -> a compact Markdown item list (title, link, short summary). Regex-level (no DOM), like the
@@ -1175,12 +1177,13 @@ function ytTranscript(url: string): string | null {
     const vtt = readdirSync(dir).find((f) => f.endsWith(".vtt"));
     if (!vtt) return null; // no captions produced (a real failure) -> fall back
     const text = vttToText(readFileSync(join(dir, vtt), "utf8"));
-    return text ? `# YouTube transcript\n${url}\n\n${text}` : null;
-  } catch {
-    return null;
-  } finally {
-    if (dir) try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
-  }
+      return text ? `# YouTube transcript\n${url}\n\n${text}` : null;
+    } catch (e) {
+      debug("web", () => `ytTranscript failed for ${url}: ${messageOf(e)}`);
+      return null;
+    } finally {
+      if (dir) try { rmSync(dir, { recursive: true, force: true }); } catch (e) { debug("web", () => `ytTranscript cleanup: ${messageOf(e)}`); }
+    }
 }
 
 /** VTT captions -> plain deduped text. Auto-subs repeat each line as the caption rolls, so drop cue numbers,
