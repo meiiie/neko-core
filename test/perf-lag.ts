@@ -72,7 +72,7 @@ async function main() {
     const session = makeSession(200); // long transcript
     const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
     const app = render(
-      React.cloneElement(React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "perf", frameDiffer: differ, preAltDispose }), { fullscreen: true }),
+      React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "perf", frameDiffer: differ, preAltDispose, fullscreen: true } as any),
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
     );
     await tick(800); // startup paint
@@ -107,7 +107,7 @@ async function main() {
     const session: any = { id: "in", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [] };
     const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
     const app = render(
-      React.cloneElement(React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "in", frameDiffer: differ, preAltDispose }), { fullscreen: true }),
+      React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "in", frameDiffer: differ, preAltDispose, fullscreen: true } as any),
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
     );
     await tick(800);

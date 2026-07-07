@@ -1344,6 +1344,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const pillLabel = newSince > 0 ? ` ↓ ${newSince} new message${newSince > 1 ? "s" : ""} · click or ctrl+End ` : ` Jump to bottom (ctrl+End) ↓ `;
   const pillX1 = 2 + Math.max(0, Math.floor((contentCols - pillLabel.length) / 2)) + 1; // 1-based col
   const pillHit = (x: number, y: number) => pillShown && y === viewH + 1 && x >= pillX1 - 2 && x <= pillX1 + pillLabel.length + 1;
+  const inputPrompt = awaitingKey ? "key> " : pendingMulti ? "... " : "> ";
+  const inputCols = Math.max(1, contentCols - inputPrompt.length);
   useEffect(() => { if (!pillShown) setPillHover(false); }, [pillShown]);
   // Compute the matching row indices for a query over the flattened rows (case-insensitive).
   const findMatches = (q: string): number[] => {
@@ -1623,12 +1625,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           </Box>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
           <Box>
-            <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{awaitingKey ? "key> " : pendingMulti ? "... " : "> "}</Text>
+            <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{inputPrompt}</Text>
             <TextInput
               value={input}
               onChange={setInput}
               onSubmit={onSubmit}
               mask={awaitingKey}
+              width={inputCols}
               placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
             />
           </Box>

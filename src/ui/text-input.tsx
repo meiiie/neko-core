@@ -30,8 +30,9 @@ export function TextInput(props: {
   onSubmit: (v: string) => void;
   placeholder?: string;
   mask?: boolean; // render bullets (for secrets like /login)
+  width?: number;
 }) {
-  const { value, onChange, onSubmit, placeholder, mask } = props;
+  const { value, onChange, onSubmit, placeholder, mask, width = 9999 } = props;
   const ref = useRef(value);
   const cur = useRef([...value].length);
   // External change (history nav, clear): adopt it and put the cursor at the end.
@@ -106,7 +107,7 @@ export function TextInput(props: {
   // reads as a gap after the text; ▏ hugs the LEFT edge of its cell, sitting flush against the preceding
   // character exactly like a real bar cursor. Green so it reads as the live insertion point.
   const cps = [...value];
-  const shown = mask ? cps.map(() => "•") : cps;
+  const visibleCols = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 9999;
   const caret = <Text color="green">{caretOn ? "▏" : " "}</Text>;
   if (cps.length === 0) {
     return (
@@ -117,11 +118,26 @@ export function TextInput(props: {
     );
   }
   const i = Math.min(cur.current, cps.length);
+  const charCols = Math.max(0, visibleCols - 1);
+  const [winStart, winEnd] = cps.length < visibleCols ? [0, cps.length] : (() => {
+    if (charCols === 0) return [i, i];
+    const margin = Math.min(4, Math.floor(charCols / 2));
+    let start = Math.max(0, i - margin);
+    let end = Math.min(cps.length, start + charCols);
+    if (end - i < margin && end < cps.length) {
+      end = Math.min(cps.length, i + margin);
+      start = Math.max(0, end - charCols);
+    }
+    if (end - start < charCols) start = Math.max(0, end - charCols);
+    return [start, end];
+  })();
+  const before = mask ? "\u2022".repeat(i - winStart) : cps.slice(winStart, i).join("");
+  const after = mask ? "\u2022".repeat(winEnd - i) : cps.slice(i, winEnd).join("");
   return (
     <Text>
-      {shown.slice(0, i).join("")}
+      {before}
       {caret}
-      {shown.slice(i).join("")}
+      {after}
     </Text>
   );
 }
