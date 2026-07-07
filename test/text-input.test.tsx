@@ -231,3 +231,30 @@ test("mask never leaks plaintext in single-line, multiline, or wrapped render pa
   assertNoLeak(wrappedFrame, wrappedSecret);
   wrapped.unmount();
 });
+
+test("wrapInput does not emit a spurious empty line for a wide char narrower than width", async () => {
+  const { wrapInput } = await import("../src/ui/text-input.tsx");
+  // A 2-cell CJK char on a 1-col box: must occupy ONE line (no leading empty line), per the
+  // "each visual line <= width" invariant (relaxed only when a single cell is wider than width).
+  const w = wrapInput([..."字"], 0, 1);
+  expect(w.lines.length).toBe(1);
+  expect(w.lines[0].cells.length).toBe(1);
+});
+
+test("mask preserves line breaks in a multiline value (not collapsed to one bullet row)", async () => {
+  const { render } = await import("ink-testing-library");
+  const { useRef } = await import("react");
+  const pp = () => { const p = useRef(new Map<number, string>()); const n = useRef(1); return { pastedContents: p.current, nextPasteId: n }; };
+  function Masked({ value, width }: { value: string; width: number }) {
+    const props = pp();
+    return <TextInput value={value} onChange={() => {}} onSubmit={() => {}} width={width} mask {...props} />;
+  }
+  const c = render(<Masked value={"top\nsecret"} width={40} />);
+  await tick();
+  const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+  const frame = strip(c.lastFrame());
+  expect(frame.split("\n").length).toBeGreaterThan(1); // line break preserved
+  expect(frame).not.toContain("top");
+  expect(frame).not.toContain("secret");
+  c.unmount();
+});

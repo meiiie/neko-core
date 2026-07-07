@@ -82,7 +82,10 @@ export function wrapInput(cps: string[], cur: number, width: number): WrapResult
       line.push({ ch: cp, index: idx, w: 0 });
       continue;
     }
-    if (lineCols + w > cols) flush();
+      // Soft-wrap when the next cell would exceed the line width. But if the line is EMPTY and the
+      // cell is wider than the whole width (e.g. a 2-cell CJK char on a 1-col box), don't flush —
+      // that would emit a spurious empty line. Let the wide char occupy the (too-narrow) line.
+      if (lineCols > 0 && lineCols + w > cols) flush();
     if (idx === cur) caretLine = lines.length;
     line.push({ ch: cp, index: idx, w });
     lineCols += w;
@@ -211,7 +214,9 @@ export function TextInput(props: {
       const i = Math.min(cur.current, cps.length);
       const cg = "\u258F";
       const bullet = "\u2022";
-      const shownChar = (ch: string) => mask ? bullet : ch;
+      // shownChar maps a printable char to a bullet when mask is set, but PRESERVES a "\n" so a masked
+      // multiline value still renders its line breaks (otherwise everything collapsed to one bullet row).
+      const shownChar = (ch: string) => mask && ch !== "\n" ? bullet : ch;
       const renderRange = (start: number, end: number) => cps.slice(start, end).map(shownChar).join("");
       const renderCaret = (ch: string, forceGlyph = false) => (
         caretOn
