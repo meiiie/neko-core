@@ -4,29 +4,28 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
-## [0.7.7] — 2026-07-07
+## [0.7.7] — 2026-07-07 (unreleased - in verification)
 
 ### Fixed
-- **Scrolling on Windows is crisp again: INSTANT jumps instead of a stuttering glide.** The glide's
-  smoothness only ever came from the differ's sub-ms band repaints; with the differ off on Windows
-  (the ghost fix), hops burned dead time and React rendered once at settle - a gesture stuttered,
-  then JUMPED. Without a fast repaint path, `useRowScroll` now goes straight to the target: one
-  render per gesture, no dead time. Unix keeps the full glide (differ on, unchanged), and `/fps` /
-  display-Hz detection keep driving Ink's render cap on every platform.
-
-### Changed
-- **The Windows differ verdict is now final, on completed evidence.** Three exoneration attempts
-  were made after the 0.7.6 hardenings: the harness's reference terminal gained lazy autowrap
-  (clipping had shifted reconstructions below full-width rows one row up - it could manufacture the
-  ghost signature on its own) and ECH, and a differ-on ConPTY re-render was sequence-inventoried
-  against the parser (nothing unsupported remains). With a COMPLETE parser the differ-on ghost still
-  reproduces 3/3 while differ-off is clean - ConPTY genuinely displaces the differ's output at live
-  cadence. The differ stays OFF on Windows (`NEKO_INCR=1` to experiment), ON elsewhere.
+- **Overall Windows lag (typing, streaming, scrolling): the frame differ is BACK ON, paired with a
+  self-healing resync.** 0.7.6 cured the duplicated-chrome ghost by disabling the differ on Windows,
+  but that traded away the whole render economy - every keystroke, stream delta and scroll step fell
+  back to full Ink frames (bench: scroll first-response 15ms -> 63-76ms, with a 391ms render backlog
+  after a flick). The ghost's real damage was PERSISTENCE, so instead of disabling the differ the
+  displacement's lifetime is now bounded: a full ABSOLUTE repaint of the model (CUP+EL per row -
+  immune to conhost's displacement, erases anything stale) lands ~400ms after every write burst and
+  at least every 2s during sustained activity - a curses-style ^L, automated. Measured through a
+  real ConPTY: scroll first-response 11ms (0.7.0-class), typed-echo OK, and the e2e ghost harness is
+  clean 3/3 where the unhealed differ ghosted 3/3. `NEKO_INCR=0` still disables the differ entirely;
+  that fallback path keeps instant coalesced scrolling and stays sim-locked in CI.
 
 ### Added
-- **The Windows-default path is sim-locked in CI**: a differ-less fullscreen simulation (render,
-  typing echo, instant wheel scroll into history and back) guards the exact configuration Windows
-  users run, forever.
+- **`scripts/bench-scroll-conpty.ts`**: scroll-latency bench through a real ConPTY (first-response /
+  settle / bytes), with baselines recorded in the header - scroll feel is now measurable, not
+  debatable.
+- **Reference-terminal fidelity**: the harness VT gained lazy autowrap (DECAWM) and ECH, and the
+  differ-on ConPTY stream was sequence-inventoried against it - verdicts no longer rest on a parser
+  with blind spots.
 
 ## [0.7.6] — 2026-07-07
 

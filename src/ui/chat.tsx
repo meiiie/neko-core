@@ -1726,18 +1726,16 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // hardware scroll (DECSTBM+SU/SD: the terminal shifts the region, we paint only the revealed rows).
   // This is the claude-code-class write path, built at the stdout layer instead of forking Ink.
   //
-  // OFF BY DEFAULT ON WINDOWS. ConPTY displaces differ output at real write cadence - the e2e
-  // harness (scripts/e2e-conpty-ghost.ts) shows the seed's chrome landing one row off and a
-  // duplicated footer/prompt surviving every later diff (images #77/#78), deterministically, on
-  // v0.7.4 through today; with the differ off the same runs are clean 100%. Three layers of fixes
-  // (absolute-only seeds, geometry-gated + then disabled hardware scroll, DEC 2026 stripped) each
-  // removed a real hazard yet the displacement persists - the remaining mechanism lives inside
-  // conhost's buffer/viewport handling, not in our bytes (they replay clean through the reference
-  // VT). Until that is cracked upstream-or-here, Windows takes Ink's plain full-frame writes:
-  // correctness over bytes. NEKO_INCR=1 force-enables (for experiments); NEKO_INCR=0 force-disables.
-  const incr = process.env.NEKO_INCR;
-  const differEnabled = incr === "1" ? true : incr === "0" ? false : process.platform !== "win32";
-  const differ = differEnabled ? new FrameDiffer() : undefined;
+  // ON everywhere - on Windows it is paired with the differ's SELF-HEALING RESYNC. ConPTY displaces
+  // differ output at real write cadence (the one-row duplicated-chrome ghost, images #77/#78;
+  // mechanism inside conhost's buffer/viewport handling - our bytes replay clean through the
+  // reference VT, and absolute-seed/no-hw-scroll/no-2026 hardenings all shipped without curing it).
+  // Turning the differ OFF cured the ghost but cost the whole render economy: typing, streaming and
+  // scrolling all fell back to full Ink frames (bench: scroll first-response 15ms -> 63ms+). The
+  // resolution keeps the differ AND bounds the displacement's LIFETIME instead: a full absolute
+  // repaint (immune to displacement, erases anything stale) lands ~400ms after every write burst and
+  // at least every 2s during sustained activity - a curses ^L, automated. NEKO_INCR=0 disables.
+  const differ = process.env.NEKO_INCR === "0" ? undefined : new FrameDiffer();
   // Fullscreen must enter the alt-screen BEFORE Ink's first render: paint-first-switch-after wipes the
   // paint, and Ink (believing its frame is on screen) never repaints -> black until a keypress. So enter
   // first, then render - the first frame paints INTO the alt screen. ChatApp adopts the disposer (prop)
@@ -1769,6 +1767,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     // EXACTLY as it was before neko ran), then print ONLY the resume hint at the shell's own cursor. No
     // transcript echo - a raw-text dump interleaved with the shell prompt was the junk of image #66; the
     // conversation lives in the session file, one `neko --resume` away.
+    differ?.dispose(); // stop the self-heal timer before the terminal is restored
     emergencyRestore(); // full terminal restore (cursor, mouse, main screen, title) - idempotent on clean exits
     await hub.close();
     console.log(`\nResume this session with:\n  neko --resume ${id}\n`);

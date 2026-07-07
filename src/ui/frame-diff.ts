@@ -88,6 +88,38 @@ export class FrameDiffer {
     if (v === "0") return false;
     return process.platform !== "win32";
   }
+
+  // SELF-HEALING RESYNC - the answer to conhost's residual displacement (the one-row ghost that
+  // survived every targeted fix; its mechanism lives inside ConPTY's buffer/viewport handling, not
+  // in our bytes). We cannot stop the displacement from ever happening, but we CAN bound its
+  // lifetime: a full ABSOLUTE repaint of the model (CUP per row + EL - cannot be displaced, erases
+  // anything stale) runs (a) ~400ms after each burst of writes goes quiet (trailing debounce - the
+  // screen the user actually looks at is always freshly healed) and (b) at least every ~2s during
+  // sustained activity (streaming). Cost: one plain frame per pause. A curses-style ^L, automated.
+  private lastResyncAt = 0;
+  private resyncTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Absolute repaint of the whole model (skips a trailing empty line - see fullRepaintOr). */
+  private paintAll(): string {
+    const lines = this.prev!;
+    const n = lines.length && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
+    let out = "";
+    for (let i = 0; i < n; i++) out += `${ESC}${i + 1};1H` + lines[i] + EL;
+    this.lastResyncAt = Date.now();
+    return out + `${ESC}${lines.length};1H`;
+  }
+  private armTrailingResync(): void {
+    if (!this.band) return; // inline frames float in scrollback - absolute repaints don't apply
+    if (this.resyncTimer) clearTimeout(this.resyncTimer);
+    this.resyncTimer = setTimeout(() => {
+      this.resyncTimer = null;
+      if (!this.writer || !this.prev || !this.band) return;
+      trace({ ev: "resync-heal" });
+      this.writer(this.paintAll());
+    }, 400);
+    (this.resyncTimer as any).unref?.();
+  }
+  /** Stop the heal timer (teardown). */
+  dispose(): void { if (this.resyncTimer) { clearTimeout(this.resyncTimer); this.resyncTimer = null; } }
   private sameGeometry(): boolean {
     return !!this.band && !!this.paintedBand &&
       this.paintedBand.top === this.band.top && this.paintedBand.height === this.band.height;
@@ -117,7 +149,7 @@ export class FrameDiffer {
       if (lines[i] !== this.prev[i]) { out += `${ESC}${i + 1};1H` + lines[i] + EL; this.prev[i] = lines[i]; }
     }
     trace({ ev: "refreshCompose", rows: rowsOf(out) });
-    if (out) this.writer(out + `${ESC}${this.prev.length};1H`);
+    if (out) { this.writer(out + `${ESC}${this.prev.length};1H`); this.armTrailingResync(); }
     this.markPainted(); // model is now consistent with the CURRENT geometry
   }
 
@@ -211,12 +243,10 @@ export class FrameDiffer {
    *    the duplicated footer/prompt of images #77/#78. Absolute rows cannot scroll, ever. */
   private fullRepaintOr(parsed: { eraseCount: number }, lines: string[]): string | null {
     if (!this.band) return null;
-    // A trailing EMPTY line (Ink frames end with "\n") would address one row PAST the screen; CUP
-    // clamps to the bottom row and its EL would erase the real last row (the footer). Skip it.
-    const n = lines.length && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
-    let out = "";
-    for (let i = 0; i < n; i++) out += `${ESC}${i + 1};1H` + lines[i] + EL;
-    return out + `${ESC}${lines.length};1H`;
+    // `lines` IS this.prev at every call site - paintAll paints exactly it (and stamps the resync
+    // clock: a seed/resync is already a full heal).
+    this.armTrailingResync();
+    return this.paintAll();
   }
 
   /** Imperative band repaint (scroll, append, warm upgrade): diff the new window against the previous
@@ -246,10 +276,14 @@ export class FrameDiffer {
     } else {
       for (let i = 0; i < H; i++) if (win[i] !== prevBand[i]) out += `${ESC}${top + i};1H` + win[i] + EL;
     }
-    out += `${ESC}${this.prev.length};1H`; // restore the cursor row Ink assumes (its frame's last line)
     for (let i = 0; i < H; i++) this.prev[i] = win[i];
+    // Sustained activity (a long scroll, streaming) never goes quiet enough for the trailing heal -
+    // fold a full repaint in at least every ~2s so displacement can't accumulate mid-gesture.
+    if (Date.now() - this.lastResyncAt > 2000) out = this.paintAll();
+    else out += `${ESC}${this.prev.length};1H`; // restore the cursor row Ink assumes (its frame's last line)
     this.writer(out);
     this.markPainted();
+    this.armTrailingResync();
   }
 
   /** Optimized bytes to write INSTEAD of `payload`; "" = nothing changed (skip the write);
@@ -297,6 +331,8 @@ export class FrameDiffer {
     // --- plain line-diff ---
     let out = "";
     trace({ ev: "diff", changed: changed.map((i) => i + 1), n: lines.length, bandH: band?.height });
+    if (band && Date.now() - this.lastResyncAt > 2000) { this.armTrailingResync(); return this.paintAll(); }
+    if (band) this.armTrailingResync();
     if (band) {
       // ABSOLUTE addressing in fullscreen (the frame is pinned at screen row 1 by alt+clear+home). This
       // is immune to cursor drift: any real-terminal quirk that leaves the cursor somewhere unexpected
