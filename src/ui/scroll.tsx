@@ -124,6 +124,15 @@ export function useRowScroll(totalRows: number, viewH: number, onHop?: (dist: nu
 
   const step = () => {
     st.current.timer = null;
+    // No fast repaint path (no differ - e.g. Windows, where ConPTY displaces differ output): gliding
+    // through React would render a FULL Ink frame per hop (28-51ms each) - the gesture stutters and
+    // then jumps. Scroll INSTANTLY instead: one render per gesture, crisp, no dead time.
+    if (!hopRef.current) {
+      const s0 = st.current;
+      s0.target = Math.max(0, Math.min(maxRef.current, s0.target));
+      if (s0.shown !== s0.target) { s0.shown = s0.target; force((t) => t + 1); }
+      return;
+    }
     // Drift-compensated cadence: timers fire LATE under load; subtract the measured overshoot from the
     // next delay so hops average the hopMs target instead of hopMs + event-loop latency (bench: 28ms
     // avg uncompensated at a 16ms target).
@@ -140,14 +149,10 @@ export function useRowScroll(totalRows: number, viewH: number, onHop?: (dist: nu
     // out of the per-hop loop entirely. Bench showed render+effect per hop cost 28-51ms between
     // repaints; direct hops run at the timer's 16ms. React still renders at the gesture EDGES (pill
     // mounts/unmounts, settle) - the only moments its output actually changes.
-    if (hopRef.current) {
-      hopRef.current(Math.min(s.shown, maxRef.current));
-      const settled = s.shown === s.target;
-      const pinnedChanged = wasPinned !== (s.shown === 0);
-      if (settled || pinnedChanged) force((t) => t + 1);
-    } else {
-      force((t) => t + 1);
-    }
+    hopRef.current(Math.min(s.shown, maxRef.current));
+    const settled = s.shown === s.target;
+    const pinnedChanged = wasPinned !== (s.shown === 0);
+    if (settled || pinnedChanged) force((t) => t + 1);
     if (s.shown !== s.target) st.current.timer = setTimeout(step, Math.max(2, hopMs - late));
   };
   const kick = () => { lastHopAt.current = 0; if (!st.current.timer) step(); };

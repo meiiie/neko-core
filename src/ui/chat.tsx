@@ -1267,7 +1267,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const rowScroll = useRowScroll(
     ansiRows.length,
     viewH,
-    (dist) => { if (bandActiveRef.current) frameDiffer?.setBandContent(paddedRowsRef.current, dist, streamRowsRef.current); },
+    // The glide's fast path exists ONLY with the differ (sub-ms band repaints). Without it (Windows
+    // default) pass NO hop callback - useRowScroll then scrolls instantly, one render per gesture.
+    frameDiffer ? (dist) => { if (bandActiveRef.current) frameDiffer.setBandContent(paddedRowsRef.current, dist, streamRowsRef.current); } : undefined,
     Math.max(4, Math.round(1000 / fps)), // glide hop follows the resolved fps (live-adjustable via /fps)
   );
   // Which LINE the current scroll position looks at (walk row counts from the end; O(scroll depth),
