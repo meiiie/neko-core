@@ -71,6 +71,13 @@ export function collectChecks(config: NekoConfig): Check[] {
     },
     {
       status: "ok",
+      name: "file_search",
+      // The `search` tool prefers ripgrep (fast, .gitignore-aware); without it, a built-in JS regex
+      // walk (correct, slower). Surfaced so users can tell which path they are on and install rg.
+      detail: Bun.which("rg") ? "ripgrep (fast)" : "built-in JS walk (install ripgrep for the fast path: https://github.com/BurntSushi/ripgrep)",
+    },
+    {
+      status: "ok",
       name: "web_search",
       detail: config.searchBackend || (config.searxngUrl ? "searxng" : process.env.TAVILY_API_KEY ? "tavily" : "duckduckgo (set searxng_url or TAVILY_API_KEY for SOTA)"),
     },
