@@ -238,13 +238,15 @@ export function TextInput(props: {
       const shownChar = (ch: string) => mask && ch !== "\n" ? bullet : ch;
       const renderRange = (start: number, end: number) => cps.slice(start, end).map(shownChar).join("");
       // Caret: a thin green bar INSERTED before the char at the cursor - a text-editor caret (like
-      // Claude Code), NEVER a block over the character. The bar is ALWAYS the glyph (never a space):
+      // Claude Code), NEVER a block over the character. It always shows the glyph so it stays TIGHT:
       // swapping glyph<->space opened a gap on the blink-off phase ("wo\u258Frld" -> "wo rld"), which the
-      // owner reported. It stays "wo\u258Frld" tight; the blink is a brightness PULSE (bright green while
-      // typing / on-phase, dim green on the off-phase) - alive, but zero horizontal shift. The glyph is
-      // the config `caret_glyph` / NEKO_CARET (default \u258F, hugging the cell's left edge flush after the
+      // owner reported. The off-phase now appends a zero-width ZWSP: INVISIBLE (no gap, no shift), but it
+      // changes the input line's BYTES every blink. That byte change is LOAD-BEARING - after a resize the
+      // fullscreen band repaints only when a frame follows the differ's reset(), and this periodic caret
+      // render guarantees one (a static caret leaves the band blank after a shrink; see fullscreen-sim).
+      // Glyph = config `caret_glyph` / NEKO_CARET (default \u258F, hugging the cell's left edge flush after the
       // preceding char - a centred "|" reads as a gap).
-      const renderCaret = () => <Text color="green" dimColor={!caretOn}>{cg}</Text>;
+      const renderCaret = () => <Text color="green">{caretOn ? cg : cg + "​"}</Text>;
       if (cps.length === 0) {
         return (
           <Text>
