@@ -476,3 +476,42 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     provider.cancelled = true; // stop the hang so no timer outlives the test
   }
 }, 15000); // generous wall-clock: streaming + per-delta hidden-instance renders can run slow under suite load
+
+test("interrupted turn is PERSISTED incrementally - resume shows the work, not nothing", async () => {
+  // The bug: persist() ran ONLY in the turn's finally block, so killing the process mid-turn (closing
+  // the terminal) lost the user's prompt AND every tool result. The fix persists at each clean
+  // checkpoint (step / tool_result). Here the provider HANGS on the first call - the finally-persist
+  // never runs, so only the incremental persist can save the user message. Without the fix: no file.
+  const saved = { up: process.env.USERPROFILE, home: process.env.HOME };
+  const home = mkdtempSync(join(tmpdir(), "neko-persist-home-"));
+  process.env.USERPROFILE = home; process.env.HOME = home;
+  let cancelled = false;
+  class Hang implements Provider {
+    async complete(): Promise<ProviderResponse> {
+      await new Promise<void>((r) => { const t = setInterval(() => { if (cancelled) { clearInterval(t); r(); } }, 20); });
+      return { content: "", tool_calls: [] };
+    }
+  }
+  try {
+    const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Hang()} sessionId="persist-int" />);
+    await tick(60);
+    c.stdin.write("nhiem vu quan trong");
+    await tick(20);
+    c.stdin.write("\r");
+    const { loadSession } = await import("../src/adapters/session.ts");
+    let s: any = null;
+    for (let i = 0; i < 80; i++) {
+      s = loadSession("persist-int");
+      if (s?.messages?.some((m: any) => String(m.content).includes("nhiem vu quan trong"))) break;
+      await tick(25);
+    }
+    // The turn is STILL hanging (never reached finally) - yet the user's prompt is already on disk.
+    expect(s).not.toBeNull();
+    expect(s.messages.some((m: any) => m.role === "user" && String(m.content).includes("nhiem vu quan trong"))).toBe(true);
+    c.unmount();
+  } finally {
+    cancelled = true;
+    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);

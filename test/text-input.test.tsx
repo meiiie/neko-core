@@ -81,62 +81,47 @@ test("ignores stray escape sequences (mouse reports) - never leak into the text"
   c.unmount();
 });
 
-test("caret is an OVERLAY: EOL shows ▏ (inverse), mid-text inverts the char (no inserted glyph)", async () => {
-  // ink-testing-library runs with debug:true which strips ANSI color, so we check the CARET MARKER
-  // in the stripped frame: at EOL it is a ▏ (kept as the inverse-cell glyph), mid-text the char under
-  // the cursor is rendered twice would be wrong - so we only assert the EOL behavior + that mid-text
-  // does NOT insert an extra ▏ glyph (it overlays the existing char instead).
+test("caret is an INSERTED bar: ▏ before the char at the cursor (never a block over it)", async () => {
+  // debug:true strips ANSI color, so we check the ▏ MARKER position in the stripped frame.
   const c = render(<Harness cb={() => {}} />);
-  expect(strip(c.lastFrame())).toContain("▏");     // empty input: caret cell shows
+  expect(strip(c.lastFrame())).toContain("▏");     // empty input: the caret bar shows
   c.stdin.write("ab");
   await tick();
-  expect(strip(c.lastFrame())).toContain("ab▏");   // EOL: ▏ after the text
-  c.stdin.write("\x1b[D");                          // left -> cursor between a and b
+  expect(strip(c.lastFrame())).toContain("ab▏");   // EOL: bar after the text
+  c.stdin.write("[D");                          // left -> cursor between a and b
   await tick();
-  // Mid-text: the caret OVERLAYS "b" (inverse) rather than inserting a ▏ between a and b.
-  // Stripped frame should be "ab" (NOT "a▏b" as the old inserted-glyph caret would).
-  expect(strip(c.lastFrame())).not.toContain("a▏b");
-  c.unmount();
-});
-
-test("caret overlay does not duplicate the under-cursor character", async () => {
-  const c = render(<Harness cb={() => {}} />);
-  c.stdin.write("ab");
-  await tick();
-  c.stdin.write("\x1b[D");
-  await tick();
+  // Mid-text: the caret is INSERTED between a and b (the owner-chosen bar) - "a▏b", NOT a
+  // block over "b", and never a duplicated char.
   const frame = strip(c.lastFrame());
-  expect(frame).toContain("ab");
+  expect(frame).toContain("a▏b");
   expect(frame).not.toContain("abb");
-  expect(frame).not.toContain("a\u258Fb");
   c.unmount();
 });
 
-test("caret idle phase keeps the EOL fallback glyph", async () => {
+test("caret is solid right after a keystroke, and re-solidifies on the next key", async () => {
   const c = render(<Harness cb={() => {}} />);
   c.stdin.write("ab");
   await tick();
-  expect(strip(c.lastFrame())).toContain("ab▏");    // solid immediately after a keystroke
-  await tick(650);
-  expect(strip(c.lastFrame())).toContain("ab▏");    // never replace EOL fallback with a bare space
-  c.stdin.write("c");                               // typing re-solidifies it at once
+  expect(strip(c.lastFrame())).toContain("ab▏");    // solid (on) immediately after a keystroke
+  c.stdin.write("c");                               // typing re-solidifies it at the new position
   await tick();
   expect(strip(c.lastFrame())).toContain("abc▏");
   c.unmount();
 }, 15000);
 
-test("mouse activity (scroll/motion) does NOT keep the caret solid - only keys do", async () => {
+test("mouse activity (scroll/motion) does NOT corrupt input or the caret", async () => {
   const c = render(<Harness cb={() => {}} />);
   c.stdin.write("ab");
   await tick();
   expect(strip(c.lastFrame())).toContain("ab▏");
-  // Feed a continuous stream of mouse reports (wheel + any-motion) while otherwise idle. They should
-  // not mutate the input or remove the EOL fallback glyph.
+  // A stream of mouse reports while otherwise idle must not be inserted as text.
   for (let i = 0; i < 10; i++) {
-    c.stdin.write("\x1b[<35;5;5M"); // an any-motion mouse report
+    c.stdin.write("[<35;5;5M"); // an any-motion mouse report
     await tick(60);
   }
-  expect(strip(c.lastFrame())).toContain("ab▏");
+  const frame = strip(c.lastFrame());
+  expect(frame).toContain("ab");        // text intact
+  expect(frame).not.toContain("35;5;5"); // no escape residue leaked into the value
   c.unmount();
 }, 15000);
 
@@ -214,7 +199,8 @@ test("mask never leaks plaintext in single-line, multiline, or wrapped render pa
   await tick();
   const singleFrame = strip(single.lastFrame());
   assertNoLeak(singleFrame, "secret99");
-  expect(singleFrame).toMatch(/\u2022{8}/);
+  // cursor moved left -> the inserted caret splits the bullet run, so count TOTAL bullets (8), not a block
+  expect((singleFrame.match(/\u2022/g) ?? []).length).toBe(8);
   single.unmount();
 
   const multilineSecret = "top\nsecret9";

@@ -342,6 +342,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   }
 
+  // Incremental persistence: the finally-block persist() only fires when a turn SETTLES. If the process
+  // is killed mid-turn (the user closes the terminal), that turn - the user's prompt AND every tool
+  // result Neko produced - was lost. This ref lets onEvent snapshot the session at each clean checkpoint
+  // (step boundaries, completed tool results) so a resume shows the interrupted work instead of nothing.
+  const persistRef = useRef<() => void>(() => {});
   const agentRef = useRef<Agent | null>(null);
   if (!agentRef.current) {
     agentRef.current = new Agent({
@@ -397,8 +402,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           const obs = String(data.observation).split("\n").slice(0, 400).join("\n");
           addLine("tool_result", obs, resultSummary(data.call?.name, obs));
           setTodos([...registryRef.current!.todos]); // reflect todo_write changes
+          persistRef.current(); // a tool finished + its result is in messages -> checkpoint (survives a kill)
         } else if (kind === "step") {
           setStep(data);
+          persistRef.current(); // start of a loop iteration = messages in a clean, resumable state
         } else if (kind === "compact") {
           // In-loop safety-net compaction (a single huge turn). Show the same progress bar; the agent
           // emits compact_done when its summarizer call returns.
@@ -425,6 +432,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       messages: agentRef.current!.messages,
     });
   };
+  persistRef.current = persist; // onEvent (set up once) calls through this ref so mid-turn checkpoints use the latest
 
   // Load a session's history into the live agent AND replay it into the transcript (like opening a
   // chat thread — you see the whole prior conversation, not just a note).

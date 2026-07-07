@@ -6,9 +6,10 @@
  * (no re-render between them) -> "mọi" became "moọi". Fix: keep the live value in a ref and
  * mutate it synchronously, so each keypress sees the latest. NFC + codepoint-safe.
  *
- * Cursor: a codepoint index (also a ref, for the same IME reason). Rendering uses an overlay
- * caret: the character under the cursor is shown with inverse video. At EOL/empty input there is
- * no under-cursor character, so the fallback cell is the thin-block glyph.
+ * Cursor: a codepoint index (also a ref, for the same IME reason). Rendering uses a text-editor
+ * caret: a thin green bar (the `caret_glyph`, default ▏) INSERTED before the char at the cursor -
+ * never a block over the character. It blinks by swapping the glyph <-> a space. Long input wraps to
+ * multiple visual lines (display-width aware); the line holding the caret splits before/caret/after.
  */
 import { Text, useInput } from "ink";
 import { useEffect, useRef, useState } from "react";
@@ -236,21 +237,17 @@ export function TextInput(props: {
       // multiline value still renders its line breaks (otherwise everything collapsed to one bullet row).
       const shownChar = (ch: string) => mask && ch !== "\n" ? bullet : ch;
       const renderRange = (start: number, end: number) => cps.slice(start, end).map(shownChar).join("");
-      // HYBRID caret (the owner-chosen look, kept where it can exist):
-      //  - EOL/empty (`eol`): no char sits under the cursor, so the caret IS the `caret_glyph` (default
-      //    \u258F). The glyph NEVER disappears (a one-space-only Text would collapse Ink/Yoga height after a
-      //    resize-down); the blink is the green BACKGROUND filling (on) / emptying to a green glyph (off).
-      //  - MID-TEXT: a glyph would shift the line, so the char under the cursor shows inverse-video (on)
-      //    and a green tint (off) - the same blink cadence with zero horizontal jitter.
-      const renderCaret = (ch: string, eol = false) => (
-        caretOn
-          ? <Text backgroundColor="green" color="black">{ch}</Text>
-          : <Text color="green">{eol ? ch + "\u200B" : ch}</Text>
-      );
+      // Caret: a thin green bar INSERTED before the char at the cursor - a text-editor caret (like
+      // Claude Code / the 0.7.7 look the owner chose), NEVER a block over the character. It blinks by
+      // swapping the glyph <-> a space (both one column, so zero horizontal jitter). The glyph is the
+      // config `caret_glyph` / NEKO_CARET (default \u258F, which hugs the cell's left edge flush against the
+      // preceding char - a centred "|" reads as a gap after the text). The off-phase carries a ZWSP so
+      // a caret that is momentarily alone (empty input, no placeholder) can't collapse Ink/Yoga height.
+      const renderCaret = () => <Text color="green">{caretOn ? cg : " \u200B"}</Text>;
       if (cps.length === 0) {
         return (
           <Text>
-            {renderCaret(cg, true)}
+            {renderCaret()}
             <Text dimColor>{placeholder ?? ""}</Text>
           </Text>
         );
@@ -258,61 +255,46 @@ export function TextInput(props: {
       // Multiline value (a small paste kept its newlines): skip horizontal windowing — Ink renders
       // the \n as real line breaks and wraps naturally, so the box shows the 2-3 lines as typed.
       // Big pastes collapse to a single-line placeholder (no \n), so they stay under windowing.
-      // The caret OVERLAYS the char at i, so `after` starts at i+1 (not i) to avoid duplicating it.
+      // The caret is INSERTED before char i, so `after` starts AT i (char i renders normally).
       if (value.includes("\n")) {
-        const beforeEnd = caretOn ? i : cps.length;
-        const afterStart = caretOn && i < cps.length ? i + 1 : i;
-        const before = renderRange(0, beforeEnd);
-        const after = caretOn ? renderRange(afterStart, cps.length) : "";
-        const caret = caretOn || i >= cps.length ? renderCaret(i < cps.length ? shownChar(cps[i]) : cg, i >= cps.length) : null;
         return (
           <Text>
-            {before}
-            {caret}
-            {after}
+            {renderRange(0, i)}
+            {renderCaret()}
+            {renderRange(i, cps.length)}
           </Text>
         );
       }
       // Wrap path: a long single-line value (no \n) that would overflow the width is wrapped into
       // multiple visual lines (display-width aware) rather than horizontal window-scroll. Each visual
-      // line is ONE <Text> of plain string; the caret, when on that line, splits it into before/overlay/
-      // after. Keeping each line a flat string (not a per-codepoint <Text> fan-out) preserves Ink's
-      // yoga height measurement after a resize-down (a nested-<Text> structure regressed SHRINK).
-        const wrapped = wrapInput(cps, cur.current, visibleCols);
+      // line is ONE <Text> of plain string; the line holding the caret splits into before/caret/after
+      // (the caret is INSERTED between cells, char i renders normally). Keeping each line a flat string
+      // (not a per-codepoint <Text> fan-out) preserves Ink's yoga height measurement after a resize-down.
+      // Reserve ONE column (visibleCols - 1) so the inserted caret never pushes a full line to overflow.
+        const wrapped = wrapInput(cps, cur.current, Math.max(1, visibleCols - 1));
         if (wrapped.lines.length > 1) {
           const startLine = Math.max(0, wrapped.caretLine - MAX_INPUT_LINES + 1);
           const shown = wrapped.lines.slice(startLine, startLine + MAX_INPUT_LINES);
           return (
             <Text>
               {shown.map((ln, li) => {
-                // caret on THIS visual line? find its column position among the cells.
                 const onThisLine = startLine + li === wrapped.caretLine;
-                let before = "";
-                let overlayCh: string | null = null; // set when we pass the caret cell on this line
-                let after = "";
-                for (const cell of ln.cells) {
-                  const ch = shownChar(cell.ch); // mask → bullet
-                  if (caretOn && onThisLine && cell.index === i) {
-                    overlayCh = ch;
-                    continue;
-                  }
-                  if (!onThisLine || !caretOn) {
-                    before += ch;
-                  } else if (overlayCh === null) {
-                    before += ch;
-                  } else {
-                    after += ch;
-                  }
+                const nl = li < shown.length - 1 ? "\n" : "";
+                if (!onThisLine) {
+                  return <Text key={`l${li}`}>{ln.cells.map((c) => shownChar(c.ch)).join("")}{nl}</Text>;
                 }
-                const caretNode = onThisLine && (caretOn || i >= cps.length)
-                  ? renderCaret(overlayCh ?? cg, overlayCh === null)
-                  : null;
+                // Insert the caret before the first cell at/after the cursor index (or at line end).
+                let before = "", after = "";
+                for (const cell of ln.cells) {
+                  const ch = shownChar(cell.ch);
+                  if (cell.index < i) before += ch; else after += ch;
+                }
                 return (
                   <Text key={`l${li}`}>
                     {before}
-                    {caretNode}
+                    {renderCaret()}
                     {after}
-                    {li < shown.length - 1 ? "\n" : ""}
+                    {nl}
                   </Text>
                 );
               })}
@@ -332,15 +314,14 @@ export function TextInput(props: {
     if (end - start < charCols) start = Math.max(0, end - charCols);
     return [start, end];
   })();
-  const beforeEnd = caretOn ? Math.min(i, winEnd) : winEnd;
-  const afterStart = caretOn && i < winEnd ? i + 1 : i;
-  const before = renderRange(winStart, beforeEnd);
-  const after = caretOn ? renderRange(Math.max(winStart, afterStart), winEnd) : "";
-  const caret = caretOn || i >= cps.length ? renderCaret(i < cps.length ? shownChar(cps[i]) : cg, i >= cps.length) : null;
+  // Caret INSERTED at the cursor (clamped to the window): char i renders normally in `after`.
+  const caretAt = Math.min(Math.max(i, winStart), winEnd);
+  const before = renderRange(winStart, caretAt);
+  const after = renderRange(caretAt, winEnd);
     return (
     <Text>
       {before}
-      {caret}
+      {renderCaret()}
       {after}
     </Text>
   );
