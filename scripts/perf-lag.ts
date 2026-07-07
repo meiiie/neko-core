@@ -6,7 +6,7 @@
  * This reuses the exact fullscreen-sim harness (real ChatApp + FrameDiffer + sync-stdout + VirtualTerminal)
  * so the bytes path is identical to production. It INSTRUMENTS FakeTtyOut to count writes + bytes + the
  * time between them, and taps ChatApp's render via Ink's onRender, so we get objective before/after numbers
- * for any future fix. Run: bun test/perf-lag.ts
+ * for any future fix. Run: bun scripts/perf-lag.ts
  */
 import { EventEmitter } from "node:events";
 import { render } from "ink";

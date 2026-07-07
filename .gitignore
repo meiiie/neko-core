@@ -64,3 +64,6 @@ skills/procurement/baogia*.xlsx
 rtk/
 _codex-tasks/
 scripts/_caret_probe.tsx
+
+# perf/trace artifacts
+*.ndjson

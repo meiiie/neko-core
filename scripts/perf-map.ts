@@ -11,7 +11,7 @@
  *  5. big transcript 500   (does render scale with history?)
  *  6. paste large input    (multibyte paste echo)
  *  7. rapid commands       (slash menu open/close churn)
- * Run: bun test/perf-map.ts   (prints a markdown-ish table)
+ * Run: bun scripts/perf-map.ts   (prints a markdown-ish table)
  */
 import { EventEmitter } from "node:events";
 import { render } from "ink";

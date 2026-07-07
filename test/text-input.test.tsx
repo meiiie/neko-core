@@ -241,6 +241,27 @@ test("wrapInput does not emit a spurious empty line for a wide char narrower tha
   expect(w.lines[0].cells.length).toBe(1);
 });
 
+test("wrapInput breaks at a SPACE (word wrap), carrying the partial word - and the caret with it", async () => {
+  const { wrapInput } = await import("../src/ui/text-input.tsx");
+  // "ab cde" at width 5: greedy char-wrap would give "ab cd"/"e" (splitting "cde"); word-wrap keeps
+  // the word whole -> "ab " / "cde" (image #79: "đã đấ|m" must not break mid-word).
+  const cps = [..."ab cde"];
+  const w = wrapInput(cps, cps.length, 5);
+  expect(w.lines.map((l) => l.cells.map((c) => c.ch).join(""))).toEqual(["ab ", "cde"]);
+  // caret at end rides the carried word -> second line
+  expect(w.caretLine).toBe(1);
+  // caret INSIDE the carried word (index 4 = "d") is also on the second line
+  expect(wrapInput(cps, 4, 5).caretLine).toBe(1);
+});
+
+test("wrapInput hard-breaks a single word wider than the whole box (no space to break at)", async () => {
+  const { wrapInput } = await import("../src/ui/text-input.tsx");
+  // "abcdef" width 3, no spaces -> falls back to char-wrap "abc"/"def" (a word longer than the line
+  // still has to break somewhere).
+  const w = wrapInput([..."abcdef"], 6, 3);
+  expect(w.lines.map((l) => l.cells.map((c) => c.ch).join(""))).toEqual(["abc", "def"]);
+});
+
 test("mask preserves line breaks in a multiline value (not collapsed to one bullet row)", async () => {
   const { render } = await import("ink-testing-library");
   const { useRef } = await import("react");

@@ -1619,7 +1619,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             </Box>
           ) : (
             <Box justifyContent="space-between">
-              <Text>
+              {/* truncate, never wrap: on a narrow terminal a wrapped footer grows the chrome a row
+                  (image #79 - Claude Code truncates) and every chrome-height change churns the band
+                  geometry, the ConPTY ghost's habitat. */}
+              <Text wrap="truncate-end">
                 <Text color={MODE_COLOR[mode]}>{" ⏵⏵ "}{mode}</Text>
                 <Text dimColor> · shift+tab to cycle</Text>
                 {rcOn ? <Text color="magenta"> · /rc active</Text> : null}
@@ -1637,7 +1640,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 const pct = ctxPercent(used, cfg.contextWindow);
                 const ctxColor = pct >= 85 ? "red" : pct >= 60 ? "yellow" : "#9a9a9a";
                 return (
-                  <Text color="#9a9a9a">
+                  <Text color="#9a9a9a" wrap="truncate-end">
                     {(cfg.model || "").split("/").pop()} · <Text color={ctxColor}>{pct}% ctx</Text>
                   </Text>
                 );

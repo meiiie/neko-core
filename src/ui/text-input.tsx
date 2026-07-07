@@ -19,8 +19,8 @@ import {
   shouldCollapsePaste,
 } from "../shared/paste-collapse.ts";
 
-/** Legacy caret glyph styles. The main caret is now an inverse-video overlay, but these exports and
- * the prop remain for config/test back-compat. EOL/empty input still uses the thin-block fallback. */
+/** Caret glyph styles for the EOL/empty caret (config `caret_glyph` / NEKO_CARET). Mid-text the
+ * caret is an inverse-video overlay instead - a glyph there would shift the line sideways. */
 export type CaretStyle = "thin-block" | "bar" | "block" | "underline";
 export const CARET_GLYPHS: Record<CaretStyle, string> = {
   "thin-block": "\u258f", // ▏ LEFT ONE EIGHTH BLOCK - hugs the left edge of its cell (default)
@@ -85,7 +85,25 @@ export function wrapInput(cps: string[], cur: number, width: number): WrapResult
       // Soft-wrap when the next cell would exceed the line width. But if the line is EMPTY and the
       // cell is wider than the whole width (e.g. a 2-cell CJK char on a 1-col box), don't flush —
       // that would emit a spurious empty line. Let the wide char occupy the (too-narrow) line.
-      if (lineCols > 0 && lineCols + w > cols) flush();
+      if (lineCols > 0 && lineCols + w > cols) {
+        // WORD wrap (image #79): break at the line's last space so words stay whole - "đã đấ|m"
+        // read broken mid-word while Claude Code carries the word down. The partial word after the
+        // space moves to the new line (and the caret moves with it when it rides a carried cell).
+        // A single word wider than the whole box still hard-breaks; an overflowing space flushes.
+        let br = -1;
+        if (cp !== " ") for (let k = line.length - 1; k >= 0; k--) if (line[k].ch === " ") { br = k; break; }
+        if (br >= 0) {
+          const carry = line.slice(br + 1);
+          line = line.slice(0, br + 1);
+          lineCols = line.reduce((s, c) => s + c.w, 0);
+          flush();
+          line = carry;
+          lineCols = carry.reduce((s, c) => s + c.w, 0);
+          if (carry.some((c) => c.index === cur)) caretLine = lines.length;
+        } else {
+          flush();
+        }
+      }
     if (idx === cur) caretLine = lines.length;
     line.push({ ch: cp, index: idx, w });
     lineCols += w;
@@ -212,16 +230,22 @@ export function TextInput(props: {
       // Text node breaks Ink/Yoga height after a resize-down. When mask is set, the overlay (and all text)
       // shows a bullet "•" instead of the real char, so a secret NEVER leaks at any cursor position.
       const i = Math.min(cur.current, cps.length);
-      const cg = "\u258F";
+      const cg = CARET_GLYPHS[caretGlyph]; // config `caret_glyph` / NEKO_CARET stays LIVE (EOL/empty caret)
       const bullet = "\u2022";
       // shownChar maps a printable char to a bullet when mask is set, but PRESERVES a "\n" so a masked
       // multiline value still renders its line breaks (otherwise everything collapsed to one bullet row).
       const shownChar = (ch: string) => mask && ch !== "\n" ? bullet : ch;
       const renderRange = (start: number, end: number) => cps.slice(start, end).map(shownChar).join("");
-      const renderCaret = (ch: string, forceGlyph = false) => (
+      // HYBRID caret (the owner-chosen look, kept where it can exist):
+      //  - EOL/empty (`eol`): no char sits under the cursor, so the caret IS the `caret_glyph` (default
+      //    \u258F). The glyph NEVER disappears (a one-space-only Text would collapse Ink/Yoga height after a
+      //    resize-down); the blink is the green BACKGROUND filling (on) / emptying to a green glyph (off).
+      //  - MID-TEXT: a glyph would shift the line, so the char under the cursor shows inverse-video (on)
+      //    and a green tint (off) - the same blink cadence with zero horizontal jitter.
+      const renderCaret = (ch: string, eol = false) => (
         caretOn
           ? <Text backgroundColor="green" color="black">{ch}</Text>
-          : <Text color="green">{forceGlyph ? ch + "\u200B" : ch}</Text>
+          : <Text color="green">{eol ? ch + "\u200B" : ch}</Text>
       );
       if (cps.length === 0) {
         return (

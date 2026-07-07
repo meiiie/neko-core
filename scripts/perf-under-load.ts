@@ -44,7 +44,7 @@ async function main() {
   // Read the resolved FPS cap
   const { resolveUiFps } = await import("../src/adapters/display.ts");
   let fpsCap = "?";
-  try { fpsCap = String(resolveUiFps({ mode: "auto" }).fps); } catch { try { fpsCap = String(resolveUiFps().fps); } catch {} }
+  try { fpsCap = String(resolveUiFps(null).fps); } catch {} // null = no explicit config; env/pref/display layering applies
   console.log(`resolved UI fps cap: ${fpsCap}\n`);
 
   // Helper to mount a fresh app
