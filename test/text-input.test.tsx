@@ -80,17 +80,22 @@ test("ignores stray escape sequences (mouse reports) - never leak into the text"
   c.unmount();
 });
 
-test("caret is a ▏ bar FLUSH before the char at the cursor (not a block, not a gapped |)", async () => {
+test("caret is an OVERLAY: EOL shows ▏ (inverse), mid-text inverts the char (no inserted glyph)", async () => {
+  // ink-testing-library runs with debug:true which strips ANSI color, so we check the CARET MARKER
+  // in the stripped frame: at EOL it is a ▏ (kept as the inverse-cell glyph), mid-text the char under
+  // the cursor is rendered twice would be wrong - so we only assert the EOL behavior + that mid-text
+  // does NOT insert an extra ▏ glyph (it overlays the existing char instead).
   const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
   const c = render(<Harness cb={() => {}} />);
-  expect(strip(c.lastFrame())).toContain("▏");     // empty: caret shows before the placeholder
+  expect(strip(c.lastFrame())).toContain("▏");     // empty input: caret cell shows
   c.stdin.write("ab");
   await tick();
-  expect(strip(c.lastFrame())).toContain("ab▏");   // cursor at end -> bar HUGGING the text, no gap
-  expect(strip(c.lastFrame())).not.toContain("ab |"); // ...definitely not a space-gapped caret
-  c.stdin.write("\x1b[D");                          // left arrow -> between a and b
+  expect(strip(c.lastFrame())).toContain("ab▏");   // EOL: ▏ after the text
+  c.stdin.write("\x1b[D");                          // left -> cursor between a and b
   await tick();
-  expect(strip(c.lastFrame())).toContain("a▏b");    // bar BEFORE the char it will insert before
+  // Mid-text: the caret OVERLAYS "b" (inverse) rather than inserting a ▏ between a and b.
+  // Stripped frame should be "ab" (NOT "a▏b" as the old inserted-glyph caret would).
+  expect(strip(c.lastFrame())).not.toContain("a▏b");
   c.unmount();
 });
 
@@ -100,12 +105,11 @@ test("caret blinks when idle but stays solid while typing", async () => {
   c.stdin.write("ab");
   await tick();
   expect(strip(c.lastFrame())).toContain("ab▏");    // solid immediately after a keystroke
-  // Idle: within a couple of blink periods the caret must reach an OFF frame (rendered as a space, so the
-  // columns don't move) - i.e. the bar is no longer hugging the text.
+  // Idle: within a couple of blink periods the caret must reach an OFF frame (no ▏ - the cell is blank).
   let sawOff = false;
   for (let i = 0; i < 40 && !sawOff; i++) { await tick(60); if (!strip(c.lastFrame()).includes("ab▏")) sawOff = true; }
-  expect(sawOff).toBe(true);                          // it blinked off
-  c.stdin.write("c");                                // typing re-solidifies it at once
+  expect(sawOff).toBe(true);                        // it blinked off
+  c.stdin.write("c");                               // typing re-solidifies it at once
   await tick();
   expect(strip(c.lastFrame())).toContain("abc▏");
   c.unmount();
@@ -139,5 +143,48 @@ test("end-typing stays codepoint/NFC correct (IME path)", async () => {
   c.stdin.write("\r");
   await tick();
   expect(out).toBe("tieng");
+  c.unmount();
+});
+
+test("wrap: a long single-line value (no newline) wraps to multiple visual lines", async () => {
+  const { wrapInput, cellWidth } = await import("../src/ui/text-input.tsx");
+  // pure helper: "abcdef" at width 3 -> 3 lines (abc / def / caret-line), caret at end
+  const cps = [..."abcdef"];
+  const w = wrapInput(cps, cps.length, 3);
+  expect(w.lines.length).toBe(2);             // "abc" and "def"
+  expect(w.lines[0].cells.map((c) => c.ch).join("")).toBe("abc");
+  expect(w.lines[1].cells.map((c) => c.ch).join("")).toBe("def");
+  expect(w.caretLine).toBe(1);                // caret at EOL -> last line
+  // cellWidth: ascii = 1, CJK = 2, combining = 0
+  expect(cellWidth("a")).toBe(1);
+  expect(cellWidth("字")).toBe(2);
+  expect(cellWidth("\u0301")).toBe(0);        // combining acute
+});
+
+test("wrap renders multiple visual lines in the frame (integration)", async () => {
+  function H4() {
+    const [v, setV] = useState("the quick brown fox jumps over");
+    return <TextInput value={v} onChange={setV} onSubmit={() => {}} width={20} {...usePasteProps()} />;
+  }
+  const c = render(<H4 />);
+  await tick();
+  const frame = c.lastFrame() ?? "";
+  const lines = frame.split("\n");
+  expect(lines.length).toBeGreaterThan(1);    // wrapped to 2+ visual lines
+  expect(frame).toContain("the quick brown"); // first visual line present
+  c.unmount();
+});
+
+test("mask renders bullets and stays single-line (no wrap fan-out)", async () => {
+  function H5() {
+    const [v, setV] = useState("secret123");
+    return <TextInput value={v} onChange={setV} onSubmit={() => {}} width={40} mask {...usePasteProps()} />;
+  }
+  const c = render(<H5 />);
+  await tick();
+  const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+  const frame = strip(c.lastFrame());
+  expect(frame).not.toContain("secret123");   // no plaintext
+  expect(frame).toMatch(/\u2022{9}/);         // 9 bullet chars for 9-char secret
   c.unmount();
 });

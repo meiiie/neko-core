@@ -48,6 +48,44 @@ export function isEscapeResidue(s: string): boolean {
   return /^(?:\x1b?\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e])+$/.test(s);
 }
 
+/** Display width of a single codepoint (0 for combining marks/zero-width, 1 narrow, 2 wide CJK/emoji). */
+export function cellWidth(cp: string): number {
+  const w = cp.match(/[\u0300-\u036F\u200B-\u200F\uFE00-\uFE0F]/) ? 0 : cp.charCodeAt(0) > 0x1100 && /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/.test(cp) ? 2 : 1;
+  return w;
+}
+
+/** Visual lines from codepoints, each <= `width` display cols. Honors hard "\n" breaks and display
+ * width (not codepoint count) so wide chars don't overflow by one cell. Returns lines + the line index
+ * the caret (codepoint cursor) sits on. Pure; never touches useInput/refs (Vietnamese-IME-safe). */
+export interface WrapCell { ch: string; index: number; w: number; }
+export interface WrapLine { cells: WrapCell[]; cols: number; }
+export interface WrapResult { lines: WrapLine[]; caretLine: number; }
+export function wrapInput(cps: string[], cur: number, width: number): WrapResult {
+  const cols = Math.max(1, Math.floor(width));
+  const lines: WrapLine[] = [];
+  let line: WrapCell[] = [];
+  let lineCols = 0;
+  let caretLine = 0;
+  const flush = () => { lines.push({ cells: line, cols: lineCols }); line = []; lineCols = 0; };
+  for (let idx = 0; idx < cps.length; idx++) {
+    if (idx === cur) caretLine = lines.length;
+    const cp = cps[idx];
+    if (cp === "\n") { flush(); continue; }
+    const w = cellWidth(cp);
+    if (w === 0) { line.push({ ch: cp, index: idx, w: 0 }); continue; }
+    if (lineCols + w > cols) flush();
+    line.push({ ch: cp, index: idx, w });
+    lineCols += w;
+  }
+  if (cur >= cps.length) caretLine = lines.length;
+  flush();
+  if (lines.length === 0) lines.push({ cells: [], cols: 0 });
+  return { lines, caretLine };
+}
+
+/** Max visual lines the input box shows before scrolling within it (keeps the caret visible). */
+export const MAX_INPUT_LINES = 5;
+
 export function TextInput(props: {
   value: string;
   onChange: (v: string) => void;
@@ -156,33 +194,75 @@ export function TextInput(props: {
   // placeholder. The glyph is "▏" (LEFT ONE EIGHTH BLOCK), NOT "|": a pipe is centred in its cell, so it
   // reads as a gap after the text; ▏ hugs the LEFT edge of its cell, sitting flush against the preceding
   // character exactly like a real bar cursor. Green so it reads as the live insertion point.
-    const cps = [...value];
-    const visibleCols = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 9999;
-    const caret = <Text color="green">{caretOn ? CARET_GLYPHS[caretGlyph] : " "}</Text>;
-    if (cps.length === 0) {
-      return (
-        <Text>
-          {caret}
-          <Text dimColor>{placeholder ?? ""}</Text>
-        </Text>
-      );
-    }
-    const i = Math.min(cur.current, cps.length);
-    // Multiline value (a small paste kept its newlines): skip horizontal windowing — Ink renders
-    // the \n as real line breaks and wraps naturally, so the box shows the 2-3 lines as typed.
-    // Big pastes collapse to a single-line placeholder (no \n), so they stay under windowing.
-    if (value.includes("\n")) {
-      const before = mask ? "" : cps.slice(0, i).join("");
-      const after = mask ? "" : cps.slice(i).join("");
-      return (
-        <Text>
-          {before}
-          {caret}
-          {after}
-        </Text>
-      );
-    }
-    const charCols = Math.max(0, visibleCols - 1);
+      const cps = [...value];
+      const visibleCols = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 9999;
+      // OVERLAY caret: the char UNDER the cursor in inverse video (no inserted glyph cell). Sits flush
+      // against preceding text (unlike ▏ which fonts kern with a gap). At EOL or empty → inverse space.
+      const i = Math.min(cur.current, cps.length);
+      const cg = "\u258F";
+      const caret = caretOn
+        ? <Text backgroundColor="green" color="black">{i < cps.length ? cps[i] : cg}</Text>
+        : <Text color="green">{" "}</Text>;
+      if (cps.length === 0) {
+        return (
+          <Text>
+            {caret}
+            <Text dimColor>{placeholder ?? ""}</Text>
+          </Text>
+        );
+      }
+      // Multiline value (a small paste kept its newlines): skip horizontal windowing — Ink renders
+      // the \n as real line breaks and wraps naturally, so the box shows the 2-3 lines as typed.
+      // Big pastes collapse to a single-line placeholder (no \n), so they stay under windowing.
+      if (value.includes("\n")) {
+        const before = mask ? "" : cps.slice(0, i).join("");
+        const after = mask ? "" : cps.slice(i).join("");
+        return (
+          <Text>
+            {before}
+            {caret}
+            {after}
+          </Text>
+        );
+      }
+      // Wrap path: a long single-line value (no \n) that would overflow the width is wrapped into
+      // multiple visual lines (display-width aware) rather than horizontal window-scroll. Each visual
+      // line is ONE <Text> of plain string; the caret, when on that line, splits it into before/overlay/
+      // after. Keeping each line a flat string (not a per-codepoint <Text> fan-out) preserves Ink's
+      // yoga height measurement after a resize-down (a nested-<Text> structure regressed SHRINK).
+      const wrapped = wrapInput(cps, cur.current, visibleCols);
+      if (wrapped.lines.length > 1) {
+        const startLine = Math.max(0, wrapped.caretLine - MAX_INPUT_LINES + 1);
+        const shown = wrapped.lines.slice(startLine, startLine + MAX_INPUT_LINES);
+        return (
+          <Text>
+            {shown.map((ln, li) => {
+              // caret on THIS visual line? find its column position among the cells.
+              const onThisLine = startLine + li === wrapped.caretLine;
+              let before = "";
+              let overlayCh: string | null = null;
+              let after = "";
+              for (const cell of ln.cells) {
+                if (onThisLine && cell.index === i) { overlayCh = cell.ch; continue; }
+                if (overlayCh === null && onThisLine) before += cell.ch; else after += cell.ch;
+                if (!onThisLine) before += cell.ch, after = "";
+              }
+              const caretNode = caretOn && onThisLine
+                ? <Text backgroundColor="green" color="black">{overlayCh ?? cg}</Text>
+                : null;
+              return (
+                <Text key={`l${li}`}>
+                  {before}
+                  {caretNode}
+                  {after}
+                  {li < shown.length - 1 ? "\n" : ""}
+                </Text>
+              );
+            })}
+          </Text>
+        );
+      }
+      const charCols = Math.max(0, visibleCols - 1);
   const [winStart, winEnd] = cps.length < visibleCols ? [0, cps.length] : (() => {
     if (charCols === 0) return [i, i];
     const margin = Math.min(4, Math.floor(charCols / 2));

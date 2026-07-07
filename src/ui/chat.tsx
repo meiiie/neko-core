@@ -1585,8 +1585,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             <Text color="green">{copyNote ? copyNote + " " : " "}</Text>
           </Box>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
-          <Box>
-            <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{inputPrompt}</Text>
+            <Box>
+              <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{inputPrompt}</Text>
+              {/* Column wrapper so a wrapped multiline input grows DOWNWARD (flexDirection column) rather
+                  than interacting badly with the prompt row. width caps each visual line at inputCols. */}
+              <Box flexDirection="column" width={inputCols}>
                 <TextInput
                   value={input}
                   onChange={setInput}
@@ -1598,8 +1601,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                   onCommitPastes={commitPastes}
                   caretGlyph={cfg.caretGlyph}
                   placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
-              />
-          </Box>
+                />
+              </Box>
+            </Box>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
           {slashMatches.length ? (
             <Box flexDirection="column" paddingLeft={2}>
