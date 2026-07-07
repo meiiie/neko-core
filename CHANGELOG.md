@@ -4,7 +4,7 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
-## [0.7.7] — 2026-07-07 (unreleased - in verification)
+## [0.7.7] — 2026-07-07
 
 ### Fixed
 - **Overall Windows lag (typing, streaming, scrolling): the frame differ is BACK ON, paired with a
@@ -18,6 +18,10 @@ All notable changes to Neko Code are documented here. The format follows
   real ConPTY: scroll first-response 11ms (0.7.0-class), typed-echo OK, and the e2e ghost harness is
   clean 3/3 where the unhealed differ ghosted 3/3. `NEKO_INCR=0` still disables the differ entirely;
   that fallback path keeps instant coalesced scrolling and stays sim-locked in CI.
+  The heal is surgical about WHEN it runs: Windows-only (elsewhere the displacement does not exist -
+  an SSH link should not pay ~10KB per pause for nothing), and only structurally-risky writes arm it
+  (many rows changing at once); the caret blink and spinner ticks do not, so an idle session is
+  byte-silent (measured: 667 bytes over 5 idle seconds - pure blink, zero heals).
 
 ### Added
 - **`scripts/bench-scroll-conpty.ts`**: scroll-latency bench through a real ConPTY (first-response /

@@ -107,8 +107,11 @@ export class FrameDiffer {
     this.lastResyncAt = Date.now();
     return out + `${ESC}${lines.length};1H`;
   }
+  /** The disease (conhost displacement) exists only on Windows - elsewhere the heal would be pure
+   * overhead (notably SSH links paying ~10KB per pause for nothing). */
+  private healEnabled(): boolean { return process.platform === "win32"; }
   private armTrailingResync(): void {
-    if (!this.band) return; // inline frames float in scrollback - absolute repaints don't apply
+    if (!this.healEnabled() || !this.band) return; // inline frames float in scrollback - absolute repaints don't apply
     if (this.resyncTimer) clearTimeout(this.resyncTimer);
     this.resyncTimer = setTimeout(() => {
       this.resyncTimer = null;
@@ -279,7 +282,7 @@ export class FrameDiffer {
     for (let i = 0; i < H; i++) this.prev[i] = win[i];
     // Sustained activity (a long scroll, streaming) never goes quiet enough for the trailing heal -
     // fold a full repaint in at least every ~2s so displacement can't accumulate mid-gesture.
-    if (Date.now() - this.lastResyncAt > 2000) out = this.paintAll();
+    if (this.healEnabled() && Date.now() - this.lastResyncAt > 2000) out = this.paintAll();
     else out += `${ESC}${this.prev.length};1H`; // restore the cursor row Ink assumes (its frame's last line)
     this.writer(out);
     this.markPainted();
@@ -331,8 +334,13 @@ export class FrameDiffer {
     // --- plain line-diff ---
     let out = "";
     trace({ ev: "diff", changed: changed.map((i) => i + 1), n: lines.length, bandH: band?.height });
-    if (band && Date.now() - this.lastResyncAt > 2000) { this.armTrailingResync(); return this.paintAll(); }
-    if (band) this.armTrailingResync();
+    // Heal scheduling is SELECTIVE: only structurally-risky writes arm it (many rows changing =
+    // layout churn, the displacement's habitat). Small diffs - the caret blink, the spinner, the
+    // ctx% tick - must NOT arm, or an idle session heals every second forever (blink 530ms beats a
+    // 400ms trailing timer). Idle stays byte-silent; risky moments still get the belt.
+    const risky = band && this.healEnabled() && changed.length >= 8;
+    if (risky && Date.now() - this.lastResyncAt > 2000) { this.armTrailingResync(); return this.paintAll(); }
+    if (risky) this.armTrailingResync();
     if (band) {
       // ABSOLUTE addressing in fullscreen (the frame is pinned at screen row 1 by alt+clear+home). This
       // is immune to cursor drift: any real-terminal quirk that leaves the cursor somewhere unexpected
