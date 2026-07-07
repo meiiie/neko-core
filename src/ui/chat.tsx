@@ -10,7 +10,7 @@ import { Box, measureElement, render, Static, Text, useApp, useInput, useStdout 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readFileSync } from "node:fs";
 
-import { ApprovalBox, type Approval } from "./approval-box.tsx";
+import { ApprovalBox, type Approval, type ApprovalFlash } from "./approval-box.tsx";
 import { runSlashCommand, SLASH } from "./commands.ts";
 import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { loadPrefs, savePrefs } from "../adapters/prefs.ts";
@@ -254,6 +254,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
+  const [approvalFlash, setApprovalFlash] = useState<ApprovalFlash | null>(null);
   const [pendingMulti, setPendingMulti] = useState(false);
   const [mode, setMode] = useState<PermissionMode>(yolo ? "auto" : cfg.mode);
   const [elapsed, setElapsed] = useState(0);
@@ -634,6 +635,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const selectedText = useRef("");                                 // the current persisted selection's text (for Ctrl+C)
   const [copyNote, setCopyNote] = useState<string | null>(null);   // transient copy confirmation, auto-clears
   const copyNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const approvalFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const approvalFlashRef = useRef<ApprovalFlash | null>(null);
   const flashCopyNote = (msg: string) => {
     setCopyNote(msg);
     if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current);
@@ -854,6 +857,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   };
 
+  useEffect(() => () => {
+    if (approvalFlashTimer.current) clearTimeout(approvalFlashTimer.current);
+    approvalFlashRef.current = null;
+  }, []);
+
   // Global hotkeys. Ctrl+C: interrupt a running turn; else clear a non-empty input; else
   // double-press exits. Ctrl+U clears the line, Ctrl+L clears the screen, Esc clears input when idle,
   // Alt+V pastes a clipboard image.
@@ -861,6 +869,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useInput((char, key) => {
     if (key.ctrl && char === "c") {
       if (selectedText.current) { copySelection(); clearSelection(); return; } // select-then-Ctrl+C copies the selection
+      if (approvalFlashRef.current || approvalFlash) return; // committed approval is visual-only for ~140ms; do not abort after accepting
       if (busy) return controllerRef.current?.abort();
       if (input) { setInput(""); ctrlC.current = false; return; }
       if (ctrlC.current) return exit();
@@ -883,22 +892,34 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // useEffectEvent always calls the latest render's closure, so it sees `approval`
     // the moment the box is visible.
     if (approval) {
+      if (approvalFlashRef.current || approvalFlash) return;
       const c = char.toLowerCase();
+      let kind: ApprovalFlash["kind"] | null = null;
       if (c === "y") {
-        // Approving a plan exits plan mode into accept-edits so the agent can implement it.
-        if (approval.toolName === "exit_plan_mode" && registryRef.current!.mode === "plan") {
-          registryRef.current!.mode = "accept-edits";
-          setMode("accept-edits");
-        }
-        approval.resolve(true);
-        setApproval(null);
+        kind = "ok";
       } else if (c === "a") {
-        alwaysApproved.current.add(approval.toolName);
-        approval.resolve(true);
-        setApproval(null);
+        kind = "always";
       } else if (c === "n" || key.escape) {
-        approval.resolve(false);
-        setApproval(null);
+        kind = "no";
+      }
+      if (kind) {
+        const flash = { kind, tool: approval.toolName };
+        approvalFlashRef.current = flash;
+        setApprovalFlash(flash);
+        approvalFlashTimer.current = setTimeout(() => {
+          approvalFlashTimer.current = null;
+          if (kind === "always") alwaysApproved.current.add(approval.toolName);
+
+          const ok = kind !== "no";
+          if (ok && approval.toolName === "exit_plan_mode" && registryRef.current!.mode === "plan") {
+            registryRef.current!.mode = "accept-edits";
+            setMode("accept-edits");
+          }
+          approval.resolve(ok);
+          setApproval(null);
+          approvalFlashRef.current = null;
+          setApprovalFlash(null);
+        }, 140);
       }
       return;
     }
@@ -1594,7 +1615,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           }}
         />
       ) : approval ? (
-        <ApprovalBox approval={approval} />
+        <ApprovalBox approval={approval} flash={approvalFlash} />
       ) : fullscreen && search ? (
         <Box flexDirection="column" flexShrink={0}>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>

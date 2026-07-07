@@ -300,11 +300,28 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
   c.unmount();
 });
 
-test("ApprovalBox renders an edit diff preview (- old / + new)", () => {
-  const f = strip(render(<ApprovalBox approval={{ toolName: "edit", args: { path: "a.ts", old_string: "let x = 1", new_string: "let x = 2" }, resolve: () => {} }} />).lastFrame());
-  expect(f).toContain("- let x = 1");
-  expect(f).toContain("+ let x = 2");
-});
+  test("ApprovalBox renders an edit diff preview (- old / + new)", () => {
+    const f = strip(render(<ApprovalBox approval={{ toolName: "edit", args: { path: "a.ts", old_string: "let x = 1", new_string: "let x = 2" }, resolve: () => {} }} />).lastFrame());
+    expect(f).toContain("- let x = 1");
+    expect(f).toContain("+ let x = 2");
+  });
+
+  test("ApprovalBox shows an approval confirmation state when flash is set (micro-feedback)", () => {
+    const approval = { toolName: "bash", args: { command: "ls" }, resolve: () => {} };
+    // No flash -> the prompt question is shown
+    const idle = strip(render(<ApprovalBox approval={approval} />).lastFrame());
+    expect(idle).toContain("Approve bash?");
+    // Flash approved -> confirmation text replaces the question
+    const ok = strip(render(<ApprovalBox approval={approval} flash={{ kind: "ok", tool: "bash" }} />).lastFrame());
+    expect(ok).toContain("approved");
+    expect(ok).not.toContain("Approve bash?");
+    // Flash denied -> different confirmation
+    const no = strip(render(<ApprovalBox approval={approval} flash={{ kind: "no", tool: "bash" }} />).lastFrame());
+    expect(no).toContain("denied");
+    // Flash always -> names the tool
+    const always = strip(render(<ApprovalBox approval={approval} flash={{ kind: "always", tool: "bash" }} />).lastFrame());
+    expect(always).toContain("always-bash");
+  });
 
 test("reasoning shows live while busy, clears when done", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Reasoner()} />);
