@@ -15,9 +15,16 @@ case "$OS-$ARCH" in
   *) echo "neko: unsupported platform '$OS-$ARCH'. Build from source: https://github.com/$REPO" >&2; exit 1 ;;
 esac
 
-# Resolve the real latest tag first so the user sees WHAT is being installed.
-echo "Fetching latest version..."
-TAG="$(curl -fsSL --max-time 15 -H 'User-Agent: neko-installer' "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
+# Pinned install / ROLLBACK path: NEKO_VERSION picks an exact release (e.g. 'v0.7.7') - the public
+# way back to a known-good baseline. Otherwise resolve the real latest tag.
+case "${NEKO_VERSION:-}" in
+  v[0-9]*.[0-9]*.[0-9]*) TAG="$NEKO_VERSION"; echo "Pinned by NEKO_VERSION: $TAG" ;;
+  [0-9]*.[0-9]*.[0-9]*)  TAG="v$NEKO_VERSION"; echo "Pinned by NEKO_VERSION: $TAG" ;;
+  *)
+    echo "Fetching latest version..."
+    TAG="$(curl -fsSL --max-time 15 -H 'User-Agent: neko-installer' "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
+    ;;
+esac
 LABEL="${TAG:-latest}"
 echo "Installing Neko Code $LABEL ($ASSET)..."
 if [ -n "$TAG" ]; then URL="https://github.com/$REPO/releases/download/$TAG/$ASSET"

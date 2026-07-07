@@ -14,13 +14,20 @@ function Write-Note($msg) { Write-Host $msg -ForegroundColor Yellow }
 
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
 
-# Resolve the real latest tag first so the user sees WHAT is being installed.
-Write-Step 'Fetching latest version...'
+# Pinned install / ROLLBACK path: NEKO_VERSION picks an exact release (e.g. 'v0.7.7') - the public
+# way back to a known-good baseline. Otherwise resolve the real latest tag so the user sees WHAT is
+# being installed.
 $tag = $null
-try {
-  $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'neko-installer' } -TimeoutSec 15
-  $tag = $rel.tag_name
-} catch { }
+if ($env:NEKO_VERSION -match '^v?\d+\.\d+\.\d+$') {
+  $tag = if ($env:NEKO_VERSION.StartsWith('v')) { $env:NEKO_VERSION } else { "v$($env:NEKO_VERSION)" }
+  Write-Step "Pinned by NEKO_VERSION: $tag"
+} else {
+  Write-Step 'Fetching latest version...'
+  try {
+    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'neko-installer' } -TimeoutSec 15
+    $tag = $rel.tag_name
+  } catch { }
+}
 $label = if ($tag) { $tag } else { 'latest' }
 Write-Step "Installing Neko Code $label (windows-x64)..."
 $url = if ($tag) { "https://github.com/$repo/releases/download/$tag/$asset" }

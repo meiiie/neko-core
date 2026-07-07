@@ -80,6 +80,11 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > Fallback if the domain is unreachable: swap the URL for
 > `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
+**Current stable baseline: [v0.7.7](https://github.com/meiiie/neko-core/releases/tag/v0.7.7).**
+Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
+real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). Pin or roll back any time:
+`$env:NEKO_VERSION='v0.7.7'` (PowerShell) / `NEKO_VERSION=v0.7.7` (sh) before the one-liner.
+
 Then set up your key and go:
 
 ```bash
