@@ -19,6 +19,7 @@ import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TranscriptViewer } from "./transcript-viewer.tsx";
 import { isEscapeResidue, TextInput } from "./text-input.tsx";
+import { openExternalEditor } from "./external-editor.ts";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { probeSyncOutput, syncOutputDecision, wrapStdoutForSync } from "./sync-stdout.ts";
 import { FrameDiffer } from "./frame-diff.ts";
@@ -92,7 +93,7 @@ interface ChatProps {
 }
 
 export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride }: ChatProps) {
-  const { exit } = useApp();
+  const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
   // sequences, so writing a raw `\x1b[2J\x1b[3J\x1b[H` to stdout mid-frame DESYNCS Ink and freezes the
@@ -147,8 +148,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     return out;
   });
-  const [stream, setStream] = useState("");
-  const [input, setInput] = useState("");
+    const [stream, setStream] = useState("");
+    const [input, setInput] = useState("");
+    // Paste-collapse state owned here (not in TextInput) so BOTH submit and the external editor
+    // (Ctrl+G) can expand `[Pasted text #N]` placeholders to their full content. TextInput stages a
+    // paste by writing into this map + bumping the counter; submit consumes the map. See
+    // shared/paste-collapse.ts for the pure helpers.
+    const pastedContentsRef = useRef(new Map<number, string>());
+    const nextPasteIdRef = useRef(1);
+    const commitPastes = () => { pastedContentsRef.current.clear(); nextPasteIdRef.current = 1; };
   const [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [approvalFlash, setApprovalFlash] = useState<ApprovalFlash | null>(null);
@@ -742,17 +750,51 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   }, [busy]);
 
   // Paste an image off the clipboard (Alt+V / /paste). Staged for the next turn; needs a vision model.
-  const pasteImage = () => {
-    const path = readClipboardImage();
-    if (!path) return addLine("info", "no image in the clipboard");
-    try {
-      pastedRef.current.push(`data:image/png;base64,${readFileSync(path).toString("base64")}`);
-      setPastedCount(pastedRef.current.length);
-      addLine("info", `image attached (${pastedRef.current.length}) - needs a vision-capable model to be read`);
-    } catch {
-      addLine("info", "could not read the pasted image");
-    }
-  };
+    const pasteImage = () => {
+      const path = readClipboardImage();
+      if (!path) return addLine("info", "no image in the clipboard");
+      try {
+        pastedRef.current.push(`data:image/png;base64,${readFileSync(path).toString("base64")}`);
+        setPastedCount(pastedRef.current.length);
+        addLine("info", `image attached (${pastedRef.current.length}) - needs a vision-capable model to be read`);
+      } catch {
+        addLine("info", "could not read the pasted image");
+      }
+    };
+
+    // Ctrl+G: open the prompt in $EDITOR / $VISUAL, sync the saved file back. Disabled while a
+    // secret is being typed (awaitingKey: never dump a key to a temp file) and while any overlay /
+    // viewer / find bar owns input. Re-entrant guard: a second Ctrl+G while the editor is open is a
+    // no-op (the spawn is synchronous; Ink is suspended).
+    const editorBusyRef = useRef(false);
+    const openEditor = () => {
+      if (editorBusyRef.current) return;
+      if (awaitingKey || overlay || viewer || search) return;
+      editorBusyRef.current = true;
+      // Fire-and-forget: useInput can't await. Errors surface as a one-line info message.
+      openExternalEditor(input, pastedContentsRef.current, {
+        suspend: (cb) => suspendTerminal(cb),
+        // Leave the alt-screen + disable mouse. Clear altDisposeRef so the active-guard invariant
+        // holds; return whether an alt-screen was actually active (inline mode -> false).
+        leaveAltScreen: () => {
+          if (!altDisposeRef.current) return false;
+          altDisposeRef.current();
+          altDisposeRef.current = null;
+          return true;
+        },
+        // Re-enter the alt-screen + re-arm mouse (only called when leave returned true). Install a
+        // fresh guard and point altDisposeRef at it so the next Ctrl+G / final unmount tears it down.
+        reenterAltScreen: () => {
+          altDisposeRef.current = installAltScreenGuard((stdout as any) ?? process.stdout, { mouse: isMouseEnabled() });
+        },
+        onDifferReset: () => frameDiffer?.reset(),
+      }).then((result) => {
+        if (result.error) addLine("info", result.error);
+        if (result.content !== null && result.content !== input) setInput(result.content);
+      }).catch((err) => {
+        addLine("info", `editor failed: ${err instanceof Error ? err.message : String(err)}`);
+      }).finally(() => { editorBusyRef.current = false; });
+    };
 
   useEffect(() => () => {
     if (approvalFlashTimer.current) clearTimeout(approvalFlashTimer.current);
@@ -831,11 +873,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       setExpandedId((cur) => (cur === last.id ? null : last.id)); // second press collapses (no duplicate re-print)
       return;
     }
-    if (key.meta && char === "v") return pasteImage();
-    if (key.ctrl && char === "u") return setInput("");
-    if (key.ctrl && char === "l") return setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
-    if (key.escape && !busy && input) return setInput("");
-  });
+      if (key.meta && char === "v") return pasteImage();
+      if (key.ctrl && char === "g") { openEditor(); return; }
+      if (key.ctrl && char === "u") return setInput("");
+      if (key.ctrl && char === "l") return setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
+      if (key.escape && !busy && input) return setInput("");
+    });
 
   // Esc interrupts a running turn - but NOT while the find bar or /transcript viewer owns Esc (their
   // Esc means "close me"; both hooks fire on the same keypress, so without this gate closing the find
@@ -1544,14 +1587,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
           <Box>
             <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{inputPrompt}</Text>
-            <TextInput
-              value={input}
-              onChange={setInput}
-              onSubmit={onSubmit}
-              mask={awaitingKey}
-              width={inputCols}
-              placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
-            />
+                <TextInput
+                  value={input}
+                  onChange={setInput}
+                  onSubmit={onSubmit}
+                  mask={awaitingKey}
+                  width={inputCols}
+                  pastedContents={pastedContentsRef.current}
+                  nextPasteId={nextPasteIdRef}
+                  onCommitPastes={commitPastes}
+                  caretGlyph={cfg.caretGlyph}
+                  placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
+              />
           </Box>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
           {slashMatches.length ? (

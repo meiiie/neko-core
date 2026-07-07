@@ -56,3 +56,11 @@ skills/procurement/baogia*.xlsx
 /*_snapshot.yml
 /*_snapshot.txt
 /temp.png
+
+# scratch / test artifacts
+.test-home/
+.agents/
+.codex/
+rtk/
+_codex-tasks/
+scripts/_caret_probe.tsx

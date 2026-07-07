@@ -25,9 +25,10 @@ export const HELP = [
   "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /continue · /retry · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
-  "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line.",
-  "Keys: Shift+Tab cycle mode · Up/Down history · Alt+V paste image · Ctrl+O expand · Ctrl+B bash to background · Ctrl+L clear.",
-  "Esc: clear input (idle) or interrupt a running turn. Ctrl+C: clear input, then again to quit.",
+    "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line, Ctrl+G external editor.",
+    "Keys: Shift+Tab cycle mode · Up/Down history · Alt+V paste image · Ctrl+O expand · Ctrl+B bash to background · Ctrl+L clear.",
+    "Esc: clear input (idle) or interrupt a running turn. Ctrl+C: clear input, then again to quit.",
+    "Caret: set caret_glyph (bar/block/underline/thin-block) or NEKO_CARET if the cursor glyph looks offset.",
 ].join("\n");
 
 export const SLASH: { name: string; desc: string }[] = [

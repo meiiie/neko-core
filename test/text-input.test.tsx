@@ -1,14 +1,21 @@
 import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { TextInput } from "../src/ui/text-input.tsx";
 
 const tick = (ms = 45) => new Promise((r) => setTimeout(r, ms));
 
+/** Default paste-collapse props TextInput now requires (owned by the parent in real use). */
+function usePasteProps() {
+  const pastedContents = useRef(new Map<number, string>());
+  const nextPasteId = useRef(1);
+  return { pastedContents: pastedContents.current, nextPasteId, onCommitPastes: () => { pastedContents.current.clear(); nextPasteId.current = 1; } };
+}
+
 function Harness({ cb }: { cb: (v: string) => void }) {
   const [v, setV] = useState("");
-  return <TextInput value={v} onChange={setV} onSubmit={cb} />;
+  return <TextInput value={v} onChange={setV} onSubmit={cb} {...usePasteProps()} />;
 }
 
 test("inserts at the cursor after moving left", async () => {
@@ -34,7 +41,7 @@ test("a multi-line paste inserts without submitting early", async () => {
   function H2() {
     const [v, setV] = useState("");
     last = v;
-    return <TextInput value={v} onChange={setV} onSubmit={(x) => (submitted = x)} />;
+    return <TextInput value={v} onChange={setV} onSubmit={(x) => (submitted = x)} {...usePasteProps()} />;
   }
   const c = render(<H2 />);
   c.stdin.write("foo();\nbar();"); // one paste chunk with a newline
@@ -61,7 +68,7 @@ test("ignores stray escape sequences (mouse reports) - never leak into the text"
   function H3() {
     const [v, setV] = useState("");
     last = v;
-    return <TextInput value={v} onChange={setV} onSubmit={(x) => (out = x)} />;
+    return <TextInput value={v} onChange={setV} onSubmit={(x) => (out = x)} {...usePasteProps()} />;
   }
   const c = render(<H3 />);
   c.stdin.write("hi");

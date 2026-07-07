@@ -162,7 +162,17 @@ export class NekoConfig {
   }
   /** The config file's EXPLICIT ui_fps, or null when unset - the display resolver (adapters/display.ts)
    * layers env > this > the /fps pref > the detected display Hz > 60. */
-  get uiFpsConfig(): number | null { return this.data.ui_fps != null ? Number(this.data.ui_fps) : null; }
+    get uiFpsConfig(): number | null { return this.data.ui_fps != null ? Number(this.data.ui_fps) : null; }
+    /** Caret glyph style for the text-input cursor. Some terminal fonts render the default thin block
+     * (▏) with a gap; switching to "bar" (│), "block" (█), or "underline" (▁) is the lowest-risk fix.
+     * Precedence: NEKO_CARET env > `caret_glyph` config > "thin-block". */
+    get caretGlyph(): "thin-block" | "bar" | "block" | "underline" {
+      const env = process.env.NEKO_CARET;
+      if (env === "bar" || env === "block" || env === "underline") return env;
+      const v = this.data.caret_glyph as string | undefined;
+      if (v === "bar" || v === "block" || v === "underline") return v;
+      return "thin-block";
+    }
   /** Fullscreen (alt-screen, scrollable viewport) is the sole interactive mode - there is no runtime
    * toggle; it is the main experience (real scrolling, glide, hover, flicker-free), and /copy serves the
    * copy that fullscreen's mouse-capture keeps native selection from reaching. Terminals that can't host

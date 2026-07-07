@@ -12,6 +12,30 @@
  */
 import { Text, useInput } from "ink";
 import { useEffect, useRef, useState } from "react";
+import {
+  expandPlaceholders,
+  formatPlaceholder,
+  gcPastes as gcPastesImpl,
+  shouldCollapsePaste,
+} from "../shared/paste-collapse.ts";
+
+/** Caret glyph styles. Some terminal fonts render the block-element caret (▏ U+258F, the default)
+ * with internal left-padding or a wider advance, so it reads as a gap rather than flush against the
+ * preceding char. Letting the user switch glyphs (the pipe/bar that sits centred, a full block, an
+ * underline) is the lowest-risk cross-font fix; terminal/font detection is brittle. Set via
+ * `caret_glyph` config or NEKO_CARET env. See adapters/config.ts caretGlyph. */
+export type CaretStyle = "thin-block" | "bar" | "block" | "underline";
+export const CARET_GLYPHS: Record<CaretStyle, string> = {
+  "thin-block": "\u258f", // ▏ LEFT ONE EIGHTH BLOCK - hugs the left edge of its cell (default)
+  bar: "\u2502", // │ BOX DRAWINGS LIGHT VERTICAL - centred in its cell
+  block: "\u2588", // █ FULL BLOCK - covers the cell
+  underline: "\u2581", // ▁ LOWER ONE EIGHTH BLOCK - sits at the cell bottom
+};
+/** Resolve an arbitrary user/config string to a CaretStyle, defaulting to "thin-block". */
+export function resolveCaretStyle(s: string | null | undefined): CaretStyle {
+  if (s === "bar" || s === "block" || s === "underline") return s;
+  return "thin-block";
+}
 
 /** Escape-sequence residue that must NEVER be inserted as text: mouse reports ("[<64;10;5M"), cursor
  * keys, private-mode echoes - alone or as a BURST of several sequences concatenated in one chunk (a
@@ -31,8 +55,18 @@ export function TextInput(props: {
   placeholder?: string;
   mask?: boolean; // render bullets (for secrets like /login)
   width?: number;
-}) {
-  const { value, onChange, onSubmit, placeholder, mask, width = 9999 } = props;
+  /** Shared paste-collapse map (owned by ChatApp so submit + external editor can expand it). */
+  pastedContents: Map<number, string>;
+  /** Shared id counter ref (owned by ChatApp). TextInput increments it when it stages a paste. */
+  nextPasteId: { current: number };
+    /** Called after a submit consumes staged pastes (ChatApp clears its map + counter). */
+    onCommitPastes?: () => void;
+    /** Caret glyph override. "thin-block" (▏, default), "bar" (│), "block" (█), "underline" (▁).
+     * Different terminal fonts render block-elements inconsistently; this lets the user pick the
+     * glyph that sits flush in THEIR font. Configured via `caret_glyph` / NEKO_CARET. */
+    caretGlyph?: CaretStyle;
+  }) {
+    const { value, onChange, onSubmit, placeholder, mask, width = 9999, pastedContents, nextPasteId, onCommitPastes, caretGlyph = "thin-block" } = props;
   const ref = useRef(value);
   const cur = useRef([...value].length);
   // External change (history nav, clear): adopt it and put the cursor at the end.
@@ -40,8 +74,11 @@ export function TextInput(props: {
     ref.current = value;
     cur.current = [...value].length;
   }
-  const [, setTick] = useState(0);
-  const rerender = () => setTick((t) => t + 1);
+    const [, setTick] = useState(0);
+    const rerender = () => setTick((t) => t + 1);
+    // Paste-collapse state is OWNED by ChatApp (pastedContents + nextPasteId are props) so submit
+    // AND the external editor (Ctrl+G) can expand placeholders. This layer only INSERTS them.
+    const gcPastes = (text: string) => gcPastesImpl(text, pastedContents);
 
   // Caret blink, like a real terminal / Word / Claude Code: SOLID while you type (so it never disappears
   // mid-keystroke), then it blinks once idle - the "waiting for input" signal. A keystroke stamps
@@ -64,7 +101,11 @@ export function TextInput(props: {
     // Ink delivers a paste as one call with the whole string; if it carries a line break, treat it
     // as a paste (insert, don't submit) rather than an Enter.
     const isPaste = input.length > 1 && /[\r\n]/.test(input);
-    if (key.return && !isPaste) return onSubmit(ref.current);
+        if (key.return && !isPaste) {
+          const expanded = expandPlaceholders(ref.current, pastedContents);
+          onCommitPastes?.(); // a submit consumes all staged pastes (ChatApp clears map + counter)
+          return onSubmit(expanded);
+        }
     const chars = [...ref.current];
     if (key.leftArrow) { cur.current = Math.max(0, cur.current - 1); return rerender(); }
     if (key.rightArrow) { cur.current = Math.min(chars.length, cur.current + 1); return rerender(); }
@@ -80,25 +121,34 @@ export function TextInput(props: {
       onChange(ref.current);
       return;
     }
-    if (key.backspace || key.delete) {
-      if (cur.current > 0) {
-        chars.splice(cur.current - 1, 1);
-        cur.current -= 1;
-        ref.current = chars.join("");
+      if (key.backspace || key.delete) {
+        if (cur.current > 0) {
+          chars.splice(cur.current - 1, 1);
+          cur.current -= 1;
+          ref.current = chars.join("");
+          gcPastes(ref.current);
+          onChange(ref.current);
+        }
+        return;
+      }
+      if (input && !input.startsWith("\x1b") && !isEscapeResidue(input) && !key.ctrl && !key.meta && !key.tab && !key.escape &&
+          !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow) {
+        // Never insert a stray escape sequence (mouse report, unknown CSI, etc.) as literal text - Ink may
+        // strip the ESC and hand us just the CSI body ("[<64;10;5M"), incl. multi-report bursts.
+        let text = isPaste ? input.replace(/\r\n?/g, "\n") : input;
+        // Paste collapse: a long or multi-line paste becomes a compact placeholder so the input box
+        // never turns into a one-line windowed blob; the full text is expanded back on submit.
+          if (isPaste && shouldCollapsePaste(text)) {
+            const id = nextPasteId.current++;
+            pastedContents.set(id, text);
+            text = formatPlaceholder(id, text);
+          }
+        const ins = [...text];
+        chars.splice(cur.current, 0, ...ins);
+        cur.current += ins.length;
+        ref.current = chars.join("").normalize("NFC");
         onChange(ref.current);
       }
-      return;
-    }
-    if (input && !input.startsWith("\x1b") && !isEscapeResidue(input) && !key.ctrl && !key.meta && !key.tab && !key.escape &&
-        !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow) {
-      // Never insert a stray escape sequence (mouse report, unknown CSI, etc.) as literal text - Ink may
-      // strip the ESC and hand us just the CSI body ("[<64;10;5M"), incl. multi-report bursts.
-      const ins = [...(isPaste ? input.replace(/\r\n?/g, "\n") : input)];
-      chars.splice(cur.current, 0, ...ins);
-      cur.current += ins.length;
-      ref.current = chars.join("").normalize("NFC");
-      onChange(ref.current);
-    }
   });
 
   // Render the caret as a thin green bar SITTING BEFORE the character at the cursor - a text-editor
@@ -106,19 +156,33 @@ export function TextInput(props: {
   // placeholder. The glyph is "▏" (LEFT ONE EIGHTH BLOCK), NOT "|": a pipe is centred in its cell, so it
   // reads as a gap after the text; ▏ hugs the LEFT edge of its cell, sitting flush against the preceding
   // character exactly like a real bar cursor. Green so it reads as the live insertion point.
-  const cps = [...value];
-  const visibleCols = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 9999;
-  const caret = <Text color="green">{caretOn ? "▏" : " "}</Text>;
-  if (cps.length === 0) {
-    return (
-      <Text>
-        {caret}
-        <Text dimColor>{placeholder ?? ""}</Text>
-      </Text>
-    );
-  }
-  const i = Math.min(cur.current, cps.length);
-  const charCols = Math.max(0, visibleCols - 1);
+    const cps = [...value];
+    const visibleCols = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 9999;
+    const caret = <Text color="green">{caretOn ? CARET_GLYPHS[caretGlyph] : " "}</Text>;
+    if (cps.length === 0) {
+      return (
+        <Text>
+          {caret}
+          <Text dimColor>{placeholder ?? ""}</Text>
+        </Text>
+      );
+    }
+    const i = Math.min(cur.current, cps.length);
+    // Multiline value (a small paste kept its newlines): skip horizontal windowing — Ink renders
+    // the \n as real line breaks and wraps naturally, so the box shows the 2-3 lines as typed.
+    // Big pastes collapse to a single-line placeholder (no \n), so they stay under windowing.
+    if (value.includes("\n")) {
+      const before = mask ? "" : cps.slice(0, i).join("");
+      const after = mask ? "" : cps.slice(i).join("");
+      return (
+        <Text>
+          {before}
+          {caret}
+          {after}
+        </Text>
+      );
+    }
+    const charCols = Math.max(0, visibleCols - 1);
   const [winStart, winEnd] = cps.length < visibleCols ? [0, cps.length] : (() => {
     if (charCols === 0) return [i, i];
     const margin = Math.min(4, Math.floor(charCols / 2));

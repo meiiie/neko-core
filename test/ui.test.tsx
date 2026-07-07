@@ -1,9 +1,15 @@
 import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Markdown } from "../src/ui/markdown.tsx";
 import { TextInput } from "../src/ui/text-input.tsx";
+
+const pasteProps = () => {
+  const pastedContents = useRef(new Map<number, string>());
+  const nextPasteId = useRef(1);
+  return { pastedContents: pastedContents.current, nextPasteId, onCommitPastes: () => { pastedContents.current.clear(); nextPasteId.current = 1; } };
+};
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
@@ -12,7 +18,7 @@ test("TextInput appends a multibyte Vietnamese char as one codepoint (the old bu
   function Wrap() {
     const [v, setV] = useState("");
     val = v;
-    return <TextInput value={v} onChange={setV} onSubmit={() => {}} />;
+    return <TextInput value={v} onChange={setV} onSubmit={() => {}} {...pasteProps()} />;
   }
   const { stdin, unmount } = render(<Wrap />);
   stdin.write("ch");
@@ -31,7 +37,7 @@ test("IME backspace+insert composes (no stale-closure duplication: 'mọ' not 'm
   function Wrap() {
     const [v, setV] = useState("mo");
     val = v;
-    return <TextInput value={v} onChange={setV} onSubmit={() => {}} />;
+    return <TextInput value={v} onChange={setV} onSubmit={() => {}} {...pasteProps()} />;
   }
   const { stdin, unmount } = render(<Wrap />);
   stdin.write(DEL); // IME deletes "o" -> "m"
