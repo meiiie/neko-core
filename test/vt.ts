@@ -3,14 +3,17 @@
  * resulting grid. Supports what Neko's pipeline emits (Ink standard frames + the FrameDiffer's output +
  * alt-screen/mouse/OSC control): text, \r\n, CUU/CUD/CUF/CUB, CHA(G), CUP(H/f), ED(J 0/2/3), EL(K 0/1/2),
  * SU/SD(S/T), DECSTBM(r), SGR(m, ignored), private set/reset (?..h/l, ignored), DECSC/DECRC (ESC 7/8),
- * OSC (skipped to BEL/ST). Bottom-of-region \n scrolls, like a real terminal. No line wrap (Ink
- * pre-wraps; overflow is clipped) - good enough to detect black screens and misplaced content.
+ * OSC (skipped to BEL/ST). Bottom-of-region \n scrolls, like a real terminal. LAZY autowrap (xterm
+ * DECAWM): a char at the last column sets pending-wrap; the NEXT printable char wraps (scrolls at the
+ * bottom). Clipping instead of wrapping shifted every reconstructed row below a full-width line one
+ * row UP versus the real terminal - the harness then reported ghosts that real WT may never show.
  */
 export class VirtualTerminal {
   grid: string[] = [];
   r = 0; c = 0;
   top = 0; bottom: number;
   private saved: { r: number; c: number } | null = null;
+  private pendingWrap = false;
 
   constructor(public cols: number, public rows: number) {
     this.grid = Array.from({ length: rows }, () => "");
@@ -48,6 +51,7 @@ export class VirtualTerminal {
           const nums = m[1].split(";").map((x) => parseInt(x, 10));
           const n = Number.isFinite(nums[0]) ? nums[0] : 1;
           const fin = m[2];
+          this.pendingWrap = false; // any CSI (cursor moves, erases) clears the deferred-wrap state
           if (fin === "A") this.r = Math.max(0, this.r - Math.max(1, n));
           else if (fin === "B") this.r = Math.min(this.rows - 1, this.r + Math.max(1, n));
           else if (fin === "C") this.c = Math.min(this.cols - 1, this.c + Math.max(1, n));
@@ -84,16 +88,22 @@ export class VirtualTerminal {
         continue;
       }
       if (ch === "\n") {
+        this.pendingWrap = false;
         if (this.r === this.bottom) this.scrollUp(1);
         else this.r = Math.min(this.rows - 1, this.r + 1);
         this.c = 0;
-      } else if (ch === "\r") this.c = 0;
+      } else if (ch === "\r") { this.c = 0; this.pendingWrap = false; }
       else if (ch >= " ") {
-        if (this.c < this.cols) {
-          const line = this.grid[this.r].padEnd(this.c, " ");
-          this.grid[this.r] = line.slice(0, this.c) + ch + line.slice(this.c + 1);
+        if (this.pendingWrap) { // deferred wrap fires on the NEXT printable char (xterm DECAWM)
+          this.pendingWrap = false;
+          this.c = 0;
+          if (this.r === this.bottom) this.scrollUp(1);
+          else this.r = Math.min(this.rows - 1, this.r + 1);
         }
+        const line = this.grid[this.r].padEnd(this.c, " ");
+        this.grid[this.r] = line.slice(0, this.c) + ch + line.slice(this.c + 1);
         this.c++;
+        if (this.c >= this.cols) { this.c = this.cols - 1; this.pendingWrap = true; }
       }
       i++;
     }
