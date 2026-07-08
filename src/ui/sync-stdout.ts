@@ -165,6 +165,9 @@ export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: Nod
         if (o === "") return true;
         if (o !== null) out = o;
       }
+      // Safety net: the caret sentinel (U+2060) the differ plants for cursor positioning must NEVER
+      // reach the terminal, even on a passthrough frame the differ didn't process (Ink clear / OSC).
+      if (out.indexOf("⁠") >= 0) out = out.split("⁠").join("");
       // When 2026 is denied for this terminal, NO write may carry it - Ink 7 brackets its own frames
       // in BSU/ESU as separate writes (write-synchronized.js), so just not adding OUR brackets is not
       // enough. This is the ghost's true mechanism (e2e divergence probe): on WT/ConPTY an update

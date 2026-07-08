@@ -306,3 +306,25 @@ test("streaming tail composes INTO the band right under the committed rows (top-
   scr.write(emitted[0]);
   expect(scr.lines(4)).toEqual(["  cau hoi", "  tra loi cu", "", "  dang go..."]);
 });
+
+test("hardware caret: the CARET_SENTINEL is stripped and drives a cursor at its column", async () => {
+  const { CARET_SENTINEL } = await import("../src/ui/frame-diff.ts");
+  const d = new FrameDiffer();
+  const writes: string[] = [];
+  d.setWriter((s) => writes.push(s));
+  d.setBand({ top: 1, height: 3 });
+  d.setBandContent(["  row a", "  row b", "  row c"], 0);
+  // A frame whose INPUT row (row 5, 1-based) carries the sentinel between "xin ch" and "ao".
+  const inputRow = "  > xin ch" + CARET_SENTINEL + "ao";
+  const out = d.process(["", "", "", "", inputRow].join("\n"))!;
+  // The sentinel never reaches the screen...
+  expect(out).not.toContain(CARET_SENTINEL);
+  // ...it shows the cursor (a bar) at row 5, at the sentinel's display column. "  > xin ch" = 10 cells,
+  // so the cursor sits at column 11 (just before "a").
+  expect(out).toContain("\x1b[?25h");   // cursor shown
+  expect(out).toMatch(/\x1b\[\d+ q/);    // DECSCUSR shape (a bar by default)
+  expect(out).toContain("\x1b[5;11H");   // CUP: row 5, col 11
+  // Feed a frame with NO sentinel (a menu owns the screen) -> no cursor control is appended.
+  const out2 = d.process(["", "", "", "", "  no caret here"].join("\n"))!;
+  expect(out2).not.toContain("\x1b[?25h");
+});

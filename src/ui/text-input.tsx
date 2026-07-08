@@ -6,10 +6,11 @@
  * (no re-render between them) -> "mọi" became "moọi". Fix: keep the live value in a ref and
  * mutate it synchronously, so each keypress sees the latest. NFC + codepoint-safe.
  *
- * Cursor: a codepoint index (also a ref, for the same IME reason). Rendering uses a text-editor
- * caret: a thin green bar (the `caret_glyph`, default ▏) INSERTED before the char at the cursor -
- * never a block over the character. It blinks by swapping the glyph <-> a space. Long input wraps to
- * multiple visual lines (display-width aware); the line holding the caret splits before/caret/after.
+ * Cursor: a codepoint index (also a ref, for the same IME reason). The caret is the terminal's REAL
+ * hardware cursor (a bar BETWEEN cells, like Claude Code's "khả|o") - no glyph is drawn in the text.
+ * TextInput only marks the position with the zero-width CARET_SENTINEL; the FrameDiffer strips it and
+ * positions the cursor there, and the terminal blinks it natively. Long input wraps to multiple visual
+ * lines (display-width aware); the line holding the caret carries the sentinel.
  */
 import { Text, useInput } from "ink";
 import { useEffect, useRef, useState } from "react";
@@ -19,6 +20,7 @@ import {
   gcPastes as gcPastesImpl,
   shouldCollapsePaste,
 } from "../shared/paste-collapse.ts";
+import { CARET_SENTINEL } from "./frame-diff.ts";
 
 /** Caret glyph styles for the EOL/empty caret (config `caret_glyph` / NEKO_CARET). Mid-text the
  * caret is an inverse-video overlay instead - a glyph there would shift the line sideways. */
@@ -34,6 +36,7 @@ export function resolveCaretStyle(s: string | null | undefined): CaretStyle {
   if (s === "bar" || s === "block" || s === "underline") return s;
   return "thin-block";
 }
+
 
 /** Escape-sequence residue that must NEVER be inserted as text: mouse reports ("[<64;10;5M"), cursor
  * keys, private-mode echoes - alone or as a BURST of several sequences concatenated in one chunk (a
@@ -149,25 +152,13 @@ export function TextInput(props: {
     // AND the external editor (Ctrl+G) can expand placeholders. This layer only INSERTS them.
     const gcPastes = (text: string) => gcPastesImpl(text, pastedContents);
 
-  // Caret blink, like a real terminal / Word / Claude Code: SOLID while you type (so it never disappears
-  // mid-keystroke), then it blinks once idle - the "waiting for input" signal. A keystroke stamps
-  // `lastActivity`; the interval keeps the caret on for one blink period after the last key, then toggles.
-  // Toggling is a single-cell change: mid-text off phase renders the normal under-cursor char; at
-  // EOL/empty it keeps the thin-block fallback rather than a bare space.
-  const BLINK_MS = 530; // classic caret cadence
-  const [caretOn, setCaretOn] = useState(true);
-  const lastActivity = useRef(0);
-  useEffect(() => {
-    const id = setInterval(() => setCaretOn((on) => (Date.now() - lastActivity.current < BLINK_MS ? true : !on)), BLINK_MS);
-    return () => clearInterval(id);
-  }, []);
-
+  // Caret: the REAL terminal hardware cursor (a thin bar between cells, like Claude Code's "khả|o") -
+  // no glyph is drawn in the text at all. TextInput marks the caret position with a zero-width SENTINEL
+  // (CARET_SENTINEL); the FrameDiffer finds it, strips it, and positions the terminal cursor there
+  // (DECSCUSR bar + show). This is the only way to sit BETWEEN two cells with zero width - any drawn
+  // glyph occupies a full cell and reads as a gap ("chà▏o"). The terminal blinks the cursor natively,
+  // so there is no glyph-toggle (which used to add/remove a visible space on each blink).
   useInput((input, key) => {
-    // Only KEYBOARD activity keeps the caret solid - NOT mouse reports (wheel scroll + any-motion) that
-    // Ink also funnels through useInput. Stamping on those froze the blink: the caret stayed lit the whole
-    // time the mouse moved/scrolled. isEscapeResidue flags mouse/CSI residue; real keys - including arrows,
-    // which arrive as input="" - don't match it, so they still keep it solid while you type/edit.
-    if (!isEscapeResidue(input)) { lastActivity.current = Date.now(); setCaretOn(true); }
     // Ink delivers a paste as one call with the whole string; if it carries a line break, treat it
     // as a paste (insert, don't submit) rather than an Enter.
     const isPaste = input.length > 1 && /[\r\n]/.test(input);
@@ -221,36 +212,23 @@ export function TextInput(props: {
       }
   });
 
-  // Overlay caret: the char UNDER the cursor in inverse video (no inserted glyph cell). At EOL or
-  // empty input there is no under-cursor char, so render the thin-block fallback glyph instead of a
-  // bare space; a one-space-only Text node breaks Ink/Yoga height after resize-down.
       const cps = [...value];
       const visibleCols = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 9999;
-      // OVERLAY caret: the char UNDER the cursor in inverse video (no inserted glyph cell). At EOL or
-      // empty input there is no under-cursor char, so the fallback cell is the ▏ glyph — a one-space-only
-      // Text node breaks Ink/Yoga height after a resize-down. When mask is set, the overlay (and all text)
-      // shows a bullet "•" instead of the real char, so a secret NEVER leaks at any cursor position.
       const i = Math.min(cur.current, cps.length);
-      const cg = CARET_GLYPHS[caretGlyph]; // config `caret_glyph` / NEKO_CARET stays LIVE (EOL/empty caret)
       const bullet = "\u2022";
       // shownChar maps a printable char to a bullet when mask is set, but PRESERVES a "\n" so a masked
       // multiline value still renders its line breaks (otherwise everything collapsed to one bullet row).
       const shownChar = (ch: string) => mask && ch !== "\n" ? bullet : ch;
       const renderRange = (start: number, end: number) => cps.slice(start, end).map(shownChar).join("");
-      // Caret: a thin green bar INSERTED before the char at the cursor - a text-editor caret (like
-      // Claude Code), NEVER a block over the character. It always shows the glyph so it stays TIGHT:
-      // swapping glyph<->space opened a gap on the blink-off phase ("wo\u258Frld" -> "wo rld"), which the
-      // owner reported. The off-phase now appends a zero-width ZWSP: INVISIBLE (no gap, no shift), but it
-      // changes the input line's BYTES every blink. That byte change is LOAD-BEARING - after a resize the
-      // fullscreen band repaints only when a frame follows the differ's reset(), and this periodic caret
-      // render guarantees one (a static caret leaves the band blank after a shrink; see fullscreen-sim).
-      // Glyph = config `caret_glyph` / NEKO_CARET (default \u258F, hugging the cell's left edge flush after the
-      // preceding char - a centred "|" reads as a gap).
-      const renderCaret = () => <Text color="green">{caretOn ? cg : cg + "​"}</Text>;
+      // The caret is the terminal's HARDWARE cursor (a bar between cells, like Claude Code's "khả|o").
+      // TextInput only MARKS its position with the zero-width CARET_SENTINEL; the FrameDiffer strips it
+      // and positions the real cursor there. No glyph is drawn, so text stays tight and the bar sits
+      // BETWEEN cells (a drawn glyph occupies a full cell and reads as a gap). Zero width -> no shift.
+      const CARET = CARET_SENTINEL;
       if (cps.length === 0) {
         return (
           <Text>
-            {renderCaret()}
+            {CARET}
             <Text dimColor>{placeholder ?? ""}</Text>
           </Text>
         );
@@ -263,7 +241,7 @@ export function TextInput(props: {
         return (
           <Text>
             {renderRange(0, i)}
-            {renderCaret()}
+            {CARET}
             {renderRange(i, cps.length)}
           </Text>
         );
@@ -295,7 +273,7 @@ export function TextInput(props: {
                 return (
                   <Text key={`l${li}`}>
                     {before}
-                    {renderCaret()}
+                    {CARET}
                     {after}
                     {nl}
                   </Text>
@@ -324,7 +302,7 @@ export function TextInput(props: {
     return (
     <Text>
       {before}
-      {renderCaret()}
+      {CARET}
       {after}
     </Text>
   );

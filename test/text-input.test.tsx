@@ -81,31 +81,37 @@ test("ignores stray escape sequences (mouse reports) - never leak into the text"
   c.unmount();
 });
 
-test("caret is an INSERTED bar: ▏ before the char at the cursor (never a block over it)", async () => {
-  // debug:true strips ANSI color, so we check the ▏ MARKER position in the stripped frame.
+test("caret is the HARDWARE cursor: no glyph in the text, a zero-width sentinel marks the spot", async () => {
+  // The caret is the terminal's real cursor (positioned by the differ from a zero-width sentinel).
+  // In isolation (no differ) the sentinel is present but ZERO-WIDTH, so the visible text is TIGHT -
+  // "ab" not "ab' + BAR + '", and mid-text "ab" not "a' + BAR + 'b" (no drawn glyph, no gap, no block).
+  const SENT = "⁠";
   const c = render(<Harness cb={() => {}} />);
-  expect(strip(c.lastFrame())).toContain("▏");     // empty input: the caret bar shows
+  expect(strip(c.lastFrame())).toContain(SENT);           // empty: the caret sentinel is placed
   c.stdin.write("ab");
   await tick();
-  expect(strip(c.lastFrame())).toContain("ab▏");   // EOL: bar after the text
-  c.stdin.write("[D");                          // left -> cursor between a and b
+  const eol = strip(c.lastFrame());
+  expect(eol).toContain("ab");                            // text is tight
+  expect(eol).not.toContain("' + BAR + '");                            // NO glyph drawn in the text
+  expect(eol.replace(SENT, "")).toContain("ab");         // sentinel is zero-width -> text reads clean
+  c.stdin.write("[D");                                // left -> cursor between a and b
   await tick();
-  // Mid-text: the caret is INSERTED between a and b (the owner-chosen bar) - "a▏b", NOT a
-  // block over "b", and never a duplicated char.
-  const frame = strip(c.lastFrame());
-  expect(frame).toContain("a▏b");
-  expect(frame).not.toContain("abb");
+  const mid = strip(c.lastFrame());
+  expect(mid.replace(SENT, "")).toContain("ab");         // still tight "ab" (sentinel sits between them)
+  expect(mid).not.toContain("' + BAR + '");                            // never a glyph
+  expect(mid).not.toContain("abb");                      // never a duplicated char
   c.unmount();
 });
 
-test("caret is solid right after a keystroke, and re-solidifies on the next key", async () => {
+test("caret sentinel is placed after a keystroke and moves with typing", async () => {
+  const SENT = "⁠";
   const c = render(<Harness cb={() => {}} />);
   c.stdin.write("ab");
   await tick();
-  expect(strip(c.lastFrame())).toContain("ab▏");    // solid (on) immediately after a keystroke
-  c.stdin.write("c");                               // typing re-solidifies it at the new position
+  expect(strip(c.lastFrame())).toContain("ab" + SENT);   // caret sentinel right after the text
+  c.stdin.write("c");
   await tick();
-  expect(strip(c.lastFrame())).toContain("abc▏");
+  expect(strip(c.lastFrame())).toContain("abc" + SENT);  // follows the new position
   c.unmount();
 }, 15000);
 
@@ -113,7 +119,7 @@ test("mouse activity (scroll/motion) does NOT corrupt input or the caret", async
   const c = render(<Harness cb={() => {}} />);
   c.stdin.write("ab");
   await tick();
-  expect(strip(c.lastFrame())).toContain("ab▏");
+  expect(strip(c.lastFrame())).toContain("ab");
   // A stream of mouse reports while otherwise idle must not be inserted as text.
   for (let i = 0; i < 10; i++) {
     c.stdin.write("[<35;5;5M"); // an any-motion mouse report

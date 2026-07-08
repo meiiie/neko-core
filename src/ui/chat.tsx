@@ -737,10 +737,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           // Fullscreen: NO wipe. clearScreen()'s log.sync makes Ink believe its frame is still painted,
           // so after a 2J nothing gets rewritten until the next output-changing keypress - the "black
           // screen until you type" bug (image-verified). The alt screen has no rewrap ghosts to wipe;
-          // resetting the differ makes the next frame a full composed rewrite, which repaints everything.
-          // Band content stays as-is: the dimension change re-renders Ink, the differ (baseline gone)
-          // emits a full COMPOSED rewrite, and everything - band + chrome - repaints in one write.
-          frameDiffer?.reset();
+          // Recompose the LATEST Ink frame at the new geometry and repaint it in full NOW - the hardware
+          // caret is static (no periodic blink to supply a follow-up frame), so without this a resize with
+          // no typing would leave the band blank until the next keystroke (fullscreen-sim).
+          frameDiffer?.forceFullRepaint();
         } else {
           clearScreen?.();
           (stdout as any).write?.("\x1b[2J\x1b[H");
