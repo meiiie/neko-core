@@ -4,6 +4,17 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
+## [0.8.2] — 2026-07-08
+
+### Fixed
+- **The input caret is now the terminal's real cursor — a thin bar BETWEEN cells (like Claude Code's
+  "khả|o"), never a drawn glyph.** A glyph caret always occupied a full cell, so the cursor before a
+  character read as a gap ("chà▏o") and the blink toggled a space in and out of that cell. TextInput
+  now draws no glyph and marks the caret with a zero-width sentinel; the renderer strips it and places
+  the real hardware cursor (a bar, blinked natively by the terminal) at that column — tight text, no
+  gap, no blink flicker. `NEKO_CARET` picks the shape (bar/block/underline). Removing the old blink
+  timer also surfaced and fixed a latent bug where the transcript could go blank after a window resize.
+
 ## [0.8.1] — 2026-07-08
 
 ### Fixed
