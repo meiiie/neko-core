@@ -1,5 +1,8 @@
 # Neko Code installer (Windows) — downloads a standalone binary; no Bun required.
-#   irm https://neko.holilihu.online/install.ps1 | iex
+#   Latest:  irm https://neko.holilihu.online/install.ps1 | iex
+#   Pinned:  & ([scriptblock]::Create((irm https://neko.holilihu.online/install.ps1))) -Version 0.7.7
+#            (or set $env:NEKO_VERSION='v0.7.7' before the one-liner)
+param([string]$Version)  # MUST be the first statement - lets a scriptblock invocation pass -Version cleanly
 $ErrorActionPreference = 'Stop'
 
 $repo  = 'meiiie/neko-core'
@@ -14,13 +17,13 @@ function Write-Note($msg) { Write-Host $msg -ForegroundColor Yellow }
 
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
 
-# Pinned install / ROLLBACK path: NEKO_VERSION picks an exact release (e.g. 'v0.7.7') - the public
-# way back to a known-good baseline. Otherwise resolve the real latest tag so the user sees WHAT is
-# being installed.
+# Pinned install / ROLLBACK path: -Version (scriptblock arg) OR $env:NEKO_VERSION picks an exact
+# release (e.g. '0.7.7') - the public way back to a known-good baseline. Otherwise the latest tag.
+$pin = if ($Version) { $Version } elseif ($env:NEKO_VERSION) { $env:NEKO_VERSION } else { $null }
 $tag = $null
-if ($env:NEKO_VERSION -match '^v?\d+\.\d+\.\d+$') {
-  $tag = if ($env:NEKO_VERSION.StartsWith('v')) { $env:NEKO_VERSION } else { "v$($env:NEKO_VERSION)" }
-  Write-Step "Pinned by NEKO_VERSION: $tag"
+if ($pin -match '^v?\d+\.\d+\.\d+$') {
+  $tag = if ($pin.StartsWith('v')) { $pin } else { "v$pin" }
+  Write-Step "Pinned version: $tag"
 } else {
   Write-Step 'Fetching latest version...'
   try {
@@ -94,7 +97,7 @@ if ($ver) { Write-Ok "$ver installed" } else { Write-Ok 'Installed' }
 # A PINNED install (NEKO_VERSION) is a HOLD: pause auto-update in the user config so the daily updater
 # can't drag this exact version forward again. auto_update:false is honored by every release >= 0.7.4
 # (the one being installed), so the pin actually sticks. Re-enable with `neko update`.
-if ($env:NEKO_VERSION) {
+if ($pin) {
   try {
     $cfgDir = Join-Path $env:USERPROFILE '.neko-core'
     New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null

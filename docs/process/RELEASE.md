@@ -63,8 +63,11 @@ and a link to the CHANGELOG section for detail.
 - **Rollback is first-class and it STICKS.** Two public paths, both pin so auto-update can't undo them:
   - In-app: `neko update 0.7.7` — downloads that exact version (up OR down) and pauses auto-update
     (`neko update` with no version returns to latest and resumes it).
-  - Installer: `$env:NEKO_VERSION='v0.7.7'; irm https://neko.holilihu.online/install.ps1 | iex`
-    (`NEKO_VERSION=v0.7.7 curl -fsSL .../install.sh | sh` on unix) — installs + pins.
+  - Installer (version as an ARGUMENT — the rustup/uv-style form, cleaner than an env line):
+    - Windows: `& ([scriptblock]::Create((irm https://neko.holilihu.online/install.ps1))) -Version 0.7.7`
+    - Unix: `curl -fsSL https://neko.holilihu.online/install.sh | sh -s -- --version 0.7.7`
+    - `NEKO_VERSION=v0.7.7` before the one-liner still works as a fallback. Either way the installer
+      installs + pins.
   - The pin is `auto_update: false` in `~/.neko-core/config.json`, NOT a new field: it must be
     honored by the version being rolled back TO. Every release ≥ 0.7.4 honors it, so a rollback to
     0.7.7 holds; a new pin field would be ignored by the old binary and the user would be dragged

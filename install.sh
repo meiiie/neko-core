@@ -1,11 +1,25 @@
 #!/bin/sh
 # Neko Code installer (macOS / Linux) — downloads a standalone binary; no Bun required.
-#   curl -fsSL https://neko.holilihu.online/install.sh | sh
+#   Latest:  curl -fsSL https://neko.holilihu.online/install.sh | sh
+#   Pinned:  curl -fsSL https://neko.holilihu.online/install.sh | sh -s -- --version 0.7.7
+#            (or set NEKO_VERSION=v0.7.7 before the one-liner)
 set -e
 
 REPO="meiiie/neko-core"
 OS="$(uname -s)"
 ARCH="$(uname -m)"
+
+# --version <x.y.z> / -v <x.y.z> / a bare version argument (via `sh -s -- ...`) pins an exact release;
+# falls back to the NEKO_VERSION env. The arg form is the cleaner rollback UX (no separate env line).
+PIN="${NEKO_VERSION:-}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version|-v) PIN="$2"; shift 2 ;;
+    --version=*)  PIN="${1#*=}"; shift ;;
+    [0-9]*.[0-9]*.[0-9]*|v[0-9]*.[0-9]*.[0-9]*) PIN="$1"; shift ;;
+    *) shift ;;
+  esac
+done
 
 case "$OS-$ARCH" in
   Linux-x86_64)              ASSET="neko-linux-x64" ;;
@@ -15,11 +29,10 @@ case "$OS-$ARCH" in
   *) echo "neko: unsupported platform '$OS-$ARCH'. Build from source: https://github.com/$REPO" >&2; exit 1 ;;
 esac
 
-# Pinned install / ROLLBACK path: NEKO_VERSION picks an exact release (e.g. 'v0.7.7') - the public
-# way back to a known-good baseline. Otherwise resolve the real latest tag.
-case "${NEKO_VERSION:-}" in
-  v[0-9]*.[0-9]*.[0-9]*) TAG="$NEKO_VERSION"; echo "Pinned by NEKO_VERSION: $TAG" ;;
-  [0-9]*.[0-9]*.[0-9]*)  TAG="v$NEKO_VERSION"; echo "Pinned by NEKO_VERSION: $TAG" ;;
+# Pinned install / ROLLBACK path: PIN (from --version / NEKO_VERSION) is an exact release; else latest.
+case "$PIN" in
+  v[0-9]*.[0-9]*.[0-9]*) TAG="$PIN"; echo "Pinned version: $TAG" ;;
+  [0-9]*.[0-9]*.[0-9]*)  TAG="v$PIN"; echo "Pinned version: $TAG" ;;
   *)
     echo "Fetching latest version..."
     TAG="$(curl -fsSL --max-time 15 -H 'User-Agent: neko-installer' "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
@@ -51,7 +64,7 @@ echo "${VER:-Installed}"
 # A PINNED install (NEKO_VERSION) is a HOLD: pause auto-update so the daily updater can't drag this
 # exact version forward again. auto_update:false is honored by every release >= 0.7.4 (the one being
 # installed), so the pin sticks. Uses python/node/sed as available; falls back to a hint. Resume: neko update.
-if [ -n "${NEKO_VERSION:-}" ]; then
+if [ -n "$PIN" ]; then
   CFG_DIR="${HOME}/.neko-core"; CFG="${CFG_DIR}/config.json"; mkdir -p "$CFG_DIR"
   if command -v python3 >/dev/null 2>&1; then
     python3 - "$CFG" <<'PY' 2>/dev/null && PINNED=1 || PINNED=0
