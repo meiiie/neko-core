@@ -35,3 +35,30 @@ test("assetName picks the right release asset per platform/arch (matches release
   expect(assetName("linux", "x64")).toBe("neko-linux-x64");
   expect(assetName("linux", "arm64")).toBe("neko-linux-arm64");
 });
+
+test("normalizeTag: bare or v-prefixed x.y.z -> vX.Y.Z; junk -> null", () => {
+  const { normalizeTag } = require("../src/adapters/update.ts");
+  expect(normalizeTag("0.7.7")).toBe("v0.7.7");
+  expect(normalizeTag("v0.7.7")).toBe("v0.7.7");
+  expect(normalizeTag("  0.8.0 ")).toBe("v0.8.0");
+  expect(normalizeTag("latest")).toBe(null);
+  expect(normalizeTag("0.7")).toBe(null);       // must be full x.y.z
+  expect(normalizeTag("v0.7.7-rc1")).toBe(null); // no pre-release suffix
+});
+
+test("setAutoUpdate writes the hold flag to the user config (rollback sticks)", () => {
+  const saved = { up: process.env.USERPROFILE, home: process.env.HOME };
+  const home = mkdtempSync(join(tmpdir(), "neko-pin-"));
+  process.env.USERPROFILE = home; process.env.HOME = home;
+  try {
+    const { setAutoUpdate } = require("../src/adapters/project.ts");
+    setAutoUpdate(false); // pin/hold
+    const cfgPath = join(home, ".neko-core", "config.json");
+    expect(JSON.parse(require("node:fs").readFileSync(cfgPath, "utf-8")).auto_update).toBe(false);
+    setAutoUpdate(true);  // resume
+    expect(JSON.parse(require("node:fs").readFileSync(cfgPath, "utf-8")).auto_update).toBe(true);
+  } finally {
+    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    rmSync(home, { recursive: true, force: true });
+  }
+});

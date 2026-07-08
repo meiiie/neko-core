@@ -67,6 +67,14 @@ export function setModel(model: string): void {
   updateUserConfig((d) => { d.model = model.trim(); });
 }
 
+/** Hold (or resume) auto-install of newer releases. Rolling BACK to an older version writes
+ * `auto_update: false` so the daily updater can't drag the user forward again - and that flag is
+ * honored by every release since 0.7.4 (the version they roll back TO), so the pin actually STICKS.
+ * `neko update` (to latest) sets it true again. Never throws on a missing config (writes a fresh one). */
+export function setAutoUpdate(on: boolean): void {
+  try { updateUserConfig((d: any) => { d.auto_update = on; }); } catch { /* malformed config - leave it for the user to fix */ }
+}
+
 /** Persist the active provider profile so `neko` uses it by default — no --profile flag, no config editing.
  * Also drops any stray top-level model/api_key so the profile's own endpoint+key+model take effect cleanly. */
 export function setActiveProfile(name: string): void {

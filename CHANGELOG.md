@@ -4,6 +4,21 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
+## [Unreleased]
+
+### Added
+- **Version rollback that STICKS.** `neko update 0.7.7` downloads an exact version (up or down — a
+  real downgrade) and pauses auto-update so the daily updater can't drag you forward again; `neko
+  update` (no version) returns to latest and resumes auto-updates. The installer honors the same via
+  `NEKO_VERSION`. The hold is written as `auto_update: false` (not a new config field) precisely so
+  the version you roll back TO honors it — a rollback to 0.7.7 actually holds instead of being
+  auto-upgraded on the next launch. `neko doctor` also now shows the file-search backend (ripgrep vs
+  the built-in JS walk) so you can confirm the fast path.
+
+### Fixed
+- (See the research/multiline-caret branch: word-wrap, tight inserted-bar caret, plan-box width,
+  incremental session persistence so an interrupted turn survives a resume.)
+
 ## [0.7.7] — 2026-07-07
 
 ### Fixed

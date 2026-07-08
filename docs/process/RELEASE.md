@@ -60,10 +60,15 @@ and a link to the CHANGELOG section for detail.
 
 - One release at a time is the **known-good baseline** (currently **v0.7.7**). New features target
   the next minor; only field-driven fixes may move the baseline pointer.
-- Rollback is a public, one-line path — the installers honor a pinned version:
-  `$env:NEKO_VERSION='v0.7.7'; irm https://neko.holilihu.online/install.ps1 | iex`
-  (`NEKO_VERSION=v0.7.7 curl -fsSL .../install.sh | sh` on unix). A baseline nobody can return to
-  is a label, not a guarantee.
+- **Rollback is first-class and it STICKS.** Two public paths, both pin so auto-update can't undo them:
+  - In-app: `neko update 0.7.7` — downloads that exact version (up OR down) and pauses auto-update
+    (`neko update` with no version returns to latest and resumes it).
+  - Installer: `$env:NEKO_VERSION='v0.7.7'; irm https://neko.holilihu.online/install.ps1 | iex`
+    (`NEKO_VERSION=v0.7.7 curl -fsSL .../install.sh | sh` on unix) — installs + pins.
+  - The pin is `auto_update: false` in `~/.neko-core/config.json`, NOT a new field: it must be
+    honored by the version being rolled back TO. Every release ≥ 0.7.4 honors it, so a rollback to
+    0.7.7 holds; a new pin field would be ignored by the old binary and the user would be dragged
+    forward on the next launch. A baseline nobody can *stay* on is a label, not a guarantee.
 
 ## 8. LTS / 1.0 bar
 

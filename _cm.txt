@@ -1,0 +1,25 @@
+feat(update): version rollback that STICKS (neko update <version> + pin)
+
+The gap: NEKO_VERSION let you install an old version, but auto-update would
+drag you back to latest on the next launch - so a rollback did not hold.
+
+Now:
+- `neko update 0.7.7` downloads an EXACT version (up or DOWN - a real
+  downgrade; isNewer is bypassed for an explicit target) and pins it.
+- `neko update` (no version) returns to latest and resumes auto-updates.
+- The installer honors NEKO_VERSION and pins the same way.
+
+The pin is written as `auto_update: false` in the user config - deliberately
+NOT a new field: the version you roll back TO must honor it, and every
+release >= 0.7.4 already honors auto_update. A new "pin" field would be
+ignored by the old binary and the user dragged forward again. This is the
+only design where the rollback actually sticks across the downgrade.
+
+Also: `neko doctor` now shows the file-search backend (ripgrep vs JS walk).
+
+RELEASE.md §7 + CHANGELOG document the rollback contract. +2 tests
+(normalizeTag, setAutoUpdate persists the hold). 382/382, typecheck clean,
+policy PASS, build + smokes; installer pin verified end-to-end (config
+api_key/model preserved, auto_update -> false).
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>

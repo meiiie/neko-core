@@ -75,24 +75,45 @@ export async function checkForUpdate(now = Date.now()): Promise<string | null> {
   return latest && isNewer(latest, VERSION) ? latest : null;
 }
 
-/** Download the latest release binary and replace the running executable. Returns true on success. */
-export async function selfUpdate(log: (s: string) => void): Promise<boolean> {
+/** Normalize a user-typed version to a release tag: "0.7.7" / "v0.7.7" -> "v0.7.7". null if unparseable. */
+export function normalizeTag(v: string): string | null {
+  const m = /^v?(\d+\.\d+\.\d+)$/.exec(v.trim());
+  return m ? `v${m[1]}` : null;
+}
+
+/**
+ * Download a release binary and replace the running executable. Returns true on success.
+ *   selfUpdate(log)            -> latest (refuses if already current)
+ *   selfUpdate(log, "v0.7.7")  -> that EXACT version, UP or DOWN (a rollback). Downgrades are allowed:
+ *                                 the caller pins `auto_update: false` so the daily updater can't undo it.
+ */
+export async function selfUpdate(log: (s: string) => void, target?: string): Promise<boolean> {
   const exe = process.execPath;
   if (basename(exe).replace(/\.exe$/i, "").toLowerCase() === "bun") {
     log("Running from source (bun). Update with:  git pull && bun run build");
     return false;
   }
-  const latest = await latestVersion();
-  if (!latest) {
-    log("Could not reach the release server (check your connection).");
-    return false;
+  let tag: string;
+  if (target) {
+    const t = normalizeTag(target);
+    if (!t) { log(`Not a version: "${target}" (use e.g. 0.7.7).`); return false; }
+    tag = t;
+    if (t.replace(/^v/, "") === VERSION) { log(`Already on ${t}.`); return false; }
+    log(isNewer(t, VERSION) ? `Switching v${VERSION} -> ${t} ...` : `Rolling back v${VERSION} -> ${t} ...`);
+  } else {
+    const latest = await latestVersion();
+    if (!latest) {
+      log("Could not reach the release server (check your connection).");
+      return false;
+    }
+    if (!isNewer(latest, VERSION)) {
+      log(`Already up to date (v${VERSION}).`);
+      return false;
+    }
+    tag = latest;
+    log(`Updating v${VERSION} -> ${tag} ...`);
   }
-  if (!isNewer(latest, VERSION)) {
-    log(`Already up to date (v${VERSION}).`);
-    return false;
-  }
-  log(`Updating v${VERSION} -> ${latest} ...`);
-  const url = `https://github.com/${REPO}/releases/download/${latest}/${assetName()}`;
+  const url = `https://github.com/${REPO}/releases/download/${tag}/${assetName()}`;
   let bytes: Buffer;
   try {
     const res = await fetch(url, { headers: { "user-agent": "neko-core" }, signal: AbortSignal.timeout(300000) });
@@ -115,7 +136,7 @@ export async function selfUpdate(log: (s: string) => void): Promise<boolean> {
     renameSync(exe, old);
     renameSync(tmp, exe);
     try { rmSync(old); } catch { /* in use on Windows; harmless */ }
-    log(`Updated to ${latest}. Restart neko to use it.`);
+    log(`Installed ${tag}. Restart neko to use it.`);
     return true;
   } catch (e) {
     log(`Install failed: ${(e as Error).message}`);

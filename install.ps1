@@ -91,6 +91,21 @@ $newVer = if ($ver -match 'neko-core\s+([0-9][0-9.]*)') { $Matches[1] } else { '
 Write-Dim  "  Installed to $dest"
 if ($ver) { Write-Ok "$ver installed" } else { Write-Ok 'Installed' }
 
+# A PINNED install (NEKO_VERSION) is a HOLD: pause auto-update in the user config so the daily updater
+# can't drag this exact version forward again. auto_update:false is honored by every release >= 0.7.4
+# (the one being installed), so the pin actually sticks. Re-enable with `neko update`.
+if ($env:NEKO_VERSION) {
+  try {
+    $cfgDir = Join-Path $env:USERPROFILE '.neko-core'
+    New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
+    $cfgPath = Join-Path $cfgDir 'config.json'
+    $cfg = if (Test-Path $cfgPath) { Get-Content -Raw $cfgPath | ConvertFrom-Json } else { [pscustomobject]@{} }
+    $cfg | Add-Member -NotePropertyName auto_update -NotePropertyValue $false -Force
+    ($cfg | ConvertTo-Json -Depth 20) | Set-Content -Encoding utf8 $cfgPath
+    Write-Note "  Pinned to $label - auto-update paused so it holds. Resume with: neko update"
+  } catch { Write-Note "  (could not pin auto_update - set `"auto_update`": false in ~/.neko-core/config.json to hold)" }
+}
+
 # PATH: compare per ENTRY, never by substring - "...\Programs\neko-core" (the pre-v0.3 install dir)
 # CONTAINS "...\Programs\neko", so a wildcard check false-positives and the real dir never gets added.
 function Test-OnPath($pathString, $wantDir) {

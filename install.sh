@@ -48,6 +48,29 @@ VER="$("$TARGET" version 2>/dev/null | head -1 || true)"
 echo "  Installed to $TARGET"
 echo "${VER:-Installed}"
 
+# A PINNED install (NEKO_VERSION) is a HOLD: pause auto-update so the daily updater can't drag this
+# exact version forward again. auto_update:false is honored by every release >= 0.7.4 (the one being
+# installed), so the pin sticks. Uses python/node/sed as available; falls back to a hint. Resume: neko update.
+if [ -n "${NEKO_VERSION:-}" ]; then
+  CFG_DIR="${HOME}/.neko-core"; CFG="${CFG_DIR}/config.json"; mkdir -p "$CFG_DIR"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$CFG" <<'PY' 2>/dev/null && PINNED=1 || PINNED=0
+import json,sys,os
+p=sys.argv[1]
+d={}
+if os.path.exists(p):
+    try: d=json.load(open(p))
+    except Exception: d={}
+d["auto_update"]=False
+json.dump(d,open(p,"w"),indent=2)
+PY
+  else
+    PINNED=0
+  fi
+  if [ "${PINNED:-0}" = "1" ]; then echo "  Pinned to $LABEL - auto-update paused so it holds. Resume with: neko update"
+  else echo "  To hold this version, set \"auto_update\": false in ~/.neko-core/config.json (resume with: neko update)"; fi
+fi
+
 # PATH: always report the state.
 case ":$PATH:" in
   *":$BIN_DIR:"*) echo "  $BIN_DIR is already on your PATH." ;;

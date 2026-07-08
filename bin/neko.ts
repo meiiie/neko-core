@@ -211,7 +211,8 @@ Commands:
   skills        list available skills (~/.neko-core/skills)
   recipes       list runnable recipes (~/.neko-core/recipes)
   login         save an API key (neko login <key>, or pipe it); logout removes it
-  update        download the latest release and replace this binary (self-update)
+  update [ver]  self-update to the latest release (resumes auto-updates); 'update 0.7.7' pins/rolls
+                back to an EXACT version and PAUSES auto-updates so it sticks
   mcp           list configured MCP servers and their tools
   setup [web]   one command to stand up the SOTA web stack (SearXNG + browser MCP, wired)
   chat          interactive session (default - same as bare 'neko' / 'neko code')
@@ -553,7 +554,22 @@ async function main(): Promise<number> {
       case "recipes": return cmdRecipes();
       case "login": return await cmdLogin(args);
       case "logout": return cmdLogout();
-      case "update": { const { selfUpdate } = await import("../src/adapters/update.ts"); return (await selfUpdate(console.log)) ? 0 : 1; }
+      case "update": {
+        const { selfUpdate } = await import("../src/adapters/update.ts");
+        const { setAutoUpdate } = await import("../src/adapters/project.ts");
+        const target = args.positionals[0]; // `neko update 0.7.7` rolls back (or forward) to an exact version
+        const ok = await selfUpdate(console.log, target);
+        if (ok) {
+          // A pinned version HOLDS: auto_update off so the daily updater can't drag it forward again
+          // (that flag is honored by the version being installed, so the pin sticks). Plain `neko update`
+          // (to latest) RESUMES auto-updates - "get me current and keep me current".
+          setAutoUpdate(!target);
+          console.log(target
+            ? "Pinned. Auto-updates are paused - run `neko update` to return to the latest and resume them."
+            : "Auto-updates resumed.");
+        }
+        return ok ? 0 : 1;
+      }
       // Hidden build-time smoke probe: render a real Ink/JSX tree headlessly. The test suite runs from
       // SOURCE, so a transform/runtime mismatch baked into the COMPILED binary (e.g. dev-jsx callsites
       // against production React - the jsxDEV crash) is invisible to it; this catches that class in the
