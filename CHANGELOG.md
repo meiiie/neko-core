@@ -4,6 +4,16 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
+## [0.8.1] — 2026-07-08
+
+### Fixed
+- **Drag-select can now run past the fold.** The mouse drag-to-copy selection was anchored to the
+  visible screen and cleared on any scroll, so you couldn't drag UP past the top edge to select text
+  above the viewport. It's now anchored to CONTENT rows: dragging at/above the top (or at/below the
+  bottom) auto-scrolls the transcript and the highlight keeps extending over the revealed text; the
+  highlight follows the text as you scroll (no longer dropped), and copy captures the whole selection
+  even the part that's off-screen.
+
 ## [0.8.0] — 2026-07-08
 
 Editing, input UX, and lifecycle polish — with a professional version-rollback path.
