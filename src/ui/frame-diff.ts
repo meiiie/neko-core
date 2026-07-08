@@ -374,9 +374,21 @@ export class FrameDiffer {
   /** Optimized bytes to write INSTEAD of `payload`; "" = nothing changed (skip the write);
    * null = pass the payload through untouched. Wraps the diff so the hardware caret (cursorSuffix) is
    * re-placed after every real write - the terminal cursor lands on the input no matter what repainted. */
+  private lastCursorKey = "";
   process(payload: string): string | null {
     const out = this.processInner(payload);
-    return typeof out === "string" && out !== "" ? out + this.cursorSuffix() : out;
+    if (out === null) return null; // passthrough (extractCursor did not run) - leave the cursor alone
+    // The caret sentinel is stripped BEFORE the diff, so moving the caret (same visible text) produces
+    // an IDENTICAL frame ("" ) - but the cursor still has to move. Emit the cursor suffix on a caret-only
+    // move, and refresh it after any real write. Key = active position (or "" when hidden).
+    const key = this.caretActive && this.cursorPos ? `${this.cursorPos.row},${this.cursorPos.col}` : "";
+    if (out === "") {
+      if (key === this.lastCursorKey) return "";      // nothing changed, caret didn't move -> skip
+      this.lastCursorKey = key;
+      return this.cursorSuffix();                       // caret-only move: reposition the hardware cursor
+    }
+    this.lastCursorKey = key;
+    return out + this.cursorSuffix();
   }
   private processInner(payload: string): string | null {
     // NEUTRAL control writes: Ink 7 brackets every frame with its own BSU/ESU as SEPARATE writes

@@ -4,6 +4,14 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
+## [0.8.3] — 2026-07-08
+
+### Fixed
+- **Arrow keys move the caret again.** With the hardware-cursor caret (0.8.2), moving the cursor left/
+  right leaves the visible text identical (only the zero-width marker shifts), so the renderer treated
+  the frame as unchanged and skipped repositioning the cursor. It now detects a caret-only move and
+  re-places the hardware cursor even when the text is byte-for-byte the same.
+
 ## [0.8.2] — 2026-07-08
 
 ### Fixed

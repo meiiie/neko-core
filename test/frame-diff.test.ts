@@ -328,3 +328,24 @@ test("hardware caret: the CARET_SENTINEL is stripped and drives a cursor at its 
   const out2 = d.process(["", "", "", "", "  no caret here"].join("\n"))!;
   expect(out2).not.toContain("\x1b[?25h");
 });
+
+test("caret-only move (same visible text, cursor shifts) STILL repositions the hardware cursor", async () => {
+  const { CARET_SENTINEL } = await import("../src/ui/frame-diff.ts");
+  const d = new FrameDiffer();
+  d.setWriter(() => {});
+  d.setBand({ top: 1, height: 3 });
+  d.setBandContent(["  a", "  b", "  c"], 0);
+  const S = CARET_SENTINEL;
+  const eol = ["", "", "", "  > xin chao" + S];
+  const mid = ["", "", "", "  > xin cha" + S + "o"];
+  d.process(eol.join("\n"));       // first render seeds (no erase prefix)
+  d.process(payload(4, eol));      // settle the baseline with the erase prefix Ink really sends
+  // Left arrow: the VISIBLE text is identical ("  > xin chao"), only the zero-width sentinel moved one
+  // char earlier. The stripped rows are identical, so the diff is "" - but the cursor MUST still move.
+  const out = d.process(payload(4, mid))!;
+  expect(out).not.toBe("");               // NOT skipped despite identical visible text
+  expect(out).toContain("\x1b[?25h");     // cursor shown + repositioned
+  expect(out).toMatch(/\x1b\[\d+;\d+H/);  // an absolute CUP (the new caret column)
+  // Sentinel didn't move again -> a truly identical frame IS skipped.
+  expect(d.process(payload(4, mid))).toBe("");
+});
