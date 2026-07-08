@@ -542,9 +542,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // --- Mouse drag-to-select + copy (fullscreen captures the mouse, so the terminal's native
   // select-to-copy is off; we provide our own, like Claude Code). A left-drag paints a solid highlight
   // over the transcript; it PERSISTS after release so the "select, then Ctrl+C" habit works, and it also
-  // copies on release. The highlight is screen-anchored, so anything that shifts the view (scroll, new
-  // content) clears it. ---
-  const selAnchor = useRef<{ x: number; y: number } | null>(null); // where a left-drag began (1-based screen coords)
+  // copies on release. The selection is anchored to CONTENT rows (indices into the transcript), so a drag
+  // can run PAST the top/bottom edge - the view auto-scrolls and the highlight keeps extending over the
+  // text above/below the fold, and scrolling afterward doesn't lose it (the differ re-maps content->screen). ---
+  const selAnchor = useRef<{ x: number; row: number } | null>(null); // where a left-drag began: 1-based screen col + CONTENT row index
   const selectedText = useRef("");                                 // the current persisted selection's text (for Ctrl+C)
   const [copyNote, setCopyNote] = useState<string | null>(null);   // transient copy confirmation, auto-clears
   const copyNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -558,26 +559,32 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => () => { if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current); }, []);
   const clearSelection = () => { if (selectedText.current || selAnchor.current) { selectedText.current = ""; selAnchor.current = null; frameDiffer?.setSelection(null); } };
   const copySelection = () => { if (selectedText.current) { copyBoth(selectedText.current); flashCopyNote(`copied ${selectedText.current.length} chars to clipboard`); } };
-  // Normalize anchor+focus into a reading-order selection {r0,c0 <= r1,c1}, clamped to the band rows.
-  const selFrom = (a: { x: number; y: number }, b: { x: number; y: number }) => {
-    const cy = (y: number) => Math.max(1, Math.min(viewH, y));
-    const A = { x: a.x, y: cy(a.y) }, B = { x: b.x, y: cy(b.y) };
-    const [f, l] = A.y < B.y || (A.y === B.y && A.x <= B.x) ? [A, B] : [B, A];
-    return { r0: f.y, c0: f.x, r1: l.y, c1: l.x };
+  // The total band content + the top CONTENT row currently visible (matches FrameDiffer.windowRows:
+  // start = max(0, total - dist - viewH)). Maps a screen row y (1..viewH) to a content row index.
+  const bandTotal = () => paddedRowsRef.current.length + streamRowsRef.current.length;
+  const bandStart = () => Math.max(0, bandTotal() - rowScroll.dist - viewH);
+  const contentRowAt = (y: number) => {
+    const total = bandTotal();
+    if (total === 0) return 0;
+    return Math.max(0, Math.min(total - 1, bandStart() + Math.max(1, Math.min(viewH, y)) - 1));
   };
-  // Extract the selected text from the differ's composed on-screen rows: honor columns on the first/last
-  // row, take middle rows whole, trim trailing whitespace, drop trailing blank lines.
+  // Normalize anchor+focus (CONTENT rows) into a reading-order selection {r0,c0 <= r1,c1}.
+  const selFrom = (a: { x: number; row: number }, b: { x: number; row: number }) => {
+    const [f, l] = a.row < b.row || (a.row === b.row && a.x <= b.x) ? [a, b] : [b, a];
+    return { r0: f.row, c0: f.x, r1: l.row, c1: l.x };
+  };
+  // Extract the selected text from the CONTENT rows (paddedRows - what the band shows, incl. rows scrolled
+  // off), so a selection that spans past the fold copies in full. Honor columns on the first/last row.
   const selectionText = (sel: { r0: number; c0: number; r1: number; c1: number }): string => {
-    const rows = frameDiffer?.screenText(sel.r0, sel.r1) ?? [];
-    return rows
-      .map((row, k) => {
-        const y = sel.r0 + k;
-        const from = y === sel.r0 ? sel.c0 - 1 : 0;
-        const to = y === sel.r1 ? sel.c1 : row.length;
-        return row.slice(Math.max(0, from), to).replace(/\s+$/, "");
-      })
-      .join("\n")
-      .replace(/\n+$/, "");
+    const rows = paddedRowsRef.current;
+    const out: string[] = [];
+    for (let r = sel.r0; r <= sel.r1 && r < rows.length; r++) {
+      const plain = (rows[r] ?? "").replace(/\x1b\[[0-9;]*m/g, ""); // strip SGR -> real text (gutter incl.)
+      const from = r === sel.r0 ? sel.c0 - 1 : 0;
+      const to = r === sel.r1 ? sel.c1 : plain.length;
+      out.push(plain.slice(Math.max(0, from), to).replace(/\s+$/, ""));
+    }
+    return out.join("\n").replace(/\n+$/, "");
   };
   // New transcript content shifts the band, so a screen-anchored highlight would land on the wrong rows -
   // drop the selection whenever the line count changes (a new turn, a committed reply, etc.).
@@ -1330,6 +1337,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // PgUp/PgDn / Ctrl+arrows / Home scroll the rich view by LINES, and (ctrl+)End or clicking the pill
   // jumps back to the live tail.
   const ROWS_PER_NOTCH = 3; // one wheel notch = 3 rows: the terminal-native scroll grain
+  const EDGE_SCROLL = 2;    // rows to auto-scroll per drag-move while the pointer is held at a band edge
   useInput(
     (input, key) => {
       if (!fullscreen || overlay || viewer || approval) return;
@@ -1342,18 +1350,25 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (!search && ptr.kind === "press" && ptr.left) {
           clearSelection();                                                       // a fresh drag drops any old selection
           if (pillHit(ptr.x, ptr.y)) return rowScroll.toBottom();                 // the pill is a click target
-          selAnchor.current = ptr.y >= 1 && ptr.y <= viewH ? { x: ptr.x, y: ptr.y } : null; // begin in the band only
+          selAnchor.current = ptr.y >= 1 && ptr.y <= viewH ? { x: ptr.x, row: contentRowAt(ptr.y) } : null; // begin in the band only
           return;
         }
         if (ptr.kind === "move") {
-          if (selAnchor.current && ptr.left) frameDiffer?.setSelection(selFrom(selAnchor.current, ptr), gutter + contentCols); // extend the drag
+          if (selAnchor.current && ptr.left) {
+            // Auto-scroll when the drag reaches an edge, so a selection can run PAST the fold: dragging
+            // at/above the top row scrolls up (revealing earlier text); at/below the bottom scrolls down.
+            if (ptr.y <= 1) rowScroll.by(-EDGE_SCROLL);
+            else if (ptr.y >= viewH) rowScroll.by(EDGE_SCROLL);
+            const focus = { x: ptr.x, row: contentRowAt(ptr.y) };
+            frameDiffer?.setSelection(selFrom(selAnchor.current, focus), gutter + contentCols); // extend the drag
+          }
           return; // a drag OR a bare hover - moves never fall through
         }
         if (ptr.kind === "release") {
           const a = selAnchor.current;
           selAnchor.current = null;
           if (a) {
-            const sel = selFrom(a, ptr);
+            const sel = selFrom(a, { x: ptr.x, row: contentRowAt(ptr.y) });
             const dragged = sel.r0 !== sel.r1 || sel.c1 > sel.c0; // a bare click is a point, not a selection
             const text = dragged ? selectionText(sel) : "";
             if (text.trim()) {
@@ -1364,8 +1379,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           }
           return;
         }
-        // a wheel event falls through to the wheel handler below
-        if (ptr.kind === "wheel") clearSelection(); // scrolling shifts the view - the screen-anchored highlight is stale
+        // a wheel event falls through to the wheel handler below (the content-anchored selection survives it)
       }
       if (search) {
         const w = parseWheelAll(input); // wheel still scrolls the flat window while finding
@@ -1395,10 +1409,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       if (key.ctrl && input === "f") return setSearch({ q: "", matches: [], idx: 0 }); // open find
       const wheel = parseWheelAll(input);
-      if (wheel) { clearSelection(); return rowScroll.by((wheel.dir === "up" ? -1 : 1) * ROWS_PER_NOTCH * wheel.count); }
-      // Any scroll shifts the view, so the screen-anchored selection highlight would go stale - drop it.
-      const scrollKey = key.pageUp || key.pageDown || (key.ctrl && (key.upArrow || key.downArrow)) || key.home || key.end;
-      if (scrollKey) clearSelection();
+      if (wheel) return rowScroll.by((wheel.dir === "up" ? -1 : 1) * ROWS_PER_NOTCH * wheel.count); // content-anchored selection follows the scroll
       const page = Math.max(1, viewH - 1); // one viewport of rows, minus a row of overlap for context
       if (key.pageUp) return rowScroll.by(-page);
       if (key.pageDown) return rowScroll.by(page);

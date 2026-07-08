@@ -156,15 +156,16 @@ export class FrameDiffer {
     this.markPainted(); // model is now consistent with the CURRENT geometry
   }
 
-  // Text selection (mouse drag-to-copy): a highlighted region over the band, in 1-based SCREEN coords.
-  // Because the band rows are full screen rows (2-space gutter + content), screen column X is visible
-  // column X-1 in the row string - no gutter math. The overlay is applied in windowRows(), so BOTH the
-  // Ink-frame compose path and the imperative repaint show it, and it updates through the normal diff.
-  private selection: { r0: number; c0: number; r1: number; c1: number } | null = null;
+  // Text selection (mouse drag-to-copy): a highlighted region over the band, anchored to CONTENT rows
+  // (indices into bandRows), NOT screen rows - so a drag can extend past the top/bottom edge and the
+  // view can scroll under it while the highlight stays on the same text (the "drag up to select above
+  // the fold" case). windowRows maps content rows -> screen rows from the CURRENT scroll distance, so
+  // every repaint (scroll hop included) re-lands the highlight correctly with no per-scroll bookkeeping.
+  // Columns include the 2-space gutter (bandRows are full screen rows), so screen col X = string index X-1.
+  private selection: { r0: number; c0: number; r1: number; c1: number } | null = null; // r0/r1 = CONTENT row indices
   private selWidth = 0; // pad spanned rows out to this screen column so the block is a solid rectangle
-  /** Highlight a selection over the band; null clears it. `width` = the content right-edge column, so a
-   * multi-row selection paints as a full-width rectangle (first/middle rows extend to it, blank rows too)
-   * like a native/desktop selection - not a ragged block that stops at each line's text. Repaints at once. */
+  /** Highlight a selection over the band (r0/r1 are CONTENT row indices into bandRows); null clears it.
+   * `width` = the content right-edge column, so a multi-row selection paints as a full-width rectangle. */
   setSelection(sel: { r0: number; c0: number; r1: number; c1: number } | null, width = 0): void {
     this.selection = sel;
     this.selWidth = width;
@@ -212,14 +213,17 @@ export class FrameDiffer {
       slice.push(i < this.bandRows.length ? this.bandRows[i] : this.bandTail[i - this.bandRows.length]);
     }
     while (slice.length < H) slice.push("");
-    // Selection highlight: invert the selected columns of each row the drag covers (screen coords).
+    // Selection highlight: r0/r1 are CONTENT row indices. The slice index i shows content row `start+i`,
+    // so a row is selected when start+i is within [r0, r1]. Column bounds apply on the first/last CONTENT
+    // rows; middle rows fill to the right edge. Because start comes from the CURRENT scroll distance, the
+    // highlight follows the text as the view scrolls - no screen-coordinate bookkeeping on scroll.
     if (this.selection) {
       const s = this.selection;
       for (let i = 0; i < slice.length; i++) {
-        const y = this.band.top + i;
-        if (y < s.r0 || y > s.r1) continue;
-        const from = y === s.r0 ? s.c0 - 1 : 0;                          // 1-based screen col -> 0-based
-        const to = y === s.r1 ? s.c1 : (this.selWidth || Number.MAX_SAFE_INTEGER); // last row stops at c1; the
+        const c = start + i; // content row shown at slice index i
+        if (c < s.r0 || c > s.r1) continue;
+        const from = c === s.r0 ? s.c0 - 1 : 0;                          // 1-based screen col -> 0-based
+        const to = c === s.r1 ? s.c1 : (this.selWidth || Number.MAX_SAFE_INTEGER); // last row stops at c1; the
         slice[i] = overlaySelection(slice[i], Math.max(0, from), to);    // rest fill to the content right edge
       }
     }

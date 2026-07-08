@@ -126,24 +126,49 @@ test("selection: screenText extracts on-screen text; setSelection highlights the
   // screenText reads the COMPOSED screen (1-based rows), stripped of SGR - what a copy should see.
   expect(d.screenText(1, 1)[0]).toBe("  hello world");
   expect(d.screenText(1, 3)).toEqual(["  hello world", "  second line", "  third row"]);
-  // A selection over row 1, screen cols 3..7 = "hello" (after the 2-col gutter) paints the UNIFORM
-  // selection colour (solid blue bg + white fg), not per-char inverse.
+  // A selection over CONTENT row 0, screen cols 3..7 = "hello" (after the 2-col gutter) paints the
+  // UNIFORM selection colour (solid blue bg + white fg), not per-char inverse. (dist 0 -> content row 0
+  // shows at screen row 1.)
   writes.length = 0;
-  d.setSelection({ r0: 1, c0: 3, r1: 1, c1: 7 });
+  d.setSelection({ r0: 0, c0: 3, r1: 0, c1: 7 });
   const out = writes.join("");
   expect(out).toContain("\x1b[48;5;25m"); // solid blue background opened at the selection start
   expect(out).toContain("\x1b[97m");       // bright-white text
   expect(out).toContain("\x1b[0m");        // block reset at its end
-  // A MULTI-row selection with a width fills spanned rows out to a SOLID rectangle (not ragged): row 1 as
-  // the first row of a 2-row selection extends past its "hello world" text to the right edge (col 30).
+  // A MULTI-row selection with a width fills spanned rows out to a SOLID rectangle (not ragged): content
+  // row 0 as the first row of a 2-row selection extends past its "hello world" text to the right edge.
   writes.length = 0;
-  d.setSelection({ r0: 1, c0: 1, r1: 2, c1: 5 }, 30);
+  d.setSelection({ r0: 0, c0: 1, r1: 1, c1: 5 }, 30);
   expect(writes.join("")).toMatch(/hello world {10,}/); // content followed by a long run of padded spaces
   // Clearing repaints the row WITHOUT the selection colour.
   writes.length = 0;
   d.setSelection(null);
   expect(writes.join("")).toContain("hello world");
   expect(writes.join("")).not.toContain("\x1b[48;5;25m");
+});
+
+test("selection is CONTENT-anchored: it follows the text as the band scrolls (drag-past-fold)", () => {
+  const d = new FrameDiffer();
+  const writes: string[] = [];
+  d.setWriter((s) => writes.push(s));
+  d.setBand({ top: 1, height: 3 });
+  // 6 content rows, viewport shows 3. Select CONTENT row 0 ("line-0") - which is ABOVE the fold when
+  // scrolled to the tail (dist 0 shows rows 3,4,5). Scrolling up must bring the highlight into view.
+  const rows = Array.from({ length: 6 }, (_, i) => `  line-${i}`);
+  d.setBandContent(rows, 0);
+  d.process(["", "", "", "> input"].join("\n"));
+  d.setSelection({ r0: 0, c0: 1, r1: 0, c1: 8 }); // content row 0
+  // At dist 0 the window is rows 3..5 - row 0 is off-screen, so NO highlight is painted.
+  writes.length = 0;
+  d.setBandContent(rows, 0);
+  expect(writes.join("")).not.toContain("\x1b[48;5;25m");
+  // Scroll all the way up (dist 3 -> window rows 0..2): content row 0 is now the top screen row and the
+  // SAME selection now highlights it - the highlight followed the text, no re-anchoring by the caller.
+  writes.length = 0;
+  d.setBandContent(rows, 3);
+  const up = writes.join("");
+  expect(up).toContain("\x1b[48;5;25m"); // the selection is visible again after scrolling to it
+  expect(up).toContain("line-0");
 });
 
 test("neutral control writes (Ink's own BSU/ESU, cursor hide/show) do NOT reset the baseline", () => {
