@@ -3,6 +3,32 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-08 — v0.8.0: editing/input UX + lifecycle polish (research/multiline-caret merged)
+
+Developed by the self-improve loop (Neko + Codex peer-review) on a research clone, then senior-reviewed
+before merge. The review caught a scope-underreport (branch was 44 files / +3198, not the "6 files" the
+loop reported) and a red typecheck; both fixed. Highlights:
+
+- **Input**: O(1) windowed render (long input no longer lags) + WORD-wrap (not mid-word, image #79) +
+  footer truncates on narrow terminals (no extra chrome row = no band-geometry churn).
+- **Caret**: reverted the branch's inverse-video BLOCK back to the owner's tight inserted bar (`wo▏rld`).
+  The off-phase appends a zero-width ZWSP - INVISIBLE (no `wo| rld` gap) but flips the line's bytes each
+  blink, which is LOAD-BEARING: a truly static caret let the differ skip frames and left the fullscreen
+  band blank after a resize (fullscreen-sim caught it). Documented so no one "simplifies" it back.
+- **Resume data loss (owner report)**: persist() ran only in the turn's finally block, so closing the
+  terminal mid-task lost the prompt + every tool result. Now onEvent snapshots at each clean checkpoint
+  (step / tool_result) via a persistRef; sealDanglingToolCalls handles a mid-tools kill. Test: a hanging
+  provider proves the prompt is on disk though the turn never finished.
+- **Rollback that STICKS (owner question)**: `neko update <version>` downgrades + pins; installers take
+  `--version` (rustup/uv-style) / `-Version` (PS scriptblock) / NEKO_VERSION. The pin is `auto_update:
+  false` - NOT a new field - so the version rolled back TO honors it (a `pin_version` field would be
+  ignored by the old binary and the user dragged forward). RELEASE.md §7 documents the contract.
+- **doctor**: shows the file-search backend (ripgrep vs JS walk); rg IS used (14.1.1 verified).
+- Refactors: adapters/web.ts, agent-constants.ts, chat-lines.ts extracted; Ctrl+G external editor;
+  plan-box respects terminal width. Removed docs/research (Neko's ephemeral task/consult notes).
+- Gates on the branch BUILD (the loop's blind spot): 382/382, typecheck clean, policy PASS, build +
+  __uiprobe + input-probe, e2e-conpty-ghost 3/3, resize sim, scroll bench 6ms. Merged as v0.8.0.
+
 ## 2026-07-04 — Seamless resume/continue: interrupt a task, come back, just keep typing (Claude-Code parity)
 
 Owner: interrupting a coding task mid-tool then resuming lost the whole chat; and it shouldn't need a

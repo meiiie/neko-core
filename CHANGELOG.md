@@ -4,20 +4,39 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
-## [Unreleased]
+## [0.8.0] — 2026-07-08
+
+Editing, input UX, and lifecycle polish — with a professional version-rollback path.
 
 ### Added
-- **Version rollback that STICKS.** `neko update 0.7.7` downloads an exact version (up or down — a
+- **Version rollback that STICKS.** `neko update 0.7.7` downloads an EXACT version (up or down — a
   real downgrade) and pauses auto-update so the daily updater can't drag you forward again; `neko
-  update` (no version) returns to latest and resumes auto-updates. The installer honors the same via
-  `NEKO_VERSION`. The hold is written as `auto_update: false` (not a new config field) precisely so
-  the version you roll back TO honors it — a rollback to 0.7.7 actually holds instead of being
-  auto-upgraded on the next launch. `neko doctor` also now shows the file-search backend (ripgrep vs
-  the built-in JS walk) so you can confirm the fast path.
+  update` (no version) returns to latest and resumes auto-updates. Installers take the version as an
+  argument (rustup/uv-style): `sh -s -- --version 0.7.7` (unix) / `-Version 0.7.7` via a scriptblock
+  (Windows), with `NEKO_VERSION` as a fallback. The hold is written as `auto_update: false` (NOT a new
+  config field) precisely so the version you roll back TO honors it — the pin actually holds instead
+  of being auto-upgraded on the next launch.
+- **Ctrl+G opens the prompt in `$EDITOR`.** Edit a long prompt in your real editor (suspends the TUI,
+  restores the alt-screen/mouse around it), pastes collapse to `[Pasted #N]` placeholders and expand
+  back for editing.
+- **`neko doctor` shows the file-search backend** (ripgrep vs the built-in JS walk) so you can confirm
+  the fast path (ripgrep IS used when installed — verified 14.1.1).
 
 ### Fixed
-- (See the research/multiline-caret branch: word-wrap, tight inserted-bar caret, plan-box width,
-  incremental session persistence so an interrupted turn survives a resume.)
+- **Long input no longer lags** (O(1) windowed input render) and **wraps by WORD**, not mid-word
+  ("đã đấ|m" → the word carries whole to the next line); the footer truncates on narrow terminals
+  instead of wrapping into an extra chrome row.
+- **The caret is a tight inserted bar** (`wo▏rld`), never a block, and stays tight through the blink
+  (the off-phase is invisible, so no `wo| rld` gap); `caret_glyph` / `NEKO_CARET` is honored.
+- **An interrupted turn survives a resume.** The session is now persisted incrementally at each clean
+  checkpoint (step / completed tool result), so closing the terminal mid-task no longer loses the
+  prompt and the work Neko did — resume shows the interrupted state instead of nothing.
+- **The exit-plan-mode box respects terminal width** (down to very narrow terminals) instead of
+  overflowing at a fixed 80 columns.
+
+### Changed
+- Internal refactors toward the Ports & Adapters boundary: `adapters/web.ts`, `agent-constants.ts`,
+  and `chat-lines.ts` extracted; approval flow gains a committed-visual micro-feedback before resolve.
 
 ## [0.7.7] — 2026-07-07
 

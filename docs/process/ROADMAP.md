@@ -10,11 +10,14 @@ intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibil
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Default model: **glm-5.2** via the Z.ai GLM coding plan (`anthropic` provider, `--profile zai`).
 
-- **Branch:** `self-improve`. **v0.7.7 released 2026-07-07** - the stability arc: field-debugged input
-  (Bun runtime pin + probe three-state), the ConPTY ghost (differ + self-healing resync), installer
-  self-healing, and permanent gates (input-probe, e2e ConPTY harness, scroll bench). Prior: **v0.7.0
-  released 2026-07-06** (owner-approved push; 0.6.0 was an internal
-  milestone, never published). All green: typecheck (TS 7.0.1-rc native) + 360/0 tests + policy + build
+- **Branch:** `self-improve`. **v0.8.0 released 2026-07-08** - editing/input UX + lifecycle polish:
+  O(1) windowed input + word-wrap, a tight inserted-bar caret, Ctrl+G external editor, incremental
+  session persistence (an interrupted turn survives a resume), and a professional version-rollback
+  path (`neko update <version>` / installer `--version`, pinned so it holds). Prior: **v0.7.7 released
+  2026-07-07** - the stability arc: field-debugged input (Bun runtime pin + probe three-state), the
+  ConPTY ghost (differ + self-healing resync), installer self-healing, and permanent gates
+  (input-probe, e2e ConPTY harness, scroll bench). **v0.7.0 released 2026-07-06** (0.6.0 was an
+  internal milestone, never published). All green: typecheck (TS 7.0.1-rc native) + 360/0 tests + policy + build
   on Windows, and the FULL verify loop natively on Linux (359/0; the one win32-gated test skipped).
 - **The v0.7.0 arc (Jul 3-6) — fullscreen became THE interface:** app-owned alt-screen viewport with a
   stdout-layer FrameDiffer (line-diff + DECSTBM hardware scroll, absolute-addressed, VT-verified), ANSI
