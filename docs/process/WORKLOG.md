@@ -3,6 +3,34 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-10 — reliability/security sweep: composition, streaming, permissions, config
+
+Owner asked to resolve every issue from the repository audit and to keep MCP web as a first-class
+extensibility path. The implementation stayed deliberately small:
+
+- Added one adapter-level ToolRegistry composition seam used by CLI + TUI; depth-one subagents inherit
+  web/vision/skills, disabled tools, sandbox/network/seatbelt settings, presence/input, summarization,
+  and adversarial review. Native `web_search`/`web_fetch` remain a zero-config fallback beside namespaced
+  `mcp__<server>__<tool>` capabilities; MCP is not replaced or shadowed.
+- Fixed OpenAI-compatible parallel streaming by accumulating each tool-call index independently and
+  eager-finalizing only when that index contains a complete JSON object (index switches are not stops).
+- Made persistent memory/workflow/playbook permissions action-sensitive; mutating actions are gated,
+  plan mode stays read-only, accept-edits includes multi_edit, and policy audits the full contract.
+- Added recursive config redaction for MCP headers/env, typed boolean NEKO_* parsing, built-in-profile key
+  persistence/migration, durable session titles, AGENTS.md loading, deep paging for large files, dynamic
+  architecture coverage, platform-correct tool schemas, and a load-safe ffmpeg test timeout.
+- Marked Python-era docs as historical, refreshed the v0.8.3/current architecture pointers, and removed
+  the unused ink-spinner dependency.
+
+Design evidence checked before coding: MCP tools/list + namespacing/list-change contract
+(modelcontextprotocol.io/specification/2025-11-25/server/tools); Anthropic's simple-composable-agent,
+brain/hand separation, MCP context-efficiency, and containment guidance; OpenAI's 2026 harness-engineering
+and prompt-injection guidance; the official openai-node streaming accumulator behavior. No new framework
+or dependency was introduced from those references.
+
+Verification: TS 7.0.1-rc + TS 5.9 clean; **400/400 tests, 1423 assertions, 52 files**; doctor OK;
+policy PASS; compiled binary + production UI probe + real-PTY input probe PASS.
+
 ## 2026-07-08 — v0.8.0: editing/input UX + lifecycle polish (research/multiline-caret merged)
 
 Developed by the self-improve loop (Neko + Codex peer-review) on a research clone, then senior-reviewed

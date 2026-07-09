@@ -1,5 +1,9 @@
 # Neko Core — Hướng dẫn phát triển AI Agentic CLI
 
+> **Tài liệu lịch sử:** phần lớn nội dung bên dưới mô tả Python contest harness cũ, không phải
+> TypeScript/Bun runtime hiện đang phát hành. Bắt đầu tại [`process/ARCHITECTURE.md`](process/ARCHITECTURE.md),
+> [`process/RULES.md`](process/RULES.md) và [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+
 > Tài liệu kỹ thuật chuyên sâu, độc lập với cuộc thi. Mục tiêu: bất kỳ ai (kể cả sau khi
 > HackAIthon kết thúc) đều có thể **dùng lại Neko Core làm khung phát triển một AI Agentic CLI**
 > — cắm mô hình/API mới, thêm workflow/agent/tool, mở rộng pipeline — mà không phải đọc lại mã nguồn.

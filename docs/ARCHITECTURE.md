@@ -1,4 +1,7 @@
-# Neko Core — Architecture (intended)
+# Neko Core — Architecture (historical scaffold)
+
+> This file describes the original Python-era target and is retained for history only.
+> The shipped TypeScript architecture is documented in [`process/ARCHITECTURE.md`](process/ARCHITECTURE.md).
 
 Early scaffold. This document is the design the codebase is growing toward.
 

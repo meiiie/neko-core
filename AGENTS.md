@@ -19,9 +19,10 @@ enforced by `test/architecture.test.ts`).
 | `core/permissions.ts` · `core/cost.ts` | Permission modes (default/accept-edits/plan/auto) · token usage. |
 | **`adapters/`** (edge) | |
 | `adapters/providers.ts` | `openai_compat` over `fetch`: SSE streaming, retry, abort (implements `Provider`). |
-| `adapters/config.ts` | Config-first loader: overlay (built-in → `~/.neko-core` → `./.neko-core` → profile → `NEKO_*`) + profiles. Key read on demand, never stored/printed. |
+| `adapters/config.ts` | Config-first loader: overlay (built-in → profile preset → `~/.neko-core` → `./.neko-core` → `NEKO_*`) + profiles. Key read on demand, never stored/printed. |
 | `adapters/mcp.ts` · `adapters/session.ts` · `adapters/context.ts` · `adapters/skills.ts` | MCP client · session persistence/resume · project context (NEKO.md/AGENTS.md) · `.md` skills. |
 | `adapters/registry.ts` · `adapters/doctor.ts` · `adapters/project.ts` | capabilities + `policy` audit · `doctor` diagnostics · `init` scaffolds. |
+| `adapters/tool-registry.ts` | Shared CLI/TUI/subagent composition for native web, skills, vision, sandbox and inherited safety boundaries. |
 | **`shared/`** | `version.ts` (leaf). |
 | **`ui/`** | Ink REPL, split by concern: `chat.tsx` (lifecycle + turn loop + render), `commands.ts` (slash commands + `runSlashCommand`), `transcript.tsx` (line renderer), `select-list.tsx` (reusable picker), `thinking-line.tsx`, `approval-box.tsx`, `markdown.tsx`, `highlight.tsx`, `logo.tsx`, `text-input.tsx`, `format.ts`. |
 | `bin/neko.ts` | The `neko` CLI entry point. |

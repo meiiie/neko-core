@@ -12,12 +12,14 @@ edges swappable as the project grows. Enforced by `test/architecture.test.ts`.
         │
    src/core/  ───────────────────────────┐  ← pure domain, no I/O frameworks
      agent · tools · tool-runtime         │
-     permissions · cost · ports           │
+     permissions · memory · workflows     │
+     playbook · sandbox · cost · ports     │
         │  depends only on PORTS (ports.ts)
    src/adapters/  ──────────────────────┐ │  ← implement ports / touch the outside world
      providers (LLM) · mcp · config      │ │
      session · context · skills          │ │
      project · doctor · registry         │ │
+     tool-registry (composition)         │ │
    src/shared/  version                    ←── leaf utilities
 ```
 
@@ -44,6 +46,8 @@ or a UI framework (Ink/React). Adapters import `core/` (ports) + `shared/`, neve
 Also: `ToolRegistry` (`core/tool-runtime.ts`) — the agent calls `schemas()`/`execute()`, never
 knowing what a tool does; `ApprovalGate` (`core/tool-runtime.ts`) — the gated-tool consent
 callback the UI supplies.
+`adapters/tool-registry.ts` is the single composition seam for config-backed capabilities and
+child-boundary inheritance; CLI, TUI, and depth-one subagents must use it to avoid wiring drift.
 
 ## How to extend (the common cases)
 

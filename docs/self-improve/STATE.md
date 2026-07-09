@@ -4,7 +4,9 @@
 what's measured, and the last few moves — not a full history (that's `docs/process/WORKLOG.md`).*
 
 ## Current focus
-**Owner-directed work, not the autonomous loop** (as of 2026-07-02). The self-improve loop is built + ran (it
+**Owner-directed work, not the autonomous loop** (as of 2026-07-10). A reliability/security audit just
+closed composition, streaming, permission, config, persistence, paging, context, and documentation drift;
+the full gate is green at 400/400 tests. The self-improve loop is built + ran (it
 produced ~4 real wins then plateaued — a disciplined assistant, not perpetual motion), and its idea `BACKLOG.md`
 (~46 items) + `RESEARCH.md` stay as the queue for when it runs again. The last stretch was **hands-on UX/UI
 polish to real-terminal / Claude-Code quality** (see `../process/ROADMAP.md` Phase H + `../process/WORKLOG.md`),
@@ -33,6 +35,11 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-10] (owner-directed) reliability/security sweep: one shared registry composition seam for
+  CLI/TUI/subagents; native web restored as an MCP-compatible fallback; nested secret redaction; typed
+  env booleans; interleaved OpenAI tool-call parsing; action-sensitive persistent-memory permissions;
+  large-file paging; profile-key/session-title persistence; AGENTS.md context; dynamic architecture gate.
+  TS 7 + TS 5.9 clean, 400/400 tests, policy PASS, binary + UI/input probes PASS.
 - [2026-07-03] (owner-directed) perf+robustness deep-dive: stream-eager execution (overlap read tools with
   generation, EAYG/AsyncFC), MCP lazy-CONNECT (513->233MB RAM), pre-flight arg validation (Gecko),
   original-task carry across compact(), opt-in verify gate. Full battery ALL GREEN, no regression: unit
@@ -60,8 +67,9 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
   re-run). Suite 253/0. NOT pushed - awaiting owner OK.
 - [2026-07-02] (owner-directed, NOT the loop) real-terminal UX/UI polish — rendering (wrap/math/tables/emoji/
   spacing/gutter/rules), streaming scroll-jump fix, idle timeout, Windows bash→Git-Bash; + GeneBench-Pro
-  dogfood. A fullscreen scroll mode was tried and reverted (stock Ink can't clip a viewport). Full detail in
-  `../process/ROADMAP.md` Phase H + `../process/WORKLOG.md`.
+  dogfood. The first stock-Ink fullscreen attempt was reverted; the later custom FrameDiffer/compositor
+  implementation shipped fullscreen-first. Full detail in `../process/ROADMAP.md` Phase H +
+  `../process/WORKLOG.md`.
 - [2026-07-01] bash seatbelt (dangerousCommand) was bypassable by QUOTING the target: `rm -rf "$HOME"`, `rm -rf "/"`, `rm -rf '~'` all slipped past the `rm -rf` guard because the target regex required the token immediately after whitespace -- a quote char broke the match. Made the token match quote-aware (optional `["']?`); added a test asserting the four quoted forms are Refused AND that quoting a normal relative path (`rm -rf "build"`) is still allowed. Verify gate green: typecheck + 227/0 tests + policy PASS. Left uncommitted for the harness.
 - [2026-06-30] compact() lean-tail clip now also triggers by char count (LEAN_TAIL_CHARS=8000), so dense few-line tool results (minified JSON/base64/packed logs) — long in chars but short in lines — are actually clipped instead of passing through fully intact and freeing no context; committed a76ec45.
 - [2026-06-30] estimateTokens now counts assistant tool_calls so the in-loop overflow guard isn't undercounted on tool-heavy turns (e.g. several large write_file calls); committed 620aed2.

@@ -4,6 +4,19 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
+## [Unreleased]
+
+### Fixed
+- Unified CLI/TUI/subagent tool wiring: native web fallback, vision, skills, sandbox, disabled-tool and
+  adversarial boundaries now compose consistently while namespaced MCP tools remain first-class.
+- Correctly accumulate interleaved parallel OpenAI-compatible tool-call streams by index.
+- Redact nested MCP secrets, parse boolean `NEKO_*` values by type, and retain keys per built-in profile.
+- Gate mutating memory/workflow/playbook actions, persist pinned session titles, page deep into large files,
+  load `AGENTS.md`, and hide the Windows-only computer schema on other platforms.
+
+### Changed
+- Architecture tests now cover every core/adapter source file; the unused `ink-spinner` dependency is gone.
+
 ## [0.8.3] — 2026-07-08
 
 ### Fixed

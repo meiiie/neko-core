@@ -1,7 +1,9 @@
 # Neko Core Harness Architecture
 
-Status: Active
+Status: Historical (Python contest harness; not the shipped TypeScript runtime)
 Last updated: 2026-06-08
+
+Current architecture: [`process/ARCHITECTURE.md`](process/ARCHITECTURE.md).
 
 ## Operating Thesis
 

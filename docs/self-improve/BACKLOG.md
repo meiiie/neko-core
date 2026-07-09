@@ -106,7 +106,8 @@ one never blocks another.
   on Terminal Bench this way; it's the single highest-leverage harness fix.) Verify: a unit test
   where a stub provider emits 3 distinct edits to ONE path — assert the nudge observation fires
   (the old guard does NOT trip on distinct calls) and that no real edit runs past the nudge.
-- [ ] **Pre-completion verification gate (force a verify pass before exit).** `run()` returns the
+- [x] **Pre-completion verification gate (force a verify pass before exit).** *(landed as the opt-in
+  `verifyBeforeExit` agent option with unit coverage; config wiring is shared by CLI/TUI/subagents.)* `run()` returns the
   final text the instant the model stops calling tools, so an agent can declare "done" without ever
   re-checking its work (re-running the test, re-reading the file, re-running the build). Add an
   opt-in `verifyBeforeExit` option: when the model would emit a tool-less final answer, intercept
@@ -621,7 +622,8 @@ one never blocks another.
   so a pure self-poll may under-trigger — the *hard token-budget* ceiling is the reliable backstop,
   the feasibility poll is the bonus.
 
-- [ ] **Pre-flight tool-argument validation + self-repair (Gecko).** When the provider returns a
+- [x] **Pre-flight tool-argument validation + self-repair (Gecko).** *(landed 2026-07-03:
+  required schema fields are validated before execution and a repair hint is returned; unit-tested.)* When the provider returns a
   tool call, its `arguments` are trusted verbatim: `adapters/providers.ts` line ~230 (and
   `adapters/anthropic.ts` line ~102) do `JSON.parse(fn.arguments)` and on a parse failure silently
   coerce to `{}` (Anthropic) or `{ _raw }` (providers) — so a malformed/partial JSON call, or a
@@ -1023,4 +1025,3 @@ one never blocks another.
 ---
 *If this list is empty or stale, the loop triggers a RESEARCH pass (web_search SOTA + new papers) and appends
 fresh items here.*
-

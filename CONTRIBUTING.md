@@ -38,7 +38,7 @@ Ports & Adapters — dependencies point **inward**, enforced by `test/architectu
 - `bin/neko.ts` — the CLI entry point.
 
 A **new model or endpoint is a config profile, not code** (`src/adapters/config.ts`). The full map is in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the roadmap and working notes live under
+[`docs/process/ARCHITECTURE.md`](docs/process/ARCHITECTURE.md); the roadmap and working notes live under
 [`docs/process/`](docs/process/) (start with `ROADMAP.md` and `RULES.md`).
 
 ## Ground rules
