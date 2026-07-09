@@ -8,9 +8,10 @@
  * tool never crashes the agent loop. Path-taking tools refuse to escape the project root.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { createInterface } from "node:readline";
 
 import type { McpTools, WebPort } from "./ports.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
@@ -18,7 +19,7 @@ import { memoryTool } from "./memory.ts";
 import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
 import { wrapBash } from "./sandbox.ts";
-import { GATED, resolveTool, toolSchemas } from "./tools.ts";
+import { effectivePermission, GATED, resolveTool, toolSchemas } from "./tools.ts";
 import { debug, messageOf } from "../shared/debug.ts";
 
 /** An approval gate: given (toolName, the tool's args) -> approve? (may be async).
@@ -341,7 +342,7 @@ export class ToolRegistry {
       return `Error: ${(error as Error).message}`;
     }
 
-    const decision = decide(this.mode, spec);
+    const decision = decide(this.mode, spec, args);
     if (decision === "deny") {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
     }
@@ -350,7 +351,7 @@ export class ToolRegistry {
     }
     // Adversarial review: when a mutating tool is auto-approved (no human in the loop), a model
     // pass vets it for prompt injection / destructive intent before it runs.
-    if (decision === "allow" && spec.permission === GATED && this.checkAction) {
+    if (decision === "allow" && effectivePermission(spec, args) === GATED && this.checkAction) {
       const v = await this.checkAction(name, args);
       if (!v.ok) return `Blocked by adversarial check: ${v.reason || "looks unsafe"}`;
     }
@@ -361,7 +362,7 @@ export class ToolRegistry {
     }
     try {
       const out = name === "bash" ? await this.runBash(args, signal)
-        : name === "read_file" ? this.runReadFile(args)
+        : name === "read_file" ? await this.runReadFile(args)
         : name === "skill" ? this.runSkill(args)
         : name === "computer" ? this.runComputer(args)
         : await DISPATCH[name](this.root, args);
@@ -374,14 +375,14 @@ export class ToolRegistry {
 
   /** read_file with media awareness: images -> vision content (if enabled), PDFs -> extracted text,
    * everything else -> the line-numbered text path. */
-  private runReadFile(args: Record<string, any>): string | any[] {
+  private async runReadFile(args: Record<string, any>): Promise<string | any[]> {
     const raw = requireArg(args, "path");
     const path = resolveInRoot(this.root, raw);
     if (!existsSync(path)) return `Error: no such file: ${raw}`;
     const ext = (raw.split(".").pop() ?? "").toLowerCase();
     if (IMAGE_EXTS.has(ext)) return readImageFile(path, raw, ext, this.vision);
     if (ext === "pdf") return readPdfFile(path, raw);
-    return toolReadFile(this.root, args);
+    return await toolReadFile(this.root, args);
   }
 
   /** First-class desktop/GUI control (Windows): dispatches to the computer-use skill's accessibility-tree
@@ -456,17 +457,22 @@ export class ToolRegistry {
   }
 }
 
-function toolReadFile(root: string, args: Record<string, any>): string {
+async function toolReadFile(root: string, args: Record<string, any>): Promise<string> {
   const raw = requireArg(args, "path");
   const path = resolveInRoot(root, raw);
   if (!existsSync(path)) return `Error: no such file: ${raw}`;
   const stat = statSync(path);
   if (stat.isDirectory()) return `Error: is a directory: ${raw}`;
+  const offset = Math.max(1, Math.floor(Number(args.offset) || 1)); // 1-based
+  const limit = Number(args.limit) > 0 ? Math.floor(Number(args.limit)) : undefined;
+  const MAX_READ_BYTES = MAX_READ_CHARS * 4; // UTF-8 is <= 4 bytes/char
+  if (stat.size > MAX_READ_BYTES && (offset > 1 || limit !== undefined)) {
+    return await readLargeFileWindow(path, offset, limit);
+  }
   let text: string;
   try {
     // Read at most a bounded prefix: a giant file (multi-GB log/data) must not be slurped whole into
     // memory only to be truncated — that OOMs the process. The result is capped to MAX_READ_CHARS anyway.
-    const MAX_READ_BYTES = MAX_READ_CHARS * 4; // UTF-8 is <= 4 bytes/char
     if (stat.size > MAX_READ_BYTES) {
       const fd = openSync(path, "r");
       try {
@@ -487,14 +493,46 @@ function toolReadFile(root: string, args: Record<string, any>): string {
   }
   // offset/limit: read a slice of a large file instead of the whole prefix (Claude-style paging).
   const allLines = text.split("\n");
-  const offset = Math.max(1, Math.floor(Number(args.offset) || 1)); // 1-based
-  const limit = Number(args.limit) > 0 ? Math.floor(Number(args.limit)) : undefined;
   const start = offset - 1;
   const slice = limit !== undefined ? allLines.slice(start, start + limit) : allLines.slice(start);
   // Line-numbered for reference (the model cites lines; numbers are display-only).
   const body = slice.map((l, i) => `${String(start + i + 1).padStart(5)}  ${l}`).join("\n");
   const windowed = start > 0 || (limit !== undefined && start + slice.length < allLines.length);
   return windowed ? `(lines ${start + 1}-${start + slice.length} of ${allLines.length})\n${body}` : body;
+}
+
+/** Stream an explicit line window from a large file without retaining the skipped prefix in memory. */
+async function readLargeFileWindow(path: string, offset: number, limit?: number): Promise<string> {
+  const input = createReadStream(path, { encoding: "utf-8" });
+  const reader = createInterface({ input, crlfDelay: Infinity });
+  const lines: string[] = [];
+  let lineNo = 0;
+  let chars = 0;
+  let more = false;
+  try {
+    for await (const line of reader) {
+      lineNo++;
+      if (lineNo < offset) continue;
+      if (limit !== undefined && lines.length >= limit) { more = true; break; }
+      const remaining = MAX_READ_CHARS - chars;
+      if (remaining <= 0) { more = true; break; }
+      if (line.length + 1 > remaining) {
+        lines.push(line.slice(0, remaining));
+        chars = MAX_READ_CHARS;
+        more = true;
+        break;
+      }
+      lines.push(line);
+      chars += line.length + 1;
+    }
+  } finally {
+    reader.close();
+    input.destroy();
+  }
+  if (!lines.length) return `(offset ${offset} is beyond end of file at line ${lineNo})`;
+  const end = offset + lines.length - 1;
+  const body = lines.map((line, i) => `${String(offset + i).padStart(5)}  ${line}`).join("\n");
+  return `(lines ${offset}-${end}${more ? "; more available" : ""})\n${body}${more && chars >= MAX_READ_CHARS ? `\n... (truncated at ${MAX_READ_CHARS} chars)` : ""}`;
 }
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);

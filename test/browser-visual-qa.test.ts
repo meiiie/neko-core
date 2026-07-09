@@ -1,10 +1,12 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { loadSkill } from "../src/adapters/skills.ts";
+
+setDefaultTimeout(15000); // ffmpeg can exceed Bun's 5s default under full-suite load
 
 const SCRIPT = join(import.meta.dir, "..", "skills", "browser-visual-qa", "scripts", "extract-frames.ts");
 const run = (args: string[], cwd: string) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: "utf-8" });

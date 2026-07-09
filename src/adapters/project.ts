@@ -49,7 +49,9 @@ export function setApiKey(key: string): string {
     let target = "the top-level key";
     updateUserConfig((d: any) => {
       const active = typeof d.active_profile === "string" ? d.active_profile : "";
-      if (active && d.profiles && typeof d.profiles === "object" && d.profiles[active]) {
+      if (active) {
+        if (!d.profiles || typeof d.profiles !== "object") d.profiles = {};
+        if (!d.profiles[active] || typeof d.profiles[active] !== "object") d.profiles[active] = {};
         d.profiles[active].api_key = key.trim();
         target = `profile "${active}"`;
       } else {
@@ -78,7 +80,17 @@ export function setAutoUpdate(on: boolean): void {
 /** Persist the active provider profile so `neko` uses it by default — no --profile flag, no config editing.
  * Also drops any stray top-level model/api_key so the profile's own endpoint+key+model take effect cleanly. */
 export function setActiveProfile(name: string): void {
-  updateUserConfig((d: any) => { d.active_profile = name; delete d.model; delete d.api_key; });
+  updateUserConfig((d: any) => {
+    const previous = typeof d.active_profile === "string" ? d.active_profile : "";
+    if (previous && d.api_key) {
+      if (!d.profiles || typeof d.profiles !== "object") d.profiles = {};
+      if (!d.profiles[previous] || typeof d.profiles[previous] !== "object") d.profiles[previous] = {};
+      if (!d.profiles[previous].api_key) d.profiles[previous].api_key = d.api_key;
+    }
+    d.active_profile = name;
+    delete d.model;
+    delete d.api_key;
+  });
 }
 
 /** Persist the chosen reasoning effort across sessions ("" / off clears it). */
@@ -147,9 +159,9 @@ const USER_TEMPLATE = {
     "Neko Core user config (like ~/.claude.json). Put your API key + chosen profile here. " +
     "NEVER commit this file. Env vars NEKO_API_KEY / OPENAI_API_KEY / NVIDIA_API_KEY override api_key.",
   active_profile: "nvidia",
-  api_key: "",
+  profiles: { nvidia: { api_key: "" } },
   model: "",
-  _hint: "Paste your key in api_key (or set NEKO_API_KEY). Set model to your endpoint's model id. List profiles with `neko profiles`.",
+  _hint: "Paste your key in profiles.nvidia.api_key (or use /login / set NEKO_API_KEY). List profiles with `neko profiles`.",
 };
 
 const PROJECT_TEMPLATE = {

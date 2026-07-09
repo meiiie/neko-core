@@ -61,10 +61,17 @@ test("schema shape", () => {
 });
 
 test("tool order", () => {
-  expect(toolSchemas().map((t: any) => t.function.name)).toEqual([
+  const expected = [
     "read_file", "search", "glob", "ls", "write_file", "edit", "multi_edit", "bash", "computer", "todo_write",
     "web_search", "web_fetch", "exit_plan_mode", "task", "memory", "skill", "workflow", "playbook",
-  ]);
+  ];
+  if (process.platform !== "win32") expected.splice(expected.indexOf("computer"), 1);
+  expect(toolSchemas().map((t: any) => t.function.name)).toEqual(expected);
+});
+
+test("tool schemas hide Windows-only computer control on other platforms", () => {
+  expect(toolSchemas("linux").map((t: any) => t.function.name)).not.toContain("computer");
+  expect(toolSchemas("win32").map((t: any) => t.function.name)).toContain("computer");
 });
 
 test("resolve unknown throws", () => {

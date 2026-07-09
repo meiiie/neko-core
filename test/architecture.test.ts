@@ -1,11 +1,14 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 // The dependency rule from ARCHITECTURE.md (Ports & Adapters): dependencies point inward.
 // If this fails, a layering violation crept in - move the logic / add a port, don't loosen.
-const CORE = ["agent.ts", "agent-constants.ts", "tools.ts", "tool-runtime.ts", "permissions.ts", "cost.ts", "ports.ts"];
-const ADAPTERS = ["providers.ts", "anthropic.ts", "mcp.ts", "config.ts", "session.ts", "context.ts", "skills.ts", "project.ts", "doctor.ts", "registry.ts", "web.ts"];
+const files = (layer: string) => readdirSync(join(import.meta.dir, "..", "src", layer), { withFileTypes: true })
+  .filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name))
+  .map((entry) => entry.name);
+const CORE = files("core");
+const ADAPTERS = files("adapters");
 const read = (layer: string, f: string) => readFileSync(join(import.meta.dir, "..", "src", layer, f), "utf-8");
 
 test("core depends only inward (no adapters, no ui, no UI framework)", () => {

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { clearApiKey, patchUserConfig, setApiKey, setModel } from "../src/adapters/project.ts";
+import { clearApiKey, patchUserConfig, setActiveProfile, setApiKey, setModel } from "../src/adapters/project.ts";
 
 // project.ts resolves the user config under homedir(); point that at a temp dir per test.
 const ORIG = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
@@ -58,6 +58,23 @@ test("setApiKey saves to the ACTIVE profile (not top-level); clearApiKey removes
   expect(clearApiKey()).toContain("top-level");         // ...but clearApiKey cleans BOTH
   cfg = JSON.parse(readFileSync(path, "utf-8"));
   expect(cfg.profiles.zai.api_key).toBeUndefined();
+  expect(cfg.api_key).toBeUndefined();
+});
+
+test("setApiKey creates an override for an active built-in profile", () => {
+  const path = withTempHome(JSON.stringify({ active_profile: "nvidia" }));
+  expect(setApiKey("NKEY")).toContain('profile "nvidia"');
+  const cfg = JSON.parse(readFileSync(path, "utf-8"));
+  expect(cfg.profiles.nvidia.api_key).toBe("NKEY");
+  expect(cfg.api_key).toBeUndefined();
+});
+
+test("switching profiles preserves a legacy top-level key under the previous profile", () => {
+  const path = withTempHome(JSON.stringify({ active_profile: "nvidia", api_key: "OLD-NKEY", profiles: { nvidia: { api_key: "" } } }));
+  setActiveProfile("zai");
+  const cfg = JSON.parse(readFileSync(path, "utf-8"));
+  expect(cfg.active_profile).toBe("zai");
+  expect(cfg.profiles.nvidia.api_key).toBe("OLD-NKEY");
   expect(cfg.api_key).toBeUndefined();
 });
 

@@ -306,20 +306,27 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
   let usage: Usage | undefined;
   const acc: { id: string; name: string; argString: string }[] = [];
   const announced = new Set<number>(); // tool calls whose name we've already surfaced
-  // OpenAI streams tool calls as index-keyed deltas with no end-of-call marker: call i is complete
-  // when a delta for a DIFFERENT index arrives (or the stream ends). Finalize exactly once per index
-  // and fire onToolCallReady so the agent can overlap read-only execution with the rest of the stream.
+  // OpenAI streams index-keyed argument deltas and may interleave several indexes in one chunk. There
+  // is no per-call stop marker, so an index switch does NOT mean completion. A call is eager-ready only
+  // once its accumulated arguments parse as a complete JSON object; invalid tails finalize at stream end.
   const finalized = new Map<number, ToolCall>();
-  const finalize = (i: number): void => {
+  const finalize = (i: number, force = false): void => {
     const t = acc[i];
     if (!t || finalized.has(i)) return;
     let args: Record<string, any>;
-    try { args = t.argString ? JSON.parse(t.argString) : {}; } catch { args = { _raw: t.argString }; }
+    try {
+      const parsed = t.argString ? JSON.parse(t.argString) : {};
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("arguments must be an object");
+      args = parsed;
+    } catch {
+      if (!force) return;
+      args = { _raw: t.argString };
+    }
+    if (!force && (!t.id || !t.name)) return;
     const call = { id: t.id, name: t.name, arguments: args };
     finalized.set(i, call);
     try { onToolCallReady?.(call); } catch { /* an eager-start failure never breaks parsing */ }
   };
-  let openIndex = -1; // the tool-call index currently receiving deltas
   const think = makeThinkSplitter(
     (s) => { content += s; onDelta(s); },
     (s) => { reasoning += s; onDelta(s, "reasoning"); },
@@ -346,8 +353,6 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
     }
     for (const tc of delta.tool_calls ?? []) {
       const i = tc.index ?? 0;
-      if (openIndex >= 0 && openIndex !== i) finalize(openIndex); // previous call is complete
-      openIndex = i;
       acc[i] ??= { id: "", name: "", argString: "" };
       if (tc.id) acc[i].id = tc.id;
       if (tc.function?.name) {
@@ -358,13 +363,14 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
         acc[i].argString += tc.function.arguments;
         onDelta(tc.function.arguments, "tool"); // count a big tool-call's args in the live token meter
       }
+      finalize(i); // eager only when this index now holds a complete JSON object
     }
   }
   think.flush(); // emit any buffered tail (e.g. trailing content with no closing tag)
 
   // Finalize every accumulated call (fires onToolCallReady for the last/open one) and build the
   // response from the SAME finalized objects so eager consumers and the loop see identical calls.
-  acc.forEach((_t, i) => finalize(i));
+  acc.forEach((_t, i) => finalize(i, true));
   const toolCalls: ToolCall[] = acc.map((_t, i) => finalized.get(i)!).filter(Boolean);
   return { content: content || null, tool_calls: toolCalls, usage, reasoning: reasoning || undefined };
 }

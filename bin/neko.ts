@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent.ts";
-import { loadConfig, type NekoConfig } from "../src/adapters/config.ts";
+import { loadConfig, redactSecrets, type NekoConfig } from "../src/adapters/config.ts";
 import { agentsContextBlock, loadAgent } from "../src/adapters/agents.ts";
 import { environmentBlock, projectContextBlock, renderContext } from "../src/adapters/context.ts";
 import { collectChecks, collectTerminalChecks, render } from "../src/adapters/doctor.ts";
@@ -19,12 +19,13 @@ import { HARD_TASKS, renderBenchReport, renderLiftReport, runBench, runHarnessLi
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
-import { loadSkill, matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
+import { matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
 import { memoryIndexBlock } from "../src/core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../src/core/workflows.ts";
 import { playbookContextBlock } from "../src/core/playbook.ts";
 import { ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
-import { webPort, WEB_EXTRACT_PROMPT } from "../src/adapters/web.ts";
+import { WEB_EXTRACT_PROMPT } from "../src/adapters/web.ts";
+import { configureToolRegistry, inheritToolRegistrySettings } from "../src/adapters/tool-registry.ts";
 import {
   collectCapabilities,
   evaluatePolicy,
@@ -134,28 +135,25 @@ async function buildAgent(
 ): Promise<{ agent: Agent; close: () => Promise<void> }> {
   const mode = yolo ? "auto" : cfg.mode;
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);
-  const registry = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
-  registry.hooks = cfg.hooks;
-  registry.allowDangerousBash = cfg.allowDangerousBash;
-  registry.sandboxBash = cfg.sandbox;
-  registry.sandboxAllowNetwork = cfg.sandboxNetwork;
-  registry.searxngUrl = cfg.searxngUrl;
-  registry.searchBackend = cfg.searchBackend;
-    registry.scrapeBackend = cfg.scrapeBackend;
-    registry.vision = cfg.vision;
-    registry.noTools = noTools;
-    registry.web = webPort;
-  registry.loadSkill = (name) => { const s = loadSkill(name); return s ? { body: s.body, dir: s.dir } : null; };
+  const registry = configureToolRegistry(
+    new ToolRegistry(process.cwd(), mode, promptApprove, hub),
+    cfg,
+    { noTools },
+  );
   registry.subagent = async (prompt, type) => {
-    const subReg = new ToolRegistry(process.cwd(), mode, promptApprove, hub);
-    subReg.hooks = cfg.hooks; // depth 1: no subReg.subagent
-    subReg.searxngUrl = cfg.searxngUrl;
-    subReg.searchBackend = cfg.searchBackend;
-      subReg.scrapeBackend = cfg.scrapeBackend;
-      subReg.vision = cfg.vision;
-      subReg.web = webPort;
+    const subReg = inheritToolRegistrySettings(
+      new ToolRegistry(process.cwd(), registry.mode, registry.prompt, hub),
+      registry,
+    ); // depth 1: no subReg.subagent
     const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT;
-    return await new Agent({ provider: getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps }).run(prompt);
+    return await new Agent({
+      provider: getProvider(cfg),
+      tools: subReg,
+      systemPrompt,
+      maxSteps: cfg.maxSteps,
+      maxContextTokens: cfg.contextWindow,
+      verifyBeforeExit: cfg.verifyBeforeExit,
+    }).run(prompt);
   };
   registry.summarize = async (instruction, content, schema) => {
     const res = await getProvider(cfg).complete([
@@ -235,11 +233,12 @@ Options:
 
 function cmdConfig(args: Args): number {
   const cfg = load(args);
+  const printable = redactSecrets(cfg.data) as Record<string, any>;
   console.log("Resolved Neko Core config:");
   console.log(`  profile = ${cfg.profile ?? "(none)"}`);
-  for (const key of Object.keys(cfg.data).sort()) {
+  for (const key of Object.keys(printable).sort()) {
     if (key.startsWith("_")) continue; // skip _comment/_hint annotations
-    const value = cfg.data[key];
+    const value = printable[key];
     console.log(`  ${key} = ${value && typeof value === "object" ? JSON.stringify(value) : value}`);
   }
   // The API key is a secret - only ever report presence, never the value.

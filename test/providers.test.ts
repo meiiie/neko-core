@@ -325,3 +325,31 @@ test("openai stream finalizes tool call i when the index advances (onToolCallRea
     globalThis.fetch = orig;
   }
 });
+
+test("openai stream accumulates interleaved parallel tool-call deltas by index", async () => {
+  const chunks = [
+    { choices: [{ delta: { tool_calls: [
+      { index: 0, id: "a", function: { name: "read_file", arguments: '{"path":"' } },
+      { index: 1, id: "b", function: { name: "search", arguments: '{"pattern":"' } },
+    ] } }] },
+    { choices: [{ delta: { tool_calls: [
+      { index: 0, function: { arguments: 'x"}' } },
+      { index: 1, function: { arguments: 'y"}' } },
+    ] } }] },
+  ];
+  const body = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n";
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })) as any;
+  const ready: any[] = [];
+  try {
+    const c = new NekoConfig({ provider: "openai_compat", base_url: "http://x/v1", model: "m", reasoning_effort: "off" }, null, {}, "k");
+    const res = await new OpenAICompatProvider(c).complete(
+      [{ role: "user", content: "hi" }], undefined, () => {}, undefined,
+      { onToolCallReady: (call) => ready.push(call) },
+    );
+    expect(ready.map((x) => x.arguments)).toEqual([{ path: "x" }, { pattern: "y" }]);
+    expect(res.tool_calls.map((x) => x.arguments)).toEqual([{ path: "x" }, { pattern: "y" }]);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});

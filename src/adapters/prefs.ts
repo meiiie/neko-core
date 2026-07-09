@@ -1,6 +1,6 @@
 /**
  * Tiny persistent user preferences (~/.neko-core/prefs.json). Separate from config, which is a LAYERED,
- * read-at-startup overlay (built-in -> ~/.neko-core -> ./.neko-core -> profile -> env); this is the small
+ * read-at-startup overlay (built-in -> profile preset -> ~/.neko-core -> ./.neko-core -> env); this is the small
  * WRITABLE "remember my choice" store the REPL updates at runtime - e.g. the resume-from-summary opt-out.
  * Best-effort: a missing/corrupt file reads as empty defaults, and a failed write is swallowed (a lost
  * preference is a minor annoyance, never a crash or data loss).

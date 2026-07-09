@@ -126,6 +126,14 @@ test("plan blocks writes, allows reads", async () => {
   expect(await reg.execute("read_file", { path: "a.txt" })).toContain("yo");
 });
 
+test("plan blocks persistent-memory mutations but allows their read actions", async () => {
+  const { reg } = makeReg("plan", () => false);
+  expect(await reg.execute("memory", { action: "read", name: "missing" })).not.toContain("Blocked");
+  expect(await reg.execute("memory", { action: "write", name: "x", content: "secret" })).toContain("plan");
+  expect(await reg.execute("workflow", { action: "delete", name: "x" })).toContain("plan");
+  expect(await reg.execute("playbook", { action: "add", content: "x" })).toContain("plan");
+});
+
 test("default + deny gate denies gated, allows safe", async () => {
   const { root, reg } = makeReg("default", () => false);
   writeFileSync(join(root, "a.txt"), "yo");
@@ -136,6 +144,7 @@ test("default + deny gate denies gated, allows safe", async () => {
 test("accept-edits auto-approves edits but prompts bash", async () => {
   const { reg } = makeReg("accept-edits", () => false);
   expect(await reg.execute("write_file", { path: "b.txt", content: "x" })).toContain("Wrote");
+  expect(await reg.execute("multi_edit", { path: "b.txt", edits: [{ old_string: "x", new_string: "y" }] })).toContain("Edited");
   expect(await reg.execute("bash", { command: "echo no" })).toContain("Denied");
 });
 
@@ -157,7 +166,9 @@ test("adversarial check blocks an auto-approved mutating tool when it flags unsa
   const { reg } = makeReg("auto", () => true);
   reg.checkAction = async () => ({ ok: false, reason: "looks like exfiltration" });
   expect(await reg.execute("write_file", { path: "x.txt", content: "data" })).toContain("Blocked by adversarial check");
+  expect(await reg.execute("memory", { action: "write", name: "x", content: "data" })).toContain("Blocked by adversarial check");
   expect(await reg.execute("read_file", { path: "x.txt" })).not.toContain("adversarial"); // read-only not checked
+  expect(await reg.execute("memory", { action: "read", name: "x" })).not.toContain("adversarial");
   reg.checkAction = async () => ({ ok: true, reason: "SAFE" });
   expect(await reg.execute("write_file", { path: "y.txt", content: "ok" })).toContain("Wrote");
 });
@@ -290,6 +301,17 @@ test("read_file offset/limit returns a line window numbered from the offset", as
   expect(out).toContain("line7");
   expect(out).not.toContain("line8");
   expect(out).not.toContain("line4");
+});
+
+test("read_file offset pages beyond the bounded prefix of a large file", async () => {
+  const { root, reg } = makeReg();
+  const body = Array.from({ length: 60_000 }, (_, i) => `line-${i + 1}-${"x".repeat(8)}`).join("\n");
+  writeFileSync(join(root, "large-lines.txt"), body);
+  const out = await reg.execute("read_file", { path: "large-lines.txt", offset: 50_000, limit: 2 });
+  expect(out).toContain("line-50000-");
+  expect(out).toContain("line-50001-");
+  expect(out).not.toContain("line-49999-");
+  expect(out).not.toContain("line-50002-");
 });
 
 test("search: case-insensitive is opt-in", async () => {

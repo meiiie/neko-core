@@ -159,8 +159,13 @@ export interface PolicyReport {
   findings: PolicyFinding[];
 }
 
-const MUST_BE_GATED = new Set(["write_file", "edit", "bash"]);
-const MUST_BE_SAFE = new Set(["read_file", "search", "glob", "ls"]);
+const MUST_BE_GATED = new Set(["write_file", "edit", "multi_edit", "bash", "computer"]);
+const MUST_BE_SAFE = new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "skill"]);
+const MUST_GATE_ACTIONS: Record<string, string[]> = {
+  memory: ["write", "delete"],
+  workflow: ["write", "delete"],
+  playbook: ["add", "revise", "remove"],
+};
 
 export function evaluatePolicy(config: NekoConfig): PolicyReport {
   const tools = listTools();
@@ -179,6 +184,19 @@ export function evaluatePolicy(config: NekoConfig): PolicyReport {
     }
     if (MUST_BE_SAFE.has(tool.name) && tool.permission !== SAFE) {
       findings.push({ severity: "warn", code: "reader_over_restricted", subject: tool.name, message: "A read-only tool is marked gated; it could run without approval." });
+    }
+  }
+  for (const [name, actions] of Object.entries(MUST_GATE_ACTIONS)) {
+    const spec = toolsByName.get(name);
+    if (!spec) continue;
+    const missing = actions.filter((action) => !spec.gatedActions?.includes(action));
+    if (missing.length) {
+      findings.push({
+        severity: "fail",
+        code: "mutating_action_not_gated",
+        subject: name,
+        message: `Mutating actions must be gated: ${missing.join(", ")}.`,
+      });
     }
   }
 

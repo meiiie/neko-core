@@ -14,6 +14,8 @@ export const GATED = "gated";
 export interface ToolSpec {
   name: string;
   permission: typeof SAFE | typeof GATED;
+  /** Actions that mutate state when the tool otherwise has read-only actions. */
+  gatedActions?: string[];
   summary: string;
   parameters: Record<string, any>; // JSON-schema properties (type/description, plus items/enum)
   required: string[];
@@ -196,7 +198,8 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "memory",
     permission: SAFE,
-    summary: "Your persistent cross-session memory (~/.neko-core/memory/*.md). list | read | write | delete | search. Record durable facts/preferences/learnings; recall relevant ones before working.",
+    gatedActions: ["write", "delete"],
+    summary: "Your persistent cross-session memory (~/.neko-core/memory/*.md). list | read | write | delete | search. Mutating actions are approval-gated.",
     parameters: {
       action: { type: "string", enum: ["list", "read", "write", "delete", "search"], description: "What to do." },
       name: { type: "string", description: "Memory file name (for read/write/delete)." },
@@ -217,7 +220,8 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "workflow",
     permission: SAFE,
-    summary: "Your learned procedural memory (~/.neko-core/workflows/*.md). list | read | write | delete | search. Where `memory` holds facts, workflows hold reusable PROCEDURES you learned by doing: read one before redoing a similar task; write one after a non-trivial task whose approach (steps/tools/gotchas) would help next time. This is how you get faster and more reliable over time.",
+    gatedActions: ["write", "delete"],
+    summary: "Your learned procedural memory (~/.neko-core/workflows/*.md). list | read | write | delete | search. Mutating actions are approval-gated.",
     parameters: {
       action: { type: "string", enum: ["list", "read", "write", "delete", "search"], description: "What to do." },
       name: { type: "string", description: "Workflow file name (for read/write/delete)." },
@@ -229,7 +233,8 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "playbook",
     permission: SAFE,
-    summary: "Your evolving operating playbook (always in your context). read | add | revise | remove. After a task that was non-obvious or went wrong, REFLECT and `add` one specific reusable lesson, or `revise` an existing bullet to sharpen it. Refine one bullet at a time; merge near-duplicates; keep specifics. This is how your operating context improves over time (ACE).",
+    gatedActions: ["add", "revise", "remove"],
+    summary: "Your evolving operating playbook (always in your context). read | add | revise | remove. Mutating actions are approval-gated.",
     parameters: {
       action: { type: "string", enum: ["read", "add", "revise", "remove"], description: "What to do." },
       content: { type: "string", description: "The lesson/strategy bullet (for add, or the refined text for revise)." },
@@ -239,12 +244,18 @@ export const TOOL_SPECS: ToolSpec[] = [
   },
 ];
 
-export function listTools(): ToolSpec[] {
+export function listTools(platform: NodeJS.Platform = process.platform): ToolSpec[] {
   // The computer tool drives Windows UI Automation (PowerShell scripts) - on other platforms the model
   // should never even SEE it in the schema, rather than call it and get a refusal. (tool-runtime keeps
   // a runtime guard as the backstop for anything that slips through, e.g. a resumed session replaying.)
-  if (process.platform !== "win32") return TOOL_SPECS.filter((t) => t.name !== "computer");
+  if (platform !== "win32") return TOOL_SPECS.filter((t) => t.name !== "computer");
   return TOOL_SPECS;
+}
+
+/** Resolve action-sensitive permission without making read/list operations prompt. */
+export function effectivePermission(spec: ToolSpec, args: Record<string, any> = {}): typeof SAFE | typeof GATED {
+  if (spec.permission === GATED) return GATED;
+  return spec.gatedActions?.includes(String(args.action ?? "")) ? GATED : SAFE;
 }
 
 /** Human-facing verb for each tool in the transcript (Claude-style: Read/Update/Search...). */
@@ -306,12 +317,12 @@ export function toOpenAISchema(spec: ToolSpec): Record<string, any> {
   };
 }
 
-export function toolSchemas(): Record<string, any>[] {
-  return TOOL_SPECS.map(toOpenAISchema);
+export function toolSchemas(platform: NodeJS.Platform = process.platform): Record<string, any>[] {
+  return listTools(platform).map(toOpenAISchema);
 }
 
 export function renderTools(specs: ToolSpec[]): string {
-  return ["Neko Core tools", ...specs.map((s) => `[${s.permission}] ${s.name}: ${s.summary}`)].join("\n");
+  return ["Neko Core tools", ...specs.map((s) => `[${s.permission}${s.gatedActions?.length ? `; gated: ${s.gatedActions.join("/")}` : ""}] ${s.name}: ${s.summary}`)].join("\n");
 }
 
 export function renderToolDetail(spec: ToolSpec): string {
@@ -319,6 +330,7 @@ export function renderToolDetail(spec: ToolSpec): string {
     "Neko Core Tool",
     `Name: ${spec.name}`,
     `Permission: ${spec.permission}`,
+    ...(spec.gatedActions?.length ? [`Gated actions: ${spec.gatedActions.join(", ")}`] : []),
     `Summary: ${spec.summary}`,
     "",
     "Parameters:",

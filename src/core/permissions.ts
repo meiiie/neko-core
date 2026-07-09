@@ -8,7 +8,7 @@
  *
  * Safe tools (read_file/search/glob/ls) are always allowed in every mode.
  */
-import { GATED, type ToolSpec } from "./tools.ts";
+import { effectivePermission, GATED, type ToolSpec } from "./tools.ts";
 
 export type PermissionMode = "default" | "accept-edits" | "plan" | "auto";
 export type Decision = "allow" | "prompt" | "deny";
@@ -21,14 +21,14 @@ export const MODES: { mode: PermissionMode; label: string; detail: string }[] = 
 ];
 
 const MODE_ORDER: PermissionMode[] = ["default", "accept-edits", "plan", "auto"];
-const EDIT_TOOLS = new Set(["write_file", "edit"]);
+const EDIT_TOOLS = new Set(["write_file", "edit", "multi_edit"]);
 
 export function isMode(value: string): value is PermissionMode {
   return MODE_ORDER.includes(value as PermissionMode);
 }
 
-export function decide(mode: PermissionMode, spec: ToolSpec): Decision {
-  if (spec.permission !== GATED) return "allow";
+export function decide(mode: PermissionMode, spec: ToolSpec, args: Record<string, any> = {}): Decision {
+  if (effectivePermission(spec, args) !== GATED) return "allow";
   switch (mode) {
     case "auto":
       return "allow";

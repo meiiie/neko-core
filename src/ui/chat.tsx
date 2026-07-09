@@ -50,9 +50,10 @@ import { latestSession, loadSession, newSessionId, renameSession, saveSession, t
 import { memoryIndexBlock } from "../core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
 import { playbookContextBlock } from "../core/playbook.ts";
-import { loadSkill, matchSkill, skillsContextBlock } from "../adapters/skills.ts";
+import { matchSkill, skillsContextBlock } from "../adapters/skills.ts";
 import { ToolRegistry } from "../core/tool-runtime.ts";
 import { WEB_EXTRACT_PROMPT } from "../adapters/web.ts";
+import { configureToolRegistry, inheritToolRegistrySettings } from "../adapters/tool-registry.ts";
 import {
   contentToText,
   resultSummary,
@@ -220,6 +221,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const name = resumedSession?.title || (typeof fu?.content === "string" ? fu.content.replace(/\s+/g, " ").trim() : "");
     return name ? trunc(name, 40) : "";
   })());
+  const pinnedTitleRef = useRef(resumedSession?.title ?? ""); // full persisted /title; tab text stays truncated separately
   const altDisposeRef = useRef<null | (() => void)>(preAltDispose ?? null); // alt-screen teardown (adopts runChat's pre-render guard)
   const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
   const [search, setSearch] = useState<{ q: string; matches: number[]; idx: number } | null>(null); // fullscreen in-viewport find
@@ -299,28 +301,21 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   const registryRef = useRef<ToolRegistry | null>(null);
   if (!registryRef.current) {
-    registryRef.current = new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub);
+    registryRef.current = configureToolRegistry(
+      new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub),
+      cfg,
+    );
     if (resumedRef.current) registryRef.current.todos = recoverTodos(resumedRef.current.messages); // keep the tracker + registry in sync on startup resume
-    registryRef.current.hooks = cfg.hooks;
-    registryRef.current.allowDangerousBash = cfg.allowDangerousBash;
-    registryRef.current.sandboxBash = cfg.sandbox;
-    registryRef.current.sandboxAllowNetwork = cfg.sandboxNetwork;
-    registryRef.current.searxngUrl = cfg.searxngUrl;
-    registryRef.current.searchBackend = cfg.searchBackend;
-    registryRef.current.scrapeBackend = cfg.scrapeBackend;
-    registryRef.current.presence = cfg.computerUseOverlay;
-    registryRef.current.inputBackend = cfg.computerUseInput;
-    registryRef.current.loadSkill = (name) => { const s = loadSkill(name); return s ? { body: s.body, dir: s.dir } : null; };
     // Sub-agents: the `task` tool spawns a fresh, isolated agent (depth 1 — its registry has no
     // subagent), inheriting the parent's mode/approval/hooks so its tool use is gated the same.
     registryRef.current.subagent = async (prompt, type) => {
       const parent = registryRef.current!;
-      const subReg = new ToolRegistry(process.cwd(), parent.mode, parent.prompt, mcpHub);
-      subReg.hooks = parent.hooks;
-      subReg.searxngUrl = parent.searxngUrl;
-      subReg.searchBackend = parent.searchBackend;
+      const subReg = inheritToolRegistrySettings(
+        new ToolRegistry(process.cwd(), parent.mode, parent.prompt, mcpHub),
+        parent,
+      );
       const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT; // named agent role, else default
-      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps, maxContextTokens: cfg.contextWindow }).run(prompt);
+      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps, maxContextTokens: cfg.contextWindow, verifyBeforeExit: cfg.verifyBeforeExit }).run(prompt);
     };
     // web_fetch's optional extractor: one model pass over the fetched page (Claude-style).
     registryRef.current.summarize = async (instruction, content, schema) => {
@@ -429,6 +424,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       updatedAt: new Date().toISOString(),
       cwd: process.cwd(),
       model: cfg.model,
+      title: pinnedTitleRef.current || undefined,
       messages: agentRef.current!.messages,
     });
   };
@@ -483,6 +479,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const fu = target.messages.find((m) => m.role === "user");
     const tname = target.title || (typeof fu?.content === "string" ? fu.content.replace(/\s+/g, " ").trim() : "");
     titleLockedRef.current = !!target.title;
+    pinnedTitleRef.current = target.title ?? "";
     titleTaskRef.current = tname ? trunc(tname, 40) : "";
     setTabTitle(titleTaskRef.current || "Neko Core", busyRef.current);
     const todos = recoverTodos(target.messages); // from the FULL thread, before any compaction
@@ -600,6 +597,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     renameSession(sessionIdRef.current, name);
     titleLockedRef.current = true;
+    pinnedTitleRef.current = name;
     titleTaskRef.current = trunc(name, 40);
     setTabTitle(titleTaskRef.current, busyRef.current);
     addLine("info", `session + tab named "${trunc(name, 60)}"`);

@@ -15,6 +15,19 @@ test("loads NEKO.md from the project root", () => {
   expect(files.some((f) => f.text.includes("hello project context"))).toBe(true);
 });
 
+test("loads AGENTS.md project instructions for Codex-compatible repositories", () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-agents-"));
+  mkdirSync(join(root, ".git"));
+  writeFileSync(join(root, "AGENTS.md"), "AGENT RULE: keep changes surgical");
+  const files = loadProjectContext(root);
+  expect(files.some((f) => f.path.endsWith("AGENTS.md") && f.text.includes("AGENT RULE"))).toBe(true);
+});
+
+test("context source contains no literal NUL byte (keeps text tools working)", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "src", "adapters", "context.ts"), "utf-8");
+  expect(source).not.toContain("\u0000");
+});
+
 test("expands @import references inline", () => {
   const root = mkdtempSync(join(tmpdir(), "neko-imp-"));
   mkdirSync(join(root, ".git"));

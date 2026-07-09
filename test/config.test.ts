@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadConfig, NekoConfig } from "../src/adapters/config.ts";
+import { loadConfig, NekoConfig, redactSecrets } from "../src/adapters/config.ts";
 
 beforeEach(() => {
   for (const key of Object.keys(process.env)) {
@@ -95,6 +95,42 @@ test("env overrides value", () => {
   const cfg = loadConfig({ path: tmpConfig({ model: "file-model" }) });
   expect(cfg.model).toBe("env-model");
   expect(cfg.maxSteps).toBe(7);
+});
+
+test("boolean NEKO_* overrides parse false/true instead of using string truthiness", () => {
+  process.env.NEKO_SANDBOX = "0";
+  process.env.NEKO_VERIFY_BEFORE_EXIT = "false";
+  process.env.NEKO_MCP_LAZY = "off";
+  process.env.NEKO_VISION = "yes";
+  const cfg = loadConfig({ path: tmpConfig({ sandbox: true, verify_before_exit: true, mcp_lazy: true }) });
+  expect(cfg.sandbox).toBe(false);
+  expect(cfg.verifyBeforeExit).toBe(false);
+  expect(cfg.mcpLazy).toBe(false);
+  expect(cfg.vision).toBe(true);
+  expect(cfg.data.sandbox).toBe(false);
+});
+
+test("invalid boolean NEKO_* override fails clearly", () => {
+  process.env.NEKO_SANDBOX = "sometimes";
+  expect(() => loadConfig({ path: tmpConfig({}) })).toThrow(/NEKO_SANDBOX.*boolean/i);
+});
+
+test("redactSecrets recursively masks MCP headers and env values", () => {
+  const shown = redactSecrets({
+    model: "m",
+    mcp_servers: {
+      web: {
+        headers: { Authorization: "Bearer secret", "X-API-Key": "secret-2" },
+        env: { PATH: "also-hide", CUSTOM: "hide-this-too" },
+      },
+    },
+    nested: { access_token: "token", harmless: "visible" },
+  }) as any;
+  expect(JSON.stringify(shown)).not.toContain("secret");
+  expect(JSON.stringify(shown)).not.toContain("also-hide");
+  expect(JSON.stringify(shown)).not.toContain("hide-this-too");
+  expect(shown.nested.harmless).toBe("visible");
+  expect(shown.mcp_servers.web.headers.Authorization).toBe("<redacted>");
 });
 
 test("api key from file, never in data", () => {

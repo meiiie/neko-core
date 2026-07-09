@@ -3,9 +3,9 @@
  *
  * Behaviour is data, not code. Config resolves by overlaying, lowest precedence first:
  *   1. built-in defaults (DEFAULTS, below)
- *   2. ~/.neko-core/config.json        (user-global, claude.json-style home file)
- *   3. ./.neko-core/config.json        (project-local, wins over user)
- *   4. the active profile's keys        (pick with --profile / NEKO_PROFILE)
+ *   2. the active profile preset        (pick with --profile / NEKO_PROFILE)
+ *   3. ~/.neko-core/config.json        (user-global, claude.json-style home file)
+ *   4. ./.neko-core/config.json        (project-local, wins over user/profile)
  *   5. NEKO_* environment variables     (win last)
  *
  * Secrets never live in tracked config: the API key is read on demand from the
@@ -80,6 +80,46 @@ export const DEFAULTS: Record<string, any> = {
     local: { provider: "openai_compat", base_url: "http://127.0.0.1:8080/v1", model: "local-model" },
   },
 };
+
+const BOOLEAN_ENV_KEYS = new Set([
+  "adversarial_check",
+  "allow_dangerous_bash",
+  "auto_loop",
+  "auto_update",
+  "auto_update_check",
+  "computer_use_overlay",
+  "fullscreen",
+  "mcp_lazy",
+  "prompt_cache",
+  "sandbox",
+  "sandbox_network",
+  "verify_before_exit",
+  "vision",
+]);
+
+function parseBooleanEnv(envName: string, value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  throw new Error(`${envName} must be a boolean (1/0, true/false, yes/no, on/off)`);
+}
+
+const SECRET_KEY = /(api[_-]?key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|secret|password|passwd|cookie|credential|private[_-]?key)/i;
+const SECRET_CONTAINER = /^(headers|env)$/i;
+
+/** Return a printable clone with credentials removed, including arbitrary MCP header/env values. */
+export function redactSecrets(value: unknown, key = "", hideValue = false): unknown {
+  if (hideValue || (key && SECRET_KEY.test(key))) return "<redacted>";
+  if (Array.isArray(value)) return value.map((item) => redactSecrets(item));
+  if (!value || typeof value !== "object") return value;
+  const hideChildren = SECRET_CONTAINER.test(key);
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([childKey, child]) => [
+      childKey,
+      redactSecrets(child, childKey, hideChildren),
+    ]),
+  );
+}
 
 export interface MoaRef { model: string; profile?: string }
 export interface MoaConfig {
@@ -360,7 +400,8 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
     if (!key.startsWith("NEKO_")) continue;
     const suffix = key.slice("NEKO_".length);
     if (suffix === "API_KEY" || suffix === "PROFILE") continue;
-    merged[suffix.toLowerCase()] = value;
+    const configKey = suffix.toLowerCase();
+    merged[configKey] = BOOLEAN_ENV_KEYS.has(configKey) ? parseBooleanEnv(key, value ?? "") : value;
   }
 
   return new NekoConfig(merged, selected, profiles, apiKeyFromFile);
