@@ -63,6 +63,11 @@ export class ToolRegistry {
   checkAction?: (toolName: string, args: Record<string, any>) => Promise<{ ok: boolean; reason: string }>;
   /** Load a skill's body by name (set by the wiring layer; core can't import the skills adapter). */
   loadSkill?: (name: string) => { body: string; dir: string } | null;
+  /** Injected desktop backend for the `computer` tool (set by the host). Default unset = the real
+   * Windows UIA/PowerShell path in runComputer. A deterministic simulated GUI world sets this to drive
+   * the long-horizon computer-use eval in-process (any OS, no desktop); a future remote/other-OS backend
+   * would plug in the same way. Returns the same shape as the real path: a string, or image content parts. */
+  computerHandler?: (args: Record<string, any>) => string | any[];
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
   /** Opt-in OS sandbox for bash (fs read-only except cwd). Set from config by the host. */
@@ -403,6 +408,9 @@ export class ToolRegistry {
    * scripts. Reads/acts on a window BY NAME (no vision); pointer acts use touch injection (no mouse hijack).
    * Unicode element names go through a temp UTF-8 file (@file) -- the cp1252 console mangles non-ASCII args. */
   private runComputer(args: Record<string, any>): string | any[] {
+    // An injected backend (e.g. the simulated GUI world in the long-horizon eval) takes over the whole
+    // tool: it needs no real desktop, so it also bypasses the Windows-only guard below. Default unset.
+    if (this.computerHandler) return this.computerHandler(args);
     // The computer tool drives Windows UI Automation via PowerShell scripts - Windows-only by design.
     // Fail honestly and immediately on other platforms instead of a confusing spawn error 90s later.
     if (process.platform !== "win32") {

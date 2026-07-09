@@ -66,7 +66,12 @@ one never blocks another.
   fails ~30-60% — THEN harness improvements (TDD/debugging skills, verify gate) show measurable lift.
   Complementary: wire skill-context into the bench so `test-driven-development`/`systematic-debugging` lift
   is measurable (bench currently runs skill-less). Verify: a task set where glm-5.2 is <100% and a harness
-  change moves it.
+  change moves it. *(2026-07-10: the COMPUTER-USE half of this landed as `neko bench gui` — 4 axis-isolated
+  long-horizon tasks on a deterministic simulated desktop (grounding / recovery / precise-action /
+  constraint), verifier-backed, injected via `ToolRegistry.computerHandler`, with a 15-test scripted-provider
+  self-test. Still open: the live glm-5.2 calibration (confirm it's <100% so a harness lever shows lift) and
+  the CODING long-horizon tier — a 15-25 step multi-file feature / cross-module migration with a regression
+  test.)*
 
 ## Research-seeded (turn into "Now" items as they're scoped)
 - [ ] Archive/population self-improvement (DGM): keep N improved branches, benchmark each, keep the best —

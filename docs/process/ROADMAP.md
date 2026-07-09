@@ -37,8 +37,15 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   to mtime+size with in-place legacy migration (no `/resume` stall after upgrade).
 - **Earlier this arc (Jul 2-3, released as v0.5.1):** approval dropped-'y' race fixed, release-asset
   race fixed (create-once), prompt-cache stability + measurement, 529 retry, tool-error recovery.
-- **Next:** build the verifier-backed long-horizon computer-use eval pack in `docs/self-improve/BACKLOG.md`;
-  only add another controller/framework if measured progress drift warrants it. **Rule: never merge to `main` or push without the owner's
+- **Computer-use eval pack (working tree, 2026-07-10):** the verifier-backed long-horizon eval landed as
+  `neko bench gui` — a deterministic simulated desktop the real model drives through the `computer` tool
+  (injected via an opt-in `ToolRegistry.computerHandler` seam; the real Windows UIA path is untouched and
+  still proven by the WPF/UIA live probe). Four axis-isolated tasks (task-success+constraint / error-recovery
+  / precise-action / coordinate-grounding), metrics to bench-log suite "gui", and a 15-test deterministic
+  self-test (scripted provider, no live model). 436/436 tests, policy PASS.
+- **Next:** run `neko bench gui` LIVE (glm-5.2) to set the baseline, then demonstrate harness lift with a
+  lever (verify gate / recovery middleware / re-grounding); only add another controller/framework if measured
+  progress drift warrants it. **Rule: never merge to `main` or push without the owner's
   explicit OK.** Orientation for a fresh session: `WORKLOG.md` (journal) · `RULES.md` (how we work) ·
   `CLAUDE.md` (codebase map) · `docs/self-improve/` (the Neko-improves-Neko loop + its idea `BACKLOG.md`).
 

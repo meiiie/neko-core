@@ -11,8 +11,10 @@ gate is green at 416/416 tests. The self-improve loop is built + ran (it
 produced ~4 real wins then plateaued — a disciplined assistant, not perpetual motion), and its idea `BACKLOG.md`
 (~46 items) + `RESEARCH.md` stay as the queue for when it runs again. The last stretch was **hands-on UX/UI
 polish to real-terminal / Claude-Code quality** (see `../process/ROADMAP.md` Phase H + `../process/WORKLOG.md`),
-done interactively with the owner — not by the loop. **Next = the small verifier-backed long-horizon
-computer-use eval pack; no new controller until the measurements justify one.**
+done interactively with the owner — not by the loop. **The small verifier-backed long-horizon computer-use
+eval pack now exists** (`neko bench gui`, deterministic simulated desktop, 4 axis-isolated tasks, 15-test
+self-test). **Next = run it LIVE (glm-5.2) to establish the baseline, then let a harness lever (verify
+gate / recovery middleware / re-grounding) show measurable lift; no new controller until then.**
 
 The loop's original framing still holds for when it resumes: bench coding tasks are **saturated** (glm-5.2 =
 11/11), so the live signal is the **codebase itself** (bug/test/robustness/perf/security/harness/docs), with the
@@ -37,7 +39,12 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
-- [2026-07-10] (owner-directed) verified persistence + computer-use pass: atomic todo validation and
+- [2026-07-10] (owner-directed, continuing the colleague's computer-use arc) built the long-horizon
+  computer-use eval `neko bench gui`: a deterministic simulated GUI world injected via a new opt-in
+  `ToolRegistry.computerHandler` seam (default unset = real Windows path untouched); 4 axis-isolated tasks
+  (task-success+constraint / error-recovery / precise-action / coordinate-grounding), metrics -> bench-log
+  suite "gui". 15-test deterministic self-test (scripted provider, no live model). 436/436, policy PASS,
+  typecheck clean. Live glm-5.2 baseline is the owner's to run next. Committed to `self-improve`, NOT pushed. atomic todo validation and
   open-plan exit recovery; `Alt+C` copies raw and collapsed-paste drafts without mutation; Windows
   `computer` gains Unicode type, exact-control focus, key, touch-scroll, wait, and open; action payloads
   are redacted; built-in skills/assets are embedded into the standalone binary. 416/416 tests, policy

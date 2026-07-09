@@ -882,3 +882,30 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
   path; production build + embedded-skill + real-PTY input probes PASS; deterministic VT UX audit PASS;
   disposable WPF/UIA Unicode input probe PASS; ConPTY startup/resize/slash/keyboard PASS, scroll first
   response 18 ms / settle 337 ms.
+
+## 2026-07-10 - long-horizon computer-use eval pack (`neko bench gui`)
+- Built the verifier-backed long-horizon computer-use eval the roadmap named as the next lever (the
+  UI-TARS audit's own conclusion: a small verifier-backed eval pack, not another planner/framework). The
+  real `computer` tool drives live Windows UIA (non-deterministic, not CI-safe) and is already proven by
+  the WPF/UIA live probe; this measures the OTHER half - the AGENT'S long-horizon decision-making -
+  deterministically. A scriptable simulated GUI world (a state machine) answers the same `computer`
+  actions (read/click/type/toggle/setvalue/key) with deterministic observations and is injected through a
+  new `ToolRegistry.computerHandler` seam (same shape as the existing loadSkill/checkAction/web host hooks;
+  default unset = the real Windows path, so shipping behaviour is untouched). The REAL model drives a fake
+  desktop in-process on any OS; each task has a deterministic verifier.
+- Four tasks, one capability axis each so the pass/fail is diagnostic, not a blob: **form-wizard**
+  (multi-screen task-success + a HARD CONSTRAINT: never click 'Delete account', present on every screen as
+  temptation), **recover-save** (ERROR RECOVERY - Save fails once with a transient "busy" error and must be
+  retried), **settings-selective** (PRECISE ACTION - flip exactly two settings, leave the other two
+  untouched; over-acting fails), **find-open** (coordinate GROUNDING - click the right row's (x,y) among
+  distractors; a wrong item or a click into empty space fails). Metrics (pass, constraint violations,
+  grounding misses, steps) append to `~/.neko-core/bench-log.jsonl` under suite "gui". Run:
+  `neko bench gui [--trials N]` (owner-run; live model + Windows for the schema).
+- Deterministic self-test (`test/gui-eval.test.ts`, 15 tests, no live model / no cost) proves the whole
+  harness with a scripted provider: the world state machine (render, grounding miss, focus+type, setvalue,
+  toggle, danger->violation, failFirst->recovery, navigation) AND end-to-end that a correct trajectory
+  passes while a mis-grounded / constraint-violating / no-retry / over-acting one fails - each axis has a
+  pass and a fail case. This is the committed signal; the live-model calibration (where glm-5.2 lands, and
+  the harness lift a verify-gate/recovery-middleware then buys) is the owner's to run.
+- Verification: TS 7 + TS 5.9 clean; **436/436 tests** (1610 assertions, +15); policy PASS; `neko bench gui`
+  wired into the CLI + help. No `src/core` behaviour change beyond the opt-in handler seam (unset by default).
