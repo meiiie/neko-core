@@ -127,7 +127,7 @@ export const TOOL_SPECS: ToolSpec[] = [
         type: "string",
         enum: ["list", "read", "get", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "open", "screenshot"],
         description:
-          "list/read/get perceive; invoke/setvalue/toggle act by accessible name; click/stroke use touch; type enters Unicode text into the focused control; key sends a shortcut such as CTRL+L or ENTER; scroll moves the target window; wait lets dynamic UI settle; open launches an app/file/URL; screenshot captures a GIF. setvalue/toggle self-verify; after other actions call list/read/get/screenshot to verify.",
+          "list/read/get perceive; invoke/setvalue/toggle act by accessible name; click/stroke use touch; type enters Unicode text into the focused control; key sends a shortcut such as CTRL+L or ENTER; scroll moves the target window; wait lets dynamic UI settle; open launches an app/file/URL; screenshot captures the primary screen and returns it directly when vision is enabled. setvalue/toggle self-verify; after other actions call list/read/get/screenshot to verify.",
       },
       window: { type: "string", description: "Distinctive target window title substring (e.g. 'Paint'). Omit = foreground window; type/key refuse ambiguous matches." },
       name: { type: "string", description: "Element NAME for get/invoke/setvalue/toggle, or an optional exact focus target for type/key (copy it from `list`/`read`)." },

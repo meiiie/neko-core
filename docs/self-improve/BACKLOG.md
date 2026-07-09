@@ -80,7 +80,9 @@ one never blocks another.
   reads. (Lodha et al. "Less Context, Better Agents" cut ~64% tokens *and* gained accuracy;
   Anthropic calls tool-result clearing "the safest, lightest-touch compaction.") Verify: a unit
   test that the last `k` results are intact and older ones are markers; bench `in` tokens drop,
-  pass-rate flat.
+  pass-rate flat. *(2026-07-10: the multimodal subset is now real - when context relief fires, it keeps
+  the two newest tool images and replaces older base64 images with a marker, while never touching user
+  attachments. General text-result clearing remains open and still needs the benchmark.)*
 - [ ] **Online skill/tool synthesis via step-reflection nudge.** (Live-SWE-agent's on-the-fly
   scaffold evolution — contrasted with DGM's offline loop.) After every Nth tool observation,
   inject a reflection nudge: "would capturing a reusable procedure as a `.neko-core` skill/script

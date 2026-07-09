@@ -57,7 +57,7 @@ export function buildReplayLines(messages: any[], nextId: () => number): Line[] 
       }
     } else if (m.role === "tool") {
       const name = toolById.get(m.tool_call_id);
-      const obs = String(m.content ?? "").split("\n").slice(0, 400).join("\n");
+      const obs = contentToText(m.content).split("\n").slice(0, 400).join("\n");
       out.push({ id: nextId(), kind: "tool_result", text: obs, summary: resultSummary(name, obs) });
     }
   }

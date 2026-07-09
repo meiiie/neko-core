@@ -402,7 +402,7 @@ export class ToolRegistry {
   /** First-class desktop/GUI control (Windows): dispatches to the computer-use skill's accessibility-tree
    * scripts. Reads/acts on a window BY NAME (no vision); pointer acts use touch injection (no mouse hijack).
    * Unicode element names go through a temp UTF-8 file (@file) -- the cp1252 console mangles non-ASCII args. */
-  private runComputer(args: Record<string, any>): string {
+  private runComputer(args: Record<string, any>): string | any[] {
     // The computer tool drives Windows UI Automation via PowerShell scripts - Windows-only by design.
     // Fail honestly and immediately on other platforms instead of a confusing spawn error 90s later.
     if (process.platform !== "win32") {
@@ -418,6 +418,7 @@ export class ToolRegistry {
     const tmp: string[] = [];
     const atFile = (s: string): string => { const p = join(tmpdir(), `neko_uia_${Date.now()}_${tmp.length}.txt`); writeFileSync(p, s, "utf8"); tmp.push(p); return "@" + p; };
     let script: string, sa: string[];
+    let capturePath = "";
     switch (action) {
       case "list": case "read": script = "uia.ps1"; sa = [action]; break;
       case "get": case "invoke": case "toggle": {
@@ -469,7 +470,15 @@ export class ToolRegistry {
         if (target.length > 4096) return "Error: computer open 'target' is too long.";
         script = "input.ps1"; sa = ["open", atFile(target)]; break;
       }
-      case "screenshot": { const out = join(tmpdir(), `neko_shot_${Date.now()}.gif`); script = "screenshot.ps1"; sa = [out]; break; }
+      case "screenshot": {
+        capturePath = join(tmpdir(), `neko_shot_${Date.now()}.gif`);
+        // A vision-capable main model gets embedded bytes, so its temp capture can be removed. Keep
+        // the legacy file for a text-only driver: it may hand that path to the separate vision helper.
+        if (this.vision) tmp.push(capturePath);
+        script = "screenshot.ps1";
+        sa = [capturePath];
+        break;
+      }
       default: return `Unknown computer action '${action}'. Use: list | read | get | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
     }
     try {
@@ -482,6 +491,25 @@ export class ToolRegistry {
       }
       const out = (r.stdout || "").trim(), err = (r.stderr || "").trim();
       if (r.status && r.status !== 0) return `Error: computer ${action} failed (PowerShell exit ${r.status}). ${err || out || ""}`.trim();
+      if (capturePath) {
+        if (!existsSync(capturePath)) return `Error: computer screenshot did not create an image. ${err || out || ""}`.trim();
+        // Return the observation itself, not a dead temp-file path. This closes the GUI loop in one
+        // tool round-trip: with vision on, the next model call sees the screen; without it, the legacy
+        // saved path remains available to the separate vision helper. Keep scale/view dimensions because
+        // grounded coordinates must map back to physical pixels. The temp image is removed in finally
+        // after its bytes have been embedded in the result.
+        const observation = readImageFile(capturePath, "desktop screenshot", "gif", this.vision);
+        if (typeof observation === "string") return [out, observation].filter(Boolean).join("\n");
+        const info = out.replace(/^saved\s+.*?\s+(?=view=)/i, "captured ");
+        let annotated = false;
+        return observation.map((part) => {
+          if (!annotated && part?.type === "text") {
+            annotated = true;
+            return { ...part, text: [info, part.text].filter(Boolean).join("\n") };
+          }
+          return part;
+        });
+      }
       return out || (err && `Error: computer ${action}: ${err}`) || "(no output)";
     } finally {
       for (const p of tmp) { try { rmSync(p, { force: true }); } catch {} }

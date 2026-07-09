@@ -4,7 +4,15 @@ import { render } from "ink-testing-library";
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
 import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
-import { clampToRows, recoverTodos, renderTail } from "../src/ui/chat-lines.ts";
+import { buildReplayLines, clampToRows, contentToText, recoverTodos, renderTail } from "../src/ui/chat-lines.ts";
+
+test("multimodal tool observations render as metadata + [image], never object coercion", () => {
+  const content = [{ type: "text", text: "captured screen\n" }, { type: "image_url", image_url: { url: "data:image/gif;base64,AA" } }];
+  expect(contentToText(content)).toBe("captured screen\n[image]");
+  const lines = buildReplayLines([{ role: "tool", tool_call_id: "shot", content }], () => 1);
+  expect(lines[0].text).toBe("captured screen\n[image]");
+  expect(lines[0].text).not.toContain("[object Object]");
+});
 
 test("clampToRows bounds the live stream to the viewport height (fixes streaming scroll-jump)", () => {
   const text = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");

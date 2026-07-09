@@ -44,6 +44,20 @@ test("toAnthropicMessages: image_url -> Anthropic image block", () => {
   expect(msgs[0].content).toContainEqual({ type: "image", source: { type: "base64", media_type: "image/png", data: "ABC" } });
 });
 
+test("toAnthropicMessages: multimodal tool result keeps its screenshot", () => {
+  const { msgs } = toAnthropicMessages([
+    { role: "assistant", content: "", tool_calls: [{ id: "shot", function: { name: "computer", arguments: '{"action":"screenshot"}' } }] },
+    { role: "tool", tool_call_id: "shot", content: [
+      { type: "text", text: "captured view=768x432 scale=0.4" },
+      { type: "image_url", image_url: { url: "data:image/gif;base64,R0lGODlh" } },
+    ] },
+  ]);
+  const result = msgs[1].content[0];
+  expect(result.type).toBe("tool_result");
+  expect(result.content).toContainEqual({ type: "text", text: "captured view=768x432 scale=0.4" });
+  expect(result.content).toContainEqual({ type: "image", source: { type: "base64", media_type: "image/gif", data: "R0lGODlh" } });
+});
+
 test("toAnthropicTools: OpenAI function shape -> Anthropic input_schema", () => {
   expect(toAnthropicTools([{ type: "function", function: { name: "f", description: "d", parameters: { type: "object", properties: {} } } }]))
     .toEqual([{ name: "f", description: "d", input_schema: { type: "object", properties: {} } }]);

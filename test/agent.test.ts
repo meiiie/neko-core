@@ -190,6 +190,26 @@ test("run attaches images as OpenAI vision content", async () => {
   expect(seen.content[1].image_url.url).toContain("base64,AAAA");
 });
 
+test("context relief keeps two recent tool images and masks older screenshots", () => {
+  const agent = new Agent({
+    provider: { complete: async () => ({ content: "ok", tool_calls: [] }) } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  const image = (id: string) => ({ role: "tool", tool_call_id: id, content: [
+    { type: "text", text: `screen ${id}` },
+    { type: "image_url", image_url: { url: `data:image/gif;base64,${id}` } },
+  ] });
+  agent.messages = [
+    { role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,USER" } }] },
+    image("old"), image("middle"), image("latest"),
+  ];
+  expect((agent as any).shrinkOldObservations()).toBe(true);
+  expect(agent.messages[0].content[0].image_url.url).toContain("USER"); // user evidence is never masked
+  expect(agent.messages[1].content.some((p: any) => p.type === "image_url")).toBe(false);
+  expect(agent.messages[1].content.some((p: any) => String(p.text).includes("older tool image elided"))).toBe(true);
+  expect(agent.messages.slice(2).filter((m: any) => m.content.some((p: any) => p.type === "image_url"))).toHaveLength(2);
+});
+
 test("concurrency-safe tool calls in one turn run in parallel", async () => {
   class SlowTools {
     active = 0;

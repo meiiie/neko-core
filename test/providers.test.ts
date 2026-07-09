@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { NekoConfig } from "../src/adapters/config.ts";
-import { clampEffort, getProvider, makeThinkSplitter, OpenAICompatProvider, parseOpenAIMessage } from "../src/adapters/providers.ts";
+import { clampEffort, getProvider, makeThinkSplitter, normalizeToolResultImages, OpenAICompatProvider, parseOpenAIMessage, toImgTagMessages } from "../src/adapters/providers.ts";
 
 function cfg(provider: string) {
   return new NekoConfig({ provider }, null, {}, "");
@@ -23,6 +23,26 @@ test("plain content (no think tags) streams through untouched", () => {
   s.flush();
   expect(content).toBe("just a normal answer");
   expect(reasoning).toBe("");
+});
+
+test("OpenAI-compatible wire format moves tool screenshots after the complete tool-result batch", () => {
+  const messages = normalizeToolResultImages([
+    { role: "assistant", content: "", tool_calls: [
+      { id: "shot", function: { name: "computer", arguments: '{"action":"screenshot"}' } },
+      { id: "read", function: { name: "read_file", arguments: '{"path":"x"}' } },
+    ] },
+    { role: "tool", tool_call_id: "shot", content: [
+      { type: "text", text: "captured scale=0.4" },
+      { type: "image_url", image_url: { url: "data:image/gif;base64,AAA" } },
+    ] },
+    { role: "tool", tool_call_id: "read", content: "file text" },
+  ]);
+  expect(messages.map((m) => m.role)).toEqual(["assistant", "tool", "tool", "user"]);
+  expect(messages[1].content).toBe("captured scale=0.4");
+  expect(messages[2].content).toBe("file text");
+  expect(messages[3].content.some((p: any) => p.type === "image_url")).toBe(true);
+  const nvidia = toImgTagMessages(messages);
+  expect(nvidia[3].content).toContain('<img src="data:image/gif;base64,AAA" />');
 });
 
 test("complete sends response_format json_schema only when a responseSchema is given (structured output)", async () => {

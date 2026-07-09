@@ -401,7 +401,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           addLine("tool_call", done.text);
           // Store the full result (capped) for Ctrl+O; read-type tools get a 1-line summary
           // (Claude-style), keeping the full output one keystroke away.
-          const obs = String(data.observation).split("\n").slice(0, 400).join("\n");
+          const obs = contentToText(data.observation).split("\n").slice(0, 400).join("\n");
           addLine("tool_result", obs, resultSummary(data.call?.name, obs));
           setTodos([...registryRef.current!.todos]); // reflect todo_write changes
           persistRef.current(); // a tool finished + its result is in messages -> checkpoint (survives a kill)

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -48,6 +48,39 @@ test("computer action validates inputs deterministically (no NaN/garbage reaches
   expect(String(await tools.execute("computer", { action: "open" }))).toContain("needs 'target'");
   expect(String(await tools.execute("computer", { action: "bogus" }))).toContain("Unknown computer action");
   expect(String(await tools.execute("computer", { action: "wait", duration_ms: 1 }))).toContain("waited 1 ms");
+});
+
+test("computer screenshot embeds vision bytes, while text-only mode keeps the helper path", async () => {
+  if (process.platform !== "win32") return;
+  const root = mkdtempSync(join(tmpdir(), "nk-shot-root-"));
+  const skill = join(root, "computer-use");
+  const scripts = join(skill, "scripts");
+  mkdirSync(scripts, { recursive: true });
+  // A deterministic 1x1 GIF avoids reading the developer's real desktop in the unit suite.
+  writeFileSync(join(scripts, "screenshot.ps1"), [
+    'param([string]$out)',
+    '[IO.File]::WriteAllBytes($out,[Convert]::FromBase64String("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="))',
+    '[IO.File]::WriteAllText((Join-Path $PSScriptRoot "capture-path.txt"),$out)',
+    'Write-Output ("saved $out view=1x1 screen=1x1 scale=1")',
+  ].join("\n"));
+  const tools = new ToolRegistry(root, "auto", () => true);
+  tools.loadSkill = () => ({ body: "", dir: skill });
+  const textOnly = String(await tools.execute("computer", { action: "screenshot" }));
+  const fallbackPath = textOnly.match(/^saved\s+(.+?)\s+view=/)?.[1];
+  expect(fallbackPath).toBeTruthy();
+  expect(existsSync(fallbackPath!)).toBe(true); // separate vision helper can consume it
+  rmSync(fallbackPath!, { force: true });
+
+  tools.vision = true;
+  const result = await tools.execute("computer", { action: "screenshot" });
+  expect(Array.isArray(result)).toBe(true);
+  const parts = result as any[];
+  expect(parts.find((p) => p.type === "text").text).toContain("captured view=1x1 screen=1x1 scale=1");
+  expect(parts.find((p) => p.type === "image_url").image_url.url).toContain("data:image/gif;base64,");
+  const stalePath = parts.find((p) => p.type === "text").text.match(/neko_shot_\d+\.gif/)?.[0];
+  expect(stalePath).toBeUndefined(); // dead temp paths are not advertised to the model
+  const capturePath = readFileSync(join(scripts, "capture-path.txt"), "utf8");
+  expect(existsSync(capturePath)).toBe(false); // bytes are embedded before finally removes the file
 });
 
 test("describeToolCall uses Claude-style labels + primary arg", () => {

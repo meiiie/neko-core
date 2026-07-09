@@ -9,6 +9,10 @@ All notable changes to Neko Code are documented here. The format follows
 ### Added
 - Added `Alt+C` to copy the complete current draft without clearing it, including the expanded contents
   behind collapsed paste placeholders.
+- Made `computer screenshot` a first-class multimodal observation: vision-enabled models receive the
+  captured screen directly, strict OpenAI-compatible and Anthropic transports preserve the image, and
+  the TUI renders `[image]` instead of object-coercion noise. Text-only drivers keep the saved path for
+  the separate vision helper, and context relief retains the two most recent tool images under pressure.
 - Extended the gated Windows `computer` tool with Unicode `type`, shortcuts via `key`, mouse-independent
   `scroll`, bounded `wait`, and `open` for apps/files/URLs. Exact-control focus is verified before typing,
   with a disposable WPF/UIA probe covering the real input path.

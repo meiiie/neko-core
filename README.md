@@ -33,7 +33,9 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
   `bash` · `computer` (approval-gated). `search` uses ripgrep when present; `bash` takes a per-call timeout
   and can run in the background; `read_file` pages large files and reads images/PDFs. On Windows,
   `computer` combines UI Automation, mouse-independent touch, Unicode typing, shortcuts, scrolling, and
-  app/file/URL launch. Path-escape is refused.
+  app/file/URL launch. With vision enabled, a desktop screenshot returns directly to the model as the
+  next observation; text-only drivers can pass the saved capture to a separate vision model. Path-escape
+  is refused.
 - **Permission modes** — `default` / `accept-edits` / `plan` / `auto`, cycled with **Shift+Tab** (a
   *named* bounded-autonomy state, audited by `neko policy`); a seatbelt blocks catastrophic shell.
 - **Fullscreen terminal UI** — an app-owned, flicker-free viewport (alt-screen, like vim/htop):

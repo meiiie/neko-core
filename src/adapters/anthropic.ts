@@ -147,7 +147,11 @@ export function toAnthropicMessages(messages: any[]): { system: string; msgs: an
   for (const m of messages) {
     if (m.role === "system") { sys.push(typeof m.content === "string" ? m.content : textOf(m.content)); continue; }
     if (m.role === "tool") {
-      const block = { type: "tool_result", tool_use_id: m.tool_call_id, content: String(m.content ?? "") };
+      // Anthropic tool_result blocks accept nested text/image blocks. Preserve multimodal tool
+      // observations (read_file images and computer screenshots) instead of stringifying them to
+      // "[object Object]", which silently made the model blind after a successful capture.
+      const nested = Array.isArray(m.content) ? toAnthropicContent(m.content) : null;
+      const block = { type: "tool_result", tool_use_id: m.tool_call_id, content: nested?.length ? nested : String(m.content ?? "") };
       const last = msgs[msgs.length - 1];
       if (last?.role === "user" && Array.isArray(last.content) && last.content.length > 0 && last.content.every((b: any) => b.type === "tool_result")) last.content.push(block);
       else msgs.push({ role: "user", content: [block] });
@@ -167,16 +171,21 @@ export function toAnthropicMessages(messages: any[]): { system: string; msgs: an
     }
     // user
     if (Array.isArray(m.content)) {
-      msgs.push({ role: "user", content: m.content.map((p: any) => {
-        if (p?.type === "image_url" && p.image_url?.url) {
-          const dm = String(p.image_url.url).match(/^data:([^;]+);base64,(.+)$/);
-          if (dm) return { type: "image", source: { type: "base64", media_type: dm[1], data: dm[2] } };
-        }
-        return { type: "text", text: p?.type === "text" ? p.text : "" };
-      }) });
+      msgs.push({ role: "user", content: toAnthropicContent(m.content) });
     } else msgs.push({ role: "user", content: String(m.content ?? "") });
   }
   return { system: sys.filter(Boolean).join("\n\n"), msgs };
+}
+
+/** OpenAI text/image content parts -> Anthropic content blocks (valid for user messages and tool results). */
+function toAnthropicContent(parts: any[]): any[] {
+  return parts.map((p: any) => {
+    if (p?.type === "image_url" && p.image_url?.url) {
+      const dm = String(p.image_url.url).match(/^data:([^;]+);base64,(.+)$/);
+      if (dm) return { type: "image", source: { type: "base64", media_type: dm[1], data: dm[2] } };
+    }
+    return { type: "text", text: p?.type === "text" ? String(p.text ?? "") : "" };
+  });
 }
 
 /** OpenAI {type:function, function:{name,description,parameters}} -> Anthropic {name,description,input_schema}. */

@@ -44,6 +44,35 @@ export function toImgTagMessages(messages: any[]): any[] {
   });
 }
 
+/** Chat Completions tool messages are text-only on many OpenAI-compatible endpoints. Move image parts
+ * from a consecutive tool-result batch into one following user observation, after every required tool
+ * result has been supplied. This keeps the tool protocol valid while making screenshots visible across
+ * strict OpenAI servers; Anthropic keeps images natively inside tool_result blocks in its own adapter. */
+export function normalizeToolResultImages(messages: any[]): any[] {
+  const out: any[] = [];
+  for (let i = 0; i < messages.length;) {
+    const message = messages[i];
+    if (message?.role !== "tool") { out.push(message); i++; continue; }
+
+    const images: any[] = [];
+    while (i < messages.length && messages[i]?.role === "tool") {
+      const tool = messages[i++];
+      if (!Array.isArray(tool.content)) { out.push(tool); continue; }
+      const text = tool.content.filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? "")).join("\n");
+      const toolImages = tool.content.filter((p: any) => p?.type === "image_url" && p.image_url?.url);
+      images.push(...toolImages);
+      out.push({ ...tool, content: text || (toolImages.length ? "[visual observation attached next]" : "") });
+    }
+    if (images.length) {
+      out.push({
+        role: "user",
+        content: [{ type: "text", text: "Visual observation(s) returned by the preceding tool call(s):" }, ...images],
+      });
+    }
+  }
+  return out;
+}
+
 export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "moa") return new MoaProvider(config);
   if (config.provider === "anthropic") return new AnthropicProvider(config);
@@ -101,9 +130,10 @@ export class OpenAICompatProvider implements Provider {
     // image_url part (which they silently ignore). Convert when the endpoint needs it -- config-first,
     // auto for an NVIDIA base_url. No-op for text-only messages, so it's safe to always apply.
     const imgTag = this.cfg.imageFormat === "img-tag" || (this.cfg.imageFormat === "auto" && /nvidia/i.test(this.cfg.baseUrl));
+    const normalizedMessages = normalizeToolResultImages(messages);
     const payload: Record<string, any> = {
       model: this.cfg.model,
-      messages: imgTag ? toImgTagMessages(messages) : messages,
+      messages: imgTag ? toImgTagMessages(normalizedMessages) : normalizedMessages,
       temperature: this.cfg.temperature,
       stream,
     };

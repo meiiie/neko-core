@@ -151,10 +151,24 @@ export class Agent {
    * it freed anything (so the caller only falls back to a summary when there's nothing left to clip). */
   private shrinkOldObservations(): boolean {
     const CLIP = 1200, KEEP_RECENT = 3, MARK = "chars elided to fit context";
+    // A GUI loop can produce several base64 screenshots inside one user turn. Summarizing cannot help
+    // that shape (there is no older user-turn boundary), so keep the two most recent visual states and
+    // mask older tool images before clipping text. Two supports before/after comparison while bounding
+    // both request size and local session growth; user-attached images are deliberately untouched.
+    const imageIdx = this.messages
+      .map((m, i) => (m.role === "tool" && Array.isArray(m.content) && m.content.some((p: any) => p?.type === "image_url") ? i : -1))
+      .filter((i) => i >= 0);
+    let shrank = false;
+    for (const i of imageIdx.slice(0, Math.max(0, imageIdx.length - 2))) {
+      const m = this.messages[i];
+      m.content = m.content.map((p: any) => p?.type === "image_url"
+        ? { type: "text", text: "[older tool image elided; capture/read it again if the current state is insufficient]" }
+        : p);
+      shrank = true;
+    }
     const toolIdx = this.messages
       .map((m, i) => (m.role === "tool" && typeof m.content === "string" ? i : -1))
       .filter((i) => i >= 0);
-    let shrank = false;
     for (const i of toolIdx.slice(0, Math.max(0, toolIdx.length - KEEP_RECENT))) {
       const m = this.messages[i];
       if (m.content.length > CLIP + 80 && !m.content.includes(MARK)) {

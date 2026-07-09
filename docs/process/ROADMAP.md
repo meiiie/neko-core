@@ -21,8 +21,11 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   plans, raw-Markdown commit flashes, resize ghosts, history/scroll key conflicts and repeated approval
   feedback. The follow-up hardens todo state/exit persistence, adds non-destructive `Alt+C` draft copy,
   closes the native computer tool's type/key/scroll/wait/open gap, and embeds every built-in skill/asset in
-  the standalone binary. Gates: TS 7 + TS 5.9 typecheck, **416/416 tests**, policy PASS, binary build +
-  UI/input/skill probes, deterministic VT capture, real desktop WPF/UIA input probe, and ConPTY smoke.
+  the standalone binary. A UI-TARS Desktop clean-room audit then closed the visual-observation gap:
+  `computer screenshot` now reaches vision models directly across OpenAI-compatible and Anthropic wire
+  formats while preserving the text-only helper path. Gates: TS 7 + TS 5.9 typecheck, **421/421 tests**
+  (1572 assertions), policy PASS, binary build + UI/input/skill probes, deterministic VT capture, real
+  desktop WPF/UIA input probe, and ConPTY smoke.
 - **The v0.7.0 arc (Jul 3-6) — fullscreen became THE interface:** app-owned alt-screen viewport with a
   stdout-layer FrameDiffer (line-diff + DECSTBM hardware scroll, absolute-addressed, VT-verified), ANSI
   row cache + windowed warmer, live-markdown streaming tail, ease-out glide scroll at the display's

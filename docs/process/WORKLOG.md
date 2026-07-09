@@ -856,3 +856,29 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
 - Verification: TS 7 + TS 5.9 clean; **416/416 tests** (1549 assertions); doctor healthy; policy PASS;
   production build + embedded-skill/UI + real-PTY input probes PASS; deterministic VT audit PASS; WPF/UIA
   input probe PASS; ConPTY startup/resize/slash/keyboard PASS, scroll first response 14 ms / settle 142 ms.
+
+## 2026-07-10 - UI-TARS Desktop clean-room audit and visual computer observations
+- Cloned `bytedance/UI-TARS-desktop` into the untracked sibling reference area at commit
+  `c2ad42e3eb9b27830db41a3e6f51ca7179d9b168`. Studied it clean-room only; no source or visual assets were
+  copied into Neko. The in-app browser was unavailable, so the visual audit used the repository's own
+  current documentation screenshots (`start_task`, `take_control`, `terminate`, settings) plus source.
+- The useful mechanism was narrower than the Electron shell: both the legacy SDK and current GUI Agent
+  2.0 make screenshots explicit environment input, keep a bounded visual history (legacy limit: five),
+  wait for the UI to settle, and expose action/status/takeover events. Neko already has the stronger
+  terminal-native pieces for its product - queued input while busy, approval modes, todo state, action
+  transcript, Esc/click takeover, UIA structure, and a mouse-independent pointer channel - so porting the
+  desktop layout or its operator hierarchy would add weight without closing a real gap.
+- Found the real gap by executing Neko's tool: `computer screenshot` returned only a temp GIF path. A
+  vision-enabled main model therefore did not receive the visual observation in the next turn, and a
+  multimodal tool result would stringify to `[object Object]` in the TUI and Anthropic adapter.
+- Fixed the whole path surgically: screenshots now embed as image content when `vision` is enabled;
+  text-only drivers retain the file path for `computer-use/scripts/see.ts`; strict OpenAI-compatible
+  payloads move tool images after the complete tool-result batch as a user visual observation; Anthropic
+  emits native nested image blocks; live and resumed TUI transcripts render metadata plus `[image]`.
+  Context relief masks older tool images while retaining the newest two for before/after comparison and
+  never prunes user attachments.
+- Verification: TS 7 + TS 5.9 clean; **421/421 tests** (1572 assertions); doctor healthy; policy PASS;
+  a real desktop capture returned a 768x432 GIF observation with physical-screen scale and no stale temp
+  path; production build + embedded-skill + real-PTY input probes PASS; deterministic VT UX audit PASS;
+  disposable WPF/UIA Unicode input probe PASS; ConPTY startup/resize/slash/keyboard PASS, scroll first
+  response 18 ms / settle 337 ms.
