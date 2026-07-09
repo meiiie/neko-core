@@ -119,10 +119,9 @@ export function ThinkingLine(props: { verb: string; elapsed: number; step: numbe
 
   return (
     <Box flexDirection="row">
-      <Box width={2}>
-        <Text color={ORANGE}>{star}</Text>
-      </Box>
+      <Text color={ORANGE}>{star}</Text>
       <Text>
+        {" "}
         {chars.map((c, i) => (
           <Text key={i} color={Math.abs(i - glimmer) <= 1 ? SHIMMER : ORANGE}>{c}</Text>
         ))}{" "}

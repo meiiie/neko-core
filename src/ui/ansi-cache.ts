@@ -79,6 +79,14 @@ export function getCachedRows(line: Line, width: number): string[] | null {
   return hit && hit.width === width ? hit.rows : null;
 }
 
+/** Prime a newly committed rich line before it enters the fullscreen transcript. Streaming replies
+ * are already shown as formatted Markdown; caching the final assistant line synchronously prevents a
+ * one-frame fallback to raw `**markdown**` while the background warmer catches up. */
+export function primeAnsiCache(line: Line, width: number, cfg: NekoConfig): void {
+  try { cache.set(line.id, { width, rows: renderLineRows(line, width, cfg) }); }
+  catch { cache.set(line.id, { width, rows: fallbackRows(line) }); }
+}
+
 export function clearAnsiCache(): void {
   cache.clear();
   if (warmTimer) { clearTimeout(warmTimer); warmTimer = null; }

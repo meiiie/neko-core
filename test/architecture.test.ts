@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 // The dependency rule from ARCHITECTURE.md (Ports & Adapters): dependencies point inward.
 // If this fails, a layering violation crept in - move the logic / add a port, don't loosen.
@@ -25,5 +25,17 @@ test("adapters never import the ui layer or a UI framework", () => {
     const src = read("adapters", f);
     expect(src, `${f}: adapters must not import ui`).not.toMatch(/from ["']\.\.\/ui/);
     expect(src, `${f}: adapters must not import a UI framework`).not.toMatch(/from ["'](ink|react)/);
+  }
+});
+
+test("developer scripts have no broken relative imports", () => {
+  const dir = join(import.meta.dir, "..", "scripts");
+  for (const f of readdirSync(dir).filter((name) => name.endsWith(".ts"))) {
+    const src = readFileSync(join(dir, f), "utf-8");
+    const imports = [...src.matchAll(/(?:from\s+|import\()\s*["'](\.[^"']+)["']/g)];
+    for (const match of imports) {
+      const target = resolve(dir, match[1]);
+      expect(existsSync(target), `${f}: missing relative import ${match[1]}`).toBe(true);
+    }
   }
 });

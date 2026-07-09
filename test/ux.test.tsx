@@ -73,6 +73,23 @@ test("status bar shows mode + context %", () => {
   c.unmount();
 });
 
+test("first-run status bar names the missing model instead of showing a dangling separator", () => {
+  const saved = { userProfile: process.env.USERPROFILE, home: process.env.HOME };
+  const home = mkdtempSync(join(tmpdir(), "neko-first-run-"));
+  process.env.USERPROFILE = home;
+  process.env.HOME = home;
+  try {
+    const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
+    const status = strip(c.lastFrame()).split("\n").find((line) => line.includes("shift+tab")) ?? "";
+    expect(status).toContain("no model");
+    c.unmount();
+  } finally {
+    if (saved.userProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.userProfile;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("ThinkingLine shows effort + per-turn tokens split input/output", () => {
   const f = strip(render(<ThinkingLine verb="Thinking" elapsed={11} liveIn={() => 1200} liveOut={() => 340} step={1} queued={0} effort="xhigh" />).lastFrame());
   expect(f).toContain("xhigh effort");
@@ -208,6 +225,18 @@ test("ansi-cache: renderLineRows renders a line rich once; fallback is instant p
   clearAnsiCache();
 });
 
+test("ansi-cache: priming a committed assistant skips the raw markdown fallback", async () => {
+  const { primeAnsiCache, getCachedRows, clearAnsiCache } = await import("../src/ui/ansi-cache.ts");
+  const line = { id: 90003, kind: "assistant" as const, text: "**formatted answer**" };
+  clearAnsiCache();
+  primeAnsiCache(line, 60, CFG);
+  const rows = getCachedRows(line, 60);
+  expect(rows).not.toBeNull();
+  expect(rows!.join("\n")).not.toContain("**");
+  expect(rows!.join("\n")).toContain("formatted answer");
+  clearAnsiCache();
+});
+
 test("fullscreen history: PgUp shows the jump pill; a new turn counts; End returns to the tail", async () => {
   {
     const msgs: any[] = [];
@@ -318,6 +347,7 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
     // Flash denied -> different confirmation
     const no = strip(render(<ApprovalBox approval={approval} flash={{ kind: "no", tool: "bash" }} />).lastFrame());
     expect(no).toContain("denied");
+    expect(no.match(/denied/g)).toHaveLength(1); // confirmation is not repeated in both header + footer
     // Flash always -> names the tool
     const always = strip(render(<ApprovalBox approval={approval} flash={{ kind: "always", tool: "bash" }} />).lastFrame());
     expect(always).toContain("always-bash");

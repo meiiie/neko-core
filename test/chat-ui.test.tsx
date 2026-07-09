@@ -118,6 +118,7 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
   stdin.write("y"); // approve
   expect(await until(() => seen("(exit 0)"))).toBe(true); // tool ran after approval (git-bash spawn can be slow)
   expect(await until(() => seen("Finished"))).toBe(true); // final answer
+  expect(lastFrame() ?? "").not.toMatch(/^\s*>\s*y\s*$/m); // approval key must not leak into the prompt
   unmount();
 }, 40000);
 

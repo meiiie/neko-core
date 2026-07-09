@@ -39,6 +39,25 @@ function renderFS(node: any, options: any) {
   return render(React.cloneElement(node, { fullscreen: true }), { ...options, interactive: true });
 }
 
+test("virtual terminal consumes cursor-shape control sequences without visible residue", () => {
+  const vt = new VirtualTerminal(40, 4);
+  vt.write("ready\x1b[5 q"); // DECSCUSR: blinking bar cursor
+  expect(vt.text()).toContain("ready");
+  expect(vt.text()).not.toContain("[5 q");
+});
+
+test("virtual terminal tracks Unicode display cells, not UTF-16 code units", () => {
+  const vt = new VirtualTerminal(40, 4);
+  vt.write("A界B");
+  expect(vt.c).toBe(4); // 1 + wide CJK cell pair + 1
+  expect(vt.lines()[0]).toBe("A界B");
+
+  const combining = new VirtualTerminal(40, 4);
+  combining.write("e\u0301x");
+  expect(combining.c).toBe(2); // one grapheme/cell for e + combining acute, then x
+  expect(combining.lines()[0]).toBe("e\u0301x");
+});
+
 test("fullscreen sim: startup, typing, grow and shrink never leave a black screen", async () => {
   const vt = new VirtualTerminal(100, 30);
   const out = new FakeTtyOut(100, 30, vt);
@@ -77,6 +96,31 @@ test("fullscreen sim: startup, typing, grow and shrink never leave a black scree
   // typing after all of it still lands
   stdin.push("z"); await tick(150);
   expect(vt.text()).toContain("z");
+  app.unmount();
+  await tick(50);
+}, 30000);
+
+test("resize after a completed turn keeps the input row empty", async () => {
+  const vt = new VirtualTerminal(110, 32);
+  const out = new FakeTtyOut(110, 32, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  const provider: any = { complete: async () => ({ content: "final answer", tool_calls: [] }) };
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = renderFS(
+    React.createElement(ChatApp as any, { yolo: true, provider, sessionId: "resize-after-turn", frameDiffer: differ, preAltDispose }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(300);
+  stdin.push("PROMPT-MUST-NOT-GHOST"); await tick(30); stdin.push("\r"); await tick(450);
+  expect(vt.text()).toContain("final answer");
+
+  out.setSize(80, 20);
+  await tick(700);
+  const promptRows = vt.lines().filter((line) => /^\s*>/.test(line));
+  expect(promptRows.at(-1)?.trim()).toBe(">");
+  stdin.push("\x1b[1;5A"); await tick(120); // Ctrl+Up belongs to transcript scroll, not prompt history
+  expect(vt.lines().filter((line) => /^\s*>/.test(line)).at(-1)?.trim()).toBe(">");
   app.unmount();
   await tick(50);
 }, 30000);
@@ -138,6 +182,76 @@ test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for
   out.all = "";
   stdin.push("\x03"); await tick(80);           // the habit: the selection persists, Ctrl+C copies it
   expect(out.all).toContain("\x1b]52;");        // Ctrl+C copied the still-active selection
+  app.unmount();
+  await tick(50);
+}, 30000);
+
+test("todo flow shows the current plan once while the next step is running", async () => {
+  const vt = new VirtualTerminal(96, 28);
+  const out = new FakeTtyOut(96, 28, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  let call = 0;
+  let finish = () => {};
+  const provider: any = {
+    complete: async () => {
+      call++;
+      if (call === 1) {
+        return {
+          content: null,
+          tool_calls: [{
+            id: "todo-flow",
+            name: "todo_write",
+            arguments: { todos: [
+              { content: "active task", status: "in_progress" },
+              { content: "UNIQUE PENDING TODO", status: "pending" },
+            ] },
+          }],
+        };
+      }
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { content: "done", tool_calls: [] };
+    },
+  };
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = renderFS(
+    React.createElement(ChatApp as any, { yolo: true, provider, sessionId: "todo-flow", frameDiffer: differ, preAltDispose }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(300);
+  stdin.push("make a plan"); await tick(30); stdin.push("\r"); await tick(450);
+  const occurrences = vt.text().split("UNIQUE PENDING TODO").length - 1;
+  expect(occurrences).toBe(1); // one plan, not a committed result plus a duplicate live copy
+  finish();
+  await tick(150);
+  app.unmount();
+  await tick(50);
+}, 30000);
+
+test("approval decision keys never leak into the prompt", async () => {
+  const vt = new VirtualTerminal(80, 24);
+  const out = new FakeTtyOut(80, 24, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  let call = 0;
+  const provider: any = {
+    complete: async () => ++call === 1
+      ? { content: null, tool_calls: [{ id: "deny", name: "bash", arguments: { command: "echo should-not-run" } }] }
+      : { content: "denied safely", tool_calls: [] },
+  };
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = renderFS(
+    React.createElement(ChatApp as any, { yolo: false, provider, sessionId: "approval-key", frameDiffer: differ, preAltDispose }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(300);
+  stdin.push("request approval"); await tick(30); stdin.push("\r");
+  for (let waited = 0; waited < 2000 && !vt.text().includes("Approve bash?"); waited += 25) await tick(25);
+  expect(vt.text()).toContain("Approve bash?");
+  stdin.push("n");
+  await tick(500);
+  expect(vt.text()).toContain("denied safely");
+  expect(vt.lines().some((line) => /^\s*>\s*n\s*$/.test(line))).toBe(false);
   app.unmount();
   await tick(50);
 }, 30000);

@@ -530,6 +530,32 @@ test("compact() carries the ORIGINAL task verbatim ahead of the summary (survive
   expect(String(summ.content)).toContain("ORIGINAL TASK (verbatim): Build me a landing page"); // task preserved by CODE, not the summarizer
 });
 
+test("compact() carries the current todo plan deterministically", async () => {
+  const tools = new ToolRegistry(process.cwd(), "auto", () => true);
+  tools.todos = [
+    { content: "inspect the TUI", status: "completed" },
+    { content: "fix the todo flow", status: "in_progress" },
+  ];
+  const agent = new Agent({
+    provider: new ScriptedProvider([{ content: "SUMMARY", tool_calls: [] }]) as any,
+    tools,
+  });
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "Improve the terminal UX" },
+    { role: "assistant", content: "a1" },
+    { role: "user", content: "o2" }, { role: "assistant", content: "a2" },
+    { role: "user", content: "r1" }, { role: "assistant", content: "a3" },
+    { role: "user", content: "r2" }, { role: "assistant", content: "a4" },
+    { role: "user", content: "r3" }, { role: "assistant", content: "a5" },
+    { role: "user", content: "RECENT" }, { role: "assistant", content: "ra" },
+  ];
+  await agent.compact();
+  const summary = agent.messages.find((m: any) => String(m.content).includes("SUMMARY"));
+  expect(String(summary.content)).toContain("[x] inspect the TUI");
+  expect(String(summary.content)).toContain("[~] fix the todo flow");
+});
+
 test("verify_before_exit gate fires once, then lets the model finish (off by default)", async () => {
   // OFF: the first tool-less answer returns immediately.
   const offScript = [{ content: "done-immediately", tool_calls: [] }];

@@ -64,6 +64,39 @@ test("parseInkPayload accepts the standard shape (erase prefix OPTIONAL), reject
   expect(parseInkPayload(erase(2) + "x\x1b[3Ay")).toBe(null);      // cursor moves inside a "frame"
 });
 
+test("fullscreen full repaint erases a stale trailing spare row", () => {
+  const d = new FrameDiffer();
+  d.setBand({ top: 1, height: 15 });
+  // Production fullscreen owns rows-1; row 20 is the physical spare that prevents bottom-right scroll.
+  const frame = ["top", ...Array.from({ length: 18 }, () => "")];
+  const screen = new Screen(20);
+  screen.r = 19;
+  screen.write("STALE STATUS"); // terminal resize/reflow can leave content in the reserved last row
+  screen.write(d.process(frame.join("\n"))!);
+  expect(screen.lines(20)[19]).toBe("");
+});
+
+test("resize wipe composes the new frame and never replays the stale pre-wipe frame", () => {
+  const d = new FrameDiffer();
+  const writes: string[] = [];
+  d.setWriter((s) => writes.push(s));
+  d.setBand({ top: 1, height: 26 });
+  d.process(Array.from({ length: 32 }, (_, i) => i === 28 ? "> OLD PROMPT" : `old-${i}`).join("\n"));
+  writes.length = 0;
+
+  // Ink can resize through an explicit clear + full frame. The differ must compose THIS new frame (its
+  // band is blank in Ink), not pass the blank band through and not retain the old 32-row lastRaw.
+  const resized = d.process("\x1b[2J\x1b[H" + Array.from({ length: 20 }, (_, i) => i === 16 ? "> " : `new-${i}`).join("\n"));
+  expect(resized).not.toBeNull();
+  expect(resized).toContain("new-0");
+  expect(resized).not.toContain("OLD PROMPT");
+  d.setBand({ top: 1, height: 14 });
+  writes.length = 0;
+  d.forceFullRepaint();
+  expect(writes.join("")).toContain("new-0");
+  expect(writes.join("")).not.toContain("OLD PROMPT");
+});
+
 test("line-diff: only the changed line is rewritten, and the screen matches a full rewrite", () => {
   const d = new FrameDiffer();
   const A = ["r0", "r1", "r2", "r3"];

@@ -11,7 +11,7 @@
  */
 import { CostTracker } from "./cost.ts";
 import type { DeltaHook, Provider, ToolCall } from "./ports.ts";
-import type { ToolRegistry } from "./tool-runtime.ts";
+import { todosContextBlock, type ToolRegistry } from "./tool-runtime.ts";
 import {
   DEFAULT_SYSTEM_PROMPT,
   CONCURRENCY_SAFE,
@@ -135,9 +135,10 @@ export class Agent {
     // summarized head, carry its text (clipped) ahead of the model summary.
     const firstUser = head.find((m) => m.role === "user");
     const task = typeof firstUser?.content === "string" ? firstUser.content.slice(0, 600) : "";
+    const plan = todosContextBlock(this.tools.todos);
     this.messages = [
       ...sys,
-      { role: "user", content: `[Summary of earlier conversation]\n${task ? `ORIGINAL TASK (verbatim): ${task}\n\n` : ""}${summary}` },
+      { role: "user", content: `[Summary of earlier conversation]\n${task ? `ORIGINAL TASK (verbatim): ${task}\n\n` : ""}${plan ? `${plan}\n\n` : ""}${summary}` },
       ...leanTail,
     ];
     return summary;
@@ -197,7 +198,7 @@ export class Agent {
     return out;
   }
 
-  /** Refresh the live session context (env + project + memory + todos) held INSIDE the single base
+  /** Refresh the live session context (env + project + memory) held INSIDE the single base
    * system message — so a mid-session model switch or NEKO.md edit is reflected at once, without ever
    * emitting a second system message (which breaks tool-calling on some templates). */
   private refreshDynamicContext(): void {

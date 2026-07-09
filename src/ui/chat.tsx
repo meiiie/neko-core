@@ -26,7 +26,7 @@ import { FrameDiffer } from "./frame-diff.ts";
 import { canFullscreen, emergencyRestore, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
-import { clearAnsiCache, fallbackRows, getCachedRows, renderNodeRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
+import { clearAnsiCache, fallbackRows, getCachedRows, primeAnsiCache, renderNodeRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
 import { DISABLE_MOUSE, isMouseEnabled, parseLastPointer, parseWheelAll } from "./mouse.ts";
 import { brandTitle, saveTitle, setTabTitle, setTerminalTitle, stopTitleDriver } from "./title.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
@@ -182,6 +182,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // terminal can't host it (non-TTY / too small). Set once at mount - there is no runtime toggle.
   const [fullscreen] = useState<boolean>(fullscreenOverride ?? (cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout)));
   const fullscreenRef = useRef(fullscreen); // for closures that read the mode (resize debounce, mount effect)
+  const contentColsRef = useRef(Math.max(20, (stdout?.columns ?? 80) - 4));
   useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
   // Brand the tab title on mount - AFTER Ink's first render, when VT processing is on, so the OSC 2 write
   // reliably lands (a pre-render write can be dropped before the console enables VT). The session's name
@@ -239,8 +240,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const autoLoadedSkills = useRef<Set<string>>(new Set()); // domain skills already auto-loaded this session
   const [pastedCount, setPastedCount] = useState(0);
 
-  const addLine = (kind: LineKind, text: string, summary?: string) =>
-    setLines((prev) => [...prev, { id: idRef.current++, kind, text, summary }]);
+  const addLine = (kind: LineKind, text: string, summary?: string) => {
+    const line = { id: idRef.current++, kind, text, summary };
+    // A streamed answer is rich Markdown before commit. Prime its final rows now so fullscreen never
+    // flashes the cheap raw-markdown fallback while the asynchronous cache warmer catches up.
+    if (fullscreenRef.current && kind === "assistant") primeAnsiCache(line, contentColsRef.current, cfg);
+    setLines((prev) => [...prev, line]);
+  };
 
   // Bound the in-memory transcript so a marathon session can't grow `lines` (and the resize re-emit)
   // without limit. <Static> is append-only, so when we trim the front we wipe + remount it (resizeKey)
@@ -920,6 +926,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setMode(nm);
         return;
       }
+      if (key.ctrl || key.meta) return; // Ctrl+Up/Down scrolls the transcript; never recall prompt history too
       // Slash menu open: arrows highlight a suggestion, Tab completes it — keep history out of it.
       if (slashOpen && slashMatches.length) {
         const cap = Math.min(slashMatches.length, SLASH_CAP);
@@ -1218,6 +1225,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // tables, dividers, the stream clamp) uses `contentCols` = the padded inner width.
   const gutter = 2;
   const contentCols = Math.max(20, cols - gutter * 2);
+  contentColsRef.current = contentCols;
   // Fullscreen: the transcript becomes an app-owned scroll region (flattened rows, windowed to viewH)
   // instead of the append-only <Static>. Sticky-to-bottom auto-follows new output; PgUp/PgDn page and
   // Ctrl+up/down line-scroll (unambiguous keys that never fight typing or history). Hooks run every
@@ -1501,19 +1509,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         </Box>
       ) : null}
 
-      {/* Live todo tracker: only WHILE a turn runs. When idle the committed "Update Todos" tool result
-          is the record — showing the sticky list too would duplicate it (a plan printed twice). */}
-      {busy && todos.length ? (
-        <Box flexDirection="column" marginTop={1}>
-          {todos.map((t, i) => (
-            <Text key={i} color={t.status === "completed" ? "green" : t.status === "in_progress" ? "yellow" : "gray"}>
-              {t.status === "completed" ? " [x] " : t.status === "in_progress" ? " [~] " : " [ ] "}
-              {t.content}
-            </Text>
-          ))}
-        </Box>
-      ) : null}
-
       {busy && !approval && !stream && reasoning.trim() ? ( // hide stale thinking once the answer streams (frees viewport)
         <Box flexDirection="column" marginTop={1}>
           {reasoning.trim().split("\n").slice(-6).map((l, i) => (
@@ -1658,7 +1653,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 const ctxColor = pct >= 85 ? "red" : pct >= 60 ? "yellow" : "#9a9a9a";
                 return (
                   <Text color="#9a9a9a" wrap="truncate-end">
-                    {(cfg.model || "").split("/").pop()} · <Text color={ctxColor}>{pct}% ctx</Text>
+                    {(cfg.model || "no model").split("/").pop()} · <Text color={ctxColor}>{pct}% ctx</Text>
                   </Text>
                 );
               })()}

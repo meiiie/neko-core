@@ -887,8 +887,8 @@ function renderTodos(todos: { content: string; status: string }[]): string {
   return "Todos:\n" + todos.map((t) => `${mark(t.status)} ${t.content}`).join("\n");
 }
 
-/** The active todo list as a context block ("" if none) — re-injected each turn so it survives
- * compaction (structured note-taking: the plan stays in front of the model on long tasks). */
+/** The active todo list as a context block ("" if none), carried through compaction so the plan stays
+ * in front of the model on long tasks without mutating the cache-friendly system-message prefix. */
 export function todosContextBlock(todos: { content: string; status: string }[]): string {
   return todos.length ? `Current plan (todos):\n${renderTodos(todos)}` : "";
 }

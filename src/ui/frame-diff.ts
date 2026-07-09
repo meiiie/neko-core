@@ -134,12 +134,16 @@ export class FrameDiffer {
   // sustained activity (streaming). Cost: one plain frame per pause. A curses-style ^L, automated.
   private lastResyncAt = 0;
   private resyncTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Absolute repaint of the whole model (skips a trailing empty line - see fullRepaintOr). */
+  /** Absolute repaint of the whole model. Empty rows still get EL: after a resize/reflow the reserved
+   * last row may contain stale chrome, and merely moving the cursor there leaves that ghost visible. */
   private paintAll(): string {
     const lines = this.prev!;
-    const n = lines.length && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
     let out = "";
-    for (let i = 0; i < n; i++) out += `${ESC}${i + 1};1H` + lines[i] + EL;
+    for (let i = 0; i < lines.length; i++) out += `${ESC}${i + 1};1H` + lines[i] + EL;
+    // Fullscreen intentionally renders rows-1 so writing the bottom-right cell can never make Windows
+    // scroll. The unowned physical spare row still reflows OLD text during a resize; clear it explicitly
+    // or a fragment can survive beneath the footer even though every modeled row is correct.
+    out += `${ESC}${lines.length + 1};1H${EL}`;
     this.lastResyncAt = Date.now();
     return out + `${ESC}${lines.length};1H`;
   }
@@ -166,7 +170,9 @@ export class FrameDiffer {
    * caret's periodic blink accidentally supplied that follow-up frame; the hardware caret is static, so
    * this must be explicit (fullscreen-sim caught a black screen after a shrink otherwise). */
   forceFullRepaint(): void {
-    if (!this.writer || !this.lastRaw || !this.band) { this.prev = null; return; } // no frame yet -> reset so the next seeds
+    // An unrecognized control write can reset `prev` while `lastRaw` still points at the old geometry.
+    // Never replay that stale raw frame; only repaint when a current parsed model still exists.
+    if (!this.writer || !this.lastRaw || !this.band || !this.prev) { this.prev = null; return; }
     const lines = this.compose(this.lastRaw.slice()); // recompose the LATEST Ink frame at the CURRENT band geometry
     this.extractCursor(lines);
     this.prev = lines;
@@ -396,6 +402,23 @@ export class FrameDiffer {
     // pass them through but DO NOT reset the baseline, or the differ is blinded on every single frame
     // (exactly the bug the TTY bench caught: differ ON produced identical bytes to differ OFF).
     if (/^(?:\x1b\[\?[0-9;]+[hl])+$/.test(payload)) return null;
+    // Ink sometimes handles a resize as an explicit wipe immediately followed by its new full frame.
+    // Passing that through would paint the frame's intentionally BLANK transcript band and reset our
+    // model; replaying lastRaw afterward would instead resurrect the OLD-sized frame. Consume this one
+    // exact shape, compose the new raw frame now, and repaint it absolutely after the wipe.
+    const wiped = /^((?:(?:\x1b\[2J|\x1b\[3J|\x1b\[H))+)([\s\S]+)$/.exec(payload);
+    if (wiped && this.band) {
+      const afterWipe = parseInkPayload(wiped[2]);
+      if (afterWipe && afterWipe.eraseCount === 0) {
+        this.lastRaw = afterWipe.frame.split("\n");
+        const lines = this.compose(this.lastRaw.slice());
+        this.extractCursor(lines);
+        this.prev = lines;
+        this.markPainted();
+        trace({ ev: "wipe-seed", n: lines.length });
+        return wiped[1] + this.paintAll();
+      }
+    }
     const parsed = parseInkPayload(payload);
     if (!parsed) { trace({ ev: "passthru-reset", head: payload.slice(0, 40) }); this.prev = null; return null; } // not a standard rerender -> passthrough + reset
     // Compose: Ink rendered the band blank (when band content is on); splice the real window in, so

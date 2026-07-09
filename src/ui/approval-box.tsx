@@ -34,7 +34,7 @@ export function ApprovalBox({ approval, flash, width }: { approval: Approval; fl
       <Box borderStyle="round" borderColor={color ?? "blue"} paddingX={1} flexDirection="column" flexShrink={0}>
         <Text bold color={color ?? "blue"}>{status ?? "Ready to code?"}</Text>
         <Markdown text={String(args.plan ?? "")} width={mdWidth} minWidth={10} />
-        <Text color={color ?? "gray"}>{status ?? "[y] proceed (accept-edits)   [n] keep planning / Esc"}</Text>
+        {status ? null : <Text color="gray">[y] proceed (accept-edits)   [n] keep planning / Esc</Text>}
       </Box>
     );
   }
@@ -62,7 +62,7 @@ export function ApprovalBox({ approval, flash, width }: { approval: Approval; fl
     <Box borderStyle="round" borderColor={color ?? "yellow"} paddingX={1} flexDirection="column" flexShrink={0}>
       <Text bold color={color ?? "yellow"}>{status ?? `Approve ${toolName}?`}</Text>
       {preview}
-      <Text color={color ?? "gray"}>{status ?? `[y]es   [a]lways allow ${toolName}   [n]o / Esc`}</Text>
+      {status ? null : <Text color="gray">{`[y]es   [a]lways allow ${toolName}   [n]o / Esc`}</Text>}
     </Box>
   );
 }
