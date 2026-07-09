@@ -6,6 +6,9 @@
  *   bun scripts/inspect-ui.ts
  */
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve, sep } from "node:path";
 import { render } from "ink";
 import React from "react";
 
@@ -15,9 +18,18 @@ import { installAltScreenGuard } from "../src/ui/altscreen.ts";
 import { wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
 import { VirtualTerminal } from "../test/vt.ts";
 
+const savedHome = { userProfile: process.env.USERPROFILE, home: process.env.HOME };
+const auditHome = mkdtempSync(`${tmpdir()}${sep}neko-ui-audit-`);
+process.env.USERPROFILE = auditHome;
+process.env.HOME = auditHome;
+
 class Out extends EventEmitter { isTTY = true; bytes = 0; osc52 = false; selBg = false; constructor(public columns: number, public rows: number, private vt: VirtualTerminal) { super(); } write(s: string) { const str = String(s); this.bytes += str.length; if (str.includes("\x1b]52;")) this.osc52 = true; if (str.includes("\x1b[48;5;25m")) this.selBg = true; this.vt.write(str); return true; } setSize(c: number, r: number) { this.columns = c; this.rows = r; this.vt.resize(c, r); this.emit("resize"); } }
 class In extends EventEmitter { isTTY = true; data: string | null = null; setRawMode() {} setEncoding() {} ref() {} unref() {} pause() {} resume() {} read() { const d = this.data; this.data = null; return d; } push(s: string) { this.data = s; this.emit("readable"); this.emit("data", s); } }
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const until = async (pred: () => boolean, ms = 7000) => {
+  for (let waited = 0; waited < ms && !pred(); waited += 25) await tick(25);
+  return pred();
+};
 
 function dump(label: string, vt: VirtualTerminal) {
   console.log(`\n===== ${label} =====`);
@@ -27,22 +39,65 @@ function dump(label: string, vt: VirtualTerminal) {
 // A provider that streams a markdown reply token-by-token (to inspect live formatting + measure cost).
 const MD = "Đây là **tổng hợp** hôm nay:\n\n## Nga - Ukraine\n\n- Cuộc gọi **Trump - Putin** (90 phút)\n- Bối cảnh: tuần tới\n\n| Chỉ số | Số liệu |\n|---|---|\n| Người chết | **150.000** |\n| Di tản | ~12 triệu |\n\nBạn muốn đi sâu vào đâu?";
 class MdStream {
+  done = false;
   async complete(_m: any, _t: any, onDelta?: (t: string, k?: any) => void) {
     for (const tok of MD.match(/\S+\s*|\n/g) ?? []) { onDelta?.(tok); await tick(15); }
+    this.done = true;
     return { content: MD, tool_calls: [], usage: { prompt_tokens: 500, completion_tokens: 200, total_tokens: 700 } };
   }
 }
 
-const vt = new VirtualTerminal(110, 32);
-const out = new Out(110, 32, vt);
-const stdin = new In();
-const differ = new FrameDiffer();
+class TodoFlow {
+  private call = 0;
+  private release: (() => void) | null = null;
+  private wait() { return new Promise<void>((resolve) => { this.release = resolve; }); }
+  advance() {
+    if (!this.release) throw new Error("todo flow is not waiting");
+    this.release();
+    this.release = null;
+  }
+  async complete() {
+    this.call++;
+    const todos = [
+      { content: "Map the current interactive flows", status: this.call > 1 ? "completed" : "in_progress" },
+      { content: "Exercise keyboard navigation and queued input", status: this.call > 1 ? "completed" : "pending" },
+      { content: "Inspect todo updates and resume behavior", status: this.call > 1 ? "in_progress" : "pending" },
+      { content: "Verify approval and denial feedback", status: "pending" },
+      { content: "Resize narrow and short terminals", status: "pending" },
+      { content: "Run the release verification loop", status: "pending" },
+    ];
+    if (this.call === 1) return { content: null, tool_calls: [{ id: "todo-1", name: "todo_write", arguments: { todos } }] };
+    if (this.call === 2) { await this.wait(); return { content: null, tool_calls: [{ id: "todo-2", name: "todo_write", arguments: { todos } }] }; }
+    if (this.call === 3) { await this.wait(); return { content: "Todo audit complete.", tool_calls: [] }; }
+    return { content: "Done.", tool_calls: [] };
+  }
+}
+
+class ApprovalFlow {
+  private call = 0;
+  async complete() {
+    this.call++;
+    if (this.call === 1) return { content: null, tool_calls: [{ id: "approval-1", name: "bash", arguments: { command: "echo neko-ui-audit" } }] };
+    return { content: "Understood; the command was not run.", tool_calls: [] };
+  }
+}
+
+function mountFlow(provider: any, sessionId: string, cols: number, rows: number, yolo: boolean) {
+  const vt = new VirtualTerminal(cols, rows);
+  const out = new Out(cols, rows, vt);
+  const stdin = new In();
+  const differ = new FrameDiffer();
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = render(
+    React.createElement(ChatApp as any, { yolo, provider, sessionId, frameDiffer: differ, preAltDispose }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
+  );
+  return { vt, out, stdin, differ, app };
+}
+
+const mdProvider = new MdStream();
 process.env.NEKO_FULLSCREEN = "1";
-const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
-const app = render(
-  React.createElement(ChatApp as any, { yolo: true, provider: new MdStream(), sessionId: "inspect", frameDiffer: differ, preAltDispose }),
-  { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
-);
+const { vt, out, stdin, app } = mountFlow(mdProvider, "inspect", 110, 32, true);
 await tick(300);
 dump("STARTUP (fullscreen, fresh)", vt);
 
@@ -54,7 +109,15 @@ stdin.push("\r");
 const t0 = performance.now();
 await tick(400);
 dump("MID-STREAM (markdown should be FORMATTED live, no raw ** or ##)", vt);
-await tick(2500);
+if (!(await until(() => mdProvider.done))) throw new Error("markdown stream did not finish");
+if (!(await until(() =>
+  vt.text().includes("Bạn muốn đi sâu vào đâu?") &&
+  !vt.text().includes("esc to interrupt") &&
+  !vt.text().includes("**tổng hợp**") &&
+  vt.lines().filter((line) => line.includes("Đây là tổng hợp hôm nay:")).length === 1
+))) {
+  throw new Error("markdown reply did not settle on screen");
+}
 const streamMs = performance.now() - t0;
 dump("AFTER COMMIT", vt);
 console.log(`\nstream wall time: ${streamMs.toFixed(0)}ms for ${MD.length} chars, ${out.bytes} total bytes written`);
@@ -62,7 +125,9 @@ console.log(`\nstream wall time: ${streamMs.toFixed(0)}ms for ${MD.length} chars
 // --- drag-select the "Nga - Ukraine" line and copy it (mouse: press left, drag, release) ---
 {
   const ls = vt.lines();
-  const y = ls.findIndex((l) => l.includes("Nga - Ukraine")) + 1; // 1-based screen row
+  const row = ls.findIndex((l) => l.includes("Nga - Ukraine"));
+  if (row < 0) throw new Error("selection target is not visible");
+  const y = row + 1; // 1-based screen row
   const x0 = ls[y - 1].indexOf("Nga") + 1;                        // 1-based col of "Nga"
   const x1 = x0 + "Nga - Ukraine".length;
   out.osc52 = false; out.selBg = false;
@@ -77,12 +142,70 @@ console.log(`\nstream wall time: ${streamMs.toFixed(0)}ms for ${MD.length} chars
   console.log(`OSC52 on Ctrl+C (select-then-copy habit): ${out.osc52}`);
 }
 
-// Scroll up, then jump back.
-stdin.push("\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M"); await tick(200);
-dump("SCROLLED UP (pill should show; content shifted)", vt);
-stdin.push("\x1b[F"); await tick(200); // End -> tail
+// Constrain the viewport so the transcript truly exceeds it, then scroll up and jump back.
+out.setSize(80, 20);
+if (!(await until(() => vt.lines()[19] === "" && vt.lines().filter((line) => line.includes("shift+tab to cycle")).length === 1))) {
+  throw new Error("80x20 resize did not settle");
+}
+for (let i = 0; i < 3; i++) { stdin.push("\x1b[1;5A"); await tick(30); } // Ctrl+Up
+if (!(await until(() => vt.text().includes("Jump to bottom")))) throw new Error("scroll did not move the viewport");
+dump("SCROLLED UP AT 80x20 (pill should show; content shifted)", vt);
+stdin.push("\x1b[F");
+if (!(await until(() => !vt.text().includes("Jump to bottom")))) throw new Error("End did not return to the tail");
 dump("AFTER End (back to tail)", vt);
 
 app.unmount();
 await tick(50);
+
+// Todo lifecycle: capture the live plan, a constrained-terminal reflow, an update, then the idle state.
+const todoProvider = new TodoFlow();
+const { vt: todoVt, out: todoOut, stdin: todoIn, app: todoApp } = mountFlow(todoProvider, "inspect-todos", 96, 28, true);
+await tick(300);
+todoIn.push("audit the todo experience"); await tick(50); todoIn.push("\r");
+if (!(await until(() => todoVt.text().includes("Run the release verification loop") && todoVt.text().includes("esc to interrupt")))) throw new Error("initial todo plan did not settle");
+dump("TODO LIVE - INITIAL PLAN", todoVt);
+
+todoOut.setSize(72, 20);
+if (!(await until(() => todoVt.lines()[19] === "" && todoVt.text().includes("Run the release verification loop") && todoVt.lines().filter((line) => line.includes("shift+tab to cycle")).length === 1))) throw new Error("todo resize did not settle");
+dump("TODO LIVE - 72x20 REFLOW", todoVt);
+
+todoProvider.advance();
+if (!(await until(() => todoVt.text().includes("[x] Map the current interactive flows") && todoVt.text().includes("Inspect todo updates and resume behavior")))) throw new Error("updated todo plan did not settle");
+dump("TODO LIVE - UPDATED PLAN", todoVt);
+
+todoProvider.advance();
+if (!(await until(() => todoVt.text().includes("Todo audit complete.") && todoVt.lines().some((line) => /^\s*>\s*$/.test(line))))) throw new Error("idle todo state did not settle");
+dump("TODO IDLE - AFTER COMPLETION", todoVt);
+todoApp.unmount();
+await tick(50);
+
+// Slash-command keyboard flow on a constrained terminal.
+const { vt: menuVt, stdin: menuIn, app: menuApp } = mountFlow({ complete: async () => ({ content: "ok", tool_calls: [] }) }, "inspect-menu", 72, 20, true);
+await tick(300);
+menuIn.push("/");
+if (!(await until(() => menuVt.text().includes("up/down to select, tab to complete")))) throw new Error("slash menu did not open");
+dump("SLASH MENU - 72x20", menuVt);
+menuIn.push("\x1b[B"); await tick(80); menuIn.push("\t");
+if (!(await until(() => menuVt.text().includes("> /cost")))) throw new Error("slash keyboard selection did not settle");
+dump("SLASH MENU - KEYBOARD SELECTION + TAB", menuVt);
+menuApp.unmount();
+await tick(50);
+
+// Approval/denial flow. Denial is safe and proves keyboard focus + feedback without executing bash.
+const { vt: approvalVt, stdin: approvalIn, app: approvalApp } = mountFlow(new ApprovalFlow(), "inspect-approval", 80, 24, false);
+await tick(300);
+approvalIn.push("show the approval flow"); await tick(50); approvalIn.push("\r");
+if (!(await until(() => approvalVt.text().includes("Approve bash?"), 3000))) throw new Error("approval did not open");
+dump("APPROVAL - WAITING FOR A DECISION", approvalVt);
+approvalIn.push("n"); await tick(120);
+dump("APPROVAL - DENIAL FEEDBACK", approvalVt);
+if (!(await until(() => approvalVt.text().includes("command was not run") && approvalVt.lines().some((line) => /^\s*>\s*$/.test(line)), 3000))) throw new Error("denial did not settle");
+dump("APPROVAL - SETTLED", approvalVt);
+approvalApp.unmount();
+await tick(50);
+
+if (savedHome.userProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedHome.userProfile;
+if (savedHome.home === undefined) delete process.env.HOME; else process.env.HOME = savedHome.home;
+const safeTemp = resolve(tmpdir()) + sep;
+if (resolve(auditHome).startsWith(safeTemp)) rmSync(auditHome, { recursive: true, force: true });
 process.exit(0);

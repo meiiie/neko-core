@@ -17,8 +17,9 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   composition (native web fallback alongside namespaced MCP), inherited safety boundaries, nested-secret
   redaction, typed boolean env overrides, interleaved parallel tool-call parsing, action-sensitive
   memory permissions, large-file deep paging, profile-key/title persistence, AGENTS.md context, and
-  architecture-test coverage. Gates: TS 7 + TS 5.9 typecheck, **400/400 tests**, policy PASS, binary build
-  + UI/input probes.
+  architecture-test coverage. A deterministic VT + real-ConPTY UX audit then removed duplicate todo
+  plans, raw-Markdown commit flashes, resize ghosts, history/scroll key conflicts and repeated approval
+  feedback. Gates: TS 7 + TS 5.9 typecheck, **411/411 tests**, policy PASS, binary build + UI/input probes.
 - **The v0.7.0 arc (Jul 3-6) — fullscreen became THE interface:** app-owned alt-screen viewport with a
   stdout-layer FrameDiffer (line-diff + DECSTBM hardware scroll, absolute-addressed, VT-verified), ANSI
   row cache + windowed warmer, live-markdown streaming tail, ease-out glide scroll at the display's
@@ -274,9 +275,7 @@ cost/token tracking · MCP client · single-binary distribution.
   to the top (progressive commit), idle (not total) request timeout so long generations finish, Ctrl+O
   expand/collapse toggle, blue in-flight tool dot, a no-emoji output rule in the system prompt; **platform**
   — the Windows `bash` tool runs real Git-Bash instead of cmd.exe.
-- [~] **H2** Fullscreen / alt-screen scroll mode — **tried, then REVERTED.** Stock Ink has no real scroll
-  region (`overflow:hidden` samples rows, doesn't clip); Claude Code only gets it smooth via a *patched* Ink
-  renderer + custom ScrollBox. Forking Ink is disproportionate (weeks, risky, threatens the single binary),
-  and the earlier progressive-commit fix already removed the reported jump — so the polished **inline** mode
-  stays the single experience. (Lesson recorded in WORKLOG: don't chase a Claude-Code feature that depends on
-  their forked Ink.)
+- [x] **H2** Fullscreen / alt-screen scroll mode — shipped clean-room without forking Ink. Neko owns a
+  windowed transcript band at the stdout layer (`FrameDiffer` + ANSI row cache), uses absolute cell
+  repainting, hardware scroll where safe, a Unicode-aware VT oracle, and real PTY/ConPTY smoke tests.
+  Fullscreen is the primary experience; inline remains the automatic fallback for unfit terminals.

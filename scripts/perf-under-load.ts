@@ -11,7 +11,7 @@ import { ChatApp } from "../src/ui/chat.tsx";
 import { FrameDiffer } from "../src/ui/frame-diff.ts";
 import { installAltScreenGuard } from "../src/ui/altscreen.ts";
 import { wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
-import { VirtualTerminal } from "./vt.ts";
+import { VirtualTerminal } from "../test/vt.ts";
 
 class FakeTtyOut extends EventEmitter {
   isTTY = true;
@@ -51,8 +51,12 @@ async function main() {
   async function fresh(provider: any) {
     const vt = new VirtualTerminal(100, 30); const out = new FakeTtyOut(100, 30, vt);
     const stdin = new FakeStdin(); const differ = new FrameDiffer();
+    const session: any = {
+      id: "load", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
+      messages: Array.from({ length: 120 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `history row ${i} for scroll latency` })),
+    };
     const app = render(
-      React.createElement(ChatApp as any, { yolo: true, provider, sessionId: "l", frameDiffer: differ, preAltDispose: installAltScreenGuard(out as any, { mouse: false }), fullscreen: true } as any),
+      React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "load", frameDiffer: differ, preAltDispose: installAltScreenGuard(out as any, { mouse: false }), fullscreen: true } as any),
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
     );
     await tick(900);

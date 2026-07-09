@@ -8,8 +8,13 @@ whole TUI/UX — plus live end-to-end runs against a real provider, tiered easy 
 ```bash
 rtk bun run typecheck        # types
 rtk bun test                 # all headless tests (unit + integration + UI snapshots) — no network
-bash scripts/selftest.sh     # LIVE end-to-end (drives `neko run`; uses real API tokens)
-bun bin/neko.ts policy       # safe/gated tool-boundary audit
+rtk bun scripts/inspect-ui.ts           # deterministic interactive flow capture through VirtualTerminal
+rtk bun scripts/perf-latency.ts         # keystroke/submit/scroll/paste latency map
+rtk bun scripts/perf-idle-churn.ts      # proves an idle TUI writes zero bytes
+rtk bun run build                        # binary + production UI + real PTY keyboard probes
+rtk bun scripts/bench-scroll-conpty.ts worktree  # compiled TUI under a real PTY/ConPTY
+rtk bash scripts/selftest.sh            # LIVE end-to-end (drives `neko run`; uses real API tokens)
+rtk bun bin/neko.ts policy              # safe/gated tool-boundary audit
 ```
 
 ## Layer 1 — headless unit/integration (`bun test`, no network)
@@ -33,12 +38,22 @@ bun bin/neko.ts policy       # safe/gated tool-boundary audit
 | File | Covers |
 |---|---|
 | chat-ui.test | header/status bar, **resume replays conversation**, tool line, approval box + `y`, plan box, queue, slash menu |
-| ux.test (9) | status bar (mode + ctx%), **ThinkingLine effort + per-turn tokens**, **edit diff preview** (-/+), **live reasoning** (shows then clears), **post-turn run-time line**, **placeholder drops after 1st turn**, **Ctrl+C clears input**, **Shift+Tab mode cycle**, **slash autocomplete**, **/help** |
+| ux.test | status bar (mode + ctx%), **ThinkingLine effort + per-turn tokens**, **edit diff preview** (-/+), **live reasoning** (shows then clears), **post-turn run-time line**, **placeholder drops after 1st turn**, **Ctrl+C clears input**, **Shift+Tab mode cycle**, **slash autocomplete**, **/help** |
 | markdown.test | table renders bold cells + decodes entities/`<br>`; tool-result collapse + ctrl+o hint; 1-line read summary |
 | text-input.test | cursor insert (Left + type), IME/NFC end-typing, multi-line paste (no early submit) |
 | ui.test | logo/markdown/highlight primitives |
 
-## Layer 3 — live end-to-end (`scripts/selftest.sh`, real provider)
+## Layer 3 — deterministic terminal UX (no network/model cost)
+
+| Surface | Covers |
+|---|---|
+| `fullscreen-sim.test.ts` + `test/vt.ts` | Real `ChatApp` wiring replayed cell-for-cell through a Unicode-aware virtual terminal: startup, typing, resize, scroll, selection/copy, slash picker, todo lifecycle, differ path and differ-less fallback |
+| `scripts/inspect-ui.ts` | Human-readable screen captures for startup, live Markdown, committed answer, scroll, todo create/update, constrained reflow, slash-keyboard flow and approval/denial; uses an isolated temporary home |
+| `scripts/perf-*.ts` | Perceived latency, long input, React scaling, idle churn, scroll cost and CPU-contention measurements |
+| `scripts/input-probe.ts` | Compiled binary under a real PTY/ConPTY: key write → raw stdin → echo → verdict |
+| `scripts/bench-scroll-conpty.ts` | Current `dist/neko` under a real PTY/ConPTY: `/help`, scroll, resize, slash menu and keyboard completion |
+
+## Layer 4 — live end-to-end (`scripts/selftest.sh`, real provider)
 
 Tiered, with deterministic checks where possible (file contents, grep on output):
 
@@ -52,7 +67,7 @@ Tiered, with deterministic checks where possible (file contents, grep on output)
 | Hard | multi_edit (2 edits, atomic) | both edits land on disk |
 | Edge | read missing file | reports the error gracefully (no crash/loop) |
 
-## Layer 4 — stress / adversarial (`scripts/stresstest.sh`, real provider)
+## Layer 5 — stress / adversarial (`scripts/stresstest.sh`, real provider)
 
 | Scenario | What it stresses | Check |
 |---|---|---|
@@ -81,5 +96,17 @@ Tiered, with deterministic checks where possible (file contents, grep on output)
   cost matters, trimming the system prompt is the clearest win.
 - Live `reasoning` only renders for endpoints that return `reasoning_content`; the qwen *instruct*
   model doesn't emit it (not a Neko issue) — verified the mechanism with a mock that does.
-- The interactive TUI can't be keyboard-driven headlessly (no TTY); it's covered by Ink snapshot
-  tests (Layer 2). The live layer drives the same core via `neko run`.
+- The interactive TUI is keyboard-driven without a model through both a deterministic virtual terminal
+  and a real PTY/ConPTY. Keep both: the virtual grid gives reproducible assertions; the PTY catches
+  runtime/input/resize behavior a React snapshot cannot.
+
+**2026-07-10** (deterministic interactive UX audit, no model/network cost)
+- TS 7 and TS 5.9 typechecks clean; `bun test` **411 passed, 0 failed** (52 files, 1519 assertions);
+  doctor healthy, policy PASS, production binary UI probe + real PTY input probe PASS.
+- Four repeated full-flow VT captures showed one formatted committed answer, one todo plan, correct
+  Ctrl+Up/End scrolling, slash keyboard completion, and approval/denial focus with no key leakage.
+- Real ConPTY binary smoke passed twice: startup/resize/slash/keyboard all OK; scroll first response
+  **14 ms**, settle **127-144 ms**.
+- Perceived-latency map: keystroke p50/p95 **22/32 ms**, submit **18/18 ms**, scroll **0/4 ms**,
+  3k paste **23/23 ms**. Idle 3 s: **0 writes / 0 bytes**. Under ~80% background CPU:
+  keystroke p50/p95 **13/21 ms**, scroll **3/4 ms**.

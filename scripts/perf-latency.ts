@@ -17,7 +17,7 @@ import { ChatApp } from "../src/ui/chat.tsx";
 import { FrameDiffer } from "../src/ui/frame-diff.ts";
 import { installAltScreenGuard } from "../src/ui/altscreen.ts";
 import { wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
-import { VirtualTerminal } from "./vt.ts";
+import { VirtualTerminal } from "../test/vt.ts";
 
 class FakeTtyOut extends EventEmitter {
   isTTY = true;

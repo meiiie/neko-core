@@ -812,3 +812,21 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
 - **v0.7.7 (owner's birthday build, 2026-07-07) - instant scroll + the differ verdict finalized**: owner reported laggy scrolling (differ-off glide = dead hops + one settle render). Fix: no fast path -> useRowScroll jumps INSTANTLY (one render per gesture); glide callback only passed when a differ exists; unix unchanged. Third exoneration attempt for the differ: vt.ts gained LAZY AUTOWRAP (clipping at the right edge shifted reconstructions below 118-col rules one row UP - the harness could manufacture the ghost signature itself!) and the differ-ON ConPTY stream was re-inventoried (CSI h/l/J/m/H/K/C/X + OSC - ALL supported now). With the parser complete: differ-on ghost STILL 3/3, differ-off clean -> ConPTY really displaces differ output; verdict stands on solid ground. New CI sim locks the differ-less fullscreen path (render/type/instant-scroll). 366/366.
 - **Owner: still laggy + 'lag tong the' - differ RESTORED with SELF-HEALING RESYNC (v0.7.7 re-scoped, release deleted per owner)**: the owner's field signal was right - differ-off degraded EVERYTHING (typing/stream/scroll all full-frame; bench 76ms first-response, 391ms post-flick backlog; wheel coalescing got it to 63/110ms but the ceiling is the full-frame render itself). Resolution: the ghost's damage is PERSISTENCE, so bound its lifetime instead of disabling the differ - paintAll() (absolute CUP+EL rows, displacement-immune) fires ~400ms after each write burst (trailing debounce) and >=2s during sustained activity; seeds/resyncs stamp the clock; dispose() on teardown. Result: e2e clean 3/3 WITH the differ on (unhealed differ: ghost 3/3), typed-echo OK, scroll first-response 11ms (better than the 15ms 0.7.0 baseline). bench-scroll-conpty.ts promoted to scripts/ with baselines. v0.7.7 will be re-tagged only after the owner's hands-on confirmation.
 - **Heal made surgical + v0.7.7 released (the owner's birthday build)**: two refinements from the limitations review - (1) heal is WINDOWS-ONLY (the displacement does not exist elsewhere; SSH links were paying ~10KB/pause for nothing); (2) heal arming is SELECTIVE: only structurally-risky writes (>=8 rows changed / band churn / geometry) arm the trailing timer - the caret blink (530ms) had been beating the 400ms timer, healing an IDLE session every second forever. Verified: idle 5s = 667 bytes (pure blink, zero heals); e2e 3/3 clean + typed-echo OK; scroll first-response 13ms; 366/366; policy PASS. Docs refreshed (CHANGELOG final, ROADMAP status, memory). Released as v0.7.7 after the owner's hands-on OK ('tot roi').
+
+## 2026-07-10 — deterministic interactive UX audit
+- Drove the real `ChatApp` through a Unicode display-cell VirtualTerminal and the compiled binary through
+  a real ConPTY. Captured startup, typing, live Markdown, commit, selection/copy, Ctrl+Up/End scroll,
+  todo create/update/reflow/idle, slash keyboard navigation, and approval/denial.
+- Fixed the findings: duplicate live todo plan removed; the current plan is carried through compaction;
+  Ctrl+Up/Down no longer collides with prompt history; approval decisions render once; first-run footer
+  says `no model`; spinner spacing is stable; committed streams prime the rich-row cache so raw Markdown
+  never flashes.
+- Resize hardening now consumes `wipe + new frame`, composes that frame immediately, refuses stale raw
+  replay, and clears the unowned physical spare row. The latter was found only by ConPTY after the VT
+  suite was already green, validating the two-layer harness.
+- Harness repairs: Unicode-aware VT CSI/cell handling, isolated capture HOME, deterministic state gates,
+  working perf-script imports, truthful idle measurement, a real long-session scroll fixture, and a
+  compiled-binary ConPTY smoke covering resize plus slash completion.
+- Verification: TS 7 + TS 5.9 clean; 411/411 tests; doctor/policy/build/UI/input probes PASS; VT capture
+  stable 4/4; ConPTY smoke 2/2 (14 ms first scroll response); idle 3 s = 0 writes; keystroke p50/p95
+  22/32 ms and 13/21 ms under ~80% background CPU.

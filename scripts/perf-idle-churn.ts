@@ -1,7 +1,7 @@
 /**
  * Idle churn probe: does the app re-render while NOTHING is happening (no typing, no streaming)?
- * A caret blink is expected (~every 530ms), but anything MORE = wasted CPU/battery + a subtle
- * contributor to the "feels laggy" perception. Count writes over a 3s idle window.
+ * The caret is a native terminal cursor, so its blink needs ZERO app writes. Any UI-sized write is
+ * wasted CPU/battery + a subtle contributor to the "feels laggy" perception.
  */
 import { EventEmitter } from "node:events";
 import { render } from "ink";
@@ -10,7 +10,7 @@ import { ChatApp } from "../src/ui/chat.tsx";
 import { FrameDiffer } from "../src/ui/frame-diff.ts";
 import { installAltScreenGuard } from "../src/ui/altscreen.ts";
 import { wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
-import { VirtualTerminal } from "./vt.ts";
+import { VirtualTerminal } from "../test/vt.ts";
 
 class FakeTtyOut extends EventEmitter {
   isTTY = true;
@@ -53,10 +53,10 @@ async function main() {
   const t0 = performance.now();
   await tick(3000); // 3 seconds of pure idle
   const t1 = performance.now();
+  const f = [...out.frames]; // freeze the measurement BEFORE teardown restores the terminal
   app.unmount();
   await tick(40);
 
-  const f = out.frames;
   console.log(`idle window: ${Math.round(t1 - t0)}ms`);
   console.log(`writes: ${f.length}`);
   console.log(`total bytes: ${f.reduce((a, x) => a + x.bytes, 0)}`);
@@ -68,11 +68,11 @@ async function main() {
   }
   console.log(`\nsample writes:`);
   f.slice(0, 8).forEach((x, i) => console.log(`  ${i + 1}. ${x.bytes}B  head="${x.head}"`));
-  // classify: blink writes change only the caret cell (~tens of bytes); anything >100B is suspicious
-  const blink = f.filter((x) => x.bytes <= 100);
+  // Tiny control writes are harmless; anything UI-sized is suspicious.
+  const tiny = f.filter((x) => x.bytes <= 100);
   const heavy = f.filter((x) => x.bytes > 100);
-  console.log(`\nblink-size writes (<=100B, expected): ${blink.length}`);
+  console.log(`\ntiny control writes (<=100B):        ${tiny.length}`);
   console.log(`heavy writes (>100B, investigate):   ${heavy.length}`);
-  if (blink.length) console.log(`=> blink cadence ≈ ${Math.round((t1 - t0) / blink.length)}ms per caret tick`);
+  console.log(f.length === 0 ? "=> PASS: fully idle; the terminal owns caret blinking" : "=> inspect the writes above");
 }
 main();

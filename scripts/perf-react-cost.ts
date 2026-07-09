@@ -14,7 +14,7 @@ import { ChatApp } from "../src/ui/chat.tsx";
 import { FrameDiffer } from "../src/ui/frame-diff.ts";
 import { installAltScreenGuard } from "../src/ui/altscreen.ts";
 import { wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
-import { VirtualTerminal } from "./vt.ts";
+import { VirtualTerminal } from "../test/vt.ts";
 import { EventEmitter } from "node:events";
 
 // A provider that instantly "completes" each turn so we can seed N lines then go idle.

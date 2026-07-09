@@ -20,7 +20,7 @@ import { ChatApp } from "../src/ui/chat.tsx";
 import { FrameDiffer } from "../src/ui/frame-diff.ts";
 import { installAltScreenGuard } from "../src/ui/altscreen.ts";
 import { wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
-import { VirtualTerminal } from "./vt.ts";
+import { VirtualTerminal } from "../test/vt.ts";
 
 class FakeTtyOut extends EventEmitter {
   isTTY = true;
@@ -166,6 +166,5 @@ async function main() {
     console.log(row("7 slash menu open/close x8", out.window(), t1 - t0));
     app.unmount(); await tick(40);
   }
-  console.log("\n# ranking by bytes (higher = more render cost):");
 }
 main();

@@ -7,6 +7,11 @@ All notable changes to Neko Code are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Hardened the interactive fullscreen UX: todo plans render once and survive compaction, Ctrl+Up/Down
+  no longer recalls prompt history, approval feedback is not repeated, and first-run status names a
+  missing model clearly.
+- Removed one-frame raw-Markdown flashes when a streamed answer commits, and made resize repainting
+  compose the new frame while clearing the physical spare row instead of replaying stale content.
 - Unified CLI/TUI/subagent tool wiring: native web fallback, vision, skills, sandbox, disabled-tool and
   adversarial boundaries now compose consistently while namespaced MCP tools remain first-class.
 - Correctly accumulate interleaved parallel OpenAI-compatible tool-call streams by index.
