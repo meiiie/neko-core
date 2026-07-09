@@ -40,7 +40,14 @@ test("computer action validates inputs deterministically (no NaN/garbage reaches
   expect(String(await tools.execute("computer", { action: "click", x: "abc", y: 5 }))).toContain("numeric");
   expect(String(await tools.execute("computer", { action: "stroke", points: [1, 2, "x", 4] }))).toContain("NUMBERS");
   expect(String(await tools.execute("computer", { action: "invoke" }))).toContain("needs 'name'");
+  expect(String(await tools.execute("computer", { action: "type" }))).toContain("needs non-empty 'text'");
+  expect(String(await tools.execute("computer", { action: "key" }))).toContain("needs 'keys'");
+  expect(String(await tools.execute("computer", { action: "scroll", direction: "sideways" }))).toContain("up | down | left | right");
+  expect(String(await tools.execute("computer", { action: "scroll", direction: "down", amount: 11 }))).toContain("integer from 1 to 10");
+  expect(String(await tools.execute("computer", { action: "wait", duration_ms: -1 }))).toContain("0 to 10000");
+  expect(String(await tools.execute("computer", { action: "open" }))).toContain("needs 'target'");
   expect(String(await tools.execute("computer", { action: "bogus" }))).toContain("Unknown computer action");
+  expect(String(await tools.execute("computer", { action: "wait", duration_ms: 1 }))).toContain("waited 1 ms");
 });
 
 test("describeToolCall uses Claude-style labels + primary arg", () => {

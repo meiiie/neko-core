@@ -75,7 +75,7 @@ function WindowSig(){
 if($name -like '@*' -and (Test-Path $name.Substring(1))){ $name=(Get-Content $name.Substring(1) -Raw -Encoding UTF8).TrimEnd("`r","`n") }
 if($value -like '@*' -and (Test-Path $value.Substring(1))){ $value=(Get-Content $value.Substring(1) -Raw -Encoding UTF8).TrimEnd("`r","`n") }
 # --- Action audit log (trace; review the steps with: read %TEMP%\neko_actions.log) ---
-if($cmd -in 'invoke','setvalue','toggle'){ try { $alog= if($env:NEKO_ACTION_LOG){$env:NEKO_ACTION_LOG}else{"$env:TEMP\neko_actions.log"}; ("{0}  uia {1} '{2}'{3}" -f (Get-Date -Format 'HH:mm:ss'),$cmd,$name,$(if($value){" = '$value'"}else{""})) | Out-File $alog -Append -Encoding utf8 } catch {} }
+if($cmd -in 'invoke','setvalue','toggle'){ try { $alog= if($env:NEKO_ACTION_LOG){$env:NEKO_ACTION_LOG}else{"$env:TEMP\neko_actions.log"}; $detail=if($cmd -eq 'setvalue'){" ($($value.Length) chars)"}else{""}; ("{0}  uia {1} '{2}'{3}" -f (Get-Date -Format 'HH:mm:ss'),$cmd,$name,$detail) | Out-File $alog -Append -Encoding utf8 } catch {} }
 
 switch($cmd){
   "list" {

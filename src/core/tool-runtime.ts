@@ -304,9 +304,23 @@ export class ToolRegistry {
 
     // todo_write: safe, no approval — record the plan for the REPL to render.
     if (name === "todo_write") {
-      this.todos = Array.isArray(args.todos)
-        ? args.todos.map((t: any) => ({ content: String(t?.content ?? ""), status: String(t?.status ?? "pending") }))
-        : [];
+      if (!Array.isArray(args.todos)) return "Error: todo_write needs a 'todos' array.";
+      if (args.todos.length > 64) return "Error: todo_write accepts at most 64 items; keep the plan at the useful working level.";
+      const next = args.todos.map((t: any) => ({ content: String(t?.content ?? "").trim(), status: String(t?.status ?? "") }));
+      if (next.some((t) => !t.content)) return "Error: todo_write items need non-empty content.";
+      if (next.some((t) => !["pending", "in_progress", "completed"].includes(t.status))) {
+        return "Error: todo_write status must be pending, in_progress, or completed.";
+      }
+      const seen = new Set<string>();
+      if (next.some((t) => { const key = t.content.toLowerCase(); if (seen.has(key)) return true; seen.add(key); return false; })) {
+        return "Error: todo_write items must be unique.";
+      }
+      const active = next.filter((t) => t.status === "in_progress").length;
+      const pending = next.some((t) => t.status === "pending");
+      if (active > 1 || (pending && active !== 1)) {
+        return "Error: todo_write needs exactly one in_progress item while pending work remains; an all-completed list has none.";
+      }
+      this.todos = next;
       return renderTodos(this.todos);
     }
 
@@ -424,8 +438,39 @@ export class ToolRegistry {
         if (nums.length < 4 || nums.length % 2 !== 0 || nums.some((n) => !Number.isFinite(n))) return "Error: computer stroke needs an even 'points' array of NUMBERS [x1,y1,x2,y2,...] (>= 2 points).";
         script = "inject.ps1"; sa = ["stroke", ...nums.map((n) => String(Math.round(n)))]; break;
       }
+      case "type": {
+        if (typeof args.text !== "string" || !args.text.length) return "Error: computer type needs non-empty 'text'.";
+        if (args.text.length > 20_000) return "Error: computer type is limited to 20000 characters; use a file or programmatic path for larger content.";
+        const name = String(args.name ?? "");
+        script = "input.ps1"; sa = ["type", atFile(args.text), "1", name ? atFile(name) : ""]; break;
+      }
+      case "key": {
+        const keys = String(args.keys ?? "").trim();
+        if (!keys) return "Error: computer key needs 'keys' (for example ENTER or CTRL+L).";
+        if (keys.length > 80) return "Error: computer key 'keys' is too long.";
+        const name = String(args.name ?? "");
+        script = "input.ps1"; sa = ["key", atFile(keys), "1", name ? atFile(name) : ""]; break;
+      }
+      case "scroll": {
+        const direction = String(args.direction ?? "").toLowerCase();
+        if (!["up", "down", "left", "right"].includes(direction)) return "Error: computer scroll needs direction: up | down | left | right.";
+        const amount = args.amount === undefined ? 1 : Number(args.amount);
+        if (!Number.isInteger(amount) || amount < 1 || amount > 10) return "Error: computer scroll 'amount' must be an integer from 1 to 10.";
+        script = "input.ps1"; sa = ["scroll", direction, String(amount)]; break;
+      }
+      case "wait": {
+        const duration = args.duration_ms === undefined ? 500 : Number(args.duration_ms);
+        if (!Number.isInteger(duration) || duration < 0 || duration > 10_000) return "Error: computer wait 'duration_ms' must be an integer from 0 to 10000.";
+        script = "input.ps1"; sa = ["wait", "", String(duration)]; break;
+      }
+      case "open": {
+        const target = String(args.target ?? "");
+        if (!target) return "Error: computer open needs 'target' (an executable, file path, or URL).";
+        if (target.length > 4096) return "Error: computer open 'target' is too long.";
+        script = "input.ps1"; sa = ["open", atFile(target)]; break;
+      }
       case "screenshot": { const out = join(tmpdir(), `neko_shot_${Date.now()}.gif`); script = "screenshot.ps1"; sa = [out]; break; }
-      default: return `Unknown computer action '${action}'. Use: list | read | get | invoke | setvalue | toggle | click | stroke | screenshot.`;
+      default: return `Unknown computer action '${action}'. Use: list | read | get | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
     }
     try {
       const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa], { encoding: "utf-8", cwd: this.root, env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });

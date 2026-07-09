@@ -9,6 +9,7 @@ whole TUI/UX — plus live end-to-end runs against a real provider, tiered easy 
 rtk bun run typecheck        # types
 rtk bun test                 # all headless tests (unit + integration + UI snapshots) — no network
 rtk bun scripts/inspect-ui.ts           # deterministic interactive flow capture through VirtualTerminal
+rtk bun scripts/probe-computer-input.ts # Windows: disposable WPF type/key/focus/UIA readback probe
 rtk bun scripts/perf-latency.ts         # keystroke/submit/scroll/paste latency map
 rtk bun scripts/perf-idle-churn.ts      # proves an idle TUI writes zero bytes
 rtk bun run build                        # binary + production UI + real PTY keyboard probes
@@ -38,7 +39,7 @@ rtk bun bin/neko.ts policy              # safe/gated tool-boundary audit
 | File | Covers |
 |---|---|
 | chat-ui.test | header/status bar, **resume replays conversation**, tool line, approval box + `y`, plan box, queue, slash menu |
-| ux.test | status bar (mode + ctx%), **ThinkingLine effort + per-turn tokens**, **edit diff preview** (-/+), **live reasoning** (shows then clears), **post-turn run-time line**, **placeholder drops after 1st turn**, **Ctrl+C clears input**, **Shift+Tab mode cycle**, **slash autocomplete**, **/help** |
+| ux.test | status bar (mode + ctx%), **ThinkingLine effort + per-turn tokens**, **edit diff preview** (-/+), **live reasoning** (shows then clears), **post-turn run-time line**, **placeholder drops after 1st turn**, **Ctrl+C clears input**, **Alt+C copies raw/collapsed-paste drafts without mutation**, **Shift+Tab mode cycle**, **slash autocomplete**, **/help** |
 | markdown.test | table renders bold cells + decodes entities/`<br>`; tool-result collapse + ctrl+o hint; 1-line read summary |
 | text-input.test | cursor insert (Left + type), IME/NFC end-typing, multi-line paste (no early submit) |
 | ui.test | logo/markdown/highlight primitives |
@@ -48,10 +49,11 @@ rtk bun bin/neko.ts policy              # safe/gated tool-boundary audit
 | Surface | Covers |
 |---|---|
 | `fullscreen-sim.test.ts` + `test/vt.ts` | Real `ChatApp` wiring replayed cell-for-cell through a Unicode-aware virtual terminal: startup, typing, resize, scroll, selection/copy, slash picker, todo lifecycle, differ path and differ-less fallback |
-| `scripts/inspect-ui.ts` | Human-readable screen captures for startup, live Markdown, committed answer, scroll, todo create/update, constrained reflow, slash-keyboard flow and approval/denial; uses an isolated temporary home |
+| `scripts/inspect-ui.ts` | Human-readable screen captures for startup, draft copy + OSC52, live Markdown, committed answer, scroll, todo create/update/complete, constrained reflow, slash-keyboard flow and approval/denial; uses an isolated temporary home |
 | `scripts/perf-*.ts` | Perceived latency, long input, React scaling, idle churn, scroll cost and CPU-contention measurements |
 | `scripts/input-probe.ts` | Compiled binary under a real PTY/ConPTY: key write → raw stdin → echo → verdict |
 | `scripts/bench-scroll-conpty.ts` | Current `dist/neko` under a real PTY/ConPTY: `/help`, scroll, resize, slash menu and keyboard completion |
+| `scripts/probe-computer-input.ts` | Disposable Windows WPF window: Unicode `type`, exact-control focus, `Ctrl+A`, replacement, UIA value readback, wait, and close |
 
 ## Layer 4 — live end-to-end (`scripts/selftest.sh`, real provider)
 
@@ -110,3 +112,16 @@ Tiered, with deterministic checks where possible (file contents, grep on output)
 - Perceived-latency map: keystroke p50/p95 **22/32 ms**, submit **18/18 ms**, scroll **0/4 ms**,
   3k paste **23/23 ms**. Idle 3 s: **0 writes / 0 bytes**. Under ~80% background CPU:
   keystroke p50/p95 **13/21 ms**, scroll **3/4 ms**.
+
+**2026-07-10** (todo persistence + draft copy + computer-use, no model/network cost)
+- TS 7 and TS 5.9 clean; `bun test` **416 passed, 0 failed** (52 files, 1549 assertions); doctor healthy,
+  policy PASS, production build, embedded-skill/UI probe and real PTY input probe PASS.
+- Deterministic capture proves `Alt+C` emits OSC52, leaves the 23-character Unicode draft visible, and
+  expands collapsed multiline paste content before copy. Todo capture covers initial, active update,
+  narrow reflow, all-completed update, and idle final state.
+- Disposable WPF/UIA desktop probe: Unicode `type` -> exact control readback -> `Ctrl+A` -> replacement ->
+  readback -> close, **3/3 repeated PASS**; a duplicate-title window is refused as ambiguous. The focus
+  check caught and fixed an intermittent wrong-control no-op before the final run.
+- A compiled binary launched outside the repository lists the embedded `computer-use`, `web-reach`, and
+  `procurement` skills and executes its extracted input helper. Real ConPTY smoke: first scroll response
+  **14 ms**, settle **142 ms**; startup, resize, slash menu, and keyboard completion PASS.

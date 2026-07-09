@@ -43,6 +43,7 @@ import { startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts"
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { randomBytes } from "node:crypto";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
+import { expandPlaceholders } from "../shared/paste-collapse.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
@@ -822,7 +823,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   // Global hotkeys. Ctrl+C: interrupt a running turn; else clear a non-empty input; else
   // double-press exits. Ctrl+U clears the line, Ctrl+L clears the screen, Esc clears input when idle,
-  // Alt+V pastes a clipboard image.
+  // Alt+C copies the current draft; Alt+V pastes a clipboard image.
   const ctrlC = useRef(false);
   useInput((char, key) => {
     if (key.ctrl && char === "c") {
@@ -882,6 +883,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     if (overlay || viewer || search) return; // let the overlay / viewer / find bar own the rest of the keys (Ctrl+C above still works)
+    if (key.meta && char === "c") {
+      if (awaitingKey) { flashCopyNote("draft copy disabled while entering a secret"); return; }
+      if (!input) { flashCopyNote("nothing to copy"); return; }
+      const draft = expandPlaceholders(input, pastedContentsRef.current);
+      flashCopyNote(copyBoth(draft) ? `copied draft (${draft.length} chars)` : "draft copy failed");
+      return;
+    }
     if (key.ctrl && char === "o") { // toggle: expand the most recent collapsed tool output, press again to collapse
       // Match the collapse logic in TranscriptLine: summarized reads collapse at >1 line, plain
       // results at >8 — so the "(ctrl+o to expand)" hint and this finder never disagree.

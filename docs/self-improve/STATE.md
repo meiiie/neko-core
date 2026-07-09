@@ -5,12 +5,14 @@ what's measured, and the last few moves — not a full history (that's `docs/pro
 
 ## Current focus
 **Owner-directed work, not the autonomous loop** (as of 2026-07-10). A reliability/security audit just
-closed composition, streaming, permission, config, persistence, paging, context, and documentation drift;
-the full gate is green at 400/400 tests. The self-improve loop is built + ran (it
+closed composition, streaming, permission, config, persistence, paging, context, and documentation drift.
+Todo persistence, draft copy, native computer input, and standalone skill packaging then landed; the full
+gate is green at 416/416 tests. The self-improve loop is built + ran (it
 produced ~4 real wins then plateaued — a disciplined assistant, not perpetual motion), and its idea `BACKLOG.md`
 (~46 items) + `RESEARCH.md` stay as the queue for when it runs again. The last stretch was **hands-on UX/UI
 polish to real-terminal / Claude-Code quality** (see `../process/ROADMAP.md` Phase H + `../process/WORKLOG.md`),
-done interactively with the owner — not by the loop. **Next = a new owner-directed task (TBD).**
+done interactively with the owner — not by the loop. **Next = the small verifier-backed long-horizon
+computer-use eval pack; no new controller until the measurements justify one.**
 
 The loop's original framing still holds for when it resumes: bench coding tasks are **saturated** (glm-5.2 =
 11/11), so the live signal is the **codebase itself** (bug/test/robustness/perf/security/harness/docs), with the
@@ -35,6 +37,11 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-10] (owner-directed) verified persistence + computer-use pass: atomic todo validation and
+  open-plan exit recovery; `Alt+C` copies raw and collapsed-paste drafts without mutation; Windows
+  `computer` gains Unicode type, exact-control focus, key, touch-scroll, wait, and open; action payloads
+  are redacted; built-in skills/assets are embedded into the standalone binary. 416/416 tests, policy
+  PASS, VT capture, WPF/UIA probe 3/3, external-directory binary skill probe, ConPTY 14 ms/142 ms PASS.
 - [2026-07-10] (owner-directed) reliability/security sweep: one shared registry composition seam for
   CLI/TUI/subagents; native web restored as an MCP-compatible fallback; nested secret redaction; typed
   env booleans; interleaved OpenAI tool-call parsing; action-sensitive persistent-memory permissions;

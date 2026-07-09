@@ -5,8 +5,8 @@ description: Drive the computer like a person when there is no programmatic path
 
 # Skill: Computer use (code-first, GUI-fallback)
 
-Distilled from the 2026 SOTA (UI-TARS, OpenCUA, Aguvis, **CoAct-1**, OSWorld). The hard truth first, then
-the method.
+Distilled from the 2026 SOTA (UI-TARS-2, OpenCUA, Agent S2, **CoAct-1**, OSWorld 2.0, OSGuard). The hard
+truth first, then the method.
 
 ## The hard truth (read this)
 - **Most "GUI" control needs NO vision.** The screen is already structured data — the OS accessibility
@@ -14,7 +14,9 @@ the method.
   plain text model (gpt-oss) grounds reliably and pixel-perfect. **Raw-pixel vision is the LAST resort**
   (custom-drawn UIs with no tree) — only THAT wants a GUI-trained model. See "Grounding without a
   GUI-trained model" below; this is the spine of the skill.
-- **Even frontier *pixel-vision* agents top out ~72% on OSWorld**; open models ~42-45%. That ceiling is the
+- **Even frontier *pixel-vision* agents top out ~75% on OSWorld-Verified**; open models ~42-45%. On the
+  108 long-horizon tasks in OSWorld 2.0, the best tested agent completes only **20.6%**. The dominant failures
+  are lost constraints/state and skipped verification, not a missing click primitive. That ceiling is the
   pixel path — the accessibility-tree path is deterministic, not a guess. Either way, **verify after every
   step**.
 - **It can break things.** Mouse/keyboard/`invoke` on the real machine is destructive. Guardrails below are
@@ -58,9 +60,9 @@ Keep steps minimal (each screenshot+reason is slow); stop when the goal is visib
 - **Perception** is already possible: `bash` takes a screenshot → `read_file` reads it with vision. (That
   read needs a VISION model — gpt-oss is text-only. On the NVIDIA key, `NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1`
   is a strong reader, verified; avoid llama-3.2-vision. But prefer UIA `read`/`list` — no vision needed.)
-- **Action (mouse/keyboard)** needs an input tool — connect a **computer-use MCP** (desktop screenshot +
-  click/type) via `mcp_servers`, the same way the browser MCP is wired. Tools then appear as
-  `mcp__<server>__*`.
+- **Action (Windows)** is built in: the gated `computer` tool exposes UIA, touch, Unicode typing, shortcuts,
+  scrolling, waits, launching, and screenshots. A **computer-use MCP** remains the extension path for
+  macOS/Linux, remote desktops, or a provider-specific sandbox; its tools appear as `mcp__<server>__*`.
 - **For WEB specifically** (the most common case), prefer a browser tool: `@playwright/mcp`
   (`browser_snapshot` is an accessibility tree = DOM-grounded, the reliable path), or a dedicated
   web-agent like **browser-use** behind an MCP bridge. Web grounding via the DOM beats raw-pixel clicking.
@@ -82,8 +84,9 @@ the `procurement` skill.
 Native apps have no DOM, but Windows UI Automation (UIA) IS the desktop's accessibility tree — the desktop
 DOM. **This is the primary path; use it first.**
 
-**Prefer the first-class `computer` tool** over bash-ing the scripts: `computer({action, window, name, value,
-x, y, points})` — `action` is `list | read | get | invoke | setvalue | toggle | click | stroke | screenshot`.
+**Prefer the first-class `computer` tool** over bash-ing the scripts: `computer({action, window, ...})` —
+`action` is `list | read | get | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait |
+open | screenshot`.
 It dispatches to the scripts below (Unicode names handled via a temp UTF-8 `@file` automatically), gated like
 bash, and honours the presence/input config. Bash + the raw scripts is the fallback / for anything the tool
 doesn't expose. The underlying `uia.ps1` lets a text model perceive + act + verify with no vision and (for
@@ -108,6 +111,23 @@ pwsh uia.ps1 read                          # dumps readable content (list = acti
 # Unicode targets (Vietnamese/CJK/emoji): the cp1252 console mangles non-ASCII args -> pass @<utf8-file>:
 pwsh uia.ps1 invoke "@C:\tmp\name.txt"     # reads the exact element name from a UTF-8 file (round-trips clean)
 ```
+
+Controls without a usable UIA pattern use the human-input verbs. They target the named window and **refuse
+to type if Neko cannot prove that window owns the foreground**, preventing text from leaking into another
+app. `type` uses Win32 `SendInput` + `KEYEVENTF_UNICODE`, not the clipboard or keyboard-layout-dependent
+SendKeys; `scroll` uses the separate touch channel, so the real mouse stays put:
+
+```text
+computer({ action: "open", target: "notepad.exe" })
+computer({ action: "wait", duration_ms: 500 })
+computer({ action: "type", window: "Notepad", name: "Text editor", text: "Hello from Neko" })
+computer({ action: "key", window: "Notepad", keys: "CTRL+S" })
+computer({ action: "scroll", window: "Notepad", direction: "down", amount: 2 })
+computer({ action: "read", window: "Notepad" })  # verify from fresh state
+```
+
+`open` launches a single executable/file/URL; use gated `bash` for commands with arguments, downloads,
+package managers, and installers. Never put a secret in `type`/`setvalue`; hand control to the user.
 WEB note: a browser exposes the page to UIA only when accessibility is on -- launch Chrome with
 `--force-renderer-accessibility` (reuses the logged-in profile, no CDP) so `uia.ps1 read` sees the feed/DOM
 as text. **VERIFIED:** gpt-oss autonomously read + summarized a live Facebook feed via `read`, scrolled with
@@ -171,7 +191,7 @@ pixel-perfect with no vision at all. `ground.ts` (pixel-vision) is only for cust
 and only THAT benefits from a GUI-trained model (UI-TARS/OpenCUA/Claude CU; none on NVIDIA). For pixel-vision:
 treat coords as approximate, verify after the click, don't fire irreversible clicks on a low-confidence
 ground; keep each image small (GIF) under NVIDIA's token budget (`<img>` conversion is automatic).
-(For keyboard, `WScript.Shell.SendKeys` works but is global/focus-sensitive -- see `tui-self-test`.)
+(For keyboard fallback, use the built-in `computer type`/`key`; it focus-checks the target before SendInput.)
 
 ## Grounding without a GUI-trained model (the key technique)
 "Everything is data" -- the screen ALREADY is structured data; don't make the model estimate pixels. Ground
@@ -267,7 +287,8 @@ background work or "play this game while I watch YouTube" -> (B) VM. Don't put t
 Three things separate a real computer-use agent from a demo:
 
 **1. Audit trail ("what did Neko do?").** Every desktop ACTION (`uia` invoke/setvalue/toggle, `inject`/`mouse`
-tap/click/stroke) is appended, timestamped, to `%TEMP%\neko_actions.log` (override via `NEKO_ACTION_LOG`).
+tap/click/stroke, `input` type/key/scroll/open) is appended, timestamped, to `%TEMP%\neko_actions.log`
+(override via `NEKO_ACTION_LOG`; typed text and launch targets are redacted from this log).
 To answer "what steps did you take?" or to review/replay, `read` that log -- a human-readable trace of the
 real OS-level actions (complements the agent transcript). Cheap, always-on.
 
@@ -293,6 +314,13 @@ is sane. Tip: for read/verify-heavy turns, lower `reasoning_effort` so the model
 over-reasoning into the token cap. Compose all three: the goal-loop drives to completion, the resume loop
 hands control back-and-forth cleanly, and the audit log records every step.
 
+**Long-horizon rule (OSWorld 2.0 / QGP).** Keep the full constraint list and current subgoal in `todo_write`;
+after every material action, re-read the environment and update the plan from observed state. A todo is
+`completed` only when there is fresh evidence (UIA value/tree, screenshot, file readback, or command result).
+Do not guess through an ambiguous dialog: ask. Do not emit a final answer while a todo is still pending unless
+the final answer names the external blocker. These state/backlog controllers matter more on hour-scale tasks
+than adding another action verb.
+
 ## Huge pages — read in PARTS, like a human (SOTA: agentic chunking + sub-agent)
 A heavy page's full snapshot can be tens of thousands of tokens; dumping it whole is slow, costly, and
 risks overflowing the window. Read strategically instead:
@@ -307,7 +335,7 @@ Neko also self-protects so a giant page can't crash a turn: a single tool result
 turn compresses its OLDEST observations in place before the window overflows. That's a safety net — reading
 in parts is still faster and cheaper.
 
-## Honest scope (tested, 2026-06)
+## Honest scope (tested, 2026-07-10)
 **Desktop autonomy WORKS on NVIDIA** via the driver + vision-sub-call split above -- verified: gpt-oss drove
 `see.ts`, which had `microsoft/phi-3-vision-128k-instruct` ground a close button to ~20-40 px, then chose to
 `mouse.ps1` it. Earlier I wrongly concluded "no NVIDIA model is viable" -- that was a FORMAT bug, not a model

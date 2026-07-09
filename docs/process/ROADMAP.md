@@ -19,7 +19,10 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   memory permissions, large-file deep paging, profile-key/title persistence, AGENTS.md context, and
   architecture-test coverage. A deterministic VT + real-ConPTY UX audit then removed duplicate todo
   plans, raw-Markdown commit flashes, resize ghosts, history/scroll key conflicts and repeated approval
-  feedback. Gates: TS 7 + TS 5.9 typecheck, **411/411 tests**, policy PASS, binary build + UI/input probes.
+  feedback. The follow-up hardens todo state/exit persistence, adds non-destructive `Alt+C` draft copy,
+  closes the native computer tool's type/key/scroll/wait/open gap, and embeds every built-in skill/asset in
+  the standalone binary. Gates: TS 7 + TS 5.9 typecheck, **416/416 tests**, policy PASS, binary build +
+  UI/input/skill probes, deterministic VT capture, real desktop WPF/UIA input probe, and ConPTY smoke.
 - **The v0.7.0 arc (Jul 3-6) — fullscreen became THE interface:** app-owned alt-screen viewport with a
   stdout-layer FrameDiffer (line-diff + DECSTBM hardware scroll, absolute-addressed, VT-verified), ANSI
   row cache + windowed warmer, live-markdown streaming tail, ease-out glide scroll at the display's
@@ -31,7 +34,8 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   to mtime+size with in-place legacy migration (no `/resume` stall after upgrade).
 - **Earlier this arc (Jul 2-3, released as v0.5.1):** approval dropped-'y' race fixed, release-asset
   race fixed (create-once), prompt-cache stability + measurement, 529 retry, tool-error recovery.
-- **Next:** a new, owner-directed task (TBD). **Rule: never merge to `main` or push without the owner's
+- **Next:** build the verifier-backed long-horizon computer-use eval pack in `docs/self-improve/BACKLOG.md`;
+  only add another controller/framework if measured progress drift warrants it. **Rule: never merge to `main` or push without the owner's
   explicit OK.** Orientation for a fresh session: `WORKLOG.md` (journal) · `RULES.md` (how we work) ·
   `CLAUDE.md` (codebase map) · `docs/self-improve/` (the Neko-improves-Neko loop + its idea `BACKLOG.md`).
 

@@ -16,6 +16,7 @@ fullscreen writes ABSOLUTE, drift-proof) · **ANSI row cache** (`src/ui/ansi-cac
 windowed background warmer) · **rich scrollback** (`src/ui/rich-transcript.tsx`) · **live-markdown
 streaming tail** (formats as it streams) · **drag-to-select + copy** (solid rectangle, persists for
 Ctrl+C, "copied N chars" note) · **clipboard** `/copy` = OSC 52 + native (clip.exe/pbcopy/wl-copy/xclip)
+· **draft copy** (`Alt+C`, expands staged paste placeholders and leaves the input untouched)
 · **auto fps** (display Hz detected, `/fps`) · **session tab title** (`src/ui/title.ts` — 🐱 name,
 pulsing busy dot, Windows ConPTY clobber-healing). Env: `NEKO_FULLSCREEN`, `NEKO_DISABLE_MOUSE`,
 `NEKO_SYNC`, `NEKO_FPS`, `NEKO_INCR=0` (differ off).

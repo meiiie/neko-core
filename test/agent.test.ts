@@ -574,6 +574,23 @@ test("verify_before_exit gate fires once, then lets the model finish (off by def
   expect(on.messages.filter((m: any) => String(m.content).includes("VERIFY BEFORE FINISHING")).length).toBe(1);
 });
 
+test("an unfinished todo plan gets one persistence check before the agent can finish", async () => {
+  const script = [
+    { content: "looks done", tool_calls: [] },
+    { content: null, tool_calls: [{ id: "todos-done", name: "todo_write", arguments: { todos: [{ content: "verify the result", status: "completed" }] } }] },
+    { content: "verified and done", tool_calls: [] },
+  ];
+  const tools: any = {
+    todos: [{ content: "verify the result", status: "in_progress" }],
+    schemas: () => [],
+    execute: async (name: string, args: any) => { if (name === "todo_write") tools.todos = args.todos; return "updated"; },
+  };
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools, maxSteps: 6 });
+  expect(await agent.run("do the task")).toBe("verified and done");
+  expect(agent.messages.filter((m: any) => String(m.content).includes("PLAN NOT COMPLETE")).length).toBe(1);
+  expect(tools.todos[0].status).toBe("completed");
+});
+
 test("sealDanglingToolCalls: an interrupted turn's unanswered tool_call gets a synthetic result", () => {
   const agent = new Agent({ provider: { complete: async () => ({ content: "x", tool_calls: [] }) } as any, tools: { schemas: () => [], execute: async () => "" } as any });
   agent.messages = [

@@ -1019,6 +1019,17 @@ one never blocks another.
     the distiller offline/one-shot (gate to tasks the bench flags as hard or repeated); retrieval is
     keyword/BM25-style only (no embedding dep -- local-first).
 
+- [ ] **Verifier-backed long-horizon computer-use eval pack (OSWorld 2.0 / QGP / OSGuard).** Before adding
+    another planner or GUI framework, build a small local benchmark that exposes Neko's actual remaining
+    failure modes: at least 12 disposable tasks spanning UIA controls, keyboard-only/custom controls,
+    browser DOM/MCP, file+GUI hybrid work, a dynamic/late-arriving state change, user takeover, and a latent
+    destructive shortcut. Each task gets (a) binary completion, (b) partial work-unit progress, (c) explicit
+    safety invariants, and (d) action/step/time counts. Run baseline vs plan-exit gate vs `--loop`; require
+    zero wrong-window typing, duplicate work units, secret entry, and unsafe completion. Only if the results
+    show progress drift should the next change add a persisted verifier/evidence field or a dedicated backlog
+    controller. **Verify:** repeat each task >=3x, publish aggregate completion/partial/safety/recovery rates,
+    and keep the disposable WPF input probe as the deterministic smoke test for `type`/`key` focus safety.
+
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->
 

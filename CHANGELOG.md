@@ -6,7 +6,18 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Added `Alt+C` to copy the complete current draft without clearing it, including the expanded contents
+  behind collapsed paste placeholders.
+- Extended the gated Windows `computer` tool with Unicode `type`, shortcuts via `key`, mouse-independent
+  `scroll`, bounded `wait`, and `open` for apps/files/URLs. Exact-control focus is verified before typing,
+  with a disposable WPF/UIA probe covering the real input path.
+
 ### Fixed
+- Embedded built-in skills and their helper assets into standalone executables; release binaries now expose
+  the same skill catalog as source runs and materialize executable helpers into a per-process temp directory.
+- Validate todo plans atomically and preserve the prior plan on malformed updates; an agent with open todos
+  now gets a persistence/verification pass before it can finish without reconciling the plan or naming a blocker.
 - Hardened the interactive fullscreen UX: todo plans render once and survive compaction, Ctrl+Up/Down
   no longer recalls prompt history, approval feedback is not repeated, and first-run status names a
   missing model clearly.

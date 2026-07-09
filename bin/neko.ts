@@ -6,7 +6,9 @@
  * (chat/run are wired in later TS steps; config-first, offline-capable.)
  */
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
+import { join } from "node:path";
 
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent.ts";
 import { loadConfig, redactSecrets, type NekoConfig } from "../src/adapters/config.ts";
@@ -19,7 +21,7 @@ import { HARD_TASKS, renderBenchReport, renderLiftReport, runBench, runHarnessLi
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
-import { matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
+import { loadSkill, matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
 import { memoryIndexBlock } from "../src/core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../src/core/workflows.ts";
 import { playbookContextBlock } from "../src/core/playbook.ts";
@@ -580,6 +582,19 @@ async function main(): Promise<number> {
         const app = render(probeTree(), { stdout: out, patchConsole: false, exitOnCtrlC: false, debug: true });
         app.unmount();
         if (!out.buf.includes("neko-ui-ok")) { console.error("uiprobe FAILED: rendered frame missing marker"); return 1; }
+        const computer = loadSkill("computer-use");
+        try {
+          const helper = computer && join(computer.dir, "scripts", "input.ps1");
+          if (!helper || !readFileSync(helper, "utf8").includes("NekoInputNative")) {
+            console.error("uiprobe FAILED: bundled computer-use assets are missing"); return 1;
+          }
+          if (process.platform === "win32") {
+            const input = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper, "wait", "", "1"], { encoding: "utf8", windowsHide: true });
+            if (input.status !== 0 || !input.stdout.includes("waited 1 ms")) {
+              console.error("uiprobe FAILED: bundled computer-use helper cannot execute"); return 1;
+            }
+          }
+        } catch { console.error("uiprobe FAILED: bundled computer-use assets are unreadable"); return 1; }
         console.log(`ui-ok (NODE_ENV=${process.env.NODE_ENV ?? "unset"})`);
         return 0;
       }

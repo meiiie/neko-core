@@ -58,18 +58,19 @@ class TodoFlow {
   }
   async complete() {
     this.call++;
+    const finished = this.call >= 3;
     const todos = [
       { content: "Map the current interactive flows", status: this.call > 1 ? "completed" : "in_progress" },
       { content: "Exercise keyboard navigation and queued input", status: this.call > 1 ? "completed" : "pending" },
-      { content: "Inspect todo updates and resume behavior", status: this.call > 1 ? "in_progress" : "pending" },
-      { content: "Verify approval and denial feedback", status: "pending" },
-      { content: "Resize narrow and short terminals", status: "pending" },
-      { content: "Run the release verification loop", status: "pending" },
+      { content: "Inspect todo updates and resume behavior", status: finished ? "completed" : this.call > 1 ? "in_progress" : "pending" },
+      { content: "Verify approval and denial feedback", status: finished ? "completed" : "pending" },
+      { content: "Resize narrow and short terminals", status: finished ? "completed" : "pending" },
+      { content: "Run the release verification loop", status: finished ? "completed" : "pending" },
     ];
     if (this.call === 1) return { content: null, tool_calls: [{ id: "todo-1", name: "todo_write", arguments: { todos } }] };
     if (this.call === 2) { await this.wait(); return { content: null, tool_calls: [{ id: "todo-2", name: "todo_write", arguments: { todos } }] }; }
-    if (this.call === 3) { await this.wait(); return { content: "Todo audit complete.", tool_calls: [] }; }
-    return { content: "Done.", tool_calls: [] };
+    if (this.call === 3) { await this.wait(); return { content: null, tool_calls: [{ id: "todo-3", name: "todo_write", arguments: { todos } }] }; }
+    return { content: "Todo audit complete.", tool_calls: [] };
   }
 }
 
@@ -103,6 +104,16 @@ dump("STARTUP (fullscreen, fresh)", vt);
 
 stdin.push("tin chiến tranh hôm nay"); await tick(120);
 dump("AFTER TYPING", vt);
+
+// Copy the full draft without clearing or submitting it. Terminals commonly reserve Ctrl+Shift+C,
+// so Neko owns Alt+C and emits OSC52 as well as using the native clipboard adapter.
+out.osc52 = false;
+stdin.push("\x1bc");
+if (!(await until(() => vt.text().includes("copied draft") && vt.text().includes("tin chiến tranh hôm nay")))) {
+  throw new Error("Alt+C did not copy and preserve the draft");
+}
+dump("DRAFT COPY - ALT+C (draft must remain visible)", vt);
+console.log(`OSC52 on Alt+C: ${out.osc52}`);
 
 // Submit -> the markdown reply streams. Sample mid-stream and at the end; time the deltas.
 stdin.push("\r");
@@ -173,8 +184,10 @@ todoProvider.advance();
 if (!(await until(() => todoVt.text().includes("[x] Map the current interactive flows") && todoVt.text().includes("Inspect todo updates and resume behavior")))) throw new Error("updated todo plan did not settle");
 dump("TODO LIVE - UPDATED PLAN", todoVt);
 
+todoOut.setSize(96, 28);
+if (!(await until(() => todoVt.lines()[27] === "" && todoVt.lines().filter((line) => line.includes("shift+tab to cycle")).length === 1))) throw new Error("todo completion resize did not settle");
 todoProvider.advance();
-if (!(await until(() => todoVt.text().includes("Todo audit complete.") && todoVt.lines().some((line) => /^\s*>\s*$/.test(line))))) throw new Error("idle todo state did not settle");
+if (!(await until(() => todoVt.text().includes("[x] Run the release verification loop") && todoVt.text().includes("Todo audit complete.") && todoVt.lines().some((line) => /^\s*>\s*$/.test(line))))) throw new Error("idle todo state did not settle");
 dump("TODO IDLE - AFTER COMPLETION", todoVt);
 todoApp.unmount();
 await tick(50);

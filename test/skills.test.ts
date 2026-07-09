@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadSkill, matchSkill } from "../src/adapters/skills.ts";
@@ -33,4 +33,10 @@ test("matchSkill auto-loads the procurement skill for a clear sourcing task (dia
 test("matchSkill returns null for unrelated work (no false trigger)", () => {
   expect(matchSkill("fix the typescript compile error in the build pipeline")).toBeNull();
   expect(matchSkill("hello")).toBeNull(); // too short to match anything
+});
+
+test("the bundled computer-use skill includes its executable input helper", () => {
+  const skill = loadSkill("computer-use");
+  expect(skill?.body).toContain("computer type");
+  expect(existsSync(join(skill!.dir, "scripts", "input.ps1"))).toBe(true);
 });

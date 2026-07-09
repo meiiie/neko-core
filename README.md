@@ -30,15 +30,18 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
 - **Streaming agent loop** — `complete → tool-calls → observe`, capped by `max_steps`, with live token
   streaming, read-only tool fan-out (parallel), a stuck-loop guard, and auto-compaction.
 - **Tools** — `read_file` · `search` · `glob` · `ls` (safe) and `write_file` · `edit` · `multi_edit` ·
-  `bash` (approval-gated). `search` uses ripgrep when present; `bash` takes a per-call timeout and can run
-  in the background; `read_file` pages large files and reads images/PDFs. Path-escape is refused.
+  `bash` · `computer` (approval-gated). `search` uses ripgrep when present; `bash` takes a per-call timeout
+  and can run in the background; `read_file` pages large files and reads images/PDFs. On Windows,
+  `computer` combines UI Automation, mouse-independent touch, Unicode typing, shortcuts, scrolling, and
+  app/file/URL launch. Path-escape is refused.
 - **Permission modes** — `default` / `accept-edits` / `plan` / `auto`, cycled with **Shift+Tab** (a
   *named* bounded-autonomy state, audited by `neko policy`); a seatbelt blocks catastrophic shell.
 - **Fullscreen terminal UI** — an app-owned, flicker-free viewport (alt-screen, like vim/htop):
   markdown renders live *as it streams*, scrolling is hardware-smooth at your display's refresh rate
   (auto-detected; `/fps`), the mouse wheel scrolls, drag selects + copies (or `Ctrl+C` / `/copy`),
-  `Ctrl+F` finds in the transcript, and the tab title tracks your session (a pulsing dot while it
-  works). Exit leaves your shell exactly as it was — plus a one-line resume hint.
+  `Alt+C` copies the current draft without clearing it, `Ctrl+F` finds in the transcript, and the tab
+  title tracks your session (a pulsing dot while it works). Exit leaves your shell exactly as it was —
+  plus a one-line resume hint.
 - **Sessions** — conversations persist; resume with `neko --resume`.
 - **MCP** — connect Model Context Protocol servers (stdio / http / sse + OAuth) and use their tools;
   lazy schema loading keeps a big MCP surface out of context until needed.
@@ -50,7 +53,7 @@ Neko is built to take on new roles, one skill and one tool at a time:
 - **Skills** — pluggable domain expertise with progressive disclosure. One is a *purchasing officer*
   (research, source, and plan a purchase across Vietnamese retailers — humans approve and buy); another
   drives a browser and reads screenshots back with vision to verify a UI frame by frame. A skill is a
-  markdown file, not a fork.
+  markdown file, not a fork; built-in skills and their helper scripts ship inside the single binary.
 - **Self-improving memory** — durable facts (`memory`), learned `workflows` (procedures it distills by
   doing), and an always-on `playbook` it refines over time, so it gets better with use.
 - **Remote control from any device** — type `/relay`, scan the QR, and drive Neko from your phone

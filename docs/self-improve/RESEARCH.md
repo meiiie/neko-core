@@ -751,6 +751,52 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
   sketch, not more thinking budget. (See BACKLOG "Reasoning-skill cards distilled from the agent's
   own trajectories, recalled before a hard step (TRS).")
 
+## Computer use + verified persistence — 2026-07-10 update
+
+- **OSWorld 2.0** — Yuan et al., Jun 2026
+  ([arXiv 2606.29537](https://arxiv.org/abs/2606.29537)). 108 realistic workflows take a human a
+  median 1.6 hours and Claude Opus 4.7 an average 318 tool calls. The best tested agent completes only
+  **20.6%** at 500 steps. The failure analysis is unusually actionable: agents lose constraints, miss
+  streaming/dynamic state, infer hidden state badly, guess instead of asking, and skip verification.
+  -> **Neko mapping:** adding more click verbs is not the main reliability lever. Keep the complete plan
+  in context, reject malformed plan transitions, block a tool-less "done" while open work remains, and
+  require fresh environment evidence after GUI actions. This update implements the first three; the
+  verifier-backed computer-use eval remains the next measurement task.
+- **Push Your Agent / Quantitative Goal Persistence** — Cai et al., May 2026
+  ([arXiv 2605.23574](https://arxiv.org/abs/2605.23574)). State-tracking retrieval controllers reach
+  **69-78%** and eliminate duplicate submissions; backlog controllers reach **25-50%** where standard and
+  completion-gated controllers finish zero instances. The distinction is verified progress, not merely a
+  stronger completion prompt.
+  -> **Neko mapping:** `todo_write` now enforces one active work unit, uniqueness, legal statuses, and
+  all-completed termination; invalid writes preserve the old plan. The agent loop performs a one-shot
+  plan-exit recovery pass. Honest limit: a completed status is still agent-declared; task-specific readback,
+  tests, and UI state remain the evidence source, so a generic evidence object is deferred until an eval
+  proves it improves outcomes.
+- **Hybrid action is the durable architecture, not GUI-only imitation.** CoAct-1
+  ([arXiv 2508.03923](https://arxiv.org/abs/2508.03923)) combines code and GUI for **60.76% OSWorld** at
+  10.15 average steps; UI-TARS-2 ([arXiv 2509.02544](https://arxiv.org/abs/2509.02544)) integrates GUI,
+  filesystem, terminal, and a unified rollout sandbox; Agent S2
+  ([arXiv 2504.00906](https://arxiv.org/abs/2504.00906)) combines specialist grounding with proactive
+  hierarchical replanning. OpenAI reports GPT-5.4 at **75.0% OSWorld-Verified**, 67.3% WebArena-Verified
+  with DOM+screenshot, and 92.8% Online-Mind2Web screenshot-only
+  ([official report](https://openai.com/index/introducing-gpt-5-4/)).
+  -> **Neko mapping:** preserve `bash`/code as the primary path; use MCP/DOM or Windows UIA next; use pixels
+  last. The first-class Windows tool now closes its basic human-action gap with Unicode `type`, `key`,
+  mouse-independent `scroll`, `wait`, and `open`, while every mutation remains approval-gated and target
+  typing fails closed if the requested window cannot be proven foreground.
+- **OSGuard** — Mohammadmirzaei & Flanigan, Jun 2026
+  ([arXiv 2606.15034](https://arxiv.org/abs/2606.15034)). Nominal success can hide an unsafe shortcut, so
+  OSGuard scores both local action decisions and end-to-end state safety invariants.
+  -> **Neko mapping:** never optimize computer-use success alone. Keep approval at the `computer` boundary,
+  redact typed/launch payloads from the action log, refuse secret entry, and score destructive overwrite /
+  wrong-window typing / user-intervention violations alongside completion in the future eval pack.
+- **Engineering corroboration:** Anthropic's production guidance
+  ([Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)) says the
+  strongest implementations use simple composable patterns, ground each step in environment feedback, and
+  invest in clear, tested agent-computer interfaces.
+  -> **Neko mapping:** one small native input script + an explicit tool schema + a real disposable-window
+  probe is preferable to a new computer-use framework. Add abstractions only after measured failures.
+
 ## How to turn a finding into work
 1. Read the paper's core mechanism (1-2 sentences).
 2. Find the closest existing Neko component (`compact()`, the tool schemas, the agent loop, a skill).

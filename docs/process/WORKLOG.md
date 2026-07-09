@@ -830,3 +830,29 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
 - Verification: TS 7 + TS 5.9 clean; 411/411 tests; doctor/policy/build/UI/input probes PASS; VT capture
   stable 4/4; ConPTY smoke 2/2 (14 ms first scroll response); idle 3 s = 0 writes; keystroke p50/p95
   22/32 ms and 13/21 ms under ~80% background CPU.
+
+## 2026-07-10 — verified todo completion, draft copy, and native computer input
+- Todo plans are now an atomic state boundary: non-array/oversized/empty/duplicate/illegal-status and
+  ambiguous-active updates fail without replacing the last valid plan. Pending work requires exactly one
+  `in_progress`; an all-completed plan requires none. A tool-less final with open todos gets one recovery
+  pass to re-check state, continue, reconcile the full plan, or name a real blocker.
+- `Alt+C` copies the whole current draft through OSC52 + the native clipboard without clearing/submitting it.
+  Staged paste placeholders expand back to their original multiline content; secret-entry mode refuses copy.
+  Ink tests and the deterministic VT capture prove the Unicode draft remains visible and OSC52 is emitted.
+- The gated Windows `computer` tool now exposes `type`, `key`, `scroll`, `wait`, and `open`. Unicode text uses
+  Win32 SendInput/KEYEVENTF_UNICODE; exact UIA control focus is verified before input, otherwise the action
+  fails closed; duplicate window-title matches are refused instead of guessed; scroll delegates to touch
+  injection and does not move the user's mouse. Downloads, package
+  managers, and installers remain code-first through gated bash. Typed and launch payloads are redacted from
+  the audit log. A disposable WPF probe drove Unicode type -> UIA readback -> Ctrl+A -> replacement -> close,
+  repeated 3/3 after it exposed and fixed an intermittent window-vs-control focus bug.
+- Release-binary audit found built-in skills were never embedded: outside the source tree the single binary
+  saw only user skills, so computer-use helpers disappeared. A Bun build macro now embeds the entire skill
+  tree (binary assets included, 10 MB guard), materializes it in a safe per-process temp directory, and cleans
+  it on exit. The compiled binary's `__uiprobe` verifies `computer-use/input.ps1` is present and executable.
+- Research was refreshed against OSWorld 2.0, QGP/PushBench, OSGuard, CoAct-1, UI-TARS-2, Agent S2,
+  GPT-5.4, and Anthropic's agent engineering guidance. Conclusion: Neko's next meaningful lever is a small
+  verifier-backed long-horizon eval pack, not another speculative planner/framework.
+- Verification: TS 7 + TS 5.9 clean; **416/416 tests** (1549 assertions); doctor healthy; policy PASS;
+  production build + embedded-skill/UI + real-PTY input probes PASS; deterministic VT audit PASS; WPF/UIA
+  input probe PASS; ConPTY startup/resize/slash/keyboard PASS, scroll first response 14 ms / settle 142 ms.

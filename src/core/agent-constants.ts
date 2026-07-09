@@ -22,7 +22,7 @@ export const DEFAULT_SYSTEM_PROMPT =
   "- Multi-line code (Python/Node): write it to a FILE and run that (`python build.py`). Don't pack newlines into `python -c`/`bash -c`/heredocs — they break on Windows cmd. Then verify the output file exists.\n\n" +
   "## Working\n" +
   "- Before a tool call/batch, say what you're about to do in one short, natural line in your own words — don't fire tools silently.\n" +
-  "- Multi-step -> todo_write to plan + track (exactly one item in_progress).\n" +
+  "- Multi-step -> todo_write to plan + track (exactly one item in_progress while work remains; none when all are completed). Mark an item completed only after checking the real result; before finishing, update the full plan so every finished item is completed or state the blocker.\n" +
   "- Use the `memory` tool for things worth keeping ACROSS sessions (user preferences, project facts, " +
   "hard-won learnings): recall the relevant ones (listed in context) before you work, and write/UPDATE " +
   "them as you learn — search first and edit an existing memory instead of duplicating it. Don't store " +

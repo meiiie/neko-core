@@ -6,6 +6,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homeDir } from "../shared/home.ts";
 import { dirname, join } from "node:path";
+import { builtinSkillsDir } from "./builtin-skills.ts";
 
 export interface Skill {
   name: string;
@@ -20,7 +21,7 @@ function skillDirs(): string[] {
   return [
     join(homeDir(), ".neko-core", "skills"), // user skills
     join(process.cwd(), ".neko-core", "skills"), // project skills
-    join(import.meta.dir, "..", "..", "skills"), // skills bundled with Neko (lowest priority; user/project override)
+    builtinSkillsDir(), // skills bundled with Neko (lowest priority; user/project override)
   ];
 }
 

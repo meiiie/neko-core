@@ -121,31 +121,37 @@ export const TOOL_SPECS: ToolSpec[] = [
     name: "computer",
     permission: GATED,
     summary:
-      "Drive the desktop/GUI (Windows) via the OS accessibility tree — no vision, no GUI-trained model. Read a window's elements/text and act on them BY NAME (reliable + layout-independent), plus pointer actions. Prefer this over bash-ing the scripts. Set `window` to a title substring (e.g. 'Paint', 'Chrome'); omit = foreground. Pointer acts use touch injection (does NOT move the user's mouse). See the computer-use skill for the perceive->act->verify loop, takeover/resume, and the goal loop.",
+      "Drive the Windows desktop/GUI through the accessibility tree plus human input. Use bash first for files, downloads, installs, and other programmatic work; use this for apps that require a GUI. Set `window` to a title substring; omit = foreground. Pointer acts use touch injection and do not move the user's mouse. Re-perceive after actions that cannot self-verify.",
     parameters: {
       action: {
         type: "string",
-        enum: ["list", "read", "get", "invoke", "setvalue", "toggle", "click", "stroke", "screenshot"],
+        enum: ["list", "read", "get", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "open", "screenshot"],
         description:
-          "list = actionable elements (name+verb+coords); read = the page/doc as text; get = an element's value; invoke = click a control by name; setvalue = type into a field by name (AUTO-VERIFIES by reading it back; read-only/rejected input -> error); toggle = a checkbox by name (AUTO-VERIFIES the state flipped); click = tap x,y (touch); stroke = drag/draw through points; screenshot = capture to a GIF. invoke/click can't self-verify (side effects) -> re-perceive with list/get/read after them.",
+          "list/read/get perceive; invoke/setvalue/toggle act by accessible name; click/stroke use touch; type enters Unicode text into the focused control; key sends a shortcut such as CTRL+L or ENTER; scroll moves the target window; wait lets dynamic UI settle; open launches an app/file/URL; screenshot captures a GIF. setvalue/toggle self-verify; after other actions call list/read/get/screenshot to verify.",
       },
-      window: { type: "string", description: "Target window title substring (e.g. 'Paint'). Omit = foreground window." },
-      name: { type: "string", description: "Element NAME for get/invoke/setvalue/toggle (copy it from `list`/`read`)." },
+      window: { type: "string", description: "Distinctive target window title substring (e.g. 'Paint'). Omit = foreground window; type/key refuse ambiguous matches." },
+      name: { type: "string", description: "Element NAME for get/invoke/setvalue/toggle, or an optional exact focus target for type/key (copy it from `list`/`read`)." },
       value: { type: "string", description: "Text to set, for setvalue." },
       x: { type: "number", description: "X pixel, for click." },
       y: { type: "number", description: "Y pixel, for click." },
       points: { type: "array", description: "Flat [x1,y1,x2,y2,...] screen pixels for stroke (drag/draw).", items: { type: "number" } },
+      text: { type: "string", description: "Unicode text to enter, for type. Pass name when a specific field should receive it. Never use for secrets; hand control to the user." },
+      keys: { type: "string", description: "Key or shortcut, for key (e.g. ENTER, CTRL+L, ALT+TAB). Pass name to focus a specific control first." },
+      direction: { type: "string", enum: ["up", "down", "left", "right"], description: "Content direction, for scroll." },
+      amount: { type: "number", description: "Scroll gestures, 1-10 (default 1)." },
+      duration_ms: { type: "number", description: "Delay in milliseconds, 0-10000 (default 500), for wait." },
+      target: { type: "string", description: "Executable, file path, or URL to launch, for open. Use bash when arguments are needed." },
     },
     required: ["action"],
   },
   {
     name: "todo_write",
     permission: SAFE,
-    summary: "Record/update the task todo list. Use it to plan multi-step work and track progress.",
+    summary: "Record/update the full task todo list. Keep exactly one item in_progress until every item is completed; mark completed only after verification.",
     parameters: {
       todos: {
         type: "array",
-        description: "The full todo list (replaces the previous one).",
+        description: "The full todo list (replaces the previous one). Items must be unique and non-empty. Exactly one item is in_progress while pending work remains; all-completed lists have none.",
         items: {
           type: "object",
           properties: {

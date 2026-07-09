@@ -470,6 +470,34 @@ test("Ctrl+C clears a non-empty input (does not exit)", async () => {
   c.unmount();
 });
 
+test("Alt+C copies the whole draft without changing it", async () => {
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
+  await tick();
+  c.stdin.write("draft stays here");
+  await tick(20);
+  c.stdin.write("\x1bc"); // Alt+C
+  await tick(40);
+  const frame = strip(c.lastFrame());
+  expect(frame).toContain("draft stays here");
+  expect(frame).toContain("copied draft (16 chars)");
+  c.unmount();
+});
+
+test("Alt+C expands a collapsed multiline paste before copying", async () => {
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
+  const paste = "first line\nsecond line\nthird line";
+  await tick();
+  c.stdin.write(paste);
+  await tick(30);
+  expect(strip(c.lastFrame())).toContain("[Pasted text #1 +2 lines]");
+  c.stdin.write("\x1bc");
+  await tick(40);
+  const frame = strip(c.lastFrame());
+  expect(frame).toContain("[Pasted text #1 +2 lines]");
+  expect(frame).toContain(`copied draft (${paste.length} chars)`);
+  c.unmount();
+});
+
 test("renderNodeRows renders live Markdown to ANSI rows (no raw ** markers) - the fullscreen stream path", async () => {
   const { renderNodeRows } = await import("../src/ui/ansi-cache.ts");
   const { Markdown } = await import("../src/ui/markdown.tsx");

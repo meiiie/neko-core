@@ -341,6 +341,7 @@ export class Agent {
     let repeats = 0;
     let mutErrored = false; // tool-error recovery is EDGE-triggered: re-armed by a mutating-tool success
     let verifiedExit = false; // the pre-completion verify gate fires at most once per run
+    let planExitChecked = false; // an unfinished todo plan gets one persistence nudge before exit
     for (let step = 0; step < this.maxSteps; step++) {
       this.emit("step", step + 1);
       if (signal?.aborted) return "[interrupted]";
@@ -387,6 +388,23 @@ export class Agent {
       if (!toolCalls.length) {
         const final = response.content ?? "";
         this.messages.push({ role: "assistant", content: final });
+        // A todo label is not proof, but an OPEN plan is proof that the controller has unfinished work.
+        // Give the model one chance to reconcile it before exit: continue, mark verified items done via
+        // todo_write, or report a real blocker. One-shot avoids trapping legitimate clarification turns.
+        const openTodos = Array.isArray(this.tools.todos)
+          ? this.tools.todos.filter((t) => t.status !== "completed")
+          : [];
+        if (openTodos.length && !planExitChecked && step < this.maxSteps - 1) {
+          planExitChecked = true;
+          verifiedExit = true; // this nudge already asks for real-state verification; do not stack gates
+          this.messages.push({
+            role: "user",
+            content: `PLAN NOT COMPLETE: ${openTodos.length} todo item(s) are still open. Re-check the actual state, ` +
+              "continue the work, and call todo_write with the full updated plan before finishing. Mark items " +
+              "completed only when verified. If progress is genuinely blocked, state the blocker clearly instead of claiming completion.",
+          });
+          continue;
+        }
         // Pre-completion gate (opt-in): intercept the FIRST tool-less final once and force a
         // re-inspection of the ACTUAL state - the "declared done without re-running the check"
         // failure mode (LangChain PreCompletionChecklist; ACE reflection-before-exit). Fires at

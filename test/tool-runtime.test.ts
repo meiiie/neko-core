@@ -292,6 +292,23 @@ test("todo_write records the list on the registry and renders a checklist", asyn
   expect(reg.todos.length).toBe(2);
 });
 
+test("todo_write rejects ambiguous plans without corrupting the current plan", async () => {
+  const { reg } = makeReg();
+  await reg.execute("todo_write", { todos: [{ content: "keep me", status: "in_progress" }] });
+  const invalid = [
+    [{ content: "pending with no active item", status: "pending" }],
+    [{ content: "a", status: "in_progress" }, { content: "b", status: "in_progress" }],
+    [{ content: "same", status: "in_progress" }, { content: "SAME", status: "pending" }],
+    [{ content: "", status: "in_progress" }],
+    [{ content: "bad status", status: "done" }],
+  ];
+  for (const todos of invalid) expect(String(await reg.execute("todo_write", { todos }))).toStartWith("Error:");
+  expect(reg.todos).toEqual([{ content: "keep me", status: "in_progress" }]);
+
+  expect(String(await reg.execute("todo_write", { todos: [{ content: "keep me", status: "completed" }] }))).toContain("[x]");
+  expect(reg.todos[0].status).toBe("completed");
+});
+
 test("read_file offset/limit returns a line window numbered from the offset", async () => {
   const { root, reg } = makeReg();
   writeFileSync(join(root, "lines.txt"), Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join("\n"));
