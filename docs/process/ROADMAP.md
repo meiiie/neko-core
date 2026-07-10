@@ -43,9 +43,10 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   still proven by the WPF/UIA live probe). Four axis-isolated tasks (task-success+constraint / error-recovery
   / precise-action / coordinate-grounding), metrics to bench-log suite "gui", and a 15-test deterministic
   self-test (scripted provider, no live model). 436/436 tests, policy PASS.
-- **Next:** run `neko bench gui` LIVE (glm-5.2) to set the baseline, then demonstrate harness lift with a
-  lever (verify gate / recovery middleware / re-grounding); only add another controller/framework if measured
-  progress drift warrants it. **Rule: never merge to `main` or push without the owner's
+- **Next:** the eval is live-calibrated (base tier saturated -> smoke; HARD tier at 92% with FLAKY +
+  16 grounding misses on gpt-oss-120b). Establish the glm-5.2 baseline (blocked on a fresh Z.ai key), then
+  demonstrate harness lift with a lever (verify gate / recovery middleware / re-grounding) on pass-rate or
+  miss-count; only add another controller/framework if measured progress drift warrants it. **Rule: never merge to `main` or push without the owner's
   explicit OK.** Orientation for a fresh session: `WORKLOG.md` (journal) · `RULES.md` (how we work) ·
   `CLAUDE.md` (codebase map) · `docs/self-improve/` (the Neko-improves-Neko loop + its idea `BACKLOG.md`).
 

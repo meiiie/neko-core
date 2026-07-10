@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { GUI_TASKS, GuiWorld, guiTask, renderGuiReport, runGuiTrial } from "../src/adapters/gui-eval.ts";
+import { GUI_HARD_TASKS, GUI_TASKS, GuiWorld, guiTask, renderGuiReport, runGuiTrial } from "../src/adapters/gui-eval.ts";
 
 // A provider that replays a fixed script of responses (no model, no network, no cost) - the same
 // pattern as test/agent.test.ts. Each entry is one agent step; end with an empty-tool-call final.
@@ -161,6 +161,188 @@ test("harness: precise action - toggling exactly the two named settings PASSES; 
   expect((await runGuiTrial(guiTask("settings-selective"), overAct as any, 20)).pass).toBe(false);
 });
 
+// ---- HARD tier mechanics: guard refusals + one-shot interrupt ------------------------------------
+
+test("GuiWorld: a guarded button refuses with the validation error until preconditions hold", () => {
+  const w = guiTask("guarded-form").world();
+  expect(w.act({ action: "invoke", name: "Submit" })).toMatch(/Full name.*required/i);
+  w.act({ action: "setvalue", name: "Full name", value: "Binh Pham" });
+  expect(w.act({ action: "invoke", name: "Submit" })).toMatch(/accept the terms/i);
+  w.act({ action: "toggle", name: "I agree to the terms" });
+  expect(w.act({ action: "invoke", name: "Submit" })).toContain("Confirm submission"); // navigated
+});
+
+test("GuiWorld: goTo interrupt hijacks the FIRST navigation only (one-shot dialog)", () => {
+  const w = guiTask("bank-transfer").world();
+  w.act({ action: "invoke", name: "Go to Transfer" });
+  expect(w.act({ action: "read" })).toContain("Special offer"); // hijacked once
+  w.act({ action: "invoke", name: "Dismiss" });
+  expect(w.act({ action: "read" })).toContain("Bank - Transfer");
+  w.act({ action: "invoke", name: "Back" });
+  w.act({ action: "invoke", name: "Go to Transfer" });
+  expect(w.act({ action: "read" })).toContain("Bank - Transfer"); // no second hijack
+});
+
+// ---- HARD tier end-to-end: each task has a pass and a fail trajectory ----------------------------
+
+test("hard: bank-transfer - remembering the CHECKING balance across screens PASSES", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "read" }),                              // see balances on Accounts
+    computer({ action: "invoke", name: "Go to Transfer" }),    // hijacked by the offer dialog
+    computer({ action: "invoke", name: "Dismiss" }),           // dismiss, land on Transfer
+    computer({ action: "setvalue", name: "Amount", value: "1,250,000 VND" }),
+    computer({ action: "setvalue", name: "Recipient", value: "Landlord" }),
+    computer({ action: "invoke", name: "Send" }),
+    done,
+  ]);
+  const r = await runGuiTrial(guiTask("bank-transfer"), provider as any, 20);
+  expect(r.pass).toBe(true);
+});
+
+test("hard: bank-transfer - copying the SAVINGS decoy balance FAILS", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "invoke", name: "Go to Transfer" }),
+    computer({ action: "invoke", name: "Dismiss" }),
+    computer({ action: "setvalue", name: "Amount", value: "8,400,000" }), // wrong account's balance
+    computer({ action: "setvalue", name: "Recipient", value: "Landlord" }),
+    computer({ action: "invoke", name: "Send" }),
+    done,
+  ]);
+  expect((await runGuiTrial(guiTask("bank-transfer"), provider as any, 20)).pass).toBe(false);
+});
+
+test("hard: bank-transfer - claiming the offer instead of dismissing wastes steps but recovery still PASSES", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "invoke", name: "Go to Transfer" }),     // -> offer
+    computer({ action: "invoke", name: "Claim cashback" }),     // tempted -> offers dead-end
+    computer({ action: "invoke", name: "Back to Accounts" }),   // recover
+    computer({ action: "invoke", name: "Go to Transfer" }),     // second time: straight through
+    computer({ action: "setvalue", name: "Amount", value: "1250000" }),
+    computer({ action: "setvalue", name: "Recipient", value: "Landlord" }),
+    computer({ action: "invoke", name: "Send" }),
+    done,
+  ]);
+  expect((await runGuiTrial(guiTask("bank-transfer"), provider as any, 20)).pass).toBe(true);
+});
+
+test("hard: paged-decoys - navigating to page 2 and opening the exact item PASSES", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "read" }),                          // page 1: decoy visible
+    computer({ action: "invoke", name: "Next page" }),     // -> page 2
+    computer({ action: "read" }),
+    computer({ action: "click", x: 210, y: 120 }),         // Invoice #42
+    done,
+  ]);
+  const r = await runGuiTrial(guiTask("paged-decoys"), provider as any, 16);
+  expect(r.pass).toBe(true);
+});
+
+test("hard: paged-decoys - opening the page-1 decoy FAILS permanently (even if the right one follows)", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "read" }),
+    computer({ action: "click", x: 210, y: 80 }),          // "Invoice #42 (copy)" - the decoy
+    computer({ action: "invoke", name: "Close" }),         // back to page 1
+    computer({ action: "invoke", name: "Next page" }),
+    computer({ action: "click", x: 210, y: 120 }),         // the real one - too late
+    done,
+  ]);
+  expect((await runGuiTrial(guiTask("paged-decoys"), provider as any, 16)).pass).toBe(false);
+});
+
+test("hard: guarded-form - fixing each validation error then confirming PASSES", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "invoke", name: "Submit" }),                        // Error: name required
+    computer({ action: "setvalue", name: "Full name", value: "Binh Pham" }),
+    computer({ action: "invoke", name: "Submit" }),                        // Error: accept terms
+    computer({ action: "toggle", name: "I agree to the terms" }),
+    computer({ action: "invoke", name: "Submit" }),                        // -> confirm screen
+    computer({ action: "invoke", name: "Confirm submission" }),            // done
+    done,
+  ]);
+  expect((await runGuiTrial(guiTask("guarded-form"), provider as any, 20)).pass).toBe(true);
+});
+
+test("hard: guarded-form - stopping at the confirm screen (feels done, is not) FAILS", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "setvalue", name: "Full name", value: "Binh Pham" }),
+    computer({ action: "toggle", name: "I agree to the terms" }),
+    computer({ action: "invoke", name: "Submit" }),   // reaches confirm, never confirms
+    done,
+  ]);
+  expect((await runGuiTrial(guiTask("guarded-form"), provider as any, 20)).pass).toBe(false);
+});
+
+test("hard: guarded-form - subscribing to the newsletter (over-acting) FAILS", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "setvalue", name: "Full name", value: "Binh Pham" }),
+    computer({ action: "toggle", name: "I agree to the terms" }),
+    computer({ action: "toggle", name: "Subscribe to newsletter" }), // must stay off
+    computer({ action: "invoke", name: "Submit" }),
+    computer({ action: "invoke", name: "Confirm submission" }),
+    done,
+  ]);
+  expect((await runGuiTrial(guiTask("guarded-form"), provider as any, 20)).pass).toBe(false);
+});
+
+test("hard: expense-report - the full chain (memory x2, paging, decline survey, re-submit, confirm) PASSES", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "invoke", name: "Open Receipts" }),
+    computer({ action: "invoke", name: "Next page" }),          // real taxi receipt on page 2
+    computer({ action: "read" }),                                // memorize 240,000
+    computer({ action: "invoke", name: "Home" }),
+    computer({ action: "invoke", name: "Open Rates" }),
+    computer({ action: "read" }),                                // memorize 350,000
+    computer({ action: "invoke", name: "Home" }),
+    computer({ action: "invoke", name: "Open Report" }),
+    computer({ action: "setvalue", name: "Taxi amount", value: "240,000" }),
+    computer({ action: "setvalue", name: "Per-diem amount", value: "350,000" }),
+    computer({ action: "toggle", name: "Mark as final" }),
+    computer({ action: "invoke", name: "Submit report" }),       // hijacked -> survey
+    computer({ action: "invoke", name: "Not now" }),             // decline -> back on report
+    computer({ action: "invoke", name: "Submit report" }),       // second submit -> confirm
+    computer({ action: "invoke", name: "Confirm and send" }),    // sent
+    done,
+  ]);
+  const r = await runGuiTrial(guiTask("expense-report"), provider as any, 32);
+  expect(r.pass).toBe(true);
+});
+
+test("hard: expense-report - using the DRAFT receipt's amount FAILS", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "invoke", name: "Open Receipts" }),
+    computer({ action: "read" }),                                // page 1 only: sees the draft 190,000
+    computer({ action: "invoke", name: "Home" }),
+    computer({ action: "invoke", name: "Open Rates" }),
+    computer({ action: "invoke", name: "Home" }),
+    computer({ action: "invoke", name: "Open Report" }),
+    computer({ action: "setvalue", name: "Taxi amount", value: "190,000" }), // the draft decoy
+    computer({ action: "setvalue", name: "Per-diem amount", value: "350,000" }),
+    computer({ action: "toggle", name: "Mark as final" }),
+    computer({ action: "invoke", name: "Submit report" }),
+    computer({ action: "invoke", name: "Not now" }),
+    computer({ action: "invoke", name: "Submit report" }),
+    computer({ action: "invoke", name: "Confirm and send" }),
+    done,
+  ]);
+  expect((await runGuiTrial(guiTask("expense-report"), provider as any, 32)).pass).toBe(false);
+});
+
+test("hard: expense-report - assuming the hijacked submit went through (no re-submit) FAILS", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "invoke", name: "Open Receipts" }),
+    computer({ action: "invoke", name: "Next page" }),
+    computer({ action: "invoke", name: "Home" }),
+    computer({ action: "invoke", name: "Open Report" }),
+    computer({ action: "setvalue", name: "Taxi amount", value: "240,000" }),
+    computer({ action: "setvalue", name: "Per-diem amount", value: "350,000" }),
+    computer({ action: "toggle", name: "Mark as final" }),
+    computer({ action: "invoke", name: "Submit report" }),  // hijacked -> survey
+    computer({ action: "invoke", name: "Not now" }),        // back on report... and stops here
+    done,                                                    // never re-submits, never confirms
+  ]);
+  expect((await runGuiTrial(guiTask("expense-report"), provider as any, 32)).pass).toBe(false);
+});
+
 // ---- Report rendering ---------------------------------------------------------------------------
 
 test("renderGuiReport: marks PASS / FAIL / VIOLATE and surfaces the axes", () => {
@@ -180,9 +362,17 @@ test("renderGuiReport: marks PASS / FAIL / VIOLATE and surfaces the axes", () =>
   expect(out).toContain("constraint violations: 1");
 });
 
-test("every GUI task has a distinct id and axis", () => {
-  const ids = new Set(GUI_TASKS.map((t) => t.id));
-  const axes = new Set(GUI_TASKS.map((t) => t.axis));
-  expect(ids.size).toBe(GUI_TASKS.length);
-  expect(axes.size).toBe(GUI_TASKS.length);
+test("every GUI task (both tiers) has a distinct id and axis", () => {
+  const all = [...GUI_TASKS, ...GUI_HARD_TASKS];
+  expect(new Set(all.map((t) => t.id)).size).toBe(all.length);
+  expect(new Set(all.map((t) => t.axis)).size).toBe(all.length);
+});
+
+test("renderGuiReport: the hard suite is named in the header and the log line", () => {
+  const out = renderGuiReport({
+    model: "m", effort: "high", trials: 1,
+    results: [], passed: 0, total: 0, violations: 0, misses: 0, tokens: 0, outTok: 0, seconds: 1,
+  }, "gui-hard");
+  expect(out).toContain("HARD tier");
+  expect(out).toContain('suite "gui-hard"');
 });

@@ -66,12 +66,25 @@ one never blocks another.
   fails ~30-60% — THEN harness improvements (TDD/debugging skills, verify gate) show measurable lift.
   Complementary: wire skill-context into the bench so `test-driven-development`/`systematic-debugging` lift
   is measurable (bench currently runs skill-less). Verify: a task set where glm-5.2 is <100% and a harness
-  change moves it. *(2026-07-10: the COMPUTER-USE half of this landed as `neko bench gui` — 4 axis-isolated
-  long-horizon tasks on a deterministic simulated desktop (grounding / recovery / precise-action /
-  constraint), verifier-backed, injected via `ToolRegistry.computerHandler`, with a 15-test scripted-provider
-  self-test. Still open: the live glm-5.2 calibration (confirm it's <100% so a harness lever shows lift) and
-  the CODING long-horizon tier — a 15-25 step multi-file feature / cross-module migration with a regression
-  test.)*
+  change moves it. *(2026-07-10: the COMPUTER-USE half of this landed AND is live-calibrated — `neko bench
+  gui` (base tier, saturated 12/12 -> smoke) + `neko bench gui hard` (cross-screen memory, paged decoys,
+  one-shot interrupts via `El.goTo`, guarded submits via `El.guard`, and an expense-report composite;
+  budgets METR-calibrated to the measured strain point). gpt-oss-120b baseline: 11/12 (92%), paged-decoys
+  FLAKY 2/3, 16 grounding misses — a discriminating ruler with headroom in both directions. Still open:
+  the glm-5.2 baseline (blocked on a fresh Z.ai key) and the CODING long-horizon tier — a 15-25 step
+  multi-file feature / cross-module migration with a regression test.)*
+
+- [ ] **Doctor warning when a top-level `model:` shadows the profile's model.** Found live 2026-07-10:
+  `~/.neko-core/config.json` had a top-level `"model": "z-ai/glm-5.2"` — per the documented overlay order
+  (file beats profile preset) this silently OVERRODE every profile's model, so `--profile nvidia` sent
+  `z-ai/glm-5.2` to NVIDIA (404 material). Correct-by-design but a real footgun: the user selected a
+  profile precisely to get its model. Fix candidates (pick one): (a) `neko doctor` emits a WARN when the
+  active profile declares a model that the file's top-level `model` shadows, naming both; (b) flip the
+  precedence so an explicitly-selected profile's model wins over the base file's top-level model (audit
+  what else that changes). Verify: (a) a unit test that doctor's output contains the shadow warning when
+  both are set and differ, and stays silent when they agree or only one exists; (b) if precedence flips,
+  a config-loader test that `--profile X` yields X's model despite a top-level model, plus no regression
+  in the existing overlay tests.
 
 ## Research-seeded (turn into "Now" items as they're scoped)
 - [ ] Archive/population self-improvement (DGM): keep N improved branches, benchmark each, keep the best —

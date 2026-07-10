@@ -909,3 +909,37 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
   the harness lift a verify-gate/recovery-middleware then buys) is the owner's to run.
 - Verification: TS 7 + TS 5.9 clean; **436/436 tests** (1610 assertions, +15); policy PASS; `neko bench gui`
   wired into the CLI + help. No `src/core` behaviour change beyond the opt-in handler seam (unset by default).
+
+## 2026-07-10 - GUI eval live calibration + the HARD tier (owner-authorized live runs)
+- Live calibration (owner: "chay di... toan quyen"). glm-5.2 was unreachable - BOTH stored Z.ai keys
+  (env + config, different keys) are rejected by api.z.ai today (`{"code":1000,"msg":"Authentication
+  Failed"}` on a direct `/v1/models` probe; they worked 2026-07-08), so the account/key needs the owner.
+  Two environment findings along the way: (a) the top-level `model:` in `~/.neko-core/config.json`
+  SHADOWS every profile's model (documented overlay order - the file beats the profile preset - but a
+  real footgun: `--profile nvidia` was silently sending `z-ai/glm-5.2` to NVIDIA); worked around with a
+  scratchpad-local `./.neko-core` overlay, owner's config untouched. (b) the eval surfaced provider
+  errors properly instead of silent 0/1 (the bench.ts pattern paying off).
+- Baseline on `openai/gpt-oss-120b` (NVIDIA): the base tier SATURATED immediately - 4/4 first run,
+  12/12 at 3 trials, 0 misses. Honest per the eval's own contract ("if 100%, tighten the ruler"): the
+  base tier is now the smoke/regression tier.
+- Built the HARD tier (`neko bench gui hard`, suite "gui-hard") with the pressures real desktops apply
+  that the base tier lacked: **bank-transfer** (cross-screen memory - the checking balance is only
+  visible on the Accounts screen, a savings-balance decoy sits next to it, and a one-shot promo dialog
+  hijacks the first navigation), **paged-decoys** (partial observability - a 3-page inbox where the
+  page-1 decoy "Invoice #42 (copy)" fails the task permanently), **guarded-form** (validation-error-
+  driven progress + a final confirm screen where stopping early feels done but is not), and the
+  **expense-report composite** (~17-perfect-turn chain: memorize TWO values from different screens, a
+  paged list with a draft decoy, checkbox precision, a survey dialog that hijacks the SUBMIT itself so
+  the model must notice the submit did not go through, a final confirm, and a Factory-reset danger
+  button). Engine additions: `El.goTo` (dynamic destination - one-shot interrupts) and `El.guard`
+  (refuse activation with a validation error); `GuiWorld.openedAll`/`flags`.
+- First hard run saturated too (9/9) BUT with visible strain: bank-transfer used ~27 of 34 turns with
+  4 grounding misses. Applied the METR-style calibration (horizon = the budget where success ~50%):
+  budgets now sit just under the measured strain point (bank-transfer 34->24, paged-decoys 24->16,
+  guarded-form 26->16), so inefficiency IS failure and a harness lever shows up as pass-rate lift.
+- Calibrated result (gpt-oss-120b, 3 trials/task): **11/12 (92%), paged-decoys FLAKY 2/3, 16 grounding
+  misses** - the ruler discriminates. Deliberately stopped tightening here: sharpening further against
+  one model's 3-trial run would overfit the eval to gpt-oss-120b. The glm-5.2 baseline lands once the
+  owner refreshes the Z.ai key.
+- Verification: TS 7 + TS 5.9 clean; **450/450 tests** (1629 assertions, +14); policy PASS; live runs
+  logged to bench-log.jsonl suites "gui" and "gui-hard".

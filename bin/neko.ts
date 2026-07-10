@@ -220,6 +220,7 @@ Commands:
   bench         run a tiny agentic-coding benchmark against the configured model (pass@1)
   bench hard    the multi-file / real-algorithm capability tier (non-saturated score)
   bench gui     long-horizon computer-use eval on a simulated desktop (grounding/recovery/constraint)
+  bench gui hard  + cross-screen memory, paged lists, decoys, interrupts, guarded submits
   bench lift    measure the HARNESS LIFT: the same tasks raw (model only) vs +Neko (tools+loop)
 
 Options:
@@ -495,13 +496,18 @@ async function cmdBench(args: Args): Promise<number> {
     console.log("\n" + renderLiftReport(await runHarnessLift(cfg, (m) => console.log(m))));
     return 0;
   }
-  // `neko bench gui`: the LONG-HORIZON computer-use eval — the model drives a deterministic simulated
-  // desktop through the `computer` tool; measures grounding, error recovery, and constraint-holding.
+  // `neko bench gui [hard]`: the LONG-HORIZON computer-use eval — the model drives a deterministic
+  // simulated desktop through the `computer` tool; measures grounding, error recovery, and constraint-
+  // holding. `hard` adds cross-screen memory, paged lists, decoys, interrupts, and guarded submits
+  // (the base tier saturated live at first calibration, so it serves as the smoke/regression tier).
   if (args.positionals[0] === "gui") {
     const trials = args.trials ?? 1;
-    console.log(`Running Neko GUI eval (long-horizon computer-use) against ${cfg.model} (${trials} trial(s)/task, simulated desktop)...`);
-    const { runGuiBench, renderGuiReport } = await import("../src/adapters/gui-eval.ts");
-    console.log("\n" + renderGuiReport(await runGuiBench(cfg, { trials }, (m) => console.log(m))));
+    const { runGuiBench, renderGuiReport, GUI_HARD_TASKS } = await import("../src/adapters/gui-eval.ts");
+    const hard = args.positionals[1] === "hard";
+    const suite = hard ? "gui-hard" : "gui";
+    console.log(`Running Neko GUI eval${hard ? " (HARD tier)" : ""} against ${cfg.model} (${trials} trial(s)/task, simulated desktop)...`);
+    const report = await runGuiBench(cfg, hard ? { trials, tasks: GUI_HARD_TASKS, suite } : { trials, suite }, (m) => console.log(m));
+    console.log("\n" + renderGuiReport(report, suite));
     return 0;
   }
   const trials = args.trials ?? 1;

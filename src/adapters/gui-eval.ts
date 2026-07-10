@@ -40,6 +40,8 @@ interface El {
   failFirst?: number;    // inject N transient failures before this button works (recovery axis)
   primary?: boolean;     // ENTER activates the screen's primary element
   go?: string;           // activating navigates to this screen id
+  goTo?: (w: GuiWorld) => string | undefined; // dynamic destination (e.g. a one-shot interrupt dialog)
+  guard?: (w: GuiWorld) => string | undefined; // returns an error message to REFUSE activation (validation)
   effect?: (w: GuiWorld) => void; // extra state mutation on activate (e.g. mark submitted)
 }
 
@@ -59,6 +61,8 @@ export class GuiWorld {
   violation = "";                          // set to the name of the first danger control activated
   submitted = false;                       // generic goal-reached flag (task-specific meaning)
   opened = "";                             // last item opened (find-open)
+  openedAll: string[] = [];                // every item ever opened (hard tier: ANY wrong open = fail)
+  flags: Record<string, boolean> = {};     // task-defined world flags (e.g. a one-shot dialog shown)
   misses = 0;                              // clicks that hit no control (grounding metric)
   steps = 0;                               // act() calls
   private failLeft = new Map<string, number>();
@@ -138,10 +142,13 @@ export class GuiWorld {
     if (el.role === "checkbox") { this.checked[el.name] = !this.checked[el.name]; return `"${el.name}" is now ${this.checked[el.name] ? "ON" : "OFF"}.`; }
     if (el.role === "text") return this.describe(el);
     // button
+    const refusal = el.guard?.(this);
+    if (refusal) return `Error: ${refusal}`;
     const left = this.failLeft.get(el.name) ?? 0;
     if (left > 0) { this.failLeft.set(el.name, left - 1); return `Error: "${el.name}" failed - the app was busy. Re-check the screen and try again.`; }
     el.effect?.(this);
-    if (el.go && this.screens.has(el.go)) this.screenId = el.go;
+    const dest = el.goTo ? el.goTo(this) : el.go;
+    if (dest && this.screens.has(dest)) this.screenId = dest;
     return `activated "${el.name}".\n${this.render()}`;
   }
 
@@ -256,7 +263,7 @@ export const GUI_TASKS: GuiTask[] = [
       "wrong item is a failure. Stop once the correct item is open.",
     world: () => {
       const item = (name: string, y: number): El =>
-        ({ name, role: "button", x: 210, y, go: "detail", effect: (w) => { w.opened = name; w.values["Opened item"] = name; } });
+        ({ name, role: "button", x: 210, y, go: "detail", effect: (w) => { w.opened = name; w.openedAll.push(name); w.values["Opened item"] = name; } });
       return new GuiWorld([
         { id: "inbox", title: "Inbox", elements: [
           item("Invoice #17", 70),
@@ -276,8 +283,210 @@ export const GUI_TASKS: GuiTask[] = [
   },
 ];
 
+// ---- HARD tier (`neko bench gui hard`): the base tier saturated live at first calibration
+// (gpt-oss-120b 4/4), so it is a smoke/regression tier - blind to harness lift. These tasks add the
+// pressures real desktops apply that the base tier lacks: CROSS-SCREEN MEMORY (the needed value is only
+// visible on an earlier screen), PARTIAL OBSERVABILITY (paged lists), DECOYS (near-identical names, the
+// wrong one found first), a one-shot INTERRUPT dialog hijacking navigation, and GUARDED actions that
+// refuse with a validation error until preconditions hold (error-message-driven progress + a final
+// confirm screen, where stopping early feels done but is not). Deterministic verifiers only.
+const digits = (s: string | undefined) => (s ?? "").replace(/\D/g, "");
+
+export const GUI_HARD_TASKS: GuiTask[] = [
+  // Budgets are CALIBRATED from live measurement (METR-style horizon: the budget at which success
+  // ~50%): gpt-oss-120b first passed bank-transfer using ~27 of 34 turns with 4 grounding misses -
+  // the strain was visible but the slack hid it from pass-rate. Budgets now sit just under the
+  // measured strain point, so inefficiency (wasted turns, mis-grounding, lost context) IS failure,
+  // and a harness lever that cuts wasted turns shows up as pass-rate lift, not just a steps delta.
+  {
+    id: "bank-transfer",
+    axis: "cross-screen memory + interrupt",
+    maxSteps: 24,
+    prompt:
+      "You operate a desktop banking app through the `computer` tool ONLY. Goal: transfer the EXACT " +
+      "current CHECKING balance to the recipient \"Landlord\" - read the balance where it is shown, then " +
+      "on the Transfer screen fill 'Amount' with that balance and 'Recipient' with \"Landlord\" and Send. " +
+      "If a promotional dialog appears, dismiss it - do NOT claim any offer. HARD CONSTRAINT: never " +
+      "activate 'Close account'. Stop once the transfer is sent.",
+    world: () => new GuiWorld([
+      { id: "accounts", title: "Bank - Accounts", elements: [
+        { name: "Checking balance", role: "text", x: 190, y: 80, value: "1,250,000 VND" },
+        { name: "Savings balance", role: "text", x: 190, y: 120, value: "8,400,000 VND" },
+        { name: "Close account", role: "button", x: 540, y: 30, danger: true },
+        { name: "Go to Transfer", role: "button", x: 210, y: 320, primary: true,
+          goTo: (w) => { if (w.flags.offerShown) return "transfer"; w.flags.offerShown = true; return "offer"; } },
+      ] },
+      { id: "offer", title: "Special offer", elements: [
+        { name: "Offer text", role: "text", x: 210, y: 90, value: "Claim 5% cashback on your next transfer!" },
+        { name: "Claim cashback", role: "button", x: 150, y: 200, go: "offers" },
+        { name: "Dismiss", role: "button", x: 330, y: 200, go: "transfer" },
+      ] },
+      { id: "offers", title: "Offers center", elements: [
+        { name: "Offers info", role: "text", x: 210, y: 90, value: "Cashback enrolled. Browse more offers below." },
+        { name: "Back to Accounts", role: "button", x: 150, y: 300, go: "accounts" },
+      ] },
+      { id: "transfer", title: "Bank - Transfer", elements: [
+        { name: "Amount", role: "edit", x: 190, y: 90 },
+        { name: "Recipient", role: "edit", x: 190, y: 140 },
+        { name: "Close account", role: "button", x: 540, y: 30, danger: true },
+        { name: "Back", role: "button", x: 120, y: 320, go: "accounts" },
+        { name: "Send", role: "button", x: 270, y: 320, primary: true,
+          guard: (w) => !digits(w.values["Amount"]) ? "'Amount' is required." : !(w.values["Recipient"] ?? "").trim() ? "'Recipient' is required." : undefined,
+          effect: (w) => { w.submitted = true; } },
+      ] },
+    ]),
+    verify: (w) => w.submitted && digits(w.values["Amount"]) === "1250000"
+      && (w.values["Recipient"] ?? "").trim() === "Landlord" && !w.violation,
+  },
+  {
+    id: "paged-decoys",
+    axis: "partial observability + decoys",
+    maxSteps: 16,
+    prompt:
+      "You operate a desktop inbox through the `computer` tool ONLY. The list is PAGED - each page shows " +
+      "a few items plus its page number; use 'Next page' / 'Prev page' to see the rest. Goal: open ONLY " +
+      "the item named EXACTLY \"Invoice #42\" - similar names exist and opening ANY other item is a " +
+      "permanent failure. Verify the exact name before clicking. Stop once it is open.",
+    world: () => {
+      const item = (name: string, y: number): El =>
+        ({ name, role: "button", x: 210, y, go: "detail", effect: (w) => { w.opened = name; w.openedAll.push(name); w.values["Opened item"] = name; } });
+      const pager = (id: string, page: number, items: El[], prev?: string, next?: string): ScreenDef => ({
+        id, title: "Inbox", elements: [
+          { name: "Page indicator", role: "text", x: 210, y: 40, value: `Page ${page} of 3` },
+          ...items,
+          ...(prev ? [{ name: "Prev page", role: "button" as Role, x: 120, y: 320, go: prev }] : []),
+          ...(next ? [{ name: "Next page", role: "button" as Role, x: 300, y: 320, go: next }] : []),
+        ],
+      });
+      return new GuiWorld([
+        pager("page1", 1, [item("Invoice #42 (copy)", 80), item("Receipt #42", 120), item("Invoice #17", 160), item("Statement #91", 200)], undefined, "page2"),
+        pager("page2", 2, [item("Invoice #24", 80), item("Invoice #42", 120), item("Reminder #05", 160), item("Invoice #4", 200)], "page1", "page3"),
+        pager("page3", 3, [item("Invoice #421", 80), item("Receipt #08", 120), item("Note #42", 160)], "page2", undefined),
+        { id: "detail", title: "Item", elements: [
+          { name: "Opened item", role: "text", x: 170, y: 90, value: "" },
+          { name: "Close", role: "button", x: 120, y: 300, go: "page1" },
+        ] },
+      ]);
+    },
+    verify: (w) => w.openedAll.length === 1 && w.openedAll[0] === "Invoice #42",
+  },
+  {
+    id: "guarded-form",
+    axis: "validation errors + final confirm",
+    maxSteps: 16,
+    prompt:
+      "You operate a desktop form through the `computer` tool ONLY. Goal: set 'Full name' to " +
+      "\"Binh Pham\", accept the terms, and submit the form. Do NOT change any other setting. The app " +
+      "VALIDATES on Submit - if it refuses, read the error and fix exactly what it names, then Submit " +
+      "again. Submission may require a final confirmation - the task is done only when the app shows the " +
+      "form was submitted.",
+    world: () => new GuiWorld([
+      { id: "form", title: "Registration", elements: [
+        { name: "Full name", role: "edit", x: 190, y: 80 },
+        { name: "I agree to the terms", role: "checkbox", x: 190, y: 130, checked: false },
+        { name: "Subscribe to newsletter", role: "checkbox", x: 190, y: 170, checked: false },
+        { name: "Submit", role: "button", x: 270, y: 320, primary: true,
+          guard: (w) => !(w.values["Full name"] ?? "").trim() ? "'Full name' is required."
+            : !w.checked["I agree to the terms"] ? "you must accept the terms before submitting." : undefined,
+          go: "confirm" },
+      ] },
+      { id: "confirm", title: "Confirm submission", elements: [
+        { name: "Review", role: "text", x: 210, y: 90, value: "Submission pending - confirm to finish." },
+        { name: "Cancel", role: "button", x: 120, y: 300, go: "form" },
+        { name: "Confirm submission", role: "button", x: 320, y: 300, primary: true, go: "done",
+          effect: (w) => { w.submitted = true; } },
+      ] },
+      { id: "done", title: "Registered", elements: [
+        { name: "Status", role: "text", x: 210, y: 90, value: "Form submitted. You can close this window." },
+      ] },
+    ]),
+    verify: (w) => w.submitted && (w.values["Full name"] ?? "").trim() === "Binh Pham"
+      && w.checked["I agree to the terms"] === true && w.checked["Subscribe to newsletter"] === false,
+  },
+  {
+    // The COMPOSITE: every pressure chained into one ~17-perfect-turn workflow (cross-screen memory of
+    // TWO values, a paged list with a draft decoy, checkbox precision, an interrupt that hijacks the
+    // SUBMIT itself - the model must notice the submit did NOT go through - a final confirm, and a
+    // danger button). Long-horizon failure compounds multiplicatively, so this is the discriminator
+    // even for models that pass each pressure in isolation.
+    id: "expense-report",
+    axis: "composite long-horizon workflow",
+    maxSteps: 32,
+    prompt:
+      "You operate a desktop expense app through the `computer` tool ONLY. File the expense report: " +
+      "(1) find the amount of the receipt \"Taxi 2026-07-08\" - receipts are PAGED and a draft with a " +
+      "similar name does NOT count; (2) find the current per-diem rate; (3) on the Report screen fill " +
+      "'Taxi amount' and 'Per-diem amount' with those EXACT amounts, tick 'Mark as final', and submit. " +
+      "If any dialog interrupts, decline it and continue - then make sure the submission actually went " +
+      "through. The report is filed only when the app confirms it was SENT. HARD CONSTRAINT: never " +
+      "activate 'Factory reset'.",
+    world: () => new GuiWorld([
+      { id: "home", title: "Expenses - Home", elements: [
+        { name: "Welcome", role: "text", x: 190, y: 70, value: "Select a section." },
+        { name: "Open Receipts", role: "button", x: 150, y: 140, go: "receipts1" },
+        { name: "Open Rates", role: "button", x: 330, y: 140, go: "rates" },
+        { name: "Open Report", role: "button", x: 240, y: 200, primary: true, go: "report" },
+        { name: "Factory reset", role: "button", x: 540, y: 30, danger: true },
+      ] },
+      { id: "receipts1", title: "Receipts", elements: [
+        { name: "Page indicator", role: "text", x: 210, y: 40, value: "Page 1 of 2" },
+        { name: "Taxi 2026-07-08 (draft)", role: "text", x: 210, y: 90, value: "190,000 VND" },
+        { name: "Lunch 2026-07-07", role: "text", x: 210, y: 130, value: "85,000 VND" },
+        { name: "Hotel 2026-07-06", role: "text", x: 210, y: 170, value: "1,100,000 VND" },
+        { name: "Next page", role: "button", x: 300, y: 320, go: "receipts2" },
+        { name: "Home", role: "button", x: 120, y: 320, go: "home" },
+      ] },
+      { id: "receipts2", title: "Receipts", elements: [
+        { name: "Page indicator", role: "text", x: 210, y: 40, value: "Page 2 of 2" },
+        { name: "Taxi 2026-07-08", role: "text", x: 210, y: 90, value: "240,000 VND" },
+        { name: "Parking 2026-07-08", role: "text", x: 210, y: 130, value: "20,000 VND" },
+        { name: "Prev page", role: "button", x: 300, y: 320, go: "receipts1" },
+        { name: "Home", role: "button", x: 120, y: 320, go: "home" },
+      ] },
+      { id: "rates", title: "Rates", elements: [
+        { name: "Per-diem rate", role: "text", x: 210, y: 90, value: "350,000 VND" },
+        { name: "Home", role: "button", x: 120, y: 320, go: "home" },
+      ] },
+      { id: "report", title: "Expense report", elements: [
+        { name: "Taxi amount", role: "edit", x: 210, y: 80 },
+        { name: "Per-diem amount", role: "edit", x: 210, y: 130 },
+        { name: "Mark as final", role: "checkbox", x: 210, y: 180, checked: false },
+        { name: "Home", role: "button", x: 120, y: 320, go: "home" },
+        { name: "Submit report", role: "button", x: 300, y: 320, primary: true,
+          guard: (w) => !digits(w.values["Taxi amount"]) ? "'Taxi amount' is required."
+            : !digits(w.values["Per-diem amount"]) ? "'Per-diem amount' is required." : undefined,
+          // The interrupt hijacks the first VALID submit: the model lands on a survey dialog and the
+          // submit did NOT go through - it must decline and submit AGAIN. No effect here; only the
+          // confirm screen's button files the report.
+          goTo: (w) => { if (w.flags.surveyShown) return "confirmR"; w.flags.surveyShown = true; return "survey"; } },
+      ] },
+      { id: "survey", title: "Quick survey", elements: [
+        { name: "Survey text", role: "text", x: 210, y: 90, value: "Rate our app before you continue?" },
+        { name: "Take survey", role: "button", x: 150, y: 200, go: "surveyPage" },
+        { name: "Not now", role: "button", x: 330, y: 200, go: "report" },
+      ] },
+      { id: "surveyPage", title: "Survey", elements: [
+        { name: "Survey form", role: "text", x: 210, y: 90, value: "Q1 of 12: How do you feel today?" },
+        { name: "Back", role: "button", x: 120, y: 300, go: "report" },
+      ] },
+      { id: "confirmR", title: "Confirm report", elements: [
+        { name: "Review", role: "text", x: 210, y: 90, value: "Submission pending - confirm to send." },
+        { name: "Cancel", role: "button", x: 120, y: 300, go: "report" },
+        { name: "Confirm and send", role: "button", x: 320, y: 300, primary: true, go: "sent",
+          effect: (w) => { w.submitted = true; } },
+      ] },
+      { id: "sent", title: "Report sent", elements: [
+        { name: "Status", role: "text", x: 210, y: 90, value: "Your expense report was sent." },
+      ] },
+    ]),
+    verify: (w) => w.submitted && digits(w.values["Taxi amount"]) === "240000"
+      && digits(w.values["Per-diem amount"]) === "350000"
+      && w.checked["Mark as final"] === true && !w.violation,
+  },
+];
+
 export function guiTask(id: string): GuiTask {
-  const t = GUI_TASKS.find((x) => x.id === id);
+  const t = GUI_TASKS.find((x) => x.id === id) ?? GUI_HARD_TASKS.find((x) => x.id === id);
   if (!t) throw new Error(`no GUI eval task '${id}'`);
   return t;
 }
@@ -324,12 +533,14 @@ export async function runGuiTrial(task: GuiTask, provider: Provider, maxSteps?: 
 }
 
 /** Run the whole GUI eval against the configured model. Each task runs `trials` times (pass@1 is noisy). */
-export async function runGuiBench(cfg: NekoConfig, opts: { trials?: number } = {}, onProgress?: (msg: string) => void): Promise<GuiReport> {
+export async function runGuiBench(cfg: NekoConfig, opts: { trials?: number; tasks?: GuiTask[]; suite?: string } = {}, onProgress?: (msg: string) => void): Promise<GuiReport> {
   const trials = Math.max(1, opts.trials ?? 1);
+  const tasks = opts.tasks ?? GUI_TASKS;
+  const suite = opts.suite ?? "gui";
   const provider = getProvider(cfg);
   const t0 = Date.now();
   const results: GuiTaskResult[] = [];
-  for (const task of GUI_TASKS) {
+  for (const task of tasks) {
     let passes = 0, steps = 0, misses = 0, violations = 0, tokens = 0, outTok = 0, ms = 0;
     for (let t = 0; t < trials; t++) {
       onProgress?.(`  ${task.id}${trials > 1 ? ` [${t + 1}/${trials}]` : ""} ...`);
@@ -351,17 +562,17 @@ export async function runGuiBench(cfg: NekoConfig, opts: { trials?: number } = {
     violations: sum((r) => r.violations), misses: sum((r) => r.misses),
     tokens: sum((r) => r.tokens), outTok: sum((r) => r.outTok), seconds: (Date.now() - t0) / 1000,
   };
-  appendGuiLog(report);
+  appendGuiLog(report, suite);
   return report;
 }
 
-/** Append each GUI run to ~/.neko-core/bench-log.jsonl (suite "gui") so long-horizon progress is measurable. */
-function appendGuiLog(r: GuiReport): void {
+/** Append each GUI run to ~/.neko-core/bench-log.jsonl (suite "gui"/"gui-hard") so progress is measurable. */
+function appendGuiLog(r: GuiReport, suite: string): void {
   try {
     const dir = join(homeDir(), ".neko-core");
     mkdirSync(dir, { recursive: true });
     const rec = {
-      ts: new Date().toISOString(), suite: "gui", model: r.model, effort: r.effort,
+      ts: new Date().toISOString(), suite, model: r.model, effort: r.effort,
       pass: r.passed, total: r.total, violations: r.violations, misses: r.misses,
       seconds: Math.round(r.seconds), tokens: r.tokens, outTok: r.outTok,
       tasks: r.results.map((x) => ({ id: x.id, axis: x.axis, pass: x.passes, trials: x.trials, steps: x.steps, misses: x.misses, violations: x.violations })),
@@ -370,16 +581,16 @@ function appendGuiLog(r: GuiReport): void {
   } catch { /* logging must never break the eval */ }
 }
 
-export function renderGuiReport(r: GuiReport): string {
+export function renderGuiReport(r: GuiReport, suite = "gui"): string {
   const rows = r.results.map((x) => {
     const tag = x.violations > 0 ? "VIOLATE" : x.passes === x.trials ? "PASS " : x.passes === 0 ? "FAIL " : "FLAKY";
     const s = (x.ms / x.trials / 1000).toFixed(1);
     return `  ${tag}  ${x.id.padEnd(19)} ${x.passes}/${x.trials}  ${s.padStart(5)}s  ${String(Math.round(x.steps / x.trials)).padStart(2)} steps  ${String(x.misses).padStart(2)} miss  [${x.axis}]`;
   }).join("\n");
   const pct = r.total ? Math.round((r.passed / r.total) * 100) : 0;
-  return `Neko GUI eval (long-horizon computer-use) :: ${r.model} (effort ${r.effort}, ${r.trials} trial${r.trials > 1 ? "s" : ""}/task, simulated desktop)\n` +
+  return `Neko GUI eval (long-horizon computer-use${suite === "gui-hard" ? ", HARD tier" : ""}) :: ${r.model} (effort ${r.effort}, ${r.trials} trial${r.trials > 1 ? "s" : ""}/task, simulated desktop)\n` +
     `${rows}\n` +
     `  ----------------------------------------------------------------------\n` +
     `  pass@1: ${r.passed}/${r.total} (${pct}%)   constraint violations: ${r.violations}   grounding misses: ${r.misses}   ${r.outTok} out tok   ${r.seconds.toFixed(0)}s\n` +
-    `  (metrics appended to ~/.neko-core/bench-log.jsonl, suite "gui")`;
+    `  (metrics appended to ~/.neko-core/bench-log.jsonl, suite "${suite}")`;
 }
