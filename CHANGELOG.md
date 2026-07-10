@@ -31,7 +31,8 @@ All notable changes to Neko Code are documented here. The format follows
   later turn. Images are now normalized at the source on Windows (longest side 1568px, JPEG q82 — the
   vision-API sweet spot), oversized attachments are refused with the size and the fix, and the in-loop
   context relief can now free pasted images from earlier turns (the current turn's attachment always
-  survives).
+  survives). The temporary clipboard capture is removed after its bytes are embedded instead of leaking
+  one `neko-paste-*` file per Alt+V.
 
 ### Added
 - **Relay v2 — the phone experience, rebuilt** (host + Worker + web client, deployed and live-verified

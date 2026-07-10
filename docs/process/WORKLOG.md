@@ -3,6 +3,14 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-11 - pasted-image temp lifecycle closed
+
+The Fable 5 image audit found a concrete lifecycle leak outside the model context: every Alt+V read a
+temporary `neko-paste-*` capture into a data URL but never removed the file. Four stale captures totaling
+about 619 KiB were already present in TEMP during the audit. `pasteImage()` now removes its capture in a
+`finally` block on success, oversize refusal, and read failure. Existing temp files were left untouched;
+future pastes clean up after themselves. No image payload or clipboard behavior changed.
+
 ## 2026-07-11 - Fable 5 audit: GUI harness v2 closes repaired-violation false passes
 
 Re-read the 14-commit range after `6fa903f` through `1995d72`, the current roadmap/state/backlog,

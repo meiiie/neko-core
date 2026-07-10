@@ -8,7 +8,7 @@
  */
 import { Box, measureElement, render, Static, Text, useApp, useInput, useStdout } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 
 import { ApprovalBox, type Approval, type ApprovalFlash } from "./approval-box.tsx";
 import { runSlashCommand, SLASH } from "./commands.ts";
@@ -797,6 +797,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       } catch {
         addLine("info", "could not read the pasted image");
         return null;
+      } finally {
+        // readClipboardImage creates a temp capture; the data URL above owns the bytes now.
+        // Remove the file on success, refusal, and read failure so repeated pastes do not fill TEMP.
+        try { rmSync(path, { force: true }); } catch { /* best-effort temp cleanup */ }
       }
     };
 
