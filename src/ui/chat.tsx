@@ -37,6 +37,7 @@ import { loadConfig } from "../adapters/config.ts";
 import { agentsContextBlock, loadAgent } from "../adapters/agents.ts";
 import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
 import { readClipboardImage, writeClipboardText } from "../adapters/clipboard.ts";
+import { describeImage } from "../adapters/vision.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
 import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
 import { loadOrCreatePairing, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
@@ -158,8 +159,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // paste by writing into this map + bumping the counter; submit consumes the map. See
     // shared/paste-collapse.ts for the pure helpers.
     const pastedContentsRef = useRef(new Map<number, string>());
+    const pastedImagesRef = useRef(new Map<number, string>()); // [Image #N] id -> data: URL (shares the paste id counter)
     const nextPasteIdRef = useRef(1);
-    const commitPastes = () => { pastedContentsRef.current.clear(); nextPasteIdRef.current = 1; };
+    // Reset the shared id counter only when NOTHING is staged - a still-staged image (its turn is
+    // consuming asynchronously, or it was staged mid-turn) must not have its id reused.
+    const commitPastes = () => { pastedContentsRef.current.clear(); if (!pastedImagesRef.current.size) nextPasteIdRef.current = 1; };
   const [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [approvalFlash, setApprovalFlash] = useState<ApprovalFlash | null>(null);
@@ -238,9 +242,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [inflight, setInflight] = useState<{ key: string; text: string }[]>([]);
   const syncInflight = () => setInflight([...inflightRef.current]);
   const [awaitingKey, setAwaitingKey] = useState(false); // /login: next submit is the API key
-  const pastedRef = useRef<string[]>([]); // staged image data: URLs for the next turn
   const autoLoadedSkills = useRef<Set<string>>(new Set()); // domain skills already auto-loaded this session
-  const [pastedCount, setPastedCount] = useState(0);
 
   const addLine = (kind: LineKind, text: string, summary?: string) => {
     const line = { id: idRef.current++, kind, text, summary };
@@ -774,23 +776,27 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   }, [busy]);
 
   // Paste an image off the clipboard (Alt+V / /paste). Staged for the next turn; needs a vision model.
-    const pasteImage = () => {
+    /** Read the clipboard image and stage it behind an inline `[Image #N]` token (Claude-Code style):
+     * the token travels IN the sentence, deleting it detaches the image, and the id shares the text
+     * paste counter so numbering is uniform. Returns the token to insert, or null. */
+    const pasteImage = (): string | null => {
       const path = readClipboardImage();
-      if (!path) return addLine("info", "no image in the clipboard");
+      if (!path) { addLine("info", "no image in the clipboard"); return null; }
       try {
         const b64 = readFileSync(path).toString("base64");
         // Last-line size gate: an oversized attachment overflows the context window (HTTP 400) and,
         // worse, keeps re-overflowing from history. Refuse honestly instead of sending a doomed turn.
         if (b64.length > 600_000) {
           addLine("error", `image too large to attach (~${Math.round((b64.length * 3) / 4 / 1024)}KB) - crop or capture a smaller region and paste again`);
-          return;
+          return null;
         }
         const mime = path.endsWith(".jpg") ? "image/jpeg" : "image/png";
-        pastedRef.current.push(`data:${mime};base64,${b64}`);
-        setPastedCount(pastedRef.current.length);
-        addLine("info", `image attached (${pastedRef.current.length}) - needs a vision-capable model to be read`);
+        const id = nextPasteIdRef.current++;
+        pastedImagesRef.current.set(id, `data:${mime};base64,${b64}`);
+        return `[Image #${id}]`;
       } catch {
         addLine("info", "could not read the pasted image");
+        return null;
       }
     };
 
@@ -912,7 +918,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       setExpandedId((cur) => (cur === last.id ? null : last.id)); // second press collapses (no duplicate re-print)
       return;
     }
-      if (key.meta && char === "v") return pasteImage();
+      // Alt+V is handled INSIDE TextInput (onPasteImage) so the [Image #N] token lands at the caret.
       if (key.ctrl && char === "g") { openEditor(); return; }
       if (key.ctrl && char === "u") return setInput("");
       if (key.ctrl && char === "l") return setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
@@ -982,7 +988,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     if (text === "/paste") {
-      pasteImage();
+      const ph = pasteImage();
+      if (ph) setInput((v) => (v ? v.trimEnd() + " " : "") + ph + " "); // token lands in the (empty) input, ready to compose around
       return;
     }
     if (text === "/rc" || text === "/remote-control") {
@@ -1119,11 +1126,37 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (p) { const r = await registryRef.current!.execute("read_file", { path: p }); toSend += `\n\n[@${p}]\n${typeof r === "string" ? r : "[image attachment]"}`; }
       }
     }
-    const imgs = pastedRef.current; // consume any staged pasted images
-    pastedRef.current = [];
-    setPastedCount(0);
+    // Images travel as inline [Image #N] tokens (Claude-Code style): attach exactly the ones whose
+    // token survived editing - a deleted token is a detached image. Consume them from the stage.
+    const imgIds = [...new Set([...text.matchAll(/\[Image #(\d+)\]/g)].map((m) => Number(m[1])))]
+      .filter((id) => pastedImagesRef.current.has(id));
+    const imgPairs = imgIds.map((id) => ({ id, url: pastedImagesRef.current.get(id)! }));
+    imgIds.forEach((id) => pastedImagesRef.current.delete(id));
+    let imgs = imgPairs.map((p) => p.url);
     addLine("user", loopGoal ? `/auto ${loopGoal}` : text);
-    if (imgs.length) addLine("info", `  └ ${imgs.length} image${imgs.length > 1 ? "s" : ""} attached`);
+    // The vision bridge ("caption-then-reason"): a text-only main model can't read pixels, so a
+    // vision model reads each image into grounded text IN PLACE of its token. With `vision: true`
+    // the main model gets the real image; with neither, the note says exactly what to configure.
+    if (imgPairs.length && !cfg.vision) {
+      imgs = [];
+      const vm = cfg.visionModel;
+      for (const { id, url } of imgPairs) {
+        let block: string;
+        if (!vm) {
+          block = `[Image #${id}: attached, but the active model cannot see images and no vision_model is configured - set "vision": true (vision-capable model) or "vision_model" in config]`;
+          addLine("info", `[Image #${id}] cannot be read: set vision_model in config (or vision: true on a vision-capable model)`);
+        } else {
+          addLine("info", `reading [Image #${id}] with ${vm.split("/").pop()}...`);
+          try {
+            block = `[Image #${id}, read by ${vm}]\n${await describeImage(cfg, url)}\n[end of image #${id}]`;
+          } catch (e) {
+            block = `[Image #${id}: the vision read failed - ${e instanceof Error ? e.message : String(e)}]`;
+            addLine("error", `[Image #${id}] vision read failed: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+        toSend = toSend.split(`[Image #${id}]`).join(block);
+      }
+    }
     verbRef.current = VERBS[Math.floor(Math.random() * VERBS.length)];
     setStarted(true); // conversation begun -> drop the input placeholder hint
     registryRef.current!.clearCheckpoint(); // start a fresh file checkpoint for this turn (/rewind)
@@ -1647,10 +1680,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // input row vanished and the first menu items overlapped (image #61). The flexible transcript box
         // gives up the rows instead (same fix as the /resume picker, image #60).
         <Box flexDirection="column" flexShrink={0}>
-          {/* One RESERVED row for ephemeral status (image-attached on the left, "copied N chars" on the
-              right), always present so it never shifts the transcript when a message appears (image #52). */}
+          {/* One RESERVED row for ephemeral status ("copied N chars" on the right), always present so
+              it never shifts the transcript when a message appears (image #52). Images announce
+              themselves as inline [Image #N] tokens in the input now - no separate badge. */}
           <Box justifyContent="space-between">
-            <Text color="magenta">{pastedCount > 0 ? `  [${pastedCount} image attached - will send with your next message]` : ""}</Text>
+            <Text> </Text>
             <Text color="green">{copyNote ? copyNote + " " : " "}</Text>
           </Box>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
@@ -1668,6 +1702,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                   pastedContents={pastedContentsRef.current}
                   nextPasteId={nextPasteIdRef}
                   onCommitPastes={commitPastes}
+                  onPasteImage={pasteImage}
                   caretGlyph={cfg.caretGlyph}
                   placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
                 />

@@ -135,10 +135,14 @@ export function TextInput(props: {
   nextPasteId: { current: number };
     /** Called after a submit consumes staged pastes (ChatApp clears its map + counter). */
     onCommitPastes?: () => void;
+    /** Alt+V hook: ChatApp reads the clipboard image and returns its `[Image #N]` placeholder (or
+     * null). TextInput only does the caret mechanics - the token is inserted AT the caret, inline,
+     * so an image reads as part of the sentence being typed (the Claude Code affordance). */
+    onPasteImage?: () => string | null;
     /** Legacy caret glyph override. Kept for config/API compatibility; overlay caret ignores it. */
     caretGlyph?: CaretStyle;
   }) {
-    const { value, onChange, onSubmit, placeholder, mask, width = 9999, pastedContents, nextPasteId, onCommitPastes, caretGlyph = "thin-block" } = props;
+    const { value, onChange, onSubmit, placeholder, mask, width = 9999, pastedContents, nextPasteId, onCommitPastes, onPasteImage, caretGlyph = "thin-block" } = props;
   const ref = useRef(value);
   const cur = useRef([...value].length);
   // External change (history nav, clear): adopt it and put the cursor at the end.
@@ -168,6 +172,17 @@ export function TextInput(props: {
           return onSubmit(expanded);
         }
     const chars = [...ref.current];
+    if (key.meta && input === "v" && onPasteImage) { // Alt+V: clipboard image -> [Image #N] at the caret
+      const ph = onPasteImage();
+      if (ph) {
+        const ins = [...(cur.current > 0 && chars[cur.current - 1] !== " " ? " " : "") + ph + " "];
+        chars.splice(cur.current, 0, ...ins);
+        cur.current += ins.length;
+        ref.current = chars.join("");
+        onChange(ref.current);
+      }
+      return;
+    }
     if (key.leftArrow) { cur.current = Math.max(0, cur.current - 1); return rerender(); }
     if (key.rightArrow) { cur.current = Math.min(chars.length, cur.current + 1); return rerender(); }
     if (key.ctrl && input === "a") { cur.current = 0; return rerender(); } // home

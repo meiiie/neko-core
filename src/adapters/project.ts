@@ -64,9 +64,20 @@ export function setApiKey(key: string): string {
   }
 }
 
-/** Persist the chosen model so the NEXT session (and new folders) start with it too. */
-export function setModel(model: string): void {
-  updateUserConfig((d) => { d.model = model.trim(); });
+/** Persist the chosen model so the NEXT session (and new folders) start with it too. With an active
+ * profile the model belongs to THAT profile - a top-level `model` would shadow EVERY profile's preset
+ * (the /model footgun doctor warns about), so writing here also clears any legacy top-level value. */
+export function setModel(model: string, profile?: string | null): void {
+  updateUserConfig((d) => {
+    if (profile) {
+      d.profiles ??= {};
+      d.profiles[profile] ??= {};
+      d.profiles[profile].model = model.trim();
+      delete d.model; // a stale top-level model would keep shadowing every profile
+    } else {
+      d.model = model.trim();
+    }
+  });
 }
 
 /** Hold (or resume) auto-install of newer releases. Rolling BACK to an older version writes

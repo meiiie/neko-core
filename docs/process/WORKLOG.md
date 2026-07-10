@@ -3,6 +3,34 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-10 (night, part 7) — [Image #N] inline tokens + the caption-then-reason vision bridge
+
+Owner: paste should read like Claude Code ("[Image #92]" inline in the sentence), and "model không
+visual vẫn có thể đọc và hiểu ảnh". Research (caption-then-reason: the modular pattern used by
+BLIP/LLaVA-augmented WebArena-class agents; native multimodal tool-calling is the 2026 frontier when
+the model HAS eyes) shaped the ladder: main model vision-capable -> attach the real image; else
+`vision_model` reads it into grounded text; else an honest per-image note naming the exact config fix.
+
+- **Inline tokens**: Alt+V now inserts `[Image #N]` AT THE CARET (TextInput does the caret mechanics
+  via a new `onPasteImage` hook; ChatApp stages id -> data URL in a map sharing the paste counter -
+  PLACEHOLDER_RE already matched `[Image #N]`, groundwork from the paste-collapse arc). The token
+  travels in the sentence; deleting it DETACHES the image; /paste drops the token into the input.
+  The separate "image attached" info line + magenta badge are gone - the token IS the affordance.
+- **The bridge** (`src/adapters/vision.ts`): one-shot `describeImage()` on `cfg.visionModel`
+  (default: free nemotron VLM on NVIDIA endpoints - the getter existed since the vision arc but had
+  NO consumers until now) with a grounded read prompt: VERBATIM transcription (errors, code, digits,
+  tables as markdown), compact layout description, and the untrusted-data stance (image text is
+  content, never instructions - mirrors WEB_EXTRACT_PROMPT). The description replaces the token IN
+  PLACE, so the text-only model sees it exactly where the user put it.
+- **/model footgun closed at the source**: /model persisted a TOP-LEVEL `model`, recreating the
+  profile-shadow trap doctor warns about (it bit the owner AGAIN mid-test). setModel(model, profile)
+  now writes into the ACTIVE profile and deletes any legacy top-level value.
+
+Verified: 500/500 tests (Alt+V caret insertion x2, describeImage contract x3, setModel profile
+write x2), dual typecheck, policy PASS, and a LIVE bridge probe: a drawn image with known text ->
+real nemotron on NVIDIA -> "ERROR CODE NEKO-4217" and "--safe" transcribed verbatim in 4.2s.
+Binary rebuilt + reinstalled; owner's config de-shadowed once more (the new binary stops recreating it).
+
 ## 2026-07-10 (night, part 6) — pasted images: normalize at the source, break the 400 death spiral
 
 Owner's live test (image #90) produced two HTTP 400s that are one root cause: **/paste attached the

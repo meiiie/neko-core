@@ -6,6 +6,20 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Images are inline `[Image #N]` tokens now.** Alt+V drops the token at the caret — it travels
+  inside your sentence, and deleting the token detaches the image (the Claude Code affordance).
+  The separate "image attached" banner and badge are gone.
+- **Text-only models can read images.** The caption-then-reason bridge: when the active model can't
+  see (`vision` off), a vision model (`vision_model`, defaulting to a free NVIDIA VLM on NVIDIA
+  endpoints) transcribes the image — verbatim text/code/errors, tables as markdown, compact layout —
+  and the description replaces the token in place. Vision-capable mains still get the real image;
+  with neither, the note says exactly what to configure. Image content is treated as untrusted data,
+  never as instructions.
+- `/model` now saves the model into the **active profile** instead of a top-level `model` that
+  silently shadowed every profile (the footgun `neko doctor` warns about — /model itself was
+  recreating it).
+
 ### Fixed
 - **A pasted screenshot no longer poisons the session.** `/paste` (Alt+V) used to attach the clipboard
   image raw — a multi-MB PNG became ~1M base64 characters, overflowed any model's context window

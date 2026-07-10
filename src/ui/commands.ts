@@ -175,7 +175,7 @@ async function openModelPicker(ctx: CommandCtx): Promise<void> {
       onSelect: (it) => {
         ctx.setOverlay(null);
         cfg.data.model = it.id;
-        setModel(it.id); // persist across sessions
+        setModel(it.id, cfg.profile); // persist across sessions - into the ACTIVE profile, not a shadowing top-level
         addLine("info", `model -> ${it.id}`);
       },
     });
@@ -221,7 +221,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       const arg = input.slice("/model".length).trim();
       if (arg && arg !== "list") {
         cfg.data.model = arg;
-        setModel(arg); // remember it for the next session/folder too
+        setModel(arg, cfg.profile); // remember it for the next session/folder too - in the ACTIVE profile
         return addLine("info", `model -> ${arg}`);
       }
       await openModelPicker(ctx); // model of the CURRENT provider (quick swap without changing account)

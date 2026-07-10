@@ -30,6 +30,20 @@ test("a malformed user config is NOT clobbered by setModel (no data loss)", () =
   expect(readFileSync(path, "utf-8")).toContain("SECRET"); // api_key preserved, not overwritten
 });
 
+test("setModel with an ACTIVE profile writes into that profile and clears the shadowing top-level model", () => {
+  const path = withTempHome('{ "model": "old-shadow", "profiles": { "nvidia": { "model": "preset" } } }');
+  setModel("openai/gpt-oss-120b", "nvidia");
+  const d = JSON.parse(readFileSync(path, "utf-8"));
+  expect(d.profiles.nvidia.model).toBe("openai/gpt-oss-120b"); // the model belongs to the profile...
+  expect(d.model).toBeUndefined(); // ...and the footgun top-level shadow is GONE (/model used to recreate it)
+});
+
+test("setModel without a profile keeps the simple top-level write", () => {
+  const path = withTempHome("{}");
+  setModel("solo-model");
+  expect(JSON.parse(readFileSync(path, "utf-8")).model).toBe("solo-model");
+});
+
 test("setApiKey reports a malformed config instead of crashing or wiping it", () => {
   const path = withTempHome("{ broken");
   expect(setApiKey("k")).toContain("invalid JSON");

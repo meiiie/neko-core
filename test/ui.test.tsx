@@ -47,6 +47,40 @@ test("IME backspace+insert composes (no stale-closure duplication: 'mọ' not 'm
   unmount();
 });
 
+test("Alt+V inserts the [Image #N] token AT THE CARET (inline, Claude-Code style)", async () => {
+  let val = "";
+  function Wrap() {
+    const [v, setV] = useState("");
+    val = v;
+    return <TextInput value={v} onChange={setV} onSubmit={() => {}} onPasteImage={() => "[Image #1]"} {...pasteProps()} />;
+  }
+  const { stdin, unmount } = render(<Wrap />);
+  stdin.write("look  now"); // caret sits at the end; move it between the two spaces
+  await tick();
+  stdin.write("\x1b[D\x1b[D\x1b[D\x1b[D"); // four lefts -> after "look "
+  await tick();
+  stdin.write("\x1bv"); // Alt+V
+  await tick();
+  expect(val).toBe("look [Image #1]  now"); // token landed inline at the caret, not appended
+  unmount();
+});
+
+test("Alt+V with no clipboard image (hook returns null) leaves the input untouched", async () => {
+  let val = "";
+  function Wrap() {
+    const [v, setV] = useState("");
+    val = v;
+    return <TextInput value={v} onChange={setV} onSubmit={() => {}} onPasteImage={() => null} {...pasteProps()} />;
+  }
+  const { stdin, unmount } = render(<Wrap />);
+  stdin.write("hi");
+  await tick();
+  stdin.write("\x1bv");
+  await tick();
+  expect(val).toBe("hi");
+  unmount();
+});
+
 test("Markdown renders headings, bold, inline code, bullets, fences", () => {
   const { lastFrame } = render(<Markdown text={"# Title\n- **bold** and `code`\n\n```\nblock\n```"} />);
   const out = lastFrame() ?? "";
