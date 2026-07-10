@@ -3,6 +3,29 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-10 (night, part 3) — relay v2.2: the web client IS the Neko terminal now
+
+Owner on the desktop web view (stretched full-width, 5 raw fields dumped) + the QR: "giao diện chưa
+thật sự tốt... thiết kế giống hệt như Terminal của neko core hiện tại, vì tôi đang rất thích giao diện
+này." So the client was rebuilt to BE the terminal:
+
+- Full monospace (Cascadia Mono), the exact logo amber `#e6932e`, dim `─` rules, a `>` prompt
+  composer, a bottom status bar (mode left / identity right) - a 1:1 read of chat.tsx's chrome.
+- Messages are a terminal TRANSCRIPT, not bubbles: `> you` in cyan, `●` tool lines (the streamed
+  process log), replies flowing below. The mascot (assets/) is the header logo + favicon + app icon.
+- **Desktop fix**: capped to a centered 820px column, framed with side borders >=860px like a
+  terminal window - no more edge-to-edge stretch on a 1920px monitor.
+- **Flow fix**: unpaired = ONE calm pairing card (mascot, a single paste-link box, "manual setup"
+  tucked behind a disclosure) instead of five raw fields. Paired = straight to the transcript.
+- QR research (SOTA check): half-block IS the scannable optimum (cells ~1:2 -> 2 modules/cell is the
+  squarest packing; quiet-zone 2 is standard), and a 100-char pairing URL can't shrink without
+  weakening the keys - so the answer is show-once (done in v2.1), not shrink.
+
+Verified: no TS touched (client-only); Worker redeployed; deployed page structurally validated 13/13
+(monospace, amber, 820px cap, `>` prompt, transcript turns, process log, pairing card, paste-link,
+embedded logo, no leftover placeholder, no stray bubble CSS, no mojibake). Visual confirmation is the
+owner's next reload (Chrome extension not connected here for an auto-screenshot).
+
 ## 2026-07-10 (night, part 2) — relay v2.1: the owner dogfooded from a real phone; every rough edge fixed
 
 The owner paired from a real phone (Messenger's in-app browser) and hit the worst possible message:

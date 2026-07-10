@@ -38,7 +38,16 @@ All notable changes to Neko Code are documented here. The format follows
     field pairs even in in-app browsers that strip URL fragments (Messenger).
   - **The QR is a first-pairing affordance, not daily chrome.** `/relay` prints a compact status
     (the pairing persists anyway); the code appears only on first pairing, `/relay new`, or
-    `/relay qr`.
+    `/relay qr`. (The half-block QR renderer is already the scannable optimum — terminal cells are
+    ~1:2, so two modules per cell is the squarest packing; you can't shrink a 100-char pairing URL
+    further without weakening the keys. So the fix is showing it once, not shrinking it.)
+  - **The web client is now the Neko terminal, on your phone.** Rebuilt to match the CLI the owner
+    likes: full monospace, the exact terminal amber (`#e6932e`), dim `─`-style rules, a `>` prompt
+    composer, and a bottom status bar — messages render as a terminal transcript (`> you` in cyan,
+    `●` tool lines, flowing replies) instead of chat bubbles. The layout is capped to a centered
+    820px column framed like a terminal window, which fixes the desktop view stretching edge-to-edge
+    on wide screens. Unpaired devices get a single calm pairing card (mascot, one paste-link box,
+    "manual setup" tucked away) instead of five raw fields dumped on screen.
 - Plain info lines in the transcript (relay pairing URLs, update notes) are now OSC 8 hyperlinks too.
 - **`neko setup tavily <key>`** — the no-Docker rung of the search ladder: verifies the key against the
   live Tavily API, then wires it into the gitignored user config (`tavily_api_key`, redacted by
