@@ -42,7 +42,7 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   to mtime+size with in-place legacy migration (no `/resume` stall after upgrade).
 - **Earlier this arc (Jul 2-3, released as v0.5.1):** approval dropped-'y' race fixed, release-asset
   race fixed (create-once), prompt-cache stability + measurement, 529 retry, tool-error recovery.
-- **Computer-use eval pack (working tree, 2026-07-10):** the verifier-backed long-horizon eval landed as
+- **Computer-use eval pack (released in v0.9.0, 2026-07-10):** the verifier-backed long-horizon eval landed as
   `neko bench gui` — a deterministic simulated desktop the real model drives through the `computer` tool
   (injected via an opt-in `ToolRegistry.computerHandler` seam; the real Windows UIA path is untouched and
   still proven by the WPF/UIA live probe). Four axis-isolated tasks (task-success+constraint / error-recovery

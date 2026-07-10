@@ -4,17 +4,19 @@
 what's measured, and the last few moves — not a full history (that's `docs/process/WORKLOG.md`).*
 
 ## Current focus
-**Owner-directed work, not the autonomous loop** (as of 2026-07-10). A reliability/security audit just
-closed composition, streaming, permission, config, persistence, paging, context, and documentation drift.
-Todo persistence, draft copy, native computer input, and standalone skill packaging then landed; the full
-gate is green at 416/416 tests. The self-improve loop is built + ran (it
-produced ~4 real wins then plateaued — a disciplined assistant, not perpetual motion), and its idea `BACKLOG.md`
-(~46 items) + `RESEARCH.md` stay as the queue for when it runs again. The last stretch was **hands-on UX/UI
-polish to real-terminal / Claude-Code quality** (see `../process/ROADMAP.md` Phase H + `../process/WORKLOG.md`),
-done interactively with the owner — not by the loop. **The verifier-backed long-horizon computer-use eval
-now exists AND discriminates**: `neko bench gui` (base tier = smoke; saturated live 12/12) + `neko bench
-gui hard` (cross-screen memory, paged decoys, interrupts, guarded submits, a composite workflow; METR-style
-calibrated budgets). Live baseline gpt-oss-120b: **11/12 (92%), paged-decoys FLAKY, 16 grounding misses**.
+**Owner-directed work, not the autonomous loop** (as of 2026-07-10). **v0.9.0 is RELEASED** (tag
+`153e470`, 5/5 binaries, main fast-forwarded): OSC 8 clickable links through the whole custom
+compositor, the managed SearXNG lifecycle (Ollama keep_alive pattern), the vision computer-use loop,
+and `neko bench gui [hard]`. The evening close-out then landed on `self-improve` as Unreleased:
+`neko setup tavily <key>` (the no-Docker search rung, live-verified), the ladder's middle-rung
+fallback (SearXNG -> Tavily -> DuckDuckGo), and a doctor WARN naming the model-shadow footgun
+(top-level `model` vs profile preset). The self-improve loop is built + ran (it produced ~4 real wins
+then plateaued — a disciplined assistant, not perpetual motion), and its idea `BACKLOG.md` +
+`RESEARCH.md` stay as the queue for when it runs again. **The verifier-backed long-horizon
+computer-use eval exists AND discriminates**: `neko bench gui` (base tier = smoke; saturated live
+12/12) + `neko bench gui hard` (cross-screen memory, paged decoys, interrupts, guarded submits, a
+composite workflow; METR-style calibrated budgets). Live baseline gpt-oss-120b: **11/12 (92%),
+paged-decoys FLAKY, 16 grounding misses**.
 **Next = the glm-5.2 baseline (blocked: both Z.ai keys rejected since 2026-07-10, owner must refresh), then
 a harness lever (verify gate / recovery middleware / re-grounding) must show measurable lift on pass-rate
 or miss-count; no new controller until then.**
@@ -42,6 +44,11 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-10 evening] (owner-directed close-out) **v0.9.0 released** (all RELEASE.md gates green; 5/5
+  assets; notes curated; local binary reinstalled). Then handoff polish on `self-improve` (pushed):
+  doctor model-shadow WARN (verified live on the real shadowed config), `neko setup tavily <key>` with
+  live key verification, ladder middle-rung fallback. 485/485 tests, dual typecheck, policy PASS,
+  secret-scan CLEAN.
 - [2026-07-10] (owner-authorized live calibration) base tier saturated (12/12) -> built the HARD tier
   (bank-transfer / paged-decoys / guarded-form / expense-report composite; `El.goTo` interrupts +
   `El.guard` validation) and calibrated budgets METR-style to the measured strain point. Result on
