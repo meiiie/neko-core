@@ -44,6 +44,12 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-10 night] (owner-directed: "relay ... suy nghĩ sâu") **relay v2 shipped + deployed**: WS
+  hibernation transport (SOTA-checked vs Claude Code Remote Control + Cloudflare DO guidance),
+  streaming partials to the phone, mid-turn Stop, durable pairing (relay.json), DO-storage state
+  (eviction/offline-queue fixed), truthful /alive, busy=wait. 490/490 tests; Worker deployed to the
+  owner's Cloudflare and live-probed 10/10. Back-compat both ways. Also: owner's config model-shadow
+  FIXED live (top-level model removed, doctor now OK on gpt-oss-120b).
 - [2026-07-10 evening] (owner-directed close-out) **v0.9.0 released** (all RELEASE.md gates green; 5/5
   assets; notes curated; local binary reinstalled). Then handoff polish on `self-improve` (pushed):
   doctor model-shadow WARN (verified live on the real shadowed config), `neko setup tavily <key>` with
