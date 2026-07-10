@@ -19,6 +19,9 @@ All notable changes to Neko Code are documented here. The format follows
 - `/model` now saves the model into the **active profile** instead of a top-level `model` that
   silently shadowed every profile (the footgun `neko doctor` warns about — /model itself was
   recreating it).
+- **Current frontier routes are explicit profiles.** `--profile nvidia-glm` runs `z-ai/glm-5.2`
+  with `NVIDIA_API_KEY`; `--profile fable` runs `claude-fable-5` with native vision and a
+  profile-specific 2576px / 4.5MB clipboard-image budget.
 
 ### Fixed
 - **GUI eval v2 no longer grants false passes for repaired constraint violations.** Opening a wrong
@@ -28,11 +31,15 @@ All notable changes to Neko Code are documented here. The format follows
 - **A pasted screenshot no longer poisons the session.** `/paste` (Alt+V) used to attach the clipboard
   image raw — a multi-MB PNG became ~1M base64 characters, overflowed any model's context window
   (`max_tokens must be at least 1, got -102511`), and then kept re-overflowing from history on every
-  later turn. Images are now normalized at the source on Windows (longest side 1568px, JPEG q82 — the
-  vision-API sweet spot), oversized attachments are refused with the size and the fix, and the in-loop
+  later turn. Images are now normalized at the source on all supported desktop OSes (JPEG q82;
+  longest edge and byte ceiling are profile data, with a conservative 1568px default), oversized
+  attachments are refused with the size and the fix, and the in-loop
   context relief can now free pasted images from earlier turns (the current turn's attachment always
   survives). The temporary clipboard capture is removed after its bytes are embedded instead of leaking
   one `neko-paste-*` file per Alt+V.
+- **`[Image #N]` is now truly inline on the model wire.** Multiple pasted images keep their exact
+  text/image ordering through the core content parts and NVIDIA's `<img>` conversion instead of being
+  silently moved after the whole prompt.
 
 ### Added
 - **Relay v2 — the phone experience, rebuilt** (host + Worker + web client, deployed and live-verified

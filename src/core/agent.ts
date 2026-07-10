@@ -41,6 +41,36 @@ export {
 };
 export type { EventHook, AgentOptions };
 
+export interface NumberedImageAttachment { id: number; url: string }
+export type ImageAttachment = string | NumberedImageAttachment;
+
+/** Build one multimodal user turn without losing the semantic position of numbered pasted images.
+ * Plain string attachments are CLI `--image` inputs and keep the legacy text-then-images layout. */
+export function imageContent(instruction: string, images: ImageAttachment[]): any[] {
+  const numbered = new Map<number, NumberedImageAttachment>();
+  for (const image of images) if (typeof image !== "string") numbered.set(image.id, image);
+  const used = new Set<number>();
+  const parts: any[] = [];
+  let cursor = 0;
+  for (const match of instruction.matchAll(/\[Image #(\d+)\]/g)) {
+    const id = Number(match[1]);
+    const image = numbered.get(id);
+    if (!image || used.has(id) || match.index === undefined) continue;
+    const end = match.index + match[0].length;
+    parts.push({ type: "text", text: instruction.slice(cursor, end) });
+    parts.push({ type: "image_url", image_url: { url: image.url } });
+    cursor = end;
+    used.add(id);
+  }
+  const tail = instruction.slice(cursor);
+  if (tail || !parts.length) parts.push({ type: "text", text: tail });
+  for (const image of images) {
+    if (typeof image === "string") parts.push({ type: "image_url", image_url: { url: image } });
+    else if (!used.has(image.id)) parts.push({ type: "image_url", image_url: { url: image.url } });
+  }
+  return parts;
+}
+
 export class Agent {
   private provider: Provider; // swappable between turns so the REPL can switch providers live (see setProvider)
   private readonly tools: ToolRegistry;
@@ -354,14 +384,14 @@ export class Agent {
   /** Run the loop until the model is done or maxSteps is hit. Returns the final text.
    * Pass an AbortSignal to support Esc-to-interrupt (stops cleanly between/within steps).
    * `images` (data: URLs) attach as OpenAI vision content — used by paste-image (needs a vision model). */
-  async run(instruction: string, signal?: AbortSignal, images?: string[]): Promise<string> {
+  async run(instruction: string, signal?: AbortSignal, images?: ImageAttachment[]): Promise<string> {
     if (!this.messages.length) {
       this.messages.push({ role: "system", content: this.systemPrompt });
     }
     this.sealDanglingToolCalls(); // an interrupted/resumed turn can leave tool_calls unanswered
     this.refreshDynamicContext();
     const content = images && images.length
-      ? [{ type: "text", text: instruction }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))]
+      ? imageContent(instruction, images)
       : instruction;
     this.messages.push({ role: "user", content });
 

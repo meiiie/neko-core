@@ -45,6 +45,17 @@ test("OpenAI-compatible wire format moves tool screenshots after the complete to
   expect(nvidia[3].content).toContain('<img src="data:image/gif;base64,AAA" />');
 });
 
+test("NVIDIA img-tag wire format preserves interleaved text/image order", () => {
+  const [message] = toImgTagMessages([{ role: "user", content: [
+    { type: "text", text: "first [Image #1]" },
+    { type: "image_url", image_url: { url: "data:image/jpeg;base64,ONE" } },
+    { type: "text", text: " then [Image #2]" },
+    { type: "image_url", image_url: { url: "data:image/jpeg;base64,TWO" } },
+    { type: "text", text: " done" },
+  ] }]);
+  expect(message.content).toBe('first [Image #1]<img src="data:image/jpeg;base64,ONE" /> then [Image #2]<img src="data:image/jpeg;base64,TWO" /> done');
+});
+
 test("complete sends response_format json_schema only when a responseSchema is given (structured output)", async () => {
   const config = new NekoConfig({ provider: "openai_compat", base_url: "https://example/v1", model: "m" }, null, {}, "");
   const provider = getProvider(config);

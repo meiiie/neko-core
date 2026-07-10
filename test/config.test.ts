@@ -30,6 +30,29 @@ test("visionModel: explicit vision_model wins; NVIDIA gets a verified default; e
   expect(loadConfig({ path: tmpConfig({ base_url: "https://api.openai.com/v1" }) }).visionModel).toBe("");
 });
 
+test("image normalization limits are config-first and bounded", () => {
+  const defaults = loadConfig({ path: tmpConfig({}) });
+  expect(defaults.imageLongEdge).toBe(1568);
+  expect(defaults.imageMaxBytes).toBe(450_000);
+  const highRes = loadConfig({ path: tmpConfig({ image_long_edge: 2576, image_max_bytes: 4_500_000 }) });
+  expect(highRes.imageLongEdge).toBe(2576);
+  expect(highRes.imageMaxBytes).toBe(4_500_000);
+  const bounded = loadConfig({ path: tmpConfig({ image_long_edge: 99_999, image_max_bytes: 99_999_999 }) });
+  expect(bounded.imageLongEdge).toBe(4096);
+  expect(bounded.imageMaxBytes).toBe(5_000_000);
+});
+
+test("current GLM and high-resolution Fable routes are first-class profiles", () => {
+  const glm = loadConfig({ path: tmpConfig({}), profile: "nvidia-glm" });
+  expect(glm.model).toBe("z-ai/glm-5.2");
+  expect(glm.baseUrl).toBe("https://integrate.api.nvidia.com/v1");
+  const fable = loadConfig({ path: tmpConfig({}), profile: "fable" });
+  expect(fable.model).toBe("claude-fable-5");
+  expect(fable.vision).toBe(true);
+  expect(fable.imageLongEdge).toBe(2576);
+  expect(fable.imageMaxBytes).toBe(4_500_000);
+});
+
 test("withModel clones the config at a different model, same endpoint, original unchanged", () => {
   const cfg = loadConfig({ path: tmpConfig({ base_url: "https://x/v1", model: "main" }) });
   const v = cfg.withModel("vision-x");

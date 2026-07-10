@@ -190,6 +190,29 @@ test("run attaches images as OpenAI vision content", async () => {
   expect(seen.content[1].image_url.url).toContain("base64,AAAA");
 });
 
+test("run keeps numbered image attachments at their inline [Image #N] positions", async () => {
+  let seen: any;
+  const agent = new Agent({
+    provider: { complete: async (msgs: any[]) => { seen = msgs[msgs.length - 1]; return { content: "ok", tool_calls: [] }; } } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  await agent.run(
+    "compare [Image #7] with the detail in [Image #9], then explain",
+    undefined,
+    [
+      { id: 7, url: "data:image/png;base64,SEVEN" },
+      { id: 9, url: "data:image/png;base64,NINE" },
+    ],
+  );
+  expect(seen.content).toEqual([
+    { type: "text", text: "compare [Image #7]" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,SEVEN" } },
+    { type: "text", text: " with the detail in [Image #9]" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,NINE" } },
+    { type: "text", text: ", then explain" },
+  ]);
+});
+
 test("context relief keeps two recent tool images and masks older screenshots", () => {
   const agent = new Agent({
     provider: { complete: async () => ({ content: "ok", tool_calls: [] }) } as any,

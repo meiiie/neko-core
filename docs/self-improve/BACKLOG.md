@@ -78,7 +78,8 @@ one never blocks another.
   budgets METR-calibrated to the measured strain point). Historical harness-v1 gpt-oss-120b baseline:
   11/12 (92%), paged-decoys FLAKY 2/3, 16 grounding misses. Harness v2 tightened repaired-violation
   scoring, so it needs a fresh baseline before comparison. Still open:
-  the glm-5.2 baseline (blocked on a fresh Z.ai key) and the CODING long-horizon tier — a 15-25 step
+  the glm-5.2 baseline through the working NVIDIA route (`--profile nvidia-glm`; direct Z.ai remains
+  blocked on its own key) and the CODING long-horizon tier — a 15-25 step
   multi-file feature / cross-module migration with a regression test.)*
 
 - [x] **Doctor warning when a top-level `model:` shadows the profile's model.** *(Done 2026-07-10,

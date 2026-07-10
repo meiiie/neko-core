@@ -17,7 +17,8 @@ computer-use eval exists AND discriminates**: `neko bench gui` (base tier = smok
 12/12) + `neko bench gui hard` (cross-screen memory, paged decoys, interrupts, guarded submits, a
 composite workflow; METR-style calibrated budgets). Live baseline gpt-oss-120b: **11/12 (92%),
 paged-decoys FLAKY, 16 grounding misses**.
-**Next = the glm-5.2 baseline (blocked: both Z.ai keys rejected since 2026-07-10, owner must refresh), then
+**Next = re-run the glm-5.2 baseline through the working NVIDIA route (`--profile nvidia-glm`); only the
+direct Z.ai route remains blocked by its rejected keys. Then
 a harness lever (verify gate / recovery middleware / re-grounding) must show measurable lift on pass-rate
 or miss-count; no new controller until then.** The recorded 11/12 gpt-oss result is the historical v1
 baseline; GUI harness v2 tightened instruction/constraint verification and needs a fresh baseline before
@@ -28,8 +29,9 @@ The loop's original framing still holds for when it resumes: bench coding tasks 
 bench as a **no-regression guard + metrics tracker**.
 
 ## What's in place
-- **Provider:** `anthropic` provider → Z.ai GLM coding-plan endpoint; `--profile zai` = glm-5.2; effort →
-  Anthropic extended-thinking budget. `key_env` presets make any provider a profile + an env var.
+- **Provider:** `--profile nvidia-glm` runs `z-ai/glm-5.2` through NVIDIA with `NVIDIA_API_KEY`;
+  `--profile zai` remains the direct Z.ai coding-plan route. `--profile fable` is the current
+  `claude-fable-5` Anthropic route with native vision and its high-resolution image limits.
 - **Measurement:** `neko bench` reports per-task time / in-out tokens / tok/s / steps and appends a JSON line
   to `~/.neko-core/bench-log.jsonl`. **Diff two lines to see if a change helped.**
 - **The loop:** `scripts/self-improve.ts` — forever; verify gate (typecheck + 0-fail tests + policy) + a real
@@ -46,6 +48,11 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-11] (owner correction + vision audit) GLM 5.2 is not generally blocked: the NVIDIA-hosted
+  `z-ai/glm-5.2` route remains available with `NVIDIA_API_KEY`; only the direct Z.ai keys failed.
+  Added explicit `nvidia-glm`/`fable` profiles. Native pasted images now remain interleaved beside their
+  `[Image #N]` tokens all the way through OpenAI/Anthropic/NVIDIA wire formats, and normalization limits
+  are profile data (1568px conservative default; 2576px/4.5MB for Fable 5).
 - [2026-07-11] (owner-directed Fable 5 audit) GUI harness v2 closed three false-pass classes found by
   replaying forbidden-then-repaired trajectories: wrong item then right item, unrelated setting toggled
   then restored, and forbidden interrupt choices followed by successful recovery. The log now records a

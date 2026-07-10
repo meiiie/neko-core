@@ -50,7 +50,8 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   self-test (scripted provider, no live model). 436/436 tests, policy PASS.
 - **Next:** the eval was live-calibrated on harness v1 (base tier saturated -> smoke; HARD tier at 92%
   with FLAKY + 16 grounding misses on gpt-oss-120b). Harness v2 now enforces repaired constraint
-  violations, so re-establish both gpt-oss and glm-5.2 baselines (glm remains blocked on a fresh Z.ai key), then
+  violations, so re-establish both gpt-oss and glm-5.2 baselines (use the NVIDIA-backed
+  `--profile nvidia-glm`; only direct Z.ai is key-blocked), then
   demonstrate harness lift with a lever (verify gate / recovery middleware / re-grounding) on pass-rate or
   miss-count; only add another controller/framework if measured progress drift warrants it. **Rule: never merge to `main` or push without the owner's
   explicit OK.** Orientation for a fresh session: `WORKLOG.md` (journal) · `RULES.md` (how we work) ·

@@ -4,7 +4,7 @@
  * uses pngpaste (if installed); Linux uses xclip. Best-effort — returns null on any failure.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,17 +30,18 @@ export function writeClipboardText(text: string): boolean {
   }
 }
 
-export function readClipboardImage(): string | null {
+export function readClipboardImage(maxLongEdge = 1568): string | null {
   try {
+    const edge = Math.min(4096, Math.max(512, Math.round(maxLongEdge) || 1568));
     if (process.platform === "win32") {
-      // Normalize at the source (what Claude Code does): cap the longest side at 1568px and encode
+      // Normalize at the source: cap the longest side for the active profile and encode
       // JPEG q82. A raw 4K screenshot PNG is multi-MB -> ~1M base64 chars -> an instant context-window
       // overflow (HTTP 400, negative max_tokens) on ANY model; resized JPEG is ~100-300KB and every
-      // vision API reads JPEG. Vision models don't resolve beyond ~1.5k px anyway - nothing is lost.
+      // vision API reads JPEG. The profile may raise the conservative 1568px default for a high-res VLM.
       const dest = join(tmpdir(), `neko-paste-${Date.now()}.jpg`);
       const ps =
         `Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $i=[System.Windows.Forms.Clipboard]::GetImage(); ` +
-        `if($i){ $s=[Math]::Min(1.0, 1568.0/[Math]::Max($i.Width,$i.Height)); ` + // 1.0 forces the double overload (Min(int,int) truncates 0.49 -> 0 -> a 1x1 image)
+        `if($i){ $s=[Math]::Min(1.0, ${edge}.0/[Math]::Max($i.Width,$i.Height)); ` + // 1.0 forces the double overload (Min(int,int) truncates 0.49 -> 0 -> a 1x1 image)
         `$w=[int][Math]::Max(1,$i.Width*$s); $h=[int][Math]::Max(1,$i.Height*$s); ` +
         `$b=New-Object System.Drawing.Bitmap($w,$h); $g=[System.Drawing.Graphics]::FromImage($b); ` +
         `$g.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic; ` +
@@ -52,13 +53,25 @@ export function readClipboardImage(): string | null {
       const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf-8", windowsHide: true });
       return r.stdout?.trim() === "ok" && existsSync(dest) ? dest : null;
     }
-    const dest = join(tmpdir(), `neko-paste-${Date.now()}.png`);
+    const raw = join(tmpdir(), `neko-paste-${Date.now()}.png`);
+    const dest = join(tmpdir(), `neko-paste-${Date.now()}.jpg`);
     if (process.platform === "darwin") {
-      const r = spawnSync("pngpaste", [dest], { encoding: "utf-8" }); // brew install pngpaste
-      return r.status === 0 && existsSync(dest) ? dest : null;
+      const copied = spawnSync("pngpaste", [raw], { encoding: "utf-8" }); // brew install pngpaste
+      if (copied.status !== 0 || !existsSync(raw)) return null;
+      const resized = spawnSync("sips", ["--resampleHeightWidthMax", String(edge), "--setProperty", "format", "jpeg", "--setProperty", "formatOptions", "82", raw, "--out", dest], { encoding: "utf-8" });
+      try { rmSync(raw, { force: true }); } catch { /* best effort */ }
+      return resized.status === 0 && existsSync(dest) ? dest : null;
     }
-    spawnSync("bash", ["-c", `xclip -selection clipboard -t image/png -o > '${dest}'`], { encoding: "utf-8" });
-    return existsSync(dest) && statSync(dest).size > 0 ? dest : null;
+    spawnSync("bash", ["-c", `xclip -selection clipboard -t image/png -o > '${raw}'`], { encoding: "utf-8" });
+    if (!existsSync(raw) || statSync(raw).size === 0) return null;
+    const args = [raw, "-resize", `${edge}x${edge}>`, "-quality", "82", dest];
+    let resized = spawnSync("magick", args, { encoding: "utf-8" });
+    if (resized.status !== 0) resized = spawnSync("convert", args, { encoding: "utf-8" });
+    if (resized.status === 0 && existsSync(dest)) {
+      try { rmSync(raw, { force: true }); } catch { /* best effort */ }
+      return dest;
+    }
+    return raw; // optional ImageMagick missing: the UI byte gate still refuses unsafe payloads
   } catch {
     return null;
   }

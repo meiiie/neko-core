@@ -25,6 +25,9 @@ export interface Profile {
   provider?: string;
   base_url?: string;
   model?: string;
+  vision?: boolean;
+  image_long_edge?: number;
+  image_max_bytes?: number;
   /** Env var holding this provider's API key (e.g. "ZAI_API_KEY"), so multi-provider works with no config
    * editing: pick the profile, set its env var. It's a FALLBACK — an explicit config api_key wins over it
    * (a stale/foreign env var can't override a key you wrote into config). NEKO_API_KEY still overrides all. */
@@ -45,6 +48,8 @@ export const DEFAULTS: Record<string, any> = {
   offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
   approval: "prompt", // prompt | auto (--yolo flips gated tools to auto)
   effort_ceiling: "high", // highest reasoning_effort the endpoint accepts (OpenAI standard caps at high); a profile can raise it
+  image_long_edge: 1568, // conservative cross-provider vision input; high-resolution profiles may raise it
+  image_max_bytes: 450_000, // protects strict OpenAI-compatible endpoints from oversized inline data URLs
   auto_update_check: true, // check for a newer release at startup (daily-cached; set false to silence)
   auto_update: true, // AUTO-INSTALL that newer release in the background (claude-code style); false = notify only
   mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
@@ -53,9 +58,11 @@ export const DEFAULTS: Record<string, any> = {
     // A new model/endpoint is a data edit, not a code change. "Offline" = point a
     // profile at a local OpenAI-compatible server (llama-server :8080, Ollama :11434).
     nvidia: { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "", key_env: "NVIDIA_API_KEY" },
+    "nvidia-glm": { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "z-ai/glm-5.2", key_env: "NVIDIA_API_KEY" },
     openai: { provider: "openai_compat", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", key_env: "OPENAI_API_KEY" },
     // Anthropic Messages API (provider: anthropic). Real Claude, and Z.ai's GLM coding-plan endpoint:
     claude: { provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-4-6", key_env: "ANTHROPIC_API_KEY" },
+    fable: { provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-fable-5", key_env: "ANTHROPIC_API_KEY", vision: true, image_long_edge: 2576, image_max_bytes: 4_500_000 },
     zai: { provider: "anthropic", base_url: "https://api.z.ai/api/anthropic", model: "glm-4.6", key_env: "ZAI_API_KEY" },         // GLM Coding Plan quota
     "zai-openai": { provider: "openai_compat", base_url: "https://api.z.ai/api/paas/v4", model: "glm-4.6", key_env: "ZAI_API_KEY" }, // Z.ai pay-as-you-go
     // Most hosted providers are OpenAI-compatible -> a profile, not new code. Set your model with /model.
@@ -160,6 +167,15 @@ export class NekoConfig {
     const set = String(this.data.vision_model ?? "").trim();
     if (set) return set;
     return /nvidia/i.test(this.baseUrl) ? "nvidia/llama-3.1-nemotron-nano-vl-8b-v1" : "";
+  }
+  /** Clipboard-image normalization is profile data because model/provider limits differ. */
+  get imageLongEdge(): number {
+    const n = Number(this.data.image_long_edge ?? 1568);
+    return Math.min(4096, Math.max(512, Number.isFinite(n) ? Math.round(n) : 1568));
+  }
+  get imageMaxBytes(): number {
+    const n = Number(this.data.image_max_bytes ?? 450_000);
+    return Math.min(5_000_000, Math.max(64_000, Number.isFinite(n) ? Math.round(n) : 450_000));
   }
   /** A clone of this config pointing at a different model (same endpoint + key) — e.g. the vision pre-pass. */
   withModel(model: string): NekoConfig {

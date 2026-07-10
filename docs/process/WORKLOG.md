@@ -3,6 +3,21 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-11 - image wire semantics + current model routes
+
+The owner corrected the provider diagnosis: GLM 5.2 is still available as `z-ai/glm-5.2` through
+NVIDIA using `NVIDIA_API_KEY`; the rejected keys block only the direct Z.ai route. Added an explicit
+`nvidia-glm` profile and a current `fable` profile (`claude-fable-5`, native vision).
+
+The vision audit then found a real semantic bug. The TUI placed `[Image #N]` at the caret, but
+`Agent.run()` moved every actual image after the complete text, and NVIDIA's `<img>` conversion moved
+them to the end a second time. Numbered attachments now retain exact text/image interleaving through
+both layers; CLI `--image` keeps its backwards-compatible text-then-images behavior. Clipboard
+normalization is profile-driven rather than a universal 1568px assumption: 1568px/450KB stays the
+safe default for strict OpenAI-compatible endpoints, while Fable 5 uses 2576px/4.5MB. macOS and Linux
+now normalize too when their native/optional image tools are available. Regression tests cover inline
+ordering, NVIDIA wire order, profile limits, and the two current profiles.
+
 ## 2026-07-11 - pasted-image temp lifecycle closed
 
 The Fable 5 image audit found a concrete lifecycle leak outside the model context: every Alt+V read a

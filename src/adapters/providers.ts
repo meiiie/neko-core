@@ -34,13 +34,16 @@ export function clampEffort(effort: string, ceiling: string): string {
 export function toImgTagMessages(messages: any[]): any[] {
   return messages.map((m) => {
     if (!Array.isArray(m.content)) return m;
-    let text = "";
-    const imgs: string[] = [];
+    let content = "";
+    let hasImage = false;
     for (const part of m.content) {
-      if (part?.type === "text") text += part.text;
-      else if (part?.type === "image_url" && part.image_url?.url) imgs.push(`<img src="${part.image_url.url}" />`);
+      if (part?.type === "text") content += part.text;
+      else if (part?.type === "image_url" && part.image_url?.url) {
+        content += `<img src="${part.image_url.url}" />`;
+        hasImage = true;
+      }
     }
-    return imgs.length ? { ...m, content: `${text} ${imgs.join(" ")}`.trim() } : m;
+    return hasImage ? { ...m, content } : m;
   });
 }
 

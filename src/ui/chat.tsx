@@ -780,13 +780,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
      * the token travels IN the sentence, deleting it detaches the image, and the id shares the text
      * paste counter so numbering is uniform. Returns the token to insert, or null. */
     const pasteImage = (): string | null => {
-      const path = readClipboardImage();
+      const path = readClipboardImage(cfg.imageLongEdge);
       if (!path) { addLine("info", "no image in the clipboard"); return null; }
       try {
         const b64 = readFileSync(path).toString("base64");
         // Last-line size gate: an oversized attachment overflows the context window (HTTP 400) and,
         // worse, keeps re-overflowing from history. Refuse honestly instead of sending a doomed turn.
-        if (b64.length > 600_000) {
+        if ((b64.length * 3) / 4 > cfg.imageMaxBytes) {
           addLine("error", `image too large to attach (~${Math.round((b64.length * 3) / 4 / 1024)}KB) - crop or capture a smaller region and paste again`);
           return null;
         }
@@ -1136,7 +1136,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       .filter((id) => pastedImagesRef.current.has(id));
     const imgPairs = imgIds.map((id) => ({ id, url: pastedImagesRef.current.get(id)! }));
     imgIds.forEach((id) => pastedImagesRef.current.delete(id));
-    let imgs = imgPairs.map((p) => p.url);
+    let imgs = imgPairs;
     addLine("user", loopGoal ? `/auto ${loopGoal}` : text);
     // The vision bridge ("caption-then-reason"): a text-only main model can't read pixels, so a
     // vision model reads each image into grounded text IN PLACE of its token. With `vision: true`
