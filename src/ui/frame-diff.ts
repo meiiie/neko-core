@@ -55,6 +55,7 @@ function sentinelCol(row: string): number {
   let col = 0, i = 0;
   while (i < idx) {
     if (row.charCodeAt(i) === 27 && row[i + 1] === "[") { const m = /^\[[0-9;]*[A-Za-z]/.exec(row.slice(i)); if (m) { i += m[0].length; continue; } }
+    if (row.charCodeAt(i) === 27 && row[i + 1] === "]") { const m = /^\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/.exec(row.slice(i)); if (m) { i += m[0].length; continue; } } // OSC (hyperlink) = zero-width, skip like SGR
     const cp = row.codePointAt(i)!;
     col += cellW(cp);
     i += cp > 0xffff ? 2 : 1;
@@ -86,11 +87,13 @@ export function parseInkPayload(p: string): { eraseCount: number; frame: string 
   const eraseCount = m[1] ? (m[1].match(/\x1b\[2K/g) ?? []).length : 0;
   const frame = p.slice(m[1]?.length ?? 0);
   if (frame.length === 0) return null;
-  // A frame is text + SGR color codes + newlines. Any cursor-movement/erase/scroll CSI - OR an OSC
-  // introducer (ESC ]) - means this is NOT a plain frame (alt-screen switches, wipes, Ink's clear, or a
+  // A frame is text + SGR color codes + newlines. Any cursor-movement/erase/scroll CSI - OR a non-link
+  // OSC introducer - means this is NOT a plain frame (alt-screen switches, wipes, Ink's clear, or a
   // /copy OSC 52 clipboard write that goes through the wrapper): refuse to optimize and pass it through
-  // untouched rather than splice the band into it and eat it.
-  if (/\x1b\[[0-9;]*[ABCDEFGHJKSTr]/.test(frame) || frame.includes("\x1b]")) return null;
+  // untouched rather than splice the band into it and eat it. OSC 8 hyperlinks are the one exception:
+  // they are zero-width TEXT ATTRIBUTES (like SGR) that legitimately live inside chrome rows - rejecting
+  // them would silently drop the differ into passthrough-reset (full repaints) on every linked frame.
+  if (/\x1b\[[0-9;]*[ABCDEFGHJKSTr]/.test(frame) || /\x1b\](?!8;;)/.test(frame)) return null;
   return { eraseCount, frame };
 }
 
@@ -256,10 +259,13 @@ export class FrameDiffer {
     this.repaintBand();
   }
   /** Plain text (ANSI stripped) of the CURRENT on-screen rows [top..bottom], 1-based inclusive. The
-   * selection overlay is SGR, so stripping leaves the real transcript text - what a copy should yield. */
+   * selection overlay is SGR and hyperlinks are OSC 8 - stripping both leaves the real transcript text
+   * (for a bare URL the visible text IS the url, so a copied link stays a link). */
   screenText(top: number, bottom: number): string[] {
     const out: string[] = [];
-    for (let y = top; y <= bottom; y++) out.push((this.prev?.[y - 1] ?? "").replace(/\x1b\[[0-9;]*m/g, ""));
+    for (let y = top; y <= bottom; y++) {
+      out.push((this.prev?.[y - 1] ?? "").replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-9;]*m/g, ""));
+    }
     return out;
   }
 
@@ -504,17 +510,22 @@ function overlaySelection(row: string, from: number, to: number): string {
   if (from >= to) return row;
   const cap = to === Number.MAX_SAFE_INTEGER ? Infinity : to;
   const isSgr = (): RegExpExecArray | null => (row[i] === "\x1b" && row[i + 1] === "[" ? /^\x1b\[[0-9;]*[A-Za-z]/.exec(row.slice(i)) : null);
+  // OSC 8 hyperlinks are zero-width like SGR: emitted verbatim before the block, dropped inside it
+  // (the highlight closes any open link first, so a link cut in half never bleeds into the selection).
+  const isOsc = (): RegExpExecArray | null => (row[i] === "\x1b" && row[i + 1] === "]" ? /^\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/.exec(row.slice(i)) : null);
   let out = "", col = 0, i = 0, sgr = "";
   // 1. content BEFORE the block: emit verbatim, tracking colour state.
   for (let m; col < from && i < row.length; ) {
     if ((m = isSgr())) { if (m[0].endsWith("m")) sgr += m[0]; out += m[0]; i += m[0].length; continue; }
+    if ((m = isOsc())) { out += m[0]; i += m[0].length; continue; }
     out += row[i]; col++; i++;
   }
   while (col < from) { out += " "; col++; } // pad if the row ended before the block starts (trailing space)
   // 2. INSIDE the block: one flat colour - drop the row's own SGR (keep tracking state), fill to the edge.
-  out += SEL_ON;
+  out += "\x1b]8;;\x07" + SEL_ON; // close any open hyperlink (a stray close is a no-op), then highlight
   for (let m; col < cap && i < row.length; ) {
     if ((m = isSgr())) { if (m[0].endsWith("m")) sgr += m[0]; i += m[0].length; continue; }
+    if ((m = isOsc())) { i += m[0].length; continue; }
     out += row[i]; col++; i++;
   }
   if (cap !== Infinity) while (col < cap) { out += " "; col++; } // pad the block out to a solid rectangle

@@ -68,10 +68,12 @@ test("Markdown highlights code while preserving the text", () => {
   expect(lastFrame() ?? "").toContain('const x = "hi"; // note');
 });
 
-test("Markdown renders blockquotes and link text", () => {
+test("Markdown renders blockquotes and link text (url carried as an OSC 8 hyperlink, not shown)", () => {
   const { lastFrame } = render(<Markdown text={"> a quote\nsee [the docs](http://x.io)"} />);
   const out = lastFrame() ?? "";
   expect(out).toContain("a quote");
   expect(out).toContain("the docs"); // link text shown
-  expect(out).not.toContain("http://x.io"); // url hidden
+  expect(out).toContain("\x1b]8;;http://x.io\x07"); // the url IS carried - as a real hyperlink
+  const visible = out.replace(/\x1b\]8;;[^\x07]*\x07/g, "");
+  expect(visible).not.toContain("http://x.io"); // ...but never rendered as visible text
 });

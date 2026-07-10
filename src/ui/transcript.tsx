@@ -1,8 +1,12 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { Box, Text } from "ink";
 
 import type { NekoConfig } from "../adapters/config.ts";
 import { VERSION } from "../shared/version.ts";
 import { highlightLine } from "./highlight.tsx";
+import { fileUri, linkSegments, osc8 } from "./links.ts";
 import { Logo } from "./logo.tsx";
 import { Markdown } from "./markdown.tsx";
 
@@ -21,11 +25,23 @@ function parseDiffLine(l: string): { lineNo?: string; marker: "+" | "-" | " " | 
  *  green, removed = red, both dim so they read as a gutter, not as content), then the +/- marker in the
  *  full color, then per-token syntax-highlighted code (added/context) or dim-red code (removed). The
  *  number carries the signal too, so a wall of edits scans at a glance. Plain result lines stay dim. */
+/** Plain prose with bare URLs turned into OSC 8 hyperlinks (Ctrl+Click in a supporting terminal) -
+ * web_search / web_fetch results list the exact product/source URLs, and those must be reachable. */
+function LinkedText({ text }: { text: string }) {
+  return (
+    <>
+      {linkSegments(text).map((seg, k) =>
+        typeof seg === "string" ? seg : <Text key={k} color="cyan" underline>{osc8(seg.uri, seg.text)}</Text>,
+      )}
+    </>
+  );
+}
+
 function DiffLine({ raw, indent, isError }: { raw: string; indent: string; isError: boolean }) {
   const disp = raw.length > 200 ? raw.slice(0, 200) + "…" : raw;
   if (isError) return <Text color="red">{indent + disp}</Text>;
   const { lineNo, marker, code } = parseDiffLine(disp);
-  if (marker === "") return <Text dimColor>{indent + code}</Text>; // plain result line -> dim, no highlight
+  if (marker === "") return <Text dimColor>{indent}<LinkedText text={code} /></Text>; // plain result line -> dim, links live
   const isAdd = marker === "+", isDel = marker === "-";
   const markerColor = isAdd ? "green" : isDel ? "red" : undefined;
   return (
@@ -46,6 +62,23 @@ export interface Line {
   kind: LineKind;
   text: string;
   summary?: string; // 1-line collapse for read-type tool results (full is under Ctrl+O)
+}
+
+/** A tool-call line like "Read(src/core/agent.ts)": when the argument resolves to a real local file,
+ * hyperlink it (file:// URI) so Ctrl+Click opens it - the Claude-Code affordance. The existsSync gate
+ * keeps queries/commands/truncated args as plain text (renders happen once per line via the ANSI cache,
+ * so the stat is paid once, not per frame). */
+function ToolCallText({ text }: { text: string }) {
+  const m = text.match(/^([^()]+)\((.+)\)$/s);
+  if (m && /^[^\s"'`]+$/.test(m[2]) && /[\\/.]/.test(m[2])) {
+    try {
+      const abs = resolve(m[2]);
+      if (existsSync(abs)) {
+        return <Text>{m[1]}(<Text color="cyan">{osc8(fileUri(abs), m[2])}</Text>)</Text>;
+      }
+    } catch { /* an unresolvable arg is just prose */ }
+  }
+  return <Text>{text}</Text>;
 }
 
 /** Color the "+N" green and "-N" red inside an edit/write header like "Edited f  (+3 -1)". */
@@ -99,7 +132,7 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
       // A blank line above each tool call groups it with its result and separates it from the prompt.
       return (
         <Box marginTop={1}>
-          <Text><Text color="green">● </Text>{line.text}</Text>
+          <Text><Text color="green">● </Text><ToolCallText text={line.text} /></Text>
         </Box>
       );
     case "tool_result": {

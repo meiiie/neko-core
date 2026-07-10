@@ -382,3 +382,34 @@ test("caret-only move (same visible text, cursor shifts) STILL repositions the h
   // Sentinel didn't move again -> a truly identical frame IS skipped.
   expect(d.process(payload(4, mid))).toBe("");
 });
+
+test("parseInkPayload ACCEPTS a frame containing an OSC 8 hyperlink (zero-width text attribute, like SGR)", () => {
+  const linked = "xem \x1b]8;;https://tiki.vn/p/1\x07https://tiki.vn/p/1\x1b]8;;\x07 nhe";
+  expect(parseInkPayload(linked)).toEqual({ eraseCount: 0, frame: linked });
+  // ...while OSC 52 (clipboard) and other OSC writes still pass through untouched (null).
+  expect(parseInkPayload("\x1b]52;c;YQ==\x07")).toBe(null);
+  expect(parseInkPayload("\x1b]0;title\x07")).toBe(null);
+});
+
+test("selection + links: screenText strips OSC 8 (copy yields the visible url), and the highlight never swallows the URI", () => {
+  const d = new FrameDiffer();
+  const writes: string[] = [];
+  d.setWriter((s) => writes.push(s));
+  d.setBand({ top: 1, height: 2 });
+  const url = "https://tiki.vn/p/123";
+  const linkedRow = "  xem \x1b]8;;" + url + "\x07" + url + "\x1b]8;;\x07 nhe";
+  d.setBandContent([linkedRow, "  plain row"], 0);
+  d.process(["", "", "> input"].join("\n"));
+  // Copy: OSC wrappers stripped, the VISIBLE url remains (a copied link is still a link).
+  expect(d.screenText(1, 1)[0]).toBe("  xem " + url + " nhe");
+  // Selection over cols 3..9 ("xem " + start of the url): the block closes any open hyperlink FIRST
+  // and drops link sequences inside, so the URI bytes never render as selected text.
+  writes.length = 0;
+  d.setSelection({ r0: 0, c0: 3, r1: 0, c1: 9 });
+  const out = writes.join("");
+  expect(out).toContain("\x1b]8;;\x07\x1b[48;5;25m"); // hyperlink closed, then the highlight opens
+  const inside = out.slice(out.indexOf("\x1b[48;5;25m"));
+  expect(inside).not.toContain("\x1b]8;;https"); // no link OPEN inside/after the selection block on this row
+  // Column math skipped the zero-width OSC: the selected run starts at the same screen text ("em " + url head).
+  expect(d.screenText(1, 1)[0].slice(2, 9)).toBe("xem htt");
+});

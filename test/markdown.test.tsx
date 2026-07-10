@@ -146,3 +146,32 @@ test("tool_result collapses past 8 lines with a ctrl+o hint", () => {
   expect(out).toContain("+4 lines");
   expect(out).not.toContain("line9"); // 9th+ lines hidden
 });
+
+test("[text](url) renders the label AND carries the url as an OSC 8 hyperlink (the url used to be dropped)", () => {
+  const frame = render(<Markdown text={"Mua tai [iPhone 15](https://cellphones.com.vn/iphone-15.html) nhe"} width={80} />).lastFrame() ?? "";
+  expect(frame).toContain("\x1b]8;;https://cellphones.com.vn/iphone-15.html\x07iPhone 15\x1b]8;;\x07");
+  const visible = strip(frame).replace(/\x1b\]8;;[^\x07]*\x07/g, "");
+  expect(visible).toContain("iPhone 15");
+  expect(visible).not.toContain("cellphones.com.vn"); // label-only on screen, target lives in the link
+});
+
+test("a bare URL in prose becomes a hyperlink whose visible text IS the url; trailing punctuation stays prose", () => {
+  const frame = render(<Markdown text={"Nguon: https://tiki.vn/p/123."} width={80} />).lastFrame() ?? "";
+  expect(frame).toContain("\x1b]8;;https://tiki.vn/p/123\x07https://tiki.vn/p/123\x1b]8;;\x07");
+  expect(strip(frame).replace(/\x1b\]8;;[^\x07]*\x07/g, "")).toContain("https://tiki.vn/p/123."); // the dot still shows
+});
+
+test("a non-web [text](target) stays label-only (no broken hyperlink)", () => {
+  const frame = render(<Markdown text={"[xem muc](#anchor)"} width={60} />).lastFrame() ?? "";
+  expect(frame).not.toContain("\x1b]8;;");
+  expect(strip(frame)).toContain("xem muc");
+});
+
+test("a linked table cell keeps column alignment (OSC 8 is zero display width)", () => {
+  const md = "| San pham | Nguon |\n|---|---|\n| iPhone | [CPS](https://cellphones.com.vn) |";
+  const frame = render(<Markdown text={md} width={60} />).lastFrame() ?? "";
+  expect(frame).toContain("\x1b]8;;https://cellphones.com.vn\x07");
+  const rows = strip(frame).replace(/\x1b\]8;;[^\x07]*\x07/g, "").split("\n").filter((l) => l.includes("│"));
+  const edges = rows.map((r) => r.lastIndexOf("│"));
+  expect(new Set(edges).size).toBe(1); // every row's right border lands on the same column
+});

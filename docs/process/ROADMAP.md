@@ -19,7 +19,8 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   memory permissions, large-file deep paging, profile-key/title persistence, AGENTS.md context, and
   architecture-test coverage. A deterministic VT + real-ConPTY UX audit then removed duplicate todo
   plans, raw-Markdown commit flashes, resize ghosts, history/scroll key conflicts and repeated approval
-  feedback. The follow-up hardens todo state/exit persistence, adds non-destructive `Alt+C` draft copy,
+  feedback. Transcript links are now REAL terminal hyperlinks (OSC 8: hover tooltip + Ctrl+Click for
+  `[label](url)`, bare URLs, and existing file paths; wrap-safe, selection/copy/differ OSC-aware). The follow-up hardens todo state/exit persistence, adds non-destructive `Alt+C` draft copy,
   closes the native computer tool's type/key/scroll/wait/open gap, and embeds every built-in skill/asset in
   the standalone binary. A UI-TARS Desktop clean-room audit then closed the visual-observation gap:
   `computer screenshot` now reaches vision models directly across OpenAI-compatible and Anthropic wire

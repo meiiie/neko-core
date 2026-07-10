@@ -943,3 +943,29 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
   owner refreshes the Z.ai key.
 - Verification: TS 7 + TS 5.9 clean; **450/450 tests** (1629 assertions, +14); policy PASS; live runs
   logged to bench-log.jsonl suites "gui" and "gui-hard".
+
+## 2026-07-10 - OSC 8 hyperlinks: links in the transcript are hover-and-Ctrl+Click real (owner ask)
+- The owner's procurement case made the gap concrete: `[text](url)` rendered the LABEL and threw the
+  URL away (markdown.tsx) - fatal when the answer IS the link - and nothing in the transcript was
+  clickable the way Claude Code's file/PR links are (owner screenshot: WT tooltip "Ctrl+Click to
+  follow link" = OSC 8, not terminal auto-detection).
+- Emit: a new React-free `ui/links.ts` (osc8 wrapper with control-byte URI sanitize - an embedded
+  ESC/BEL is an injection vector; fileUri with %-encoding; linkSegments for bare URLs + absolute
+  Windows paths with word-boundary guards and trailing-punctuation trim). markdown.tsx now hyperlinks
+  `[label](url)` (label visible, URL carried) and bare URLs/paths in prose; transcript.tsx hyperlinks
+  an existing file path in a tool-call line (resolve + existsSync gate, stat paid once via the ANSI
+  cache) and bare URLs in plain tool-result lines (web_search results must be reachable).
+- Why OSC 8 and not auto-detection: wrap-ansi (Ink's wrapper) RE-OPENS the hyperlink on every wrapped
+  segment (verified empirically), so a long product URL broken across 2-3 terminal lines still carries
+  its full URI - exactly where auto-detection dies. string-width measures the sequence at 0 cells.
+- The compositor had to learn the sequence everywhere column math or byte filtering lives:
+  `parseInkPayload` now accepts OSC 8 (still refuses OSC 52/title - rejecting links would silently
+  drop the differ into passthrough-reset full repaints on every linked frame), `sentinelCol` +
+  `overlaySelection` skip it as zero-width (the selection block CLOSES any open link first so a link
+  cut in half never bleeds into the highlight), `screenText` strips it on copy (the visible text of a
+  bare URL IS the url, so a copied link stays a link). The VT oracle already skipped OSC.
+- Tests: +12 (links unit incl. the injection sanitize and a real regex bug the boundary test caught -
+  "https://" mis-parsed as drive "s:"; markdown label+URI carry, trailing-punct, table alignment with
+  a linked cell; frame-diff OSC-8-accept/OSC-52-reject, copy-strip, selection-over-link; the legacy
+  "url hidden" test updated to the new contract: carried, not visible). **463/463** (1662 assertions);
+  TS 7 + TS 5.9 clean; policy PASS; binary build + UI/input probes PASS.

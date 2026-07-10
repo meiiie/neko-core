@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import stringWidth from "string-width";
 
 import { highlightLine } from "./highlight.tsx";
+import { linkSegments, osc8 } from "./links.ts";
 
 /** Decode HTML entities + <br> so they don't show up literally (common in scraped/LLM tables). Also
  * normalize the terminal-hostile emoji that misalign columns: keycaps (1\uFE0F\u20E3) -> "1.", and drop the
@@ -156,19 +157,34 @@ function inline(raw: string): ReactNode[] {
   const re = /(\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*|\[([^\]]+)\]\(([^)]+)\)|\$([^$\n]+)\$)/g;
   let last = 0;
   let key = 0;
+  // Plain prose: bare URLs / absolute Windows paths become real OSC 8 hyperlinks (hover tooltip +
+  // Ctrl+Click in a supporting terminal); other terminals just show the text. The visible text IS the
+  // target, so copy keeps working. Zero display width - table/wrap math is unaffected (verified).
+  const pushPlain = (t: string) => {
+    for (const seg of linkSegments(t)) {
+      if (typeof seg === "string") out.push(seg);
+      else out.push(<Text key={key++} color="cyan" underline>{osc8(seg.uri, seg.text)}</Text>);
+    }
+  };
   let m: RegExpExecArray | null;
   while ((m = re.exec(s)) !== null) {
-    if (m.index > last) out.push(s.slice(last, m.index));
+    if (m.index > last) pushPlain(s.slice(last, m.index));
     if (m[2] !== undefined) out.push(<Text key={key++} bold>{m[2]}</Text>);
     else if (m[3] !== undefined) out.push(<Text key={key++} color="yellow">{m[3]}</Text>);
     else if (m[4] !== undefined) out.push(<Text key={key++} italic>{m[4]}</Text>);
-    else if (m[5] !== undefined) out.push(<Text key={key++} color="cyan" underline>{m[5]}</Text>); // [text](url) -> text
+    else if (m[5] !== undefined) {
+      // [text](url): render the label AND carry the url as a real hyperlink (it used to be dropped -
+      // fatal when the answer IS the link, e.g. a sourced product). Non-web targets keep label-only.
+      const url = (m[6] ?? "").trim();
+      const linkable = /^https?:\/\/./i.test(url) || /^file:\/\//i.test(url);
+      out.push(<Text key={key++} color="cyan" underline>{linkable ? osc8(url, m[5]) : m[5]}</Text>);
+    }
     // Inline math $...$ -> Unicode, but ONLY when it actually looks like LaTeX (a backslash/^/_/brace),
     // so a price like "$5 to $10" is left untouched.
     else if (m[7] !== undefined) out.push(/[\\^_{}]/.test(m[7]) ? <Text key={key++} color="cyan">{mathToUnicode(m[7])}</Text> : m[0]);
     last = m.index + m[0].length;
   }
-  if (last < s.length) out.push(s.slice(last));
+  if (last < s.length) pushPlain(s.slice(last));
   return out.length ? out : [s];
 }
 
