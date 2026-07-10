@@ -132,10 +132,13 @@ export async function startRemoteRelay(
       }
       ended = true;
       if (timer) clearTimeout(timer);
-      // Final frame: ws carries the same {text,act} envelope (the client keeps the process log);
-      // v1 poll stays a plain string (that's what the old Worker's client understands).
+      // Final frame: ws carries the same {text,act} envelope (the client keeps the process log) plus
+      // the active model for the client's status bar; v1 poll stays a plain string (the old Worker's
+      // client understands only that).
       buf = String(result.reply ?? "");
-      send({ t: "reply", id: job.id, reply: mode === "ws" ? envelope() : sealMaybe(buf), tokens: result.tokens, ms: result.ms });
+      const model = handlers.status?.().model;
+      const finalEnvelope = () => sealMaybe(JSON.stringify({ text: buf, act: act.slice(-12), model }));
+      send({ t: "reply", id: job.id, reply: mode === "ws" ? finalEnvelope() : sealMaybe(buf), tokens: result.tokens, ms: result.ms });
     }
     draining = false;
   };

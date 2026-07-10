@@ -3,6 +3,27 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-10 (night, part 5) — relay: slash commands answer remotely; the client is CLI-verbatim
+
+Owner: "khong dung duoc ca lenh" + "toi muon giao dien giong het CLI" + the security question ("ai
+an truy cap vao cung duoc ha?").
+
+- **Slash commands were mute over the relay** (the real bug behind "can't even use commands"): /help,
+  /status etc. print info/error LINES, never an assistant message, so the remote run() returned
+  "(no reply)". addLine now feeds a per-remote-turn collector; the reply is the newest assistant
+  message when the turn grew the transcript, else the collected info/error lines. Also guarded
+  `/relay` FROM the phone (it would stop the relay and cut the very connection carrying the command).
+- **The client is now CLI-verbatim**: the header is the terminal banner (text kaomoji `ハ・・マ` +
+  "Neko Code · remote" + dim status/host lines), the composer placeholder is the CLI's
+  `Try: "..." or /help`, and the bottom bar mirrors the CLI status line - `⏵⏵ state` left,
+  `model · remote` right (the model rides the final reply envelope via handlers.status()).
+- **Security posture surfaced in-product**: the pairing card states the page is public by design and
+  can do nothing without the pairing keys (session+token auth per session, 96-bit random, first-token
+  binding, E2E on top). Unpaired submits now focus the paste box instead of silently opening a drawer.
+
+Verified: dual typecheck; 492/492 (final-envelope test now asserts the model field); policy PASS;
+client parse + 5 structural markers; Worker redeployed; live probe 13/13; binary rebuilt + installed.
+
 ## 2026-07-10 (night, part 4) — relay full re-audit: self-review caught an XSS + 4 UX defects
 
 Owner: "Kiem tra lai mot luot nua di moi thu cua relay". Re-read every relay file adversarially,

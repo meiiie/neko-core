@@ -55,7 +55,7 @@ function makeRelayDouble(port: number) {
   return { server, url: `http://127.0.0.1:${port}` };
 }
 
-const handlers = (run: RemoteHandlers["run"]): RemoteHandlers => ({ run, status: () => ({ busy: false }), interrupt: () => true });
+const handlers = (run: RemoteHandlers["run"]): RemoteHandlers => ({ run, status: () => ({ busy: false, model: "test-model" }), interrupt: () => true });
 
 test("remote-relay: outbound dial-out + long-poll routes a client instruction to the host and back (no open port)", async () => {
   const relay = makeRelayDouble(4701);
@@ -189,7 +189,7 @@ test("remote-relay v2: WS streams PARTIAL {text,act} envelopes (the terminal exp
       expect(partials[0].text).toContain("thinking about hi");
       expect(partials[0].act).toEqual(["Read(src/agent.ts)"]); // process log rides along
       const final = relay.state.frames.find((f) => f.t === "reply");
-      expect(JSON.parse(final.reply)).toEqual({ text: "final:hi", act: ["Read(src/agent.ts)"] });
+      expect(JSON.parse(final.reply)).toEqual({ text: "final:hi", act: ["Read(src/agent.ts)"], model: "test-model" }); // model rides along for the client's status bar
       expect(final.tokens).toBe(7);
     } finally { rc.stop(); }
   } finally { relay.server.stop(); }

@@ -109,6 +109,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const relayRef = useRef<RemoteRelay | null>(null);
   const remoteSinkRef = useRef<((chunk: string) => void) | null>(null); // streams a turn's output to a remote SSE client
   const remoteActRef = useRef<((line: string) => void) | null>(null); // streams tool-activity lines (the phone's process ticker)
+  const remoteLineRef = useRef<((kind: LineKind, text: string) => void) | null>(null); // collects info/error lines for a remote turn
   const [rcOn, setRcOn] = useState(false);
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
@@ -246,6 +247,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // A streamed answer is rich Markdown before commit. Prime its final rows now so fullscreen never
     // flashes the cheap raw-markdown fallback while the asynchronous cache warmer catches up.
     if (fullscreenRef.current && kind === "assistant") primeAnsiCache(line, contentColsRef.current, cfg);
+    remoteLineRef.current?.(kind, text); // a remote turn collects info/error output (slash commands answer THERE)
     setLines((prev) => [...prev, line]);
   };
 
@@ -1193,17 +1195,28 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       const w0 = Date.now();
       while (busyRef.current && Date.now() - w0 < 15 * 60_000) await new Promise((res) => setTimeout(res, 500));
       if (busyRef.current) return { reply: "(neko stayed busy for 15+ minutes - the Stop button interrupts the running turn)" };
+      // /relay from the phone would stop the relay and cut the very connection carrying the command.
+      if (/^\/relay\b/.test(msg.trim())) return { reply: "(run /relay on the computer - stopping the relay from here would cut this connection)" };
       const t0 = Date.now();
       const tok0 = agentRef.current!.cost.totalTokens;
+      const msgs0 = agentRef.current!.messages.length;
+      const infoLines: string[] = [];
       remoteSinkRef.current = onDelta ?? null;
       remoteActRef.current = onAct ?? null;
+      remoteLineRef.current = (kind, text) => { if (kind === "info" || kind === "error") infoLines.push(text); };
       try {
         await handle(msg);
+        // A model turn appends assistant messages -> reply with the newest one. A slash command
+        // (/help, /status, ...) only prints info/error lines -> THOSE are its answer; "(no reply)"
+        // was the old behavior and read as broken from the phone.
+        const grew = agentRef.current!.messages.length > msgs0;
         const last = agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content;
-        return { reply: typeof last === "string" ? last : "(no reply)", tokens: agentRef.current!.cost.totalTokens - tok0, ms: Date.now() - t0 };
+        const reply = grew && typeof last === "string" && last ? last : infoLines.join("\n") || "(done - no output)";
+        return { reply, tokens: agentRef.current!.cost.totalTokens - tok0, ms: Date.now() - t0 };
       } finally {
         remoteSinkRef.current = null;
         remoteActRef.current = null;
+        remoteLineRef.current = null;
       }
     },
     status: () => ({ busy: busyRef.current, model: cfg.model, messages: agentRef.current!.messages.length }),
