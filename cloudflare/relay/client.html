@@ -39,11 +39,17 @@
   .row.me { justify-content: flex-end; }
   @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .row { animation: none; } .pill.ok .dot { animation: none; } }
-  .bub { max-width: 84%; padding: 10px 13px; border-radius: var(--r); white-space: pre-wrap; word-wrap: break-word; }
+  .bub { max-width: 84%; padding: 10px 13px; border-radius: var(--r); white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
   .me .bub { background: var(--me); border: 1px solid color-mix(in srgb, var(--accent2) 18%, var(--line)); border-bottom-right-radius: 5px; }
   .neko .bub { background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
   .who { font-size: 11px; color: var(--accent); margin: 0 0 4px 2px; font-weight: 600; }
   .neko.err .bub { border-color: color-mix(in srgb, #f87171 45%, var(--line)); color: #fca5a5; }
+  .bub pre { background: #0f0f12; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 13px; margin: 6px 0; }
+  .bub code { background: #0f0f12; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 13px; }
+  .bub pre code { background: none; border: 0; padding: 0; }
+  .bub a { color: var(--accent); text-underline-offset: 2px; }
+  .caret { display: inline-block; width: 3px; height: 1em; vertical-align: -2px; margin-left: 2px; background: var(--accent); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
 
   .typing { display: inline-flex; gap: 4px; padding: 4px 2px; }
   .typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); animation: bob 1.1s infinite ease-in-out; }
@@ -56,6 +62,7 @@
   .send { width: 44px; height: 44px; flex: none; border: 0; border-radius: 13px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; display: grid; place-items: center; cursor: pointer; transition: transform .12s, opacity .2s, filter .2s; box-shadow: 0 4px 14px -4px var(--accent2); }
   .send:active { transform: scale(.9); } .send:disabled { opacity: .45; filter: grayscale(.5); box-shadow: none; cursor: default; }
   .send svg { width: 20px; height: 20px; }
+  .send.stop { background: #7f1d1d; box-shadow: 0 4px 14px -6px #ef4444; }
 </style></head>
 <body>
 <header>
@@ -92,16 +99,32 @@
   }
   const save = () => { try { localStorage.nekoSession = session.value; localStorage.nekoToken = token.value; localStorage.nekoSecret = secret.value; } catch {} };
 
-  // status pill + auto-open settings if not configured
+  const paired = () => !!(session.value.trim() && token.value.trim());
+  const base = () => relay.value.trim().replace(/\/+$/, "");
+  const auth = () => ({ authorization: "Bearer " + token.value.trim() });
+
+  // Status pill: truthful — asks the relay whether Neko is actually connected right now.
+  let online = null; // null = unknown
   function refresh() {
-    const ready = session.value.trim() && token.value.trim();
-    $("pill").className = "pill" + (ready ? " ok" : "");
-    $("pilltxt").textContent = ready ? (secret.value.trim() ? "paired · E2E" : "paired") : "not paired";
+    const p = paired();
+    $("pill").className = "pill" + (p && online ? " ok" : "");
+    $("pilltxt").textContent = !p ? "not paired" : online === null ? (secret.value.trim() ? "paired · E2E" : "paired")
+      : online ? "Neko online" + (secret.value.trim() ? " · E2E" : "") : "Neko offline";
   }
-  for (const el of [relay, session, token, secret]) el.oninput = () => { save(); refresh(); };
+  async function checkAlive() {
+    if (!paired()) { online = null; refresh(); return; }
+    try {
+      const r = await fetch(base() + "/alive?session=" + encodeURIComponent(session.value.trim()), { headers: auth() });
+      online = r.ok ? !!(await r.json()).online : null;
+    } catch { online = null; }
+    refresh();
+  }
+  for (const el of [relay, session, token, secret]) el.oninput = () => { save(); online = null; refresh(); };
   $("gear").onclick = () => { const c = $("cfg"); c.classList.toggle("show"); $("gear").classList.toggle("open", c.classList.contains("show")); };
-  if (!(session.value && token.value)) $("gear").click();
-  refresh();
+  if (!paired()) $("gear").click();
+  refresh(); checkAlive();
+  setInterval(checkAlive, 25_000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) checkAlive(); });
 
   // auto-growing composer; Enter sends, Shift+Enter = newline
   const grow = () => { m.style.height = "auto"; m.style.height = Math.min(m.scrollHeight, 140) + "px"; };
@@ -118,33 +141,76 @@
   async function seal(k, t) { const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = new Uint8Array(await crypto.subtle.encrypt({ name:"AES-GCM", iv }, k, new TextEncoder().encode(t))); return { iv: b64(iv), ct: b64(ct) }; }
   async function unseal(k, s) { return new TextDecoder().decode(await crypto.subtle.decrypt({ name:"AES-GCM", iv: ub64(s.iv) }, k, ub64(s.ct))); }
 
+  // Markdown-lite (escape FIRST, then decorate): fences, inline code, bold, links, headings, bullets.
+  function md(t) {
+    let s = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, __, c) => "<pre><code>" + c.replace(/\n$/, "") + "</code></pre>");
+    s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+    s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+    s = s.replace(/^#{1,4} (.*)$/gm, "<b>$1</b>");
+    s = s.replace(/^[-*] /gm, "• ");
+    return s;
+  }
+  function render(bub, text, done) {
+    bub.innerHTML = md(text) + (done ? "" : '<span class="caret"></span>');
+  }
+
   const empty = $("empty");
   function row(who, cls) { empty?.remove(); const r = document.createElement("div"); r.className = "row " + who + (cls?" "+cls:""); const b = document.createElement("div"); b.className = "bub";
     if (who === "neko") { const w = document.createElement("div"); w.className = "who"; w.textContent = "neko"; r.appendChild(w); } // who label above bubble (neko only)
     r.appendChild(b); log.appendChild(r); requestAnimationFrame(() => r.scrollIntoView({ block: "end", behavior: "smooth" })); return b; }
+  const stick = (b) => requestAnimationFrame(() => b.closest(".row").scrollIntoView({ block: "end" }));
+
+  // Send button doubles as STOP while a turn runs (reaches the host mid-turn on a v2 relay).
+  const SEND_SVG = $("send").innerHTML;
+  const STOP_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+  let awaiting = false;
+  function setAwaiting(on) {
+    awaiting = on;
+    $("send").classList.toggle("stop", on);
+    $("send").innerHTML = on ? STOP_SVG : SEND_SVG;
+    $("send").setAttribute("aria-label", on ? "stop" : "send");
+  }
 
   $("f").onsubmit = async (e) => {
     e.preventDefault();
+    if (awaiting) { // STOP: ask the relay to interrupt the running turn
+      try { await fetch(base() + "/interrupt", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim() }) }); } catch {}
+      return;
+    }
     const msg = m.value.trim(); if (!msg) return;
-    if (!(session.value.trim() && token.value.trim())) { $("cfg").classList.add("show"); $("gear").classList.add("open"); return; }
-    m.value = ""; grow(); $("send").disabled = true;
+    if (!paired()) { $("cfg").classList.add("show"); $("gear").classList.add("open"); return; }
+    m.value = ""; grow();
     row("me").textContent = msg;
     const out = row("neko"); out.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+    setAwaiting(true);
     try {
-      const base = relay.value.trim().replace(/\/+$/, ""), k = await key();
+      const k = await key();
       const payload = k ? await seal(k, msg) : msg;
-      const r = await fetch(base + "/send", { method:"POST", headers: { "content-type":"application/json", authorization:"Bearer "+token.value.trim() }, body: JSON.stringify({ session: session.value.trim(), message: payload }) });
+      const r = await fetch(base() + "/send", { method:"POST", headers: { "content-type":"application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), message: payload }) });
       if (!r.ok) { out.closest(".row").classList.add("err"); out.textContent = "send failed (HTTP " + r.status + ")"; return; }
       const { id } = await r.json();
-      let reply;
-      for (let i = 0; i < 40 && reply === undefined; i++) {
-        const rr = await fetch(base + "/result?session=" + encodeURIComponent(session.value.trim()) + "&id=" + id, { headers: { authorization:"Bearer "+token.value.trim() } });
-        if (rr.status === 200) { const g = (await rr.json()).reply; reply = k && g && g.iv ? await unseal(k, g) : g; }
+      // Long-poll for updates: partials render live (seq-cursor so nothing repeats), done ends the wait.
+      let seen = 0, done = false, offlineWarned = false;
+      const t0 = Date.now();
+      while (!done && Date.now() - t0 < 60 * 60_000) {
+        const rr = await fetch(base() + "/result?session=" + encodeURIComponent(session.value.trim()) + "&id=" + id + "&seen=" + seen, { headers: auth() });
+        if (rr.status === 200) {
+          const g = await rr.json();
+          seen = g.seq || seen; done = !!g.done;
+          const text = k && g.reply && g.reply.iv ? await unseal(k, g.reply) : String(g.reply ?? "");
+          render(out, text, done); stick(out);
+        } else if (!offlineWarned) {
+          // Nothing yet: tell the user fast if Neko isn't even connected (instead of silent dots).
+          await checkAlive();
+          if (online === false) { out.innerHTML = '<span class="typing"><i></i><i></i><i></i></span> <span style="color:var(--warn)">Neko is offline — the task is queued and runs when /relay reconnects.</span>'; offlineWarned = true; }
+        }
       }
-      if (reply == null) { out.closest(".row").classList.add("err"); out.textContent = "(no reply — is Neko's /relay running?)"; }
-      else out.textContent = reply;
+      if (!done && !out.textContent.trim()) { out.closest(".row").classList.add("err"); out.textContent = "(no reply — is Neko's /relay running?)"; }
     } catch (err) { out.closest(".row").classList.add("err"); out.textContent = "error: " + err.message; }
-    finally { $("send").disabled = false; m.focus(); }
+    finally { setAwaiting(false); m.focus(); checkAlive(); }
   };
 </script>
 </body></html>

@@ -115,7 +115,7 @@ Current Version ID: ...
 curl -s -o /dev/null -w "%{http_code}\n" https://neko-relay.<...>.workers.dev/        # expect 200
 
 # 4b. An unauthenticated control call is rejected (HTTP 401):
-curl -s -o /dev/null -w "%{http_code}\n" https://neko-relay.<...>.workers.dev/status?session=test   # expect 401
+curl -s -o /dev/null -w "%{http_code}\n" https://neko-relay.<...>.workers.dev/alive?session=test   # expect 401
 ```
 
 If 4a returns 200 and 4b returns 401, the relay is deployed and working.

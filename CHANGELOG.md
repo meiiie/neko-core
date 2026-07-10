@@ -7,6 +7,26 @@ All notable changes to Neko Code are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Relay v2 — the phone experience, rebuilt** (host + Worker + web client, deployed and live-verified
+  end-to-end 10/10 on real Cloudflare infrastructure):
+  - **Live streaming to the phone.** The host now holds a hibernation-friendly WebSocket to the Worker
+    and streams the growing reply as throttled, still-E2E-sealed partial frames — the phone watches
+    Neko type instead of staring at dots for minutes. The web client renders markdown-lite (code,
+    bold, links, bullets).
+  - **Stop from the phone.** The send button becomes a Stop button while a turn runs; the interrupt
+    reaches the host mid-turn over the socket.
+  - **Pairing that survives restarts.** `/relay` persists the pairing in `~/.neko-core/relay.json` —
+    restart Neko and an already-paired phone reconnects by itself; `/relay new` rotates it.
+  - **No more silent death.** Session state (token binding, queued jobs, results) moved into Durable
+    Object storage: an eviction (laptop asleep) no longer kills the session, a message sent while the
+    host is offline queues durably and runs on reconnect, and the phone's status pill now asks the
+    relay whether Neko is actually online (`/alive`) instead of guessing.
+  - **Cheaper to keep on.** The old 1-second long-poll kept the Durable Object awake 24/7; with
+    WebSocket hibernation it sleeps between messages (free-plan friendly). Messages from the phone
+    now WAIT for a busy turn (like the desktop input queue) instead of being dropped.
+  - Fully backward compatible: an old binary works against the new Worker (v1 long-poll endpoints
+    kept), and a new binary degrades to long-poll against an old Worker or where WSS is blocked.
+- Plain info lines in the transcript (relay pairing URLs, update notes) are now OSC 8 hyperlinks too.
 - **`neko setup tavily <key>`** — the no-Docker rung of the search ladder: verifies the key against the
   live Tavily API, then wires it into the gitignored user config (`tavily_api_key`, redacted by
   `neko config`; `TAVILY_API_KEY` env still wins). `web_search` failures now walk DOWN the ladder —

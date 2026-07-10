@@ -3,6 +3,35 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-10 (night) — relay v2: the phone becomes a first-class seat
+
+Owner: "phần relay giao diện và mọi thứ chưa được tốt lắm suy nghĩ sâu nhé". Audited the whole
+subsystem by reading it as the phone user experiences it, checked the July-2026 SOTA (Claude Code
+Remote Control's launch architecture: streaming + approve/redirect from the phone; Cloudflare's
+Durable Object guidance: WebSocket Hibernation is GA and the recommended shape for long-lived agent
+sessions - long-polling keeps the DO awake and billing), then rebuilt the transport:
+
+- **Found and fixed, in order of user pain:** (1) no streaming - `handlers.run` had an `onDelta` the
+  relay never used; the phone stared at typing dots for whole minutes. (2) restart = silent unpair -
+  fresh session/token/secret every `/relay`, phone waits ~16 min then shows a vague error. (3) DO
+  eviction = permanent silent death - token lived in memory, every later /pull got 401 and the host
+  swallowed it forever. (4) busy = message DROPPED. (5) no host-liveness concept. (6) raw markdown
+  on the phone.
+- **The rebuild:** host <-> Worker is now a WebSocket with hibernation (jobs push instantly; DO
+  sleeps between messages instead of burning free-tier duty cycle on a 1s poll); the host streams
+  throttled E2E-sealed partial frames and the client renders them live with a seq cursor
+  (`/result?seen=`); Stop on the phone sends `{t:"interrupt"}` mid-turn; pairing persists in
+  `~/.neko-core/relay.json` (`/relay new` rotates); token/queue/results moved into DO storage;
+  `/alive` makes the status pill truthful; busy remote messages wait (bounded 15 min) like desktop
+  input. Back-compat both ways: v1 endpoints kept for old binaries; a v2 host reads `/register`'s
+  `v` field and degrades to long-poll against an old Worker (or when WSS never opens - 3 strikes).
+- **Verified:** 490/490 tests (5 new WS-double tests: partial-then-final, mid-turn interrupt,
+  WSS-blocked degrade, reconnect-and-serve, pairing persistence; the untouched v1 tests double as
+  the back-compat proof), dual typecheck, policy PASS. Worker deployed to the owner's Cloudflare
+  and **live-probed 10/10 on real infrastructure**: WS transport, /alive truth, E2E round-trip,
+  offline queue -> reconnect flush, 2 streamed partials before the final, phone-Stop interrupting a
+  hung turn.
+
 ## 2026-07-10 (evening) — handoff polish: doctor names the model-shadow trap; the search ladder gets its middle rung
 
 Post-v0.9.0 close-out session (the owner's last with this collaborator — priorities chosen for a solo

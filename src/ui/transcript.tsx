@@ -171,6 +171,7 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
     case "error":
       return <Text color="red">{"✗ "}{line.text}</Text>;
     default:
-      return <Text color="gray">{line.text}</Text>;
+      // info lines carry actionable URLs (relay pairing, release notes) - make them Ctrl+Click-able.
+      return <Text color="gray"><LinkedText text={line.text} /></Text>;
   }
 }

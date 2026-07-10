@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { RemoteHandlers } from "../src/adapters/remote-control.ts";
 import { open, seal } from "../src/adapters/relay-crypto.ts";
-import { startRemoteRelay } from "../src/adapters/remote-relay.ts";
+import { loadOrCreatePairing, startRemoteRelay } from "../src/adapters/remote-relay.ts";
 
 /** A tiny in-memory relay double standing in for the Cloudflare Worker, so we can prove the host
  * (agent) side end-to-end: the host dials OUT and long-polls; a client submits an instruction; the
@@ -125,6 +128,127 @@ test("remote-relay E2E: the relay only ever sees ciphertext (zero-knowledge)", a
   } finally {
     server.stop();
   }
+});
+
+/** A v2 relay double: /register advertises v:2 and the host connects a WebSocket (token in the
+ * subprotocol). Mirrors the Cloudflare Worker's /ws contract so the WS path is proven end-to-end. */
+function makeWsDouble(port: number, opts: { refuseWs?: boolean } = {}) {
+  const state = { connections: 0, frames: [] as any[], sockets: [] as any[], token: "", queue: [] as any[], replies: new Map<string, any>() };
+  let counter = 0;
+  const server = Bun.serve({
+    port,
+    fetch(req, srv) {
+      const u = new URL(req.url);
+      const tok = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "");
+      if (u.pathname === "/register" && req.method === "POST") { state.token = tok; return Response.json({ ok: true, v: 2 }); }
+      if (u.pathname === "/ws") {
+        if (opts.refuseWs) return new Response("nope", { status: 404 });
+        const protos = (req.headers.get("sec-websocket-protocol") ?? "").split(",").map((s) => s.trim());
+        const t = (protos.find((p) => p.startsWith("t.")) ?? "").slice(2);
+        if (t !== state.token) return new Response("unauthorized", { status: 401 });
+        if (srv.upgrade(req, { headers: { "sec-websocket-protocol": "neko-relay" } })) return undefined as any;
+        return new Response("no upgrade", { status: 426 });
+      }
+      // v1 endpoints (the WSS-blocked fallback lands here)
+      if (u.pathname === "/pull") return Response.json(state.queue.shift() ?? {});
+      if (u.pathname === "/reply" && req.method === "POST") { return req.json().then((b: any) => { state.replies.set(b.id, b.reply); return Response.json({ ok: true }); }); }
+      return new Response("nf", { status: 404 });
+    },
+    websocket: {
+      open(ws) { state.connections++; state.sockets.push(ws); },
+      message(_ws, raw) { state.frames.push(JSON.parse(String(raw))); },
+      close() {},
+    },
+  });
+  return { server, state, url: `http://127.0.0.1:${port}` };
+}
+
+const until = async (cond: () => boolean, ms = 3000) => {
+  const t0 = Date.now();
+  while (!cond() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 20));
+  expect(cond()).toBe(true);
+};
+
+test("remote-relay v2: WebSocket transport streams PARTIAL frames then the final reply", async () => {
+  const relay = makeWsDouble(4704);
+  try {
+    const rc = await startRemoteRelay(relay.url, handlers(async (m, onDelta) => {
+      onDelta?.("thinking about " + m);
+      await new Promise((r) => setTimeout(r, 200)); // let the 50ms partial throttle fire
+      onDelta?.(" ...more");
+      return { reply: "final:" + m, tokens: 7, ms: 5 };
+    }), { partialMs: 50 });
+    try {
+      expect(rc.transport()).toBe("ws");
+      await until(() => relay.state.connections === 1);
+      relay.state.sockets[0].send(JSON.stringify({ id: "j1", message: "hi" }));
+      await until(() => relay.state.frames.some((f) => f.t === "reply"));
+      const partials = relay.state.frames.filter((f) => f.t === "partial");
+      expect(partials.length).toBeGreaterThan(0);
+      expect(partials[0].reply).toContain("thinking about hi");
+      const final = relay.state.frames.find((f) => f.t === "reply");
+      expect(final.reply).toBe("final:hi");
+      expect(final.tokens).toBe(7);
+    } finally { rc.stop(); }
+  } finally { relay.server.stop(); }
+});
+
+test("remote-relay v2: an {t:interrupt} frame reaches handlers.interrupt MID-TURN (phone Stop)", async () => {
+  const relay = makeWsDouble(4705);
+  let interrupted = false;
+  let release: () => void = () => {};
+  const h: RemoteHandlers = {
+    run: async () => { await new Promise<void>((r) => { release = r; }); return { reply: "done" }; },
+    status: () => ({ busy: true }),
+    interrupt: () => { interrupted = true; release(); return true; },
+  };
+  try {
+    const rc = await startRemoteRelay(relay.url, h, {});
+    try {
+      await until(() => relay.state.connections === 1);
+      relay.state.sockets[0].send(JSON.stringify({ id: "j1", message: "long task" }));
+      await new Promise((r) => setTimeout(r, 100)); // the turn is now running (blocked on `release`)
+      relay.state.sockets[0].send(JSON.stringify({ t: "interrupt" }));
+      await until(() => interrupted); // reached the host WHILE the turn was in flight
+      await until(() => relay.state.frames.some((f) => f.t === "reply")); // and the turn still replied
+    } finally { rc.stop(); }
+  } finally { relay.server.stop(); }
+});
+
+test("remote-relay v2: WSS blocked (socket never opens) degrades honestly to the v1 poll loop", async () => {
+  const relay = makeWsDouble(4706, { refuseWs: true });
+  relay.state.queue.push({ id: "j9", message: "via poll" });
+  try {
+    const rc = await startRemoteRelay(relay.url, handlers(async (m) => ({ reply: "ok:" + m })), { pollMs: 20, backoffMs: 10 });
+    try {
+      await until(() => rc.transport() === "poll");
+      await until(() => relay.state.replies.get("j9") === "ok:via poll");
+    } finally { rc.stop(); }
+  } finally { relay.server.stop(); }
+});
+
+test("remote-relay v2: reconnects after a dropped socket and keeps serving jobs", async () => {
+  const relay = makeWsDouble(4707);
+  try {
+    const rc = await startRemoteRelay(relay.url, handlers(async (m) => ({ reply: "ok:" + m })), { backoffMs: 20 });
+    try {
+      await until(() => relay.state.connections === 1);
+      relay.state.sockets[0].close(); // relay hiccup / DO eviction
+      await until(() => relay.state.connections === 2); // host came back by itself
+      relay.state.sockets[1].send(JSON.stringify({ id: "j2", message: "after reconnect" }));
+      await until(() => relay.state.frames.some((f) => f.t === "reply" && f.reply === "ok:after reconnect"));
+    } finally { rc.stop(); }
+  } finally { relay.server.stop(); }
+});
+
+test("pairing persists across restarts (same QR, phone stays paired) and `new` rotates it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nk-relay-"));
+  const a = loadOrCreatePairing(false, dir);
+  const b = loadOrCreatePairing(false, dir);
+  expect(b).toEqual(a); // a restart reuses the pairing - the phone reconnects with no re-scan
+  const c = loadOrCreatePairing(true, dir);
+  expect(c.session).not.toBe(a.session); // /relay new = a genuinely fresh pairing
+  expect(loadOrCreatePairing(false, dir)).toEqual(c); // ...which then persists too
 });
 
 test("remote-relay: a wrong token can't submit to the session", async () => {

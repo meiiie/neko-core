@@ -39,9 +39,8 @@ import { environmentBlock, projectContextBlock, rememberNote } from "../adapters
 import { readClipboardImage, writeClipboardText } from "../adapters/clipboard.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
 import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
-import { startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
+import { loadOrCreatePairing, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
-import { randomBytes } from "node:crypto";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { expandPlaceholders } from "../shared/paste-collapse.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
@@ -1000,24 +999,27 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         addLine("info", "relay off");
         return;
       }
-      const url = text.slice("/relay".length).trim() || cfg.relayUrl;
+      const arg = text.slice("/relay".length).trim();
+      const rotate = arg === "new"; // /relay new = rotate the pairing (old phones disconnect)
+      const url = (rotate ? "" : arg) || cfg.relayUrl;
       if (!url) {
         addLine("info", "usage: /relay <your-relay-url> - drive Neko from any phone, no open port. Deploy cloudflare/relay once, set relay_url in config, then just type /relay.");
         return;
       }
       try {
-        // Short (96-bit) ids so the pairing URL stays small enough to fit a scannable QR. The secret is
-        // the E2E key: printed to you, carried in the URL #fragment, NEVER sent to the relay.
-        const id = () => randomBytes(12).toString("base64url");
-        const session = id(), token = id(), secret = id();
-        const r = await startRemoteRelay(url, makeRemoteHandlers(), { session, token, secret });
+        // Durable pairing (~/.neko-core/relay.json): a phone paired once STAYS paired across restarts.
+        // The secret is the E2E key: printed to you, carried in the URL #fragment, NEVER sent to the relay.
+        const pairing = loadOrCreatePairing(rotate);
+        const r = await startRemoteRelay(url, makeRemoteHandlers(), { session: pairing.session, token: pairing.token, secret: pairing.secret });
         relayRef.current = r;
         const base = url.replace(/\/+$/, "");
-        const pair = `${base}/#s=${r.session}&t=${r.token}&k=${secret}`;
+        const pair = `${base}/#s=${r.session}&t=${r.token}&k=${pairing.secret}`;
         const qr = qrMatrix(pair);
-        addLine("info", "relay on - E2E (the relay only sees ciphertext). Scan with your phone camera:");
+        const live = r.transport() === "ws";
+        addLine("info", `relay on${live ? " (live: streaming + phone Stop)" : " (compat poll - redeploy cloudflare/relay for streaming)"} - E2E, the relay only sees ciphertext.`);
+        addLine("info", rotate ? "NEW pairing - previously paired phones must re-scan:" : "same pairing as last time - an already-paired phone reconnects by itself; scan to pair a new one:");
         if (qr) addLine("info", qrToText(qr));
-        addLine("info", `${pair}\n  (or enter manually)  session: ${r.session}  token: ${r.token}  secret: ${secret}`);
+        addLine("info", `${pair}\n  (or enter manually)  session: ${r.session}  token: ${r.token}  secret: ${pairing.secret}\n  /relay new rotates the pairing`);
       } catch (e) {
         addLine("error", `relay failed to start: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -1166,7 +1168,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // remote sink if given), report status, interrupt.
   const makeRemoteHandlers = (): RemoteHandlers => ({
     run: async (msg, onDelta) => {
-      if (busyRef.current) return { reply: "(neko is busy - try again when idle)" };
+      // Busy = WAIT for the current turn (the desktop's input queue does), never drop the phone's
+      // message. Bounded so a wedged turn eventually answers honestly instead of hanging the client.
+      const w0 = Date.now();
+      while (busyRef.current && Date.now() - w0 < 15 * 60_000) await new Promise((res) => setTimeout(res, 500));
+      if (busyRef.current) return { reply: "(neko stayed busy for 15+ minutes - the Stop button interrupts the running turn)" };
       const t0 = Date.now();
       const tok0 = agentRef.current!.cost.totalTokens;
       remoteSinkRef.current = onDelta ?? null;
