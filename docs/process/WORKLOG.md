@@ -3,6 +3,29 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-10 (night, part 4) — relay full re-audit: self-review caught an XSS + 4 UX defects
+
+Owner: "Kiem tra lai mot luot nua di moi thu cua relay". Re-read every relay file adversarially,
+starting with my own freshest code (the most likely home of bugs). Found and fixed five:
+
+1. **XSS (critical, self-introduced in v2.2's md())**: fenced-code content was UN-escaped before
+   innerHTML - hostile page content relayed inside a reply's code fence would execute script on the
+   phone. Fences now keep the escaped text (which is also what displays correctly).
+2. **syncEmpty() rebuilt the pairing card on every 25s refresh** - wiping the paste-link box while
+   the user was typing into it. Now rebuilds only when the state (unpaired/paired/turns) changes.
+3. **A single mobile-network blip killed the whole wait**: the /result poll ran inside one try -
+   one failed fetch = error row while Neko kept working. Poll failures now sleep 1.5s and continue.
+4. **Streaming yanked the page down while reading scrollback**: auto-stick now only applies within
+   160px of the bottom (sending always scrolls) - the terminal's own behavior.
+5. **`/relay qr` / `/relay new` while the relay was ON just turned it off** (the toggle branch ate
+   every argument). `qr` now reprints the running relay's code without restarting; `new` stops,
+   rotates, and restarts in one step; bare `/relay` stays the toggle.
+
+Verified end-to-end again after the fixes: dual typecheck; 492/492 tests; policy PASS; client script
+parse + 4 static guards (no fence un-escape, emptyKey, nearBottom, parse); Worker redeployed; served
+page 13/13 structural checks; **live probe 13/13 re-run on the deployed Worker**; binary rebuilt +
+reinstalled (UI + input probes PASS).
+
 ## 2026-07-10 (night, part 3) — relay v2.2: the web client IS the Neko terminal now
 
 Owner on the desktop web view (stretched full-width, 5 raw fields dumped) + the QR: "giao diện chưa

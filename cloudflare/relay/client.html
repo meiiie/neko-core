@@ -194,8 +194,12 @@
 
   // Empty state: pairing card when unpaired, a quiet hint when paired-but-idle, nothing once chatting.
   function hasTurns() { return !!log.querySelector(".turn"); }
+  let emptyKey = ""; // rebuild only on a STATE change - the periodic refresh must not wipe the paste box mid-typing
   function syncEmpty() {
-    if (hasTurns()) { const e = $("_empty"); if (e) e.remove(); return; }
+    if (hasTurns()) { emptyKey = "turns"; const gone = $("_empty"); if (gone) gone.remove(); return; }
+    const state = paired() ? "paired" : "unpaired";
+    if (state === emptyKey && $("_empty")) return;
+    emptyKey = state;
     let e = $("_empty");
     if (!e) { e = document.createElement("div"); e.id = "_empty"; log.appendChild(e); }
     if (!paired()) {
@@ -229,7 +233,9 @@
   const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   function md(t) {
     let s = esc(t);
-    s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, __, c) => "<pre><code>" + c.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\n$/, "") + "</code></pre>");
+    // c is already HTML-escaped and MUST stay escaped (un-escaping into innerHTML would let hostile
+    // page content, relayed inside a reply's code fence, inject live HTML - XSS).
+    s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, __, c) => "<pre><code>" + c.replace(/\n$/, "") + "</code></pre>");
     s = s.replace(/((?:^\|.*\|[ \t]*$\n?){2,})/gm, (x) => "<pre>" + x.replace(/\n$/, "") + "</pre>");
     s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
     s = s.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
@@ -252,18 +258,27 @@
     return { text: String(raw ?? ""), act: [] };
   }
 
-  const scrollEnd = (el) => requestAnimationFrame(() => (el || log.lastElementChild)?.scrollIntoView({ block: "end", behavior: "smooth" }));
+  // Stick to the bottom only when the reader IS at the bottom - streaming must not yank the page
+  // down while they scrolled up to read something (the terminal behaves the same way).
+  const nearBottom = () => {
+    const d = document.scrollingElement;
+    return d.scrollHeight - d.clientHeight - d.scrollTop < 160;
+  };
+  const scrollEnd = (el, force) => {
+    if (!force && !nearBottom()) return;
+    requestAnimationFrame(() => (el || log.lastElementChild)?.scrollIntoView({ block: "end", behavior: "smooth" }));
+  };
   function userTurn(text) {
     const e = $("_empty"); if (e) e.remove();
     const t = document.createElement("div"); t.className = "turn user";
     const mk = document.createElement("span"); mk.className = "mk"; mk.textContent = "> ";
     t.appendChild(mk); t.appendChild(document.createTextNode(text));
-    log.appendChild(t); scrollEnd(t);
+    log.appendChild(t); scrollEnd(t, true); // just sent -> always bring it into view
   }
   function nekoTurn() {
     const t = document.createElement("div"); t.className = "turn neko";
     const proc = document.createElement("div"); const body = document.createElement("div"); body.className = "body";
-    t.appendChild(proc); t.appendChild(body); log.appendChild(t); scrollEnd(t);
+    t.appendChild(proc); t.appendChild(body); log.appendChild(t); scrollEnd(t, true);
     return { t, proc, body };
   }
   function render(nk, state) {
@@ -299,7 +314,13 @@
       let seen = 0, done = false, warned = false, saw = false;
       const t0 = Date.now();
       while (!done && Date.now() - t0 < 60 * 60_000) {
-        const rr = await fetch(base() + "/result?session=" + encodeURIComponent(session.value.trim()) + "&id=" + id + "&seen=" + seen, { headers: auth() });
+        let rr;
+        try {
+          rr = await fetch(base() + "/result?session=" + encodeURIComponent(session.value.trim()) + "&id=" + id + "&seen=" + seen, { headers: auth() });
+        } catch { // a mobile-network blip must not abandon the turn - Neko is still working
+          await new Promise((res) => setTimeout(res, 1500));
+          continue;
+        }
         if (rr.status === 200) {
           const g = await rr.json(); seen = g.seq || seen; done = !!g.done; saw = true;
           let raw;

@@ -996,15 +996,26 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     if (text === "/relay" || text.startsWith("/relay ")) {
-      if (relayRef.current) {
-        relayRef.current.stop();
-        relayRef.current = null;
-        addLine("info", "relay off");
-        return;
-      }
       const arg = text.slice("/relay".length).trim();
       const rotate = arg === "new"; // /relay new = rotate the pairing (old phones disconnect)
       const wantQr = arg === "qr"; // /relay qr = show the pairing code again
+      if (relayRef.current && wantQr) {
+        // Reprint the pairing code for the RUNNING relay - do not restart it.
+        const p = loadOrCreatePairing(false);
+        const pair = `${cfg.relayUrl.replace(/\/+$/, "")}/#s=${p.session}&t=${p.token}&k=${p.secret}`;
+        const qr = qrMatrix(pair);
+        if (qr) addLine("info", qrToText(qr).split("\n").map((l) => "  " + l).join("\n"));
+        addLine("info", `  scan with the phone camera, or open: ${pair}`);
+        return;
+      }
+      if (relayRef.current) {
+        relayRef.current.stop();
+        relayRef.current = null;
+        if (!rotate) { // bare /relay = toggle off; /relay new falls through and restarts rotated
+          addLine("info", "relay off");
+          return;
+        }
+      }
       const url = (rotate || wantQr ? "" : arg) || cfg.relayUrl;
       if (!url) {
         addLine("info", "usage: /relay <your-relay-url> - drive Neko from any phone, no open port. Deploy cloudflare/relay once, set relay_url in config, then just type /relay.");
