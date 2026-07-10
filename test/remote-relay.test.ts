@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import type { RemoteHandlers } from "../src/adapters/remote-control.ts";
 import { open, seal } from "../src/adapters/relay-crypto.ts";
-import { loadOrCreatePairing, revokeRemoteRelay, secretKid, startRemoteRelay } from "../src/adapters/remote-relay.ts";
+import { loadOrCreatePairing, loadOrCreateSessionPairing, relaySessionCode, revokeRemoteRelay, secretKid, startRemoteRelay } from "../src/adapters/remote-relay.ts";
 
 /** A tiny in-memory relay double standing in for the Cloudflare Worker, so we can prove the host
  * (agent) side end-to-end: the host dials OUT and long-polls; a client submits an instruction; the
@@ -318,6 +318,33 @@ test("pairing persists across restarts (same QR, phone stays paired) and `new` r
   expect(c.fresh).toBe(true);
   expect(c.session).not.toBe(a.session); // /relay new = a genuinely fresh pairing
   expect(trio(loadOrCreatePairing(false, dir))).toEqual(trio(c)); // ...which then persists too
+});
+
+test("default relay pairings are isolated per Neko conversation", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nk-relay-session-"));
+  const a1 = loadOrCreateSessionPairing("local-a", false, dir);
+  const a2 = loadOrCreateSessionPairing("local-a", false, dir);
+  const b = loadOrCreateSessionPairing("local-b", false, dir);
+  expect(a2.session).toBe(a1.session);
+  expect(b.session).not.toBe(a1.session);
+  expect(b.token).not.toBe(a1.token);
+  expect(relaySessionCode(a1.session)).toMatch(/^[A-Z0-9]{1,4}(?:-[A-Z0-9]{1,4}){0,2}$/);
+});
+
+test("remote-relay v4 publishes E2E-sealed semantic mirror events", async () => {
+  const relay = makeWsDouble(4712);
+  const secret = "mirror-secret";
+  try {
+    const rc = await startRemoteRelay(relay.url, handlers(async (m) => ({ reply: m })), { secret, hostId: "mirror-host" });
+    try {
+      await until(() => relay.state.connections === 1);
+      rc.publish({ type: "line", line: { id: 7, kind: "user", text: "from terminal" } }, { durable: true, reset: true });
+      await until(() => relay.state.frames.some((f) => f.t === "event"));
+      const frame = relay.state.frames.find((f) => f.t === "event");
+      expect(frame).toEqual(expect.objectContaining({ durable: true, reset: true }));
+      expect(JSON.parse(open(secret, frame.event))).toEqual(expect.objectContaining({ type: "line" }));
+    } finally { rc.stop(); }
+  } finally { relay.server.stop(); }
 });
 
 test("relay pairing revocation authenticates the old hub before rotating keys", async () => {

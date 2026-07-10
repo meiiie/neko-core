@@ -232,15 +232,25 @@
   const $ = (id) => document.getElementById(id);
   const log = $("log"), relay = $("relay"), session = $("session"), token = $("token"), secret = $("secret"), m = $("m");
   relay.value = location.origin;
+  const routeMatch = location.pathname.match(/^\/(?:session|hub)\/([^/]+)\/?$/);
+  const routedSession = routeMatch ? decodeURIComponent(routeMatch[1]) : "";
+  if (routedSession) session.value = routedSession;
   $("hhost").textContent = location.host;
   let hosts = [], activeHost = "", online = null, kidMismatch = false, hostModel = "";
+  let mirrorSocket = null, mirrorHost = "", mirrorReady = false, mirrorChain = Promise.resolve();
+  let mirrorRetry = null, mirrorFailures = 0;
   const pending = new Map(), loadedHosts = new Set(), drafts = {};
   let historyByHost = {};
-  try { activeHost = localStorage.nekoActiveHost || ""; historyByHost = JSON.parse(localStorage.nekoRelayHistory || "{}"); } catch {}
   const currentHost = () => activeHost || hosts[0]?.id || "";
   const selectedHost = () => hosts.find((h) => h.id === currentHost()) || null;
 
-  const save = () => { try { localStorage.nekoSession = session.value; localStorage.nekoToken = token.value; localStorage.nekoSecret = secret.value; } catch {} };
+  const save = () => { try {
+    const sid = session.value.trim();
+    const pairings = JSON.parse(localStorage.nekoRelayPairings || "{}");
+    if (sid) pairings[sid] = { token: token.value, secret: secret.value };
+    localStorage.nekoRelayPairings = JSON.stringify(pairings);
+    localStorage.nekoSession = sid; localStorage.nekoToken = token.value; localStorage.nekoSecret = secret.value; // v3 migration
+  } catch {} };
   function applyPairing(str) {
     const hashAt = str.indexOf("#");
     const h = new URLSearchParams(hashAt >= 0 ? str.slice(hashAt + 1) : str);
@@ -254,8 +264,21 @@
   if (location.hash.length > 1 && applyPairing(location.hash)) {
     history.replaceState(null, "", location.pathname);
   } else {
-    try { session.value = localStorage.nekoSession||""; token.value = localStorage.nekoToken||""; secret.value = localStorage.nekoSecret||""; } catch {}
+    try {
+      session.value = routedSession || localStorage.nekoSession || "";
+      const saved = JSON.parse(localStorage.nekoRelayPairings || "{}")[session.value] || {};
+      const legacyMatches = localStorage.nekoSession === session.value;
+      token.value = saved.token || (legacyMatches ? localStorage.nekoToken : "") || "";
+      secret.value = saved.secret || (legacyMatches ? localStorage.nekoSecret : "") || "";
+    } catch {}
   }
+  try {
+    const sid = session.value.trim();
+    const legacyMatches = localStorage.nekoSession === sid;
+    activeHost = JSON.parse(localStorage.nekoActiveHosts || "{}")[sid] || (legacyMatches ? localStorage.nekoActiveHost : "") || "";
+    historyByHost = JSON.parse(localStorage.nekoRelayHistories || "{}")[sid]
+      || (legacyMatches ? JSON.parse(localStorage.nekoRelayHistory || "{}") : {});
+  } catch {}
 
   const paired = () => !!(session.value.trim() && token.value.trim());
   const base = () => relay.value.trim().replace(/\/+$/, "");
@@ -343,14 +366,17 @@
   function switchHost(id, close = true) {
     const previous = currentHost(); if (previous) drafts[previous] = m.value;
     activeHost = id || "";
-    try { localStorage.nekoActiveHost = activeHost; } catch {}
+    try {
+      const map = JSON.parse(localStorage.nekoActiveHosts || "{}"); map[session.value.trim()] = activeHost;
+      localStorage.nekoActiveHosts = JSON.stringify(map); localStorage.nekoActiveHost = activeHost;
+    } catch {}
     for (const turn of log.querySelectorAll(".turn")) turn.hidden = turn.dataset.host !== activeHost;
     restoreHost(activeHost);
     const selected = selectedHost(); online = selected ? !!selected.online : null; hostModel = "";
     m.value = drafts[activeHost] || ""; grow();
     if (close) { $("sessions").classList.remove("show"); $("hostpick").classList.remove("open"); $("hostpick").setAttribute("aria-expanded", "false"); m.focus(); }
     emptyKey = "";
-    renderSessions(); refresh();
+    renderSessions(); refresh(); connectMirror();
   }
   async function checkAlive() {
     if (!paired()) { online = null; kidMismatch = false; refresh(); return; }
@@ -371,10 +397,18 @@
   $("gear").onclick = () => { const c = $("cfg"); c.classList.toggle("show"); $("gear").classList.toggle("open", c.classList.contains("show")); };
   $("hostpick").onclick = () => { const s = $("sessions"); s.classList.toggle("show"); $("hostpick").classList.toggle("open", s.classList.contains("show")); $("hostpick").setAttribute("aria-expanded", s.classList.contains("show") ? "true" : "false"); };
   $("unpair").onclick = () => {
+    const oldSession = session.value.trim();
     for (const hostId of pending.keys()) fetch(base() + "/interrupt", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), hostId }) }).catch(() => {});
     session.value = token.value = secret.value = ""; save(); hosts = []; activeHost = ""; online = null; kidMismatch = false;
+    try { mirrorSocket?.close(); } catch {} mirrorSocket = null; mirrorHost = ""; mirrorReady = false;
+    clearTimeout(mirrorRetry); mirrorRetry = null; mirrorFailures = 0;
     historyByHost = {}; for (const key of Object.keys(drafts)) delete drafts[key];
-    try { localStorage.removeItem("nekoRelayHistory"); localStorage.removeItem("nekoActiveHost"); } catch {}
+    try {
+      const pairings = JSON.parse(localStorage.nekoRelayPairings || "{}"); delete pairings[oldSession]; localStorage.nekoRelayPairings = JSON.stringify(pairings);
+      const histories = JSON.parse(localStorage.nekoRelayHistories || "{}"); delete histories[oldSession]; localStorage.nekoRelayHistories = JSON.stringify(histories);
+      const active = JSON.parse(localStorage.nekoActiveHosts || "{}"); delete active[oldSession]; localStorage.nekoActiveHosts = JSON.stringify(active);
+      localStorage.removeItem("nekoRelayHistory"); localStorage.removeItem("nekoActiveHost");
+    } catch {}
     $("cfg").classList.remove("show"); $("gear").classList.remove("open"); $("sessions").classList.remove("show");
     log.replaceChildren(); loadedHosts.clear(); emptyKey = ""; refresh();
   };
@@ -501,6 +535,83 @@
   }
   function nekoErr(nk, text) { nk.state = { text, act: [], done: true, error: true }; nk.t.classList.add("err"); nk.proc.innerHTML = ""; nk.body.textContent = text; }
 
+  function clearMirrorHost(host) {
+    for (const turn of log.querySelectorAll(".turn")) if (turn.dataset.host === host) turn.remove();
+  }
+  function removeMirrorLive(host) {
+    for (const el of log.querySelectorAll(".mirror-live")) if (el.dataset.host === host) el.remove();
+  }
+  function appendMirrorLine(line, host) {
+    if (!line || line.kind === "welcome") return;
+    if ([...log.querySelectorAll(".mirror-line")].some((el) => el.dataset.host === host && el.dataset.lineId === String(line.id))) return;
+    removeMirrorLive(host);
+    const t = document.createElement("div");
+    t.className = "turn mirror-line" + (line.kind === "user" ? " user" : " neko") + (line.kind === "error" ? " err" : "");
+    t.dataset.host = host; t.dataset.lineId = String(line.id ?? ""); t.hidden = host !== currentHost();
+    if (line.kind === "user") {
+      const mk = document.createElement("span"); mk.className = "mk"; mk.textContent = "> ";
+      t.append(mk, document.createTextNode(String(line.text || "")));
+    } else if (line.kind === "assistant") {
+      const body = document.createElement("div"); body.className = "body"; body.innerHTML = md(String(line.text || "")); t.appendChild(body);
+    } else if (line.kind === "tool_call") {
+      const proc = document.createElement("div"); proc.className = "proc";
+      const dot = document.createElement("span"); dot.className = "b"; dot.textContent = "●";
+      proc.append(dot, document.createTextNode("  " + String(line.text || ""))); t.appendChild(proc);
+    } else {
+      const body = document.createElement("div"); body.className = line.kind === "tool_result" ? "proc" : "body";
+      body.textContent = (line.kind === "tool_result" ? "  └ " : "") + String(line.summary || line.text || ""); t.appendChild(body);
+    }
+    log.appendChild(t); if (!t.hidden) scrollEnd(t);
+  }
+  function applyMirrorEvent(event, host) {
+    if (!event || pending.has(host)) return;
+    if (event.type === "snapshot") {
+      clearMirrorHost(host);
+      for (const line of Array.isArray(event.lines) ? event.lines : []) appendMirrorLine(line, host);
+      return;
+    }
+    if (event.type === "line") { appendMirrorLine(event.line, host); return; }
+    if (event.type === "stream") {
+      removeMirrorLive(host);
+      if (!event.text) return;
+      const t = document.createElement("div"); t.className = "turn neko mirror-live"; t.dataset.host = host; t.hidden = host !== currentHost();
+      const body = document.createElement("div"); body.className = "body"; body.innerHTML = md(String(event.text)); t.appendChild(body); log.appendChild(t);
+      if (!t.hidden) scrollEnd(t); return;
+    }
+    if (event.type === "activity") {
+      removeMirrorLive(host);
+      const t = document.createElement("div"); t.className = "turn neko mirror-live"; t.dataset.host = host; t.hidden = host !== currentHost();
+      const proc = document.createElement("div"); proc.className = "proc"; proc.textContent = "●  " + String(event.text || ""); t.appendChild(proc); log.appendChild(t);
+      if (!t.hidden) scrollEnd(t);
+    }
+  }
+  function connectMirror(force = false) {
+    const host = currentHost();
+    if (!paired() || !host) return;
+    if (!force && mirrorSocket && mirrorHost === host && mirrorSocket.readyState < 2) return;
+    clearTimeout(mirrorRetry); mirrorRetry = null;
+    try { mirrorSocket?.close(); } catch {}
+    mirrorReady = false; mirrorHost = host;
+    mirrorChain = Promise.resolve();
+    const socket = new WebSocket(base().replace(/^http/, "ws") + "/client-ws?session=" + encodeURIComponent(session.value.trim()) + "&host=" + encodeURIComponent(host), ["neko-relay", "t." + token.value.trim()]);
+    mirrorSocket = socket;
+    socket.onopen = () => { mirrorFailures = 0; };
+    socket.onmessage = (ev) => { mirrorChain = mirrorChain.then(async () => {
+      let frame; try { frame = JSON.parse(String(ev.data)); } catch { return; }
+      if (frame.t === "mirror_reset") { clearMirrorHost(host); removeMirrorLive(host); return; }
+      if (frame.t === "mirror_ready") { mirrorReady = true; syncEmpty(); return; }
+      if (frame.t !== "event" || !frame.event) return;
+      const k = await key();
+      const raw = k && frame.event.iv ? await unseal(k, frame.event) : frame.event;
+      applyMirrorEvent(JSON.parse(raw), host);
+    }).catch(() => { kidMismatch = true; refresh(); }); };
+    socket.onclose = () => { if (mirrorSocket === socket) {
+      mirrorSocket = null; mirrorReady = false;
+      const delay = Math.min(1_000 * 2 ** mirrorFailures++, 25_000);
+      mirrorRetry = setTimeout(() => connectMirror(true), delay);
+    } };
+  }
+
   function restoreHost(host) {
     if (!host || loadedHosts.has(host)) return;
     loadedHosts.add(host);
@@ -516,7 +627,10 @@
     const rows = Array.isArray(historyByHost[host]) ? historyByHost[host] : [];
     rows.push({ user, state: { text: String(state.text || ""), act: Array.isArray(state.act) ? state.act.slice(-200) : [], error: !!state.error } });
     historyByHost[host] = rows.slice(-50);
-    try { localStorage.nekoRelayHistory = JSON.stringify(historyByHost); } catch {}
+    try {
+      const histories = JSON.parse(localStorage.nekoRelayHistories || "{}"); histories[session.value.trim()] = historyByHost;
+      localStorage.nekoRelayHistories = JSON.stringify(histories); localStorage.nekoRelayHistory = JSON.stringify(historyByHost);
+    } catch {}
   }
 
   const SEND = $("send").innerHTML;
@@ -588,6 +702,7 @@
       if (silentControl) nk.t.remove(); else rememberTurn(host, msg, nk.state);
       setAwaiting(host, false); if (currentHost() === host) m.focus(); checkAlive();
       if (silentControl) setTimeout(checkAlive, 1_200);
+      if (mirrorReady) setTimeout(() => connectMirror(true), 150); // replace optimistic UI with host-authoritative replay
     }
   };
 

@@ -22,9 +22,10 @@
  * (portable - browser WebSocket can't set headers - and never in the URL).
  */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homeDir } from "../shared/home.ts";
+import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { isSealed, open, seal } from "./relay-crypto.ts";
 import type { RemoteHandlers } from "./remote-control.ts";
 
@@ -37,29 +38,69 @@ export interface RemoteRelay {
   transport: () => "ws" | "poll";
   /** Push the latest E2E-sealed title/model/busy metadata to paired clients. */
   refresh: () => void;
+  /** Publish one semantic TUI event. Durable events replay after reconnect; reset starts a fresh mirror. */
+  publish: (event: unknown, opts?: { durable?: boolean; reset?: boolean }) => void;
   stop: () => void;
 }
 
 export interface RelayPairing { session: string; token: string; secret: string; fresh: boolean }
 
+const makePairing = (): RelayPairing => {
+  const id = () => randomBytes(12).toString("base64url");
+  return { session: id(), token: id(), secret: id(), fresh: true };
+};
+
+function readPairing(path: string): RelayPairing | null {
+  if (!existsSync(path)) return null;
+  try {
+    const p = JSON.parse(readFileSync(path, "utf-8"));
+    if (p.session && p.token && p.secret) {
+      return { session: String(p.session), token: String(p.token), secret: String(p.secret), fresh: false };
+    }
+  } catch { /* corrupt -> regenerate */ }
+  return null;
+}
+
+function persistPairing(path: string, pairing: RelayPairing): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    atomicWriteFileSync(path, JSON.stringify({ session: pairing.session, token: pairing.token, secret: pairing.secret }, null, 2) + "\n");
+  } catch { /* an unwritable HOME means a one-shot pairing */ }
+}
+
 /** Durable pairing (~/.neko-core/relay.json, gitignored - same trust as api_key): /relay reuses it so
  * the phone STAYS paired across Neko restarts (no re-scanning QR codes); `/relay new` rotates it. */
 export function loadOrCreatePairing(rotate = false, dir = join(homeDir(), ".neko-core")): RelayPairing {
   const path = join(dir, "relay.json");
-  if (!rotate && existsSync(path)) {
-    try {
-      const p = JSON.parse(readFileSync(path, "utf-8"));
-      if (p.session && p.token && p.secret) return { session: String(p.session), token: String(p.token), secret: String(p.secret), fresh: false };
-    } catch { /* corrupt -> regenerate below */ }
+  if (!rotate) {
+    const existing = readPairing(path);
+    if (existing) return existing;
   }
-  // Short (96-bit) ids so the pairing URL stays small enough for a scannable QR.
-  const id = () => randomBytes(12).toString("base64url");
-  const made: RelayPairing = { session: id(), token: id(), secret: id(), fresh: true };
-  try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(path, JSON.stringify({ session: made.session, token: made.token, secret: made.secret }, null, 2) + "\n", "utf-8");
-  } catch { /* best-effort: an unwritable HOME just means one-shot pairings */ }
+  const made = makePairing();
+  persistPairing(path, made);
   return made;
+}
+
+/** Default relay identity: one capability URL per Neko conversation. Separate files avoid cross-process
+ * write races and make a leaked link least-privilege. The old global pairing remains opt-in as /relay hub. */
+export function loadOrCreateSessionPairing(
+  localSessionId: string,
+  rotate = false,
+  dir = join(homeDir(), ".neko-core"),
+): RelayPairing {
+  const key = createHash("sha256").update(localSessionId).digest("hex").slice(0, 24);
+  const path = join(dir, "relay-sessions", `${key}.json`);
+  if (!rotate) {
+    const existing = readPairing(path);
+    if (existing) return existing;
+  }
+  const made = makePairing();
+  persistPairing(path, made);
+  return made;
+}
+
+export function relaySessionCode(session: string): string {
+  return session.replace(/[^A-Za-z0-9]/g, "").slice(0, 12).toUpperCase().match(/.{1,4}/g)?.join("-") ?? session;
 }
 
 /** Public fingerprint of the E2E secret (8 hex chars of SHA-256). The relay stores it so the CLIENT
@@ -262,6 +303,12 @@ export async function startRemoteRelay(
     hostId,
     transport: () => mode,
     refresh: () => send({ t: "presence", meta: sealedMeta() }),
+    publish: (event, publishOpts = {}) => send({
+      t: "event",
+      event: sealMaybe(JSON.stringify(event)),
+      durable: !!publishOpts.durable,
+      reset: !!publishOpts.reset,
+    }),
     stop: () => {
       running = false;
       ctrl.abort();

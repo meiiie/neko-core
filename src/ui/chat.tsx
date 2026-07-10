@@ -40,7 +40,7 @@ import { readClipboardImage, writeClipboardText } from "../adapters/clipboard.ts
 import { describeImage } from "../adapters/vision.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
 import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
-import { loadOrCreatePairing, revokeRemoteRelay, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
+import { loadOrCreatePairing, loadOrCreateSessionPairing, relaySessionCode, revokeRemoteRelay, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { VERSION } from "../shared/version.ts";
@@ -109,6 +109,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [started, setStarted] = useState(false); // once a turn has run, drop the input placeholder
   const rcRef = useRef<RemoteControl | null>(null);
   const relayRef = useRef<RemoteRelay | null>(null);
+  const relayScopeRef = useRef<{ key: string; hub: boolean; url: string } | null>(null);
   const relayHostIdRef = useRef(newSessionId()); // one opaque remote-control slot per running TUI
   const remoteSinkRef = useRef<((chunk: string) => void) | null>(null); // streams a turn's output to a remote SSE client
   const remoteActRef = useRef<((line: string) => void) | null>(null); // streams tool-activity lines (the phone's process ticker)
@@ -258,6 +259,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (fullscreenRef.current && kind === "assistant") primeAnsiCache(line, contentColsRef.current, cfg);
     remoteLineRef.current?.(kind, text); // a remote turn collects info/error output (slash commands answer THERE)
     setLines((prev) => [...prev, line]);
+    relayRef.current?.publish({ type: "line", line: { ...line, text: text.slice(0, 200_000) } }, { durable: true });
   };
 
   // Bound the in-memory transcript so a marathon session can't grow `lines` (and the resize re-emit)
@@ -297,12 +299,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     setStream(streamRef.current);
     setReasoning(reasoningRef.current);
+    relayRef.current?.publish({ type: "stream", text: streamRef.current.slice(-200_000) });
   };
 
   const flushStream = () => {
     if (streamRef.current.trim()) addLine("assistant", streamRef.current.trimEnd());
     streamRef.current = "";
     setStream("");
+    relayRef.current?.publish({ type: "stream", text: "" });
     reasoningRef.current = ""; // thinking is transient: it vanishes once the step produces output
     toolStreamRef.current = "";
     setReasoning("");
@@ -404,6 +408,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           const call = describeToolCall(data.name, data.arguments);
           inflightRef.current.push({ key: k, text: call });
           remoteActRef.current?.(call); // the phone's process ticker shows the same line the terminal does
+          relayRef.current?.publish({ type: "activity", id: k, text: call });
           syncInflight();
         } else if (kind === "tool_result") {
           // The call finished: drop its blinking line and commit tool_call + result to <Static> (solid dot).
@@ -1027,39 +1032,53 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     if (text === "/relay" || text.startsWith("/relay ")) {
       const arg = text.slice("/relay".length).trim();
-      const rotate = arg === "new"; // /relay new = rotate the pairing (old phones disconnect)
-      const wantQr = arg === "qr"; // /relay qr = show the pairing code again
+      const args = arg.split(/\s+/).filter(Boolean);
+      const explicitHub = args[0] === "hub";
+      if (explicitHub) args.shift();
+      const activeScope = relayScopeRef.current;
+      const hub = explicitHub || (!!relayRef.current && !!activeScope?.hub);
+      const rotate = args.includes("new");
+      const wantQr = args.includes("qr");
+      const explicitUrl = args.find((x) => /^https?:\/\//i.test(x)) ?? "";
+      const scopeKey = hub ? "hub" : sessionIdRef.current;
+      const pairingFor = (fresh: boolean) => hub
+        ? loadOrCreatePairing(fresh)
+        : loadOrCreateSessionPairing(scopeKey, fresh);
+      const pairingUrl = (base: string, p: { session: string; token: string; secret: string }) =>
+        `${base}/${hub ? "hub" : "session"}/${encodeURIComponent(p.session)}#t=${p.token}&k=${p.secret}`;
       if (relayRef.current && wantQr) {
         // Reprint the pairing code for the RUNNING relay - do not restart it.
-        const p = loadOrCreatePairing(false);
-        const pair = `${cfg.relayUrl.replace(/\/+$/, "")}/#s=${p.session}&t=${p.token}&k=${p.secret}`;
+        const active = relayScopeRef.current ?? { key: sessionIdRef.current, hub: false, url: cfg.relayUrl };
+        const p = active.hub ? loadOrCreatePairing(false) : loadOrCreateSessionPairing(active.key, false);
+        const pair = `${active.url.replace(/\/+$/, "")}/${active.hub ? "hub" : "session"}/${encodeURIComponent(p.session)}#t=${p.token}&k=${p.secret}`;
         const qr = qrMatrix(pair);
         if (qr) addLine("info", qrToText(qr).split("\n").map((l) => "  " + l).join("\n"));
-        addLine("info", `  scan with the phone camera, or open: ${pair}`);
+        addLine("info", `relay session ${relaySessionCode(p.session)} - open: ${pair}`);
         return;
       }
       if (relayRef.current) {
         relayRef.current.stop();
         relayRef.current = null;
-        if (!rotate) { // bare /relay = toggle off; /relay new falls through and restarts rotated
+        relayScopeRef.current = null;
+        if (!rotate && !explicitHub && !explicitUrl) { // bare /relay = off; scoped/configured commands restart
           addLine("info", "relay off");
           return;
         }
       }
-      const url = (rotate || wantQr ? "" : arg) || cfg.relayUrl;
+      const url = explicitUrl || activeScope?.url || cfg.relayUrl;
       if (!url) {
-        addLine("info", "usage: /relay <your-relay-url> - drive Neko from any phone, no open port. Deploy cloudflare/relay once, set relay_url in config, then just type /relay.");
+        addLine("info", "usage: /relay [<url>|new|qr] - share this session. /relay hub opts into one broad multi-session pairing.");
         return;
       }
       try {
-        // Durable pairing (~/.neko-core/relay.json): a phone paired once STAYS paired across restarts.
-        // The secret is the E2E key: printed to you, carried in the URL #fragment, NEVER sent to the relay.
+        // Default = one least-privilege capability per Neko conversation. /relay hub deliberately reuses
+        // the old broad pairing. The E2E secret remains in the URL fragment and never reaches the Worker.
         if (rotate) {
-          const old = loadOrCreatePairing(false);
+          const old = pairingFor(false);
           const revoked = await revokeRemoteRelay(url, old);
-          if (!revoked) addLine("info", "old relay hub could not be revoked (redeploy relay v3); toggle /relay in any other running Neko terminals to rotate them too");
+          if (!revoked) addLine("info", "old relay capability could not be revoked (it may already be offline); the replacement still uses fresh keys");
         }
-        const pairing = loadOrCreatePairing(rotate);
+        const pairing = pairingFor(rotate);
         const r = await startRemoteRelay(url, makeRemoteHandlers(), {
           session: pairing.session,
           token: pairing.token,
@@ -1067,19 +1086,19 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           hostId: relayHostIdRef.current,
         });
         relayRef.current = r;
+        relayScopeRef.current = { key: scopeKey, hub, url };
         const base = url.replace(/\/+$/, "");
-        const pair = `${base}/#s=${r.session}&t=${r.token}&k=${pairing.secret}`;
+        const pair = pairingUrl(base, pairing);
         const live = r.transport() === "ws";
-        addLine("info", `relay on - ${live ? "streaming live to your phone (Stop works mid-turn)" : "compat mode (redeploy cloudflare/relay for streaming)"}, E2E encrypted, multi-session hub.`);
-        // The QR is a first-pairing affordance, not daily chrome: a paired phone reconnects by itself,
-        // so show the code only when there is something new to scan (or on request: /relay qr).
+        const snapshot = lines.slice(-1000).map((line) => ({ ...line, text: line.text.slice(0, 200_000) }));
+        while (snapshot.length > 1 && JSON.stringify(snapshot).length > 1_000_000) snapshot.shift();
+        r.publish({ type: "snapshot", lines: snapshot }, { durable: true, reset: true });
+        addLine("info", `relay session ${relaySessionCode(r.session)} on - ${live ? "live mirror + control" : "compat control"}, E2E encrypted${hub ? ". hub access covers every joined Neko session" : ""}.`);
         if (pairing.fresh || rotate || wantQr) {
           const qr = qrMatrix(pair);
           if (qr) addLine("info", qrToText(qr).split("\n").map((l) => "  " + l).join("\n"));
-          addLine("info", `  scan with the phone camera, or open: ${pair}`);
-        } else {
-          addLine("info", `your phone is already paired and reconnects by itself - open: ${base}\n  (/relay qr reprints the pairing code · /relay new rotates it)`);
         }
+        addLine("info", `open this session: ${pair}\n  (/relay qr reprints its code - /relay new rotates only this capability${hub ? "" : " - /relay hub enables the broad session switcher"})`);
       } catch (e) {
         addLine("error", `relay failed to start: ${e instanceof Error ? e.message : String(e)}`);
       }

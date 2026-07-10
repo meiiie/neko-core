@@ -74,14 +74,43 @@ test("relay hub keeps offline queues isolated per host", async () => {
   expect((await ctx.storage.get("q:beta"))[0].message).toBe("B");
 });
 
+test("relay refuses to bind a capability without a token", async () => {
+  const relay = new RelaySession(makeContext() as any);
+  const request = new Request("https://relay.test/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ session: "unbound", hostId: "alpha" }),
+  });
+  expect((await relay.fetch(request)).status).toBe(401);
+});
+
+test("relay v4 persists and broadcasts opaque mirror events per host", async () => {
+  const ctx = makeContext();
+  const relay = new RelaySession(ctx as any);
+  await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
+  const host = new SocketDouble(["host", "host:alpha"]); host.attachment = { role: "host", hostId: "alpha" };
+  const client = new SocketDouble(["client", "client:alpha"]); client.attachment = { role: "client", hostId: "alpha" };
+  ctx.sockets.push(host, client);
+
+  const ciphertext = { iv: "opaque-iv", ct: "opaque-event" };
+  await relay.webSocketMessage(host as any, JSON.stringify({ t: "event", event: ciphertext, durable: true, reset: true }));
+  expect(client.sent).toEqual([{ t: "mirror_reset" }, expect.objectContaining({ t: "event", seq: 1, event: ciphertext })]);
+  expect(await ctx.storage.get("mirror:alpha")).toEqual([expect.objectContaining({ seq: 1, event: ciphertext })]);
+
+  await relay.webSocketMessage(client as any, JSON.stringify({ t: "event", event: "client-must-not-publish", durable: true }));
+  expect(await ctx.storage.get("mirror:alpha")).toHaveLength(1);
+});
+
 test("relay hub revocation closes every host and invalidates the old phone token", async () => {
   const ctx = makeContext();
   const relay = new RelaySession(ctx as any);
   await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
-  const socket = new SocketDouble(["host", "host:alpha"]); ctx.sockets.push(socket);
+  const socket = new SocketDouble(["host", "host:alpha"]);
+  const client = new SocketDouble(["client", "client:alpha"]); ctx.sockets.push(socket, client);
   const revoked = await relay.fetch(post("/revoke", { session: "hub" }));
   expect(revoked.status).toBe(200);
   expect(socket.closed).toBe(true);
+  expect(client.closed).toBe(true);
   expect(ctx.storage.data.size).toBe(0);
   expect((await relay.fetch(post("/send", { session: "hub", hostId: "alpha", message: "stale" }))).status).toBe(401);
 });

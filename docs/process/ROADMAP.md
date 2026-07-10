@@ -265,12 +265,11 @@ cost/token tracking · MCP client · single-binary distribution.
   local agent **dials OUT** to a relay you host and long-polls for instructions, so it never opens a
   listening port and works behind any NAT/firewall with zero per-device setup (a phone browser is enough,
   no Tailscale). Ships a self-hosted Cloudflare Worker (Durable-Object rendezvous) + a mobile web client +
-  deploy guide under `cloudflare/relay/`. Because the relay is YOURS, it's already more private than a
-  vendor cloud. **(c) E2E — the beyond-vendor piece:** `/relay` derives an AES-256-GCM key from a pairing
+  deploy guide under `cloudflare/relay/`. **(c) E2E blind relay:** `/relay` derives an AES-256-GCM key from a pairing
   secret (carried in the URL `#fragment`, never sent to the relay); host (`relay-crypto.ts`) and phone
   client (WebCrypto) seal/open at the edges, so the Worker forwards **only ciphertext** — a true
-  zero-knowledge blind forwarder, MORE private than Claude Code's relay (where the platform reads
-  plaintext). *(proven: node<->browser interop + tamper/wrong-secret rejection; the relay-sees-only-
+  zero-knowledge blind forwarder: the relay operator need not be trusted with conversation plaintext.
+  *(proven: node<->browser interop + tamper/wrong-secret rejection; the relay-sees-only-
   ciphertext property as a unit test AND end-to-end with a real agent — relay saw only `{iv,ct}`, phone
   decrypted "30". full suite 168/0.)* **(d) relay v3 multi-session hub (2026-07-11):** one pairing now
   registers multiple opaque Neko host ids, with per-host WebSocket/queue/interrupt routing and E2E-sealed
@@ -279,7 +278,13 @@ cost/token tracking · MCP client · single-binary distribution.
   sockets proved isolated encrypted round trips. **(e) CLI parity:** relay now shares the CLI's full-screen
   banner/transcript/composer/footer hierarchy; encrypted presence includes provider/profile/effort/mode/
   context, Shift+Tab changes the real host permission mode, Esc interrupts, and session/settings overlays
-  do not resize the terminal surface. Production redeploy intentionally awaits owner approval.
+  do not resize the terminal surface. **(f) relay v4 session mirror (2026-07-11):** bare `/relay` now
+  creates a least-privilege capability and direct deep-link for the current conversation instead of one
+  account-wide link. The local TUI publishes an E2E-sealed semantic snapshot plus ordered durable lines
+  and transient stream/activity events; a read-only hibernatable browser WebSocket replays then follows
+  that authoritative state. `/relay hub` preserves the broad v3 switcher as an explicit opt-in. Local
+  Worker E2E proved terminal-origin live events, a browser-origin turn, and exact durable replay after
+  reconnect. Production redeploy intentionally awaits owner approval.
 - [x] **G12** Tool-use parity with Claude Code (atomic-level audit of agent.ts/tool-runtime.ts/mcp.ts).
   Verdict: the orchestration (loop, read-only parallel fan-out, loop-guard, abort, compact, hooks,
   permissions, adversarial check) and MCP (stdio/http/sse + OAuth + resources + prompts + reconnect)

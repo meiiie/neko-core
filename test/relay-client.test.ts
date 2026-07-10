@@ -28,4 +28,12 @@ test("relay client keeps terminal semantics and accessible control names", () =>
   expect(script).toContain('e.key === "Tab" && e.shiftKey');
   expect(script).toContain('"\\u0000neko:cycle-mode"');
   expect(script).toContain("log.scrollHeight - log.clientHeight - log.scrollTop");
+  expect(script).toContain('location.pathname.match(/^\\/(?:session|hub)');
+  expect(script).toContain("nekoRelayPairings");
+  expect(script).toContain("const legacyMatches = localStorage.nekoSession === session.value");
+  expect(script).toContain('"/client-ws?session="');
+  expect(script).toContain('frame.t === "mirror_reset"');
+  expect(script).toContain('event.type === "snapshot"');
+  expect(script).toContain("connectMirror(true)");
+  expect(script).toContain("Math.min(1_000 * 2 ** mirrorFailures++, 25_000)");
 });

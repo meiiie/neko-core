@@ -4,25 +4,28 @@
  * instructions here; this Worker just routes them. Because it's YOUR Worker (not a vendor's), it sees
  * only what passes through — and with end-to-end encryption (see README) it sees only ciphertext.
  *
- * v3 hub: one durable pairing routes multiple running Neko processes by opaque host id. The browser
- * lists/switches them, while title/cwd/model/busy metadata remains E2E ciphertext to this Worker.
+ * v4 mirror: the default pairing is scoped to one Neko conversation and the browser replays its
+ * durable semantic transcript, then receives live stream/activity events. The v3 multi-session hub
+ * remains available explicitly; all content and metadata stays E2E ciphertext to this Worker.
  * v2 transport remains underneath: each host connects a WebSocket (hibernatable - the Durable Object SLEEPS between
  * messages, so an idle relay costs ~nothing on the free plan, where the old 1s long-poll kept it awake
  * 24/7). Jobs push to the host instantly; the host streams PARTIAL replies back so the phone watches
  * the answer grow; an /interrupt from the phone reaches the host mid-turn. The v1 long-poll endpoints
  * (/pull, /reply) are kept so an older Neko binary still works against this Worker.
  *
- * One Durable Object per paired hub. Token + per-host job queues + results live in DO storage, so an eviction
+ * One Durable Object per paired capability. Token + per-host queues + results + bounded mirror events live
+ * in DO storage, so an eviction
  * (laptop asleep, quiet hours) no longer silently kills the session. Endpoints (all require
  * `Authorization: Bearer <token>` except `/` and the host's /ws which authenticates via subprotocol):
  *   POST /register {session,hostId,meta}   host announces a session (first token wins; meta is ciphertext)
  *   GET  /ws?session=...&host=...         host WebSocket (subprotocol "t.<token>"); jobs/replies as JSON
+ *   GET  /client-ws?session=...&host=...  read-only browser mirror WebSocket; replay then live events
  *   GET  /sessions?session=...            list opaque host ids, encrypted metadata, and online state
  *   POST /send  {session,hostId,message}  client submits an instruction to one host
  *   GET  /result?session=&id=&seen=<seq>  client long-polls; 200 {reply,done,seq} on any NEW state
  *   GET  /alive?session=...&host=...      {online} - is that host connected (or v1-polling)?
  *   POST /interrupt {session,hostId}      abort that host's running turn (v2+ hosts only)
- *   POST /revoke {session}                invalidate a rotated hub and close every old host
+ *   POST /revoke {session}                invalidate a rotated capability and close every socket
  *   GET  /pull · POST /reply              v1 host long-poll (compat)
  *   GET  /                                minimal phone web client (client.html)
  */
@@ -30,6 +33,8 @@ import CLIENT_HTML from "./client.html";
 
 const LONG_POLL_MS = 25_000;
 const KEEP_RESULTS = 20; // ring of stored results per session (a phone may re-poll after a reconnect)
+const KEEP_MIRROR_EVENTS = 400;
+const MAX_MIRROR_BYTES = 1_500_000; // SQLite-backed DO values cap at 2 MB; leave serialization headroom.
 const MAX_HOSTS = 32;
 const DEFAULT_HOST = "default";
 
@@ -37,15 +42,17 @@ function hostId(value) {
   return String(value || DEFAULT_HOST).replace(/[^A-Za-z0-9._-]/g, "").slice(0, 80) || DEFAULT_HOST;
 }
 const hostTag = (id) => `host:${hostId(id)}`;
+const clientTag = (id) => `client:${hostId(id)}`;
+const validSession = (value) => /^[A-Za-z0-9._~-]{1,128}$/.test(String(value || ""));
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/" || url.pathname === "/client") {
+    if (url.pathname === "/" || url.pathname === "/client" || /^\/(?:session|hub)\/[^/]+\/?$/.test(url.pathname)) {
       return new Response(CLIENT_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
     }
     const session = url.searchParams.get("session") || (await peekSession(request));
-    if (!session) return json(400, { error: "missing session" });
+    if (!validSession(session)) return json(400, { error: "invalid session" });
     const id = env.RELAY.idFromName(session);
     return env.RELAY.get(id).fetch(request);
   },
@@ -65,6 +72,18 @@ function json(status, obj) {
   return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
 }
 
+async function safeEqual(a, b) {
+  const enc = new TextEncoder();
+  const [ah, bh] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(String(a || ""))),
+    crypto.subtle.digest("SHA-256", enc.encode(String(b || ""))),
+  ]);
+  const av = new Uint8Array(ah), bv = new Uint8Array(bh);
+  let diff = 0;
+  for (let i = 0; i < av.length; i++) diff |= av[i] ^ bv[i];
+  return diff === 0 && !!a && !!b;
+}
+
 /** Per-session routing. Durable state (token, queue, results) in storage; waiters in memory (they
  * only exist while a request is in flight, which keeps the DO awake anyway). */
 export class RelaySession {
@@ -82,7 +101,7 @@ export class RelaySession {
     const a = request.headers.get("authorization") || "";
     const tok = a.startsWith("Bearer ") ? a.slice(7) : "";
     const bound = await this.boundToken();
-    return !!(tok && bound && tok === bound);
+    return safeEqual(tok, bound);
   }
 
   hostSocket(id) {
@@ -133,15 +152,16 @@ export class RelaySession {
     const tok = (request.headers.get("authorization") || "").replace(/^Bearer /, "");
 
     if (path === "/register" && request.method === "POST") {
+      if (!tok) return json(401, { error: "missing token" });
       const bound = await this.boundToken();
       if (!bound) await this.ctx.storage.put("token", tok); // first registration binds - durably
-      else if (bound !== tok) return json(401, { error: "session bound to a different token" });
+      else if (!(await safeEqual(tok, bound))) return json(401, { error: "session bound to a different token" });
       // kid = the E2E secret's public fingerprint; the client compares it to ITS secret's fingerprint
       // via /alive and can flag a stale/mistyped secret BEFORE sending anything.
       const { kid, hostId: requestedHost, meta } = await request.clone().json().catch(() => ({}));
       if (kid) await this.ctx.storage.put("kid", String(kid).slice(0, 16));
       const registeredHost = await this.touchHost(requestedHost, meta);
-      return json(200, { ok: true, v: 3, hostId: registeredHost });
+      return json(200, { ok: true, v: 4, hostId: registeredHost });
     }
 
     // Host WebSocket: token rides the subprotocol ("t.<token>") - portable (no custom headers needed)
@@ -153,23 +173,42 @@ export class RelaySession {
       const protos = (request.headers.get("sec-websocket-protocol") || "").split(",").map((s) => s.trim());
       const t = (protos.find((p) => p.startsWith("t.")) || "").slice(2);
       const bound = await this.boundToken();
-      if (!bound || t !== bound) return json(401, { error: "unauthorized" });
+      if (!(await safeEqual(t, bound))) return json(401, { error: "unauthorized" });
       const id = await this.resolveHost(url.searchParams.get("host"));
       const pair = new WebSocketPair();
       for (const old of this.ctx.getWebSockets(hostTag(id))) {
         try { old.close(1000, "replaced by reconnect"); } catch { /* already closed */ }
       }
-      pair[1].serializeAttachment({ hostId: id });
+      pair[1].serializeAttachment({ role: "host", hostId: id });
       this.ctx.acceptWebSocket(pair[1], ["host", hostTag(id)]);
       await this.touchHost(id);
       await this.flushQueueTo(pair[1], id); // anything sent while this host was away
       return new Response(null, { status: 101, webSocket: pair[0], headers: { "sec-websocket-protocol": "neko-relay" } });
     }
 
+    // Browser mirror socket: same session capability, but read-only at the transport layer. It gets
+    // durable semantic TUI events on connect, then live events as the authoritative host emits them.
+    if (path === "/client-ws") {
+      if ((request.headers.get("upgrade") || "").toLowerCase() !== "websocket") {
+        return json(426, { error: "expected websocket" });
+      }
+      const protos = (request.headers.get("sec-websocket-protocol") || "").split(",").map((s) => s.trim());
+      const t = (protos.find((p) => p.startsWith("t.")) || "").slice(2);
+      if (!(await safeEqual(t, await this.boundToken()))) return json(401, { error: "unauthorized" });
+      const id = await this.resolveHost(url.searchParams.get("host"));
+      const pair = new WebSocketPair();
+      pair[1].serializeAttachment({ role: "client", hostId: id });
+      this.ctx.acceptWebSocket(pair[1], ["client", clientTag(id)]);
+      pair[1].send(JSON.stringify({ t: "mirror_reset" }));
+      for (const event of await this.readMirrorEvents(id)) pair[1].send(JSON.stringify(event));
+      pair[1].send(JSON.stringify({ t: "mirror_ready" }));
+      return new Response(null, { status: 101, webSocket: pair[0], headers: { "sec-websocket-protocol": "neko-relay" } });
+    }
+
     if (!(await this.authed(request))) return json(401, { error: "unauthorized" });
 
     if (path === "/revoke" && request.method === "POST") {
-      for (const ws of this.ctx.getWebSockets("host")) {
+      for (const ws of this.ctx.getWebSockets()) {
         try { ws.close(1000, "pairing revoked"); } catch { /* already closed */ }
       }
       await this.ctx.storage.deleteAll();
@@ -274,9 +313,21 @@ export class RelaySession {
   async webSocketMessage(ws, raw) {
     let m;
     try { m = JSON.parse(raw); } catch { return; }
+    const attachment = ws.deserializeAttachment?.() ?? {};
+    if (attachment.role === "client") return; // browser sockets are receive-only; commands use /send
     if (m?.t === "presence") {
-      const attachment = ws.deserializeAttachment?.() ?? {};
       await this.touchHost(attachment.hostId, m.meta);
+      return;
+    }
+    if (m?.t === "event" && m.event) {
+      const id = hostId(attachment.hostId);
+      if (m.reset) {
+        await this.ctx.storage.delete(`mirror:${id}`);
+        this.broadcastMirror(id, { t: "mirror_reset" });
+      }
+      let frame = { t: "event", event: m.event };
+      if (m.durable) frame = await this.storeMirrorEvent(id, m.event);
+      this.broadcastMirror(id, frame);
       return;
     }
     if (!m || !m.id) return;
@@ -286,6 +337,30 @@ export class RelaySession {
 
   webSocketClose() { /* nothing held per-socket; getWebSockets() simply stops listing it */ }
   webSocketError() { /* ditto */ }
+
+  async readMirrorEvents(id) {
+    return (await this.ctx.storage.get(`mirror:${hostId(id)}`)) ?? [];
+  }
+
+  async storeMirrorEvent(id, event) {
+    id = hostId(id);
+    const key = `mirror:${id}`;
+    const events = await this.readMirrorEvents(id);
+    const seq = ((await this.ctx.storage.get(`mirrorSeq:${id}`)) ?? 0) + 1;
+    const frame = { t: "event", seq, event };
+    events.push(frame);
+    while (events.length > KEEP_MIRROR_EVENTS || JSON.stringify(events).length > MAX_MIRROR_BYTES) events.shift();
+    await this.ctx.storage.put(key, events);
+    await this.ctx.storage.put(`mirrorSeq:${id}`, seq);
+    return frame;
+  }
+
+  broadcastMirror(id, frame) {
+    const raw = JSON.stringify(frame);
+    for (const client of this.ctx.getWebSockets(clientTag(id))) {
+      try { client.send(raw); } catch { /* stale sockets disappear from getWebSockets after close */ }
+    }
+  }
 
   /** Store a result update (seq bumps every time) and wake any /result long-pollers. */
   async storeResult(id, reply, done, extra = {}) {

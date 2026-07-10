@@ -3,6 +3,32 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-11 - relay v4: one conversation, one capability, one authoritative mirror
+
+The owner caught the key mismatch with Claude Code Remote Control: Neko exposed one reusable hub URL,
+so sharing one conversation implicitly shared every Neko terminal joined to that pairing. The web
+transcript was also client-owned; terminal-origin turns could not appear on the phone. That was neither
+least privilege nor a real shared session.
+
+Bare `/relay` now derives a persisted capability per local conversation and prints a short display code
+plus a direct `/session/<opaque-id>` link. `/relay new` revokes only that capability. The former broad
+multi-session behavior remains available as the deliberately explicit `/relay hub` / `/relay hub new`.
+Browser credentials, active host, drafts, and history are keyed by remote session, including a guarded
+v3 migration path that cannot spill old credentials into a different deep-link.
+
+The local Ink TUI is the authoritative writer. It publishes E2E-sealed semantic events (bounded
+snapshot, committed transcript lines, live assistant stream, and tool activity) through the relay
+adapter. The Durable Object stores only a bounded ciphertext replay window and fans live events to
+read-only hibernatable browser WebSockets. Reconnect begins with reset + ordered replay before live
+delivery, so it cannot duplicate a stale browser transcript. Pixel streaming and CRDTs were rejected:
+one serialized agent session needs an ordered event log, not video bandwidth or multi-writer merge
+machinery.
+
+Verification used the real local Wrangler Worker. A host-origin transcript appeared in the CLI-shaped
+browser, a browser-origin task executed and streamed through the host, and a fresh WebSocket replayed
+the authoritative durable transcript while correctly omitting transient stream frames. Targeted relay
+tests and strict typecheck passed; production deployment remains intentionally untouched.
+
 ## 2026-07-11 - relay UI now shares the CLI shell and interaction contract
 
 The owner compared the live relay and CLI side by side. The first relay pass had the right colors but
