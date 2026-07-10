@@ -6,6 +6,15 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **A pasted screenshot no longer poisons the session.** `/paste` (Alt+V) used to attach the clipboard
+  image raw — a multi-MB PNG became ~1M base64 characters, overflowed any model's context window
+  (`max_tokens must be at least 1, got -102511`), and then kept re-overflowing from history on every
+  later turn. Images are now normalized at the source on Windows (longest side 1568px, JPEG q82 — the
+  vision-API sweet spot), oversized attachments are refused with the size and the fix, and the in-loop
+  context relief can now free pasted images from earlier turns (the current turn's attachment always
+  survives).
+
 ### Added
 - **Relay v2 — the phone experience, rebuilt** (host + Worker + web client, deployed and live-verified
   end-to-end 10/10 on real Cloudflare infrastructure):

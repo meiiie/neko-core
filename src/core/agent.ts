@@ -154,7 +154,7 @@ export class Agent {
     // A GUI loop can produce several base64 screenshots inside one user turn. Summarizing cannot help
     // that shape (there is no older user-turn boundary), so keep the two most recent visual states and
     // mask older tool images before clipping text. Two supports before/after comparison while bounding
-    // both request size and local session growth; user-attached images are deliberately untouched.
+    // both request size and local session growth.
     const imageIdx = this.messages
       .map((m, i) => (m.role === "tool" && Array.isArray(m.content) && m.content.some((p: any) => p?.type === "image_url") ? i : -1))
       .filter((i) => i >= 0);
@@ -163,6 +163,20 @@ export class Agent {
       const m = this.messages[i];
       m.content = m.content.map((p: any) => p?.type === "image_url"
         ? { type: "text", text: "[older tool image elided; capture/read it again if the current state is insufficient]" }
+        : p);
+      shrank = true;
+    }
+    // USER-attached images from EARLIER turns are maskable too. They used to be untouchable, which
+    // created a death spiral: one oversized pasted image overflowed the window, the 400'd request left
+    // the image in history, and every later turn re-sent it and 400'd forever - nothing could free it.
+    // The CURRENT user turn's attachment is preserved (the model must get one full look at it).
+    const lastUser = this.messages.map((m, i) => (m.role === "user" ? i : -1)).filter((i) => i >= 0).pop() ?? -1;
+    for (let i = 0; i < this.messages.length; i++) {
+      const m = this.messages[i];
+      if (m.role !== "user" || i === lastUser || !Array.isArray(m.content)) continue;
+      if (!m.content.some((p: any) => p?.type === "image_url")) continue;
+      m.content = m.content.map((p: any) => p?.type === "image_url"
+        ? { type: "text", text: "[pasted image from an earlier turn elided to fit the context window - attach it again if still needed]" }
         : p);
       shrank = true;
     }

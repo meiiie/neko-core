@@ -778,7 +778,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       const path = readClipboardImage();
       if (!path) return addLine("info", "no image in the clipboard");
       try {
-        pastedRef.current.push(`data:image/png;base64,${readFileSync(path).toString("base64")}`);
+        const b64 = readFileSync(path).toString("base64");
+        // Last-line size gate: an oversized attachment overflows the context window (HTTP 400) and,
+        // worse, keeps re-overflowing from history. Refuse honestly instead of sending a doomed turn.
+        if (b64.length > 600_000) {
+          addLine("error", `image too large to attach (~${Math.round((b64.length * 3) / 4 / 1024)}KB) - crop or capture a smaller region and paste again`);
+          return;
+        }
+        const mime = path.endsWith(".jpg") ? "image/jpeg" : "image/png";
+        pastedRef.current.push(`data:${mime};base64,${b64}`);
         setPastedCount(pastedRef.current.length);
         addLine("info", `image attached (${pastedRef.current.length}) - needs a vision-capable model to be read`);
       } catch {

@@ -3,6 +3,30 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-10 (night, part 6) — pasted images: normalize at the source, break the 400 death spiral
+
+Owner's live test (image #90) produced two HTTP 400s that are one root cause: **/paste attached the
+clipboard image RAW**. A screenshot PNG is multi-MB -> ~1M base64 chars -> ~233k tokens -> overflows
+ANY context window; the server computes max_tokens = window - prompt = NEGATIVE (-102511) and 400s.
+Worse: the doomed user message stays in history, and shrinkOldObservations deliberately never touched
+user-attached images - so EVERY later turn re-sent the whale and 400'd too ("maximum context length is
+202752 tokens... your messages resulted in 254082"). A session poisoned forever by one paste.
+
+Three fixes, each at its own layer:
+1. **Source (clipboard.ts, win32)**: normalize on read - longest side capped at 1568px, JPEG q82 (what
+   Claude Code does; vision APIs don't resolve past ~1.5k px). Live-probed with a REAL 3200x2000
+   clipboard bitmap: 236KB JPEG at 1568x980. The probe also caught a PowerShell overload trap:
+   `[Math]::Min(1, 1568/w)` resolves to Min(int,int), truncates 0.49 -> 0, and produced a 1x1 image -
+   `1.0` forces the double overload. (Non-Windows paths unchanged: pngpaste/xclip, no resize.)
+2. **Attach gate (chat.tsx)**: >600k base64 chars is refused with the size and the fix ("crop or
+   capture a smaller region") instead of sending a doomed request.
+3. **History relief (agent.ts)**: shrinkOldObservations now also masks user-pasted images from
+   EARLIER turns (text stub; the CURRENT turn's attachment is preserved so the model gets one full
+   look). This breaks the re-overflow loop for any session that still gets too big.
+
+Verified: 493/493 tests (new: earlier-user-image masking; last-turn image untouched), dual typecheck,
+policy PASS, live clipboard probe all-green, binary rebuilt + reinstalled.
+
 ## 2026-07-10 (night, part 5) — relay: slash commands answer remotely; the client is CLI-verbatim
 
 Owner: "khong dung duoc ca lenh" + "toi muon giao dien giong het CLI" + the security question ("ai

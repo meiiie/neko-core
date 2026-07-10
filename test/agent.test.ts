@@ -204,10 +204,29 @@ test("context relief keeps two recent tool images and masks older screenshots", 
     image("old"), image("middle"), image("latest"),
   ];
   expect((agent as any).shrinkOldObservations()).toBe(true);
-  expect(agent.messages[0].content[0].image_url.url).toContain("USER"); // user evidence is never masked
+  expect(agent.messages[0].content[0].image_url.url).toContain("USER"); // the LAST user turn's evidence is never masked
   expect(agent.messages[1].content.some((p: any) => p.type === "image_url")).toBe(false);
   expect(agent.messages[1].content.some((p: any) => String(p.text).includes("older tool image elided"))).toBe(true);
   expect(agent.messages.slice(2).filter((m: any) => m.content.some((p: any) => p.type === "image_url"))).toHaveLength(2);
+});
+
+test("context relief frees EARLIER user-pasted images (breaks the oversized-image 400 death spiral)", () => {
+  const agent = new Agent({
+    provider: { complete: async () => ({ content: "ok", tool_calls: [] }) } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  const userImg = (tag: string) => ({ role: "user", content: [
+    { type: "text", text: `look: ${tag}` },
+    { type: "image_url", image_url: { url: `data:image/png;base64,${tag}` } },
+  ] });
+  agent.messages = [userImg("HUGE-OLD"), { role: "assistant", content: "hm" }, userImg("CURRENT")];
+  expect((agent as any).shrinkOldObservations()).toBe(true);
+  // The old turn's image is gone (it was re-overflowing every request from history)...
+  expect(agent.messages[0].content.some((p: any) => p.type === "image_url")).toBe(false);
+  expect(agent.messages[0].content.some((p: any) => String(p.text).includes("pasted image from an earlier turn elided"))).toBe(true);
+  expect(agent.messages[0].content[0].text).toBe("look: HUGE-OLD"); // its text survives
+  // ...but the CURRENT turn's image is untouched - the model gets its full look.
+  expect(agent.messages[2].content.some((p: any) => p.type === "image_url")).toBe(true);
 });
 
 test("concurrency-safe tool calls in one turn run in parallel", async () => {
