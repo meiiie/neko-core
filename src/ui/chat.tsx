@@ -108,6 +108,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const rcRef = useRef<RemoteControl | null>(null);
   const relayRef = useRef<RemoteRelay | null>(null);
   const remoteSinkRef = useRef<((chunk: string) => void) | null>(null); // streams a turn's output to a remote SSE client
+  const remoteActRef = useRef<((line: string) => void) | null>(null); // streams tool-activity lines (the phone's process ticker)
   const [rcOn, setRcOn] = useState(false);
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
@@ -389,7 +390,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           // Defer the commit: show this call LIVE with a blinking dot (RunningLine) while it runs;
           // it commits to <Static> paired with its result below. Keyed by call id so parallel calls pair up.
           const k = data.id || data.name || `t${inflightRef.current.length}`;
-          inflightRef.current.push({ key: k, text: describeToolCall(data.name, data.arguments) });
+          const call = describeToolCall(data.name, data.arguments);
+          inflightRef.current.push({ key: k, text: call });
+          remoteActRef.current?.(call); // the phone's process ticker shows the same line the terminal does
           syncInflight();
         } else if (kind === "tool_result") {
           // The call finished: drop its blinking line and commit tool_call + result to <Static> (solid dot).
@@ -1001,7 +1004,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       const arg = text.slice("/relay".length).trim();
       const rotate = arg === "new"; // /relay new = rotate the pairing (old phones disconnect)
-      const url = (rotate ? "" : arg) || cfg.relayUrl;
+      const wantQr = arg === "qr"; // /relay qr = show the pairing code again
+      const url = (rotate || wantQr ? "" : arg) || cfg.relayUrl;
       if (!url) {
         addLine("info", "usage: /relay <your-relay-url> - drive Neko from any phone, no open port. Deploy cloudflare/relay once, set relay_url in config, then just type /relay.");
         return;
@@ -1014,12 +1018,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         relayRef.current = r;
         const base = url.replace(/\/+$/, "");
         const pair = `${base}/#s=${r.session}&t=${r.token}&k=${pairing.secret}`;
-        const qr = qrMatrix(pair);
         const live = r.transport() === "ws";
-        addLine("info", `relay on${live ? " (live: streaming + phone Stop)" : " (compat poll - redeploy cloudflare/relay for streaming)"} - E2E, the relay only sees ciphertext.`);
-        addLine("info", rotate ? "NEW pairing - previously paired phones must re-scan:" : "same pairing as last time - an already-paired phone reconnects by itself; scan to pair a new one:");
-        if (qr) addLine("info", qrToText(qr));
-        addLine("info", `${pair}\n  (or enter manually)  session: ${r.session}  token: ${r.token}  secret: ${pairing.secret}\n  /relay new rotates the pairing`);
+        addLine("info", `relay on - ${live ? "streaming live to your phone (Stop works mid-turn)" : "compat mode (redeploy cloudflare/relay for streaming)"}, E2E encrypted.`);
+        // The QR is a first-pairing affordance, not daily chrome: a paired phone reconnects by itself,
+        // so show the code only when there is something new to scan (or on request: /relay qr).
+        if (pairing.fresh || rotate || wantQr) {
+          const qr = qrMatrix(pair);
+          if (qr) addLine("info", qrToText(qr).split("\n").map((l) => "  " + l).join("\n"));
+          addLine("info", `  scan with the phone camera, or open: ${pair}`);
+        } else {
+          addLine("info", `your phone is already paired and reconnects by itself - open: ${base}\n  (/relay qr reprints the pairing code · /relay new rotates it)`);
+        }
       } catch (e) {
         addLine("error", `relay failed to start: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -1167,7 +1176,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Shared remote handlers for /rc (HTTP) and /relay (outbound poll): run one turn (streaming to a
   // remote sink if given), report status, interrupt.
   const makeRemoteHandlers = (): RemoteHandlers => ({
-    run: async (msg, onDelta) => {
+    run: async (msg, onDelta, onAct) => {
       // Busy = WAIT for the current turn (the desktop's input queue does), never drop the phone's
       // message. Bounded so a wedged turn eventually answers honestly instead of hanging the client.
       const w0 = Date.now();
@@ -1176,12 +1185,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       const t0 = Date.now();
       const tok0 = agentRef.current!.cost.totalTokens;
       remoteSinkRef.current = onDelta ?? null;
+      remoteActRef.current = onAct ?? null;
       try {
         await handle(msg);
         const last = agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content;
         return { reply: typeof last === "string" ? last : "(no reply)", tokens: agentRef.current!.cost.totalTokens - tok0, ms: Date.now() - t0 };
       } finally {
         remoteSinkRef.current = null;
+        remoteActRef.current = null;
       }
     },
     status: () => ({ busy: busyRef.current, model: cfg.model, messages: agentRef.current!.messages.length }),

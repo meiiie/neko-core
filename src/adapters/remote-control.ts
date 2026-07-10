@@ -22,8 +22,9 @@ export interface RunResult {
   interrupted?: boolean;
 }
 export interface RemoteHandlers {
-  /** Run one turn. `onDelta` (when given) streams output chunks as they arrive. */
-  run: (text: string, onDelta?: (chunk: string) => void) => Promise<RunResult>;
+  /** Run one turn. `onDelta` (when given) streams output chunks as they arrive; `onAct` streams
+   * one-line tool activity (the same "Read(src/agent.ts)" lines the terminal shows). */
+  run: (text: string, onDelta?: (chunk: string) => void, onAct?: (line: string) => void) => Promise<RunResult>;
   status: () => { busy: boolean; model?: string; messages?: number };
   interrupt: () => boolean;
 }
@@ -82,7 +83,11 @@ export async function startRemoteControl(handlers: RemoteHandlers, port = 4517, 
         try {
           if (wantsStream) {
             res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-            const result = await handlers.run(String(text), (d) => res.write(`data: ${JSON.stringify({ delta: d })}\n\n`));
+            const result = await handlers.run(
+              String(text),
+              (d) => res.write(`data: ${JSON.stringify({ delta: d })}\n\n`),
+              (line) => res.write(`data: ${JSON.stringify({ act: line })}\n\n`),
+            );
             res.write(`event: done\ndata: ${JSON.stringify(result)}\n\n`);
             res.end();
           } else {

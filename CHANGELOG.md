@@ -26,6 +26,19 @@ All notable changes to Neko Code are documented here. The format follows
     now WAIT for a busy turn (like the desktop input queue) instead of being dropped.
   - Fully backward compatible: an old binary works against the new Worker (v1 long-poll endpoints
     kept), and a new binary degrades to long-poll against an old Worker or where WSS is blocked.
+  - **The phone shows the terminal experience.** Tool activity streams live as the same
+    `Read(src/agent.ts)`-style lines the terminal shows (a monospace process log with a braille
+    spinner), above the growing reply. The web client was redesigned around the actual Neko mascot
+    and its amber palette (real logo as favicon/app icon/header), with a cleaner message layout.
+  - **Wrong-secret pairing is now diagnosable instead of cryptic.** The host answers a message it
+    cannot decrypt in plaintext with the exact fix (v1 sealed that error with the same mismatched
+    key — guaranteed unreadable); the relay stores a public fingerprint of the secret so the phone
+    flags "key mismatch" before sending; pairing from the QR fragment now persists immediately
+    (v1 only saved it if you typed manually — a reload unpaired you); and a "paste pairing link"
+    field pairs even in in-app browsers that strip URL fragments (Messenger).
+  - **The QR is a first-pairing affordance, not daily chrome.** `/relay` prints a compact status
+    (the pairing persists anyway); the code appears only on first pairing, `/relay new`, or
+    `/relay qr`.
 - Plain info lines in the transcript (relay pairing URLs, update notes) are now OSC 8 hyperlinks too.
 - **`neko setup tavily <key>`** — the no-Docker rung of the search ladder: verifies the key against the
   live Tavily API, then wires it into the gitignored user config (`tavily_api_key`, redacted by

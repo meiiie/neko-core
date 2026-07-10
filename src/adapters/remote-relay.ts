@@ -16,7 +16,7 @@
  * All HTTP is authed with `Authorization: Bearer <token>`; the WS authenticates via subprotocol
  * (portable - browser WebSocket can't set headers - and never in the URL).
  */
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homeDir } from "../shared/home.ts";
@@ -31,7 +31,7 @@ export interface RemoteRelay {
   stop: () => void;
 }
 
-export interface RelayPairing { session: string; token: string; secret: string }
+export interface RelayPairing { session: string; token: string; secret: string; fresh: boolean }
 
 /** Durable pairing (~/.neko-core/relay.json, gitignored - same trust as api_key): /relay reuses it so
  * the phone STAYS paired across Neko restarts (no re-scanning QR codes); `/relay new` rotates it. */
@@ -40,17 +40,24 @@ export function loadOrCreatePairing(rotate = false, dir = join(homeDir(), ".neko
   if (!rotate && existsSync(path)) {
     try {
       const p = JSON.parse(readFileSync(path, "utf-8"));
-      if (p.session && p.token && p.secret) return { session: String(p.session), token: String(p.token), secret: String(p.secret) };
+      if (p.session && p.token && p.secret) return { session: String(p.session), token: String(p.token), secret: String(p.secret), fresh: false };
     } catch { /* corrupt -> regenerate below */ }
   }
   // Short (96-bit) ids so the pairing URL stays small enough for a scannable QR.
   const id = () => randomBytes(12).toString("base64url");
-  const fresh: RelayPairing = { session: id(), token: id(), secret: id() };
+  const made: RelayPairing = { session: id(), token: id(), secret: id(), fresh: true };
   try {
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path, JSON.stringify(fresh, null, 2) + "\n", "utf-8");
+    writeFileSync(path, JSON.stringify({ session: made.session, token: made.token, secret: made.secret }, null, 2) + "\n", "utf-8");
   } catch { /* best-effort: an unwritable HOME just means one-shot pairings */ }
-  return fresh;
+  return made;
+}
+
+/** Public fingerprint of the E2E secret (8 hex chars of SHA-256). The relay stores it so the CLIENT
+ * can detect a stale/mistyped secret BEFORE sending (a mismatched key otherwise only surfaces as an
+ * unreadable reply). Reveals nothing useful: the secret is 96 random bits. */
+export function secretKid(secret: string): string {
+  return createHash("sha256").update(secret).digest("hex").slice(0, 8);
 }
 
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
@@ -66,7 +73,8 @@ export async function startRemoteRelay(
   const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
 
   // Register (outbound). Throw if the relay is unreachable so /relay can report it to the user.
-  const reg = await fetch(`${base}/register`, { method: "POST", headers, body: JSON.stringify({ session }) });
+  // `kid` = the secret's public fingerprint, so the phone can flag a stale secret before sending.
+  const reg = await fetch(`${base}/register`, { method: "POST", headers, body: JSON.stringify({ session, kid: opts.secret ? secretKid(opts.secret) : undefined }) });
   if (!reg.ok) throw new Error(`relay register failed: HTTP ${reg.status}${reg.status === 401 ? " (session bound to another token - try /relay new)" : ""}`);
   const v2 = Number(((await reg.json().catch(() => ({}))) as { v?: number }).v ?? 1) >= 2;
 
@@ -98,25 +106,36 @@ export async function startRemoteRelay(
       const job = jobs.shift();
       if (!job) break;
       const message = decrypt(job.message);
-      let result: { reply?: string; tokens?: number; ms?: number };
-      if (message === null) result = { reply: "error: could not decrypt (check the pairing secret)" };
-      else {
-        // Stream the growing reply as throttled PARTIAL frames (ws only), sealed like the final one -
-        // the phone renders live text instead of staring at typing dots for minutes.
-        let buf = "";
-        let timer: ReturnType<typeof setTimeout> | null = null;
-        let ended = false;
-        const flush = () => { timer = null; if (!ended && buf) send({ t: "partial", id: job.id, reply: sealMaybe(buf) }); };
-        const onDelta = mode === "ws" ? (d: string) => { buf += d; if (!timer) timer = setTimeout(flush, opts.partialMs ?? 600); } : undefined;
-        try {
-          result = await handlers.run(message, onDelta);
-        } catch (e) {
-          result = { reply: `error: ${e instanceof Error ? e.message : String(e)}` };
-        }
-        ended = true;
-        if (timer) clearTimeout(timer);
+      if (message === null) {
+        // Key mismatch: reply in PLAINTEXT on purpose - sealing an error about the wrong key with
+        // that same wrong key would make it unreadable exactly when the user needs it most.
+        send({ t: "reply", id: job.id, reply: "error: could not decrypt - the pairing secret doesn't match. On your machine run /relay (or /relay new) and re-scan the QR." });
+        continue;
       }
-      send({ t: "reply", id: job.id, reply: sealMaybe(String(result.reply ?? "")), tokens: result.tokens, ms: result.ms });
+      // Stream the terminal experience (ws only): assistant text deltas grow `buf`, tool calls land in
+      // `act` (the same lines the terminal shows). Throttled PARTIAL frames carry both, sealed like the
+      // final - the phone watches Neko WORK instead of staring at typing dots for minutes.
+      let buf = "";
+      const act: string[] = [];
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let ended = false;
+      const envelope = () => sealMaybe(JSON.stringify({ text: buf, act: act.slice(-12) }));
+      const flush = () => { timer = null; if (!ended) send({ t: "partial", id: job.id, reply: envelope() }); };
+      const bump = () => { if (!timer) timer = setTimeout(flush, opts.partialMs ?? 600); };
+      const onDelta = mode === "ws" ? (d: string) => { buf += d; bump(); } : undefined;
+      const onAct = mode === "ws" ? (line: string) => { act.push(line.slice(0, 96)); bump(); } : undefined;
+      let result: { reply?: string; tokens?: number; ms?: number };
+      try {
+        result = await handlers.run(message, onDelta, onAct);
+      } catch (e) {
+        result = { reply: `error: ${e instanceof Error ? e.message : String(e)}` };
+      }
+      ended = true;
+      if (timer) clearTimeout(timer);
+      // Final frame: ws carries the same {text,act} envelope (the client keeps the process log);
+      // v1 poll stays a plain string (that's what the old Worker's client understands).
+      buf = String(result.reply ?? "");
+      send({ t: "reply", id: job.id, reply: mode === "ws" ? envelope() : sealMaybe(buf), tokens: result.tokens, ms: result.ms });
     }
     draining = false;
   };

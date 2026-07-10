@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import type { RemoteHandlers } from "../src/adapters/remote-control.ts";
 import { open, seal } from "../src/adapters/relay-crypto.ts";
-import { loadOrCreatePairing, startRemoteRelay } from "../src/adapters/remote-relay.ts";
+import { loadOrCreatePairing, secretKid, startRemoteRelay } from "../src/adapters/remote-relay.ts";
 
 /** A tiny in-memory relay double standing in for the Cloudflare Worker, so we can prove the host
  * (agent) side end-to-end: the host dials OUT and long-polls; a client submits an instruction; the
@@ -169,10 +169,11 @@ const until = async (cond: () => boolean, ms = 3000) => {
   expect(cond()).toBe(true);
 };
 
-test("remote-relay v2: WebSocket transport streams PARTIAL frames then the final reply", async () => {
+test("remote-relay v2: WS streams PARTIAL {text,act} envelopes (the terminal experience) then the final", async () => {
   const relay = makeWsDouble(4704);
   try {
-    const rc = await startRemoteRelay(relay.url, handlers(async (m, onDelta) => {
+    const rc = await startRemoteRelay(relay.url, handlers(async (m, onDelta, onAct) => {
+      onAct?.("Read(src/agent.ts)"); // the same tool line the terminal shows
       onDelta?.("thinking about " + m);
       await new Promise((r) => setTimeout(r, 200)); // let the 50ms partial throttle fire
       onDelta?.(" ...more");
@@ -183,14 +184,50 @@ test("remote-relay v2: WebSocket transport streams PARTIAL frames then the final
       await until(() => relay.state.connections === 1);
       relay.state.sockets[0].send(JSON.stringify({ id: "j1", message: "hi" }));
       await until(() => relay.state.frames.some((f) => f.t === "reply"));
-      const partials = relay.state.frames.filter((f) => f.t === "partial");
+      const partials = relay.state.frames.filter((f) => f.t === "partial").map((f) => JSON.parse(f.reply));
       expect(partials.length).toBeGreaterThan(0);
-      expect(partials[0].reply).toContain("thinking about hi");
+      expect(partials[0].text).toContain("thinking about hi");
+      expect(partials[0].act).toEqual(["Read(src/agent.ts)"]); // process log rides along
       const final = relay.state.frames.find((f) => f.t === "reply");
-      expect(final.reply).toBe("final:hi");
+      expect(JSON.parse(final.reply)).toEqual({ text: "final:hi", act: ["Read(src/agent.ts)"] });
       expect(final.tokens).toBe(7);
     } finally { rc.stop(); }
   } finally { relay.server.stop(); }
+});
+
+test("remote-relay v2: a WRONG-SECRET message gets a PLAINTEXT actionable error (never sealed with the mismatched key)", async () => {
+  const relay = makeWsDouble(4708);
+  try {
+    const rc = await startRemoteRelay(relay.url, handlers(async () => ({ reply: "should never run" })), { secret: "host-secret" });
+    try {
+      await until(() => relay.state.connections === 1);
+      relay.state.sockets[0].send(JSON.stringify({ id: "j1", message: seal("phone-DIFFERENT-secret", "hello") }));
+      await until(() => relay.state.frames.some((f) => f.t === "reply"));
+      const final = relay.state.frames.find((f) => f.t === "reply");
+      expect(typeof final.reply).toBe("string"); // NOT a sealed {iv,ct} blob - the phone can read it
+      expect(final.reply).toContain("pairing secret doesn't match");
+      expect(final.reply).toContain("/relay");
+    } finally { rc.stop(); }
+  } finally { relay.server.stop(); }
+});
+
+test("remote-relay v2: /register carries the secret's public fingerprint (kid) for phone-side mismatch detection", async () => {
+  let regBody: any = null;
+  const server = Bun.serve({
+    port: 4709,
+    async fetch(req) {
+      const u = new URL(req.url);
+      if (u.pathname === "/register") { regBody = await req.json(); return Response.json({ ok: true, v: 1 }); } // v1: no ws needed
+      if (u.pathname === "/pull") return Response.json({});
+      return new Response("nf", { status: 404 });
+    },
+  });
+  try {
+    const rc = await startRemoteRelay("http://127.0.0.1:4709", handlers(async (m) => ({ reply: m })), { secret: "s3cret", pollMs: 30 });
+    expect(regBody.kid).toBe(secretKid("s3cret"));
+    expect(regBody.kid).toMatch(/^[0-9a-f]{8}$/);
+    rc.stop();
+  } finally { server.stop(); }
 });
 
 test("remote-relay v2: an {t:interrupt} frame reaches handlers.interrupt MID-TURN (phone Stop)", async () => {
@@ -236,19 +273,23 @@ test("remote-relay v2: reconnects after a dropped socket and keeps serving jobs"
       relay.state.sockets[0].close(); // relay hiccup / DO eviction
       await until(() => relay.state.connections === 2); // host came back by itself
       relay.state.sockets[1].send(JSON.stringify({ id: "j2", message: "after reconnect" }));
-      await until(() => relay.state.frames.some((f) => f.t === "reply" && f.reply === "ok:after reconnect"));
+      await until(() => relay.state.frames.some((f) => f.t === "reply" && String(f.reply).includes("ok:after reconnect")));
     } finally { rc.stop(); }
   } finally { relay.server.stop(); }
 });
 
 test("pairing persists across restarts (same QR, phone stays paired) and `new` rotates it", () => {
   const dir = mkdtempSync(join(tmpdir(), "nk-relay-"));
+  const trio = (p: { session: string; token: string; secret: string }) => ({ session: p.session, token: p.token, secret: p.secret });
   const a = loadOrCreatePairing(false, dir);
+  expect(a.fresh).toBe(true); // first ever pairing -> /relay shows the QR
   const b = loadOrCreatePairing(false, dir);
-  expect(b).toEqual(a); // a restart reuses the pairing - the phone reconnects with no re-scan
+  expect(b.fresh).toBe(false); // a restart reuses it (no QR wall every time)
+  expect(trio(b)).toEqual(trio(a)); // the phone reconnects with no re-scan
   const c = loadOrCreatePairing(true, dir);
+  expect(c.fresh).toBe(true);
   expect(c.session).not.toBe(a.session); // /relay new = a genuinely fresh pairing
-  expect(loadOrCreatePairing(false, dir)).toEqual(c); // ...which then persists too
+  expect(trio(loadOrCreatePairing(false, dir))).toEqual(trio(c)); // ...which then persists too
 });
 
 test("remote-relay: a wrong token can't submit to the session", async () => {

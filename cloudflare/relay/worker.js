@@ -88,6 +88,10 @@ export class RelaySession {
       const bound = await this.boundToken();
       if (!bound) await this.ctx.storage.put("token", tok); // first registration binds - durably
       else if (bound !== tok) return json(401, { error: "session bound to a different token" });
+      // kid = the E2E secret's public fingerprint; the client compares it to ITS secret's fingerprint
+      // via /alive and can flag a stale/mistyped secret BEFORE sending anything.
+      const { kid } = await request.clone().json().catch(() => ({}));
+      if (kid) await this.ctx.storage.put("kid", String(kid).slice(0, 16));
       return json(200, { ok: true, v: 2 }); // v:2 tells the host the WebSocket channel exists
     }
 
@@ -111,7 +115,8 @@ export class RelaySession {
 
     if (path === "/alive") {
       const lastPull = (await this.ctx.storage.get("lastPull")) ?? 0;
-      return json(200, { online: !!this.hostSocket() || Date.now() - lastPull < 40_000 });
+      const kid = (await this.ctx.storage.get("kid")) ?? null;
+      return json(200, { online: !!this.hostSocket() || Date.now() - lastPull < 40_000, kid });
     }
 
     if (path === "/send" && request.method === "POST") {

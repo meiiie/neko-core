@@ -3,6 +3,38 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-10 (night, part 2) — relay v2.1: the owner dogfooded from a real phone; every rough edge fixed
+
+The owner paired from a real phone (Messenger's in-app browser) and hit the worst possible message:
+"error: The operation failed for an operation-specific reason". Root-caused as a STACK of three real
+defects, all mine, all fixed and live-verified:
+
+- **The unreadable error.** When the host couldn't decrypt an inbound message (secret mismatch) it
+  sealed the "wrong secret" error WITH THE SAME MISMATCHED KEY - guaranteed unreadable exactly when
+  the user needs it. Decrypt-failure replies now go plaintext with the exact fix in the text.
+- **Fragment pairing never persisted.** localStorage was only written on manual typing; a QR scan
+  filled the fields, worked once, and a reload silently unpaired the phone. applyPairing() now saves
+  immediately.
+- **In-app browsers strip fragments.** Messenger drops `#s=..&t=..&k=..` - added a "paste pairing
+  link" field that parses the whole URL, plus a `kid` fingerprint (SHA-256(secret) first 8 hex) the
+  host registers and the relay serves via /alive, so the client shows "key mismatch" BEFORE sending.
+- **"Hien qua trinh neko lam nhu o Terminal"** (owner): tool activity now streams to the phone as
+  the exact `describeToolCall` lines the terminal prints - a monospace process log with a braille
+  spinner above the growing reply, carried in the sealed {text,act} partial envelope (ws only).
+- **UI redesign around the real brand**: the mascot (assets/neko-icon.png + avatar-512.png, embedded
+  as data URIs) replaces the paw emoji as favicon/app icon/header/empty state; palette switched from
+  off-brand violet to the mascot's amber; message layout restructured (the "neko" label used to sit
+  BESIDE the bubble - flex bug); markdown-lite gained pipe-table rendering; friendly error taxonomy.
+- **The QR-wall complaint**: `/relay` no longer prints the code every time (pairing persists, so it
+  is first-pairing chrome only; `/relay qr` reprints, `/relay new` rotates). Kept half-block
+  rendering after working the geometry: terminal cells are ~1:2, so quadrant/octant densification
+  distorts the module aspect ratio or depends on font synthesis - reliability wins.
+
+Verified: 492/492 tests (envelope, plaintext wrong-secret error, kid-in-register, fresh-flag), dual
+typecheck, policy PASS; Worker redeployed; **live probe 13/13 on real Cloudflare infra** (adds: kid
+matches, act lines streamed, wrong-secret error readable); deployed client checked serving the new
+markup; binary rebuilt + reinstalled (UI + input probes PASS).
+
 ## 2026-07-10 (night) — relay v2: the phone becomes a first-class seat
 
 Owner: "phần relay giao diện và mọi thứ chưa được tốt lắm suy nghĩ sâu nhé". Audited the whole
