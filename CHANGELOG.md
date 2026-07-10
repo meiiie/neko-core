@@ -4,9 +4,26 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
-## [Unreleased]
+## [0.9.0] — 2026-07-10
 
 ### Added
+- **Links in the transcript are real terminal hyperlinks (OSC 8).** `[label](url)` now carries its URL
+  (it used to be dropped entirely), bare URLs and existing file paths are Ctrl+Click-able with a hover
+  tooltip in Windows Terminal (and WezTerm/iTerm2/kitty), and a long product URL wrapped across 2–3
+  terminal lines still opens as one link — where plain terminal auto-detection gives up. Selection,
+  copy, and the renderer's column math are all hyperlink-aware; copying a bare URL still yields the URL.
+- **SearXNG is now a managed, on-demand sidecar (the Ollama keep_alive pattern).** After a one-time
+  `neko setup web`, the container costs zero RAM while idle: `web_search` wakes it automatically when a
+  search needs it (one `docker start` + health check, ~5–10s on the first search) and stops it again
+  after `searxng_keepalive` idle minutes (default 15; `0` = keep running), including on process exit.
+  A container Neko didn't start is never touched, Docker Desktop is never launched or killed, and a
+  stopped daemon just means the search falls through to Tavily/DuckDuckGo instantly. `neko doctor`
+  reports the lifecycle state; zero-config users with Docker installed get a one-time tip.
+- **`neko bench gui` — a long-horizon computer-use eval on a deterministic simulated desktop.** The
+  configured model drives a scripted GUI world through the real `computer` tool; verifiers measure task
+  success, constraint-holding, error recovery, precise action, and coordinate grounding. `neko bench
+  gui hard` adds cross-screen memory, paged lists with decoys, interrupt dialogs, and guarded submits,
+  with budgets calibrated from live runs (gpt-oss-120b: base tier 12/12, hard tier 11/12).
 - Added `Alt+C` to copy the complete current draft without clearing it, including the expanded contents
   behind collapsed paste placeholders.
 - Made `computer screenshot` a first-class multimodal observation: vision-enabled models receive the

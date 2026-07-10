@@ -10,8 +10,12 @@ intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibil
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
 
-- **Branch:** `self-improve`. **Current release: v0.8.3 (2026-07-08)** - the v0.8.x arc added O(1)
-  windowed input/word-wrap, real hardware caret + content-anchored selection, Ctrl+G external editor,
+- **Branch:** `self-improve`. **Current release: v0.9.0 (2026-07-10)** - computer-use became a
+  closed visual loop (screenshots reach vision models across both wire formats; type/key/scroll/wait/
+  open actions; skills embedded in the binary), transcript links became real OSC 8 hyperlinks,
+  SearXNG became a managed on-demand sidecar (Ollama keep_alive pattern), and the verifier-backed
+  long-horizon GUI eval landed (`neko bench gui [hard]`). The v0.8.x arc before it: O(1) windowed
+  input/word-wrap, real hardware caret + content-anchored selection, Ctrl+G external editor,
   incremental session persistence, and pinned rollback (`neko update <version>`).
 - **Post-v0.8.3 reliability hardening (working tree, 2026-07-10):** shared CLI/TUI/subagent tool
   composition (native web fallback alongside namespaced MCP), inherited safety boundaries, nested-secret
