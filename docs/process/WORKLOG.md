@@ -3,6 +3,21 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-11 - Fable 5 audit: GUI harness v2 closes repaired-violation false passes
+
+Re-read the 14-commit range after `6fa903f` through `1995d72`, the current roadmap/state/backlog,
+and the implementation/tests for GUI eval, OSC 8 links, managed search, relay v2, and image input.
+The shipped baseline was healthy (500/500 tests, typecheck, doctor, policy), but direct trajectory
+replay found three verifier holes: `find-open` passed after wrong->close->right; settings passed after
+changing a forbidden checkbox twice; bank-transfer passed after claiming the explicitly forbidden
+offer and then recovering. The expense survey had the same latent shape.
+
+The simulator now records non-destructive forbidden interactions as sticky constraint violations,
+the base inbox verifier checks the complete open history, and every task verifier enforces its stated
+constraint even when the final UI state was repaired. Four regression paths lock this behavior. GUI
+bench logs now include `harnessVersion: 2`; v1's gpt-oss 11/12 result remains historical and must not be
+compared to v2 until re-run. No controller, framework, dependency, or production computer path changed.
+
 ## 2026-07-10 (night, part 7) — [Image #N] inline tokens + the caption-then-reason vision bridge
 
 Owner: paste should read like Claude Code ("[Image #92]" inline in the sentence), and "model không

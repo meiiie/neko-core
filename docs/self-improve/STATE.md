@@ -19,7 +19,9 @@ composite workflow; METR-style calibrated budgets). Live baseline gpt-oss-120b: 
 paged-decoys FLAKY, 16 grounding misses**.
 **Next = the glm-5.2 baseline (blocked: both Z.ai keys rejected since 2026-07-10, owner must refresh), then
 a harness lever (verify gate / recovery middleware / re-grounding) must show measurable lift on pass-rate
-or miss-count; no new controller until then.**
+or miss-count; no new controller until then.** The recorded 11/12 gpt-oss result is the historical v1
+baseline; GUI harness v2 tightened instruction/constraint verification and needs a fresh baseline before
+scores are compared.
 
 The loop's original framing still holds for when it resumes: bench coding tasks are **saturated** (glm-5.2 =
 11/11), so the live signal is the **codebase itself** (bug/test/robustness/perf/security/harness/docs), with the
@@ -44,6 +46,10 @@ down / tok-s up** (efficiency), or new harder tasks now passing (capability). A 
 
 ## Last moves
 <!-- the loop prepends one line per cycle: [ts] iter N: <goal> -> committed <hash> | reverted (<why>) -->
+- [2026-07-11] (owner-directed Fable 5 audit) GUI harness v2 closed three false-pass classes found by
+  replaying forbidden-then-repaired trajectories: wrong item then right item, unrelated setting toggled
+  then restored, and forbidden interrupt choices followed by successful recovery. The log now records a
+  harness version; the old 11/12 score remains historical until v2 is re-baselined.
 - [2026-07-10 night] (owner-directed: "relay ... suy nghĩ sâu") **relay v2 shipped + deployed**: WS
   hibernation transport (SOTA-checked vs Claude Code Remote Control + Cloudflare DO guidance),
   streaming partials to the phone, mid-turn Stop, durable pairing (relay.json), DO-storage state

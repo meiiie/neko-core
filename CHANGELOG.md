@@ -21,6 +21,10 @@ All notable changes to Neko Code are documented here. The format follows
   recreating it).
 
 ### Fixed
+- **GUI eval v2 no longer grants false passes for repaired constraint violations.** Opening a wrong
+  item before the target, changing a forbidden setting and changing it back, claiming the banking
+  offer, or taking the interrupting survey now remains a verifier-visible violation. GUI bench-log
+  records carry `harnessVersion: 2`, so stricter scores are not silently compared with v1 runs.
 - **A pasted screenshot no longer poisons the session.** `/paste` (Alt+V) used to attach the clipboard
   image raw — a multi-MB PNG became ~1M base64 characters, overflowed any model's context window
   (`max_tokens must be at least 1, got -102511`), and then kept re-overflowing from history on every

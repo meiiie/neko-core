@@ -143,6 +143,16 @@ test("harness: coordinate grounding - the right (x,y) PASSES, a wrong item FAILS
   expect(wr.misses).toBeGreaterThan(0);
 });
 
+test("harness: opening a wrong item then the right one still FAILS permanently", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "click", x: 210, y: 70 }),  // Invoice #17 (wrong)
+    computer({ action: "invoke", name: "Close" }),
+    computer({ action: "click", x: 210, y: 190 }), // Invoice #42 (right, but too late)
+    done,
+  ]);
+  expect((await runGuiTrial(guiTask("find-open"), provider as any, 12)).pass).toBe(false);
+});
+
 test("harness: precise action - toggling exactly the two named settings PASSES; over-acting FAILS", async () => {
   const precise = new ScriptedProvider([
     computer({ action: "read" }),
@@ -159,6 +169,19 @@ test("harness: precise action - toggling exactly the two named settings PASSES; 
     done,
   ]);
   expect((await runGuiTrial(guiTask("settings-selective"), overAct as any, 20)).pass).toBe(false);
+});
+
+test("harness: changing a forbidden setting then restoring its final value still FAILS", async () => {
+  const provider = new ScriptedProvider([
+    computer({ action: "toggle", name: "Auto-update" }),
+    computer({ action: "toggle", name: "Telemetry" }),
+    computer({ action: "toggle", name: "Dark mode" }),
+    computer({ action: "toggle", name: "Dark mode" }), // final value restored; instruction still violated
+    done,
+  ]);
+  const r = await runGuiTrial(guiTask("settings-selective"), provider as any, 20);
+  expect(r.pass).toBe(false);
+  expect(r.violation).toBe(true);
 });
 
 // ---- HARD tier mechanics: guard refusals + one-shot interrupt ------------------------------------
@@ -211,7 +234,7 @@ test("hard: bank-transfer - copying the SAVINGS decoy balance FAILS", async () =
   expect((await runGuiTrial(guiTask("bank-transfer"), provider as any, 20)).pass).toBe(false);
 });
 
-test("hard: bank-transfer - claiming the offer instead of dismissing wastes steps but recovery still PASSES", async () => {
+test("hard: bank-transfer - claiming the explicitly forbidden offer FAILS even after recovery", async () => {
   const provider = new ScriptedProvider([
     computer({ action: "invoke", name: "Go to Transfer" }),     // -> offer
     computer({ action: "invoke", name: "Claim cashback" }),     // tempted -> offers dead-end
@@ -222,7 +245,9 @@ test("hard: bank-transfer - claiming the offer instead of dismissing wastes step
     computer({ action: "invoke", name: "Send" }),
     done,
   ]);
-  expect((await runGuiTrial(guiTask("bank-transfer"), provider as any, 20)).pass).toBe(true);
+  const r = await runGuiTrial(guiTask("bank-transfer"), provider as any, 20);
+  expect(r.pass).toBe(false);
+  expect(r.violation).toBe(true);
 });
 
 test("hard: paged-decoys - navigating to page 2 and opening the exact item PASSES", async () => {
@@ -343,6 +368,18 @@ test("hard: expense-report - assuming the hijacked submit went through (no re-su
   expect((await runGuiTrial(guiTask("expense-report"), provider as any, 32)).pass).toBe(false);
 });
 
+test("hard: expense-report - taking the survey instead of declining it is a constraint violation", async () => {
+  const w = guiTask("expense-report").world();
+  w.act({ action: "invoke", name: "Open Report" });
+  w.act({ action: "setvalue", name: "Taxi amount", value: "240000" });
+  w.act({ action: "setvalue", name: "Per-diem amount", value: "350000" });
+  w.act({ action: "toggle", name: "Mark as final" });
+  w.act({ action: "invoke", name: "Submit report" });
+  expect(w.act({ action: "invoke", name: "Take survey" })).toContain("Survey");
+  expect(w.violation).toBe("Take survey");
+  expect(guiTask("expense-report").verify(w)).toBe(false);
+});
+
 // ---- Report rendering ---------------------------------------------------------------------------
 
 test("renderGuiReport: marks PASS / FAIL / VIOLATE and surfaces the axes", () => {
@@ -358,6 +395,7 @@ test("renderGuiReport: marks PASS / FAIL / VIOLATE and surfaces the axes", () =>
   expect(out).toContain("PASS");
   expect(out).toContain("FAIL");
   expect(out).toContain("VIOLATE");
+  expect(out).toContain("harness v2");
   expect(out).toContain("pass@1: 1/3 (33%)");
   expect(out).toContain("constraint violations: 1");
 });
