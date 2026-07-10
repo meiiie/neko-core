@@ -57,8 +57,7 @@ export const DEFAULTS: Record<string, any> = {
   profiles: {
     // A new model/endpoint is a data edit, not a code change. "Offline" = point a
     // profile at a local OpenAI-compatible server (llama-server :8080, Ollama :11434).
-    nvidia: { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "", key_env: "NVIDIA_API_KEY" },
-    "nvidia-glm": { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "z-ai/glm-5.2", key_env: "NVIDIA_API_KEY" },
+    nvidia: { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "z-ai/glm-5.2", key_env: "NVIDIA_API_KEY" },
     openai: { provider: "openai_compat", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", key_env: "OPENAI_API_KEY" },
     // Anthropic Messages API (provider: anthropic). Real Claude, and Z.ai's GLM coding-plan endpoint:
     claude: { provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-4-6", key_env: "ANTHROPIC_API_KEY" },
