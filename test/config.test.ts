@@ -97,6 +97,26 @@ test("env overrides value", () => {
   expect(cfg.maxSteps).toBe(7);
 });
 
+test("modelShadow: a top-level file model that overrides the profile preset is DETECTED (the --profile trap)", () => {
+  const path = tmpConfig({ model: "z-ai/glm-4.6" });
+  const cfg = loadConfig({ path, profile: "openai" }); // openai preset: gpt-4o-mini
+  expect(cfg.model).toBe("z-ai/glm-4.6"); // behaviour unchanged - the file still wins...
+  expect(cfg.modelShadow).toEqual({ source: path, profileModel: "gpt-4o-mini" }); // ...but the shadowing is named
+});
+
+test("modelShadow: null when no profile, when models agree, and when the preset has no model to shadow", () => {
+  expect(loadConfig({ path: tmpConfig({ model: "m" }) }).modelShadow).toBeNull(); // no profile selected
+  expect(loadConfig({ path: tmpConfig({ model: "gpt-4o-mini" }), profile: "openai" }).modelShadow).toBeNull(); // same model
+  expect(loadConfig({ path: tmpConfig({ model: "m" }), profile: "nvidia" }).modelShadow).toBeNull(); // nvidia preset model "" - the file IS the model source, not a shadow
+});
+
+test("modelShadow: NEKO_MODEL is named as the source (env wins over files)", () => {
+  process.env.NEKO_MODEL = "env-model";
+  const cfg = loadConfig({ path: tmpConfig({ model: "file-model" }), profile: "openai" });
+  expect(cfg.model).toBe("env-model");
+  expect(cfg.modelShadow).toEqual({ source: "NEKO_MODEL (env)", profileModel: "gpt-4o-mini" });
+});
+
 test("boolean NEKO_* overrides parse false/true instead of using string truthiness", () => {
   process.env.NEKO_SANDBOX = "0";
   process.env.NEKO_VERIFY_BEFORE_EXIT = "false";

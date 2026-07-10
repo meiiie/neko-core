@@ -51,12 +51,13 @@ function setupHint(): string {
 }
 
 /** web_search dispatcher: SearXNG (self-hosted metasearch, managed on-demand container) > Tavily
- * (agent search, env key) > DuckDuckGo (free, zero-config). Falls back to DuckDuckGo if the chosen
- * backend errors. A stopped managed SearXNG container is WOKEN once and the search retried - the
- * Ollama keep_alive pattern - so the power-up costs zero RAM while idle. */
-async function webSearch(query: string, opts: { searxngUrl: string; backend: string; keepaliveMin?: number }): Promise<string> {
+ * (agent search; key via TAVILY_API_KEY env or `tavily_api_key` config) > DuckDuckGo (free,
+ * zero-config). A stopped managed SearXNG container is WOKEN once and the search retried - the
+ * Ollama keep_alive pattern - so the power-up costs zero RAM while idle. Failures walk DOWN the
+ * ladder (Tavily if a key is wired, then DuckDuckGo) instead of jumping straight to the floor. */
+async function webSearch(query: string, opts: { searxngUrl: string; backend: string; keepaliveMin?: number; tavilyKey?: string }): Promise<string> {
   if (!query.trim()) return "Error: missing required argument: query";
-  const tavilyKey = process.env.TAVILY_API_KEY || "";
+  const tavilyKey = process.env.TAVILY_API_KEY || opts.tavilyKey || "";
   const pick = opts.backend || (opts.searxngUrl ? "searxng" : tavilyKey ? "tavily" : "duckduckgo");
   if (opts.keepaliveMin !== undefined) sidecar.keepaliveMin = opts.keepaliveMin;
   let note = "";
@@ -75,16 +76,22 @@ async function webSearch(query: string, opts: { searxngUrl: string; backend: str
           sidecar.touch();
           return `(searxng was asleep - container auto-started)\n` + fmtResults(rs);
         }
-        note = `(searxng failed: ${(error as Error).message}; ${woke.reason}; using DuckDuckGo)\n`;
+        note = `(searxng failed: ${(error as Error).message}; ${woke.reason})\n`;
       }
     } else if (pick === "tavily" && tavilyKey) {
       return fmtResults(await tavilySearch(query, tavilyKey));
     }
   } catch (error) {
-    note = `(${pick} failed: ${(error as Error).message}; using DuckDuckGo)\n`;
+    note = `(${pick} failed: ${(error as Error).message})\n`;
+  }
+  // The next rung: the primary failed and a Tavily key is wired -> use it before the free floor.
+  if (note && pick !== "tavily" && tavilyKey) {
+    try {
+      return note + "(falling back to Tavily)\n" + fmtResults(await tavilySearch(query, tavilyKey));
+    } catch (e) { note += `(tavily fallback failed: ${(e as Error).message})\n`; }
   }
   try {
-    const out = note + fmtResults(await ddgSearch(query));
+    const out = note + (note ? "(falling back to DuckDuckGo)\n" : "") + fmtResults(await ddgSearch(query));
     // Zero-config default AND Docker present -> one gentle nudge toward the private power-up.
     return pick === "duckduckgo" && !opts.searxngUrl && !tavilyKey ? out + setupHint() : out;
   } catch (e) { return `Error: web search failed: ${(e as Error).message}`; }

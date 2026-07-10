@@ -4,6 +4,19 @@ All notable changes to Neko Code are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
+## [Unreleased]
+
+### Added
+- **`neko setup tavily <key>`** — the no-Docker rung of the search ladder: verifies the key against the
+  live Tavily API, then wires it into the gitignored user config (`tavily_api_key`, redacted by
+  `neko config`; `TAVILY_API_KEY` env still wins). `web_search` failures now walk DOWN the ladder —
+  SearXNG down falls back to Tavily when a key is wired, then DuckDuckGo — instead of jumping straight
+  to the free floor.
+- **`neko doctor` names the model-shadowing footgun.** When a top-level `model` in a config file (or
+  `NEKO_MODEL`) overrides the selected profile's preset model — documented overlay order, but a real
+  trap: `--profile x` silently keeps the file's model — the `model` check turns into a WARN naming the
+  exact file, both models, and the fix.
+
 ## [0.9.0] — 2026-07-10
 
 ### Added

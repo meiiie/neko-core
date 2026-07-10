@@ -4,8 +4,9 @@ Two layers, simplest first.
 
 ## 1. Built-in (no setup, no API key)
 - **`web_search`** — pluggable backend, auto-picked: **SearXNG** (if `searxng_url` set) → **Tavily**
-  (if `TAVILY_API_KEY` set) → **DuckDuckGo** (default, zero-config). Falls back to DuckDuckGo if the
-  chosen backend errors. `neko doctor` shows the active one.
+  (if `TAVILY_API_KEY` env or `tavily_api_key` config set) → **DuckDuckGo** (default, zero-config).
+  Failures walk DOWN the ladder — SearXNG down falls to Tavily (when a key is wired), then DuckDuckGo —
+  never straight to the floor. `neko doctor` shows the active one.
 - **`web_fetch`** — fetches a URL as clean **Markdown** (deterministic HTML→markdown: keeps headings,
   links, lists; drops nav/footer/scripts — a flat text-strip used to throw links away). A **small page
   comes back whole with NO model call** (fast + cheap — the markdown IS the answer); a **large page
@@ -96,9 +97,11 @@ Measured impact (gpt-oss-120b, "iPhone 14 Pro rẻ nhất VN"): DuckDuckGo found
 the used market; **SearXNG surfaced Chợ Tốt / 24hStore / ClickBuy and found 7.99M** — same model, better
 harness. If SearXNG is down, `web_search` falls back to DuckDuckGo automatically.
 
-Or use **Tavily** (search built for agents) with a free key, env-only (never stored):
-`export TAVILY_API_KEY=tvly-...`. Force a backend with `"search_backend": "searxng" | "tavily" |
-"duckduckgo"`.
+Or use **Tavily** (search built for agents) with a free key — the no-Docker rung. One command
+verifies the key live and wires it into the gitignored user config (redacted by `neko config`):
+`neko setup tavily <key>` (get one at https://app.tavily.com), or keep it env-only with
+`export TAVILY_API_KEY=tvly-...` (env wins over config). Force a backend with
+`"search_backend": "searxng" | "tavily" | "duckduckgo"`.
 
 The rest of browser-search (Camofox / CloakBrowser for anti-bot, JS-heavy pages) is **browser
 automation** — that's §2's job. browser-search ships as a `SKILL.md`, so you can drop it straight

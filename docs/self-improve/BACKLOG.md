@@ -27,7 +27,10 @@ one never blocks another.
   when the daemon is down. Zero-config users with Docker get a one-time in-result tip pointing at
   `neko setup web`. Doctor reports the lifecycle state. Docs: WEB.md "Managed lifecycle" section (incl.
   the measured reason a no-Docker native aggregator is a dead end: Bing/Mojeek/Brave/Ecosia all wall
-  non-browser clients today; only DDG html parses). Still open (minor): README one-liner on the ladder.
+  non-browser clients today; only DDG html parses). Closed out 2026-07-10 evening: README ladder bullet,
+  `neko setup tavily <key>` (live key verify -> `tavily_api_key` in user config, redacted, env wins),
+  and the ladder now falls searxng -> Tavily (when a key is wired) -> DuckDuckGo instead of skipping
+  the middle rung. Unit-locked in web.test.ts.
 
 - [x] **MCP lazy-CONNECT (spawn on first call) — the top LOCAL-perf item.** *(done same day — spec cache
   keyed by name+config-hash registers the tool surface without spawning; ensureClient connects on first
@@ -77,17 +80,13 @@ one never blocks another.
   the glm-5.2 baseline (blocked on a fresh Z.ai key) and the CODING long-horizon tier — a 15-25 step
   multi-file feature / cross-module migration with a regression test.)*
 
-- [ ] **Doctor warning when a top-level `model:` shadows the profile's model.** Found live 2026-07-10:
-  `~/.neko-core/config.json` had a top-level `"model": "z-ai/glm-5.2"` — per the documented overlay order
-  (file beats profile preset) this silently OVERRODE every profile's model, so `--profile nvidia` sent
-  `z-ai/glm-5.2` to NVIDIA (404 material). Correct-by-design but a real footgun: the user selected a
-  profile precisely to get its model. Fix candidates (pick one): (a) `neko doctor` emits a WARN when the
-  active profile declares a model that the file's top-level `model` shadows, naming both; (b) flip the
-  precedence so an explicitly-selected profile's model wins over the base file's top-level model (audit
-  what else that changes). Verify: (a) a unit test that doctor's output contains the shadow warning when
-  both are set and differ, and stays silent when they agree or only one exists; (b) if precedence flips,
-  a config-loader test that `--profile X` yields X's model despite a top-level model, plus no regression
-  in the existing overlay tests.
+- [x] **Doctor warning when a top-level `model:` shadows the profile's model.** *(Done 2026-07-10,
+  option (a): `loadConfig` records `modelShadow` — the shadowing source (exact file path or
+  `NEKO_MODEL (env)`) + the profile's preset model — whenever a selected profile's preset model is
+  overridden by a top-level `model`. Behaviour unchanged (files still legitimately win); `neko doctor`
+  turns the `model` check into a WARN naming the source, both models, and the fix
+  (`profiles.<name>.model`). Unit-locked in config.test.ts (detect / three null cases / env source)
+  and doctor.test.ts. Precedence flip (b) rejected: file-beats-preset is documented and relied on.)*
 
 ## Research-seeded (turn into "Now" items as they're scoped)
 - [ ] Archive/population self-improvement (DGM): keep N improved branches, benchmark each, keep the best —

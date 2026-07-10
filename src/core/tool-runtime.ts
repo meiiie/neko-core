@@ -85,11 +85,14 @@ export class ToolRegistry {
    * mouse.ps1 routes clicks/strokes to the non-hijacking touch-injection path or the legacy SendInput path. */
   inputBackend = "";
   /** Web-search backend (set from config). searxng_url -> self-hosted metasearch; else Tavily (env
-   * key) -> agent search; else DuckDuckGo (free, zero-config). `searchBackend` forces one. */
+   * key or `tavily_api_key` config) -> agent search; else DuckDuckGo (free, zero-config).
+   * `searchBackend` forces one. */
   searxngUrl = "";
   searchBackend = ""; // "" = auto-pick by what's configured
   /** Idle minutes before a NEKO-STARTED SearXNG container auto-stops (0 = keep running). */
   searxngKeepalive = 15;
+  /** Tavily key from config (`tavily_api_key`, via `neko setup tavily`); TAVILY_API_KEY env wins. */
+  tavilyKey = "";
   /** Optional hosted scrape backend for web_fetch (renders JS/SPAs -> markdown). "" = direct fetch; "jina" = r.jina.ai. */
   scrapeBackend = "";
   /** Bash commands moved to the background (Ctrl+B); output keeps accumulating. Read via /bashes. */
@@ -279,7 +282,7 @@ export class ToolRegistry {
     // web_search: pick the best configured backend (SearXNG > Tavily > DuckDuckGo).
     if (name === "web_search") {
       if (!this.web) return "Error: web adapter is not configured";
-      return this.web.search(String(args.query ?? ""), { searxngUrl: this.searxngUrl, backend: this.searchBackend, keepaliveMin: this.searxngKeepalive });
+      return this.web.search(String(args.query ?? ""), { searxngUrl: this.searxngUrl, backend: this.searchBackend, keepaliveMin: this.searxngKeepalive, tavilyKey: this.tavilyKey });
     }
 
     // web_fetch: fetch the page, then (if a prompt + summarizer are available) extract just what

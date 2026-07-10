@@ -55,9 +55,12 @@ export function collectChecks(config: NekoConfig): Check[] {
     { status: "ok", name: "provider", detail: config.provider },
     { status: "ok", name: "profile", detail: config.profile ?? "none" },
     {
-      status: config.model ? "ok" : "warn",
+      status: config.model && !config.modelShadow ? "ok" : "warn",
       name: "model",
-      detail: config.model || "(unset - set model or pick a --profile)",
+      detail: config.modelShadow
+        ? `${config.model} - top-level 'model' in ${config.modelShadow.source} OVERRIDES profile '${config.profile}' ` +
+          `(preset: ${config.modelShadow.profileModel}) and every other profile; move it under profiles.${config.profile}.model or delete it`
+        : config.model || "(unset - set model or pick a --profile)",
     },
     { status: "ok", name: "max_steps", detail: String(config.maxSteps) },
     { status: "ok", name: "mode", detail: config.mode },
@@ -81,7 +84,8 @@ export function collectChecks(config: NekoConfig): Check[] {
       status: "ok",
       name: "web_search",
       detail: (() => {
-        const pick = config.searchBackend || (config.searxngUrl ? "searxng" : process.env.TAVILY_API_KEY ? "tavily" : "duckduckgo (set searxng_url or TAVILY_API_KEY for SOTA)");
+        const tavily = process.env.TAVILY_API_KEY || config.tavilyApiKey;
+        const pick = config.searchBackend || (config.searxngUrl ? "searxng" : tavily ? "tavily" : "duckduckgo (run `neko setup web` or `neko setup tavily <key>` for SOTA)");
         if (!pick.startsWith("searxng") || !config.searxngUrl) return pick;
         // Managed-lifecycle truth: a stopped container is fine - the first search wakes it.
         const state = new SearxngSidecar({ keepaliveMin: config.searxngKeepalive }).describe();

@@ -136,6 +136,9 @@ export class NekoConfig {
     public profile: string | null,
     public readonly profiles: Record<string, Profile>,
     private apiKeyFromFile: string,
+    /** Set when a top-level `model` (config file or NEKO_MODEL) overrides the selected profile's preset
+     * model — the #1 config trap: `--profile x` silently keeps the file's model. Doctor names the source. */
+    public modelShadow: { source: string; profileModel: string } | null = null,
   ) {}
 
   /** Adopt another config's provider profile IN PLACE — data, profile name, and resolved key — so the
@@ -146,6 +149,7 @@ export class NekoConfig {
     Object.assign(this.data, other.data);
     this.profile = other.profile;
     this.apiKeyFromFile = other.apiKeyFromFile;
+    this.modelShadow = other.modelShadow;
   }
 
   get provider(): string { return String(this.data.provider ?? "openai_compat"); }
@@ -261,6 +265,9 @@ export class NekoConfig {
   }
   /** Force a web_search backend ("searxng" | "tavily" | "duckduckgo"); "" = auto-pick. */
   get searchBackend(): string { return String(this.data.search_backend ?? ""); }
+  /** Tavily search key from config (`tavily_api_key`, wired by `neko setup tavily`; redacted when
+   * printed). TAVILY_API_KEY env still wins at search time. */
+  get tavilyApiKey(): string { return String(this.data.tavily_api_key ?? "").trim(); }
   /** Optional hosted scrape backend for web_fetch: "" = direct fetch (our HTML->markdown, no JS render);
    * "jina" = r.jina.ai (renders JS/SPAs, returns markdown; free + keyless for light use, PUBLIC pages only). */
   get scrapeBackend(): string { return String(this.data.scrape_backend ?? "").trim().toLowerCase(); }
@@ -353,14 +360,15 @@ export class NekoConfig {
 export function loadConfig(opts: { path?: string; profile?: string } = {}): NekoConfig {
   // Config files, lowest precedence first. `./neko.json` (project root) is the easy, discoverable
   // settings file (claude.json / codex style); keep secrets out of it (api_key -> ~/.neko-core or env).
-  const overlays: Record<string, any>[] = opts.path
-    ? [readOverlay(opts.path)]
+  const overlayPaths: string[] = opts.path
+    ? [opts.path]
     : [
-        readOverlay(join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)),
-        readOverlay(join(homeDir(), "neko.json")),
-        readOverlay(join(process.cwd(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)),
-        readOverlay(join(process.cwd(), "neko.json")),
+        join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME),
+        join(homeDir(), "neko.json"),
+        join(process.cwd(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME),
+        join(process.cwd(), "neko.json"),
       ];
+  const overlays: Record<string, any>[] = overlayPaths.map(readOverlay);
   const filesMerged = overlays.reduce((acc, o) => mergeDeep(acc, o), {} as Record<string, any>);
 
   // Built-in profiles are always available; files may add or override individual ones (merge, not replace).
@@ -410,7 +418,23 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
     merged[configKey] = BOOLEAN_ENV_KEYS.has(configKey) ? parseBooleanEnv(key, value ?? "") : value;
   }
 
-  return new NekoConfig(merged, selected, profiles, apiKeyFromFile);
+  // The #1 config trap: a top-level `model` in a file (or NEKO_MODEL) legitimately wins over the profile
+  // PRESET — but it wins over EVERY profile, so `--profile x` silently keeps sending the file's model.
+  // Behaviour is unchanged here; we just record the fact + its source so doctor can name it.
+  const profileModel = selected ? String(profiles[selected].model ?? "").trim() : "";
+  const effectiveModel = String(merged.model ?? "").trim();
+  let modelShadow: { source: string; profileModel: string } | null = null;
+  if (profileModel && effectiveModel && effectiveModel !== profileModel) {
+    let source = (process.env.NEKO_MODEL ?? "").trim() ? "NEKO_MODEL (env)" : "";
+    if (!source) {
+      for (let i = overlays.length - 1; i >= 0; i--) {
+        if (String(overlays[i].model ?? "").trim()) { source = overlayPaths[i]; break; }
+      }
+    }
+    if (source) modelShadow = { source, profileModel };
+  }
+
+  return new NekoConfig(merged, selected, profiles, apiKeyFromFile, modelShadow);
 }
 
 function readOverlay(path: string): Record<string, any> {

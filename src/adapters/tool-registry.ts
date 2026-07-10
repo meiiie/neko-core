@@ -13,6 +13,7 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
   registry.searxngUrl = cfg.searxngUrl;
   registry.searchBackend = cfg.searchBackend;
   registry.searxngKeepalive = cfg.searxngKeepalive;
+  registry.tavilyKey = cfg.tavilyApiKey;
   registry.scrapeBackend = cfg.scrapeBackend;
   registry.vision = cfg.vision;
   registry.noTools = options.noTools ?? false;
@@ -44,6 +45,7 @@ export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRe
   target.searxngUrl = source.searxngUrl;
   target.searchBackend = source.searchBackend;
   target.searxngKeepalive = source.searxngKeepalive;
+  target.tavilyKey = source.tavilyKey;
   target.scrapeBackend = source.scrapeBackend;
   return target;
 }

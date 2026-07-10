@@ -82,6 +82,36 @@ test("web_search WAKES a stopped managed SearXNG container and retries once (Oll
   expect(searxCalls).toBe(2); // failed once, woke, retried exactly once
 });
 
+test("web_search uses a CONFIG-wired Tavily key (neko setup tavily) with no env var set", async () => {
+  globalThis.fetch = (async (url: any) => {
+    expect(String(url)).toContain("api.tavily.com");
+    return json({ results: [{ title: "Cfg", url: "https://c.io", content: "from config key" }] });
+  }) as any;
+  const r = reg();
+  r.tavilyKey = "tvly-from-config";
+  const out = await r.execute("web_search", { query: "x" });
+  expect(out).toContain("Cfg");
+});
+
+test("the ladder, not the cliff: searxng fails -> Tavily (key wired) -> never touches DuckDuckGo", async () => {
+  let ddgCalled = false;
+  globalThis.fetch = (async (url: any) => {
+    const u = String(url);
+    if (u.includes("searx")) throw new Error("down");
+    if (u.includes("api.tavily.com")) return json({ results: [{ title: "Rung2", url: "https://t.io", content: "tavily caught it" }] });
+    ddgCalled = true;
+    throw new Error("no DDG expected");
+  }) as any;
+  const r = reg();
+  r.searxngUrl = "https://searx.local/";
+  r.tavilyKey = "tvly-x";
+  const out = await r.execute("web_search", { query: "x" });
+  expect(out).toContain("searxng failed: down");
+  expect(out).toContain("falling back to Tavily");
+  expect(out).toContain("Rung2");
+  expect(ddgCalled).toBe(false);
+});
+
 test("zero-config search with Docker present shows the setup tip ONCE per process", async () => {
   globalThis.fetch = (async () =>
     new Response('<a class="result__a" href="https://d.com">DDG hit</a>', { status: 200, headers: { "content-type": "text/html" } })) as any;

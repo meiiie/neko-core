@@ -3,6 +3,31 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-10 (evening) — handoff polish: doctor names the model-shadow trap; the search ladder gets its middle rung
+
+Post-v0.9.0 close-out session (the owner's last with this collaborator — priorities chosen for a solo
+user running Neko day-to-day):
+
+- **Doctor warns on model shadowing.** The overlay order (file beats profile preset) is documented and
+  correct, but it bit us live on 2026-07-10: a top-level `model` in `~/.neko-core/config.json` silently
+  overrode every profile, so `--profile nvidia` kept sending `z-ai/glm-5.2`. `loadConfig` now records
+  `modelShadow` (the exact source file or `NEKO_MODEL (env)` + the preset model) whenever a selected
+  profile's preset model is overridden; behaviour is unchanged, but `neko doctor`'s `model` check turns
+  WARN and names the file, both models, and the fix (`profiles.<name>.model`). Verified live against the
+  owner's real config. Precedence flip rejected: file-beats-preset is documented and relied upon.
+- **`neko setup tavily <key>`** — the no-Docker rung, onboarded in one command: live key verification
+  against api.tavily.com (nothing written on failure), then `tavily_api_key` into the gitignored user
+  config (auto-redacted by `neko config`'s SECRET_KEY regex; env `TAVILY_API_KEY` wins at search time).
+  Key threaded config -> registry -> WebPort opts; subagents inherit it.
+- **The ladder stopped skipping its middle rung.** `web_search` used to fall from a failed SearXNG
+  straight to DuckDuckGo even when a Tavily key existed. Failures now walk DOWN: SearXNG -> Tavily (if
+  wired) -> DuckDuckGo, with honest notes at each step. README gained the ladder bullet; WEB.md updated.
+
+Verification: dual typecheck clean; **485/485 tests, 1717 assertions, 55 files** (one load-induced 15s
+timeout on the first run, green twice after); policy PASS; doctor demonstrates the new WARN on the real
+config. New tests: config modelShadow (4), doctor shadow WARN (1), config-wired Tavily key + ladder
+fallback (2).
+
 ## 2026-07-10 — reliability/security sweep: composition, streaming, permissions, config
 
 Owner asked to resolve every issue from the repository audit and to keep MCP web as a first-class

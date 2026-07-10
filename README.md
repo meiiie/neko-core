@@ -36,6 +36,11 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
   app/file/URL launch. With vision enabled, a desktop screenshot returns directly to the model as the
   next observation; text-only drivers can pass the saved capture to a separate vision model. Path-escape
   is refused.
+- **Web, a ladder not a cliff** — `web_search` + `web_fetch` work with zero config (DuckDuckGo).
+  `neko setup web` upgrades to a private multi-engine SearXNG that Neko wakes on demand and stops when
+  idle (Docker, Ollama-style); `neko setup tavily <key>` wires hosted agent-search with no Docker at
+  all. Each rung falls back to the next automatically. See
+  [`docs/process/WEB.md`](docs/process/WEB.md).
 - **Permission modes** — `default` / `accept-edits` / `plan` / `auto`, cycled with **Shift+Tab** (a
   *named* bounded-autonomy state, audited by `neko policy`); a seatbelt blocks catastrophic shell.
 - **Fullscreen terminal UI** — an app-owned, flicker-free viewport (alt-screen, like vim/htop):

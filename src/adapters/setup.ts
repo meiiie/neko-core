@@ -79,19 +79,50 @@ async function setupSearxng(log: (m: string) => void): Promise<boolean> {
   return false;
 }
 
-/** `neko setup [web|searxng|browser]`. Returns a process exit code. */
-export async function setupWeb(component: string, log: (m: string) => void): Promise<number> {
+/** Verify a Tavily key against the live API, then wire it into user config (`tavily_api_key`,
+ * gitignored + redacted when printed). The no-Docker rung of the search ladder: hosted, free tier,
+ * one key. The key itself is NEVER echoed. */
+async function setupTavily(keyArg: string, log: (m: string) => void): Promise<boolean> {
+  const key = (keyArg || process.env.TAVILY_API_KEY || "").trim();
+  if (!key) {
+    log("  [skip] Tavily — no key. Get a free one at https://app.tavily.com, then either:");
+    log("           neko setup tavily <key>      (note: the key lands in your shell history)");
+    log("           or set TAVILY_API_KEY and re-run `neko setup tavily`.");
+    return false;
+  }
+  log("  ...   verifying the key against api.tavily.com...");
+  try {
+    const res = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: key, query: "neko setup probe", max_results: 1 }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) { log(`  [fail] Tavily rejected the key (HTTP ${res.status}) — nothing written. Check it at https://app.tavily.com.`); return false; }
+  } catch (e) {
+    log(`  [fail] could not reach api.tavily.com (${(e as Error).message}) — nothing written; re-run when online.`);
+    return false;
+  }
+  patchUserConfig({ tavily_api_key: key });
+  log("  [ok]   Tavily key verified + wired into ~/.neko-core/config.json (redacted in `neko config`).");
+  log("  [ok]   ladder: SearXNG (if configured) > Tavily > DuckDuckGo — Tavily also catches SearXNG failures.");
+  return true;
+}
+
+/** `neko setup [web|searxng|browser|tavily]`. Returns a process exit code. */
+export async function setupWeb(component: string, log: (m: string) => void, extra = ""): Promise<number> {
   const which = (component || "web").toLowerCase();
-  if (!["web", "searxng", "browser"].includes(which)) {
-    log(`Unknown setup target '${which}'. Use: neko setup [web|searxng|browser]`);
+  if (!["web", "searxng", "browser", "tavily"].includes(which)) {
+    log(`Unknown setup target '${which}'. Use: neko setup [web|searxng|browser|tavily]`);
     return 2;
   }
   log(`Setting up the web stack (${which})...`);
   let allOk = true;
   if (which === "web" || which === "browser") allOk = setupBrowser(log) && allOk;
   if (which === "web" || which === "searxng") allOk = (await setupSearxng(log)) && allOk;
+  if (which === "tavily") allOk = (await setupTavily(extra, log)) && allOk;
   log(allOk
-    ? "\nDone. Verify: `neko doctor` (web_search: searxng) and `neko mcp` (browser). See docs/process/WEB.md."
-    : "\nFinished with [skip]/[warn]/[fail] above — the rest is wired. Fix those and re-run `neko setup web`.");
+    ? "\nDone. Verify: `neko doctor` (web_search) and `neko mcp` (browser). See docs/process/WEB.md."
+    : `\nFinished with [skip]/[warn]/[fail] above — the rest is wired. Fix those and re-run \`neko setup ${which}\`.`);
   return allOk ? 0 : 1;
 }
