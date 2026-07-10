@@ -21,4 +21,11 @@ test("relay client keeps terminal semantics and accessible control names", () =>
   expect(script).toContain('t.className = "turn user"');
   expect(script).toContain('t.className = "turn neko"');
   expect(html).toContain('class="pr">&gt;</span>');
+  expect(html).toContain('id="hversion">v0.9.0</small>');
+  expect(html).toContain('Try: "explain src/agent.ts"   or   /help');
+  expect(html).toContain("width: 100%; max-width: none; height: 100dvh");
+  expect(script).toContain('e.key === "Escape"');
+  expect(script).toContain('e.key === "Tab" && e.shiftKey');
+  expect(script).toContain('"\\u0000neko:cycle-mode"');
+  expect(script).toContain("log.scrollHeight - log.clientHeight - log.scrollTop");
 });

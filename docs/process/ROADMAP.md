@@ -276,7 +276,10 @@ cost/token tracking · MCP client · single-binary distribution.
   registers multiple opaque Neko host ids, with per-host WebSocket/queue/interrupt routing and E2E-sealed
   title/cwd/model/busy presence. The terminal-style phone client switches sessions, preserves separate
   drafts/transcripts/history, and runs different hosts concurrently. Local Wrangler + two live host
-  sockets proved isolated encrypted round trips; production redeploy intentionally awaits owner approval.
+  sockets proved isolated encrypted round trips. **(e) CLI parity:** relay now shares the CLI's full-screen
+  banner/transcript/composer/footer hierarchy; encrypted presence includes provider/profile/effort/mode/
+  context, Shift+Tab changes the real host permission mode, Esc interrupts, and session/settings overlays
+  do not resize the terminal surface. Production redeploy intentionally awaits owner approval.
 - [x] **G12** Tool-use parity with Claude Code (atomic-level audit of agent.ts/tool-runtime.ts/mcp.ts).
   Verdict: the orchestration (loop, read-only parallel fan-out, loop-guard, abort, compact, hooks,
   permissions, adversarial check) and MCP (stdio/http/sse + OAuth + resources + prompts + reconnect)

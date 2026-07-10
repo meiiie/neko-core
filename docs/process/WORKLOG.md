@@ -3,6 +3,29 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-11 - relay UI now shares the CLI shell and interaction contract
+
+The owner compared the live relay and CLI side by side. The first relay pass had the right colors but
+the wrong product shape: an 820px centered web column, a sticky web header, boxed controls, a visible
+send button, and relay-specific status text. The CLI is a full-screen terminal surface with a three-line
+banner, a flexible transcript, a rule-framed prompt, and permission/context state at the bottom.
+
+The relay now uses that exact hierarchy and spacing contract: full viewport with the CLI gutters and
+background, `Neko Code vX` plus model/provider/profile/effort and cwd, an independently scrolling
+terminal transcript with hidden scroll chrome, the same prompt placeholder and cyan `>`, and
+`mode / model / ctx%` in the footer. Session and pairing controls are overlays, so opening them cannot
+resize the transcript; desktop-only relay controls stay out of the normal CLI view until the banner is
+hovered or keyboard-focused, while remaining visible on mobile.
+
+The host's encrypted presence now carries version, provider, profile, effort, permission mode, and
+context percentage. Browser Shift+Tab cycles the real host permission mode without consuming the draft
+or adding a fake transcript turn; Esc interrupts the active turn; Enter streams normally; native textarea
+selection/copy remains intact. Live browser checks covered draft preservation, mode cycling, send,
+partial streaming, Stop, two-session switching, and overlay geometry. The reference and post-change
+screenshots are in the ignored `.artifacts/relay-cli-parity-2026-07-11/` audit folder.
+Verification: typecheck clean; 514/514 tests (1827 assertions); doctor resolves NVIDIA GLM 5.2;
+policy PASS; compiled binary UI and real-PTY input probes PASS.
+
 ## 2026-07-11 - relay v3: one E2E pairing, multiple real Neko sessions
 
 Screenshot-first audit confirmed that relay v2 only resembled the terminal by color: its paired state
@@ -26,8 +49,7 @@ status, session drawer, keyboard/ARIA labels, and reduced-motion behavior. Unit 
 routing/queue isolation, encrypted metadata, client syntax/contracts, v1/v2 fallback, streaming,
 interrupt and reconnect. A local Wrangler Durable Object with two real host WebSockets completed two
 encrypted turns concurrently and returned the correct GLM/Fable model + process log for each. The
-post-change browser screenshot is still pending because the selected browser connection disappeared
-during the audit; no deployment was made.
+later CLI-parity pass captured and inspected the live browser surface; no deployment was made.
 
 ## 2026-07-11 - image wire semantics + current model routes
 

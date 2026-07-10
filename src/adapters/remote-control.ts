@@ -25,7 +25,20 @@ export interface RemoteHandlers {
   /** Run one turn. `onDelta` (when given) streams output chunks as they arrive; `onAct` streams
    * one-line tool activity (the same "Read(src/agent.ts)" lines the terminal shows). */
   run: (text: string, onDelta?: (chunk: string) => void, onAct?: (line: string) => void) => Promise<RunResult>;
-  status: () => { busy: boolean; model?: string; messages?: number; title?: string; cwd?: string; sessionId?: string };
+  status: () => {
+    busy: boolean;
+    model?: string;
+    messages?: number;
+    title?: string;
+    cwd?: string;
+    sessionId?: string;
+    version?: string;
+    provider?: string;
+    profile?: string;
+    effort?: string;
+    mode?: string;
+    contextPercent?: number;
+  };
   interrupt: () => boolean;
 }
 export interface RemoteControl {

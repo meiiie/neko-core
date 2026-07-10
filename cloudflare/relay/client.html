@@ -121,13 +121,88 @@
   .status.ok .l { color: var(--ok); } .status.ok .l .d { background: var(--ok); }
   .status.warn .l { color: var(--amber); } .status.warn .l .d { background: var(--amber); }
   .status.err .l { color: var(--err); } .status.err .l .d { background: var(--err); }
+
+  /* CLI parity shell: the web relay uses the same full-screen geometry as the Ink UI. */
+  :root { --bg: #111; --line: #555; }
+  body { font-size: 16px; line-height: 1.45; }
+  .app {
+    width: 100%; max-width: none; height: 100dvh; min-height: 0; margin: 0;
+    padding: 0 34px 12px; overflow: hidden;
+  }
+  @media (min-width: 860px) { .app { border: 0; } }
+  header {
+    position: relative; top: auto; z-index: 10; flex: none;
+    grid-template-columns: auto minmax(0, 1fr) auto; gap: 20px;
+    padding: 9px 0 0; background: transparent; backdrop-filter: none; border: 0;
+  }
+  .mark { font-size: 18px; line-height: 1.35; letter-spacing: 1px; }
+  .htitle { font-size: 19px; line-height: 1.25; }
+  .htitle small { font-size: inherit; }
+  .hstatus { display: block; margin: 0; color: var(--dim); font-size: 16px; line-height: 1.35; }
+  .hstatus .dot { display: none; }
+  .hhost { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.35; }
+  .hactions { gap: 12px; padding-top: 4px; opacity: 0; transition: opacity .15s; }
+  header:hover .hactions, .hactions:focus-within { opacity: 1; }
+  .hostpick, .gear {
+    width: auto; min-width: 0; height: auto; padding: 2px 0; border: 0; border-radius: 0;
+    color: var(--dim); background: transparent; font: 13px/1.3 var(--mono);
+  }
+  .hostpick.open, .hostpick:active, .gear.open { border: 0; color: var(--amber); }
+  .gear svg { display: none; }
+  .gear::after { content: "settings"; }
+
+  .sessions, .cfg {
+    position: fixed; z-index: 30; top: 42px; right: 34px; width: min(460px, calc(100vw - 68px));
+    background: #111; border: 1px solid var(--line); box-shadow: 0 16px 48px #000a;
+  }
+  .sessions { padding: 7px; }
+  .sessions.show { display: grid; }
+  .cfg { display: none; max-height: min(70vh, 520px); overflow: auto; padding: 13px 16px 15px; }
+  .cfg.show { display: grid; max-height: min(70vh, 520px); padding: 13px 16px 15px; border-bottom-color: var(--line); }
+
+  #log { min-height: 0; flex: 1; overflow: auto; padding: 14px 0 22px; scrollbar-width: none; }
+  #log::-webkit-scrollbar { width: 0; height: 0; }
+  .turn.user { margin-top: 18px; }
+  .turn.user .mk { color: var(--cyan); }
+  .turn.neko { margin-top: 8px; }
+  .proc { font-size: 15px; line-height: 1.65; }
+
+  .foot { position: relative; bottom: auto; flex: none; background: transparent; backdrop-filter: none; border: 0; padding: 0; }
+  .composer { align-items: center; gap: 10px; padding: 5px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .composer .pr { color: var(--cyan); padding: 8px 0; font-size: 18px; }
+  .composer textarea { max-height: 128px; padding: 8px 0; font: 16px/1.4 var(--mono); caret-color: var(--cyan); }
+  .send {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+  .status { padding: 8px 16px 0; font-size: 16px; line-height: 1.35; }
+  .status .l { gap: 0; }
+
+  @media (max-width: 700px) {
+    body { font-size: 14px; }
+    .app { padding: 0 14px 8px; }
+    header { gap: 10px; }
+    .mark { font-size: 14px; }
+    .htitle { font-size: 15px; }
+    .hstatus, .hhost { font-size: 12px; }
+    .hactions { gap: 8px; opacity: .7; }
+    .hostpick, .gear { font-size: 11px; }
+    .sessions, .cfg { top: 58px; right: 14px; width: calc(100vw - 28px); }
+    .proc { font-size: 13px; }
+    .composer textarea { font-size: 14px; }
+    .status { padding: 7px 4px 0; font-size: 12px; }
+    .send {
+      position: static; width: 34px; height: 34px; padding: 0; margin: 0; overflow: visible;
+      clip: auto; white-space: normal; border: 1px solid var(--line); border-radius: 3px;
+    }
+  }
 </style></head>
 <body>
 <div class="app">
   <header>
     <div class="mark">ハ・・マ</div>
     <div class="hgrid">
-      <div class="htitle"><span id="htitle">Neko Code</span> <small>· remote</small></div>
+      <div class="htitle"><span id="htitle">Neko Code</span> <small id="hversion">v0.9.0</small></div>
       <div class="hstatus" id="hstatus"><span class="dot"></span><span id="hstatustxt">not paired</span></div>
       <div class="hhost" id="hhost"></div>
     </div>
@@ -147,7 +222,7 @@
   <div class="foot">
     <form class="composer" id="f">
       <span class="pr">&gt;</span>
-      <textarea id="m" rows="1" aria-label="message Neko" placeholder='Try: "run the tests"   or   /help' autocomplete="off" autocapitalize="sentences" enterkeyhint="send"></textarea>
+      <textarea id="m" rows="1" aria-label="message Neko" placeholder='Try: "explain src/agent.ts"   or   /help' autocomplete="off" autocapitalize="sentences" enterkeyhint="send"></textarea>
       <button class="send" id="send" type="submit" aria-label="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
     </form>
     <div class="status" id="status" role="status" aria-live="polite"><span class="l"><span id="statustxt">⏵⏵ not paired</span></span><span class="r" id="statusr">remote</span></div>
@@ -194,20 +269,26 @@
     const working = pending.has(currentHost());
     const meta = selected?.meta || {};
     hostModel = meta.model ? String(meta.model).split("/").pop() : hostModel;
-    const cls = !p ? "" : kidMismatch ? "err" : online ? "ok" : online === false ? "warn" : "";
-    const txt = !p ? "not paired"
+    const connection = !p ? "not paired"
       : kidMismatch ? "key mismatch"
-      : working ? "working · E2E · streaming"
+      : working ? "working - E2E streaming"
       : !hosts.length ? "paired · waiting for Neko"
       : online === null ? "paired · E2E"
       : online ? "online · E2E · streaming" : "offline · queued";
-    setStatus($("hstatus"), $("hstatustxt"), cls, txt);
-    // The bottom bar mirrors the CLI's mode indicator: `⏵⏵ state` left, `model · remote` right.
-    setStatus($("status"), $("statustxt"), cls, "⏵⏵ " + (!p ? "not paired" : kidMismatch ? "key mismatch" : working ? "working" : online ? "online · E2E" : online === false ? "offline" : "E2E"));
-    $("statusr").textContent = (hostModel ? hostModel + " · " : "") + "remote";
-    $("htitle").textContent = meta.title || "Neko Code";
+    const headerBits = [hostModel || "no model", meta.provider, meta.profile];
+    if (meta.effort) headerBits.push(meta.effort + " effort");
+    $("hstatus").className = "hstatus";
+    $("hstatustxt").textContent = headerBits.filter(Boolean).join(" · ");
+    const mode = meta.mode || (!p ? "not paired" : "remote");
+    const modeClass = kidMismatch ? "err" : mode === "auto" ? "err" : mode === "accept-edits" ? "warn" : online === false ? "warn" : "";
+    setStatus($("status"), $("statustxt"), modeClass, "⏵⏵ " + mode + (working ? " · esc to interrupt" : " · shift+tab to cycle"));
+    const pct = Number.isFinite(Number(meta.contextPercent)) ? Math.max(0, Math.min(100, Math.round(Number(meta.contextPercent)))) : 0;
+    $("statusr").textContent = (hostModel || "no model") + " · " + pct + "% ctx";
+    $("htitle").textContent = "Neko Code";
+    $("hversion").textContent = "v" + (meta.version || "0.9.0");
     $("hhost").textContent = meta.cwd || location.host;
     $("hostpick").textContent = hosts.length ? `${hosts.length} session${hosts.length === 1 ? "" : "s"}` : "sessions";
+    $("hostpick").title = connection + (meta.title ? " - " + meta.title : "");
     $("hostpick").disabled = !p;
     paintComposer();
     syncEmpty();
@@ -331,7 +412,15 @@
 
   const grow = () => { m.style.height = "auto"; m.style.height = Math.min(m.scrollHeight, 128) + "px"; };
   m.addEventListener("input", () => { drafts[currentHost()] = m.value; grow(); });
-  m.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("f").requestSubmit(); } });
+  m.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("f").requestSubmit(); return; }
+    if (e.key === "Escape" && pending.has(currentHost())) { e.preventDefault(); $("f").requestSubmit(); return; }
+    if (e.key === "Tab" && e.shiftKey && paired() && currentHost() && !pending.has(currentHost())) {
+      e.preventDefault();
+      m.dataset.control = "cycle-mode";
+      $("f").requestSubmit();
+    }
+  });
 
   // E2E (AES-256-GCM; key = PBKDF2(secret)) — wire-compatible with the Node host (relay-crypto.ts).
   const b64 = (u) => btoa(String.fromCharCode(...u)), ub64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -382,12 +471,11 @@
   // Stick to the bottom only when the reader IS at the bottom - streaming must not yank the page
   // down while they scrolled up to read something (the terminal behaves the same way).
   const nearBottom = () => {
-    const d = document.scrollingElement;
-    return d.scrollHeight - d.clientHeight - d.scrollTop < 160;
+    return log.scrollHeight - log.clientHeight - log.scrollTop < 160;
   };
   const scrollEnd = (el, force) => {
     if (!force && !nearBottom()) return;
-    requestAnimationFrame(() => (el || log.lastElementChild)?.scrollIntoView({ block: "end", behavior: "smooth" }));
+    requestAnimationFrame(() => { log.scrollTo({ top: log.scrollHeight, behavior: "smooth" }); });
   };
   function userTurn(text, host = currentHost()) {
     const e = $("_empty"); if (e) e.remove();
@@ -439,14 +527,16 @@
   }
   function setAwaiting(host, on) {
     if (on) pending.set(host, true); else pending.delete(host);
-    renderSessions(); paintComposer();
+    renderSessions(); refresh();
   }
 
   $("f").onsubmit = async (e) => {
     e.preventDefault();
     const host = currentHost();
+    const silentControl = m.dataset.control === "cycle-mode";
+    delete m.dataset.control;
     if (pending.has(host)) { try { await fetch(base() + "/interrupt", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), hostId: host || undefined }) }); } catch {} return; }
-    const msg = m.value.trim(); if (!msg) return;
+    const msg = silentControl ? "\u0000neko:cycle-mode" : m.value.trim(); if (!msg) return;
     if (!paired()) {
       // Guide, don't scold: the pairing card is right there - put the cursor in its paste box.
       const p = $("_paste");
@@ -456,9 +546,9 @@
     }
     if (kidMismatch) { const nk = nekoTurn(); nekoErr(nk, "The pairing secret doesn't match Neko's. Run /relay qr on your computer and re-scan (or paste the fresh link in settings)."); return; }
     if (!host) { const nk = nekoTurn(); nekoErr(nk, "No Neko session is registered yet. Run /relay in a local Neko terminal first."); return; }
-    m.value = ""; drafts[host] = ""; grow();
-    userTurn(msg, host);
+    if (!silentControl) { m.value = ""; drafts[host] = ""; grow(); userTurn(msg, host); }
     const nk = nekoTurn(host);
+    if (silentControl) nk.t.style.display = "none";
     render(nk, { text: "", act: [], done: false });
     setAwaiting(host, true);
     try {
@@ -494,7 +584,11 @@
       }
       if (!done && !saw) nekoErr(nk, "No reply — is /relay running on your computer?");
     } catch (err) { nekoErr(nk, "error: " + err.message); }
-    finally { rememberTurn(host, msg, nk.state); setAwaiting(host, false); if (currentHost() === host) m.focus(); checkAlive(); }
+    finally {
+      if (silentControl) nk.t.remove(); else rememberTurn(host, msg, nk.state);
+      setAwaiting(host, false); if (currentHost() === host) m.focus(); checkAlive();
+      if (silentControl) setTimeout(checkAlive, 1_200);
+    }
   };
 
   refresh(); checkAlive();

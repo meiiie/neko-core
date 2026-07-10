@@ -43,6 +43,7 @@ import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../
 import { loadOrCreatePairing, revokeRemoteRelay, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
+import { VERSION } from "../shared/version.ts";
 import { expandPlaceholders } from "../shared/paste-collapse.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
@@ -170,6 +171,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [approvalFlash, setApprovalFlash] = useState<ApprovalFlash | null>(null);
   const [pendingMulti, setPendingMulti] = useState(false);
   const [mode, setMode] = useState<PermissionMode>(yolo ? "auto" : cfg.mode);
+  const modeRef = useRef<PermissionMode>(mode);
+  useEffect(() => {
+    modeRef.current = mode;
+    relayRef.current?.refresh();
+  }, [mode]);
   const [elapsed, setElapsed] = useState(0);
   const [queued, setQueued] = useState(0);
   const [step, setStep] = useState(0);
@@ -1250,6 +1256,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // remote sink if given), report status, interrupt.
   const makeRemoteHandlers = (): RemoteHandlers => ({
     run: async (msg, onDelta, onAct) => {
+      if (msg === "\u0000neko:cycle-mode") {
+        const next = nextMode(modeRef.current);
+        modeRef.current = next;
+        setMode(next);
+        return { reply: `mode: ${next}` };
+      }
       // Busy = WAIT for the current turn (the desktop's input queue does), never drop the phone's
       // message. Bounded so a wedged turn eventually answers honestly instead of hanging the client.
       const w0 = Date.now();
@@ -1286,6 +1298,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       title: titleTaskRef.current || "Neko Core",
       cwd: process.cwd(),
       sessionId: sessionIdRef.current,
+      version: VERSION,
+      provider: cfg.provider,
+      profile: cfg.profile ?? undefined,
+      effort: cfg.effort || undefined,
+      mode: modeRef.current,
+      contextPercent: (() => {
+        const cost = agentRef.current!.cost;
+        const messages = agentRef.current!.messages;
+        if (estCacheRef.current.len !== messages.length) {
+          estCacheRef.current = { len: messages.length, val: estimateTokens(messages) };
+        }
+        const used = cost.lastPrompt || estCacheRef.current.val;
+        return ctxPercent(used, cfg.contextWindow);
+      })(),
     }),
     interrupt: () => { if (controllerRef.current) { controllerRef.current.abort(); return true; } return false; },
   });
