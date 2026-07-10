@@ -19,12 +19,15 @@ one never blocks another.
   bench (no-regression) on changes touching `src/core` or `src/adapters/providers`. Verify: gate catches a
   deliberate token/pass regression.
 
-- [ ] **End-user search onboarding ladder (Docker optional) — docs + UX.** (Owner, 2026-07-03: "để sau".)
-  Today's finding: Docker Desktop idles ~5.7GB RAM for SearXNG; the INDEX->VERIFY skill architecture makes
-  DDG-only correct for catalog price surveys, so Docker is a per-session power-up, not a dependency. TODO
-  when picked up: document the 3-tier ladder (default DDG / TAVILY_API_KEY / `neko setup web` + Docker) in
-  README + a first-run hint; consider a gentle in-chat hint when searxng_url is configured but unreachable
-  ("start Docker Desktop or remove searxng_url"). Verify: docs render + the hint fires only in that state.
+- [x] **End-user search onboarding ladder (Docker optional) — docs + UX.** (Owner, 2026-07-03: "để sau";
+  landed 2026-07-10 as the MANAGED SEARXNG LIFECYCLE, owner-directed.) The ladder is now self-driving:
+  `web_search` wakes the stopped `neko-searxng` container on demand (docker start + health poll + one
+  retry), auto-stops it after `searxng_keepalive` idle minutes (default 15, 0 = always-on) incl. a
+  process-exit cleanup, never touches a container Neko didn't start, and falls through the ladder fast
+  when the daemon is down. Zero-config users with Docker get a one-time in-result tip pointing at
+  `neko setup web`. Doctor reports the lifecycle state. Docs: WEB.md "Managed lifecycle" section (incl.
+  the measured reason a no-Docker native aggregator is a dead end: Bing/Mojeek/Brave/Ecosia all wall
+  non-browser clients today; only DDG html parses). Still open (minor): README one-liner on the ladder.
 
 - [x] **MCP lazy-CONNECT (spawn on first call) — the top LOCAL-perf item.** *(done same day — spec cache
   keyed by name+config-hash registers the tool surface without spawning; ensureClient connects on first

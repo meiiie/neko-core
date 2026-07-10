@@ -52,7 +52,7 @@ export interface McpTools {
 
 /** Web content acquisition (implemented by an adapter, injected by the host). */
 export interface WebPort {
-  search(query: string, opts: { searxngUrl: string; backend: string }): Promise<string>;
+  search(query: string, opts: { searxngUrl: string; backend: string; keepaliveMin?: number }): Promise<string>;
   fetch(
     root: string,
     args: Record<string, any>,

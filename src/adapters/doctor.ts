@@ -5,6 +5,7 @@
 import type { NekoConfig } from "./config.ts";
 import { detectSandbox } from "../core/sandbox.ts";
 import { cachedRefreshRate, resolveUiFps } from "./display.ts";
+import { SearxngSidecar } from "./sidecar.ts";
 import { VERSION } from "../shared/version.ts";
 
 export interface Check {
@@ -79,7 +80,13 @@ export function collectChecks(config: NekoConfig): Check[] {
     {
       status: "ok",
       name: "web_search",
-      detail: config.searchBackend || (config.searxngUrl ? "searxng" : process.env.TAVILY_API_KEY ? "tavily" : "duckduckgo (set searxng_url or TAVILY_API_KEY for SOTA)"),
+      detail: (() => {
+        const pick = config.searchBackend || (config.searxngUrl ? "searxng" : process.env.TAVILY_API_KEY ? "tavily" : "duckduckgo (set searxng_url or TAVILY_API_KEY for SOTA)");
+        if (!pick.startsWith("searxng") || !config.searxngUrl) return pick;
+        // Managed-lifecycle truth: a stopped container is fine - the first search wakes it.
+        const state = new SearxngSidecar({ keepaliveMin: config.searxngKeepalive }).describe();
+        return state ? `searxng (${state})` : "searxng (no local container found - is it remote, or run `neko setup web`)";
+      })(),
     },
     { status: config.baseUrl ? "ok" : "warn", name: "base_url", detail: config.baseUrl || "(unset)" },
     {

@@ -253,6 +253,12 @@ export class NekoConfig {
 
   /** Self-hosted SearXNG base URL for web_search metasearch ("" = off). */
   get searxngUrl(): string { return String(this.data.searxng_url ?? ""); }
+  /** Idle minutes before a Neko-STARTED SearXNG container auto-stops (Ollama-style keep_alive;
+   * 0 = keep running). Only containers Neko itself woke are ever stopped. */
+  get searxngKeepalive(): number {
+    const n = Number(this.data.searxng_keepalive);
+    return Number.isFinite(n) && n >= 0 ? n : 15;
+  }
   /** Force a web_search backend ("searxng" | "tavily" | "duckduckgo"); "" = auto-pick. */
   get searchBackend(): string { return String(this.data.search_backend ?? ""); }
   /** Optional hosted scrape backend for web_fetch: "" = direct fetch (our HTML->markdown, no JS render);

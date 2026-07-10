@@ -49,6 +49,25 @@ API, then `neko doctor` shows `web_search: searxng`. Sub-targets: `neko setup se
 `neko setup browser`. (No Docker? It says so and you can use a Tavily key instead.) The
 manual recipe below is what it automates.
 
+### Managed lifecycle - the Ollama pattern applied to search (2026-07-10)
+After setup, the user never touches Docker again. The container has NO restart policy on
+purpose: `web_search` **wakes it on demand** (a connection failure triggers one
+`docker start` + health poll, then the search retries - first search after idle pays ~5-10s)
+and **auto-stops it after `searxng_keepalive` idle minutes** (default 15; `0` = keep running)
+- including a process-exit cleanup so a short `neko run` can't leak a running container.
+A container Neko did NOT start is never stopped, and Docker Desktop itself is never launched
+or killed. Honest boundary: this frees the CONTAINER's RAM between uses; Docker Desktop's own
+baseline is the user's call. Daemon down -> the search falls through the ladder fast (~100ms)
+instead of blocking. `neko doctor` reports the truth ("container stopped - starts on demand").
+Zero-config users with Docker installed get a ONE-TIME tip in web_search results: ask Neko to
+run `neko setup web` (the normal bash approval gate applies) and the private backend is theirs.
+Why not "SearXNG without Docker"? Measured 2026-07-10: SearXNG has no native-Windows support
+(WSL/Docker are the official paths), and a native in-binary multi-engine aggregator is a dead
+end today - live probes from a VN residential IP: Bing serves 0 organic results to non-browser
+clients, Mojeek walls with a captcha, Brave 429s, Ecosia 403s; only DuckDuckGo's html endpoint
+still parses. The anti-bot arms race is exactly what the SearXNG community maintains full-time
+- so Neko manages the sidecar instead of reimplementing it.
+
 ### Upgrading web_search to SOTA — free, self-hosted (SearXNG)
 [browser-search](https://github.com/Johell1NS/browser-search)'s core idea is **SearXNG** — a
 metasearch engine that aggregates Google/Bing/DDG/… into one JSON API, free and unlimited. Run one

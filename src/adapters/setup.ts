@@ -51,8 +51,11 @@ async function setupSearxng(log: (m: string) => void): Promise<boolean> {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "settings.yml"), SETTINGS_YML, "utf-8");
   spawnSync("docker", ["rm", "-f", "neko-searxng"], { encoding: "utf8", timeout: 30000 }); // idempotent
+  // No --restart policy on purpose: Neko manages the lifecycle (Ollama-style) - web_search auto-starts
+  // the container on demand and auto-stops it after `searxng_keepalive` idle minutes, so it costs zero
+  // RAM between uses instead of idling forever.
   const run = spawnSync("docker", [
-    "run", "-d", "--name", "neko-searxng", "--restart", "unless-stopped",
+    "run", "-d", "--name", "neko-searxng",
     "-p", `${SEARXNG_PORT}:8080`, "-v", `${dir}:/etc/searxng`, "searxng/searxng:latest",
   ], { encoding: "utf8", timeout: 240000 });
   if (run.status !== 0) { log(`  [fail] SearXNG container — ${(run.stderr || run.stdout || "").trim().slice(0, 200)}`); return false; }
@@ -66,6 +69,7 @@ async function setupSearxng(log: (m: string) => void): Promise<boolean> {
         if (Array.isArray(data.results)) {
           patchUserConfig({ searxng_url: SEARXNG_BASE, search_backend: "searxng" });
           log(`  [ok]   SearXNG -> ${SEARXNG_BASE} (JSON API, ${data.results.length} results), config wired.`);
+          log("  [ok]   lifecycle is managed: web_search wakes the container on demand and stops it after 15 idle minutes (searxng_keepalive; 0 = keep running).");
           return true;
         }
       }

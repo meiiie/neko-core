@@ -88,6 +88,8 @@ export class ToolRegistry {
    * key) -> agent search; else DuckDuckGo (free, zero-config). `searchBackend` forces one. */
   searxngUrl = "";
   searchBackend = ""; // "" = auto-pick by what's configured
+  /** Idle minutes before a NEKO-STARTED SearXNG container auto-stops (0 = keep running). */
+  searxngKeepalive = 15;
   /** Optional hosted scrape backend for web_fetch (renders JS/SPAs -> markdown). "" = direct fetch; "jina" = r.jina.ai. */
   scrapeBackend = "";
   /** Bash commands moved to the background (Ctrl+B); output keeps accumulating. Read via /bashes. */
@@ -277,7 +279,7 @@ export class ToolRegistry {
     // web_search: pick the best configured backend (SearXNG > Tavily > DuckDuckGo).
     if (name === "web_search") {
       if (!this.web) return "Error: web adapter is not configured";
-      return this.web.search(String(args.query ?? ""), { searxngUrl: this.searxngUrl, backend: this.searchBackend });
+      return this.web.search(String(args.query ?? ""), { searxngUrl: this.searxngUrl, backend: this.searchBackend, keepaliveMin: this.searxngKeepalive });
     }
 
     // web_fetch: fetch the page, then (if a prompt + summarizer are available) extract just what

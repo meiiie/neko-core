@@ -969,3 +969,33 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
   a linked cell; frame-diff OSC-8-accept/OSC-52-reject, copy-strip, selection-over-link; the legacy
   "url hidden" test updated to the new contract: carried, not visible). **463/463** (1662 assertions);
   TS 7 + TS 5.9 clean; policy PASS; binary build + UI/input probes PASS.
+
+## 2026-07-10 - managed SearXNG lifecycle: the Ollama pattern applied to search (owner ask)
+- Owner ask: can users get local SearXNG without ever thinking about Docker - auto-run when needed,
+  auto-off when idle? Researched before building. (a) SearXNG has NO native-Windows support (official
+  docs + maintainer discussion #4029: WSL/Docker are the paths) - a venv-on-Windows product path is a
+  dead end. (b) The "reimplement a native in-binary multi-engine aggregator" idea DIED on live data:
+  probes from a VN residential IP show Bing serves 0 organic results to non-browser clients, Mojeek
+  answers with a captcha page, Brave 429s and Ecosia 403s on the FIRST request; only DuckDuckGo's html
+  endpoint still parses. Fighting that arms race is SearXNG's community full-time job - do not
+  reimplement it, manage it. (c) The precedent for "heavy backend, zero thought" is Ollama's
+  keep_alive: load on demand, unload after idle. (d) RRF (Cormack et al., SIGIR 2009) noted as the
+  fusion standard if a multi-engine merge ever becomes viable again.
+- Built `adapters/sidecar.ts` (SearxngSidecar, injectable exec/probe): a searxng search that cannot
+  connect wakes the `neko-searxng` container ONCE per process (docker start + health poll <=8s) and the
+  search retries; every healthy search re-arms an idle timer that `docker stop`s it after
+  `searxng_keepalive` minutes (config, default 15, 0 = always-on); a PROCESS-EXIT hook stops a container
+  we woke so a short `neko run` can't leak it (design gap caught during review, unit-locked). Hard
+  rules: a container Neko did not start is NEVER stopped; Docker Desktop is never launched/killed; a
+  dead daemon fails in ~100ms and the search falls through the ladder (Tavily/DDG) - infra never blocks
+  a search. `setup web` drops --restart unless-stopped (the lifecycle owns it now); doctor reports the
+  managed state; zero-config users with Docker get a ONE-TIME in-result tip ("ask me to run
+  `neko setup web`") - the agent runs it under the normal bash approval gate, which is the "UI asks the
+  user" without blocking an agent turn on infrastructure consent.
+- LIVE end-to-end proof on this machine: container Exited (6h, zero RAM) -> real search "gia iphone 15
+  128gb" woke it and returned Vietnamese product results with exact URLs (cellphones.com.vn,
+  thegioididong.com) in 9.5s total -> 3s test keepalive -> container back to Exited(0). The procurement
+  loop's search tier now costs zero RAM while idle and zero user attention while active.
+- Verification: TS 7 + TS 5.9 clean; **479/479 tests** (+16: 13 sidecar lifecycle + 3 web dispatcher
+  wake/hint; existing fallback test hardened against real-docker side effects via an inert sidecar);
+  policy PASS; doctor line verified live ("searxng (container stopped - starts on demand...)").

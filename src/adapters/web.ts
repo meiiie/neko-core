@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { debug, messageOf } from "../shared/debug.ts";
 import type { WebPort } from "../core/ports.ts";
+import { dockerAvailable, SearxngSidecar } from "./sidecar.ts";
 
 const WEB_HEADERS = { "User-Agent": "Mozilla/5.0 (NekoCore)" };
 
@@ -29,21 +30,64 @@ function requireArg(args: Record<string, any>, key: string): string {
   return String(value);
 }
 
-/** web_search dispatcher: SearXNG (self-hosted metasearch) > Tavily (agent search, env key) >
- * DuckDuckGo (free, zero-config). Falls back to DuckDuckGo if the chosen backend errors. */
-async function webSearch(query: string, opts: { searxngUrl: string; backend: string }): Promise<string> {
+/** The managed SearXNG lifecycle (per process). Tests swap it via __setSidecarForTest. */
+let sidecar = new SearxngSidecar();
+export function __setSidecarForTest(s: SearxngSidecar): void { sidecar = s; }
+/** One-time-per-process setup hint state (and its test hooks). */
+let hintShown = false;
+let dockerProbe: () => boolean = dockerAvailable;
+export function __resetHintForTest(probe?: () => boolean): void {
+  hintShown = false;
+  dockerProbe = probe ?? dockerAvailable;
+}
+
+/** When search runs on the zero-config default while Docker is sitting right there, say so ONCE -
+ * the user can simply ask Neko to run `neko setup web` (the normal bash approval gate applies). */
+function setupHint(): string {
+  if (hintShown) return "";
+  hintShown = true;
+  if (!dockerProbe()) return "";
+  return "\n(tip: Docker detected - ask me to run 'neko setup web' and searches switch to a private local multi-engine backend (SearXNG), auto-started on demand)";
+}
+
+/** web_search dispatcher: SearXNG (self-hosted metasearch, managed on-demand container) > Tavily
+ * (agent search, env key) > DuckDuckGo (free, zero-config). Falls back to DuckDuckGo if the chosen
+ * backend errors. A stopped managed SearXNG container is WOKEN once and the search retried - the
+ * Ollama keep_alive pattern - so the power-up costs zero RAM while idle. */
+async function webSearch(query: string, opts: { searxngUrl: string; backend: string; keepaliveMin?: number }): Promise<string> {
   if (!query.trim()) return "Error: missing required argument: query";
   const tavilyKey = process.env.TAVILY_API_KEY || "";
   const pick = opts.backend || (opts.searxngUrl ? "searxng" : tavilyKey ? "tavily" : "duckduckgo");
+  if (opts.keepaliveMin !== undefined) sidecar.keepaliveMin = opts.keepaliveMin;
+  let note = "";
   try {
-    if (pick === "searxng" && opts.searxngUrl) return fmtResults(await searxngSearch(query, opts.searxngUrl));
-    if (pick === "tavily" && tavilyKey) return fmtResults(await tavilySearch(query, tavilyKey));
+    if (pick === "searxng" && opts.searxngUrl) {
+      try {
+        const rs = await searxngSearch(query, opts.searxngUrl);
+        sidecar.touch(); // healthy search re-arms the idle auto-stop (managed containers only)
+        return fmtResults(rs);
+      } catch (error) {
+        // Connection-class failure: wake the managed container once, retry once. Any other state
+        // (daemon down, user's own container, API broken) reports fast and honest - never blocks.
+        const woke = await sidecar.ensureUp(opts.searxngUrl);
+        if (woke.ok) {
+          const rs = await searxngSearch(query, opts.searxngUrl);
+          sidecar.touch();
+          return `(searxng was asleep - container auto-started)\n` + fmtResults(rs);
+        }
+        note = `(searxng failed: ${(error as Error).message}; ${woke.reason}; using DuckDuckGo)\n`;
+      }
+    } else if (pick === "tavily" && tavilyKey) {
+      return fmtResults(await tavilySearch(query, tavilyKey));
+    }
   } catch (error) {
-    // fall through to the free engine below, noting why
-    const note = `(${pick} failed: ${(error as Error).message}; using DuckDuckGo)\n`;
-    try { return note + fmtResults(await ddgSearch(query)); } catch (e) { return `Error: web search failed: ${(e as Error).message}`; }
+    note = `(${pick} failed: ${(error as Error).message}; using DuckDuckGo)\n`;
   }
-  try { return fmtResults(await ddgSearch(query)); } catch (e) { return `Error: web search failed: ${(e as Error).message}`; }
+  try {
+    const out = note + fmtResults(await ddgSearch(query));
+    // Zero-config default AND Docker present -> one gentle nudge toward the private power-up.
+    return pick === "duckduckgo" && !opts.searxngUrl && !tavilyKey ? out + setupHint() : out;
+  } catch (e) { return `Error: web search failed: ${(e as Error).message}`; }
 }
 
 /** SearXNG JSON API (self-hosted metasearch; aggregates Google/Bing/DDG/... — free, unlimited). */
