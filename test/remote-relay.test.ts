@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import type { RemoteHandlers } from "../src/adapters/remote-control.ts";
 import { open, seal } from "../src/adapters/relay-crypto.ts";
-import { loadOrCreatePairing, secretKid, startRemoteRelay } from "../src/adapters/remote-relay.ts";
+import { loadOrCreatePairing, revokeRemoteRelay, secretKid, startRemoteRelay } from "../src/adapters/remote-relay.ts";
 
 /** A tiny in-memory relay double standing in for the Cloudflare Worker, so we can prove the host
  * (agent) side end-to-end: the host dials OUT and long-polls; a client submits an instruction; the
@@ -230,6 +230,34 @@ test("remote-relay v2: /register carries the secret's public fingerprint (kid) f
   } finally { server.stop(); }
 });
 
+test("remote-relay v3: registers one opaque host id and E2E-sealed session metadata", async () => {
+  let regBody: any = null;
+  const server = Bun.serve({
+    port: 4710,
+    async fetch(req) {
+      const u = new URL(req.url);
+      if (u.pathname === "/register") { regBody = await req.json(); return Response.json({ ok: true, v: 1 }); }
+      if (u.pathname === "/pull") return Response.json({});
+      return new Response("nf", { status: 404 });
+    },
+  });
+  const secret = "metadata-secret";
+  const richHandlers: RemoteHandlers = {
+    run: async (m) => ({ reply: m }),
+    status: () => ({ busy: false, model: "z-ai/glm-5.2", messages: 7, title: "relay audit", cwd: "E:/work/neko", sessionId: "local-session" }),
+    interrupt: () => true,
+  };
+  try {
+    const rc = await startRemoteRelay("http://127.0.0.1:4710", richHandlers, { secret, hostId: "host-alpha", pollMs: 30 });
+    expect(rc.hostId).toBe("host-alpha");
+    expect(regBody.hostId).toBe("host-alpha");
+    expect(JSON.parse(open(secret, regBody.meta))).toEqual(expect.objectContaining({
+      model: "z-ai/glm-5.2", title: "relay audit", cwd: "E:/work/neko", sessionId: "local-session",
+    }));
+    rc.stop();
+  } finally { server.stop(); }
+});
+
 test("remote-relay v2: an {t:interrupt} frame reaches handlers.interrupt MID-TURN (phone Stop)", async () => {
   const relay = makeWsDouble(4705);
   let interrupted = false;
@@ -290,6 +318,18 @@ test("pairing persists across restarts (same QR, phone stays paired) and `new` r
   expect(c.fresh).toBe(true);
   expect(c.session).not.toBe(a.session); // /relay new = a genuinely fresh pairing
   expect(trio(loadOrCreatePairing(false, dir))).toEqual(trio(c)); // ...which then persists too
+});
+
+test("relay pairing revocation authenticates the old hub before rotating keys", async () => {
+  let authorized = false;
+  const server = Bun.serve({ port: 4711, async fetch(req) {
+    authorized = req.headers.get("authorization") === "Bearer old-token" && (await req.json()).session === "old-session";
+    return new Response("", { status: authorized ? 200 : 401 });
+  } });
+  try {
+    expect(await revokeRemoteRelay("http://127.0.0.1:4711/", { session: "old-session", token: "old-token" })).toBe(true);
+    expect(authorized).toBe(true);
+  } finally { server.stop(); }
 });
 
 test("remote-relay: a wrong token can't submit to the session", async () => {

@@ -7,6 +7,13 @@ All notable changes to Neko Code are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Relay v3 is a real multi-session remote terminal.** One persistent pairing is now a hub for every
+  running Neko process: the phone lists/switches sessions, routes Send/Stop/offline queues independently,
+  runs different sessions concurrently, and preserves a bounded transcript plus draft per session.
+  Session title, cwd, model, and busy state are E2E-encrypted metadata; the Worker routes only opaque
+  host ids. The old centered paired card is gone in favor of the terminal transcript, with the same
+  `> ` prompt/process lines/status model and accessible control labels. `/relay new` now revokes the
+  entire old hub before rotating, while v1/v2 compatibility remains.
 - **Images are inline `[Image #N]` tokens now.** Alt+V drops the token at the caret — it travels
   inside your sentence, and deleting the token detaches the image (the Claude Code affordance).
   The separate "image attached" banner and badge are gone.
@@ -19,7 +26,7 @@ All notable changes to Neko Code are documented here. The format follows
 - `/model` now saves the model into the **active profile** instead of a top-level `model` that
   silently shadowed every profile (the footgun `neko doctor` warns about — /model itself was
   recreating it).
-- **Current frontier routes are explicit profiles.** `--profile nvidia-glm` runs `z-ai/glm-5.2`
+- **Current frontier routes are explicit profiles.** `--profile nvidia` defaults to `z-ai/glm-5.2`
   with `NVIDIA_API_KEY`; `--profile fable` runs `claude-fable-5` with native vision and a
   profile-specific 2576px / 4.5MB clipboard-image budget.
 

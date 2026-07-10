@@ -3,11 +3,40 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-11 - relay v3: one E2E pairing, multiple real Neko sessions
+
+Screenshot-first audit confirmed that relay v2 only resembled the terminal by color: its paired state
+was a large empty card, one persisted pairing collided across concurrent Neko processes, the Worker
+routed to its first host socket, process activity was truncated to 12 lines, and the phone had no
+session switcher, per-session drafts/history, or independent in-flight state.
+
+Relay v3 makes the durable pairing a hub. Every running TUI gets an opaque host id; the Worker keeps
+per-host socket tags and durable queues, and `/sessions`, `/send`, `/alive`, `/interrupt`, and v1 pull
+resolve the intended host. Reconnect replaces a stale socket for the same host. Title/cwd/model/busy
+presence is AES-GCM sealed at the host, so Cloudflare still cannot read project metadata. The phone
+decrypts the session list, switches transcript + draft state, can run two sessions concurrently, and
+Stop targets only the active one. Fifty completed turns per host stay on the paired device; Unpair
+purges them. `/relay new` revokes the complete old hub before rotating so another running host cannot
+leave an old phone authorized. Activity envelopes retain the most recent 200 lines rather than silently
+showing 12.
+
+The web surface now uses the existing terminal design language directly: selected session title/path
+in the banner, terminal-flow empty state instead of the paired card, `> ` input, process lines, model
+status, session drawer, keyboard/ARIA labels, and reduced-motion behavior. Unit tests cover worker
+routing/queue isolation, encrypted metadata, client syntax/contracts, v1/v2 fallback, streaming,
+interrupt and reconnect. A local Wrangler Durable Object with two real host WebSockets completed two
+encrypted turns concurrently and returned the correct GLM/Fable model + process log for each. The
+post-change browser screenshot is still pending because the selected browser connection disappeared
+during the audit; no deployment was made.
+
 ## 2026-07-11 - image wire semantics + current model routes
 
 The owner corrected the provider diagnosis: GLM 5.2 is still available as `z-ai/glm-5.2` through
 NVIDIA using `NVIDIA_API_KEY`; the rejected keys block only the direct Z.ai route. Added an explicit
-`nvidia-glm` profile and a current `fable` profile (`claude-fable-5`, native vision).
+default for the existing `nvidia` profile and added a current `fable` profile (`claude-fable-5`, native vision).
+The real configured NVIDIA route then completed a no-tools probe exactly as requested
+(`GLM_NVIDIA_OK`, one call), proving endpoint + stored key + model together rather than relying only on
+doctor output.
 
 The vision audit then found a real semantic bug. The TUI placed `[Image #N]` at the caret, but
 `Agent.run()` moved every actual image after the complete text, and NVIDIA's `<img>` conversion moved

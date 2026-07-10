@@ -39,6 +39,9 @@
   .hstatus.err { color: var(--err); } .hstatus.err .dot { background: var(--err); }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent); } 70%,100% { box-shadow: 0 0 0 6px transparent; } }
   .hhost { color: var(--faint); font-size: 12px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hactions { display: flex; align-items: center; gap: 7px; }
+  .hostpick { min-width: 30px; height: 30px; padding: 0 9px; border: 1px solid var(--line); background: transparent; border-radius: 7px; color: var(--dim); font: 11.5px var(--mono); cursor: pointer; }
+  .hostpick.open, .hostpick:active { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, var(--line)); }
   .gear { width: 30px; height: 30px; border: 1px solid var(--line); background: transparent; border-radius: 7px; color: var(--dim); display: grid; place-items: center; cursor: pointer; transition: color .15s, border-color .15s; }
   .gear:active { transform: scale(.92); }
   .gear.open { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, var(--line)); }
@@ -52,6 +55,18 @@
   .cfg input:focus { outline: 0; border-color: var(--amber); box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 22%, transparent); }
   .cfg .btn { justify-self: start; background: transparent; border: 1px solid var(--line2); color: var(--dim); border-radius: 7px; padding: 7px 12px; font: 12.5px var(--mono); cursor: pointer; }
   .cfg .btn:active { transform: scale(.96); }
+
+  /* One pairing is a hub; this terminal-like drawer switches among running/recent Neko sessions. */
+  .sessions { display: none; padding: 7px 10px 9px; border-bottom: 1px solid var(--line); background: #0a0a0a; }
+  .sessions.show { display: grid; gap: 4px; }
+  .session { width: 100%; display: grid; grid-template-columns: 9px minmax(0,1fr) auto; gap: 9px; align-items: center; text-align: left; border: 1px solid transparent; border-radius: 6px; padding: 7px 8px; background: transparent; color: var(--ink); font: 12.5px/1.35 var(--mono); cursor: pointer; }
+  .session:hover, .session.active { border-color: var(--line2); background: #111; }
+  .session .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .session.online .sdot { background: var(--ok); }
+  .session .smain { min-width: 0; }
+  .session .sname, .session .spath { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session .spath, .session .smodel { color: var(--faint); font-size: 11px; }
+  .session.busy .smodel { color: var(--amber); }
 
   /* Transcript = terminal flow: `> ` user echo (cyan), neko reply, `●` tool lines. No chat bubbles. */
   #log { flex: 1; padding: 14px 16px 24px; }
@@ -85,6 +100,7 @@
   .pair input:focus { outline: 0; border-color: var(--amber); box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 22%, transparent); }
   .pair .adv { margin-top: 14px; color: var(--faint); font-size: 12.5px; cursor: pointer; user-select: none; }
   .pair .note { color: var(--faint); font-size: 11.5px; line-height: 1.7; margin-top: 18px; }
+  .idle { color: var(--faint); padding: 6px 0; font-size: 12.5px; }
 
   /* Composer = the terminal's rule-framed `>` prompt + a bottom status bar. */
   .foot { position: sticky; bottom: 0; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
@@ -111,27 +127,30 @@
   <header>
     <div class="mark">ハ・・マ</div>
     <div class="hgrid">
-      <div class="htitle">Neko Code <small>· remote</small></div>
+      <div class="htitle"><span id="htitle">Neko Code</span> <small>· remote</small></div>
       <div class="hstatus" id="hstatus"><span class="dot"></span><span id="hstatustxt">not paired</span></div>
       <div class="hhost" id="hhost"></div>
     </div>
+    <div class="hactions"><button class="hostpick" id="hostpick" type="button" aria-label="switch Neko session" aria-expanded="false">sessions</button>
     <button class="gear" id="gear" aria-label="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+    </div>
   </header>
+  <div class="sessions" id="sessions" role="listbox" aria-label="Neko sessions"></div>
   <div class="cfg" id="cfg">
-    <label>relay URL</label><input id="relay" autocomplete="off" placeholder="https://neko-relay.<you>.workers.dev">
-    <label>session</label><input id="session" autocomplete="off" placeholder="from /relay">
-    <label>token</label><input id="token" autocomplete="off" type="password" placeholder="from /relay">
-    <label>secret (end-to-end key)</label><input id="secret" autocomplete="off" type="password" placeholder="from /relay">
+    <label for="relay">relay URL</label><input id="relay" autocomplete="off" placeholder="https://neko-relay.<you>.workers.dev">
+    <label for="session">session</label><input id="session" autocomplete="off" placeholder="from /relay">
+    <label for="token">token</label><input id="token" autocomplete="off" type="password" placeholder="from /relay">
+    <label for="secret">secret (end-to-end key)</label><input id="secret" autocomplete="off" type="password" placeholder="from /relay">
     <button class="btn" id="unpair" type="button">unpair this device</button>
   </div>
-  <div id="log"></div>
+  <div id="log" role="log" aria-live="polite" aria-relevant="additions text"></div>
   <div class="foot">
     <form class="composer" id="f">
       <span class="pr">&gt;</span>
-      <textarea id="m" rows="1" placeholder='Try: "run the tests"   or   /help' autocomplete="off" autocapitalize="sentences" enterkeyhint="send"></textarea>
+      <textarea id="m" rows="1" aria-label="message Neko" placeholder='Try: "run the tests"   or   /help' autocomplete="off" autocapitalize="sentences" enterkeyhint="send"></textarea>
       <button class="send" id="send" type="submit" aria-label="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
     </form>
-    <div class="status" id="status"><span class="l"><span id="statustxt">⏵⏵ not paired</span></span><span class="r" id="statusr">remote</span></div>
+    <div class="status" id="status" role="status" aria-live="polite"><span class="l"><span id="statustxt">⏵⏵ not paired</span></span><span class="r" id="statusr">remote</span></div>
   </div>
 </div>
 <script>
@@ -139,6 +158,12 @@
   const log = $("log"), relay = $("relay"), session = $("session"), token = $("token"), secret = $("secret"), m = $("m");
   relay.value = location.origin;
   $("hhost").textContent = location.host;
+  let hosts = [], activeHost = "", online = null, kidMismatch = false, hostModel = "";
+  const pending = new Map(), loadedHosts = new Set(), drafts = {};
+  let historyByHost = {};
+  try { activeHost = localStorage.nekoActiveHost || ""; historyByHost = JSON.parse(localStorage.nekoRelayHistory || "{}"); } catch {}
+  const currentHost = () => activeHost || hosts[0]?.id || "";
+  const selectedHost = () => hosts.find((h) => h.id === currentHost()) || null;
 
   const save = () => { try { localStorage.nekoSession = session.value; localStorage.nekoToken = token.value; localStorage.nekoSecret = secret.value; } catch {} };
   function applyPairing(str) {
@@ -161,19 +186,30 @@
   const base = () => relay.value.trim().replace(/\/+$/, "");
   const auth = () => ({ authorization: "Bearer " + token.value.trim() });
 
-  let online = null, kidMismatch = false, hostModel = "";
   function setStatus(el, txtEl, cls, txt) { el.className = el.className.split(" ")[0] + (cls ? " " + cls : ""); txtEl.textContent = txt; }
   function refresh() {
     const p = paired();
+    const selected = selectedHost();
+    if (selected) online = !!selected.online;
+    const working = pending.has(currentHost());
+    const meta = selected?.meta || {};
+    hostModel = meta.model ? String(meta.model).split("/").pop() : hostModel;
     const cls = !p ? "" : kidMismatch ? "err" : online ? "ok" : online === false ? "warn" : "";
     const txt = !p ? "not paired"
       : kidMismatch ? "key mismatch"
+      : working ? "working · E2E · streaming"
+      : !hosts.length ? "paired · waiting for Neko"
       : online === null ? "paired · E2E"
       : online ? "online · E2E · streaming" : "offline · queued";
     setStatus($("hstatus"), $("hstatustxt"), cls, txt);
     // The bottom bar mirrors the CLI's mode indicator: `⏵⏵ state` left, `model · remote` right.
-    setStatus($("status"), $("statustxt"), cls, "⏵⏵ " + (!p ? "not paired" : kidMismatch ? "key mismatch" : online ? "online · E2E" : online === false ? "offline" : "E2E"));
+    setStatus($("status"), $("statustxt"), cls, "⏵⏵ " + (!p ? "not paired" : kidMismatch ? "key mismatch" : working ? "working" : online ? "online · E2E" : online === false ? "offline" : "E2E"));
     $("statusr").textContent = (hostModel ? hostModel + " · " : "") + "remote";
+    $("htitle").textContent = meta.title || "Neko Code";
+    $("hhost").textContent = meta.cwd || location.host;
+    $("hostpick").textContent = hosts.length ? `${hosts.length} session${hosts.length === 1 ? "" : "s"}` : "sessions";
+    $("hostpick").disabled = !p;
+    paintComposer();
     syncEmpty();
   }
   async function myKid() {
@@ -182,25 +218,92 @@
     const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
     return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
   }
+  async function loadSessions() {
+    const r = await fetch(base() + "/sessions?session=" + encodeURIComponent(session.value.trim()), { headers: auth() });
+    if (!r.ok) {
+      // v2 Worker compatibility: it has one implicit host and ignores the extra hostId field.
+      if (r.status === 404 && !hosts.length) { hosts = [{ id: "default", online, meta: { title: "Neko Code" } }]; activeHost = "default"; renderSessions(); switchHost(activeHost, false); }
+      return;
+    }
+    const data = await r.json();
+    const k = await key();
+    const decoded = [];
+    for (const row of Array.isArray(data.hosts) ? data.hosts : []) {
+      let meta = {};
+      try {
+        if (k && row.meta?.iv && row.meta?.ct) meta = JSON.parse(await unseal(k, row.meta));
+        else if (row.meta && !row.meta.iv) meta = row.meta;
+      } catch { /* wrong key is reported by kid; keep routing metadata opaque */ }
+      decoded.push({ ...row, meta });
+    }
+    hosts = decoded.sort((a, b) => Number(b.online) - Number(a.online) || Number(b.lastSeen || 0) - Number(a.lastSeen || 0));
+    if (!hosts.some((h) => h.id === activeHost)) activeHost = hosts.find((h) => h.online)?.id || hosts[0]?.id || "";
+    renderSessions();
+    if (activeHost) switchHost(activeHost, false);
+  }
+  function renderSessions() {
+    const box = $("sessions"); box.replaceChildren();
+    for (const host of hosts) {
+      const meta = host.meta || {};
+      const button = document.createElement("button");
+      button.type = "button"; button.role = "option";
+      button.className = "session" + (host.online ? " online" : "") + ((meta.busy || pending.has(host.id)) ? " busy" : "") + (host.id === currentHost() ? " active" : "");
+      button.setAttribute("aria-selected", host.id === currentHost() ? "true" : "false");
+      const dot = document.createElement("span"); dot.className = "sdot";
+      const main = document.createElement("span"); main.className = "smain";
+      const name = document.createElement("span"); name.className = "sname"; name.textContent = meta.title || "Neko session";
+      const path = document.createElement("span"); path.className = "spath"; path.textContent = meta.cwd || (host.online ? "online" : "offline");
+      const model = document.createElement("span"); model.className = "smodel"; model.textContent = (meta.busy || pending.has(host.id)) ? "working" : (meta.model ? String(meta.model).split("/").pop() : (host.online ? "ready" : "offline"));
+      main.append(name, path); button.append(dot, main, model);
+      button.onclick = () => switchHost(host.id);
+      box.appendChild(button);
+    }
+  }
+  function switchHost(id, close = true) {
+    const previous = currentHost(); if (previous) drafts[previous] = m.value;
+    activeHost = id || "";
+    try { localStorage.nekoActiveHost = activeHost; } catch {}
+    for (const turn of log.querySelectorAll(".turn")) turn.hidden = turn.dataset.host !== activeHost;
+    restoreHost(activeHost);
+    const selected = selectedHost(); online = selected ? !!selected.online : null; hostModel = "";
+    m.value = drafts[activeHost] || ""; grow();
+    if (close) { $("sessions").classList.remove("show"); $("hostpick").classList.remove("open"); $("hostpick").setAttribute("aria-expanded", "false"); m.focus(); }
+    emptyKey = "";
+    renderSessions(); refresh();
+  }
   async function checkAlive() {
     if (!paired()) { online = null; kidMismatch = false; refresh(); return; }
     try {
-      const r = await fetch(base() + "/alive?session=" + encodeURIComponent(session.value.trim()), { headers: auth() });
-      if (r.ok) { const g = await r.json(); online = !!g.online; const mine = await myKid(); kidMismatch = !!(g.kid && mine && g.kid !== mine); }
+      await loadSessions();
+      const hid = currentHost();
+      const r = await fetch(base() + "/alive?session=" + encodeURIComponent(session.value.trim()) + (hid ? "&host=" + encodeURIComponent(hid) : ""), { headers: auth() });
+      if (r.ok) {
+        const g = await r.json(); online = !!g.online;
+        const selected = selectedHost(); if (selected) selected.online = online;
+        const mine = await myKid(); kidMismatch = !!(g.kid && mine && g.kid !== mine);
+      }
       else { online = null; kidMismatch = false; }
     } catch { online = null; }
     refresh();
   }
   for (const el of [relay, session, token, secret]) el.oninput = () => { save(); online = null; kidMismatch = false; refresh(); checkAlive(); };
   $("gear").onclick = () => { const c = $("cfg"); c.classList.toggle("show"); $("gear").classList.toggle("open", c.classList.contains("show")); };
-  $("unpair").onclick = () => { session.value = token.value = secret.value = ""; save(); $("cfg").classList.remove("show"); $("gear").classList.remove("open"); online = null; kidMismatch = false; refresh(); };
+  $("hostpick").onclick = () => { const s = $("sessions"); s.classList.toggle("show"); $("hostpick").classList.toggle("open", s.classList.contains("show")); $("hostpick").setAttribute("aria-expanded", s.classList.contains("show") ? "true" : "false"); };
+  $("unpair").onclick = () => {
+    for (const hostId of pending.keys()) fetch(base() + "/interrupt", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), hostId }) }).catch(() => {});
+    session.value = token.value = secret.value = ""; save(); hosts = []; activeHost = ""; online = null; kidMismatch = false;
+    historyByHost = {}; for (const key of Object.keys(drafts)) delete drafts[key];
+    try { localStorage.removeItem("nekoRelayHistory"); localStorage.removeItem("nekoActiveHost"); } catch {}
+    $("cfg").classList.remove("show"); $("gear").classList.remove("open"); $("sessions").classList.remove("show");
+    log.replaceChildren(); loadedHosts.clear(); emptyKey = ""; refresh();
+  };
 
   // Empty state: pairing card when unpaired, a quiet hint when paired-but-idle, nothing once chatting.
-  function hasTurns() { return !!log.querySelector(".turn"); }
+  function hasTurns() { return [...log.querySelectorAll(".turn")].some((turn) => turn.dataset.host === currentHost()); }
   let emptyKey = ""; // rebuild only on a STATE change - the periodic refresh must not wipe the paste box mid-typing
   function syncEmpty() {
     if (hasTurns()) { emptyKey = "turns"; const gone = $("_empty"); if (gone) gone.remove(); return; }
-    const state = paired() ? "paired" : "unpaired";
+    const state = paired() ? "paired:" + currentHost() + ":" + hosts.length : "unpaired";
     if (state === emptyKey && $("_empty")) return;
     emptyKey = state;
     let e = $("_empty");
@@ -218,10 +321,16 @@
       e.className = "pair";
       e.innerHTML = '<img src="data:image/png;base64,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CgkAACgkAACgkAAAgEICAAAKCQAAKCQAAKCQAACAQgIAAAoJAAAoJAAAoJAAAIBCAgAACgkAACgkAACgkAAAgEICAAAKCQAAKCQAAKCQAACAQgIAAAoJAAAoJAAAoJAAAIBCAgAACgkAACgkAACgkAAAgEICAAAKCQAAKCQAAKCQAACAQgIAAAoJAAAoJAAAoJAAAIBCAgAACgkAACgkAACgkAAAgEICAAAKCQAAKCQAAKCQAACAQgIAAAoJAAAoJAAAoJAAAIBCAgAACgkAACgkAACgkAAAgEICAAAKCQAAKCQAAKCQAACAQgIAAAoJAAAoJAAAoJAAAIBCAgAACgkAACgkAACgkAAAgEICAAAKCQAAKCQAAKCQAACAQgIAAAoJAAAoJAAAoJAAAIBCAgAACgkAACgkAACgkAAAgEICAAAKCQAAKCQAAKCQAACAQgIAAAoJAAAoJAAAoJAAAIBCAgAACgkAACgkAACgkAAAgEICAAAKCQAAKCQAAKCQAACAQgIAAAoJAAAoJAAAoJAAAIBCAgAACgkAACgkAACgkAAAgEICAAAKCQAAKCQAAKCQAACAQgIAAAoJAAAoJAAAoJAAAIBCAgAACgkAACj0f4JcFrX5mmiyAAAAAElFTkSuQmCC" alt=""><h2>Paired &amp; encrypted</h2><p>Send Neko a task from anywhere — you\'ll watch it work, live.</p>';
     }
+    if (paired()) {
+      e.className = "idle";
+      e.textContent = hosts.length
+        ? "Remote transcript for " + (selectedHost()?.meta?.title || "this Neko session") + ". Type below exactly as you would in the terminal."
+        : "Waiting for a Neko session. Run /relay in a local Neko terminal; it will appear here automatically.";
+    }
   }
 
   const grow = () => { m.style.height = "auto"; m.style.height = Math.min(m.scrollHeight, 128) + "px"; };
-  m.addEventListener("input", grow);
+  m.addEventListener("input", () => { drafts[currentHost()] = m.value; grow(); });
   m.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("f").requestSubmit(); } });
 
   // E2E (AES-256-GCM; key = PBKDF2(secret)) — wire-compatible with the Node host (relay-crypto.ts).
@@ -257,12 +366,12 @@
     if (running) lines.push('<span class="sp">' + SPIN[spinI] + "</span>  working…");
     return lines.length ? '<div class="proc">' + lines.join("\n") + "</div>" : "";
   }
-  function parseReply(raw) {
+  function parseReply(raw, host = currentHost()) {
     if (typeof raw === "string" && raw.startsWith("{")) {
       try {
         const o = JSON.parse(raw);
         if (typeof o.text === "string") {
-          if (o.model) { hostModel = String(o.model).split("/").pop(); refresh(); } // the CLI status bar shows the model - so do we
+          if (o.model && host === currentHost()) { hostModel = String(o.model).split("/").pop(); refresh(); } // background sessions never overwrite the active status bar
           return { text: o.text, act: Array.isArray(o.act) ? o.act : [] };
         }
       } catch {}
@@ -280,35 +389,63 @@
     if (!force && !nearBottom()) return;
     requestAnimationFrame(() => (el || log.lastElementChild)?.scrollIntoView({ block: "end", behavior: "smooth" }));
   };
-  function userTurn(text) {
+  function userTurn(text, host = currentHost()) {
     const e = $("_empty"); if (e) e.remove();
     const t = document.createElement("div"); t.className = "turn user";
+    t.dataset.host = host; t.hidden = host !== currentHost();
     const mk = document.createElement("span"); mk.className = "mk"; mk.textContent = "> ";
     t.appendChild(mk); t.appendChild(document.createTextNode(text));
     log.appendChild(t); scrollEnd(t, true); // just sent -> always bring it into view
   }
-  function nekoTurn() {
+  function nekoTurn(host = currentHost()) {
     const t = document.createElement("div"); t.className = "turn neko";
+    t.dataset.host = host; t.hidden = host !== currentHost();
     const proc = document.createElement("div"); const body = document.createElement("div"); body.className = "body";
     t.appendChild(proc); t.appendChild(body); log.appendChild(t); scrollEnd(t, true);
     return { t, proc, body };
   }
   function render(nk, state) {
+    nk.state = state;
     nk.proc.outerHTML = procHtml(state.act, !state.done) || '<div></div>';
     nk.proc = nk.t.firstElementChild;
     nk.body.innerHTML = state.text ? md(state.text) : (!state.done && !state.act?.length ? '<span class="typing"><i></i><i></i><i></i></span>' : "");
-    scrollEnd(nk.t);
+    if (!nk.t.hidden) scrollEnd(nk.t);
   }
-  function nekoErr(nk, text) { nk.t.classList.add("err"); nk.proc.innerHTML = ""; nk.body.textContent = text; }
+  function nekoErr(nk, text) { nk.state = { text, act: [], done: true, error: true }; nk.t.classList.add("err"); nk.proc.innerHTML = ""; nk.body.textContent = text; }
+
+  function restoreHost(host) {
+    if (!host || loadedHosts.has(host)) return;
+    loadedHosts.add(host);
+    for (const item of Array.isArray(historyByHost[host]) ? historyByHost[host] : []) {
+      userTurn(String(item.user || ""), host);
+      const nk = nekoTurn(host);
+      if (item.state?.error) nekoErr(nk, String(item.state.text || "error"));
+      else render(nk, { text: String(item.state?.text || ""), act: Array.isArray(item.state?.act) ? item.state.act : [], done: true });
+    }
+  }
+  function rememberTurn(host, user, state) {
+    if (!host || !state) return;
+    const rows = Array.isArray(historyByHost[host]) ? historyByHost[host] : [];
+    rows.push({ user, state: { text: String(state.text || ""), act: Array.isArray(state.act) ? state.act.slice(-200) : [], error: !!state.error } });
+    historyByHost[host] = rows.slice(-50);
+    try { localStorage.nekoRelayHistory = JSON.stringify(historyByHost); } catch {}
+  }
 
   const SEND = $("send").innerHTML;
   const STOP = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>';
-  let awaiting = false;
-  function setAwaiting(on) { awaiting = on; $("send").classList.toggle("stop", on); $("send").innerHTML = on ? STOP : SEND; $("send").setAttribute("aria-label", on ? "stop" : "send"); }
+  function paintComposer() {
+    const on = pending.has(currentHost());
+    $("send").classList.toggle("stop", on); $("send").innerHTML = on ? STOP : SEND; $("send").setAttribute("aria-label", on ? "stop" : "send");
+  }
+  function setAwaiting(host, on) {
+    if (on) pending.set(host, true); else pending.delete(host);
+    renderSessions(); paintComposer();
+  }
 
   $("f").onsubmit = async (e) => {
     e.preventDefault();
-    if (awaiting) { try { await fetch(base() + "/interrupt", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim() }) }); } catch {} return; }
+    const host = currentHost();
+    if (pending.has(host)) { try { await fetch(base() + "/interrupt", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), hostId: host || undefined }) }); } catch {} return; }
     const msg = m.value.trim(); if (!msg) return;
     if (!paired()) {
       // Guide, don't scold: the pairing card is right there - put the cursor in its paste box.
@@ -318,15 +455,16 @@
       return;
     }
     if (kidMismatch) { const nk = nekoTurn(); nekoErr(nk, "The pairing secret doesn't match Neko's. Run /relay qr on your computer and re-scan (or paste the fresh link in settings)."); return; }
-    m.value = ""; grow();
-    userTurn(msg);
-    const nk = nekoTurn();
+    if (!host) { const nk = nekoTurn(); nekoErr(nk, "No Neko session is registered yet. Run /relay in a local Neko terminal first."); return; }
+    m.value = ""; drafts[host] = ""; grow();
+    userTurn(msg, host);
+    const nk = nekoTurn(host);
     render(nk, { text: "", act: [], done: false });
-    setAwaiting(true);
+    setAwaiting(host, true);
     try {
       const k = await key();
       const payload = k ? await sealMsg(k, msg) : msg;
-      const r = await fetch(base() + "/send", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), message: payload }) });
+      const r = await fetch(base() + "/send", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), hostId: host, message: payload }) });
       if (!r.ok) { nekoErr(nk, r.status === 401 ? "Not authorized — the pairing is stale. Re-scan the QR from /relay." : "send failed (HTTP " + r.status + ")"); return; }
       const { id } = await r.json();
       let seen = 0, done = false, warned = false, saw = false;
@@ -344,15 +482,19 @@
           let raw;
           try { raw = k && g.reply && g.reply.iv ? await unseal(k, g.reply) : g.reply; }
           catch { nekoErr(nk, "Can't decrypt the reply — the pairing secret doesn't match. Run /relay qr on your computer and re-scan."); checkAlive(); return; }
-          const state = parseReply(raw); state.done = done; render(nk, state);
+          const state = parseReply(raw, host); state.done = done; render(nk, state);
+        } else if (rr.status === 401) {
+          nekoErr(nk, "Not authorized — this device was unpaired or the pairing rotated.");
+          return;
         } else if (!warned) {
           await checkAlive();
-          if (online === false) { render(nk, { text: "", act: ["Neko is offline — the task is queued and runs when /relay reconnects"], done: false }); warned = true; }
+          const target = hosts.find((h) => h.id === host);
+          if (target?.online === false) { render(nk, { text: "", act: ["Neko is offline — the task is queued and runs when /relay reconnects"], done: false }); warned = true; }
         }
       }
       if (!done && !saw) nekoErr(nk, "No reply — is /relay running on your computer?");
     } catch (err) { nekoErr(nk, "error: " + err.message); }
-    finally { setAwaiting(false); m.focus(); checkAlive(); }
+    finally { rememberTurn(host, msg, nk.state); setAwaiting(host, false); if (currentHost() === host) m.focus(); checkAlive(); }
   };
 
   refresh(); checkAlive();

@@ -6,7 +6,12 @@
  * to the agent and returns the reply. Because the relay is YOURS (not a vendor's) and payloads are
  * end-to-end encrypted, the relay is a blind forwarder. This module is the host (agent) side.
  *
+ * One durable pairing is a hub: every running Neko process registers an opaque host id, so a paired
+ * phone can list, switch, stream, queue, and interrupt several local sessions independently. Session
+ * title/cwd/model/busy metadata is sealed with the same E2E key; the Worker cannot read it.
+ *
  * Transport, newest first (the /register response advertises what the Worker speaks):
+ *   v3  v2 WebSocket transport + multi-host routing and encrypted presence metadata.
  *   v2  WebSocket (`GET /ws`, token in the "t.<token>" subprotocol): jobs push instantly, PARTIAL
  *       replies stream to the phone while the turn runs, and a phone-side Stop reaches the host
  *       mid-turn as an {t:"interrupt"} frame. Reconnects with backoff; if the socket never opens
@@ -26,8 +31,12 @@ import type { RemoteHandlers } from "./remote-control.ts";
 export interface RemoteRelay {
   session: string;
   token: string;
+  /** Opaque id for this running Neko process inside the paired relay hub. */
+  hostId: string;
   /** Live transport: "ws" (streaming + interrupt) or "poll" (v1 compat). May downgrade at runtime. */
   transport: () => "ws" | "poll";
+  /** Push the latest E2E-sealed title/model/busy metadata to paired clients. */
+  refresh: () => void;
   stop: () => void;
 }
 
@@ -60,21 +69,46 @@ export function secretKid(secret: string): string {
   return createHash("sha256").update(secret).digest("hex").slice(0, 8);
 }
 
+/** Revoke the old hub before `/relay new` persists replacement keys. v2 Workers return false; the
+ * caller can still rotate this process but must warn that other already-running hosts remain old. */
+export async function revokeRemoteRelay(relayUrl: string, pairing: Pick<RelayPairing, "session" | "token">): Promise<boolean> {
+  try {
+    const response = await fetch(relayUrl.replace(/\/+$/, "") + "/revoke", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${pairing.token}` },
+      body: JSON.stringify({ session: pairing.session }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 export async function startRemoteRelay(
   relayUrl: string,
   handlers: RemoteHandlers,
-  opts: { session?: string; token?: string; pollMs?: number; secret?: string; partialMs?: number; backoffMs?: number } = {},
+  opts: { session?: string; token?: string; hostId?: string; pollMs?: number; secret?: string; partialMs?: number; backoffMs?: number } = {},
 ): Promise<RemoteRelay> {
   const base = relayUrl.replace(/\/+$/, "");
   const session = opts.session ?? randomUUID();
   const token = opts.token ?? randomUUID();
+  const hostId = opts.hostId ?? randomBytes(12).toString("base64url");
   const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
+  const sealedMeta = (busy?: boolean) => {
+    if (!opts.secret) return undefined; // keep cwd/title opaque; paired /relay always has a secret
+    return seal(opts.secret, JSON.stringify({ ...handlers.status(), ...(busy === undefined ? {} : { busy }), updatedAt: Date.now() }));
+  };
 
   // Register (outbound). Throw if the relay is unreachable so /relay can report it to the user.
   // `kid` = the secret's public fingerprint, so the phone can flag a stale secret before sending.
-  const reg = await fetch(`${base}/register`, { method: "POST", headers, body: JSON.stringify({ session, kid: opts.secret ? secretKid(opts.secret) : undefined }) });
+  const reg = await fetch(`${base}/register`, { method: "POST", headers, body: JSON.stringify({
+    session,
+    kid: opts.secret ? secretKid(opts.secret) : undefined,
+    hostId,
+    meta: sealedMeta(),
+  }) });
   if (!reg.ok) throw new Error(`relay register failed: HTTP ${reg.status}${reg.status === 401 ? " (session bound to another token - try /relay new)" : ""}`);
   const v2 = Number(((await reg.json().catch(() => ({}))) as { v?: number }).v ?? 1) >= 2;
 
@@ -119,11 +153,12 @@ export async function startRemoteRelay(
       const act: string[] = [];
       let timer: ReturnType<typeof setTimeout> | null = null;
       let ended = false;
-      const envelope = () => sealMaybe(JSON.stringify({ text: buf, act: act.slice(-12) }));
+      send({ t: "presence", meta: sealedMeta(true) });
+      const envelope = () => sealMaybe(JSON.stringify({ text: buf, act: act.slice(-200) }));
       const flush = () => { timer = null; if (!ended) send({ t: "partial", id: job.id, reply: envelope() }); };
       const bump = () => { if (!timer) timer = setTimeout(flush, opts.partialMs ?? 600); };
       const onDelta = mode === "ws" ? (d: string) => { buf += d; bump(); } : undefined;
-      const onAct = mode === "ws" ? (line: string) => { act.push(line.slice(0, 96)); bump(); } : undefined;
+      const onAct = mode === "ws" ? (line: string) => { act.push(line); bump(); } : undefined;
       let result: { reply?: string; tokens?: number; ms?: number };
       try {
         result = await handlers.run(message, onDelta, onAct);
@@ -137,8 +172,9 @@ export async function startRemoteRelay(
       // client understands only that).
       buf = String(result.reply ?? "");
       const model = handlers.status?.().model;
-      const finalEnvelope = () => sealMaybe(JSON.stringify({ text: buf, act: act.slice(-12), model }));
+      const finalEnvelope = () => sealMaybe(JSON.stringify({ text: buf, act: act.slice(-200), model }));
       send({ t: "reply", id: job.id, reply: mode === "ws" ? finalEnvelope() : sealMaybe(buf), tokens: result.tokens, ms: result.ms });
+      send({ t: "presence", meta: sealedMeta(false) });
     }
     draining = false;
   };
@@ -155,8 +191,9 @@ export async function startRemoteRelay(
       while (running) {
         let job: { id?: string; message?: unknown } | null = null;
         try {
-          const r = await fetch(`${base}/pull?session=${encodeURIComponent(session)}`, { headers, signal: ctrl.signal });
+          const r = await fetch(`${base}/pull?session=${encodeURIComponent(session)}&host=${encodeURIComponent(hostId)}`, { headers, signal: ctrl.signal });
           if (!running) break;
+          if (r.status === 401) { running = false; break; } // hub was revoked/rotated; do not poll forever
           if (r.ok) job = (await r.json()) as { id?: string; message?: unknown };
         } catch {
           if (!running) break;
@@ -186,11 +223,12 @@ export async function startRemoteRelay(
   const connect = () => {
     if (!running) return;
     let opened = false;
-    const sock = new WebSocket(base.replace(/^http/, "ws") + `/ws?session=${encodeURIComponent(session)}`, ["neko-relay", `t.${token}`]);
+    const sock = new WebSocket(base.replace(/^http/, "ws") + `/ws?session=${encodeURIComponent(session)}&host=${encodeURIComponent(hostId)}`, ["neko-relay", `t.${token}`]);
     ws = sock;
     sock.onopen = () => {
       opened = true;
       failures = 0;
+      try { sock.send(JSON.stringify({ t: "presence", meta: sealedMeta() })); } catch { /* reconnect will retry */ }
       for (const f of outbox.splice(0)) { try { sock.send(JSON.stringify(f)); } catch { break; } }
     };
     sock.onmessage = (ev) => {
@@ -221,7 +259,9 @@ export async function startRemoteRelay(
   return {
     session,
     token,
+    hostId,
     transport: () => mode,
+    refresh: () => send({ t: "presence", meta: sealedMeta() }),
     stop: () => {
       running = false;
       ctrl.abort();

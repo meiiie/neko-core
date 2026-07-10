@@ -43,7 +43,7 @@ test("image normalization limits are config-first and bounded", () => {
 });
 
 test("current GLM and high-resolution Fable routes are first-class profiles", () => {
-  const glm = loadConfig({ path: tmpConfig({}), profile: "nvidia-glm" });
+  const glm = loadConfig({ path: tmpConfig({}), profile: "nvidia" });
   expect(glm.model).toBe("z-ai/glm-5.2");
   expect(glm.baseUrl).toBe("https://integrate.api.nvidia.com/v1");
   const fable = loadConfig({ path: tmpConfig({}), profile: "fable" });
@@ -130,7 +130,7 @@ test("modelShadow: a top-level file model that overrides the profile preset is D
 test("modelShadow: null when no profile, when models agree, and when the preset has no model to shadow", () => {
   expect(loadConfig({ path: tmpConfig({ model: "m" }) }).modelShadow).toBeNull(); // no profile selected
   expect(loadConfig({ path: tmpConfig({ model: "gpt-4o-mini" }), profile: "openai" }).modelShadow).toBeNull(); // same model
-  expect(loadConfig({ path: tmpConfig({ model: "m" }), profile: "nvidia" }).modelShadow).toBeNull(); // nvidia preset model "" - the file IS the model source, not a shadow
+  expect(loadConfig({ path: tmpConfig({ model: "m" }), profile: "openrouter" }).modelShadow).toBeNull(); // empty preset - the file IS the model source, not a shadow
 });
 
 test("modelShadow: NEKO_MODEL is named as the source (env wins over files)", () => {

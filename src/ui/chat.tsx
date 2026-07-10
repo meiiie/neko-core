@@ -40,7 +40,7 @@ import { readClipboardImage, writeClipboardText } from "../adapters/clipboard.ts
 import { describeImage } from "../adapters/vision.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
 import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
-import { loadOrCreatePairing, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
+import { loadOrCreatePairing, revokeRemoteRelay, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { expandPlaceholders } from "../shared/paste-collapse.ts";
@@ -108,6 +108,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [started, setStarted] = useState(false); // once a turn has run, drop the input placeholder
   const rcRef = useRef<RemoteControl | null>(null);
   const relayRef = useRef<RemoteRelay | null>(null);
+  const relayHostIdRef = useRef(newSessionId()); // one opaque remote-control slot per running TUI
   const remoteSinkRef = useRef<((chunk: string) => void) | null>(null); // streams a turn's output to a remote SSE client
   const remoteActRef = useRef<((line: string) => void) | null>(null); // streams tool-activity lines (the phone's process ticker)
   const remoteLineRef = useRef<((kind: LineKind, text: string) => void) | null>(null); // collects info/error lines for a remote turn
@@ -495,6 +496,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     pinnedTitleRef.current = target.title ?? "";
     titleTaskRef.current = tname ? trunc(tname, 40) : "";
     setTabTitle(titleTaskRef.current || "Neko Core", busyRef.current);
+    relayRef.current?.refresh();
     const todos = recoverTodos(target.messages); // from the FULL thread, before any compaction
     registryRef.current!.todos = todos;
     setTodos(todos);
@@ -613,6 +615,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     pinnedTitleRef.current = name;
     titleTaskRef.current = trunc(name, 40);
     setTabTitle(titleTaskRef.current, busyRef.current);
+    relayRef.current?.refresh();
     addLine("info", `session + tab named "${trunc(name, 60)}"`);
   };
 
@@ -1045,13 +1048,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       try {
         // Durable pairing (~/.neko-core/relay.json): a phone paired once STAYS paired across restarts.
         // The secret is the E2E key: printed to you, carried in the URL #fragment, NEVER sent to the relay.
+        if (rotate) {
+          const old = loadOrCreatePairing(false);
+          const revoked = await revokeRemoteRelay(url, old);
+          if (!revoked) addLine("info", "old relay hub could not be revoked (redeploy relay v3); toggle /relay in any other running Neko terminals to rotate them too");
+        }
         const pairing = loadOrCreatePairing(rotate);
-        const r = await startRemoteRelay(url, makeRemoteHandlers(), { session: pairing.session, token: pairing.token, secret: pairing.secret });
+        const r = await startRemoteRelay(url, makeRemoteHandlers(), {
+          session: pairing.session,
+          token: pairing.token,
+          secret: pairing.secret,
+          hostId: relayHostIdRef.current,
+        });
         relayRef.current = r;
         const base = url.replace(/\/+$/, "");
         const pair = `${base}/#s=${r.session}&t=${r.token}&k=${pairing.secret}`;
         const live = r.transport() === "ws";
-        addLine("info", `relay on - ${live ? "streaming live to your phone (Stop works mid-turn)" : "compat mode (redeploy cloudflare/relay for streaming)"}, E2E encrypted.`);
+        addLine("info", `relay on - ${live ? "streaming live to your phone (Stop works mid-turn)" : "compat mode (redeploy cloudflare/relay for streaming)"}, E2E encrypted, multi-session hub.`);
         // The QR is a first-pairing affordance, not daily chrome: a paired phone reconnects by itself,
         // so show the code only when there is something new to scan (or on request: /relay qr).
         if (pairing.fresh || rotate || wantQr) {
@@ -1189,6 +1202,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     turnOutStartRef.current = agentRef.current!.cost.completionTokens;
     busyRef.current = true; // sync now so a keystroke landing this instant queues (not just after render)
     setBusy(true);
+    relayRef.current?.refresh();
     const controller = new AbortController();
     controllerRef.current = controller;
     try {
@@ -1221,6 +1235,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } finally {
       busyRef.current = false;
       setBusy(false);
+      relayRef.current?.refresh();
       setTabTitle(titleTaskRef.current || "Neko Core", false); // the cat returns, the dot stops
       if (inflightRef.current.length) { inflightRef.current = []; syncInflight(); } // drop any un-resulted (aborted) blinking lines
       controllerRef.current = null;
@@ -1264,7 +1279,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         remoteLineRef.current = null;
       }
     },
-    status: () => ({ busy: busyRef.current, model: cfg.model, messages: agentRef.current!.messages.length }),
+    status: () => ({
+      busy: busyRef.current,
+      model: cfg.model,
+      messages: agentRef.current!.messages.length,
+      title: titleTaskRef.current || "Neko Core",
+      cwd: process.cwd(),
+      sessionId: sessionIdRef.current,
+    }),
     interrupt: () => { if (controllerRef.current) { controllerRef.current.abort(); return true; } return false; },
   });
 

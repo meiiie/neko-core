@@ -51,7 +51,7 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
 - **Next:** the eval was live-calibrated on harness v1 (base tier saturated -> smoke; HARD tier at 92%
   with FLAKY + 16 grounding misses on gpt-oss-120b). Harness v2 now enforces repaired constraint
   violations, so re-establish both gpt-oss and glm-5.2 baselines (use the NVIDIA-backed
-  `--profile nvidia-glm`; only direct Z.ai is key-blocked), then
+  `--profile nvidia`; only direct Z.ai is key-blocked), then
   demonstrate harness lift with a lever (verify gate / recovery middleware / re-grounding) on pass-rate or
   miss-count; only add another controller/framework if measured progress drift warrants it. **Rule: never merge to `main` or push without the owner's
   explicit OK.** Orientation for a fresh session: `WORKLOG.md` (journal) · `RULES.md` (how we work) ·
@@ -272,7 +272,11 @@ cost/token tracking · MCP client · single-binary distribution.
   zero-knowledge blind forwarder, MORE private than Claude Code's relay (where the platform reads
   plaintext). *(proven: node<->browser interop + tamper/wrong-secret rejection; the relay-sees-only-
   ciphertext property as a unit test AND end-to-end with a real agent — relay saw only `{iv,ct}`, phone
-  decrypted "30". full suite 168/0.)*
+  decrypted "30". full suite 168/0.)* **(d) relay v3 multi-session hub (2026-07-11):** one pairing now
+  registers multiple opaque Neko host ids, with per-host WebSocket/queue/interrupt routing and E2E-sealed
+  title/cwd/model/busy presence. The terminal-style phone client switches sessions, preserves separate
+  drafts/transcripts/history, and runs different hosts concurrently. Local Wrangler + two live host
+  sockets proved isolated encrypted round trips; production redeploy intentionally awaits owner approval.
 - [x] **G12** Tool-use parity with Claude Code (atomic-level audit of agent.ts/tool-runtime.ts/mcp.ts).
   Verdict: the orchestration (loop, read-only parallel fan-out, loop-guard, abort, compact, hooks,
   permissions, adversarial check) and MCP (stdio/http/sse + OAuth + resources + prompts + reconnect)
