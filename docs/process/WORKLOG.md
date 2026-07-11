@@ -1537,3 +1537,30 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
   `__uiprobe`, and real-PTY input probe PASS. Windows x64 is live-tested; macOS/Linux target selection and
   checksum paths are covered but remain reasoned/CI-only here. Bun again emitted its known non-fatal
   post-compile directory-mismatch diagnostic after producing a working binary and passing both probes.
+
+## 2026-07-11 - v0.10.0 released: verified installers, checksums, and GPT-5.6 artifact smoke
+- Hardened both one-line installers before release. Windows now requires stable GitHub release metadata,
+  the exact official asset URL/size/SHA-256, and an exact binary version probe before same-volume
+  `File.Replace`; Unix stages the binary, verifies a v0.10+ checksum sidecar plus version, then uses atomic
+  rename. Every platform build publishes its own `.sha256`. A Windows pinned v0.9.0 E2E ran in isolated
+  LOCALAPPDATA/HOME with a sentinel old binary: 82,546,688 bytes downloaded and verified, atomic replacement
+  succeeded, no stage/backup remained, and rollback pin persisted. Historical releases without sidecars
+  retain their version-probe rollback path.
+- Release candidate gates on commit `aa2835e`: TS 5.9 + TS 7 clean; **575/575 tests, 2212 assertions,
+  65 files**; policy PASS; doctor reports 0.10.0; production build, `__uiprobe`, and real-PTY input probe
+  PASS. Real ConPTY ghost+typing gate passed 3/3 (one footer, typed-echo OK, no ghost). Scroll benchmark:
+  26 ms first response, 179 ms settle, 13.1 KB, viewport/resize/slash-menu/keyboard all OK. Secret scan
+  CLEAN: only documented placeholders/fixtures (`nvapi-xxxxxxxx`, `ghp_...`, `sk-file/sk-env`), no inline
+  key/private key/excluded artifact tracked.
+- Pushed `self-improve`, fast-forwarded `main`, and tagged new `v0.10.0` (no re-tag). GitHub Actions run
+  `29155531142` succeeded for all five targets; the release is public/latest/non-draft with **5 binaries +
+  5 checksum sidecars**. Curated notes replace the generated commit list.
+- Ran the exact public Windows one-liner from `neko.holilihu.online` after the domain refreshed. It fetched
+  v0.10.0, verified SHA-256, atomically installed the 82,696,192-byte binary, removed the older v0.9.0 PATH
+  shadow as designed, and left no staging file. Installed SHA-256
+  `2102c007558997c3bbdd4df08165a25215b52c67925fe5e84a8060bdd5537490` matches the GitHub asset;
+  `neko version` reports 0.10.0 and `neko support status` reports Codex 0.144.1 ready. Finally, the actual
+  downloaded release binary completed GPT-5.6 Terra with exact response `RELEASE_ARTIFACT_OK` in 7.6 s.
+- CI emitted only upstream informational annotations: checkout v4's Node 20 action is forced onto Node 24,
+  and `macos-latest` is migrating to macOS 26. They did not affect any build/smoke; update checkout in the
+  next maintenance pass rather than mutating the already-verified release tag.
