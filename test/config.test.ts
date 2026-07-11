@@ -34,6 +34,7 @@ test("image normalization limits are config-first and bounded", () => {
   const defaults = loadConfig({ path: tmpConfig({}) });
   expect(defaults.imageLongEdge).toBe(1568);
   expect(defaults.imageMaxBytes).toBe(450_000);
+  expect(defaults.codexKeepalive).toBe(15);
   const highRes = loadConfig({ path: tmpConfig({ image_long_edge: 2576, image_max_bytes: 4_500_000 }) });
   expect(highRes.imageLongEdge).toBe(2576);
   expect(highRes.imageMaxBytes).toBe(4_500_000);
@@ -51,6 +52,14 @@ test("current GLM and high-resolution Fable routes are first-class profiles", ()
   expect(fable.vision).toBe(true);
   expect(fable.imageLongEdge).toBe(2576);
   expect(fable.imageMaxBytes).toBe(4_500_000);
+});
+
+test("ChatGPT subscription defaults to a completion-usable vision model", () => {
+  const cfg = loadConfig({ path: tmpConfig({}), profile: "chatgpt" });
+  expect(cfg.provider).toBe("chatgpt");
+  expect(cfg.model).toBe("gpt-5.5");
+  expect(cfg.vision).toBe(true);
+  expect(cfg.contextWindow).toBe(272_000);
 });
 
 test("withModel clones the config at a different model, same endpoint, original unchanged", () => {

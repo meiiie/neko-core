@@ -39,7 +39,9 @@ import { environmentBlock, projectContextBlock, rememberNote } from "../adapters
 import { readClipboardImage, writeClipboardText } from "../adapters/clipboard.ts";
 import { describeImage } from "../adapters/vision.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
-import { type RemoteHandlers, startRemoteControl, type RemoteControl } from "../adapters/remote-control.ts";
+import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt } from "../adapters/chatgpt-auth.ts";
+import { authChoices, providerChoices } from "../adapters/provider-choice.ts";
+import { type RemoteAction, type RemoteHandlers, startRemoteControl, type RemoteControl, type RemoteUiState } from "../adapters/remote-control.ts";
 import { loadOrCreatePairing, loadOrCreateSessionPairing, relaySessionCode, revokeRemoteRelay, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
@@ -150,7 +152,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       const left = recoverTodos(resumedRef.current.messages).filter((t) => t.status !== "completed").length;
       if (left) out.push({ id: idRef.current++, kind: "info", text: `Picking up where you left off - ${left} task${left > 1 ? "s" : ""} still open. Just tell me to keep going (in your own words), or /continue.` });
     }
-    if (!cfg.apiKey && !cfg.isLocalEndpoint) {
+    if (cfg.usesChatGptAuth && !hasChatGptCredentials()) {
+      out.push({ id: idRef.current++, kind: "info", text: "ChatGPT is not signed in - type /login to connect Plus/Pro (no API billing)." });
+    } else if (!cfg.apiKey && !cfg.isLocalEndpoint && !cfg.usesChatGptAuth) {
       out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
     }
     return out;
@@ -170,6 +174,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [approvalFlash, setApprovalFlash] = useState<ApprovalFlash | null>(null);
+  const approvalFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const approvalFlashRef = useRef<ApprovalFlash | null>(null);
+  const approvalSeqRef = useRef(0);
+  const remoteApprovalRef = useRef<{ id: string; approval: Approval } | null>(null);
+  const overlaySeqRef = useRef(0);
+  const remoteOverlayRef = useRef<{ id: string; overlay: Overlay } | null>(null);
+  const relayUiRef = useRef<RemoteUiState>({});
   const [pendingMulti, setPendingMulti] = useState(false);
   const [mode, setMode] = useState<PermissionMode>(yolo ? "auto" : cfg.mode);
   const modeRef = useRef<PermissionMode>(mode);
@@ -185,6 +196,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const toolStreamRef = useRef(""); // streamed tool-call args this turn (counted, not displayed)
   const turnInStartRef = useRef(0); // cost.promptTokens at turn start  -> live INPUT (up) counter, this turn's delta
   const turnOutStartRef = useRef(0); // cost.completionTokens at turn start -> live OUTPUT (down) counter, this turn's delta
+  const turnStartedAtRef = useRef(0);
   // Recover the todo tracker for a session resumed AT STARTUP (--resume/--continue), so its plan shows.
   const [todos, setTodos] = useState<{ content: string; status: string }[]>(() =>
     resumedRef.current ? recoverTodos(resumedRef.current.messages) : [],
@@ -252,15 +264,55 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [awaitingKey, setAwaitingKey] = useState(false); // /login: next submit is the API key
   const autoLoadedSkills = useRef<Set<string>>(new Set()); // domain skills already auto-loaded this session
 
-  const addLine = (kind: LineKind, text: string, summary?: string) => {
+  useEffect(() => {
+    const waiting = remoteApprovalRef.current;
+    if (overlay && remoteOverlayRef.current?.overlay !== overlay) remoteOverlayRef.current = { id: `o${++overlaySeqRef.current}`, overlay };
+    else if (!overlay) remoteOverlayRef.current = null;
+    const picker = remoteOverlayRef.current;
+    relayUiRef.current = {
+      turnStartedAt: busy ? turnStartedAtRef.current || Date.now() : undefined,
+      verb: todos.find((todo) => todo.status === "in_progress")?.content ?? verbRef.current,
+      step,
+      queued,
+      inflight: inflight.map((item) => item.text),
+      compactingStartedAt: compacting?.start,
+      approval: approval && waiting ? {
+        id: waiting.id,
+        toolName: approval.toolName,
+        preview: approval.toolName === "exit_plan_mode"
+          ? String(approval.args.plan ?? "").slice(0, 4_000)
+          : describeToolCall(approval.toolName, approval.args),
+      } : undefined,
+      overlay: overlay && picker ? {
+        id: picker.id,
+        title: overlay.title,
+        items: overlay.items.slice(0, 100).map((item) => ({ id: item.id, label: item.label, detail: item.detail })),
+      } : undefined,
+    };
+    relayRef.current?.refresh();
+  }, [approval, busy, compacting, inflight, overlay, queued, step, todos]);
+
+  const addLine = (kind: LineKind, text: string, summary?: string, mirror = true) => {
     const line = { id: idRef.current++, kind, text, summary };
     // A streamed answer is rich Markdown before commit. Prime its final rows now so fullscreen never
     // flashes the cheap raw-markdown fallback while the asynchronous cache warmer catches up.
     if (fullscreenRef.current && kind === "assistant") primeAnsiCache(line, contentColsRef.current, cfg);
     remoteLineRef.current?.(kind, text); // a remote turn collects info/error output (slash commands answer THERE)
     setLines((prev) => [...prev, line]);
-    relayRef.current?.publish({ type: "line", line: { ...line, text: text.slice(0, 200_000) } }, { durable: true });
+    if (mirror) relayRef.current?.publish({ type: "line", line: { ...line, text: text.slice(0, 200_000) } }, { durable: true });
   };
+
+  // Pairing instructions belong to the local terminal. Mirroring them back into the paired browser
+  // wastes the transcript, exposes a redundant capability URL on-screen, and recursively describes
+  // the transport instead of the conversation.
+  const relaySetupLine = (line: Pick<Line, "kind" | "text">) => line.kind === "info" && (
+    /^relay session [A-Z0-9-]+ (?:on\b|-\s*open:)/i.test(line.text)
+    || /^open this session:/i.test(line.text)
+    || (() => {
+      const rows = line.text.trim().split("\n");
+      return rows.length > 8 && rows.filter((row) => /^[ █▄▀]+$/.test(row.trim())).length >= rows.length - 1;
+    })()
+  );
 
   // Bound the in-memory transcript so a marathon session can't grow `lines` (and the resize re-emit)
   // without limit. <Static> is append-only, so when we trim the front we wipe + remount it (resizeKey)
@@ -316,7 +368,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const gateChain = useRef<Promise<unknown>>(Promise.resolve());
   const gate = (toolName: string, args: Record<string, any>): boolean | Promise<boolean> => {
     if (alwaysApproved.current.has(toolName)) return true;
-    const next = gateChain.current.then(() => new Promise<boolean>((resolve) => setApproval({ toolName, args, resolve })));
+    const next = gateChain.current.then(() => new Promise<boolean>((resolve) => {
+      const request = { toolName, args, resolve };
+      remoteApprovalRef.current = { id: `a${++approvalSeqRef.current}`, approval: request };
+      setApproval(request);
+    }));
     gateChain.current = next.catch(() => undefined);
     return next;
   };
@@ -527,6 +583,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const left = todos.filter((t) => t.status !== "completed").length;
     if (left) replay.push({ id: idRef.current++, kind: "info", text: `Picking up where you left off - ${left} task${left > 1 ? "s" : ""} still open. Just tell me to keep going (in your own words), or /continue.` });
     setLines((prev) => [...prev, ...replay]);
+    relayRef.current?.publish({ type: "snapshot", lines: replay.map((line) => ({ ...line, text: line.text.slice(0, 200_000) })) }, { durable: true, reset: true });
   };
 
   // Entry point for the /resume picker. For a LARGE session, first offer to resume from a summary
@@ -572,8 +629,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const selectedText = useRef("");                                 // the current persisted selection's text (for Ctrl+C)
   const [copyNote, setCopyNote] = useState<string | null>(null);   // transient copy confirmation, auto-clears
   const copyNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const approvalFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const approvalFlashRef = useRef<ApprovalFlash | null>(null);
   const flashCopyNote = (msg: string) => {
     setCopyNote(msg);
     if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current);
@@ -582,6 +637,30 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => () => { if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current); }, []);
   const clearSelection = () => { if (selectedText.current || selAnchor.current) { selectedText.current = ""; selAnchor.current = null; frameDiffer?.setSelection(null); } };
   const copySelection = () => { if (selectedText.current) { copyBoth(selectedText.current); flashCopyNote(`copied ${selectedText.current.length} chars to clipboard`); } };
+  const settleApproval = (kind: ApprovalFlash["kind"], expectedId?: string): boolean => {
+    const waiting = remoteApprovalRef.current;
+    if (!waiting || (expectedId && waiting.id !== expectedId) || approvalFlashRef.current) return false;
+    const current = waiting.approval;
+    const flash = { kind, tool: current.toolName };
+    approvalFlashRef.current = flash;
+    setApprovalFlash(flash);
+    approvalFlashTimer.current = setTimeout(() => {
+      approvalFlashTimer.current = null;
+      if (kind === "always") alwaysApproved.current.add(current.toolName);
+      const ok = kind !== "no";
+      if (ok && current.toolName === "exit_plan_mode" && registryRef.current!.mode === "plan") {
+        registryRef.current!.mode = "accept-edits";
+        setMode("accept-edits");
+      }
+      current.resolve(ok);
+      if (remoteApprovalRef.current?.id === waiting.id) remoteApprovalRef.current = null;
+      setApproval(null);
+      approvalFlashRef.current = null;
+      setApprovalFlash(null);
+      relayRef.current?.refresh();
+    }, 140);
+    return true;
+  };
   // The total band content + the top CONTENT row currently visible (matches FrameDiffer.windowRows:
   // start = max(0, total - dist - viewH)). Maps a screen row y (1..viewH) to a content row index.
   const bandTotal = () => paddedRowsRef.current.length + streamRowsRef.current.length;
@@ -897,25 +976,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       } else if (c === "n" || key.escape) {
         kind = "no";
       }
-      if (kind) {
-        const flash = { kind, tool: approval.toolName };
-        approvalFlashRef.current = flash;
-        setApprovalFlash(flash);
-        approvalFlashTimer.current = setTimeout(() => {
-          approvalFlashTimer.current = null;
-          if (kind === "always") alwaysApproved.current.add(approval.toolName);
-
-          const ok = kind !== "no";
-          if (ok && approval.toolName === "exit_plan_mode" && registryRef.current!.mode === "plan") {
-            registryRef.current!.mode = "accept-edits";
-            setMode("accept-edits");
-          }
-          approval.resolve(ok);
-          setApproval(null);
-          approvalFlashRef.current = null;
-          setApprovalFlash(null);
-        }, 140);
-      }
+      if (kind) settleApproval(kind);
       return;
     }
     if (overlay || viewer || search) return; // let the overlay / viewer / find bar own the rest of the keys (Ctrl+C above still works)
@@ -1052,8 +1113,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const p = active.hub ? loadOrCreatePairing(false) : loadOrCreateSessionPairing(active.key, false);
         const pair = `${active.url.replace(/\/+$/, "")}/${active.hub ? "hub" : "session"}/${encodeURIComponent(p.session)}#t=${p.token}&k=${p.secret}`;
         const qr = qrMatrix(pair);
-        if (qr) addLine("info", qrToText(qr).split("\n").map((l) => "  " + l).join("\n"));
-        addLine("info", `relay session ${relaySessionCode(p.session)} - open: ${pair}`);
+        if (qr) addLine("info", qrToText(qr).split("\n").map((l) => "  " + l).join("\n"), undefined, false);
+        addLine("info", `relay session ${relaySessionCode(p.session)} - open: ${pair}`, undefined, false);
         return;
       }
       if (relayRef.current) {
@@ -1090,46 +1151,94 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const base = url.replace(/\/+$/, "");
         const pair = pairingUrl(base, pairing);
         const live = r.transport() === "ws";
-        const snapshot = lines.slice(-1000).map((line) => ({ ...line, text: line.text.slice(0, 200_000) }));
+        const snapshot = lines.filter((line) => !relaySetupLine(line)).slice(-1000).map((line) => ({ ...line, text: line.text.slice(0, 200_000) }));
         while (snapshot.length > 1 && JSON.stringify(snapshot).length > 1_000_000) snapshot.shift();
         r.publish({ type: "snapshot", lines: snapshot }, { durable: true, reset: true });
-        addLine("info", `relay session ${relaySessionCode(r.session)} on - ${live ? "live mirror + control" : "compat control"}, E2E encrypted${hub ? ". hub access covers every joined Neko session" : ""}.`);
-        if (pairing.fresh || rotate || wantQr) {
+        addLine("info", `relay session ${relaySessionCode(r.session)} on - ${live ? "live mirror + control" : "compat control"}, E2E encrypted${hub ? ". hub access covers every joined Neko session" : ""}.`, undefined, false);
+        if (wantQr) {
           const qr = qrMatrix(pair);
-          if (qr) addLine("info", qrToText(qr).split("\n").map((l) => "  " + l).join("\n"));
+          if (qr) addLine("info", qrToText(qr).split("\n").map((l) => "  " + l).join("\n"), undefined, false);
         }
-        addLine("info", `open this session: ${pair}\n  (/relay qr reprints its code - /relay new rotates only this capability${hub ? "" : " - /relay hub enables the broad session switcher"})`);
+        addLine("info", `open this session: ${pair}\n  /relay qr: show code  /relay new: rotate${hub ? "" : "  /relay hub: session switcher"}`, undefined, false);
       } catch (e) {
         addLine("error", `relay failed to start: ${e instanceof Error ? e.message : String(e)}`);
       }
       return;
     }
     if (text === "/login") {
-      // Guided sign-in (goose-style): choose the provider first, THEN paste its key — a key is meaningless
-      // without its endpoint. Picking switches to that provider live, then captures the key into it.
-      const names = Object.keys(cfg.profiles).sort();
+      // Provider first, auth route second. OpenAI deliberately appears ONCE here; only after choosing
+      // it do we distinguish ChatGPT subscription OAuth from pay-as-you-go API-key auth.
+      const activate = (profile: string) => {
+        setActiveProfile(profile);
+        cfg.adopt(loadConfig({ profile }));
+        agentRef.current?.setProvider(getProvider(cfg));
+      };
+      const apiProfiles = new Set<string>();
+      for (const [name, profile] of Object.entries(cfg.profiles)) {
+        if (profile.auth === "chatgpt_oauth" || profile.auth === "none") continue;
+        try { if (loadConfig({ profile: name }).apiKey) apiProfiles.add(name); } catch { /* status only */ }
+      }
+      const openAuthRoutes = (family: string) => {
+        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), apiProfiles });
+        const selectRoute = async (route: { id: string }) => {
+          setOverlay(null);
+          const profile = cfg.profiles[route.id];
+          if (profile?.auth === "chatgpt_oauth") {
+            setBusy(true);
+            addLine("info", "Opening ChatGPT Plus/Pro sign-in in your browser...");
+            try {
+              await loginChatGpt({ notify: (message) => addLine("info", message) });
+              activate(route.id);
+              addLine("info", "OpenAI connected with ChatGPT Plus/Pro. Subscription quota is active; API billing is not used. Type /model to choose a model.");
+            } catch (error) {
+              addLine("error", `ChatGPT sign-in failed: ${error instanceof Error ? error.message : error}`);
+            } finally {
+              setBusy(false);
+            }
+            return;
+          }
+          activate(route.id);
+          setAwaitingKey(true);
+          addLine("info", `${profile?.label || route.id}: paste the API key, then Enter (input hidden). Empty Enter cancels without removing the old key.`);
+        };
+        if (family !== "openai" && routes.length === 1) {
+          void selectRoute(routes[0]);
+          return;
+        }
+        setOverlay({
+          title: family === "openai" ? "OpenAI - choose how to sign in" : `Sign in to ${family}`,
+          items: routes,
+          onSelect: (route) => { void selectRoute(route); },
+        });
+      };
       setOverlay({
-        title: "Sign in - choose a provider, then paste its key",
-        items: names.map((n) => {
-          const p: any = cfg.profiles[n] ?? {};
-          return { id: n, label: n, detail: `${p.provider ?? "?"} · ${p.model ?? "?"}` + (n === cfg.profile ? "  (current)" : "") };
-        }),
+        title: "Sign in - choose a provider",
+        items: providerChoices(cfg, true),
         onSelect: (it) => {
           setOverlay(null);
-          setActiveProfile(it.id);
-          cfg.adopt(loadConfig({ profile: it.id })); // switch endpoint+model live
-          agentRef.current?.setProvider(getProvider(cfg));
-          setAwaitingKey(true); // next submit is captured as this provider's key
-          addLine("info", `Provider: ${it.id}. Paste its API key, then Enter (input hidden). /logout to remove it.`);
+          openAuthRoutes(it.id);
         },
       });
       return;
     }
     if (text === "/logout") {
+      if (cfg.usesChatGptAuth) {
+        addLine("info", `${clearChatGptCredentials()} OpenAI API keys were left untouched.`);
+        // Replacing the provider also disposes a live Codex App Server, so an in-memory external
+        // token cannot survive /logout until process exit.
+        agentRef.current?.setProvider(getProvider(cfg));
+        return;
+      }
+      const keyEnv = cfg.profile ? cfg.profiles[cfg.profile]?.key_env : undefined;
+      const hadEnvironmentKey = Boolean(process.env.NEKO_API_KEY || (keyEnv && process.env[keyEnv]));
       delete process.env.NEKO_API_KEY;
-      delete process.env.OPENAI_API_KEY;
-      delete process.env.NVIDIA_API_KEY;
-      addLine("info", clearApiKey());
+      if (keyEnv) delete process.env[keyEnv];
+      const profile = cfg.profile;
+      const result = clearApiKey(profile ?? undefined);
+      cfg.adopt(loadConfig({ profile: profile ?? undefined }));
+      agentRef.current?.setProvider(getProvider(cfg));
+      addLine("info", `${result}. ChatGPT sign-in and other provider keys were left untouched.` +
+        (hadEnvironmentKey ? " This process forgot the environment key; remove it from your shell settings to keep it logged out after restart." : ""));
       return;
     }
     // /auto <goal>: closed-loop — work + self-review until done (bounded). Runs as a busy turn.
@@ -1142,7 +1251,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         busy,
         queue: queueRef.current,
         addLine,
-        setLines,
+        setLines: (next) => {
+          setLines(next);
+          relayRef.current?.publish({ type: "snapshot", lines: next.map((line) => ({ ...line, text: line.text.slice(0, 200_000) })) }, { durable: true, reset: true });
+        },
         nextId: () => idRef.current++,
         setOverlay,
         setBusy,
@@ -1156,6 +1268,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setTitle: applyTitle,
         exit,
       });
+      relayRef.current?.refresh();
       return;
     }
 
@@ -1225,6 +1338,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // Baselines at turn start -> the spinner shows THIS turn's tokens (delta), split input/output.
     turnInStartRef.current = agentRef.current!.cost.promptTokens;
     turnOutStartRef.current = agentRef.current!.cost.completionTokens;
+    turnStartedAtRef.current = turnStart;
     busyRef.current = true; // sync now so a keystroke landing this instant queues (not just after render)
     setBusy(true);
     relayRef.current?.refresh();
@@ -1259,6 +1373,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       else addLine("error", msg);
     } finally {
       busyRef.current = false;
+      turnStartedAtRef.current = 0;
       setBusy(false);
       relayRef.current?.refresh();
       setTabTitle(titleTaskRef.current || "Neko Core", false); // the cat returns, the dot stops
@@ -1281,6 +1396,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setMode(next);
         return { reply: `mode: ${next}` };
       }
+      const remoteCommand = msg.trim();
+      if (/^\/(?:transcript|history)$/.test(remoteCommand)) return { reply: "The relay already shows the live transcript; scroll here to review it." };
+      else if (/^\/copy(?:\s|$)/.test(remoteCommand)) return { reply: "Use /copy in the relay browser to copy onto this device." };
+      else if (/^\/(?:login|paste|exit|quit|remote-control|rc)(?:\s|$)/.test(remoteCommand)) {
+        return { reply: `Run ${remoteCommand.split(/\s+/)[0]} on the computer; it needs that device's terminal, clipboard, or credentials.` };
+      }
       // Busy = WAIT for the current turn (the desktop's input queue does), never drop the phone's
       // message. Bounded so a wedged turn eventually answers honestly instead of hanging the client.
       const w0 = Date.now();
@@ -1302,7 +1423,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // was the old behavior and read as broken from the phone.
         const grew = agentRef.current!.messages.length > msgs0;
         const last = agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content;
-        const reply = grew && typeof last === "string" && last ? last : infoLines.join("\n") || "(done - no output)";
+        const reply = grew && typeof last === "string" && last ? last : infoLines.join("\n") || (remoteOverlayRef.current ? "Choose an option below." : "(done - no output)");
         return { reply, tokens: agentRef.current!.cost.totalTokens - tok0, ms: Date.now() - t0 };
       } finally {
         remoteSinkRef.current = null;
@@ -1322,6 +1443,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       profile: cfg.profile ?? undefined,
       effort: cfg.effort || undefined,
       mode: modeRef.current,
+      commands: SLASH,
+      ui: relayUiRef.current,
       contextPercent: (() => {
         const cost = agentRef.current!.cost;
         const messages = agentRef.current!.messages;
@@ -1332,6 +1455,25 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         return ctxPercent(used, cfg.contextWindow);
       })(),
     }),
+    control: (action: RemoteAction) => {
+      if (action?.type === "approval") {
+        const kind: ApprovalFlash["kind"] = action.decision === "always" ? "always" : action.decision === "deny" ? "no" : "ok";
+        return settleApproval(kind, action.id);
+      }
+      if (action?.type === "overlay") {
+        const waiting = remoteOverlayRef.current;
+        if (!waiting || waiting.id !== action.id) return false;
+        if (action.decision === "cancel") {
+          remoteOverlayRef.current = null; setOverlay(null); addLine("info", "(cancelled)"); return true;
+        }
+        const item = waiting.overlay.items.find((candidate) => candidate.id === action.itemId);
+        if (!item) return false;
+        remoteOverlayRef.current = null;
+        waiting.overlay.onSelect(item);
+        return true;
+      }
+      return false;
+    },
     interrupt: () => { if (controllerRef.current) { controllerRef.current.abort(); return true; } return false; },
   });
 
@@ -1350,8 +1492,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       setAwaitingKey(false);
       const key = value.trim();
       if (key) {
-        process.env.NEKO_API_KEY = key; // live for this session
-        addLine("info", setApiKey(key)); // persisted
+        const profile = cfg.profile;
+        const result = setApiKey(key);
+        cfg.adopt(loadConfig({ profile: profile ?? undefined }));
+        agentRef.current?.setProvider(getProvider(cfg));
+        addLine("info", `${result}. ${cfg.profiles[profile ?? ""]?.label || profile || cfg.provider} is active; type /model to choose a model.`);
       } else {
         addLine("info", "(login cancelled)");
       }

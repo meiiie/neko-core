@@ -79,7 +79,7 @@ export class Agent {
   private readonly onEvent?: EventHook;
   private readonly onDelta?: DeltaHook;
   private readonly dynamicContext?: () => string;
-  private readonly maxContextTokens: number;
+  private maxContextTokens: number;
   private readonly verifyBeforeExit: boolean;
   readonly cost = new CostTracker();
   messages: any[] = [];
@@ -110,7 +110,19 @@ export class Agent {
 
   /** Swap the LLM provider live (used by the REPL's /provider command to switch endpoint+key between turns,
    * no restart). Safe because commands run between turns, never mid-complete(). */
-  setProvider(provider: Provider): void { this.provider = provider; }
+  setProvider(provider: Provider): void {
+    const previous = this.provider;
+    this.provider = provider;
+    try {
+      const disposed = previous.dispose?.();
+      if (disposed && typeof (disposed as Promise<void>).catch === "function") void (disposed as Promise<void>).catch(() => {});
+    } catch { /* provider cleanup must not block a live account switch */ }
+  }
+
+  /** Keep overflow/compaction guards accurate after a live /model or /provider switch. */
+  setMaxContextTokens(tokens: number): void {
+    if (Number.isFinite(tokens) && tokens > 0) this.maxContextTokens = tokens;
+  }
 
   /** Summarize the conversation and replace it with the summary, freeing context. */
   async compact(): Promise<string> {
@@ -433,9 +445,15 @@ export class Agent {
         if (!eagerOk || signal?.aborted || eager.has(eagerKey(call))) return;
         eager.set(eagerKey(call), this.safeExecute(call, signal));
       };
+      const executeTool = async (call: { id: string; name: string; arguments: Record<string, any> }) => {
+        this.emit("tool_call", call);
+        const observation = await this.safeExecute(call, signal);
+        this.emit("tool_result", { call, observation });
+        return observation;
+      };
       let response;
       try {
-        response = await this.provider.complete(this.messages, this.tools.schemas(), this.onDelta, signal, { onToolCallReady });
+        response = await this.provider.complete(this.messages, this.tools.schemas(), this.onDelta, signal, { onToolCallReady, executeTool });
       } catch (error) {
         if (signal?.aborted) return "[interrupted]";
         throw error;
@@ -445,7 +463,7 @@ export class Agent {
 
       if (!toolCalls.length) {
         const final = response.content ?? "";
-        this.messages.push({ role: "assistant", content: final });
+        this.messages.push({ role: "assistant", content: final, ...(response.continuation?.length ? { provider_data: response.continuation } : {}) });
         // A todo label is not proof, but an OPEN plan is proof that the controller has unfinished work.
         // Give the model one chance to reconcile it before exit: continue, mark verified items done via
         // todo_write, or report a real blocker. One-shot avoids trapping legitimate clarification turns.
@@ -482,7 +500,7 @@ export class Agent {
         return final;
       }
 
-      this.messages.push(assistantToolMessage(response.content, toolCalls));
+      this.messages.push(assistantToolMessage(response.content, toolCalls, response.continuation));
       if (signal?.aborted) return "[interrupted]";
 
       // Fleet fan-out: if every call in this batch is concurrency-safe (read-only or a sub-agent
@@ -582,7 +600,7 @@ export class Agent {
 
 /** Rebuild the OpenAI-format assistant turn so the next request carries the tool_calls
  * the model made (ids must match the following tool results). */
-function assistantToolMessage(content: string | null, toolCalls: ToolCall[]): any {
+function assistantToolMessage(content: string | null, toolCalls: ToolCall[], continuation?: any[]): any {
   return {
     role: "assistant",
     content: content ?? "",
@@ -591,5 +609,6 @@ function assistantToolMessage(content: string | null, toolCalls: ToolCall[]): an
       type: "function",
       function: { name: call.name, arguments: JSON.stringify(call.arguments ?? {}) },
     })),
+    ...(continuation?.length ? { provider_data: continuation } : {}),
   };
 }

@@ -15,6 +15,9 @@ export interface ProviderResponse {
   tool_calls: ToolCall[];
   usage?: Usage;
   reasoning?: string; // the model's thinking (reasoning_content field or <think> tags in content)
+  /** Opaque provider continuation items that must be replayed with the assistant turn (for example,
+   * encrypted Responses reasoning items between tool rounds). The core stores but never interprets it. */
+  continuation?: any[];
 }
 
 /** onDelta streams chunks as they arrive (SSE). kind="reasoning" is the model's live thinking;
@@ -30,11 +33,16 @@ export interface CompleteOptions {
    * Lets the agent overlap read-only tool execution with the rest of the generation ("Executing as
    * You Generate", arXiv 2604.00491). Best-effort: non-streaming responses may never fire it. */
   onToolCallReady?: (call: ToolCall) => void;
+  /** Bidirectional providers (for example Codex App Server dynamic tools) can pause an in-flight
+   * turn and ask the host to execute a tool. The Agent supplies its existing safeExecute boundary,
+   * so approvals and path/sandbox rules stay authoritative in Neko rather than the sidecar. */
+  executeTool?: (call: ToolCall) => Promise<string | any[]>;
 }
 
 /** The LLM port. One method; `OpenAICompatProvider` is the adapter. */
 export interface Provider {
   complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse>;
+  dispose?(): void | Promise<void>;
 }
 
 /** Port for an external tool source (MCP servers). `McpHub` satisfies it structurally. */

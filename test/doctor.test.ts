@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadConfig } from "../src/adapters/config.ts";
+import { loadConfig, NekoConfig } from "../src/adapters/config.ts";
 import { collectChecks, collectTerminalChecks, terminalName } from "../src/adapters/doctor.ts";
 
 test("terminalName identifies the host from the env, most-specific first", () => {
@@ -14,6 +14,20 @@ test("terminalName identifies the host from the env, most-specific first", () =>
   expect(terminalName({ TERM: "xterm-256color" } as any)).toBe("xterm-256color");
   const bare = terminalName({} as any);
   expect(bare === "legacy console (conhost)" || bare === "unknown").toBe(true); // platform-dependent
+});
+
+test("doctor explains when a persisted GPT-5.6 model needs the optional bridge", () => {
+  const cfg = new NekoConfig({ provider: "chatgpt", model: "gpt-5.6-luna" }, "chatgpt", {}, "");
+  const model = collectChecks(cfg, { state: "missing", detail: "not installed" }).find((check) => check.name === "model")!;
+  expect(model.status).toBe("warn");
+  expect(model.detail).toContain("Support Pack");
+});
+
+test("doctor accepts GPT-5.6 when the Codex bridge is ready", () => {
+  const cfg = new NekoConfig({ provider: "chatgpt", model: "gpt-5.6-luna" }, "chatgpt", {}, "");
+  const model = collectChecks(cfg, { state: "ready", detail: "path 0.144.1" }).find((check) => check.name === "model")!;
+  expect(model.status).toBe("ok");
+  expect(model.detail).toContain("Codex bridge");
 });
 
 test("collectTerminalChecks reports terminal, tty state, ui_fps, and the keys-probe pointer", () => {

@@ -7,6 +7,8 @@ import { detectSandbox } from "../core/sandbox.ts";
 import { cachedRefreshRate, resolveUiFps } from "./display.ts";
 import { SearxngSidecar } from "./sidecar.ts";
 import { VERSION } from "../shared/version.ts";
+import { hasChatGptCredentials } from "./chatgpt-auth.ts";
+import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 
 export interface Check {
   status: "ok" | "warn";
@@ -49,18 +51,25 @@ export function collectTerminalChecks(): Check[] {
   ];
 }
 
-export function collectChecks(config: NekoConfig): Check[] {
+export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportStatus): Check[] {
+  const needsCodexBridge = config.usesChatGptAuth && config.model.startsWith("gpt-5.6-");
+  const bridge = needsCodexBridge ? (codexSupport ?? discoverCodexSupport()) : null;
+  const bridgeUnavailable = needsCodexBridge && bridge?.state !== "ready";
   return [
     { status: "ok", name: "version", detail: `neko-core ${VERSION}` },
     { status: "ok", name: "provider", detail: config.provider },
     { status: "ok", name: "profile", detail: config.profile ?? "none" },
     {
-      status: config.model && !config.modelShadow ? "ok" : "warn",
+      status: config.model && !config.modelShadow && !bridgeUnavailable ? "ok" : "warn",
       name: "model",
       detail: config.modelShadow
         ? `${config.model} - top-level 'model' in ${config.modelShadow.source} OVERRIDES profile '${config.profile}' ` +
           `(preset: ${config.modelShadow.profileModel}) and every other profile; move it under profiles.${config.profile}.model or delete it`
-        : config.model || "(unset - set model or pick a --profile)",
+        : needsCodexBridge
+          ? bridge?.state === "ready"
+            ? `${config.model} via Codex bridge (${bridge.detail})`
+            : `${config.model} needs the optional GPT-5.6 Support Pack or Codex CLI >= 0.144.0 (${bridge?.detail ?? "not found"})`
+          : config.model || "(unset - set model or pick a --profile)",
     },
     { status: "ok", name: "max_steps", detail: String(config.maxSteps) },
     { status: "ok", name: "mode", detail: config.mode },
@@ -93,11 +102,17 @@ export function collectChecks(config: NekoConfig): Check[] {
       })(),
     },
     { status: config.baseUrl ? "ok" : "warn", name: "base_url", detail: config.baseUrl || "(unset)" },
-    {
-      status: config.apiKey || config.isLocalEndpoint ? "ok" : "warn",
-      name: "api_key",
-      detail: config.apiKey ? "set" : config.isLocalEndpoint ? "not needed (local endpoint)" : "missing - set NEKO_API_KEY or run `neko init-user`",
-    },
+    config.usesChatGptAuth
+      ? {
+          status: hasChatGptCredentials() ? "ok" : "warn",
+          name: "chatgpt_auth",
+          detail: hasChatGptCredentials() ? "signed in (OAuth; API billing is not used)" : "missing - run `neko login openai chatgpt`",
+        }
+      : {
+          status: config.apiKey || config.isLocalEndpoint ? "ok" : "warn",
+          name: "api_key",
+          detail: config.apiKey ? "set" : config.isLocalEndpoint ? "not needed (local endpoint)" : "missing - set NEKO_API_KEY or run `neko init-user`",
+        },
   ];
 }
 

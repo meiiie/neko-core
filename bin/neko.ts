@@ -17,8 +17,9 @@ import { environmentBlock, projectContextBlock, renderContext } from "../src/ada
 import { collectChecks, collectTerminalChecks, render } from "../src/adapters/doctor.ts";
 import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
+import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt } from "../src/adapters/chatgpt-auth.ts";
 import { HARD_TASKS, renderBenchReport, renderLiftReport, runBench, runHarnessLift } from "../src/adapters/bench.ts";
-import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setApiKey } from "../src/adapters/project.ts";
+import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setActiveProfile, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
 import { loadSkill, matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
@@ -57,13 +58,14 @@ interface Args {
   version: boolean;
   help: boolean;
   doctor: boolean;
+  device: boolean;
   trials?: number;
   images?: string[];
 }
 
 function parseArgs(argv: string[]): Args {
   const tokens: string[] = [];
-  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, once: false, version: false, help: false, doctor: false };
+  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, once: false, version: false, help: false, doctor: false, device: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--profile") args.profile = argv[++i];
@@ -83,6 +85,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--version" || a === "-v") args.version = true;
     else if (a === "--help" || a === "-h") args.help = true;
     else if (a === "--doctor") args.doctor = true; // alias of `neko doctor` (people type both)
+    else if (a === "--device") args.device = true;
     else if (a.startsWith("-")) { /* ignore unknown flags */ }
     else tokens.push(a);
   }
@@ -210,12 +213,14 @@ Commands:
   sessions      list saved chat sessions
   skills        list available skills (~/.neko-core/skills)
   recipes       list runnable recipes (~/.neko-core/recipes)
-  login         save an API key (neko login <key>, or pipe it); logout removes it
+  login         sign in; OpenAI supports 'openai chatgpt' or 'openai api <key>'
+  logout        sign out the active route, or name 'openai api' / 'openai chatgpt'
+  support       GPT-5.6 bridge status/install/update/remove (optional Support Pack)
   update [ver]  self-update to the latest release (resumes auto-updates); 'update 0.7.7' pins/rolls
                 back to an EXACT version and PAUSES auto-updates so it sticks
   mcp           list configured MCP servers and their tools
   setup [web]   one command to stand up the SOTA web stack (SearXNG + browser MCP, wired);
-                'setup tavily <key>' wires hosted search (no Docker needed)
+                'setup tavily <key>' wires hosted search; 'setup codex' installs GPT-5.6 support
   chat          interactive session (default - same as bare 'neko' / 'neko code')
   run <task>    one-shot: run a single instruction
   bench         run a tiny agentic-coding benchmark against the configured model (pass@1)
@@ -235,6 +240,7 @@ Options:
   --resume [id]      (chat) resume a session by id, or the latest for this directory
   --continue, -c     (chat) resume the latest session for this directory (then /continue to pick up)
   --doctor           alias of 'neko doctor' (setup diagnostics)
+  --device           device-code flow with 'neko login openai chatgpt' (headless/SSH)
   --version          print version`;
 
 function cmdConfig(args: Args): number {
@@ -248,7 +254,8 @@ function cmdConfig(args: Args): number {
     console.log(`  ${key} = ${value && typeof value === "object" ? JSON.stringify(value) : value}`);
   }
   // The API key is a secret - only ever report presence, never the value.
-  console.log(`  api_key = ${cfg.apiKey ? "set" : "missing"}`);
+  if (cfg.usesChatGptAuth) console.log(`  chatgpt_auth = ${hasChatGptCredentials() ? "signed in" : "missing"} (API billing disabled)`);
+  else console.log(`  api_key = ${cfg.apiKey ? "set" : "missing"}`);
   return 0;
 }
 
@@ -357,18 +364,80 @@ function cmdRecipes(): number {
 }
 
 async function cmdLogin(args: Args): Promise<number> {
-  let key = args.positionals[0] ?? "";
-  if (!key && !process.stdin.isTTY) key = (await Bun.stdin.text()).trim(); // piped
-  if (!key) {
-    console.error("usage: neko login <key>   (or: echo $KEY | neko login)   — or run `neko` and type /login");
+  const provider = args.positionals[0]?.toLowerCase() ?? "";
+  const method = args.positionals[1]?.toLowerCase() ?? "";
+  const chatgptMethod = provider === "chatgpt" || (provider === "openai" && ["chatgpt", "subscription", "oauth"].includes(method));
+  if (chatgptMethod) {
+    await loginChatGpt({ device: args.device, notify: console.log });
+    setActiveProfile("chatgpt");
+    console.log("ChatGPT sign-in complete. Active profile: chatgpt (subscription OAuth, not API billing).");
+    return 0;
+  }
+  if (provider === "openai" && !["api", "api-key", "apikey"].includes(method)) {
+    console.error("usage: neko login openai chatgpt [--device]   OR   neko login openai api <key>");
     return 2;
   }
+  let key = provider === "openai" ? (args.positionals[2] ?? "") : (args.positionals[0] ?? "");
+  if (!key && !process.stdin.isTTY) key = (await Bun.stdin.text()).trim(); // piped
+  if (!key) {
+    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login openai chatgpt [--device]");
+    return 2;
+  }
+  if (provider === "openai") setActiveProfile("openai");
   console.log(setApiKey(key));
   return 0;
 }
 
-function cmdLogout(): number {
-  console.log(clearApiKey());
+function cmdLogout(args: Args): number {
+  const provider = args.positionals[0]?.toLowerCase() ?? "";
+  const method = args.positionals[1]?.toLowerCase() ?? "";
+  const current = load(args);
+  const explicitChatGpt = provider === "chatgpt" || (provider === "openai" && ["chatgpt", "subscription", "oauth"].includes(method));
+  const explicitApi = provider === "openai" && ["api", "api-key", "apikey"].includes(method);
+  if (provider === "openai" && !method && current.profile !== "openai" && current.profile !== "chatgpt") {
+    console.error("usage: neko logout openai api   OR   neko logout openai chatgpt");
+    return 2;
+  }
+  if (explicitChatGpt || (!explicitApi && (current.usesChatGptAuth || (provider === "openai" && current.profile === "chatgpt")))) {
+    console.log(clearChatGptCredentials());
+    return 0;
+  }
+  if (provider && provider !== "openai") {
+    console.error("usage: neko logout [openai api|openai chatgpt]");
+    return 2;
+  }
+  const targetProfile = explicitApi || provider === "openai" ? "openai" : current.profile ?? undefined;
+  console.log(clearApiKey(targetProfile));
+  const keyEnv = targetProfile ? current.profiles[targetProfile]?.key_env : undefined;
+  if (process.env.NEKO_API_KEY || (keyEnv && process.env[keyEnv])) {
+    console.log(`Environment key still active${keyEnv ? ` (${keyEnv} or NEKO_API_KEY)` : " (NEKO_API_KEY)"}; remove it from your shell settings to stay logged out.`);
+  }
+  return 0;
+}
+
+async function cmdCodexSupport(action = "status"): Promise<number> {
+  const { discoverCodexSupport } = await import("../src/adapters/codex-app-server.ts");
+  const { installCodexSupportPack, readCodexSupportPack, removeCodexSupportPack } = await import("../src/adapters/codex-support-pack.ts");
+  const normalized = action.toLowerCase();
+  if (normalized === "status") {
+    const status = discoverCodexSupport();
+    const managed = readCodexSupportPack();
+    console.log(`GPT-5.6 support: ${status.state} (${status.detail})`);
+    if (managed) console.log(`  managed ${managed.protocolVersion}: ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk; source ${managed.sourceUrl}`);
+    console.log("  GPT-5.5, API, Ollama, and other providers do not require this component.");
+    return status.state === "ready" ? 0 : 1;
+  }
+  if (normalized === "remove" || normalized === "uninstall") {
+    console.log(removeCodexSupportPack()
+      ? "Neko-managed GPT-5.6 Support Pack removed. An existing Codex CLI was not changed."
+      : "No Neko-managed GPT-5.6 Support Pack is installed.");
+    return 0;
+  }
+  if (normalized !== "install" && normalized !== "update") {
+    console.error("usage: neko support [status|install|update|remove]");
+    return 2;
+  }
+  await installCodexSupportPack({ force: normalized === "update", notify: console.log });
   return 0;
 }
 
@@ -572,7 +641,8 @@ async function main(): Promise<number> {
       case "skills": return cmdSkills();
       case "recipes": return cmdRecipes();
       case "login": return await cmdLogin(args);
-      case "logout": return cmdLogout();
+      case "logout": return cmdLogout(args);
+      case "support": return await cmdCodexSupport(args.positionals[0] ?? "status");
       case "update": {
         const { selfUpdate } = await import("../src/adapters/update.ts");
         const { setAutoUpdate } = await import("../src/adapters/project.ts");
@@ -618,7 +688,11 @@ async function main(): Promise<number> {
       }
       case "mcp": return await cmdMcp(args);
       case "run": return await cmdRun(args);
-      case "setup": { const { setupWeb } = await import("../src/adapters/setup.ts"); return await setupWeb(args.positionals[0] ?? "web", (m) => console.log(m), args.positionals[1] ?? ""); }
+      case "setup": {
+        if (args.positionals[0]?.toLowerCase() === "codex") return await cmdCodexSupport("install");
+        const { setupWeb } = await import("../src/adapters/setup.ts");
+        return await setupWeb(args.positionals[0] ?? "web", (m) => console.log(m), args.positionals[1] ?? "");
+      }
       case "bench": return await cmdBench(args);
       default:
         console.error(`neko: error: unknown command '${cmd}'. Run 'neko --help'.`);

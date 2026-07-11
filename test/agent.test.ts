@@ -34,6 +34,43 @@ test("loop runs tools then finishes", async () => {
   ]);
 });
 
+test("a bidirectional provider executes tools through the same safe Agent boundary", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-bidi-"));
+  writeFileSync(join(root, "a.txt"), "bridge-safe");
+  const events: string[] = [];
+  const provider = {
+    async complete(_messages: any[], _tools: any[], _delta: any, _signal: any, opts: any) {
+      const observation = await opts.executeTool({ id: "dynamic-1", name: "read_file", arguments: { path: "a.txt" } });
+      expect(observation).toContain("bridge-safe");
+      return { content: "done", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({
+    provider,
+    tools: new ToolRegistry(root, "auto", () => true),
+    onEvent: (kind) => events.push(kind),
+  });
+  expect(await agent.run("go")).toBe("done");
+  expect(events).toContain("tool_call");
+  expect(events).toContain("tool_result");
+});
+
+test("provider continuation data survives the assistant tool turn and is replayable", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-cont-"));
+  writeFileSync(join(root, "a.txt"), "ok");
+  const opaque = [{ type: "reasoning", id: "r1", encrypted_content: "ciphertext", summary: [] }];
+  const agent = new Agent({
+    provider: new ScriptedProvider([
+      { content: null, tool_calls: [{ id: "c1", name: "read_file", arguments: { path: "a.txt" } }], continuation: opaque },
+      { content: "done", tool_calls: [] },
+    ]) as any,
+    tools: new ToolRegistry(root, "auto", () => true),
+  });
+  expect(await agent.run("go")).toBe("done");
+  const assistant = agent.messages.find((m: any) => m.role === "assistant" && m.tool_calls?.length);
+  expect(assistant.provider_data).toEqual(opaque);
+});
+
 test("a throwing tool call (model glitch) is fed back as an error, not crashed", async () => {
   // web_fetch with no `url` makes requireArg throw -- before safeExecute this rejected the whole turn.
   const script = [
@@ -441,6 +478,12 @@ test("estimateTokens counts assistant tool_calls (e.g. write_file args) so the o
   // The tool_call's serialized JSON adds length; the estimate must reflect it, not just content.
   expect(estimateTokens(withCalls)).toBeGreaterThan(estimateTokens(without));
   expect(estimateTokens(withCalls)).toBeGreaterThanOrEqual(Math.ceil(big.length / 4));
+});
+
+test("estimateTokens counts opaque provider continuation data", () => {
+  const base = estimateTokens([{ role: "assistant", content: "" }]);
+  const withContinuation = estimateTokens([{ role: "assistant", content: "", provider_data: [{ encrypted_content: "x".repeat(400) }] }]);
+  expect(withContinuation).toBeGreaterThan(base + 90);
 });
 
 test("in-loop guard clips OLD observations within one turn before context overflows", async () => {

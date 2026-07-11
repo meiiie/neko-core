@@ -3,7 +3,7 @@
  * Used by /resume, /model, and any future chooser, so every picker behaves the same.
  */
 import { Box, Text, useInput } from "ink";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { isEscapeResidue } from "./text-input.tsx";
 
@@ -44,6 +44,15 @@ export function SelectList(props: {
   const [showPreview, setShowPreview] = useState(false);
   const [lazyPreview, setLazyPreview] = useState<Record<string, string>>({}); // id -> preview, filled on demand
   const [renaming, setRenaming] = useState<string | null>(null); // rename buffer; null = not renaming
+
+  // A nested flow can replace one picker with another without unmounting this component. Its search
+  // query belongs to the old list (e.g. "openai" must not filter the following auth-method list).
+  useEffect(() => {
+    setIndex(0);
+    setQuery("");
+    setShowPreview(false);
+    setRenaming(null);
+  }, [title]);
 
   const filtered = query
     ? items.filter((it) => (it.label + " " + (it.detail ?? "")).toLowerCase().includes(query.toLowerCase()))

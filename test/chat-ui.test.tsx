@@ -1,10 +1,15 @@
 import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
 import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
 import { buildReplayLines, clampToRows, contentToText, recoverTodos, renderTail } from "../src/ui/chat-lines.ts";
+import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
+import { setModel } from "../src/adapters/project.ts";
 
 test("multimodal tool observations render as metadata + [image], never object coercion", () => {
   const content = [{ type: "text", text: "captured screen\n" }, { type: "image_url", image_url: { url: "data:image/gif;base64,AA" } }];
@@ -158,6 +163,148 @@ test("typing '/' shows a slash-command autocomplete menu", async () => {
   expect(out).not.toContain("/exit"); // filtered: doesn't start with /c
   unmount();
 });
+
+test("/login groups OpenAI first, then offers subscription OAuth or API key", async () => {
+  const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+  const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+  stdin.write("/login");
+  await tick(30);
+  stdin.write("\r");
+  expect(await until(() => (lastFrame() ?? "").includes("Sign in - choose a provider"))).toBe(true);
+  stdin.write("openai"); // filter the grouped provider list to OpenAI
+  await tick(50);
+  stdin.write("\r");
+  expect(await until(() => (lastFrame() ?? "").includes("OpenAI - choose how to sign in"))).toBe(true);
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain("ChatGPT Plus/Pro");
+  expect(frame).toContain("API key (pay-as-you-go)");
+  expect(frame).toContain("subscription, no API billing");
+  unmount();
+}, 15000);
+
+test("OpenAI API login is profile-scoped and /logout takes effect immediately", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const oldNekoKey = process.env.NEKO_API_KEY, oldOpenAiKey = process.env.OPENAI_API_KEY;
+  const home = mkdtempSync(join(tmpdir(), "neko-api-login-"));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  delete process.env.NEKO_API_KEY; delete process.env.OPENAI_API_KEY;
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, lastFrame, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+    stdin.write("/login"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Sign in - choose a provider"))).toBe(true);
+    stdin.write("openai"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("OpenAI - choose how to sign in"))).toBe(true);
+    stdin.write("\x1b[B"); // ChatGPT is first; choose the API-key route
+    await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("paste the API key"))).toBe(true);
+    stdin.write("TEST-KEY-NOT-REAL"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("profile \"openai\""))).toBe(true);
+    const configPath = join(home, ".neko-core", "config.json");
+    expect(JSON.parse(readFileSync(configPath, "utf8")).profiles.openai.api_key).toBe("TEST-KEY-NOT-REAL");
+    expect(process.env.NEKO_API_KEY).toBeUndefined(); // no cross-provider process-wide override
+    expect(frames.join("\n")).not.toContain("TEST-KEY-NOT-REAL"); // secret never echoed
+
+    await tick(100); // let the masked-key capture fully hand focus back to the normal composer
+    stdin.write("/logout"); await tick(30); stdin.write("\r");
+    expect(await until(() => /other\s+provider keys were left untouched/.test(frames.join("\n")))).toBe(true);
+    expect(JSON.parse(readFileSync(configPath, "utf8")).profiles.openai.api_key).toBeUndefined();
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    if (oldNekoKey === undefined) delete process.env.NEKO_API_KEY; else process.env.NEKO_API_KEY = oldNekoKey;
+    if (oldOpenAiKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldOpenAiKey;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("/model on ChatGPT lists only completion-usable subscription models while signed out", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-model-picker-"));
+  process.env.HOME = home; process.env.USERPROFILE = home; // guarantee no credential -> no network
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo profile="chatgpt" provider={provider} />);
+    stdin.write("/model");
+    await tick(30);
+    stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("OpenAI · ChatGPT Plus/Pro"))).toBe(true);
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("gpt-5.6-sol");
+    expect(frame).not.toContain("gpt-5.6-terra");
+    expect(frame).not.toContain("gpt-5.6-luna");
+    expect(frame).toContain("gpt-5.4");
+    expect(frame).toContain("gpt-5.5");
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("/usage shows ChatGPT subscription windows and credits without making a model call", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldFetch = globalThis.fetch;
+  const home = mkdtempSync(join(tmpdir(), "neko-usage-"));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  saveChatGptCredentials({ accessToken: "access", refreshToken: "refresh", expiresAt: Date.now() + 3_600_000, accountId: "acct" });
+  let requested = "";
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    requested = String(input);
+    return Response.json({ plan_type: "pro", rate_limit: { allowed: false, limit_reached: true,
+      primary_window: { used_percent: 100, limit_window_seconds: 18000, reset_at: 2000 },
+      secondary_window: { used_percent: 29, limit_window_seconds: 604800, reset_at: 9000 } },
+      credits: { has_credits: false, unlimited: false, balance: "0" } });
+  }) as typeof fetch;
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo profile="chatgpt" provider={provider} />);
+    stdin.write("/usage"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("ChatGPT usage (pro)"))).toBe(true);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("5h: 100% used, 0% left");
+    expect(frame).toContain("7d: 29% used, 71% left");
+    expect(frame).toContain("credits: none");
+    expect(requested).toBe("https://chatgpt.com/backend-api/wham/usage");
+    unmount();
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("/effort uses the selected compatible model catalog", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldFetch = globalThis.fetch;
+  const home = mkdtempSync(join(tmpdir(), "neko-effort-"));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  saveChatGptCredentials({ accessToken: "access", refreshToken: "refresh", expiresAt: Date.now() + 3_600_000, accountId: "acct" });
+  setModel("gpt-5.5", "chatgpt");
+  globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) => Response.json({ models: [{
+    slug: "gpt-5.5", display_name: "GPT-5.5", visibility: "list", default_reasoning_level: "medium", use_responses_lite: false,
+    input_modalities: ["text", "image"],
+    supported_reasoning_levels: ["low", "medium", "high", "xhigh"].map((effort) => ({ effort, description: `${effort} level` })),
+  }] })) as typeof fetch;
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo profile="chatgpt" provider={provider} />);
+    stdin.write("/effort"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Reasoning effort for gpt-5.5"))).toBe(true);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("default");
+    expect(frame).toContain("xhigh");
+    expect(frame).not.toContain("max");
+    expect(frame).not.toContain("ultra");
+    unmount();
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
 
 test("input typed while busy is queued, then drained", async () => {
   // First turn takes a moment; a second submit during it should queue.

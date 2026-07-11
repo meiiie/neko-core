@@ -67,15 +67,25 @@ export function setApiKey(key: string): string {
 /** Persist the chosen model so the NEXT session (and new folders) start with it too. With an active
  * profile the model belongs to THAT profile - a top-level `model` would shadow EVERY profile's preset
  * (the /model footgun doctor warns about), so writing here also clears any legacy top-level value. */
-export function setModel(model: string, profile?: string | null): void {
+export function setModel(model: string, profile?: string | null, contextWindow?: number, vision?: boolean): void {
   updateUserConfig((d) => {
     if (profile) {
       d.profiles ??= {};
       d.profiles[profile] ??= {};
       d.profiles[profile].model = model.trim();
+      if (Number.isFinite(contextWindow) && contextWindow! > 0) {
+        d.profiles[profile].model_context ??= {};
+        d.profiles[profile].model_context[model.trim()] = contextWindow;
+      }
+      if (typeof vision === "boolean") d.profiles[profile].vision = vision;
       delete d.model; // a stale top-level model would keep shadowing every profile
     } else {
       d.model = model.trim();
+      if (Number.isFinite(contextWindow) && contextWindow! > 0) {
+        d.model_context ??= {};
+        d.model_context[model.trim()] = contextWindow;
+      }
+      if (typeof vision === "boolean") d.vision = vision;
     }
   });
 }
@@ -114,10 +124,10 @@ export function setEffort(effort: string): void {
 
 /** Remove the saved API key (used by /logout). Env keys are cleared by the caller. Removes the ACTIVE
  * profile's key AND any stray top-level key (so an old top-level key can't keep shadowing the profile). */
-export function clearApiKey(): string {
+export function clearApiKey(profile?: string): string {
   try {
     const data = readUserConfig() as any;
-    const active = typeof data.active_profile === "string" ? data.active_profile : "";
+    const active = profile ?? (typeof data.active_profile === "string" ? data.active_profile : "");
     let removed = "";
     if (active && data.profiles && data.profiles[active] && data.profiles[active].api_key) {
       delete data.profiles[active].api_key;

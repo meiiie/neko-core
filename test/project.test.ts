@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { clearApiKey, patchUserConfig, setActiveProfile, setApiKey, setModel } from "../src/adapters/project.ts";
+import { loadConfig } from "../src/adapters/config.ts";
 
 // project.ts resolves the user config under homedir(); point that at a temp dir per test.
 const ORIG = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
@@ -32,10 +33,13 @@ test("a malformed user config is NOT clobbered by setModel (no data loss)", () =
 
 test("setModel with an ACTIVE profile writes into that profile and clears the shadowing top-level model", () => {
   const path = withTempHome('{ "model": "old-shadow", "profiles": { "nvidia": { "model": "preset" } } }');
-  setModel("openai/gpt-oss-120b", "nvidia");
+  setModel("openai/gpt-oss-120b", "nvidia", 372_000, true);
   const d = JSON.parse(readFileSync(path, "utf-8"));
   expect(d.profiles.nvidia.model).toBe("openai/gpt-oss-120b"); // the model belongs to the profile...
+  expect(d.profiles.nvidia.model_context["openai/gpt-oss-120b"]).toBe(372_000); // live metadata survives restart
+  expect(d.profiles.nvidia.vision).toBe(true); // model capability survives restart too
   expect(d.model).toBeUndefined(); // ...and the footgun top-level shadow is GONE (/model used to recreate it)
+  expect(loadConfig({ profile: "nvidia" }).contextWindow).toBe(372_000);
 });
 
 test("setModel without a profile keeps the simple top-level write", () => {
@@ -81,6 +85,18 @@ test("setApiKey creates an override for an active built-in profile", () => {
   const cfg = JSON.parse(readFileSync(path, "utf-8"));
   expect(cfg.profiles.nvidia.api_key).toBe("NKEY");
   expect(cfg.api_key).toBeUndefined();
+});
+
+test("clearApiKey can remove one named profile without changing or clearing another", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "nvidia",
+    profiles: { nvidia: { api_key: "NKEY" }, openai: { api_key: "OKEY" } },
+  }));
+  expect(clearApiKey("openai")).toContain('profile "openai"');
+  const cfg = JSON.parse(readFileSync(path, "utf-8"));
+  expect(cfg.active_profile).toBe("nvidia");
+  expect(cfg.profiles.nvidia.api_key).toBe("NKEY");
+  expect(cfg.profiles.openai.api_key).toBeUndefined();
 });
 
 test("switching profiles preserves a legacy top-level key under the previous profile", () => {

@@ -107,6 +107,7 @@ export function estimateTokens(messages: any[]): number {
     // text lives in arguments -- a turn writing several big files would otherwise be undercounted
     // and the overflow guard would fire too late. Results are usually larger, but not always.
     if (m.tool_calls) chars += JSON.stringify(m.tool_calls).length;
+    if (m.provider_data) chars += JSON.stringify(m.provider_data).length;
   }
   return Math.ceil(chars / 4);
 }

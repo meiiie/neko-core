@@ -8,7 +8,7 @@ import { COMPACT_AT } from "../core/agent.ts";
 import { loadConfig, type NekoConfig } from "../adapters/config.ts";
 import { rememberNote, renderContext } from "../adapters/context.ts";
 import { initProject } from "../adapters/project.ts";
-import { getProvider, listModels } from "../adapters/providers.ts";
+import { getProvider, listModelOptions, type ModelOption } from "../adapters/providers.ts";
 import { setActiveProfile, setEffort, setModel } from "../adapters/project.ts";
 import { fillRecipe, listRecipes, loadRecipe } from "../adapters/recipes.ts";
 import { listSessionMetas, loadSession, renameSession, sessionTitle, type Session } from "../adapters/session.ts";
@@ -18,10 +18,15 @@ import { listTools } from "../core/tools.ts";
 import { fmtBytes, relativeTime, trunc } from "./format.ts";
 import type { Overlay } from "./select-list.tsx";
 import type { Line, LineKind } from "./transcript.tsx";
+import { hasChatGptCredentials } from "../adapters/chatgpt-auth.ts";
+import { authChoices, profileDisplayName, providerChoices } from "../adapters/provider-choice.ts";
+import { getChatGptUsage, resolveChatGptEffort, type ChatGptUsageReport, type ChatGptUsageWindow } from "../adapters/chatgpt-provider.ts";
+import { discoverCodexSupport } from "../adapters/codex-app-server.ts";
+import { installCodexSupportPack, readCodexSupportPack, removeCodexSupportPack } from "../adapters/codex-support-pack.ts";
 
 export const HELP = [
   "Commands:",
-  "  /help /cost /model /provider /tools /skill(s) /init /clear /compact /transcript /reset /exit",
+  "  /help /cost /usage /model /provider /support /tools /skill(s) /init /clear /compact /transcript /reset /exit",
   "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /continue · /retry · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
@@ -34,8 +39,10 @@ export const HELP = [
 export const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
   { name: "/cost", desc: "token usage this session" },
+  { name: "/usage", desc: "ChatGPT plan quota, reset windows, and credits" },
   { name: "/model", desc: "show / list / switch model (/model list · /model <id>)" },
   { name: "/provider", desc: "switch provider (account) then pick its model - picker or /provider <name>" },
+  { name: "/support", desc: "GPT-5.6 bridge status/install/remove (optional; other models do not need it)" },
   { name: "/tools", desc: "list / toggle tools (/tools bash)" },
   { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
   { name: "/init", desc: "scaffold ./.neko-core/config.json" },
@@ -52,7 +59,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/resume", desc: "resume a session (/resume [id])" },
   { name: "/continue", desc: "pick up an interrupted task where it left off" },
   { name: "/retry", desc: "re-run the last message (e.g. after an error)" },
-  { name: "/effort", desc: "reasoning effort (/effort low|medium|high|off)" },
+  { name: "/effort", desc: "model-aware reasoning effort picker (/effort low..ultra|off)" },
   { name: "/context", desc: "context window usage" },
   { name: "/memory", desc: "show NEKO.md memory/context files" },
   { name: "/remember", desc: "save a note to NEKO.md (or start a line with #)" },
@@ -63,8 +70,8 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/paste", desc: "attach an image from the clipboard (or Alt+V)" },
   { name: "/remote-control", desc: "toggle a local HTTP control server (/rc) - drive Neko from elsewhere" },
   { name: "/relay", desc: "drive multiple Neko sessions from your phone (live + E2E; /relay new rotates)" },
-  { name: "/login", desc: "enter + save your API key" },
-  { name: "/logout", desc: "remove the saved API key" },
+  { name: "/login", desc: "connect ChatGPT or save a provider API key" },
+  { name: "/logout", desc: "sign out the active auth route only" },
   { name: "/rewind", desc: "undo the last turn (restore context + revert this turn's file edits)" },
   { name: "/bashes", desc: "list background bash tasks (Ctrl+B to background a running one)" },
   { name: "/reset", desc: "reset conversation context" },
@@ -153,8 +160,13 @@ function switchProfile(ctx: CommandCtx, name: string): boolean {
   setActiveProfile(name); // persist as default for next session too
   cfg.adopt(loadConfig({ profile: name })); // in-session cfg now = the new provider (endpoint+model+key)
   agent.setProvider(getProvider(cfg)); // the running agent calls the new endpoint from the next turn
+  agent.setMaxContextTokens(cfg.contextWindow);
   addLine("info", `provider -> ${name}  (${cfg.provider} · ${cfg.model})`);
-  if (!cfg.apiKey) {
+  if (cfg.usesChatGptAuth && !hasChatGptCredentials()) {
+    addLine("info", `note: provider "${name}" needs ChatGPT sign-in - type /login.`);
+    return false;
+  }
+  if (!cfg.usesChatGptAuth && !cfg.apiKey && !cfg.isLocalEndpoint) {
     addLine("info", `note: provider "${name}" has no API key yet - type /login to add it (it saves to this provider).`);
     return false;
   }
@@ -166,17 +178,20 @@ async function openModelPicker(ctx: CommandCtx): Promise<void> {
   const { cfg, addLine } = ctx;
   ctx.setBusy(true);
   try {
-    const models = await listModels(cfg);
+    const models = await listModelOptions(cfg);
     ctx.setBusy(false);
     if (!models.length) return addLine("info", "no models returned by this provider");
     ctx.setOverlay({
-      title: `Select model  (${cfg.profile ?? cfg.provider})`,
-      items: models.map((m) => ({ id: m, label: m, detail: m === cfg.model ? "(current)" : undefined })),
+      title: `Select model  (${profileDisplayName(cfg)})`,
+      items: models.map((model) => ({ id: model.id, label: model.label, detail: modelDetail(model, cfg.model) })),
       onSelect: (it) => {
         ctx.setOverlay(null);
-        cfg.data.model = it.id;
-        setModel(it.id, cfg.profile); // persist across sessions - into the ACTIVE profile, not a shadowing top-level
-        addLine("info", `model -> ${it.id}`);
+        const selected = models.find((model) => model.id === it.id);
+        if (selected?.available === false) {
+          openCodexInstallPrompt(ctx, selected);
+          return;
+        }
+        if (selected) applyModelSelection(ctx, selected);
       },
     });
   } catch (error) {
@@ -185,22 +200,118 @@ async function openModelPicker(ctx: CommandCtx): Promise<void> {
   }
 }
 
+function applyModelSelection(ctx: CommandCtx, selected: ModelOption): void {
+  const { cfg, addLine } = ctx;
+  cfg.data.model = selected.id;
+  if (selected.contextWindow) cfg.data.model_context = { ...(cfg.data.model_context ?? {}), [selected.id]: selected.contextWindow };
+  if (typeof selected.vision === "boolean") cfg.data.vision = selected.vision;
+  setModel(selected.id, cfg.profile, selected.contextWindow, selected.vision);
+  ctx.agent.setMaxContextTokens(cfg.contextWindow);
+  const before = cfg.effort;
+  const resolved = resolveChatGptEffort(before, selected);
+  if (before && before !== "off" && resolved !== before) {
+    cfg.data.reasoning_effort = resolved;
+    setEffort(resolved);
+    addLine("info", `model -> ${selected.id}; effort ${before} -> ${resolved} (highest supported)`);
+  } else {
+    const defaultNote = !before && selected.defaultEffort ? `; default effort ${selected.defaultEffort}` : "";
+    addLine("info", `model -> ${selected.id}${defaultNote}`);
+  }
+}
+
+function openCodexInstallPrompt(ctx: CommandCtx, selected: ModelOption): void {
+  ctx.setOverlay({
+    title: `${selected.id} needs the optional GPT-5.6 Support Pack. GPT-5.5/API/Ollama are unchanged.`,
+    items: [
+      { id: "install", label: "Install support pack", detail: "official OpenAI App Server; about 95 MiB download / 270 MiB disk" },
+      { id: "cancel", label: "Not now", detail: "keep the current model; download nothing" },
+    ],
+    onSelect: (choice) => {
+      ctx.setOverlay(null);
+      if (choice.id !== "install") return ctx.addLine("info", "Support Pack installation cancelled; current model unchanged.");
+      ctx.setBusy(true);
+      void installCodexSupportPack({ notify: (message) => ctx.addLine("info", message) })
+        .then(() => applyModelSelection(ctx, { ...selected, available: true }))
+        .catch((error) => ctx.addLine("error", `installing GPT-5.6 support: ${error instanceof Error ? error.message : error}`))
+        .finally(() => ctx.setBusy(false));
+    },
+  });
+}
+
+function modelDetail(model: ModelOption, current: string): string {
+  const parts: string[] = [];
+  if (model.id === current) parts.push("current");
+  if (model.description) parts.push(model.description);
+  if (model.defaultEffort) parts.push(`default ${model.defaultEffort}`);
+  if (model.efforts?.length) parts.push(`effort ${model.efforts.map((level) => level.effort).join("/")}`);
+  if (model.contextWindow) parts.push(`${Math.round(model.contextWindow / 1000)}k ctx`);
+  if (model.requiresCodexSupport) parts.push(model.available === false ? "support pack required" : "Codex bridge ready");
+  return parts.join(" - ");
+}
+
+export function formatChatGptUsage(report: ChatGptUsageReport, nowSeconds = Math.floor(Date.now() / 1000)): string {
+  const lines = [`ChatGPT usage (${report.planType || "unknown"})`];
+  for (const [index, limit] of report.limits.entries()) {
+    if (index > 0) lines.push(`${limit.name}:`);
+    const prefix = index === 0 ? "" : "  ";
+    if (limit.primary) lines.push(`${prefix}${formatUsageWindow(limit.primary, nowSeconds)}${limit.limitReached || !limit.allowed ? " - LIMIT REACHED" : ""}`);
+    if (limit.secondary) lines.push(`${prefix}${formatUsageWindow(limit.secondary, nowSeconds)}`);
+  }
+  if (report.credits) {
+    const value = report.credits.unlimited ? "unlimited" : report.credits.hasCredits ? `balance ${report.credits.balance ?? "available"}` : "none";
+    lines.push(`credits: ${value}`);
+  }
+  return lines.join("\n");
+}
+
+function formatUsageWindow(window: ChatGptUsageWindow, nowSeconds: number): string {
+  const label = window.windowSeconds >= 6 * 24 * 3600 ? `${Math.round(window.windowSeconds / 86400)}d`
+    : window.windowSeconds >= 3600 ? `${Math.round(window.windowSeconds / 3600)}h`
+    : `${Math.round(window.windowSeconds / 60)}m`;
+  const left = Math.max(0, Math.round(100 - window.usedPercent));
+  const reset = window.resetsAt ? ` - resets in ${formatDuration(Math.max(0, window.resetsAt - nowSeconds))}` : "";
+  return `${label}: ${Math.round(window.usedPercent)}% used, ${left}% left${reset}`;
+}
+
+function formatDuration(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.ceil((seconds % 3600) / 60);
+  return [days ? `${days}d` : "", hours ? `${hours}h` : "", !days && minutes ? `${minutes}m` : ""].filter(Boolean).join(" ") || "now";
+}
+
 /** Provider picker (account first). On select, switch to it and CHAIN straight into its model picker, so the
  * flow is one smooth "pick account -> pick its model" — provider stays the primary axis (it's the account /
  * quota that costs money), and the same model name on two providers never gets confused. */
-function openProviderPicker(ctx: CommandCtx): void {
+function openProviderPicker(ctx: CommandCtx, initialFamily?: string): void {
   const { cfg } = ctx;
-  const names = Object.keys(cfg.profiles).sort();
+  const chooseFamily = (family: string) => {
+    const apiProfiles = new Set<string>();
+    for (const [name, profile] of Object.entries(cfg.profiles)) {
+      if (profile.auth === "chatgpt_oauth" || profile.auth === "none") continue;
+      try { if (loadConfig({ profile: name }).apiKey) apiProfiles.add(name); } catch { /* status only */ }
+    }
+    const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), apiProfiles });
+    if (routes.length === 1) {
+      if (switchProfile(ctx, routes[0].id)) void openModelPicker(ctx);
+      return;
+    }
+    ctx.setOverlay({
+      title: `${routes[0]?.label?.startsWith("ChatGPT") ? "OpenAI" : family} - choose account`,
+      items: routes,
+      onSelect: async (route) => {
+        ctx.setOverlay(null);
+        if (switchProfile(ctx, route.id)) await openModelPicker(ctx);
+      },
+    });
+  };
+  if (initialFamily) return chooseFamily(initialFamily);
   ctx.setOverlay({
     title: "Select provider (account) - then pick its model",
-    items: names.map((n) => {
-      const p: any = cfg.profiles[n] ?? {};
-      const cur = n === cfg.profile ? "  (current)" : "";
-      return { id: n, label: n, detail: `${p.provider ?? "?"} · ${p.model ?? "?"}${cur}` };
-    }),
-    onSelect: async (it) => {
+    items: providerChoices(cfg),
+    onSelect: (it) => {
       ctx.setOverlay(null);
-      if (switchProfile(ctx, it.id)) await openModelPicker(ctx); // account -> its model, one flow
+      chooseFamily(it.id);
     },
   });
 }
@@ -217,9 +328,61 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return addLine("info", HELP);
     case "/cost":
       return addLine("info", agent.cost.summary());
+    case "/usage": {
+      if (!cfg.usesChatGptAuth) return addLine("info", "subscription quota is available for ChatGPT login; use /cost for this session's tokens");
+      ctx.setBusy(true);
+      try { addLine("info", formatChatGptUsage(await getChatGptUsage())); }
+      catch (error) { addLine("error", `reading usage: ${error instanceof Error ? error.message : error}`); }
+      finally { ctx.setBusy(false); }
+      return;
+    }
+    case "/support": {
+      const action = input.slice("/support".length).trim().toLowerCase() || "status";
+      if (action === "status") {
+        const status = discoverCodexSupport();
+        const managed = readCodexSupportPack();
+        const disk = managed ? `; ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
+        return addLine("info", `GPT-5.6 support: ${status.state} (${status.detail})${disk}. GPT-5.5/API/Ollama do not require it.`);
+      }
+      if (action === "remove" || action === "uninstall") {
+        agent.setProvider(getProvider(cfg)); // release an idle App Server before Windows removes it
+        const removed = removeCodexSupportPack();
+        const fallback = discoverCodexSupport();
+        return addLine("info", removed
+          ? `GPT-5.6 Support Pack removed. Bridge status: ${fallback.state} (${fallback.detail}).`
+          : "No Neko-managed Support Pack is installed; an existing Codex CLI is never removed by Neko.");
+      }
+      if (action !== "install" && action !== "update") return addLine("info", "usage: /support [status|install|update|remove]");
+      ctx.setBusy(true);
+      try { await installCodexSupportPack({ force: action === "update", notify: (message) => addLine("info", message) }); }
+      catch (error) { addLine("error", `installing GPT-5.6 support: ${error instanceof Error ? error.message : error}`); }
+      finally { ctx.setBusy(false); }
+      return;
+    }
     case "/model": {
       const arg = input.slice("/model".length).trim();
-      if (arg && arg !== "list") {
+      if (arg === "list") {
+        ctx.setBusy(true);
+        try {
+          const models = await listModelOptions(cfg);
+          return addLine("info", "models: " + (models.map((model) => model.id + (model.id === cfg.model ? " (current)" : "")).join(", ") || cfg.model || "(none)"));
+        } finally {
+          ctx.setBusy(false);
+        }
+      }
+      if (arg) {
+        if (cfg.usesChatGptAuth) {
+          ctx.setBusy(true);
+          try {
+            const selected = (await listModelOptions(cfg)).find((model) => model.id === arg);
+            if (!selected) return addLine("error", `unknown ChatGPT model '${arg}' - use /model list`);
+            if (selected.available === false) { openCodexInstallPrompt(ctx, selected); return; }
+            applyModelSelection(ctx, selected);
+            return;
+          } finally {
+            ctx.setBusy(false);
+          }
+        }
         cfg.data.model = arg;
         setModel(arg, cfg.profile); // remember it for the next session/folder too - in the ACTIVE profile
         return addLine("info", `model -> ${arg}`);
@@ -231,8 +394,9 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/providers":
     case "/profiles": {
       const arg = input.slice(cmd.length).trim();
-      if (arg === "list") return addLine("info", "providers: " + Object.keys(cfg.profiles).sort().join(", "));
-      if (arg) { switchProfile(ctx, arg); return; } // /provider zai  -> switch directly (no model picker)
+      if (arg === "list") return addLine("info", "providers: " + providerChoices(cfg).map((choice) => choice.label).join(", "));
+      if (arg === "openai") { openProviderPicker(ctx, "openai"); return; }
+      if (arg) { switchProfile(ctx, arg); return; } // explicit internal profile remains available
       openProviderPicker(ctx); // /provider  -> guided picker: account -> its model
       return;
     }
@@ -383,19 +547,36 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return;
     }
     case "/effort": {
-      const arg = input.split(/\s+/)[1]?.toLowerCase();
+      let arg = input.split(/\s+/)[1]?.toLowerCase();
+      if (arg === "default") arg = "off";
+      let option: ModelOption | undefined;
+      if (cfg.usesChatGptAuth) {
+        ctx.setBusy(true);
+        try { option = (await listModelOptions(cfg)).find((model) => model.id === cfg.model); }
+        finally { ctx.setBusy(false); }
+      }
+      const supported = option?.efforts?.map((level) => level.effort) ?? ["low", "medium", "high", "xhigh", "max", "ultra"];
+      const levels = ["off", ...supported];
       const apply = (lvl: string) => {
         if (lvl === "off") delete cfg.data.reasoning_effort;
         else cfg.data.reasoning_effort = lvl;
         setEffort(lvl); // persist across sessions
-        addLine("info", `effort -> ${cfg.effort || "off"}`);
+        const shown = cfg.effort || `default${option?.defaultEffort ? ` (${option.defaultEffort})` : ""}`;
+        addLine("info", `effort -> ${shown}`);
       };
-      if (arg) return apply(arg); // /effort high
+      if (arg === "list") return addLine("info", `${cfg.model} effort: default, ${supported.join(", ")}  (current: ${cfg.effort || "default"})`);
+      if (arg) {
+        if (!levels.includes(arg)) return addLine("error", `${cfg.model} supports: default, ${supported.join(", ")}`);
+        return apply(arg);
+      }
       // No arg -> interactive picker (Faster -> Smarter), Claude-style.
-      const levels = ["off", "low", "medium", "high", "xhigh", "max"];
       ctx.setOverlay({
-        title: "Reasoning effort  (Faster -> Smarter)",
-        items: levels.map((l) => ({ id: l, label: l, detail: l === (cfg.effort || "off") ? "(current)" : undefined })),
+        title: `Reasoning effort for ${cfg.model}  (Faster -> Smarter)`,
+        items: levels.map((level) => {
+          const metadata = option?.efforts?.find((candidate) => candidate.effort === level);
+          const description = level === "off" ? `use model default${option?.defaultEffort ? ` (${option.defaultEffort})` : ""}` : metadata?.description;
+          return { id: level, label: level === "off" ? "default" : level, detail: [level === (cfg.effort || "off") ? "current" : "", description ?? ""].filter(Boolean).join(" - ") };
+        }),
         onSelect: (it) => {
           ctx.setOverlay(null);
           apply(it.id);

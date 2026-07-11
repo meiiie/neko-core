@@ -9,6 +9,10 @@
 import { NekoConfig } from "./config.ts";
 import type { MoaRef } from "./config.ts";
 import { AnthropicProvider } from "./anthropic.ts";
+import { ChatGptProvider, isDirectChatGptModel, listChatGptModelCatalog } from "./chatgpt-provider.ts";
+import { HybridChatGptProvider } from "./chatgpt-app-server-provider.ts";
+import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
+import { hasChatGptCredentials } from "./chatgpt-auth.ts";
 import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
@@ -17,7 +21,7 @@ export type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/po
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic-style overloaded_error (Z.ai sends it too)
 
-const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"];
+const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max", "ultra"];
 /** Clamp a configured reasoning effort down to the endpoint's declared ceiling. Unknown tiers pass through. */
 export function clampEffort(effort: string, ceiling: string): string {
   if (!effort || !ceiling) return effort;
@@ -79,17 +83,59 @@ export function normalizeToolResultImages(messages: any[]): any[] {
 export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "moa") return new MoaProvider(config);
   if (config.provider === "anthropic") return new AnthropicProvider(config);
+  if (config.provider === "chatgpt") return new HybridChatGptProvider(config, new ChatGptProvider(config));
   if (config.provider === "openai_compat") return new OpenAICompatProvider(config);
   throw new Error(
     `Unknown provider '${config.provider}'. Use openai_compat (any OpenAI /chat/completions endpoint or a ` +
-      "local server), anthropic (Claude Messages API — also Z.ai's GLM coding endpoint), or moa (mixture-of-agents).",
+      "local server), chatgpt (Plus/Pro OAuth), anthropic (Claude Messages API), or moa (mixture-of-agents).",
   );
 }
 
-/** List model ids the endpoint offers. Used by `/model list`. The Anthropic Messages API (and Z.ai's GLM
- *  coding endpoint) exposes the list at `/v1/models` with the anthropic headers; OpenAI uses `/models`.
- *  Both return `{ data: [{ id }] }`. */
-export async function listModels(config: NekoConfig): Promise<string[]> {
+export interface ModelOption {
+  id: string;
+  label: string;
+  description?: string;
+  defaultEffort?: string;
+  efforts?: Array<{ effort: string; description: string }>;
+  contextWindow?: number;
+  vision?: boolean;
+  /** Model is account-visible but needs the optional local Codex bridge on this machine. */
+  requiresCodexSupport?: boolean;
+  available?: boolean;
+}
+
+/** Rich model metadata when the provider exposes it; plain `/models` endpoints degrade to ids. */
+export async function listModelOptions(config: NekoConfig, codexSupport?: CodexSupportStatus): Promise<ModelOption[]> {
+  if (config.provider === "chatgpt") {
+    const known = config.profile ? config.profiles[config.profile]?.models ?? [] : [];
+    const fallback = [...new Set([config.model, ...known].filter(Boolean))]
+      .filter((id) => !id.startsWith("gpt-5.6-"))
+      .map(fallbackChatGptOption);
+    if (hasChatGptCredentials()) {
+      try {
+        const live = await listChatGptModelCatalog();
+        const support = codexSupport ?? discoverCodexSupport();
+        const compatible = live.filter((model) => isDirectChatGptModel(model) || model.slug.startsWith("gpt-5.6-"));
+        if (compatible.length) return compatible.map((model) => ({
+          id: model.slug,
+          label: model.displayName,
+          description: model.description,
+          defaultEffort: model.defaultEffort,
+          efforts: model.efforts,
+          contextWindow: model.contextWindow,
+          vision: model.inputModalities.includes("image"),
+          requiresCodexSupport: !isDirectChatGptModel(model),
+          available: isDirectChatGptModel(model) || support.state === "ready",
+        }));
+      } catch {
+        // Catalog availability must not make /model unusable. The fixed, non-secret profile list is
+        // an intentional degraded mode; an actual completion still reports model entitlement errors.
+      }
+    }
+    // Keep /model useful while signed out or during a transient catalog failure. A successful live
+    // account catalog always wins, so plan/rollout availability remains authoritative when reachable.
+    return fallback;
+  }
   const anthropic = config.provider === "anthropic";
   const url = `${config.baseUrl}${anthropic ? "/v1/models" : "/models"}`;
   const headers: Record<string, string> = {};
@@ -100,7 +146,29 @@ export async function listModels(config: NekoConfig): Promise<string[]> {
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  return ((data?.data ?? []) as any[]).map((m) => m?.id).filter(Boolean).sort();
+  return ((data?.data ?? []) as any[]).map((m) => String(m?.id ?? "")).filter(Boolean).sort().map((id) => ({ id, label: id }));
+}
+
+/** Backward-compatible id-only view for CLI/tests and callers that do not need metadata. */
+export async function listModels(config: NekoConfig): Promise<string[]> {
+  return (await listModelOptions(config)).map((model) => model.id);
+}
+
+function fallbackChatGptOption(id: string): ModelOption {
+  const efforts = ["low", "medium", "high", "xhigh"];
+  const description = id.endsWith("sol") ? "Frontier quality for the hardest work"
+    : id.endsWith("terra") ? "Balanced quality and speed for everyday work"
+    : id.endsWith("luna") ? "Fast, efficient work and high throughput"
+    : undefined;
+  return {
+    id,
+    label: id,
+    description,
+    defaultEffort: "medium",
+    efforts: efforts.map((effort) => ({ effort, description: "" })),
+    contextWindow: id.includes("spark") ? 128_000 : 272_000,
+    vision: true,
+  };
 }
 
 export class OpenAICompatProvider implements Provider {
@@ -133,7 +201,13 @@ export class OpenAICompatProvider implements Provider {
     // image_url part (which they silently ignore). Convert when the endpoint needs it -- config-first,
     // auto for an NVIDIA base_url. No-op for text-only messages, so it's safe to always apply.
     const imgTag = this.cfg.imageFormat === "img-tag" || (this.cfg.imageFormat === "auto" && /nvidia/i.test(this.cfg.baseUrl));
-    const normalizedMessages = normalizeToolResultImages(messages);
+    // Opaque continuation belongs to the provider that created it (currently ChatGPT Responses).
+    // Never leak an encrypted provider item to a different endpoint after a live profile switch.
+    const normalizedMessages = normalizeToolResultImages(messages.map((message) => {
+      if (!message || typeof message !== "object" || !("provider_data" in message)) return message;
+      const { provider_data: _providerData, ...portable } = message;
+      return portable;
+    }));
     const payload: Record<string, any> = {
       model: this.cfg.model,
       messages: imgTag ? toImgTagMessages(normalizedMessages) : normalizedMessages,

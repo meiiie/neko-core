@@ -25,6 +25,14 @@ export interface Profile {
   provider?: string;
   base_url?: string;
   model?: string;
+  /** UI grouping: several auth routes can belong to one provider brand (OpenAI API + ChatGPT OAuth). */
+  family?: string;
+  label?: string;
+  auth?: "api_key" | "chatgpt_oauth" | "none";
+  /** Models known to the auth route when it has no model-list endpoint. `/model <id>` still accepts newer ids. */
+  models?: string[];
+  model_context?: Record<string, number>;
+  effort_ceiling?: string;
   vision?: boolean;
   image_long_edge?: number;
   image_max_bytes?: number;
@@ -46,6 +54,7 @@ export const DEFAULTS: Record<string, any> = {
   retry_base_delay_seconds: 1.5,
   retry_max_delay_seconds: 30,
   offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
+  codex_keepalive: 15, // GPT-5.6 App Server idle minutes; 0 keeps it alive until logout/exit
   approval: "prompt", // prompt | auto (--yolo flips gated tools to auto)
   effort_ceiling: "high", // highest reasoning_effort the endpoint accepts (OpenAI standard caps at high); a profile can raise it
   image_long_edge: 1568, // conservative cross-provider vision input; high-resolution profiles may raise it
@@ -58,7 +67,20 @@ export const DEFAULTS: Record<string, any> = {
     // A new model/endpoint is a data edit, not a code change. "Offline" = point a
     // profile at a local OpenAI-compatible server (llama-server :8080, Ollama :11434).
     nvidia: { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "z-ai/glm-5.2", key_env: "NVIDIA_API_KEY" },
-    openai: { provider: "openai_compat", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", key_env: "OPENAI_API_KEY" },
+    openai: { provider: "openai_compat", family: "openai", label: "API key (pay-as-you-go)", auth: "api_key", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", key_env: "OPENAI_API_KEY" },
+    // ChatGPT Plus/Pro subscription via OAuth and the Codex Responses backend (not API billing).
+    chatgpt: {
+      provider: "chatgpt",
+      family: "openai",
+      label: "ChatGPT Plus/Pro",
+      auth: "chatgpt_oauth",
+      base_url: "https://chatgpt.com/backend-api/codex",
+      model: "gpt-5.5",
+      models: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"],
+      model_context: { "gpt-5.5": 272_000, "gpt-5.4": 272_000, "gpt-5.4-mini": 272_000, "gpt-5.3-codex-spark": 128_000 },
+      effort_ceiling: "xhigh",
+      vision: true,
+    },
     // Anthropic Messages API (provider: anthropic). Real Claude, and Z.ai's GLM coding-plan endpoint:
     claude: { provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-4-6", key_env: "ANTHROPIC_API_KEY" },
     fable: { provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-fable-5", key_env: "ANTHROPIC_API_KEY", vision: true, image_long_edge: 2576, image_max_bytes: 4_500_000 },
@@ -81,9 +103,9 @@ export const DEFAULTS: Record<string, any> = {
       moa: { references: ["deepseek-ai/deepseek-v4-pro", "meta/llama-3.3-70b-instruct"], aggregator: "openai/gpt-oss-120b" },
     },
     // Local servers (no API key needed):
-    ollama: { provider: "openai_compat", base_url: "http://localhost:11434/v1", model: "llama3.2" },
-    lmstudio: { provider: "openai_compat", base_url: "http://localhost:1234/v1", model: "local-model" },
-    local: { provider: "openai_compat", base_url: "http://127.0.0.1:8080/v1", model: "local-model" },
+    ollama: { provider: "openai_compat", auth: "none", base_url: "http://localhost:11434/v1", model: "llama3.2" },
+    lmstudio: { provider: "openai_compat", auth: "none", base_url: "http://localhost:1234/v1", model: "local-model" },
+    local: { provider: "openai_compat", auth: "none", base_url: "http://127.0.0.1:8080/v1", model: "local-model" },
   },
 };
 
@@ -159,6 +181,7 @@ export class NekoConfig {
   }
 
   get provider(): string { return String(this.data.provider ?? "openai_compat"); }
+  get usesChatGptAuth(): boolean { return this.provider === "chatgpt"; }
   get model(): string { return String(this.data.model ?? "").trim(); }
   /** Model for a VISION pre-pass (reading an image into text the main agent can use): `vision_model`
    * config, else a verified-good default on an NVIDIA endpoint, else "" (no auto vision). */
@@ -338,6 +361,7 @@ export class NekoConfig {
   get retryMaxDelaySeconds(): number { return Number(this.data.retry_max_delay_seconds ?? 30); }
   /** How long to keep retrying a dropped connection (offline / laptop asleep) before giving up. */
   get offlineRetrySeconds(): number { return Math.max(0, Number(this.data.offline_retry_seconds ?? 1800)); }
+  get codexKeepalive(): number { return Math.max(0, Number(this.data.codex_keepalive ?? 15)); }
 
   get approval(): "prompt" | "auto" {
     const v = String(this.data.approval ?? "prompt").trim().toLowerCase();

@@ -10,10 +10,10 @@ import { renameSync, rmSync, writeFileSync } from "node:fs";
 
 let counter = 0;
 
-export function atomicWriteFileSync(path: string, data: string): void {
+export function atomicWriteFileSync(path: string, data: string, mode?: number): void {
   const tmp = `${path}.tmp-${process.pid}-${counter++}`;
   try {
-    writeFileSync(tmp, data, "utf-8");
+    writeFileSync(tmp, data, { encoding: "utf-8", ...(mode === undefined ? {} : { mode }) });
     renameSync(tmp, path);
   } catch (err) {
     try { rmSync(tmp, { force: true }); } catch { /* best effort cleanup */ }
