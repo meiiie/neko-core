@@ -284,7 +284,8 @@ cost/token tracking · MCP client · single-binary distribution.
   and transient stream/activity events; a read-only hibernatable browser WebSocket replays then follows
   that authoritative state. `/relay hub` preserves the broad v3 switcher as an explicit opt-in. Local
   Worker E2E proved terminal-origin live events, a browser-origin turn, and exact durable replay after
-  reconnect. Production redeploy intentionally awaits owner approval.
+  reconnect. Production v4 is deployed at the canonical `https://relay.holilihu.online`; the old
+  `workers.dev` hostname remains a tested rollback endpoint.
 - [x] **G12** Tool-use parity with Claude Code (atomic-level audit of agent.ts/tool-runtime.ts/mcp.ts).
   Verdict: the orchestration (loop, read-only parallel fan-out, loop-guard, abort, compact, hooks,
   permissions, adversarial check) and MCP (stdio/http/sse + OAuth + resources + prompts + reconnect)

@@ -3,6 +3,27 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-11 - relay v4 promoted to a hardened production Custom Domain
+
+The local `127.0.0.1:8790` URL was only the Wrangler dogfood surface; it could never be the remote-control
+deliverable. Cloudflare inventory found one active zone (`holilihu.online`) and no existing record at
+`relay.holilihu.online`. That short, purpose-named hostname is now the canonical relay URL. Cloudflare
+owns its DNS and TLS lifecycle; `neko-relay.hungkhp888.workers.dev` remains enabled and health-checked
+only as a bootstrap/rollback endpoint. The operator's local `relay_url` now points at the canonical host.
+
+Before promotion, the public client gained a per-response CSP nonce, no-store, anti-framing,
+no-referrer, restricted browser-permission, HSTS, and content-type headers. `/healthz` exposes only the
+service/protocol version, so monitoring no longer allocates or touches a session Durable Object. Token
+comparison uses the Workers `crypto.subtle.timingSafeEqual` primitive on current runtimes, with a local
+fallback for Bun tests. The compatibility date and generated binding types were refreshed against
+Wrangler 4.110.0 and `@cloudflare/workers-types` 5.20260711.1.
+
+Two production versions were deployed while tightening CSP; the final version is
+`4f4bc296-06a6-4b5f-a159-d85fd2b00184`. Public checks proved TLS + security headers, health v4, 401 on
+an unauthenticated control call, and a real E2E WebSocket run: terminal-origin mirror, browser-origin
+command, then durable replay after reconnect. No plaintext conversation content was visible to the
+Worker.
+
 ## 2026-07-11 - relay v4: one conversation, one capability, one authoritative mirror
 
 The owner caught the key mismatch with Claude Code Remote Control: Neko exposed one reusable hub URL,
@@ -24,10 +45,10 @@ delivery, so it cannot duplicate a stale browser transcript. Pixel streaming and
 one serialized agent session needs an ordered event log, not video bandwidth or multi-writer merge
 machinery.
 
-Verification used the real local Wrangler Worker. A host-origin transcript appeared in the CLI-shaped
+Initial verification used the real local Wrangler Worker. A host-origin transcript appeared in the CLI-shaped
 browser, a browser-origin task executed and streamed through the host, and a fresh WebSocket replayed
 the authoritative durable transcript while correctly omitting transient stream frames. Targeted relay
-tests and strict typecheck passed; production deployment remains intentionally untouched.
+tests and strict typecheck passed; the following production promotion entry records the approved deploy.
 
 ## 2026-07-11 - relay UI now shares the CLI shell and interaction contract
 

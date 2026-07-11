@@ -1,6 +1,7 @@
 name = "neko-relay"
 main = "worker.js"
-compatibility_date = "2026-07-10"
+compatibility_date = "2026-07-11"
+workers_dev = true # universal bootstrap/rollback endpoint; operators may attach their own Custom Domain
 
 [observability]
 enabled = true

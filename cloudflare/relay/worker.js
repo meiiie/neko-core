@@ -37,6 +37,7 @@ const KEEP_MIRROR_EVENTS = 400;
 const MAX_MIRROR_BYTES = 1_500_000; // SQLite-backed DO values cap at 2 MB; leave serialization headroom.
 const MAX_HOSTS = 32;
 const DEFAULT_HOST = "default";
+const RELAY_VERSION = 4;
 
 function hostId(value) {
   return String(value || DEFAULT_HOST).replace(/[^A-Za-z0-9._-]/g, "").slice(0, 80) || DEFAULT_HOST;
@@ -48,8 +49,11 @@ const validSession = (value) => /^[A-Za-z0-9._~-]{1,128}$/.test(String(value || 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === "/healthz" && request.method === "GET") {
+      return json(200, { ok: true, service: "neko-relay", version: RELAY_VERSION });
+    }
     if (url.pathname === "/" || url.pathname === "/client" || /^\/(?:session|hub)\/[^/]+\/?$/.test(url.pathname)) {
-      return new Response(CLIENT_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+      return clientResponse(request);
     }
     const session = url.searchParams.get("session") || (await peekSession(request));
     if (!validSession(session)) return json(400, { error: "invalid session" });
@@ -69,7 +73,27 @@ async function peekSession(request) {
 }
 
 function json(status, obj) {
-  return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(obj), { status, headers: {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  } });
+}
+
+function clientResponse(request) {
+  const nonce = crypto.randomUUID().replaceAll("-", "");
+  const url = new URL(request.url);
+  const socketOrigin = `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`;
+  return new Response(CLIENT_HTML.replaceAll("__CSP_NONCE__", nonce), { headers: {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src data:; connect-src 'self' ${socketOrigin}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+    "cross-origin-opener-policy": "same-origin",
+    "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    "referrer-policy": "no-referrer",
+    "strict-transport-security": "max-age=31536000",
+    "x-content-type-options": "nosniff",
+  } });
 }
 
 async function safeEqual(a, b) {
@@ -79,6 +103,10 @@ async function safeEqual(a, b) {
     crypto.subtle.digest("SHA-256", enc.encode(String(b || ""))),
   ]);
   const av = new Uint8Array(ah), bv = new Uint8Array(bh);
+  if (typeof crypto.subtle.timingSafeEqual === "function") {
+    return crypto.subtle.timingSafeEqual(av, bv) && !!a && !!b;
+  }
+  // Bun/older local runtimes may not expose the Workers-only primitive yet.
   let diff = 0;
   for (let i = 0; i < av.length; i++) diff |= av[i] ^ bv[i];
   return diff === 0 && !!a && !!b;
@@ -161,7 +189,7 @@ export class RelaySession {
       const { kid, hostId: requestedHost, meta } = await request.clone().json().catch(() => ({}));
       if (kid) await this.ctx.storage.put("kid", String(kid).slice(0, 16));
       const registeredHost = await this.touchHost(requestedHost, meta);
-      return json(200, { ok: true, v: 4, hostId: registeredHost });
+      return json(200, { ok: true, v: RELAY_VERSION, hostId: registeredHost });
     }
 
     // Host WebSocket: token rides the subprotocol ("t.<token>") - portable (no custom headers needed)

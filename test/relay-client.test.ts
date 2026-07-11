@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 const html = await Bun.file(new URL("../cloudflare/relay/client.html", import.meta.url)).text();
-const script = html.slice(html.indexOf("<script>") + 8, html.lastIndexOf("</script>"));
+const script = html.match(/<script[^>]*>([\s\S]*)<\/script>/)?.[1] ?? "";
 
 test("relay client script parses and exposes the complete multi-session control path", () => {
   expect(() => new Function(script)).not.toThrow();
@@ -16,6 +16,8 @@ test("relay client script parses and exposes the complete multi-session control 
 
 test("relay client keeps terminal semantics and accessible control names", () => {
   expect(html).toContain('role="log"');
+  expect(html).toContain('<script nonce="__CSP_NONCE__">');
+  expect(html).toContain('<style nonce="__CSP_NONCE__">');
   expect(html).toContain('aria-label="message Neko"');
   expect(html).toContain('aria-label="switch Neko session"');
   expect(script).toContain('t.className = "turn user"');

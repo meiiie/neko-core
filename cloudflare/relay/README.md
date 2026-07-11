@@ -43,11 +43,14 @@ Objects are used for per-session state (available on the free Workers plan).
 ```bash
 cd cloudflare/relay
 npx wrangler login
-npx wrangler deploy      # prints your URL, e.g. https://neko-relay.<you>.workers.dev
+npx wrangler deploy      # prints the universal workers.dev bootstrap/rollback URL
 ```
 
 ## Use it
-1. On your machine: `neko chat`, then `/relay https://neko-relay.<you>.workers.dev`.
+For production, attach a short [Workers Custom Domain](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)
+and keep `workers.dev` as a rollback endpoint. This Neko installation uses `https://relay.holilihu.online`.
+
+1. On your machine: `neko chat`, then `/relay https://<your-relay-domain>`.
    It prints a short display code and a one-tap **session URL**
    (`…/session/<id>#t=…&k=…`). The token and E2E secret stay in the URL fragment.
    Neko now dials out and waits — no open port. The **secret** is the E2E key; it rides in the URL

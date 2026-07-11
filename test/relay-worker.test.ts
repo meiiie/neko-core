@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 // @ts-expect-error Cloudflare Worker is deployed as JavaScript; this test supplies its runtime doubles.
 import { RelaySession } from "../cloudflare/relay/worker.js";
+const workerSource = await Bun.file(new URL("../cloudflare/relay/worker.js", import.meta.url)).text();
 
 class MemoryStorage {
   data = new Map<string, any>();
@@ -82,6 +83,13 @@ test("relay refuses to bind a capability without a token", async () => {
     body: JSON.stringify({ session: "unbound", hostId: "alpha" }),
   });
   expect((await relay.fetch(request)).status).toBe(401);
+});
+
+test("relay public client is non-cacheable and locked to a per-response CSP nonce", () => {
+  expect(workerSource).toContain('url.pathname === "/healthz"');
+  expect(workerSource).toContain('"cache-control": "no-store"');
+  expect(workerSource).toContain("script-src 'nonce-${nonce}'");
+  expect(workerSource).toContain("frame-ancestors 'none'");
 });
 
 test("relay v4 persists and broadcasts opaque mirror events per host", async () => {

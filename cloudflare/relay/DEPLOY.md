@@ -104,21 +104,34 @@ Deployed neko-relay triggers (x.xx sec)
 Current Version ID: ...
 ```
 
-**Record that `https://neko-relay.<...>.workers.dev` URL — it is the deliverable.**
+**Record this bootstrap/rollback URL. For production, attach a short Workers Custom Domain and use that
+as the canonical URL.**
+
+```bash
+# The hostname must be unused and belong to an active zone in the same Cloudflare account.
+npx --yes wrangler deploy --domain relay.example.com
+```
+
+Cloudflare creates the DNS record and TLS certificate. Keep `workers_dev = true` in `wrangler.toml` so
+the generated URL remains a rollback path.
 
 ---
 
 ## 4. Verify it is live
 
 ```bash
-# 4a. The root serves the mobile web client (HTML, HTTP 200):
-curl -s -o /dev/null -w "%{http_code}\n" https://neko-relay.<...>.workers.dev/        # expect 200
+# 4a. The explicit health endpoint reports relay protocol v4 (HTTP 200):
+curl -s https://<your-relay-domain>/healthz
 
-# 4b. An unauthenticated control call is rejected (HTTP 401):
-curl -s -o /dev/null -w "%{http_code}\n" https://neko-relay.<...>.workers.dev/alive?session=test   # expect 401
+# 4b. The root serves the mobile web client (HTML, HTTP 200):
+curl -s -o /dev/null -w "%{http_code}\n" https://<your-relay-domain>/        # expect 200
+
+# 4c. An unauthenticated control call is rejected (HTTP 401):
+curl -s -o /dev/null -w "%{http_code}\n" https://<your-relay-domain>/alive?session=test   # expect 401
 ```
 
-If 4a returns 200 and 4b returns 401, the relay is deployed and working.
+If health reports `version:4`, the root returns 200, and the unauthenticated call returns 401, the
+relay is deployed and its public boundary is working.
 
 > A full round-trip (a real instruction) also needs the user's local `neko chat` → `/relay` to be
 > running; you do not need to test that — just confirm the two curls above.
@@ -128,7 +141,8 @@ If 4a returns 200 and 4b returns 401, the relay is deployed and working.
 ## 5. Report back
 
 Reply with exactly:
-- the deployed URL: `https://neko-relay.<...>.workers.dev`
+- the canonical custom-domain URL
+- the rollback URL: `https://neko-relay.<account-subdomain>.workers.dev`
 - the results of the two curls in step 4 (the HTTP codes)
 - any errors encountered
 
