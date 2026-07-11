@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0c0c0c">
 <title>Neko remote</title>
 <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAC1klEQVR4nO3ZUU7DMBAE0JyIy3JHrgHfoFYq7jq2d96T8ofaZLI7Tct1AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAkO3r8+N75Fh93kABBQDBFAAEUwAQTAFAMAUAAUYX3X8HWDFHuxxt7r7AOGmOdjnaTI3AOGmOdjnaTE3FhUYFxkOrF1IBDFIAVFi9kApAAbDQ6oVUAAoABXBbEbQZNl8BuGOOuh1tpkYBcMccdTvaTI0CIJkCKGi6qMakFQWgAAimAG4qAE8F7Ch+dhUAyeILYGW4U98cXuBJdSIFwO4UwMJwZ743vEIBTKQA2F1MAay4yIhgOUb0D34KgHQKwBMAwSI+6Z/xBEA6BeAJgGAKQAEQTAEEFED0Dz0TcpmR1+z3NAMDobxzQ096TwWgACJnIGUBFEBtLh2fAK5EKaEogNpcFEATCiCjAJ9RADn3+iEFoAA8ASiA9p+AO30F6PCpu9O5zHqdCCmh7DQUHZZup3OZ9TowxU5Ld4LqAlhzFfDigCqA3xQArSiA2rze/Xu4lQKozevdv48glH0oAHltN3T3n1EuBSCv7Ybu/jPiL/fof/xoWhiWdVzPParNy6wbrqMY3Nq8FIDhOorBrc1LMRiuoyiA2rwUgOE6igKozUsBGC4CKYCBUO6/TTCHAhgIxTDSRXQBRF88pO9A9MVD+g5EXzyk70DMhcI/ReyFAoCx3WiRmwKAsd1okZsCgLHdaJGbAoCx3ZAbAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwNXYDzqjb1SOEsX2AAAAAElFTkSuQmCC">
@@ -141,13 +141,14 @@
   .hstatus { display: block; margin: 0; color: var(--dim); font-size: 16px; line-height: 1.35; }
   .hstatus .dot { display: none; }
   .hhost { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.35; }
-  .hactions { gap: 12px; padding-top: 4px; opacity: 0; transition: opacity .15s; }
+  .hactions { gap: 12px; padding-top: 4px; opacity: .42; transition: opacity .15s; }
   header:hover .hactions, .hactions:focus-within { opacity: 1; }
   .hostpick, .gear {
     width: auto; min-width: 0; height: auto; padding: 2px 0; border: 0; border-radius: 0;
     color: var(--dim); background: transparent; font: 13px/1.3 var(--mono);
   }
   .hostpick.open, .hostpick:active, .gear.open { border: 0; color: var(--amber); }
+  .hostpick:focus-visible, .gear:focus-visible { outline: 1px solid var(--amber); outline-offset: 4px; }
   .gear svg { display: none; }
   .gear::after { content: "settings"; }
 
@@ -160,15 +161,48 @@
   .cfg { display: none; max-height: min(70vh, 520px); overflow: auto; padding: 13px 16px 15px; }
   .cfg.show { display: grid; max-height: min(70vh, 520px); padding: 13px 16px 15px; border-bottom-color: var(--line); }
 
-  #log { min-height: 0; flex: 1; overflow: auto; padding: 14px 0 22px; scrollbar-width: none; }
+  #log { position: relative; z-index: 0; min-height: 0; flex: 1; overflow: auto; padding: 14px 0 22px; scrollbar-width: none; }
   #log::-webkit-scrollbar { width: 0; height: 0; }
   .turn.user { margin-top: 18px; }
   .turn.user .mk { color: var(--cyan); }
   .turn.neko { margin-top: 8px; }
   .proc { font-size: 15px; line-height: 1.65; }
 
-  .foot { position: relative; bottom: auto; flex: none; background: transparent; backdrop-filter: none; border: 0; padding: 0; }
+  .foot { position: relative; z-index: 20; bottom: auto; flex: none; background: transparent; backdrop-filter: none; border: 0; padding: 0; }
+  .liveui { display: none; margin-bottom: 6px; padding: 8px 12px; border: 1px solid var(--line); background: #111; color: var(--dim); font-size: 13px; }
+  .liveui.show { display: grid; gap: 5px; }
+  .liveui .live-title { color: var(--amber); font-weight: 700; }
+  .liveui .live-preview { max-height: min(220px, 28vh); margin: 0; overflow: auto; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+  .liveui .live-tools { display: grid; gap: 2px; color: var(--dim); }
+  .liveui .live-tool::before { content: "\25CF  "; color: #4d9fff; }
+  .liveui .live-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 2px; }
+  .liveui .overlay-list { display: grid; max-height: min(360px, 42vh); overflow: auto; }
+  .liveui button.overlay-option { width: 100%; display: grid; grid-template-columns: minmax(12ch, auto) 1fr; gap: 14px; border-width: 0 0 0 2px; text-align: left; }
+  .liveui button.overlay-option.active { border-color: var(--cyan); background: #191919; color: var(--cyan); }
+  .liveui .overlay-detail { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .liveui button { min-height: 32px; padding: 5px 9px; border: 1px solid var(--line); background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
+  .liveui button:hover, .liveui button:focus-visible { border-color: var(--cyan); color: var(--cyan); outline: 0; }
+  .liveui button.deny:hover, .liveui button.deny:focus-visible { border-color: var(--err); color: var(--err); }
+  .slashmenu {
+    position: absolute; z-index: 20; left: 0; right: 0; bottom: calc(100% - 1px);
+    max-height: min(420px, 56vh); overflow: auto; padding: 5px 0;
+    background: #111; border: 1px solid var(--line);
+    opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(5px);
+    transition: opacity .12s ease, transform .12s ease, visibility 0s linear .12s;
+  }
+  .slashmenu.open { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0); transition-delay: 0s; }
+  .slashitem {
+    width: 100%; display: grid; grid-template-columns: minmax(9ch, auto) 1fr; gap: 18px;
+    padding: 5px 12px; border: 0; border-left: 2px solid transparent;
+    background: transparent; color: var(--ink); text-align: left; font: 14px/1.45 var(--mono); cursor: pointer;
+  }
+  .slashitem .name { color: var(--cyan); }
+  .slashitem .desc { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slashitem:hover, .slashitem.active { background: #191919; border-left-color: var(--cyan); }
+  .slashmore { padding: 4px 14px 2px; color: var(--faint); font-size: 12px; }
+  .slashhint { padding: 5px 14px 3px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11px; }
   .composer { align-items: center; gap: 10px; padding: 5px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .composer:focus-within { border-color: color-mix(in srgb, var(--cyan) 72%, var(--line)); }
   .composer .pr { color: var(--cyan); padding: 8px 0; font-size: 18px; }
   .composer textarea { max-height: 128px; padding: 8px 0; font: 16px/1.4 var(--mono); caret-color: var(--cyan); }
   .send {
@@ -177,24 +211,64 @@
   }
   .status { padding: 8px 16px 0; font-size: 16px; line-height: 1.35; }
   .status .l { gap: 0; }
+  .status .mode.auto { color: var(--err); }
+  .status .mode.accept-edits, .status.working .hint { color: var(--amber); }
+  .status .hint { color: var(--faint); }
+  @media (prefers-reduced-motion: reduce) { .slashmenu { transition: none; } }
 
   @media (max-width: 700px) {
     body { font-size: 14px; }
-    .app { padding: 0 14px 8px; }
-    header { gap: 10px; }
+    .app {
+      padding: 0 max(14px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+    }
+    header { gap: 8px; padding-top: max(6px, env(safe-area-inset-top)); }
     .mark { font-size: 14px; }
     .htitle { font-size: 15px; }
-    .hstatus, .hhost { font-size: 12px; }
-    .hactions { gap: 8px; opacity: .7; }
-    .hostpick, .gear { font-size: 11px; }
-    .sessions, .cfg { top: 58px; right: 14px; width: calc(100vw - 28px); }
-    .proc { font-size: 13px; }
-    .composer textarea { font-size: 14px; }
-    .status { padding: 7px 4px 0; font-size: 12px; }
-    .send {
-      position: static; width: 34px; height: 34px; padding: 0; margin: 0; overflow: visible;
-      clip: auto; white-space: normal; border: 1px solid var(--line); border-radius: 3px;
+    .hstatus, .hhost { overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
+    .hactions { gap: 2px; padding-top: 0; opacity: .78; }
+    .hostpick, .gear {
+      min-width: 44px; height: 44px; padding: 0 4px; display: grid; place-items: center; font-size: 11px; touch-action: manipulation;
     }
+    .sessions, .cfg {
+      top: calc(max(6px, env(safe-area-inset-top)) + 48px);
+      right: max(14px, env(safe-area-inset-right)); left: max(14px, env(safe-area-inset-left)); width: auto;
+      max-height: calc(100dvh - 70px - max(8px, env(safe-area-inset-bottom))); overscroll-behavior: contain;
+    }
+    .cfg.show { max-height: calc(100dvh - 70px - max(8px, env(safe-area-inset-bottom))); }
+    .session { min-height: 44px; }
+    #log { padding: 10px 0 14px; overscroll-behavior: contain; }
+    .proc { font-size: 13px; }
+    .composer { min-height: 52px; gap: 8px; }
+    .composer .pr { padding: 10px 0; }
+    .composer textarea { min-height: 44px; max-height: min(112px, 24dvh); padding: 10px 0; font-size: 16px; }
+    .slashmenu { max-height: min(320px, 42dvh); overscroll-behavior: contain; }
+    .liveui { margin-bottom: 4px; padding: 8px 10px; font-size: 12px; }
+    .liveui.show { max-height: min(54dvh, 360px); overflow: auto; overscroll-behavior: contain; }
+    .liveui button { min-height: 44px; touch-action: manipulation; }
+    .liveui button.overlay-option { grid-template-columns: 1fr; gap: 0; }
+    .slashitem { min-height: 44px; grid-template-columns: 1fr; gap: 0; padding: 6px 10px; font-size: 13px; touch-action: manipulation; }
+    .slashitem .desc { font-size: 11px; }
+    .status { gap: 8px; padding: 7px 4px 0; font-size: 11px; white-space: nowrap; }
+    .status .l, #statustxt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #statustxt { display: block; }
+    .status .r { flex: none; }
+    .send {
+      position: static; width: 44px; height: 44px; padding: 0; margin: 0; overflow: visible;
+      clip: auto; white-space: normal; border: 1px solid var(--line); border-radius: 3px;
+      touch-action: manipulation;
+    }
+  }
+  @media (max-width: 700px) and (max-height: 600px) {
+    .hhost { display: none; }
+    #log { padding-top: 6px; padding-bottom: 8px; }
+    .liveui.show { max-height: 42dvh; }
+    .slashhint { display: none; }
+  }
+  @media (max-width: 360px) {
+    .app { padding-right: max(10px, env(safe-area-inset-right)); padding-left: max(10px, env(safe-area-inset-left)); }
+    header { gap: 6px; }
+    .htitle small { display: none; }
+    .gear::after { content: "set"; }
   }
 </style></head>
 <body>
@@ -220,9 +294,11 @@
   </div>
   <div id="log" role="log" aria-live="polite" aria-relevant="additions text"></div>
   <div class="foot">
+    <div class="liveui" id="liveui" role="region" aria-live="polite" aria-label="Neko live controls"></div>
+    <div class="slashmenu" id="slashmenu" role="listbox" aria-label="Neko commands"></div>
     <form class="composer" id="f">
       <span class="pr">&gt;</span>
-      <textarea id="m" rows="1" aria-label="message Neko" placeholder='Try: "explain src/agent.ts"   or   /help' autocomplete="off" autocapitalize="sentences" enterkeyhint="send"></textarea>
+      <textarea id="m" rows="1" role="combobox" aria-label="message Neko" aria-autocomplete="list" aria-haspopup="listbox" aria-controls="slashmenu" aria-expanded="false" placeholder='Try: "explain src/agent.ts"   or   /help' autocomplete="off" autocapitalize="sentences" enterkeyhint="send"></textarea>
       <button class="send" id="send" type="submit" aria-label="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
     </form>
     <div class="status" id="status" role="status" aria-live="polite"><span class="l"><span id="statustxt">⏵⏵ not paired</span></span><span class="r" id="statusr">remote</span></div>
@@ -239,10 +315,26 @@
   let hosts = [], activeHost = "", online = null, kidMismatch = false, hostModel = "";
   let mirrorSocket = null, mirrorHost = "", mirrorReady = false, mirrorChain = Promise.resolve();
   let mirrorRetry = null, mirrorFailures = 0;
-  const pending = new Map(), loadedHosts = new Set(), drafts = {};
+  const mirrorSeqByHost = {};
+  const pending = new Map(), loadedHosts = new Set(), drafts = {}, historyPosByHost = {}, historyDraftByHost = {};
+  const FALLBACK_COMMANDS = [
+    ["/help", "show help"], ["/cost", "token usage"], ["/model", "show or switch model"],
+    ["/provider", "switch provider"], ["/tools", "list or toggle tools"], ["/compact", "free context"],
+    ["/context", "context usage"], ["/copy", "copy the last response"], ["/clear", "clear conversation"],
+    ["/relay", "relay controls run on the computer"],
+  ].map(([name, desc]) => ({ name, desc }));
   let historyByHost = {};
+  let slashSel = 0, slashDismissed = "", approvalSending = "", approvalNote = "", lastApprovalId = "";
+  let overlaySending = "", overlayNote = "", overlaySel = 0, lastOverlayId = "";
   const currentHost = () => activeHost || hosts[0]?.id || "";
   const selectedHost = () => hosts.find((h) => h.id === currentHost()) || null;
+  const hostWorking = (host = currentHost()) => pending.has(host) || !!hosts.find((h) => h.id === host)?.meta?.busy;
+  const hostCommands = () => {
+    const commands = selectedHost()?.meta?.commands;
+    if (!Array.isArray(commands)) return FALLBACK_COMMANDS;
+    return commands.map((c) => ({ name: String(c?.name || "").slice(0, 48), desc: String(c?.desc || "").slice(0, 180) }))
+      .filter((c) => /^\/[a-z0-9-]+$/i.test(c.name)).slice(0, 100);
+  };
 
   const save = () => { try {
     const sid = session.value.trim();
@@ -284,13 +376,135 @@
   const base = () => relay.value.trim().replace(/\/+$/, "");
   const auth = () => ({ authorization: "Bearer " + token.value.trim() });
 
-  function setStatus(el, txtEl, cls, txt) { el.className = el.className.split(" ")[0] + (cls ? " " + cls : ""); txtEl.textContent = txt; }
+  function paintStatus(mode, working, connection) {
+    const status = $("status"), text = $("statustxt");
+    status.className = "status" + (working ? " working" : "");
+    const value = document.createElement("span"); value.className = "mode " + mode; value.textContent = mode;
+    const hint = document.createElement("span"); hint.className = "hint";
+    const compact = matchMedia("(max-width: 700px)").matches;
+    hint.textContent = working ? (compact ? " · working · tap stop" : " · working · esc to stop") : " · " + connection + (compact ? "" : " · shift+tab to cycle");
+    text.replaceChildren(document.createTextNode("⏵⏵ "), value, hint);
+  }
+  const elapsedText = (start) => {
+    const seconds = Math.max(0, Math.floor((Date.now() - Number(start || Date.now())) / 1000));
+    return seconds < 60 ? seconds + "s" : Math.floor(seconds / 60) + "m " + String(seconds % 60).padStart(2, "0") + "s";
+  };
+  function renderLiveUi() {
+    const box = $("liveui"), meta = selectedHost()?.meta || {}, ui = meta.ui || {};
+    const approval = ui.approval && typeof ui.approval.id === "string" ? ui.approval : null;
+    const overlay = ui.overlay && typeof ui.overlay.id === "string" && Array.isArray(ui.overlay.items) ? ui.overlay : null;
+    const working = hostWorking();
+    if (!approval && !overlay && !working && !ui.compactingStartedAt && !(Array.isArray(ui.inflight) && ui.inflight.length)) {
+      const hadModal = !!(lastApprovalId || lastOverlayId);
+      lastApprovalId = ""; approvalSending = ""; approvalNote = "";
+      lastOverlayId = ""; overlaySending = ""; overlayNote = ""; overlaySel = 0;
+      box.classList.remove("show"); box.replaceChildren(); m.disabled = false;
+      if (hadModal) requestAnimationFrame(focusComposer);
+      return;
+    }
+    const key = approval ? `approval:${approval.id}:${approvalSending}:${approvalNote}` : overlay ? `overlay:${overlay.id}:${overlaySending}:${overlayNote}:${overlaySel}` : "working";
+    if (box.dataset.key === key && (approval || overlay)) return;
+    box.dataset.key = key; box.replaceChildren(); box.classList.add("show");
+    if (approval) {
+      closeSlash();
+      m.disabled = true;
+      const isNew = lastApprovalId !== approval.id;
+      lastApprovalId = approval.id;
+      const title = document.createElement("div"); title.className = "live-title";
+      title.textContent = approval.toolName === "exit_plan_mode" ? "Ready to code?" : "Approve " + String(approval.toolName || "tool") + "?";
+      const preview = document.createElement("pre"); preview.className = "live-preview"; preview.textContent = String(approval.preview || "");
+      const actions = document.createElement("div"); actions.className = "live-actions";
+      for (const [decision, label] of [["approve", "[y] yes"], ["always", "[a] always"], ["deny", "[n] no"]]) {
+        const button = document.createElement("button"); button.type = "button"; button.dataset.decision = decision;
+        button.textContent = label; button.disabled = !!approvalSending; if (decision === "deny") button.className = "deny";
+        button.onclick = () => sendApproval(decision, approval.id); actions.appendChild(button);
+      }
+      box.append(title, preview);
+      if (Array.isArray(ui.inflight) && ui.inflight.length) {
+        const tools = document.createElement("div"); tools.className = "live-tools";
+        for (const value of ui.inflight.slice(-8)) { const line = document.createElement("div"); line.className = "live-tool"; line.textContent = String(value); tools.appendChild(line); }
+        box.appendChild(tools);
+      }
+      box.appendChild(actions);
+      if (approvalNote) { const note = document.createElement("div"); note.textContent = approvalNote; box.appendChild(note); }
+      if (isNew) requestAnimationFrame(() => actions.querySelector("button")?.focus({ preventScroll: true }));
+      return;
+    }
+    if (overlay) {
+      closeSlash(); m.disabled = true;
+      const isNew = lastOverlayId !== overlay.id;
+      if (isNew) { lastOverlayId = overlay.id; overlaySel = 0; overlaySending = overlayNote = ""; }
+      overlaySel = Math.max(0, Math.min(overlaySel, overlay.items.length - 1));
+      const title = document.createElement("div"); title.className = "live-title"; title.textContent = String(overlay.title || "Choose an option");
+      const list = document.createElement("div"); list.className = "overlay-list"; list.setAttribute("role", "listbox");
+      for (let i = 0; i < overlay.items.length; i++) {
+        const item = overlay.items[i], button = document.createElement("button"); button.type = "button"; button.setAttribute("role", "option");
+        button.className = "overlay-option" + (i === overlaySel ? " active" : ""); button.setAttribute("aria-selected", i === overlaySel ? "true" : "false"); button.disabled = !!overlaySending;
+        const label = document.createElement("span"); label.textContent = String(item.label || item.id || "option");
+        const detail = document.createElement("span"); detail.className = "overlay-detail"; detail.textContent = String(item.detail || "");
+        button.append(label, detail); button.onclick = () => sendOverlay("select", overlay.id, item.id); list.appendChild(button);
+      }
+      box.append(title, list);
+      const actions = document.createElement("div"); actions.className = "live-actions";
+      const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "deny"; cancel.textContent = "[esc] cancel";
+      cancel.disabled = !!overlaySending; cancel.onclick = () => sendOverlay("cancel", overlay.id); actions.appendChild(cancel); box.appendChild(actions);
+      const hint = document.createElement("div"); hint.textContent = overlay.items.length ? "up/down select · enter choose" : "no options available"; box.appendChild(hint);
+      if (overlayNote) { const note = document.createElement("div"); note.textContent = overlayNote; box.appendChild(note); }
+      if (isNew) requestAnimationFrame(() => list.querySelector("button")?.focus({ preventScroll: true }));
+      return;
+    }
+    m.disabled = false;
+    const title = document.createElement("div"); title.className = "live-title";
+    title.textContent = ui.compactingStartedAt ? "Compacting conversation..." : String(ui.verb || "Working") + "...";
+    const parts = [elapsedText(ui.compactingStartedAt || ui.turnStartedAt)];
+    if (meta.effort) parts.push(meta.effort + " effort");
+    if (Number(ui.step) > 1) parts.push("step " + Number(ui.step));
+    if (Number(ui.queued) > 0) parts.push(Number(ui.queued) + " queued");
+    parts.push("esc to interrupt");
+    const detail = document.createElement("div"); detail.className = "live-meta"; detail.textContent = parts.join(" · ");
+    box.append(title, detail);
+    if (Array.isArray(ui.inflight) && ui.inflight.length) {
+      const tools = document.createElement("div"); tools.className = "live-tools";
+      for (const value of ui.inflight.slice(-8)) { const line = document.createElement("div"); line.className = "live-tool"; line.textContent = String(value); tools.appendChild(line); }
+      box.appendChild(tools);
+    }
+  }
+  async function sendApproval(decision, id) {
+    if (approvalSending) return;
+    approvalSending = `${id}:${decision}`; approvalNote = "sending decision..."; renderLiveUi();
+    try {
+      const k = await key();
+      const raw = JSON.stringify({ type: "approval", id, decision });
+      const control = k ? await sealMsg(k, raw) : raw;
+      const response = await fetch(base() + "/control", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), hostId: currentHost(), control }) });
+      if (!response.ok) throw new Error(response.status === 409 ? "Neko disconnected before the decision arrived" : "decision failed (HTTP " + response.status + ")");
+      approvalNote = decision === "deny" ? "denial sent" : "approval sent";
+    } catch (error) {
+      approvalSending = ""; approvalNote = error instanceof Error ? error.message : String(error);
+    }
+    renderLiveUi();
+  }
+  async function sendOverlay(decision, id, itemId) {
+    if (overlaySending) return;
+    overlaySending = `${id}:${decision}`; overlayNote = "sending selection..."; renderLiveUi();
+    try {
+      const k = await key();
+      const raw = JSON.stringify({ type: "overlay", id, decision, ...(itemId ? { itemId } : {}) });
+      const control = k ? await sealMsg(k, raw) : raw;
+      const response = await fetch(base() + "/control", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), hostId: currentHost(), control }) });
+      if (!response.ok) throw new Error(response.status === 409 ? "Neko disconnected before the selection arrived" : "selection failed (HTTP " + response.status + ")");
+      overlayNote = decision === "cancel" ? "cancel sent" : "selection sent";
+    } catch (error) {
+      overlaySending = ""; overlayNote = error instanceof Error ? error.message : String(error);
+    }
+    renderLiveUi();
+  }
   function refresh() {
     const p = paired();
     const selected = selectedHost();
     if (selected) online = !!selected.online;
-    const working = pending.has(currentHost());
     const meta = selected?.meta || {};
+    const working = hostWorking();
     hostModel = meta.model ? String(meta.model).split("/").pop() : hostModel;
     const connection = !p ? "not paired"
       : kidMismatch ? "key mismatch"
@@ -303,8 +517,8 @@
     $("hstatus").className = "hstatus";
     $("hstatustxt").textContent = headerBits.filter(Boolean).join(" · ");
     const mode = meta.mode || (!p ? "not paired" : "remote");
-    const modeClass = kidMismatch ? "err" : mode === "auto" ? "err" : mode === "accept-edits" ? "warn" : online === false ? "warn" : "";
-    setStatus($("status"), $("statustxt"), modeClass, "⏵⏵ " + mode + (working ? " · esc to interrupt" : " · shift+tab to cycle"));
+    const connectionLabel = kidMismatch ? "key mismatch" : !p ? "not paired" : online === false ? "offline" : online === null ? "connecting" : "online";
+    paintStatus(mode, working, connectionLabel);
     const pct = Number.isFinite(Number(meta.contextPercent)) ? Math.max(0, Math.min(100, Math.round(Number(meta.contextPercent)))) : 0;
     $("statusr").textContent = (hostModel || "no model") + " · " + pct + "% ctx";
     $("htitle").textContent = "Neko Code";
@@ -313,7 +527,13 @@
     $("hostpick").textContent = hosts.length ? `${hosts.length} session${hosts.length === 1 ? "" : "s"}` : "sessions";
     $("hostpick").title = connection + (meta.title ? " - " + meta.title : "");
     $("hostpick").disabled = !p;
+    const compact = matchMedia("(max-width: 700px)").matches;
+    m.placeholder = working ? (compact ? "Queue a task..." : "type to queue while Neko works...")
+      : online === false ? (compact ? "Queue for reconnect..." : "queue a task for reconnect...")
+      : compact ? "Message Neko..." : 'Try: "explain src/agent.ts"   or   /help';
+    renderLiveUi();
     paintComposer();
+    renderSlash();
     syncEmpty();
   }
   async function myKid() {
@@ -366,6 +586,7 @@
   function switchHost(id, close = true) {
     const previous = currentHost(); if (previous) drafts[previous] = m.value;
     activeHost = id || "";
+    approvalSending = approvalNote = lastApprovalId = overlaySending = overlayNote = lastOverlayId = ""; overlaySel = 0; $("liveui").dataset.key = "";
     try {
       const map = JSON.parse(localStorage.nekoActiveHosts || "{}"); map[session.value.trim()] = activeHost;
       localStorage.nekoActiveHosts = JSON.stringify(map); localStorage.nekoActiveHost = activeHost;
@@ -373,7 +594,7 @@
     for (const turn of log.querySelectorAll(".turn")) turn.hidden = turn.dataset.host !== activeHost;
     restoreHost(activeHost);
     const selected = selectedHost(); online = selected ? !!selected.online : null; hostModel = "";
-    m.value = drafts[activeHost] || ""; grow();
+    m.value = drafts[activeHost] || ""; historyPosByHost[activeHost] = Infinity; slashDismissed = ""; slashSel = 0; grow(); renderSlash();
     if (close) { $("sessions").classList.remove("show"); $("hostpick").classList.remove("open"); $("hostpick").setAttribute("aria-expanded", "false"); m.focus(); }
     emptyKey = "";
     renderSessions(); refresh(); connectMirror();
@@ -394,8 +615,8 @@
     refresh();
   }
   for (const el of [relay, session, token, secret]) el.oninput = () => { save(); online = null; kidMismatch = false; refresh(); checkAlive(); };
-  $("gear").onclick = () => { const c = $("cfg"); c.classList.toggle("show"); $("gear").classList.toggle("open", c.classList.contains("show")); };
-  $("hostpick").onclick = () => { const s = $("sessions"); s.classList.toggle("show"); $("hostpick").classList.toggle("open", s.classList.contains("show")); $("hostpick").setAttribute("aria-expanded", s.classList.contains("show") ? "true" : "false"); };
+  $("gear").onclick = () => { closeSlash(); const c = $("cfg"); c.classList.toggle("show"); $("gear").classList.toggle("open", c.classList.contains("show")); };
+  $("hostpick").onclick = () => { closeSlash(); const s = $("sessions"); s.classList.toggle("show"); $("hostpick").classList.toggle("open", s.classList.contains("show")); $("hostpick").setAttribute("aria-expanded", s.classList.contains("show") ? "true" : "false"); };
   $("unpair").onclick = () => {
     const oldSession = session.value.trim();
     for (const hostId of pending.keys()) fetch(base() + "/interrupt", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), hostId }) }).catch(() => {});
@@ -445,11 +666,114 @@
   }
 
   const grow = () => { m.style.height = "auto"; m.style.height = Math.min(m.scrollHeight, 128) + "px"; };
-  m.addEventListener("input", () => { drafts[currentHost()] = m.value; grow(); });
+  const slashMatches = () => {
+    const query = m.value;
+    if (m.disabled || !query.startsWith("/") || /\s/.test(query) || slashDismissed === query) return [];
+    return hostCommands().filter((command) => command.name.startsWith(query));
+  };
+  function closeSlash(dismiss = false) {
+    if (dismiss) slashDismissed = m.value;
+    $("slashmenu").classList.remove("open");
+    m.setAttribute("aria-expanded", "false");
+    m.removeAttribute("aria-activedescendant");
+  }
+  function renderSlash() {
+    const menu = $("slashmenu"), matches = slashMatches(), cap = Math.min(matches.length, 10);
+    menu.replaceChildren();
+    if (!cap) { closeSlash(); return; }
+    slashSel = Math.max(0, Math.min(slashSel, cap - 1));
+    for (let i = 0; i < cap; i++) {
+      const command = matches[i], item = document.createElement("button");
+      item.type = "button"; item.id = "slash-option-" + i; item.setAttribute("role", "option"); item.tabIndex = -1;
+      item.className = "slashitem" + (i === slashSel ? " active" : "");
+      item.setAttribute("aria-selected", i === slashSel ? "true" : "false");
+      const name = document.createElement("span"); name.className = "name"; name.textContent = command.name;
+      const desc = document.createElement("span"); desc.className = "desc"; desc.textContent = command.desc;
+      item.append(name, desc);
+      item.onpointerdown = (event) => event.preventDefault();
+      item.onclick = () => { slashSel = i; acceptSlash(true); };
+      menu.appendChild(item);
+    }
+    if (matches.length > cap) {
+      const more = document.createElement("div"); more.className = "slashmore";
+      more.textContent = "+" + (matches.length - cap) + " more - keep typing"; menu.appendChild(more);
+    }
+    const hint = document.createElement("div"); hint.className = "slashhint";
+    hint.textContent = "up/down select · tab complete · enter run · esc close"; menu.appendChild(hint);
+    menu.classList.add("open"); m.setAttribute("aria-expanded", "true");
+    m.setAttribute("aria-activedescendant", "slash-option-" + slashSel);
+  }
+  function acceptSlash(run) {
+    const matches = slashMatches(), command = matches[Math.min(slashSel, matches.length - 1)];
+    if (!command) return false;
+    m.value = command.name + (run ? "" : " "); drafts[currentHost()] = m.value; slashDismissed = ""; closeSlash(); grow(); paintComposer();
+    if (run) $("f").requestSubmit();
+    return true;
+  }
+  function focusComposer() {
+    if (m.disabled || !matchMedia("(pointer: fine)").matches || $("cfg").classList.contains("show") || $("sessions").classList.contains("show")) return;
+    const selection = getSelection();
+    if (selection && !selection.isCollapsed) return;
+    m.focus({ preventScroll: true });
+  }
+  document.addEventListener("pointerup", (event) => {
+    if (event.button !== 0 || event.target.closest("a,button,input,textarea,select,label,[role=option]")) return;
+    $("cfg").classList.remove("show"); $("gear").classList.remove("open");
+    $("sessions").classList.remove("show"); $("hostpick").classList.remove("open");
+    requestAnimationFrame(focusComposer);
+  });
+  window.addEventListener("focus", () => requestAnimationFrame(focusComposer));
+  document.addEventListener("keydown", (event) => {
+    const approval = selectedHost()?.meta?.ui?.approval;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (approval) {
+      const decision = event.key === "y" ? "approve" : event.key === "a" ? "always" : (event.key === "n" || event.key === "Escape") ? "deny" : "";
+      if (!decision) return;
+      event.preventDefault(); sendApproval(decision, approval.id); return;
+    }
+    const overlay = selectedHost()?.meta?.ui?.overlay;
+    if (!overlay || !Array.isArray(overlay.items)) return;
+    if (event.key === "Escape") {
+      event.preventDefault(); sendOverlay("cancel", overlay.id); return;
+    }
+    if (!overlay.items.length) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      overlaySel = (overlaySel + (event.key === "ArrowDown" ? 1 : -1) + overlay.items.length) % overlay.items.length;
+      $("liveui").dataset.key = ""; renderLiveUi();
+      requestAnimationFrame(() => $("liveui").querySelectorAll(".overlay-option")[overlaySel]?.focus({ preventScroll: true }));
+    } else if (event.key === "Enter") {
+      event.preventDefault(); sendOverlay("select", overlay.id, overlay.items[overlaySel]?.id);
+    }
+  });
+  const promptHistory = () => [...log.querySelectorAll(".turn.user")]
+    .filter((turn) => turn.dataset.host === currentHost())
+    .map((turn) => String(turn.textContent || "").replace(/^>\s?/, ""));
+  function moveHistory(direction) {
+    if (m.value.includes("\n") || m.selectionStart !== m.selectionEnd) return false;
+    const rows = promptHistory(), host = currentHost(); if (!rows.length) return false;
+    let pos = Number.isFinite(historyPosByHost[host]) ? historyPosByHost[host] : rows.length;
+    if (pos === rows.length) historyDraftByHost[host] = m.value;
+    pos = Math.max(0, Math.min(rows.length, pos + direction));
+    if (pos === historyPosByHost[host]) return true;
+    historyPosByHost[host] = pos; m.value = pos === rows.length ? (historyDraftByHost[host] || "") : rows[pos];
+    drafts[host] = m.value; grow(); renderSlash(); requestAnimationFrame(() => m.setSelectionRange(m.value.length, m.value.length));
+    return true;
+  }
+  m.addEventListener("input", () => { slashDismissed = ""; slashSel = 0; historyPosByHost[currentHost()] = Infinity; drafts[currentHost()] = m.value; grow(); paintComposer(); renderSlash(); });
   m.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("f").requestSubmit(); return; }
-    if (e.key === "Escape" && pending.has(currentHost())) { e.preventDefault(); $("f").requestSubmit(); return; }
-    if (e.key === "Tab" && e.shiftKey && paired() && currentHost() && !pending.has(currentHost())) {
+    if (e.isComposing || e.keyCode === 229) return;
+    const matches = slashMatches();
+    if (matches.length && e.key === "ArrowDown") { e.preventDefault(); slashSel = (slashSel + 1) % Math.min(matches.length, 10); renderSlash(); return; }
+    if (matches.length && e.key === "ArrowUp") { e.preventDefault(); slashSel = (slashSel - 1 + Math.min(matches.length, 10)) % Math.min(matches.length, 10); renderSlash(); return; }
+    if (!matches.length && e.key === "ArrowUp" && moveHistory(-1)) { e.preventDefault(); return; }
+    if (!matches.length && e.key === "ArrowDown" && moveHistory(1)) { e.preventDefault(); return; }
+    if (matches.length && e.key === "Tab" && !e.shiftKey) { e.preventDefault(); acceptSlash(false); return; }
+    if (matches.length && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); acceptSlash(true); return; }
+    if ($("slashmenu").classList.contains("open") && e.key === "Escape") { e.preventDefault(); closeSlash(true); return; }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); closeSlash(); $("f").requestSubmit(); return; }
+    if (e.key === "Escape" && hostWorking()) { e.preventDefault(); m.dataset.control = "interrupt"; $("f").requestSubmit(); return; }
+    if (e.key === "Tab" && e.shiftKey && paired() && currentHost() && !hostWorking()) {
       e.preventDefault();
       m.dataset.control = "cycle-mode";
       $("f").requestSubmit();
@@ -534,6 +858,16 @@
     if (!nk.t.hidden) scrollEnd(nk.t);
   }
   function nekoErr(nk, text) { nk.state = { text, act: [], done: true, error: true }; nk.t.classList.add("err"); nk.proc.innerHTML = ""; nk.body.textContent = text; }
+  async function copyFromBrowser(all) {
+    const host = currentHost();
+    const turns = [...log.querySelectorAll(".turn")].filter((turn) => turn.dataset.host === host && !turn.classList.contains("mirror-live") && !turn.classList.contains("local-note"));
+    const chosen = all ? turns : [...turns].reverse().filter((turn) => turn.classList.contains("neko")).slice(0, 1);
+    const text = (all ? chosen : chosen.reverse()).map((turn) => String(turn.textContent || "").trim()).filter(Boolean).join("\n\n");
+    const nk = nekoTurn(host); nk.t.classList.add("local-note");
+    if (!text) { nekoErr(nk, all ? "(nothing in the conversation to copy)" : "(no response to copy yet)"); return; }
+    try { await navigator.clipboard.writeText(text); render(nk, { text: all ? "copied the conversation to this device" : "copied the last response to this device", act: [], done: true }); }
+    catch { nekoErr(nk, "clipboard permission was blocked by the browser"); }
+  }
 
   function clearMirrorHost(host) {
     for (const turn of log.querySelectorAll(".turn")) if (turn.dataset.host === host) turn.remove();
@@ -543,6 +877,7 @@
   }
   function appendMirrorLine(line, host) {
     if (!line || line.kind === "welcome") return;
+    if (isRelaySetupLine(line)) return;
     if ([...log.querySelectorAll(".mirror-line")].some((el) => el.dataset.host === host && el.dataset.lineId === String(line.id))) return;
     removeMirrorLive(host);
     const t = document.createElement("div");
@@ -562,6 +897,13 @@
       body.textContent = (line.kind === "tool_result" ? "  └ " : "") + String(line.summary || line.text || ""); t.appendChild(body);
     }
     log.appendChild(t); if (!t.hidden) scrollEnd(t);
+  }
+  function isRelaySetupLine(line) {
+    if (line?.kind !== "info") return false;
+    const text = String(line.text || ""), rows = text.trim().split("\n");
+    return /^relay session [A-Z0-9-]+ (?:on\b|-\s*open:)/i.test(text)
+      || /^open this session:/i.test(text)
+      || (rows.length > 8 && rows.filter((row) => /^[ █▄▀]+$/.test(row.trim())).length >= rows.length - 1);
   }
   function applyMirrorEvent(event, host) {
     if (!event || pending.has(host)) return;
@@ -598,9 +940,23 @@
     socket.onopen = () => { mirrorFailures = 0; };
     socket.onmessage = (ev) => { mirrorChain = mirrorChain.then(async () => {
       let frame; try { frame = JSON.parse(String(ev.data)); } catch { return; }
-      if (frame.t === "mirror_reset") { clearMirrorHost(host); removeMirrorLive(host); return; }
-      if (frame.t === "mirror_ready") { mirrorReady = true; syncEmpty(); return; }
+      if (frame.t === "presence" && frame.meta) {
+        const k = await key();
+        const raw = k && frame.meta.iv ? await unseal(k, frame.meta) : frame.meta;
+        const next = typeof raw === "string" ? JSON.parse(raw) : raw;
+        const row = hosts.find((h) => h.id === host);
+        if (row) { row.meta = { ...(row.meta || {}), ...next }; row.online = true; }
+        online = true; refresh(); return;
+      }
+      if (frame.t === "mirror_reset") { mirrorSeqByHost[host] = 0; clearMirrorHost(host); removeMirrorLive(host); return; }
+      if (frame.t === "mirror_ready") { mirrorSeqByHost[host] = Math.max(Number(mirrorSeqByHost[host] || 0), Number(frame.seq || 0)); mirrorReady = true; syncEmpty(); return; }
       if (frame.t !== "event" || !frame.event) return;
+      if (Number(frame.seq) > 0) {
+        const previous = Number(mirrorSeqByHost[host] || 0);
+        if (Number(frame.seq) <= previous) return;
+        if (mirrorReady && previous && Number(frame.seq) > previous + 1) { socket.close(1012, "mirror gap"); return; }
+        mirrorSeqByHost[host] = Number(frame.seq);
+      }
       const k = await key();
       const raw = k && frame.event.iv ? await unseal(k, frame.event) : frame.event;
       applyMirrorEvent(JSON.parse(raw), host);
@@ -636,21 +992,34 @@
   const SEND = $("send").innerHTML;
   const STOP = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>';
   function paintComposer() {
-    const on = pending.has(currentHost());
-    $("send").classList.toggle("stop", on); $("send").innerHTML = on ? STOP : SEND; $("send").setAttribute("aria-label", on ? "stop" : "send");
+    const on = hostWorking() && !m.value.trim();
+    const approval = !!selectedHost()?.meta?.ui?.approval;
+    const overlay = !!selectedHost()?.meta?.ui?.overlay;
+    $("send").disabled = approval || overlay;
+    $("send").classList.toggle("stop", on && !approval && !overlay); $("send").innerHTML = on && !approval && !overlay ? STOP : SEND; $("send").setAttribute("aria-label", approval ? "approval required" : overlay ? "selection required" : on ? "stop" : "send");
   }
   function setAwaiting(host, on) {
-    if (on) pending.set(host, true); else pending.delete(host);
+    const count = Number(pending.get(host) || 0);
+    if (on) pending.set(host, count + 1);
+    else if (count <= 1) pending.delete(host);
+    else pending.set(host, count - 1);
     renderSessions(); refresh();
   }
 
   $("f").onsubmit = async (e) => {
     e.preventDefault();
+    const suggested = slashMatches();
+    if (suggested.length && !/\s/.test(m.value)) m.value = suggested[Math.min(slashSel, suggested.length - 1)].name;
+    closeSlash(); slashSel = 0; slashDismissed = "";
     const host = currentHost();
     const silentControl = m.dataset.control === "cycle-mode";
+    const interruptControl = m.dataset.control === "interrupt";
     delete m.dataset.control;
-    if (pending.has(host)) { try { await fetch(base() + "/interrupt", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), hostId: host || undefined }) }); } catch {} return; }
+    if (interruptControl || (hostWorking(host) && !m.value.trim() && !silentControl)) { try { await fetch(base() + "/interrupt", { method: "POST", headers: { "content-type": "application/json", ...auth() }, body: JSON.stringify({ session: session.value.trim(), hostId: host || undefined }) }); } catch {} return; }
     const msg = silentControl ? "\u0000neko:cycle-mode" : m.value.trim(); if (!msg) return;
+    if (!silentControl && /^\/copy(?:\s+all)?$/i.test(msg)) {
+      m.value = ""; drafts[host] = ""; grow(); await copyFromBrowser(/\s+all$/i.test(msg)); focusComposer(); return;
+    }
     if (!paired()) {
       // Guide, don't scold: the pairing card is right there - put the cursor in its paste box.
       const p = $("_paste");
@@ -660,7 +1029,7 @@
     }
     if (kidMismatch) { const nk = nekoTurn(); nekoErr(nk, "The pairing secret doesn't match Neko's. Run /relay qr on your computer and re-scan (or paste the fresh link in settings)."); return; }
     if (!host) { const nk = nekoTurn(); nekoErr(nk, "No Neko session is registered yet. Run /relay in a local Neko terminal first."); return; }
-    if (!silentControl) { m.value = ""; drafts[host] = ""; grow(); userTurn(msg, host); }
+    if (!silentControl) { m.value = ""; drafts[host] = ""; historyPosByHost[host] = Infinity; grow(); userTurn(msg, host); }
     const nk = nekoTurn(host);
     if (silentControl) nk.t.style.display = "none";
     render(nk, { text: "", act: [], done: false });
@@ -706,8 +1075,9 @@
     }
   };
 
-  refresh(); checkAlive();
+  refresh(); checkAlive(); requestAnimationFrame(focusComposer);
+  setInterval(renderLiveUi, 1_000);
   setInterval(checkAlive, 25_000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) checkAlive(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { checkAlive(); requestAnimationFrame(focusComposer); } });
 </script>
 </body></html>

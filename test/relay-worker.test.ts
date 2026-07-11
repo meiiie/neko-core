@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 // @ts-expect-error Cloudflare Worker is deployed as JavaScript; this test supplies its runtime doubles.
-import { RelaySession } from "../cloudflare/relay/worker.js";
+import relayWorker, { RelaySession } from "../cloudflare/relay/worker.js";
 const workerSource = await Bun.file(new URL("../cloudflare/relay/worker.js", import.meta.url)).text();
 
 class MemoryStorage {
@@ -75,6 +75,34 @@ test("relay hub keeps offline queues isolated per host", async () => {
   expect((await ctx.storage.get("q:beta"))[0].message).toBe("B");
 });
 
+test("relay bounds public request bodies and each host's offline queue", async () => {
+  const oversized = await relayWorker.fetch(new Request("https://relay.test/register", {
+    method: "POST",
+    headers: { "content-length": "1050001" },
+    body: "x",
+  }), {} as any);
+  expect(oversized.status).toBe(413);
+
+  const ctx = makeContext();
+  const relay = new RelaySession(ctx as any);
+  await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
+  for (let i = 0; i < 100; i++) expect((await relay.fetch(post("/send", { session: "hub", hostId: "alpha", message: String(i) }))).status).toBe(200);
+  expect((await relay.fetch(post("/send", { session: "hub", hostId: "alpha", message: "overflow" }))).status).toBe(429);
+  expect(await ctx.storage.get("q:alpha")).toHaveLength(100);
+});
+
+test("relay forwards opaque out-of-band controls only to an online matching host", async () => {
+  const ctx = makeContext();
+  const relay = new RelaySession(ctx as any);
+  await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
+  const offline = await relay.fetch(post("/control", { session: "hub", hostId: "alpha", control: { iv: "i", ct: "c" } }));
+  expect(offline.status).toBe(409);
+  const host = new SocketDouble(["host", "host:alpha"]); host.attachment = { role: "host", hostId: "alpha" }; ctx.sockets.push(host);
+  const control = { iv: "opaque-iv", ct: "opaque-control" };
+  expect((await relay.fetch(post("/control", { session: "hub", hostId: "alpha", control }))).status).toBe(200);
+  expect(host.sent).toEqual([{ t: "control", control }]);
+});
+
 test("relay refuses to bind a capability without a token", async () => {
   const relay = new RelaySession(makeContext() as any);
   const request = new Request("https://relay.test/register", {
@@ -107,6 +135,28 @@ test("relay v4 persists and broadcasts opaque mirror events per host", async () 
 
   await relay.webSocketMessage(client as any, JSON.stringify({ t: "event", event: "client-must-not-publish", durable: true }));
   expect(await ctx.storage.get("mirror:alpha")).toHaveLength(1);
+});
+
+test("relay broadcasts encrypted host presence to the matching mirror", async () => {
+  const ctx = makeContext();
+  const relay = new RelaySession(ctx as any);
+  await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
+  const host = new SocketDouble(["host", "host:alpha"]); host.attachment = { role: "host", hostId: "alpha" };
+  const alpha = new SocketDouble(["client", "client:alpha"]);
+  const beta = new SocketDouble(["client", "client:beta"]);
+  ctx.sockets.push(host, alpha, beta);
+
+  const meta = { iv: "opaque-iv", ct: "opaque-presence" };
+  await relay.webSocketMessage(host as any, JSON.stringify({ t: "presence", meta }));
+  expect(alpha.sent).toEqual([{ t: "presence", meta }]);
+  expect(beta.sent).toEqual([]);
+});
+
+test("relay closes an oversized WebSocket frame instead of parsing it", async () => {
+  const relay = new RelaySession(makeContext() as any);
+  const host = new SocketDouble(["host", "host:alpha"]); host.attachment = { role: "host", hostId: "alpha" };
+  await relay.webSocketMessage(host as any, "x".repeat(1_050_001));
+  expect(host.closed).toBe(true);
 });
 
 test("relay hub revocation closes every host and invalidates the old phone token", async () => {

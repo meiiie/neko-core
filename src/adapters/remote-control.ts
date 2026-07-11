@@ -21,6 +21,19 @@ export interface RunResult {
   ms?: number;
   interrupted?: boolean;
 }
+export interface RemoteUiState {
+  turnStartedAt?: number;
+  verb?: string;
+  step?: number;
+  queued?: number;
+  inflight?: string[];
+  compactingStartedAt?: number;
+  approval?: { id: string; toolName: string; preview: string };
+  overlay?: { id: string; title: string; items: { id: string; label: string; detail?: string }[] };
+}
+export type RemoteAction =
+  | { type: "approval"; id: string; decision: "approve" | "always" | "deny" }
+  | { type: "overlay"; id: string; decision: "select" | "cancel"; itemId?: string };
 export interface RemoteHandlers {
   /** Run one turn. `onDelta` (when given) streams output chunks as they arrive; `onAct` streams
    * one-line tool activity (the same "Read(src/agent.ts)" lines the terminal shows). */
@@ -38,7 +51,11 @@ export interface RemoteHandlers {
     effort?: string;
     mode?: string;
     contextPercent?: number;
+    commands?: { name: string; desc: string }[];
+    ui?: RemoteUiState;
   };
+  /** Out-of-band controls must remain responsive while `run()` is awaiting an approval. */
+  control?: (action: RemoteAction) => boolean;
   interrupt: () => boolean;
 }
 export interface RemoteControl {

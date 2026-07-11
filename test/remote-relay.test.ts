@@ -244,7 +244,7 @@ test("remote-relay v3: registers one opaque host id and E2E-sealed session metad
   const secret = "metadata-secret";
   const richHandlers: RemoteHandlers = {
     run: async (m) => ({ reply: m }),
-    status: () => ({ busy: false, model: "z-ai/glm-5.2", messages: 7, title: "relay audit", cwd: "E:/work/neko", sessionId: "local-session" }),
+    status: () => ({ busy: false, model: "z-ai/glm-5.2", messages: 7, title: "relay audit", cwd: "E:/work/neko", sessionId: "local-session", commands: [{ name: "/help", desc: "show help" }], ui: { queued: 2, approval: { id: "a1", toolName: "bash", preview: "Bash(bun test)" } } }),
     interrupt: () => true,
   };
   try {
@@ -252,7 +252,7 @@ test("remote-relay v3: registers one opaque host id and E2E-sealed session metad
     expect(rc.hostId).toBe("host-alpha");
     expect(regBody.hostId).toBe("host-alpha");
     expect(JSON.parse(open(secret, regBody.meta))).toEqual(expect.objectContaining({
-      model: "z-ai/glm-5.2", title: "relay audit", cwd: "E:/work/neko", sessionId: "local-session",
+      model: "z-ai/glm-5.2", title: "relay audit", cwd: "E:/work/neko", sessionId: "local-session", commands: [{ name: "/help", desc: "show help" }], ui: { queued: 2, approval: { id: "a1", toolName: "bash", preview: "Bash(bun test)" } },
     }));
     rc.stop();
   } finally { server.stop(); }
@@ -276,6 +276,31 @@ test("remote-relay v2: an {t:interrupt} frame reaches handlers.interrupt MID-TUR
       relay.state.sockets[0].send(JSON.stringify({ t: "interrupt" }));
       await until(() => interrupted); // reached the host WHILE the turn was in flight
       await until(() => relay.state.frames.some((f) => f.t === "reply")); // and the turn still replied
+    } finally { rc.stop(); }
+  } finally { relay.server.stop(); }
+});
+
+test("remote-relay v5 decrypts out-of-band UI controls while no new turn can run", async () => {
+  const relay = makeWsDouble(4713);
+  const secret = "control-secret";
+  let action: any = null;
+  const h: RemoteHandlers = {
+    run: async () => ({ reply: "unused" }),
+    status: () => ({ busy: true }),
+    control: (next) => { action = next; return true; },
+    interrupt: () => false,
+  };
+  try {
+    const rc = await startRemoteRelay(relay.url, h, { secret });
+    try {
+      await until(() => relay.state.connections === 1);
+      relay.state.sockets[0].send(JSON.stringify({ t: "control", control: seal(secret, JSON.stringify({ type: "approval", id: "a7", decision: "approve" })) }));
+      await until(() => action !== null);
+      expect(action).toEqual({ type: "approval", id: "a7", decision: "approve" });
+      action = null;
+      relay.state.sockets[0].send(JSON.stringify({ t: "control", control: seal(secret, JSON.stringify({ type: "overlay", id: "o2", decision: "select", itemId: "max" })) }));
+      await until(() => action !== null);
+      expect(action).toEqual({ type: "overlay", id: "o2", decision: "select", itemId: "max" });
     } finally { rc.stop(); }
   } finally { relay.server.stop(); }
 });

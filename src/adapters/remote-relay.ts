@@ -11,6 +11,8 @@
  * title/cwd/model/busy metadata is sealed with the same E2E key; the Worker cannot read it.
  *
  * Transport, newest first (the /register response advertises what the Worker speaks):
+ *   v5  v4 mirror + encrypted live UI state and out-of-band approval controls.
+ *   v4  Durable semantic transcript replay and live mirror events.
  *   v3  v2 WebSocket transport + multi-host routing and encrypted presence metadata.
  *   v2  WebSocket (`GET /ws`, token in the "t.<token>" subprotocol): jobs push instantly, PARTIAL
  *       replies stream to the phone while the turn runs, and a phone-side Stop reaches the host
@@ -27,7 +29,7 @@ import { dirname, join } from "node:path";
 import { homeDir } from "../shared/home.ts";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { isSealed, open, seal } from "./relay-crypto.ts";
-import type { RemoteHandlers } from "./remote-control.ts";
+import type { RemoteAction, RemoteHandlers } from "./remote-control.ts";
 
 export interface RemoteRelay {
   session: string;
@@ -276,6 +278,12 @@ export async function startRemoteRelay(
       let m: any;
       try { m = JSON.parse(String(ev.data)); } catch { return; }
       if (m?.t === "interrupt") { handlers.interrupt(); return; } // phone Stop, mid-turn
+      if (m?.t === "control") {
+        const raw = decrypt(m.control);
+        if (raw === null) return;
+        try { handlers.control?.(JSON.parse(raw) as RemoteAction); } catch { /* malformed/stale control */ }
+        return;
+      }
       if (m?.id) { jobs.push(m); void drain(); }
     };
     sock.onerror = () => { /* the close event follows and handles it */ };

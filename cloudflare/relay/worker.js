@@ -4,7 +4,8 @@
  * instructions here; this Worker just routes them. Because it's YOUR Worker (not a vendor's), it sees
  * only what passes through — and with end-to-end encryption (see README) it sees only ciphertext.
  *
- * v4 mirror: the default pairing is scoped to one Neko conversation and the browser replays its
+ * v5 controlled mirror: v4 replay plus E2E UI state and out-of-band approvals that remain responsive
+ * while the host turn is blocked. The default pairing is scoped to one Neko conversation and the browser replays its
  * durable semantic transcript, then receives live stream/activity events. The v3 multi-session hub
  * remains available explicitly; all content and metadata stays E2E ciphertext to this Worker.
  * v2 transport remains underneath: each host connects a WebSocket (hibernatable - the Durable Object SLEEPS between
@@ -25,6 +26,7 @@
  *   GET  /result?session=&id=&seen=<seq>  client long-polls; 200 {reply,done,seq} on any NEW state
  *   GET  /alive?session=...&host=...      {online} - is that host connected (or v1-polling)?
  *   POST /interrupt {session,hostId}      abort that host's running turn (v2+ hosts only)
+ *   POST /control {session,hostId,control} E2E opaque approval/control frame; never queued when offline
  *   POST /revoke {session}                invalidate a rotated capability and close every socket
  *   GET  /pull · POST /reply              v1 host long-poll (compat)
  *   GET  /                                minimal phone web client (client.html)
@@ -36,8 +38,11 @@ const KEEP_RESULTS = 20; // ring of stored results per session (a phone may re-p
 const KEEP_MIRROR_EVENTS = 400;
 const MAX_MIRROR_BYTES = 1_500_000; // SQLite-backed DO values cap at 2 MB; leave serialization headroom.
 const MAX_HOSTS = 32;
+const MAX_QUEUE = 100;
+const MAX_REQUEST_BYTES = 1_050_000;
+const MAX_WS_FRAME_BYTES = 1_050_000;
 const DEFAULT_HOST = "default";
-const RELAY_VERSION = 4;
+const RELAY_VERSION = 5;
 
 function hostId(value) {
   return String(value || DEFAULT_HOST).replace(/[^A-Za-z0-9._-]/g, "").slice(0, 80) || DEFAULT_HOST;
@@ -48,6 +53,11 @@ const validSession = (value) => /^[A-Za-z0-9._~-]{1,128}$/.test(String(value || 
 
 export default {
   async fetch(request, env) {
+    if (request.method === "POST") {
+      const bounded = await boundedRequest(request);
+      if (bounded instanceof Response) return bounded;
+      request = bounded;
+    }
     const url = new URL(request.url);
     if (url.pathname === "/healthz" && request.method === "GET") {
       return json(200, { ok: true, service: "neko-relay", version: RELAY_VERSION });
@@ -61,6 +71,29 @@ export default {
     return env.RELAY.get(id).fetch(request);
   },
 };
+
+async function boundedRequest(request) {
+  const declared = Number(request.headers.get("content-length") || 0);
+  if (declared > MAX_REQUEST_BYTES) return json(413, { error: "body too large" });
+  if (!request.body) return request;
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_REQUEST_BYTES) {
+      try { await reader.cancel(); } catch { /* body already closed */ }
+      return json(413, { error: "body too large" });
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return new Request(request.url, { method: request.method, headers: request.headers, body });
+}
 
 async function peekSession(request) {
   // /register and POST bodies carry the session in the body; clone to read it without consuming.
@@ -228,8 +261,9 @@ export class RelaySession {
       pair[1].serializeAttachment({ role: "client", hostId: id });
       this.ctx.acceptWebSocket(pair[1], ["client", clientTag(id)]);
       pair[1].send(JSON.stringify({ t: "mirror_reset" }));
-      for (const event of await this.readMirrorEvents(id)) pair[1].send(JSON.stringify(event));
-      pair[1].send(JSON.stringify({ t: "mirror_ready" }));
+      const replay = await this.readMirrorEvents(id);
+      for (const event of replay) pair[1].send(JSON.stringify(event));
+      pair[1].send(JSON.stringify({ t: "mirror_ready", seq: replay.at(-1)?.seq ?? 0 }));
       return new Response(null, { status: 101, webSocket: pair[0], headers: { "sec-websocket-protocol": "neko-relay" } });
     }
 
@@ -241,6 +275,17 @@ export class RelaySession {
       }
       await this.ctx.storage.deleteAll();
       return json(200, { revoked: true });
+    }
+
+    if (path === "/control" && request.method === "POST") {
+      const { hostId: requestedHost, control } = await request.json().catch(() => ({}));
+      if (control === undefined) return json(400, { error: "missing control" });
+      const id = await this.resolveHost(requestedHost);
+      const ws = this.hostSocket(id);
+      if (!ws) return json(409, { error: "host offline", hostId: id });
+      try { ws.send(JSON.stringify({ t: "control", control })); }
+      catch { return json(409, { error: "host disconnected", hostId: id }); }
+      return json(200, { sent: true, hostId: id });
     }
 
     if (path === "/alive") {
@@ -281,6 +326,7 @@ export class RelaySession {
       if (!delivered) {
         // Host away: queue durably so the instruction survives an eviction and lands on reconnect.
         const q = await this.readQueue(id);
+        if (q.length >= MAX_QUEUE) return json(429, { error: "offline queue full", hostId: id });
         q.push(job);
         await this.writeQueue(id, q);
       }
@@ -340,11 +386,17 @@ export class RelaySession {
   /** Host WebSocket frames: {t:"reply"|"partial", id, reply, tokens?, ms?}. */
   async webSocketMessage(ws, raw) {
     let m;
-    try { m = JSON.parse(raw); } catch { return; }
+    const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+    if (new TextEncoder().encode(text).byteLength > MAX_WS_FRAME_BYTES) {
+      try { ws.close(1009, "frame too large"); } catch { /* already closed */ }
+      return;
+    }
+    try { m = JSON.parse(text); } catch { return; }
     const attachment = ws.deserializeAttachment?.() ?? {};
     if (attachment.role === "client") return; // browser sockets are receive-only; commands use /send
     if (m?.t === "presence") {
       await this.touchHost(attachment.hostId, m.meta);
+      this.broadcastMirror(attachment.hostId, { t: "presence", meta: m.meta });
       return;
     }
     if (m?.t === "event" && m.event) {

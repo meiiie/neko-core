@@ -10,6 +10,16 @@ that never reads your messages).
 [phone/browser] --HTTPS--> [your Cloudflare Worker (relay)] <--outbound WebSocket-- [your machine: neko /relay]
 ```
 
+**v5 controlled mirror (2026-07-11).** The browser now receives the same live state that drives Ink:
+working/compacting state, current step, queued count, concurrent tool activity, permission mode, and
+approval requests. Approval decisions use a separate E2E-sealed `/control` path, so they remain
+responsive while the agent turn is blocked waiting for consent; stale/offline decisions are never
+queued. Ink pickers for `/model`, `/provider`, `/effort`, `/resume`, and `/fps` reuse their existing
+host callbacks through the same sealed control path; no second browser-side command state machine is
+introduced. Up/Down prompt history and local-device `/copy` close the highest-impact terminal parity
+gaps. Mirror sequence cursors detect duplicate or
+missing durable frames, and public bodies, WebSocket frames, and offline queues are bounded.
+
 **v4 session mirror (2026-07-11).** Bare `/relay` creates one durable capability for the current Neko
 conversation. Its opaque session code and direct `/session/<id>` URL are distinct from every other
 conversation. The browser first replays a bounded semantic transcript, then mirrors new user,
@@ -23,7 +33,7 @@ and the phone's **Stop button interrupts a running turn**. The Durable Object **
 (the old 1s long-poll kept it awake 24/7 — real duty-cycle on the free plan). Session state (token
 binding, queued jobs, results) lives in **DO storage**, so an eviction no longer silently kills the
 session; a message sent while your machine is offline is queued and runs on reconnect. The v1 long-poll
-endpoints are kept: an older Neko binary still works against this Worker, and a v2/v3/v4 Neko degrades to
+endpoints are kept: an older Neko binary still works against this Worker, and a v2/v3/v4/v5 Neko degrades to
 long-poll against an older Worker (it reads the `/register` response's `v` field).
 
 **Durable, least-privilege pairing.** `/relay` persists one session/token/secret under
@@ -71,7 +81,7 @@ Or from any shell (no app):
 ID=$(curl -s -H "Authorization: Bearer $TOKEN" $RELAY/send -d "{\"session\":\"$SESSION\",\"message\":\"run the tests\"}" | jq -r .id)
 curl -s -H "Authorization: Bearer $TOKEN" "$RELAY/result?session=$SESSION&id=$ID" | jq -r .reply
 # hub mode: GET /sessions lists hostId values; include hostId in /send and /interrupt
-# more: GET /alive?host=... (is that host connected?) · POST /interrupt (stop that host's turn)
+# more: GET /alive?host=... (is that host connected?) · POST /interrupt (stop) · POST /control (E2E approval)
 # /result returns {reply,done,seq}; pass &seen=<seq> to long-poll only for NEWER state (partials stream)
 ```
 
@@ -86,7 +96,7 @@ page is served by the Worker, so it updates together.
   machine — treat it like an SSH key.
 - The relay is yours, so only you control retention/logging. For zero-knowledge (the relay can't read
   your messages even in transit), see **end-to-end encryption** below.
-- Session metadata and v4 mirror events are sealed at the host and decrypted only by the paired
+- Session metadata, v4 mirror events, and v5 UI/control state are sealed at the host and decrypted only by the paired
   browser. The Worker stores an opaque `hostId`, ordering metadata, and a bounded ciphertext replay
   window solely to route and reconnect the session.
 

@@ -120,7 +120,7 @@ the generated URL remains a rollback path.
 ## 4. Verify it is live
 
 ```bash
-# 4a. The explicit health endpoint reports relay protocol v4 (HTTP 200):
+# 4a. The explicit health endpoint reports relay protocol v5 (HTTP 200):
 curl -s https://<your-relay-domain>/healthz
 
 # 4b. The root serves the mobile web client (HTML, HTTP 200):
@@ -130,7 +130,7 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<your-relay-domain>/        # e
 curl -s -o /dev/null -w "%{http_code}\n" https://<your-relay-domain>/alive?session=test   # expect 401
 ```
 
-If health reports `version:4`, the root returns 200, and the unauthenticated call returns 401, the
+If health reports `version:5`, the root returns 200, and the unauthenticated call returns 401, the
 relay is deployed and its public boundary is working.
 
 > A full round-trip (a real instruction) also needs the user's local `neko chat` → `/relay` to be
