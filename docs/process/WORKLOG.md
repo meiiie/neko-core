@@ -3,6 +3,45 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-11 - relay v5: phone-sized viewport and virtual-keyboard polish
+
+A fresh 390x844 production capture exposed mobile-specific friction that the desktop mirror did not:
+the session/settings and send hit areas were too small, the desktop placeholder and status wrapped,
+and the fixed chrome left too little room when the visual viewport became short. The existing terminal
+design was kept; the mobile breakpoint now uses 44px touch targets, a 16px composer (preventing iOS
+focus zoom), notch/home-indicator safe areas, `interactive-widget=resizes-content`, bounded independent
+scroll regions for slash/approval/overlay/settings, compact mobile status/placeholder copy, and a
+short-height mode that drops only the redundant path row while the virtual keyboard is open. Page zoom
+is no longer disabled.
+
+The implementation deliberately stays CSS/HTML-native: `100dvh`, safe-area environment variables,
+media queries, and the viewport contract replace a second JavaScript geometry manager. Production
+version `6422685d-fc2d-4675-b04f-54a7fc4a2190` serves protocol v5. Verification: 555 tests / 2,132
+assertions, typecheck, compiled PTY input probe, Wrangler 4.110 dry-run, canonical and rollback health.
+
+## 2026-07-11 - relay v5: controlled mirror reaches the Ink permission boundary
+
+The relay already mirrored the durable transcript, but it stopped at the most important interactive
+boundary: an agent turn waiting for a gated tool could only be approved in the local Ink terminal. The
+browser therefore appeared to work until a real edit or shell action, then waited forever.
+
+v5 publishes the live Ink state (step, queue, compaction, current task, concurrent tools, and approval)
+inside the existing E2E-sealed presence metadata. Approval decisions travel out-of-band over a new
+opaque `/control` route, so they can resolve the promise that is blocking the current turn instead of
+joining the turn queue behind it. IDs reject stale approvals; offline controls are rejected rather than
+replayed later. The browser preserves Ink's y/a/n semantics, disables its composer while consent owns
+input, restores focus afterward, and keeps the approval preview ciphertext-only at the Worker.
+
+The mirror also gained durable sequence dedup/gap recovery, Up/Down prompt history, local-device
+`/copy`, and generic Ink Overlay projection: `/model`, `/provider`, `/effort`, `/resume`, and `/fps`
+reuse the host picker's original selection callback over the sealed control path instead of maintaining
+a browser-only copy of command behavior. HTTP bodies, WebSocket frames, and per-host offline queues are
+bounded. Chrome QA exercised approval -> resume end-to-end against
+a real local Worker/host pair. The production deployment is
+`21840067-5ef1-42c7-aec4-ca645aa72e7a`; health reports protocol v5 on both the canonical Custom Domain
+and workers.dev rollback endpoint. Full verification: 555 tests, typecheck, compiled PTY input probe,
+Wrangler dry-run, and production security headers.
+
 ## 2026-07-11 - relay v4 promoted to a hardened production Custom Domain
 
 The local `127.0.0.1:8790` URL was only the Wrangler dogfood surface; it could never be the remote-control
@@ -1340,3 +1379,161 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
 - Verification: TS 7 + TS 5.9 clean; **479/479 tests** (+16: 13 sidecar lifecycle + 3 web dispatcher
   wake/hint; existing fallback test hardened against real-docker side effects via an inert sidecar);
   policy PASS; doctor line verified live ("searxng (container stopped - starts on demand...)").
+
+## 2026-07-11 - ChatGPT Plus/Pro OAuth + Codex Responses provider (owner ask)
+- Studied the public OpenAI Codex and OpenCode implementations as protocol references, then built a
+  clean-room Neko adapter rather than routing through Claude Code or pretending subscription access is
+  an API key. The built-in `chatgpt` profile is explicit and fail-closed: it always uses the fixed
+  `https://chatgpt.com/backend-api/codex/responses` origin and never falls back to pay-as-you-go API
+  billing or sends its OAuth bearer to a configured third-party endpoint.
+- Added browser PKCE OAuth (`neko login chatgpt`) plus device-code login for SSH/headless hosts
+  (`--device`), CSRF state validation, refresh-token rotation, one forced refresh after a backend 401,
+  account-id claim extraction, logout, and CLI/TUI/doctor integration. Credentials live separately in
+  `~/.neko-core/chatgpt-auth.json`; atomic writes create the temp and final file as mode 0600 on POSIX.
+- Added a Responses wire adapter for messages, images, JSON-schema output, tools, parallel tool calls,
+  streamed text/reasoning/function arguments, usage/cache accounting, retry/abort, and strict incomplete-
+  stream failure. Opaque encrypted reasoning continuation is carried through the provider-neutral port
+  and replayed between tool rounds; other providers strip it on a live profile switch.
+- Evidence: 9 focused ChatGPT tests cover auth URL/PKCE, storage/clear, expiry refresh, device polling,
+  nested account claims, fixed-origin request/header/body translation, CRLF SSE tools/usage/reasoning,
+  disconnect rejection, and 401 refresh. Agent tests cover continuation replay and context accounting.
+  Full gates: TS 7 + TS 5.9 clean; **531/531 tests** (1910 assertions); doctor healthy; policy PASS;
+  production binary build + UI/input probes PASS; compiled binary `doctor --profile chatgpt` PASS in an
+  isolated home. No real account login or model request was performed, so the first owner-run OAuth +
+  completion remains the only unverified external edge. Bun printed a non-fatal internal directory-
+  mismatch diagnostic after its successful compile; the compiled binary smoke passed afterward.
+
+## 2026-07-11 - OpenAI auth routing UX: provider -> auth method -> account-aware models
+- Hardened the first OAuth slice after owner review. `/login` now groups the internal `openai` API and
+  `chatgpt` subscription profiles under one **OpenAI** provider, then presents two explicit routes:
+  `ChatGPT Plus/Pro` (subscription, no API billing) and `API key` (pay-as-you-go). Other providers remain
+  profile-scoped; zero-auth local routes are omitted from the sign-in picker. `/provider` uses the same
+  grouped account view, while explicit internal profile names remain available for config/debugging.
+- Fixed two correctness bugs exposed by the new flow: TUI API login no longer sets process-wide
+  `NEKO_API_KEY` (which could leak one provider's key into another), and `/logout` now reloads the active
+  config/provider after removing the profile key instead of leaving the old secret live in memory until
+  restart. ChatGPT logout and API-key logout are isolated and tested not to erase one another; environment-
+  sourced keys produce an honest shell-settings warning because a child process cannot unset its parent.
+- `/model` now names the active route (`OpenAI · ChatGPT Plus/Pro` vs API key). With ChatGPT OAuth it
+  fetches the fixed-origin, account-filtered `https://chatgpt.com/backend-api/codex/models` catalog,
+  including plan/rollout-specific availability, filters hidden entries, refreshes once on 401, and uses
+  a config fallback only before sign-in. The nested picker resets its search/cursor when moving from
+  provider to auth method (a UI test caught the old query making the second list appear empty).
+- CLI parity: `neko login openai chatgpt [--device]`, `neko login openai api <key>`, and matching scoped
+  logout routes; the short `neko login chatgpt` alias remains compatible. An isolated CLI smoke proved
+  API login -> `api_key=set` -> scoped logout -> `api_key=missing` without printing the key.
+- Verification: TS 7 + TS 5.9 clean; **540/540 tests** (1949 assertions), including two-stage UI,
+  secret non-echo, no process-wide key override, immediate logout, cross-route credential preservation,
+  live model-catalog parsing, provider grouping, and named-profile key removal; doctor healthy; policy
+  PASS; production binary build + UI/input probes PASS. No real OAuth login or model/quota call was made.
+
+## 2026-07-11 - ChatGPT `/model` real-login repair: Codex client-version contract
+- The owner's first real Plus/Pro login proved OAuth and account selection worked, but `/model` failed
+  with HTTP 400. A credential-safe live probe reproduced the backend response exactly: the Codex models
+  endpoint requires the `client_version` query field. Sending Neko's unrelated app version (`0.9.0`)
+  returned HTTP 200 with zero models because this field also gates models by minimum Codex client version.
+- Matched the public Codex request contract and introduced an explicit Codex compatibility version
+  (`0.139.0`, separate from Neko's release version). The fixed-origin request is now
+  `/backend-api/codex/models?client_version=0.139.0`; error bodies are safely summarized, and `/model`
+  degrades to the built-in profile catalog if the live catalog is unavailable or unexpectedly empty.
+  Completion entitlement remains server-authoritative, so fallback cannot bypass account access.
+- Live read-only verification with the owner's saved OAuth session returned four selectable models:
+  `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex-spark`. No completion/model-quota request was
+  made. Regression coverage asserts the versioned URL, hidden-model filtering, account header, and
+  failure fallback. Full gates: TS 7 + TS 5.9 clean; **541/541 tests** (1950 assertions); doctor healthy;
+  policy PASS; production binary + UI/input probes PASS. Bun again emitted its non-fatal post-compile
+  directory-mismatch diagnostic; the produced binary and both probes succeeded.
+
+## 2026-07-11 - GPT-5.6 catalog metadata + model-aware effort + `/usage`
+- The owner's follow-up exposed that the previous compatibility marker (`0.139.0`) intentionally hid
+  July's GPT-5.6 rollout. Checked public Codex `main` at commit `5c19155` and the signed-in account:
+  Sol, Terra, and Luna require `client_version=0.144.0`. The live account catalog now returns seven
+  selectable models, led by `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
+- Replaced the ChatGPT id-only path with rich, account-filtered model metadata: display name,
+  description, context window, default effort, and the exact supported effort ladder. `/model` renders
+  those facts and persists the selected model's context window; the live Agent overflow guard updates
+  immediately too. This avoids the subtle old behavior where a 372k model still compacted as if it had
+  the startup/default 131k window.
+- `/effort` is now per-model and honest: `default` means omit the field and use the backend's declared
+  default (it is not mislabeled as reasoning disabled). Sol/Terra expose low..ultra, Luna low..max, and
+  5.4/5.5 low..xhigh. A saved higher tier is clamped to the nearest supported tier when switching models;
+  direct max/ultra starts resolve once against the account catalog before the Responses call, preventing
+  the prior `gpt-5.4 + max` HTTP 400.
+- Added `/usage` over the fixed-origin, read-only ChatGPT `GET /backend-api/wham/usage` path with account
+  header, token refresh, and no API-billing fallback. It renders plan, used/remaining percent, reset time,
+  5-hour and weekly windows, additional model buckets, and credits. Live verification showed Pro: primary
+  5-hour window 100% used (temporarily reached), weekly ~30% used, and the separate Spark bucket available.
+  Only catalog/usage GETs were made; no completion or model quota was consumed.
+- Fallback remains useful offline but never claims entitlement: live catalog wins whenever reachable and
+  the Responses backend remains authoritative. Tests cover rich catalog parsing/filtering, 0.144 query,
+  effort clamping, Luna's no-ultra picker, usage parsing/rendering, fixed usage URL, fallback, and persisted
+  context metadata. Full gates: TS 7 + TS 5.9 clean; **546/546 tests** (1986 assertions); doctor and policy
+  healthy; production binary + UI/input probes PASS. Bun emitted the same non-fatal post-compile directory-
+  mismatch diagnostic after producing a working binary.
+
+## 2026-07-11 - GPT-5.6 404 + native ChatGPT vision: capability negotiation, not spoofing
+- Reproduced the owner's `gpt-5.6-luna` failure with credential-safe minimal requests. The live catalog
+  says Sol/Terra/Luna use Responses Lite, accept text+image, require Codex client contract 0.144.0, and are
+  `code_mode_only`. Matching the official Lite header/body plus turn metadata still returned the exact
+  `Model not found` 404 for both honest `neko` and `opencode` originators. On the same machine/account,
+  official `codex-cli 0.144.1` completed Luna; changing only the diagnostic request's client identity to
+  `codex_cli_rs` also returned 200. This proves the catalog is broader than the third-party completion
+  route. Neko deliberately does not ship that identity spoof.
+- Extended catalog parsing with transport, tool-mode, minimum-client, and input-modality metadata. The
+  ChatGPT picker now exposes only models this adapter can really complete. The built-in route defaults to
+  GPT-5.5 (272k context, native vision); a persisted 5.6 selection self-heals to the best compatible live
+  model before spending a request on a guaranteed 404, updates the runtime model/vision state, and emits
+  an explicit explanation. The README amends the earlier catalog-only claim so availability is not
+  overstated.
+- Fixed the image warning at its source: ChatGPT's profile is vision-capable and live `/model` selections
+  persist the catalog's `image` modality. Pasted images and visual tool results therefore stay as native
+  Responses `input_image` parts instead of entering the text-only caption bridge. A real 1x1 image smoke
+  through the patched provider migrated Luna -> GPT-5.5 and returned `OK` with `vision=true`.
+- Added a bounded stream retry for transient server-side `response.failed`/disconnects only before any
+  text, reasoning, or tool call has been emitted. Once visible activity or a tool call exists, failure is
+  surfaced without retry, preventing duplicate side effects. This covers the owner's earlier generic
+  post-fetch backend failure without weakening the existing HTTP retry/abort rules.
+- Verification: official source inspected at `5c19155`; live catalog GET and three minimal comparison
+  probes plus one final image smoke; TS 5.9 + TS 7 clean; **555/555 tests** (2121 assertions); production
+  binary build, `__uiprobe`, and real-PTY input probe PASS. `git diff --check` clean. Bun again printed its
+  known non-fatal directory-mismatch diagnostic after a successful build; the 101,270,528-byte binary and
+  a separate UI smoke both passed.
+
+## 2026-07-11 - GPT-5.6 Support Pack: official App Server bridge, opt-in installer, measured UX
+- Inspected current OpenAI Codex `main` (`5c19155`) and generated App Server protocol schemas rather than
+  treating the CLI as a black box. The decisive release finding was OpenAI's own separately built and
+  Windows-signed `codex-app-server` target plus `codex-app-server-package-*` assets. A source build was
+  rejected as a distribution design: current `main` identifies itself as version `0.0.0`, whereas the
+  release pipeline patches the real version before building; that client version controls the model
+  catalog. Neko therefore downloads official release artifacts and does not fork/rebrand Codex.
+- Added a thin newline-delimited JSON-RPC transport and a hybrid ChatGPT provider. GPT-5.5 and lower keep
+  Neko's lightweight direct Responses route. Only GPT-5.6 Sol/Terra/Luna start App Server, on demand, with
+  Neko's existing OAuth token, an isolated `CODEX_HOME`, read-only sandbox policy, and Neko dynamic tools.
+  Tool requests return through the existing `Agent.safeExecute` approval/path/sandbox boundary; tool-call
+  ids are idempotent. `/logout`, live provider/model switches, idle timeout (15 minutes by default), exit,
+  abort, spawn failure, and process-tree cleanup all dispose the sidecar without an orphan.
+- Added the opt-in Support Pack installer and UX: discovery first reuses a compatible Codex CLI, then a
+  Neko-managed standalone App Server. Selecting an unavailable 5.6 model offers `Install support pack` or
+  `Not now`; no selection silently downloads. `/support [status|install|update|remove]`, `neko support ...`,
+  and `neko setup codex` provide explicit management. API/Ollama/other providers and GPT-5.5 download
+  nothing. Removing the pack never removes a user's Codex CLI.
+- Supply-chain/rollback boundary: release metadata and asset URL must be the stable official
+  `openai/codex` GitHub release; archive name/target/size are bounded; SHA-256 is mandatory; Windows must
+  have a valid `OpenAI OpCo, LLC` Authenticode signature; archive contents must be exactly the expected
+  standalone binary; version and a real App Server `initialize` handshake must pass in a temporary home.
+  Installation is staged and atomically swapped, so checksum/signature/version/protocol failure preserves
+  the previous working pack. Managed-manifest path traversal is rejected. Downloads have release/download
+  deadlines and partial staging is cleaned.
+- Windows x64 measurements against official `rust-v0.144.1`: standalone `.tar.gz` **92.7 MiB** download,
+  **270.4 MiB** installed; temporary full package `.tar.zst` was 92.4 MB but installed unnecessary helpers.
+  Standalone idle process: **34.7 MiB working set / 14.7 MiB private**, 31 threads; authenticated handshake
+  **184-186 ms**. Live Pro account discovery returned seven models including Sol/Terra/Luna and rate limits.
+  Luna low-effort text returned `STANDALONE_OK` in **4.0 s**; a dynamic tool ran exactly once and returned
+  `TOOL_OK` in **6.9 s**. End-to-end temporary-home install including SHA, Authenticode, extraction, version,
+  and protocol checks completed in **16.3 s**. No API key or pay-as-you-go fallback was used.
+- Final verification: TS 5.9 + TS 7 clean; **572/572 tests, 2195 assertions, 64 files**, including
+  architecture, atomic rollback, traversal, protocol rollback, spawn-race, bridge tool/usage, model effort,
+  logout, and UI tests; `git diff --check` clean; doctor healthy; policy PASS; production binary,
+  `__uiprobe`, and real-PTY input probe PASS. Windows x64 is live-tested; macOS/Linux target selection and
+  checksum paths are covered but remain reasoned/CI-only here. Bun again emitted its known non-fatal
+  post-compile directory-mismatch diagnostic after producing a working binary and passing both probes.

@@ -4,19 +4,19 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-10) — session handoff
+## Current status (2026-07-11) — v0.10.0 release
 Neko Code is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
 
-- **Branch:** `self-improve`. **Current release: v0.9.0 (2026-07-10)** - computer-use became a
-  closed visual loop (screenshots reach vision models across both wire formats; type/key/scroll/wait/
-  open actions; skills embedded in the binary), transcript links became real OSC 8 hyperlinks,
-  SearXNG became a managed on-demand sidecar (Ollama keep_alive pattern), and the verifier-backed
-  long-horizon GUI eval landed (`neko bench gui [hard]`). The v0.8.x arc before it: O(1) windowed
-  input/word-wrap, real hardware caret + content-anchored selection, Ctrl+G external editor,
-  incremental session persistence, and pinned rollback (`neko update <version>`).
+- **Branch:** `self-improve`. **Current release: v0.10.0 (2026-07-11)** - OpenAI login now separates
+  ChatGPT subscription from API billing; account-aware `/model`, model-aware `/effort`, `/usage`, and
+  scoped `/logout` are complete. GPT-5.6 Sol/Terra/Luna use the official Codex App Server through an
+  on-demand bridge that reuses Codex CLI or offers an optional verified Support Pack. The encrypted
+  relay is now a multi-session terminal hub, inline images preserve prompt position, and both one-line
+  installers stage + verify before atomic replacement. v0.9.0 remains the rollback baseline while the
+  new provider/installer path soaks in the field.
 - **Post-v0.8.3 reliability hardening (working tree, 2026-07-10):** shared CLI/TUI/subagent tool
   composition (native web fallback alongside namespaced MCP), inherited safety boundaries, nested-secret
   redaction, typed boolean env overrides, interleaved parallel tool-call parsing, action-sensitive

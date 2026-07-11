@@ -1,8 +1,8 @@
 #!/bin/sh
 # Neko Code installer (macOS / Linux) — downloads a standalone binary; no Bun required.
 #   Latest:  curl -fsSL https://neko.holilihu.online/install.sh | sh
-#   Pinned:  curl -fsSL https://neko.holilihu.online/install.sh | sh -s -- --version 0.7.7
-#            (or set NEKO_VERSION=v0.7.7 before the one-liner)
+#   Pinned:  curl -fsSL https://neko.holilihu.online/install.sh | sh -s -- --version 0.9.0
+#            (or set NEKO_VERSION=v0.9.0 before the one-liner)
 set -e
 
 REPO="meiiie/neko-core"
@@ -39,27 +39,69 @@ case "$PIN" in
     ;;
 esac
 LABEL="${TAG:-latest}"
+case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "neko: could not resolve a stable release tag" >&2; exit 1 ;; esac
 echo "Installing Neko Code $LABEL ($ASSET)..."
 if [ -n "$TAG" ]; then URL="https://github.com/$REPO/releases/download/$TAG/$ASSET"
 else URL="https://github.com/$REPO/releases/latest/download/$ASSET"; fi
+SUM_URL="$URL.sha256"
 
 BIN_DIR="${NEKO_BIN_DIR:-$HOME/.local/bin}"
 TARGET="$BIN_DIR/neko"
 mkdir -p "$BIN_DIR"
+STAGE="$BIN_DIR/.neko-download-$$"
+SUM_STAGE="$STAGE.sha256"
+cleanup() { rm -f "$STAGE" "$SUM_STAGE"; }
+trap cleanup EXIT HUP INT TERM
 
 if command -v curl >/dev/null 2>&1; then
-  curl -fL --retry 3 --progress-bar "$URL" -o "$TARGET"
+  curl -fL --retry 3 --progress-bar "$URL" -o "$STAGE"
 elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$TARGET" "$URL"
+  wget -qO "$STAGE" "$URL"
 else
   echo "neko: need curl or wget installed" >&2; exit 1
 fi
-chmod +x "$TARGET"
 
-# Verify the binary actually runs; report its REAL version.
-VER="$("$TARGET" version 2>/dev/null | head -1 || true)"
+# v0.10.0+ publishes one checksum asset beside every binary. Older pinned releases remain installable
+# through the version probe below because those historical releases predate checksum sidecars.
+MAJOR="$(printf '%s' "$TAG" | sed 's/^v//' | cut -d. -f1)"
+MINOR="$(printf '%s' "$TAG" | sed 's/^v//' | cut -d. -f2)"
+REQUIRE_SUM=0
+if [ "${MAJOR:-0}" -gt 0 ] || [ "${MINOR:-0}" -ge 10 ]; then REQUIRE_SUM=1; fi
+GOT_SUM=0
+if command -v curl >/dev/null 2>&1; then
+  curl -fsSL --retry 3 "$SUM_URL" -o "$SUM_STAGE" 2>/dev/null && GOT_SUM=1 || true
+else
+  wget -qO "$SUM_STAGE" "$SUM_URL" 2>/dev/null && GOT_SUM=1 || true
+fi
+if [ "$GOT_SUM" = 1 ]; then
+  EXPECTED="$(awk 'NR==1 {print $1}' "$SUM_STAGE")"
+  case "$EXPECTED" in *[!0-9a-fA-F]*|'') echo "neko: release checksum is invalid" >&2; exit 1 ;; esac
+  if [ "${#EXPECTED}" -ne 64 ]; then echo "neko: release checksum is invalid" >&2; exit 1; fi
+  if command -v sha256sum >/dev/null 2>&1; then ACTUAL="$(sha256sum "$STAGE" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then ACTUAL="$(shasum -a 256 "$STAGE" | awk '{print $1}')"
+  else echo "neko: need sha256sum or shasum to verify this release" >&2; exit 1; fi
+  if [ "$(printf '%s' "$ACTUAL" | tr 'A-F' 'a-f')" != "$(printf '%s' "$EXPECTED" | tr 'A-F' 'a-f')" ]; then
+    echo "neko: downloaded SHA-256 does not match the release" >&2; exit 1
+  fi
+  VERIFY_NOTE="SHA-256 verified"
+elif [ "$REQUIRE_SUM" = 1 ]; then
+  echo "neko: release $TAG is missing its required checksum asset" >&2; exit 1
+else
+  echo "  Historical release: checksum sidecar unavailable; using the signed tag + version probe."
+  VERIFY_NOTE="version verified"
+fi
+chmod +x "$STAGE"
+
+# Verify before atomically replacing the working binary. POSIX rename keeps the old install intact on
+# any download/checksum/version failure and lets an already-running old process finish safely.
+VER="$("$STAGE" version 2>/dev/null | head -1 || true)"
+NEWV="$(printf '%s' "$VER" | sed -n 's/^neko-core *\([0-9][0-9.]*\).*/\1/p')"
+if [ -z "$NEWV" ] || [ "v$NEWV" != "$TAG" ]; then
+  echo "neko: downloaded binary failed its version probe (expected $TAG, got '$VER')" >&2; exit 1
+fi
+mv -f "$STAGE" "$TARGET"
 echo "  Installed to $TARGET"
-echo "${VER:-Installed}"
+echo "$VER installed ($VERIFY_NOTE)"
 
 # A PINNED install (NEKO_VERSION) is a HOLD: pause auto-update so the daily updater can't drag this
 # exact version forward again. auto_update:false is honored by every release >= 0.7.4 (the one being
@@ -92,7 +134,6 @@ esac
 
 # SHADOW HEALING — an old `neko` earlier on PATH wins over this install. If it IS an older neko-core
 # (verified by running it), remove it automatically; anything else is only reported, never touched.
-NEWV="$(printf '%s' "$VER" | sed -n 's/^neko-core *\([0-9][0-9.]*\).*/\1/p')"
 FOUND="$(command -v neko 2>/dev/null || true)"
 if [ -n "$FOUND" ] && [ "$FOUND" != "$TARGET" ]; then
   OV="$("$FOUND" version 2>/dev/null | head -1 || true)"
@@ -113,6 +154,7 @@ if [ -n "$FOUND" ] && [ "$FOUND" != "$TARGET" ]; then
 fi
 
 echo ""
-echo "Run 'neko' to get started!  (first time: 'neko init-user' to set up your API key)"
-echo "  neko doctor   - check your setup (provider / model / API key)"
+echo "Run 'neko' to get started!  Then use /login to choose ChatGPT, API, or another provider."
+echo "  neko doctor          - check provider / model / authentication"
+echo "  neko support status  - optional GPT-5.6 Sol/Terra/Luna support"
 echo "  neko --yolo   - auto-approve mode: Neko runs tools without asking"

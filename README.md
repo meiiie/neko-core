@@ -90,13 +90,66 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > Fallback if the domain is unreachable: swap the URL for
 > `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
-**Current release: [v0.9.0](https://github.com/meiiie/neko-core/releases/tag/v0.9.0).**
+**Current release: [v0.10.0](https://github.com/meiiie/neko-core/releases/tag/v0.10.0).**
 Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
 real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). **Pin or roll back any time**
-(the pin holds — auto-update won't undo it): `neko update 0.7.7`, or at install time
-`... | sh -s -- --version 0.7.7` (unix) / `& ([scriptblock]::Create((irm .../install.ps1))) -Version 0.7.7` (Windows).
+(the pin holds — auto-update won't undo it): `neko update 0.9.0`, or at install time
+`... | sh -s -- --version 0.9.0` (unix) / `& ([scriptblock]::Create((irm .../install.ps1))) -Version 0.9.0` (Windows).
 
-Then set up your key and go:
+Then start Neko and use the guided sign-in:
+
+```bash
+neko
+# /login -> OpenAI -> ChatGPT Plus/Pro  (subscription, no API billing)
+#                  -> API key          (pay-as-you-go API)
+```
+
+The equivalent non-TUI commands are:
+
+```bash
+neko login openai chatgpt
+neko login openai api <key>
+
+# Headless/SSH alternative: prints a URL and one-time device code
+neko login openai chatgpt --device
+
+neko doctor
+```
+
+The ChatGPT profile uses the Codex Responses backend and never falls back to an OpenAI API key. Usage
+is governed by the limits and model access of your ChatGPT plan; it does not create API pay-as-you-go
+charges. Credentials are refreshed automatically and stored separately in
+`~/.neko-core/chatgpt-auth.json` (restricted file permissions where the OS supports them). This
+third-party integration may need an update if OpenAI changes its OAuth flow or Codex backend.
+`/model` reads the live account-aware Codex catalog. GPT-5.5 and other compatible models keep using Neko's
+lightweight direct transport. GPT-5.6 Sol/Terra/Luna use the official local
+[Codex App Server](https://developers.openai.com/codex/app-server) protocol
+because their Responses-Lite/code-mode route rejects honest third-party HTTP clients. Neko first reuses a
+compatible Codex CLI already installed on the machine; the optional GPT-5.6 Support Pack is the standalone
+fallback and is not required for GPT-5.5, API-key providers, Ollama, or other local models. App Server runs
+hidden, on demand, with an isolated Codex home; Neko's existing OAuth token and approval-gated ToolRegistry
+remain authoritative, so there is no second sign-in and no client-identity spoofing. It stops after 15 idle
+minutes by default (`codex_keepalive`; `0` keeps it alive until logout/exit). Model metadata also drives
+native image input, context size, and `/effort`, so each usable model shows only its supported reasoning
+tiers. `/usage` reads the subscription's short/weekly quota windows, reset times, extra model buckets, and
+credits without making a model request. `/logout` signs out only the active route, so ChatGPT OAuth and
+OpenAI API keys do not erase each other.
+
+When `/model` needs the component, Neko asks before downloading anything. You can also manage it directly:
+
+```bash
+neko support status           # reuses an installed Codex CLI when compatible
+neko setup codex              # install the optional standalone App Server
+neko support update           # verify and replace with the latest stable official release
+neko support remove           # remove only Neko's managed pack, never the user's Codex CLI
+```
+
+On Windows x64, the tested OpenAI `0.144.1` standalone archive is 92.7 MiB and occupies 270.4 MiB after
+installation. It is downloaded from the official `openai/codex` GitHub release, checked against the asset's
+published SHA-256, and required to have a valid OpenAI Authenticode signature before Neko activates it.
+The base Neko install is unchanged because the pack remains opt-in.
+
+For API-key or local-model providers:
 
 ```bash
 neko init-user                 # scaffold ~/.neko-core/config.json (API key + profile)
@@ -120,7 +173,7 @@ bun bin/neko.ts doctor         # or run directly via Bun, no build needed
 ### Commands
 
 `neko` (session, default) · `run <task>` · `config` · `doctor` · `profiles` · `init[-user]` · `tools` ·
-`agents` · `commands` · `capabilities` · `policy` · `context` · `sessions` · `mcp` · `update`.
+`agents` · `commands` · `capabilities` · `policy` · `context` · `sessions` · `mcp` · `login` · `logout` · `update`.
 
 Bare `neko` (or `neko code` / `neko core`) starts the interactive session.
 `--profile <name>` selects a runtime profile · `--yolo` auto-approves gated tools ·

@@ -1,7 +1,7 @@
 # Neko Code installer (Windows) — downloads a standalone binary; no Bun required.
 #   Latest:  irm https://neko.holilihu.online/install.ps1 | iex
-#   Pinned:  & ([scriptblock]::Create((irm https://neko.holilihu.online/install.ps1))) -Version 0.7.7
-#            (or set $env:NEKO_VERSION='v0.7.7' before the one-liner)
+#   Pinned:  & ([scriptblock]::Create((irm https://neko.holilihu.online/install.ps1))) -Version 0.9.0
+#            (or set $env:NEKO_VERSION='v0.9.0' before the one-liner)
 param([string]$Version)  # MUST be the first statement - lets a scriptblock invocation pass -Version cleanly
 $ErrorActionPreference = 'Stop'
 
@@ -18,25 +18,44 @@ function Write-Note($msg) { Write-Host $msg -ForegroundColor Yellow }
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
 
 # Pinned install / ROLLBACK path: -Version (scriptblock arg) OR $env:NEKO_VERSION picks an exact
-# release (e.g. '0.7.7') - the public way back to a known-good baseline. Otherwise the latest tag.
+# release (e.g. '0.9.0') - the public way back to a known-good baseline. Otherwise the latest tag.
 $pin = if ($Version) { $Version } elseif ($env:NEKO_VERSION) { $env:NEKO_VERSION } else { $null }
 $tag = $null
+$rel = $null
 if ($pin -match '^v?\d+\.\d+\.\d+$') {
   $tag = if ($pin.StartsWith('v')) { $pin } else { "v$pin" }
   Write-Step "Pinned version: $tag"
+  $releaseApi = "https://api.github.com/repos/$repo/releases/tags/$tag"
 } else {
   Write-Step 'Fetching latest version...'
-  try {
-    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'neko-installer' } -TimeoutSec 15
-    $tag = $rel.tag_name
-  } catch { }
+  $releaseApi = "https://api.github.com/repos/$repo/releases/latest"
 }
-$label = if ($tag) { $tag } else { 'latest' }
-Write-Step "Installing Neko Code $label (windows-x64)..."
-$url = if ($tag) { "https://github.com/$repo/releases/download/$tag/$asset" }
-       else      { "https://github.com/$repo/releases/latest/download/$asset" }
+try {
+  $rel = Invoke-RestMethod -Uri $releaseApi -Headers @{ 'User-Agent' = 'neko-installer'; 'Accept' = 'application/vnd.github+json' } -TimeoutSec 15
+} catch {
+  throw "Could not read the official Neko release metadata: $($_.Exception.Message)"
+}
+if (-not $tag) { $tag = "$($rel.tag_name)" }
+if ($tag -notmatch '^v\d+\.\d+\.\d+$' -or "$($rel.tag_name)" -ne $tag -or $rel.draft -or $rel.prerelease) {
+  throw "The selected Neko release is not a stable version: $tag"
+}
+$label = $tag
+$assetMeta = @($rel.assets | Where-Object { $_.name -eq $asset }) | Select-Object -First 1
+if (-not $assetMeta) { throw "Release $tag does not contain $asset" }
+$url = "$($assetMeta.browser_download_url)"
+$expectedUrl = "https://github.com/$repo/releases/download/$tag/$asset"
+if ($url -ne $expectedUrl) { throw "Release $tag returned an unexpected asset URL" }
+$expectedSize = [long]$assetMeta.size
+$expectedSha = "$($assetMeta.digest)" -replace '^sha256:', ''
+if ($expectedSize -le 0 -or $expectedSize -gt 250MB) { throw "Release $tag returned an invalid asset size" }
+if ($expectedSha -notmatch '^[0-9a-fA-F]{64}$') { throw "Release $tag does not publish a usable SHA-256 digest" }
+
+Write-Step "Installing Neko Code $tag (windows-x64)..."
 
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$stage = Join-Path $dir ".neko-download-$PID.exe"
+$backup = "$dest.old"
+Remove-Item -Force $stage -ErrorAction SilentlyContinue
 
 # Download with an IN-PLACE progress line (grok/uv-style), streaming via HttpClient - full speed (no
 # Invoke-WebRequest progress tax) and no dependence on how curl renders its bar under iex.
@@ -72,27 +91,61 @@ function Get-NekoBinary($url, $dest) {
   } finally { $client.Dispose() }
 }
 
+try {
 $downloaded = $false
-try { Get-NekoBinary $url $dest; $downloaded = $true } catch {
+try { Get-NekoBinary $url $stage; $downloaded = $true } catch {
   Write-Note "  ($($_.Exception.Message) - falling back to curl)"
 }
 if (-not $downloaded -and (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
   # --ssl-no-revoke: schannel fails when the cert's OCSP/CRL host is unreachable (corporate proxy);
   # the chain + hostname are still fully validated.
-  & curl.exe -fsSL --retry 3 --ssl-no-revoke -o $dest $url
+  & curl.exe -fsSL --retry 3 --ssl-no-revoke -o $stage $url
   if ($LASTEXITCODE -eq 0) { $downloaded = $true }
 }
 if (-not $downloaded) {
   $ProgressPreference = 'SilentlyContinue'
-  Invoke-WebRequest -Uri $url -OutFile $dest
+  Invoke-WebRequest -Uri $url -OutFile $stage
 }
 
-# Verify the binary actually runs; report its REAL version.
+# Verify release size, digest, and REAL version before touching the working install.
+$actualSize = (Get-Item -LiteralPath $stage).Length
+if ($actualSize -ne $expectedSize) {
+  Remove-Item -Force $stage -ErrorAction SilentlyContinue
+  throw "Downloaded size mismatch (expected $expectedSize bytes, got $actualSize)"
+}
+$actualSha = (Get-FileHash -LiteralPath $stage -Algorithm SHA256).Hash
+if ($actualSha -ne $expectedSha) {
+  Remove-Item -Force $stage -ErrorAction SilentlyContinue
+  throw "Downloaded SHA-256 does not match the official GitHub release"
+}
 $ver = ''
-try { $ver = (& $dest version 2>$null | Select-Object -First 1) } catch { }
+try { $ver = (& $stage version 2>$null | Select-Object -First 1) } catch { }
 $newVer = if ($ver -match 'neko-core\s+([0-9][0-9.]*)') { $Matches[1] } else { '' }
+if (-not $newVer -or "v$newVer" -ne $tag) {
+  Remove-Item -Force $stage -ErrorAction SilentlyContinue
+  throw "Downloaded binary failed its version probe (expected $tag, got '$ver')"
+}
+
+# Replace only after every check passes. File.Replace is atomic on the same Windows volume and leaves
+# the old executable untouched if replacement fails (for example, a running neko.exe still locks it).
+Remove-Item -Force $backup -ErrorAction SilentlyContinue
+try {
+  if (Test-Path -LiteralPath $dest) {
+    [System.IO.File]::Replace($stage, $dest, $backup, $true)
+  } else {
+    Move-Item -LiteralPath $stage -Destination $dest
+  }
+  Remove-Item -Force $backup -ErrorAction SilentlyContinue
+} catch {
+  Remove-Item -Force $stage -ErrorAction SilentlyContinue
+  throw "Could not activate $tag; the previous Neko install was preserved. Close running Neko sessions and retry. $($_.Exception.Message)"
+}
+
 Write-Dim  "  Installed to $dest"
-if ($ver) { Write-Ok "$ver installed" } else { Write-Ok 'Installed' }
+Write-Ok "$ver installed (SHA-256 verified)"
+} finally {
+  Remove-Item -Force $stage -ErrorAction SilentlyContinue
+}
 
 # A PINNED install (NEKO_VERSION) is a HOLD: pause auto-update in the user config so the daily updater
 # can't drag this exact version forward again. auto_update:false is honored by every release >= 0.7.4
@@ -171,6 +224,7 @@ try {
 } catch { }
 
 Write-Host ''
-Write-Ok "Run 'neko' to get started!  (first time: 'neko init-user' to set up your API key)"
-Write-Dim "  neko doctor   - check your setup (provider / model / API key)"
+Write-Ok "Run 'neko' to get started!  Then use /login to choose ChatGPT, API, or another provider."
+Write-Dim "  neko doctor          - check provider / model / authentication"
+Write-Dim "  neko support status  - optional GPT-5.6 Sol/Terra/Luna support"
 Write-Dim "  neko --yolo   - auto-approve mode: Neko runs tools without asking"

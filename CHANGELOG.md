@@ -6,7 +6,25 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-07-11
+
 ### Added
+- **ChatGPT Plus/Pro is a first-class OpenAI account route.** `/login` now guides users through
+  OpenAI -> ChatGPT subscription or API key without mixing credentials or silently falling back to
+  API billing. `/model` uses the signed-in account catalog, `/effort` follows each model's declared
+  reasoning tiers, `/usage` reports quota windows/credits, and `/logout` removes only the selected
+  authentication route and releases its provider process.
+- **GPT-5.6 Sol, Terra, and Luna work through the official Codex App Server protocol.** Neko reuses a
+  compatible Codex CLI when present; otherwise the model picker offers an optional standalone Support
+  Pack. GPT-5.5, API providers, Ollama, and local models download nothing. The bridge starts on demand,
+  uses the existing ChatGPT OAuth session, keeps Neko's approval/sandbox boundary authoritative, and
+  stops on logout/model switch/exit or after 15 idle minutes. Windows x64 measurements: 92.7 MiB
+  Support Pack download, 270.4 MiB installed, 34.7 MiB idle working set, 184-186 ms handshake.
+- **One-line installers are transactional and release-verifying.** Windows checks official GitHub
+  release metadata, exact asset size, SHA-256, and the binary version before atomic replacement.
+  macOS/Linux v0.10+ downloads a published SHA-256 sidecar, verifies it and the version in staging,
+  then atomically renames. Failed downloads or checks never destroy the previous working Neko binary;
+  historical pinned rollback releases remain supported.
 - **Relay v3 is a real multi-session remote terminal.** One persistent pairing is now a hub for every
   running Neko process: the phone lists/switches sessions, routes Send/Stop/offline queues independently,
   runs different sessions concurrently, and preserves a bounded transcript plus draft per session.
