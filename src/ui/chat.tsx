@@ -2194,6 +2194,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         <TranscriptViewer lines={viewer} cols={contentCols} rows={rows} onClose={() => setViewer(null)} />
       ) : overlay ? (
         <SelectList
+          key={overlay.title}
           title={overlay.title}
           items={overlay.items}
           cols={contentCols}

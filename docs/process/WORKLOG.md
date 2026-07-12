@@ -15,6 +15,10 @@ Rules that govern this work live in `RULES.md`.
   Bun's `JSON.parse` could not, so every TUI integration reading the real user overlay failed at startup. The
   config boundary now strips exactly one leading U+FEFF and has a focused regression test; malformed JSON
   remains an error.
+- Cross-platform CI then exposed a nested-picker race: changing from the filtered provider/component list to
+  its child screen changed the title, but React rendered once with the old query before the effect cleared it.
+  `SelectList` is now keyed by overlay title, so nested flows remount with index/query/preview state cleared
+  synchronously; the existing effect still covers same-title list replacement.
 
 ## 2026-07-12 - v0.11.1 cross-platform release-gate correction
 - The v0.11.0 release matrix built, smoked, and uploaded all five binaries plus the browser-extension ZIP,
