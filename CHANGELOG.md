@@ -6,6 +6,14 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.4] — 2026-07-12
+
+### Fixed
+- The in-binary self-updater now uses the same official latest-release redirect fallback as the one-line
+  installers when GitHub's unauthenticated API is rate-limited. It also requires the published SHA-256
+  sidecar, runs the downloaded binary's version probe before replacing Neko, and restores the original if
+  activation fails after the backup rename.
+
 ## [0.11.3] — 2026-07-12
 
 ### Fixed

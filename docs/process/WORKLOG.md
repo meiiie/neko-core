@@ -3,6 +3,15 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-12 - v0.11.4 verified self-update fallback
+- The v0.11.3 installed-binary smoke proved its installer fallback and BOM writer fix, then exposed the same
+  shared-IP GitHub API limit in `neko update` itself. Auto-update state resumed correctly, but release
+  discovery still stopped at HTTP 403.
+- Self-update now prefers stable API metadata and falls back to GitHub's official latest-release redirect.
+  For v0.10+ it fetches and validates the published SHA-256 sidecar before staging, then executes the staged
+  binary's embedded version probe before any rename. A failed second rename now restores the known-good
+  executable immediately; historical pre-sidecar rollback tags retain their version-probe path.
+
 ## 2026-07-12 - v0.11.3 release-discovery and BOM writer hardening
 - The real pinned-installer smoke for v0.11.2 failed closed when GitHub's shared unauthenticated API bucket
   reached 60/60 requests. Release assets and their sidecars were healthy. Both installers now prefer the API

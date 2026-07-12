@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { assetName, cleanupStaleUpdate, isNewer } from "../src/adapters/update.ts";
+import { activateStagedBinary, assetName, cleanupStaleUpdate, isNewer, latestVersion, parseSha256Sidecar } from "../src/adapters/update.ts";
 
 test("cleanupStaleUpdate removes the leftover <exe>.old; no-op when absent", () => {
   const dir = mkdtempSync(join(tmpdir(), "neko-upd-"));
@@ -13,6 +13,19 @@ test("cleanupStaleUpdate removes the leftover <exe>.old; no-op when absent", () 
     cleanupStaleUpdate(exe);
     expect(existsSync(`${exe}.old`)).toBe(false); // swept
     cleanupStaleUpdate(exe); // absent -> silent no-op
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("activateStagedBinary restores the original if activation fails after the backup rename", () => {
+  const dir = mkdtempSync(join(tmpdir(), "neko-activate-"));
+  const exe = join(dir, "neko");
+  try {
+    writeFileSync(exe, "known-good");
+    expect(() => activateStagedBinary(exe, join(dir, "missing-stage"))).toThrow();
+    expect(readFileSync(exe, "utf8")).toBe("known-good");
+    expect(existsSync(`${exe}.old`)).toBe(false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -44,6 +57,29 @@ test("normalizeTag: bare or v-prefixed x.y.z -> vX.Y.Z; junk -> null", () => {
   expect(normalizeTag("latest")).toBe(null);
   expect(normalizeTag("0.7")).toBe(null);       // must be full x.y.z
   expect(normalizeTag("v0.7.7-rc1")).toBe(null); // no pre-release suffix
+});
+
+test("latestVersion falls back to GitHub's official redirect when the public API is rate-limited", async () => {
+  const original = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("api.github.com")) return { ok: false, status: 403 } as Response;
+    return { ok: true, url: "https://github.com/meiiie/neko-core/releases/tag/v0.11.3" } as Response;
+  }) as typeof fetch;
+  try {
+    expect(await latestVersion()).toBe("v0.11.3");
+    expect(calls).toHaveLength(2);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("release checksum sidecars are parsed strictly", () => {
+  const sha = "a".repeat(64);
+  expect(parseSha256Sidecar(`${sha} *neko-windows-x64.exe\n`)).toBe(sha);
+  expect(parseSha256Sidecar("abc *neko")).toBe(null);
 });
 
 test("setAutoUpdate writes the hold flag to the user config (rollback sticks)", () => {

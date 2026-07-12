@@ -5,11 +5,14 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 
 import { homeDir } from "../shared/home.ts";
 import { VERSION } from "../shared/version.ts";
 
 const REPO = "meiiie/neko-core";
+const STABLE_TAG = /^v\d+\.\d+\.\d+$/;
 
 /** The release asset for this platform/arch (matches release.yml). */
 export function assetName(platform = process.platform, arch = process.arch): string {
@@ -31,19 +34,44 @@ export function isNewer(latest: string, current: string): boolean {
   return false;
 }
 
-/** Latest release tag from GitHub (e.g. "v0.3.0"), or null if unreachable. */
+/** Latest stable release tag from GitHub, with a non-API fallback for shared-IP rate limits. */
 export async function latestVersion(): Promise<string | null> {
   try {
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       headers: { "user-agent": "neko-core", accept: "application/vnd.github+json" },
       signal: AbortSignal.timeout(8000),
     });
+    if (res.ok) {
+      const data: any = await res.json();
+      if (typeof data.tag_name === "string" && STABLE_TAG.test(data.tag_name) && !data.draft && !data.prerelease) {
+        return data.tag_name;
+      }
+    }
+  } catch {
+    /* fall through to GitHub's official release redirect */
+  }
+  try {
+    const res = await fetch(`https://github.com/${REPO}/releases/latest`, {
+      method: "HEAD",
+      redirect: "follow",
+      headers: { "user-agent": "neko-core" },
+      signal: AbortSignal.timeout(8000),
+    });
     if (!res.ok) return null;
-    const data: any = await res.json();
-    return typeof data.tag_name === "string" ? data.tag_name : null;
+    const match = /\/releases\/tag\/(v\d+\.\d+\.\d+)(?:$|[/?#])/.exec(res.url);
+    return match?.[1] ?? null;
   } catch {
     return null;
   }
+}
+
+export function parseSha256Sidecar(text: string): string | null {
+  return /^\s*([0-9a-fA-F]{64})(?:\s|$)/.exec(text)?.[1]?.toLowerCase() ?? null;
+}
+
+function requiresChecksum(tag: string): boolean {
+  const [major = 0, minor = 0] = tag.replace(/^v/, "").split(".").map(Number);
+  return major > 0 || minor >= 10;
 }
 
 const cachePath = () => join(homeDir(), ".neko-core", ".update-check.json");
@@ -53,6 +81,20 @@ const cachePath = () => join(homeDir(), ".neko-core", ".update-check.json");
  * (this call) can. Cheap no-op when there's nothing to clean; never throws. Called from startup. */
 export function cleanupStaleUpdate(exe = process.execPath): void {
   try { rmSync(`${exe}.old`, { force: true }); } catch { /* still locked or permission - try again next launch */ }
+}
+
+/** Activate a fully verified staged binary. If the second rename fails, restore the original immediately. */
+export function activateStagedBinary(exe: string, staged: string): void {
+  const old = `${exe}.old`;
+  try { if (existsSync(old)) rmSync(old); } catch { /* a locked stale backup makes the rename fail safely */ }
+  renameSync(exe, old);
+  try {
+    renameSync(staged, exe);
+  } catch (error) {
+    try { if (!existsSync(exe) && existsSync(old)) renameSync(old, exe); } catch { /* report original error */ }
+    throw error;
+  }
+  try { rmSync(old); } catch { /* in use on Windows; cleaned on next launch */ }
 }
 
 /** Daily-cached check: returns the newer version string if one exists, else null. Never throws. */
@@ -114,6 +156,17 @@ export async function selfUpdate(log: (s: string) => void, target?: string): Pro
     log(`Updating v${VERSION} -> ${tag} ...`);
   }
   const url = `https://github.com/${REPO}/releases/download/${tag}/${assetName()}`;
+  let expectedSha: string | null = null;
+  try {
+    const sum = await fetch(`${url}.sha256`, { headers: { "user-agent": "neko-core" }, signal: AbortSignal.timeout(15000) });
+    if (sum.ok) expectedSha = parseSha256Sidecar(await sum.text());
+  } catch {
+    /* handled by the required-check below */
+  }
+  if (!expectedSha && requiresChecksum(tag)) {
+    log(`Release ${tag} is missing its required SHA-256 sidecar.`);
+    return false;
+  }
   let bytes: Buffer;
   try {
     const res = await fetch(url, { headers: { "user-agent": "neko-core" }, signal: AbortSignal.timeout(300000) });
@@ -126,16 +179,26 @@ export async function selfUpdate(log: (s: string) => void, target?: string): Pro
     log(`Download failed: ${(e as Error).message}`);
     return false;
   }
+  if (expectedSha) {
+    const actualSha = createHash("sha256").update(bytes).digest("hex");
+    if (actualSha !== expectedSha) {
+      log(`Downloaded SHA-256 does not match the official ${tag} release.`);
+      return false;
+    }
+  }
   // Replace the running binary. Windows can't OVERWRITE a running exe, but it CAN rename it out of the
   // way and put the new one in place; the stale .old is cleaned up next launch.
-  const tmp = `${exe}.new`;
-  const old = `${exe}.old`;
+  const tmp = process.platform === "win32" ? `${exe}.new.exe` : `${exe}.new`;
   try {
     writeFileSync(tmp, bytes, { mode: 0o755 });
-    try { if (existsSync(old)) rmSync(old); } catch { /* may be locked */ }
-    renameSync(exe, old);
-    renameSync(tmp, exe);
-    try { rmSync(old); } catch { /* in use on Windows; harmless */ }
+    const probe = spawnSync(tmp, ["version"], { encoding: "utf8", timeout: 15000, windowsHide: true });
+    const probed = /^neko-core\s+([0-9]+\.[0-9]+\.[0-9]+)/m.exec(probe.stdout ?? "")?.[1];
+    if (probe.status !== 0 || !probed || `v${probed}` !== tag) {
+      rmSync(tmp, { force: true });
+      log(`Downloaded binary failed its version probe (expected ${tag}).`);
+      return false;
+    }
+    activateStagedBinary(exe, tmp);
     log(`Installed ${tag}. Restart neko to use it.`);
     return true;
   } catch (e) {
