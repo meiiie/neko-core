@@ -3,6 +3,17 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-12 - v0.11.3 release-discovery and BOM writer hardening
+- The real pinned-installer smoke for v0.11.2 failed closed when GitHub's shared unauthenticated API bucket
+  reached 60/60 requests. Release assets and their sidecars were healthy. Both installers now prefer the API
+  but can resolve the official stable tag through GitHub's release redirect, then require the published
+  SHA-256 sidecar and embedded binary version before atomic replacement.
+- Running the installed v0.11.2 binary exposed a second boundary mismatch: the general config loader accepted
+  PowerShell 5's UTF-8 BOM, but the settings read-modify-write path did not. `neko update` therefore printed
+  that automatic updates resumed while silently retaining the pin. The writer now strips exactly one leading
+  BOM too, and the subprocess regression starts from a BOM-authored config so output and persisted state must
+  agree.
+
 ## 2026-07-12 - v0.11.2 updater resume contract
 - End-to-end installer verification exposed a real state bug after the v0.11.1 assets passed: installing with
   `-Version 0.11.1` correctly wrote `auto_update: false`, but plain `neko update` returned early when already

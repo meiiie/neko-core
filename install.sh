@@ -35,7 +35,18 @@ case "$PIN" in
   [0-9]*.[0-9]*.[0-9]*)  TAG="v$PIN"; echo "Pinned version: $TAG" ;;
   *)
     echo "Fetching latest version..."
-    TAG="$(curl -fsSL --max-time 15 -H 'User-Agent: neko-installer' "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
+    if command -v curl >/dev/null 2>&1; then
+      TAG="$(curl -fsSL --max-time 15 -H 'User-Agent: neko-installer' "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
+      case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;;
+        *) FINAL="$(curl -fsSL --max-time 15 -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" 2>/dev/null || true)"
+           TAG="$(printf '%s' "$FINAL" | sed -n 's#^.*/releases/tag/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*$#\1#p')" ;;
+      esac
+    elif command -v wget >/dev/null 2>&1; then
+      TAG="$(wget -qO- --timeout=15 --header='User-Agent: neko-installer' "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
+      case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;;
+        *) TAG="$(wget --server-response --spider --timeout=15 "https://github.com/$REPO/releases/latest" 2>&1 | sed -n 's#.*[Ll]ocation: .*/releases/tag/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*#\1#p' | tail -1 || true)" ;;
+      esac
+    fi
     ;;
 esac
 LABEL="${TAG:-latest}"

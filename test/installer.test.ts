@@ -12,6 +12,9 @@ test("Windows one-line installer verifies metadata, digest, and version before a
   const replace = windows.indexOf("[System.IO.File]::Replace($stage, $dest, $backup, $true)");
   expect(windows).toContain("/releases/tags/$tag");
   expect(windows).toContain("$assetMeta.digest");
+  expect(windows).toContain("Resolve-NekoLatestTag");
+  expect(windows).toContain('"$url.sha256"');
+  expect(windows).toContain("verified-release fallback active");
   expect(windows).toContain("the previous Neko install was preserved");
   expect(windows).not.toContain("Get-NekoBinary $url $dest");
   expect(download).toBeGreaterThan(0);
@@ -26,6 +29,8 @@ test("Unix one-line installer stages and verifies v0.10+ before atomic rename", 
   const version = unix.indexOf('VER="$("$STAGE" version');
   const replace = unix.indexOf('mv -f "$STAGE" "$TARGET"');
   expect(unix).toContain("release $TAG is missing its required checksum asset");
+  expect(unix).toContain("-w '%{url_effective}'");
+  expect(unix).toContain("/releases/tag/");
   expect(unix).not.toContain('"$URL" -o "$TARGET"');
   expect(download).toBeGreaterThan(0);
   expect(digest).toBeGreaterThan(download);

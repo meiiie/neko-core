@@ -19,7 +19,8 @@ function readUserConfig(): Record<string, any> {
   // overwrite a (recoverable) malformed config and destroy the user's api_key / mcp_servers. Throw
   // instead, so the writer aborts and the file is left intact for the user to fix.
   try {
-    return JSON.parse(readFileSync(path, "utf-8"));
+    const text = readFileSync(path, "utf-8");
+    return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
   } catch (e) {
     throw new Error(`~/.neko-core/config.json has invalid JSON - fix it before changing settings (${(e as Error).message})`);
   }

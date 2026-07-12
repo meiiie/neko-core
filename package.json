@@ -1,6 +1,6 @@
 {
   "name": "neko-core",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "description": "Mot chu meo trong terminal, chi muon meo meo - va lam viec. Local-first, config-first, offline-capable.",
   "type": "module",
   "license": "MIT",

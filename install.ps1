@@ -22,6 +22,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 $pin = if ($Version) { $Version } elseif ($env:NEKO_VERSION) { $env:NEKO_VERSION } else { $null }
 $tag = $null
 $rel = $null
+$metadataError = $null
 if ($pin -match '^v?\d+\.\d+\.\d+$') {
   $tag = if ($pin.StartsWith('v')) { $pin } else { "v$pin" }
   Write-Step "Pinned version: $tag"
@@ -33,22 +34,68 @@ if ($pin -match '^v?\d+\.\d+\.\d+$') {
 try {
   $rel = Invoke-RestMethod -Uri $releaseApi -Headers @{ 'User-Agent' = 'neko-installer'; 'Accept' = 'application/vnd.github+json' } -TimeoutSec 15
 } catch {
-  throw "Could not read the official Neko release metadata: $($_.Exception.Message)"
+  $metadataError = $_.Exception.Message
 }
-if (-not $tag) { $tag = "$($rel.tag_name)" }
-if ($tag -notmatch '^v\d+\.\d+\.\d+$' -or "$($rel.tag_name)" -ne $tag -or $rel.draft -or $rel.prerelease) {
-  throw "The selected Neko release is not a stable version: $tag"
+
+function Resolve-NekoLatestTag {
+  Add-Type -AssemblyName System.Net.Http
+  $handler = New-Object System.Net.Http.HttpClientHandler
+  $handler.AllowAutoRedirect = $true
+  $handler.MaxAutomaticRedirections = 5
+  $client = New-Object System.Net.Http.HttpClient($handler)
+  $client.Timeout = [TimeSpan]::FromSeconds(15)
+  $client.DefaultRequestHeaders.UserAgent.ParseAdd('neko-installer')
+  try {
+    $response = $client.GetAsync("https://github.com/$repo/releases/latest", [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+    if (-not $response.IsSuccessStatusCode) { throw "HTTP $([int]$response.StatusCode)" }
+    $final = "$($response.RequestMessage.RequestUri.AbsoluteUri)"
+    if ($final -match '/releases/tag/(v\d+\.\d+\.\d+)(?:$|[/?#])') { return $Matches[1] }
+    throw "unexpected final URL $final"
+  } finally {
+    if ($response) { $response.Dispose() }
+    $client.Dispose()
+    $handler.Dispose()
+  }
+}
+
+if ($rel) {
+  if (-not $tag) { $tag = "$($rel.tag_name)" }
+  if ($tag -notmatch '^v\d+\.\d+\.\d+$' -or "$($rel.tag_name)" -ne $tag -or $rel.draft -or $rel.prerelease) {
+    throw "The selected Neko release is not a stable version: $tag"
+  }
+  $assetMeta = @($rel.assets | Where-Object { $_.name -eq $asset }) | Select-Object -First 1
+  if (-not $assetMeta) { throw "Release $tag does not contain $asset" }
+  $url = "$($assetMeta.browser_download_url)"
+  $expectedUrl = "https://github.com/$repo/releases/download/$tag/$asset"
+  if ($url -ne $expectedUrl) { throw "Release $tag returned an unexpected asset URL" }
+  $expectedSize = [long]$assetMeta.size
+  $expectedSha = "$($assetMeta.digest)" -replace '^sha256:', ''
+  if ($expectedSize -le 0 -or $expectedSize -gt 250MB) { throw "Release $tag returned an invalid asset size" }
+  if ($expectedSha -notmatch '^[0-9a-fA-F]{64}$') { throw "Release $tag does not publish a usable SHA-256 digest" }
+} else {
+  # GitHub's unauthenticated API is limited to 60 requests/hour per public IP. The release redirect and
+  # sidecar assets are public, official, and not subject to that API quota, so keep installs available while
+  # preserving the same trust chain: exact stable tag -> published SHA-256 -> embedded version probe.
+  if (-not $tag) {
+    try { $tag = Resolve-NekoLatestTag } catch {
+      throw "Could not resolve the latest official Neko release after the GitHub API failed ($metadataError): $($_.Exception.Message)"
+    }
+  }
+  if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw "The selected Neko release is not a stable version: $tag" }
+  $url = "https://github.com/$repo/releases/download/$tag/$asset"
+  $checksumUrl = "$url.sha256"
+  try {
+    $checksumContent = (Invoke-WebRequest -UseBasicParsing -Uri $checksumUrl -Headers @{ 'User-Agent' = 'neko-installer' } -TimeoutSec 15).Content
+    $checksumText = if ($checksumContent -is [byte[]]) { [Text.Encoding]::UTF8.GetString($checksumContent) } else { "$checksumContent" }
+  } catch {
+    throw "Could not read the official checksum for $tag after the GitHub API failed: $($_.Exception.Message)"
+  }
+  if ("$checksumText" -notmatch '^\s*([0-9a-fA-F]{64})(?:\s|$)') { throw "Release $tag returned an invalid SHA-256 sidecar" }
+  $expectedSha = $Matches[1]
+  $expectedSize = 0
+  Write-Note "  GitHub API unavailable ($metadataError); verified-release fallback active."
 }
 $label = $tag
-$assetMeta = @($rel.assets | Where-Object { $_.name -eq $asset }) | Select-Object -First 1
-if (-not $assetMeta) { throw "Release $tag does not contain $asset" }
-$url = "$($assetMeta.browser_download_url)"
-$expectedUrl = "https://github.com/$repo/releases/download/$tag/$asset"
-if ($url -ne $expectedUrl) { throw "Release $tag returned an unexpected asset URL" }
-$expectedSize = [long]$assetMeta.size
-$expectedSha = "$($assetMeta.digest)" -replace '^sha256:', ''
-if ($expectedSize -le 0 -or $expectedSize -gt 250MB) { throw "Release $tag returned an invalid asset size" }
-if ($expectedSha -notmatch '^[0-9a-fA-F]{64}$') { throw "Release $tag does not publish a usable SHA-256 digest" }
 
 Write-Step "Installing Neko Code $tag (windows-x64)..."
 
@@ -109,7 +156,7 @@ if (-not $downloaded) {
 
 # Verify release size, digest, and REAL version before touching the working install.
 $actualSize = (Get-Item -LiteralPath $stage).Length
-if ($actualSize -ne $expectedSize) {
+if ($expectedSize -gt 0 -and $actualSize -ne $expectedSize) {
   Remove-Item -Force $stage -ErrorAction SilentlyContinue
   throw "Downloaded size mismatch (expected $expectedSize bytes, got $actualSize)"
 }

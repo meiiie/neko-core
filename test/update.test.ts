@@ -67,7 +67,9 @@ test("plain update resumes auto-updates even when no binary replacement can run"
   const home = mkdtempSync(join(tmpdir(), "neko-resume-update-"));
   const configDir = join(home, ".neko-core");
   require("node:fs").mkdirSync(configDir, { recursive: true });
-  writeFileSync(join(configDir, "config.json"), JSON.stringify({ auto_update: false }));
+  // Windows PowerShell 5's `Set-Content -Encoding utf8` writes this BOM. The CLI writer must preserve
+  // the user's settings and still clear the installer pin, not merely print a success message.
+  writeFileSync(join(configDir, "config.json"), `\uFEFF${JSON.stringify({ auto_update: false })}`);
   try {
     const child = Bun.spawn([process.execPath, join(import.meta.dir, "..", "bin", "neko.ts"), "update"], {
       env: { ...process.env, HOME: home, USERPROFILE: home },

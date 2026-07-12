@@ -6,6 +6,15 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.3] — 2026-07-12
+
+### Fixed
+- Windows and Unix installers now fall back from GitHub's unauthenticated API quota to the official latest-
+  release redirect and published SHA-256 sidecar. Installation remains fail-closed and still verifies the
+  checksum plus the binary's embedded version before atomic replacement.
+- Settings writers now accept the same single UTF-8 BOM as the config loader. This lets plain `neko update`
+  actually clear a pinned installer's `auto_update: false` instead of only printing that updates resumed.
+
 ## [0.11.2] — 2026-07-12
 
 ### Fixed
