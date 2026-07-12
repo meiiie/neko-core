@@ -113,7 +113,7 @@ $w.Content=$p
     form.kill();
     await Promise.race([form.exited, Bun.sleep(1000)]);
   }
-});
+}, 15_000);
 
 test("computer tool dispatches UIA reads through the resident host", async () => {
   if (process.platform !== "win32") return;
@@ -140,4 +140,4 @@ $w.Content=$b
     form.kill();
     await Promise.race([form.exited, Bun.sleep(1000)]);
   }
-});
+}, 15_000);

@@ -6,6 +6,14 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-07-12
+
+### Fixed
+- The Gemini managed-runtime discovery fixture now uses the runner's native path semantics. The v0.11.0
+  product binaries were healthy, but the fixture simulated a Windows manifest using real filesystem checks
+  on Linux/macOS, leaving `main` CI red after the tag. Windows, Linux, and macOS now exercise the same
+  managed Support Pack behavior using each host's actual runtime filename and separators.
+
 ## [0.11.0] — 2026-07-12
 
 ### Added

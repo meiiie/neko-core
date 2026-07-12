@@ -36,19 +36,20 @@ test("Gemini discovery prefers the Neko-managed bundle and private runtime", () 
   const home = mkdtempSync(join(tmpdir(), "neko-gemini-managed-"));
   try {
     const root = join(home, ".neko-core", "gemini-support");
+    const runtimeName = process.platform === "win32" ? "node.exe" : "node";
     mkdirSync(join(root, "gemini"), { recursive: true });
     mkdirSync(join(root, "node"), { recursive: true });
     writeFileSync(join(root, "gemini", "gemini.js"), "bundle");
-    writeFileSync(join(root, "node", "node.exe"), "runtime");
+    writeFileSync(join(root, "node", runtimeName), "runtime");
     writeFileSync(join(root, "support-pack.json"), JSON.stringify({
       geminiVersion: "0.50.0",
       entry: "gemini/gemini.js",
-      runtime: "node/node.exe",
+      runtime: `node/${runtimeName}`,
     }));
-    const status = discoverGeminiCli({ home, env: { PATH: "" }, platform: "win32", runVersion: (executable) => executable.version ?? null });
+    const status = discoverGeminiCli({ home, env: { PATH: "" }, platform: process.platform, runVersion: (executable) => executable.version ?? null });
     expect(status.state).toBe("ready");
     expect(status.executable?.source).toBe("managed");
-    expect(status.executable?.runtime).toBe(join(root, "node", "node.exe"));
+    expect(status.executable?.runtime).toBe(join(root, "node", runtimeName));
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

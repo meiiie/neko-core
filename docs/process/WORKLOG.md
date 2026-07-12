@@ -3,6 +3,45 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-12 - v0.11.1 cross-platform release-gate correction
+- The v0.11.0 release matrix built, smoked, and uploaded all five binaries plus the browser-extension ZIP,
+  but `main` CI failed one Gemini discovery test on Linux and macOS. The fixture forced `platform: win32`
+  while asking the host `existsSync` to resolve Windows paths; Windows passed and both POSIX runners correctly
+  returned `missing`. Product discovery was not implicated.
+- The fixture now creates the runtime filename for the current runner (`node.exe` on Windows, `node`
+  elsewhere) and exercises `managedExecutable` with native path semantics. Because v0.11.0 was already public,
+  the correction ships as v0.11.1 rather than retagging immutable public bytes.
+- The release rerun also exposed two WPF resident-host integration cases still inheriting Bun's 5 s unit
+  timeout. They now use the same explicit 15 s integration budget as the other cold-start resident tests;
+  Neko's product request deadlines are unchanged.
+
+## 2026-07-12 - Conversational browser voice preview
+- Added a zero-download `Neko Conversational Voice - Browser Preview` as the default `/voice`
+  route. Microphone consent remains an explicit browser action; the loopback bridge is bound to
+  `127.0.0.1`, authenticated with a one-session fragment capability, origin checked, bounded, and
+  stopped on tab close, `/voice stop`, `/logout`, or Neko exit.
+- Kept audio in the browser speech stack and sent transcript text only to Neko. The consent page
+  says that browser speech services may be online and that Neko never selects paid Realtime API
+  billing automatically. Official ChatGPT and the experimental subscription bridge remain separate
+  choices so the UI does not imply that a ChatGPT web tab is an embeddable voice API.
+- Routed every final utterance through the existing `Agent`, provider, tool, and approval boundary;
+  voice cannot bypass tool safety. Added serialized turns, response speech, and barge-in that cancels
+  playback and aborts the active Agent turn.
+- Added a deterministic interaction policy for restrained Vietnamese backchannels (`ừm`,
+  `mình đang nghe`): at most once per turn, globally cooled down, and suppressed around questions,
+  credentials, tokens, URLs, OTP-like/long numbers, or short speech.
+- Verification: `bun test` passed 634 tests across 74 files (0 failures); `bun run typecheck`,
+  `bun run build`, `bun bin/neko.ts policy`, and `bun bin/neko.ts doctor` exited successfully.
+  The compiled Windows binary passed the real PTY keyboard probe. A Chromium headless smoke test
+  loaded the consent page, executed its client script, and reached `Requesting microphone...`
+  without page errors.
+- Remaining evidence boundary: no microphone permission was granted automatically, so real-device
+  recognition/synthesis quality still needs a manual Chrome/Edge check. This preview is not true
+  full-duplex GPT-Live and not an offline STT/TTS runtime; a future signed/licensed local Voice
+  Support Pack can replace the browser speech edge behind the same interaction seam. Bun 1.3.14
+  also printed its known-style non-fatal `directory mismatch` internal warning after a successful
+  build; the build, UI probe, and input probe all still returned zero.
+
 ## 2026-07-12 - v0.11.0 release candidate verification
 - Consolidated the parallel working tree into one minor release: Gemini account/Support Pack, the
   capability-scoped Browser Bridge and public-ready Chrome extension, subscription/browser voice,
