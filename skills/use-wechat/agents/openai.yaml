@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use WeChat"
+  short_description: "Operate WeChat chats safely through Neko"
+  default_prompt: "Use $use-wechat to find a WeChat chat, prepare a message, and verify the requested outcome safely."

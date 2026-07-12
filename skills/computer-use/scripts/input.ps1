@@ -3,6 +3,11 @@
 # Usage: input.ps1 type @utf8file 1 @namefile | key @utf8file 1 @namefile | scroll down 2 | wait '' 500 | open @utf8file
 param([string]$cmd="wait", [string]$arg="", [int]$amount=1, [string]$name="")
 
+# Scroll reads a window rectangle here, then hands those coordinates to the Per-Monitor-v2 touch process.
+# Join that same PHYSICAL pixel space before any geometry API runs; otherwise 125% scaling turns 1920 into
+# 1536 and the aware injector receives the wrong point.
+try { Add-Type 'using System;using System.Runtime.InteropServices;public class NekoInputDpi{[DllImport("user32.dll")]public static extern bool SetProcessDpiAwarenessContext(IntPtr v);}'; [void][NekoInputDpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch {}
+
 function Read-AtFile([string]$value) {
   if($value -like '@*' -and (Test-Path -LiteralPath $value.Substring(1))){
     return Get-Content -LiteralPath $value.Substring(1) -Raw -Encoding UTF8
@@ -21,7 +26,9 @@ if($env:NEKO_PRESENCE){
   }
   if(-not (Test-Path $run) -or (((Get-Date)-(Get-Item $run).LastWriteTime).TotalSeconds -gt 3)){
     Remove-Item $stop -ErrorAction SilentlyContinue
-    Start-Process powershell -ArgumentList '-NoProfile','-File',(Join-Path $PSScriptRoot 'overlay.ps1') -WindowStyle Hidden
+    Start-Process powershell -ArgumentList '-NoProfile','-File',(Join-Path $PSScriptRoot 'overlay.ps1') -WindowStyle Hidden `
+      -RedirectStandardOutput "$env:TEMP\neko_overlay.stdout.log" `
+      -RedirectStandardError "$env:TEMP\neko_overlay.stderr.log"
   }
   if($env:NEKO_DRAW_WINDOW){ $env:NEKO_DRAW_WINDOW | Out-File "$env:TEMP\neko_active_window.txt" -Encoding utf8 }
 }

@@ -28,7 +28,7 @@ export interface Profile {
   /** UI grouping: several auth routes can belong to one provider brand (OpenAI API + ChatGPT OAuth). */
   family?: string;
   label?: string;
-  auth?: "api_key" | "chatgpt_oauth" | "none";
+  auth?: "api_key" | "chatgpt_oauth" | "gemini_oauth" | "none";
   /** Models known to the auth route when it has no model-list endpoint. `/model <id>` still accepts newer ids. */
   models?: string[];
   model_context?: Record<string, number>;
@@ -62,6 +62,9 @@ export const DEFAULTS: Record<string, any> = {
   auto_update_check: true, // check for a newer release at startup (daily-cached; set false to silence)
   auto_update: true, // AUTO-INSTALL that newer release in the background (claude-code style); false = notify only
   mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
+  // Exact Chrome extension ids allowed to pair with the loopback Browser Bridge. The bundled
+  // developer id is deterministic; add the Chrome Web Store item id here after its first upload.
+  browser_extension_ids: ["koalaflndbcddboachbdfmppdeblldje"],
   active_profile: null,
   profiles: {
     // A new model/endpoint is a data edit, not a code change. "Offline" = point a
@@ -80,6 +83,28 @@ export const DEFAULTS: Record<string, any> = {
       model_context: { "gpt-5.5": 272_000, "gpt-5.4": 272_000, "gpt-5.4-mini": 272_000, "gpt-5.3-codex-spark": 128_000 },
       effort_ceiling: "xhigh",
       vision: true,
+    },
+    // Google account quota (Gemini Free / AI Pro / Ultra) through the official Gemini CLI ACP.
+    gemini: {
+      provider: "gemini_cli",
+      family: "google",
+      label: "Gemini Free/AI Pro/Ultra",
+      auth: "gemini_oauth",
+      model: "auto",
+      models: ["auto"],
+      context_window: 1_000_000,
+      vision: true,
+    },
+    "gemini-api": {
+      provider: "gemini_cli",
+      family: "google",
+      label: "Gemini API key (pay-as-you-go)",
+      auth: "api_key",
+      model: "auto",
+      models: ["auto"],
+      context_window: 1_000_000,
+      vision: true,
+      key_env: "GEMINI_API_KEY",
     },
     // Anthropic Messages API (provider: anthropic). Real Claude, and Z.ai's GLM coding-plan endpoint:
     claude: { provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-4-6", key_env: "ANTHROPIC_API_KEY" },
@@ -116,6 +141,7 @@ const BOOLEAN_ENV_KEYS = new Set([
   "auto_update",
   "auto_update_check",
   "computer_use_overlay",
+  "computer_use_resident",
   "fullscreen",
   "mcp_lazy",
   "prompt_cache",
@@ -182,6 +208,8 @@ export class NekoConfig {
 
   get provider(): string { return String(this.data.provider ?? "openai_compat"); }
   get usesChatGptAuth(): boolean { return this.provider === "chatgpt"; }
+  get usesGeminiCli(): boolean { return this.provider === "gemini_cli"; }
+  get usesGeminiAuth(): boolean { return this.usesGeminiCli && this.profile != null && this.profiles[this.profile]?.auth === "gemini_oauth"; }
   get model(): string { return String(this.data.model ?? "").trim(); }
   /** Model for a VISION pre-pass (reading an image into text the main agent can use): `vision_model`
    * config, else a verified-good default on an NVIDIA endpoint, else "" (no auto vision). */
@@ -314,6 +342,15 @@ export class NekoConfig {
   get remoteBind(): string { return String(this.data.remote_bind ?? "127.0.0.1"); }
   /** Default relay URL for /relay (your deployed cloudflare/relay Worker), so `/relay` needs no argument. */
   get relayUrl(): string { return String(this.data.relay_url ?? ""); }
+  /** Exact Chrome extension ids accepted by the loopback Browser Bridge. A list (or a comma-separated
+   * NEKO_BROWSER_EXTENSION_IDS value) keeps public-store and unpacked builds explicit and auditable. */
+  get browserExtensionIds(): string[] {
+    const raw = this.data.browser_extension_ids;
+    const values = Array.isArray(raw) ? raw : String(raw ?? "").split(",");
+    return [...new Set(values.map((value) => String(value).trim().toLowerCase()))]
+      .filter((value) => /^[a-p]{32}$/.test(value))
+      .slice(0, 8);
+  }
   /** Opt-in pre-completion gate: intercept the first tool-less final answer once and force a
    * re-inspection of the actual state before finishing (quality over speed; +1 turn when it fires). */
   get verifyBeforeExit(): boolean { return Boolean(this.data.verify_before_exit); }
@@ -330,6 +367,8 @@ export class NekoConfig {
   /** Show the independent agent-cursor overlay during desktop computer-use (clicky-style presence): a blue
    * cursor that flies to where the agent acts + click-to-takeover. Off by default. */
   get computerUseOverlay(): boolean { return Boolean(this.data.computer_use_overlay); }
+  /** Keep one local PowerShell UIA/input/capture process warm. On by default; false preserves the one-shot adapter. */
+  get computerUseResident(): boolean { return this.data.computer_use_resident !== false; }
   /** Desktop input backend: "inject" = touch injection (the agent acts WITHOUT moving the user's mouse --
    * its own pointer channel); "sendinput" = legacy SendInput (moves the one system cursor). "auto"/unset
    * leaves each helper's default. A new backend is a config value, not a code change. */

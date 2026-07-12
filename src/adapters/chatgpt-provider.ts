@@ -400,6 +400,21 @@ export async function parseResponsesStream(response: Response, onDelta?: DeltaHo
   const continuation = new Map<string, any>();
   const calls = new Map<string, { id: string; name: string; arguments: string }>();
   const emitted = new Set<string>();
+  const mergeArguments = (current: string, incoming: unknown): string => {
+    if (incoming == null) return current;
+    const next = String(incoming);
+    if (!next) return current;
+    if (!current) return next;
+    try {
+      const before = JSON.parse(current);
+      const after = JSON.parse(next);
+      const beforeKeys = before && typeof before === "object" && !Array.isArray(before) ? Object.keys(before).length : -1;
+      const afterKeys = after && typeof after === "object" && !Array.isArray(after) ? Object.keys(after).length : -1;
+      return beforeKeys > afterKeys ? current : next;
+    } catch {
+      return next;
+    }
+  };
   const emitCall = (key: string, force = false): ToolCall | null => {
     const item = calls.get(key);
     if (!item || emitted.has(key)) return null;
@@ -432,6 +447,13 @@ export async function parseResponsesStream(response: Response, onDelta?: DeltaHo
       const key = String(event.item_id ?? event.output_index ?? "");
       const item = calls.get(key) ?? { id: String(event.call_id ?? event.item_id ?? ""), name: String(event.name ?? ""), arguments: "" };
       item.arguments += String(event.delta ?? ""); calls.set(key, item); onDelta?.(String(event.delta ?? ""), "tool"); emitCall(key);
+    } else if (type === "response.function_call_arguments.done") {
+      const key = String(event.item_id ?? event.output_index ?? "");
+      const item = calls.get(key) ?? { id: String(event.call_id ?? event.item_id ?? ""), name: String(event.name ?? ""), arguments: "" };
+      item.id = String(event.call_id ?? item.id ?? event.item_id ?? "");
+      item.name = String(event.name ?? item.name ?? "");
+      item.arguments = mergeArguments(item.arguments, event.arguments);
+      calls.set(key, item); emitCall(key, true);
     } else if (type === "response.output_item.done" && event.item?.type === "reasoning") {
       const item = reasoningContinuation(event.item);
       if (item) continuation.set(item.id || String(event.output_index ?? continuation.size), item);
@@ -440,7 +462,7 @@ export async function parseResponsesStream(response: Response, onDelta?: DeltaHo
       const item = calls.get(key) ?? { id: "", name: "", arguments: "" };
       item.id = String(event.item.call_id ?? item.id ?? event.item.id ?? "");
       item.name = String(event.item.name ?? item.name ?? "");
-      if (event.item.arguments != null) item.arguments = String(event.item.arguments);
+      item.arguments = mergeArguments(item.arguments, event.item.arguments);
       calls.set(key, item); emitCall(key, true);
     } else if (type === "response.completed") {
       completed = true;
@@ -461,7 +483,7 @@ export async function parseResponsesStream(response: Response, onDelta?: DeltaHo
         calls.set(key, {
           id: String(item.call_id ?? previous?.id ?? item.id ?? ""),
           name: String(item.name ?? previous?.name ?? ""),
-          arguments: item.arguments != null ? String(item.arguments) : (previous?.arguments ?? ""),
+          arguments: mergeArguments(previous?.arguments ?? "", item.arguments),
         });
         emitCall(key, true);
       }

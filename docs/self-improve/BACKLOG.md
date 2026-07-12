@@ -1053,6 +1053,36 @@ one never blocks another.
     show progress drift should the next change add a persisted verifier/evidence field or a dedicated backlog
     controller. **Verify:** repeat each task >=3x, publish aggregate completion/partial/safety/recovery rates,
     and keep the disposable WPF input probe as the deterministic smoke test for `type`/`key` focus safety.
+    **Foundation landed 2026-07-12:** production CLI/TUI/subagents now enforce a state-change completion gate
+    that requires fresh tool evidence; `computer display` exposes Per-Monitor-v2 physical geometry; input/scroll
+    joined the same DPI space; deterministic tests cover confident false completion without evidence. Harness v3
+    now counts provider turns directly (independent of optional usage metadata) and reports GUI actions separately,
+    including a multi-action response test. A fresh inspection after the final mutation satisfies the production
+    gate without an extra model round. The full 12-task cross-app pack and repeated live-model comparison above
+    remain open.
+
+- [ ] **Resident Windows executor + verified app fast paths (Zalo first).** Cold measurements on 2026-07-12:
+  `input wait` median 809 ms, UIA `list` median 948 ms, and `display` median 1.16 s because each action launches
+  PowerShell and initializes .NET/UIA again. Build one local authenticated, per-Neko-process JSONL executor that
+  keeps those types warm; preserve the scripts as fallback. Above it, add skill-owned app profiles (not core
+  branches) and UFO2/Skim-style validated micro-batches: check window/control/fingerprint before every low-risk
+  action, abort to the general agent on mismatch, and make send/post/delete/pay a separate approved commit.
+  **Verify before shipping:** (1) cold/warm p50/p95 for list/read/get/setvalue/invoke/input/display; target warm
+  p50 <150 ms and p95 <300 ms; (2) a deterministic Zalo-like fixture with decoy contacts, delayed search,
+  reflow/DPI, modal interruption, user takeover, and duplicate-send traps; (3) repeated test-account E2E only
+  after the owner supplies/runs Zalo -- exact recipient + exact draft + exactly one send + delivery-state
+  evidence; (4) compare pass/safety/wall-time/model-turn/action counts against the current adapter. Target known
+  search+draft p50 <3 s, zero wrong recipients/duplicate sends, and 100% final-state verification. Do not use a
+  real contact or type credentials/PIN/OTP in an automated benchmark.
+  **Resident UIA + input foundation landed 2026-07-12:** a bounded JSONL PowerShell host is shared per Neko
+  process for `list/read/get/invoke/setvalue/toggle/type/key/click/stroke/scroll/wait`, serializes requests, restarts after disposal/failure,
+  unrefs its child/pipes so short-lived commands exit, and falls back to the original one-shot scripts on
+  transport/startup failure. Disposable WPF measurements: cold 1.08 s; warm `list` p50/p95 31/57 ms, `get`
+  23/36 ms, verified `setvalue` 93/121 ms; resident type 252-321 ms, key 311 ms, and a custom-canvas touch
+  467 ms including focus + structural verification. Config rollback: `computer_use_resident: false` or
+  `NEKO_COMPUTER_USE_RESIDENT=0`. Resident GDI virtual-desktop capture now adds 71-119 ms warm frames with
+  sampled physical change bounds; native DXGI capture is reserved for measured GPU/HDR/protected-surface
+  failures. App-profile fast paths, visual grounding/uncertainty calibration, and repeated Zalo E2E remain.
 
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->

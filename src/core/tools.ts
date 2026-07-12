@@ -125,9 +125,9 @@ export const TOOL_SPECS: ToolSpec[] = [
     parameters: {
       action: {
         type: "string",
-        enum: ["list", "read", "get", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "open", "screenshot"],
+        enum: ["list", "read", "get", "display", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "open", "screenshot"],
         description:
-          "list/read/get perceive; invoke/setvalue/toggle act by accessible name; click/stroke use touch; type enters Unicode text into the focused control; key sends a shortcut such as CTRL+L or ENTER; scroll moves the target window; wait lets dynamic UI settle; open launches an app/file/URL; screenshot captures the primary screen and returns it directly when vision is enabled. setvalue/toggle self-verify; after other actions call list/read/get/screenshot to verify.",
+          "list/read/get perceive; display reports physical monitor bounds, work areas, DPI and scale; invoke/setvalue/toggle act by accessible name; click/stroke use touch; type enters Unicode text into the focused control; key sends a shortcut such as CTRL+L or ENTER; scroll moves the target window; wait lets dynamic UI settle; open launches an app/file/URL; screenshot captures the physical virtual desktop and returns it directly when vision is enabled, with frame/delta metadata when the resident host is on. setvalue/toggle self-verify; after other actions call list/read/get/screenshot to verify. Pixel delta proves change, not the requested outcome. If bash/C#/PowerShell computes screen coordinates, set PerMonitorV2 BEFORE reading geometry; legacy SetProcessDPIAware is only system-aware.",
       },
       window: { type: "string", description: "Distinctive target window title substring (e.g. 'Paint'). Omit = foreground window; type/key refuse ambiguous matches." },
       name: { type: "string", description: "Element NAME for get/invoke/setvalue/toggle, or an optional exact focus target for type/key (copy it from `list`/`read`)." },

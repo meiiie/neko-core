@@ -3,6 +3,505 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-12 - v0.11.0 release candidate verification
+- Consolidated the parallel working tree into one minor release: Gemini account/Support Pack, the
+  capability-scoped Browser Bridge and public-ready Chrome extension, subscription/browser voice,
+  outcome-verified resident Windows computer use, Zalo/WeChat skills, Relay/mobile polish, and denser
+  transcript/web-reading UX. The product version is `0.11.0`; `v0.9.0` remains the rollback baseline.
+- Kept unrelated local artifacts out of the release (build scratch bundles, downloaded subtitles,
+  procurement scratch data, temporary transcripts, and the standalone QA scratch report). The browser
+  extension packaging script and release workflow both produce auditable ZIPs from the explicit runtime
+  file set; the base Neko binary does not embed the optional Gemini runtime or extension store package.
+- Focused pre-release security review covered browser pairing/origin/capability boundaries, active-tab
+  permissions and sensitive-field refusal, voice consent/SDP/body limits, Gemini ACP tool isolation and
+  verified atomic Support Pack installation. Secret signature scan found no credential material. This was
+  intentionally not labeled an exhaustive multi-agent scan because repository rules require solo work.
+- Full-suite runs exposed two harness-only timing/layout assumptions. The `/voice` assertion searched for
+  contiguous prose after Ink wrapped it across rows; it now treats whitespace as layout. The Windows
+  computer validation integration also inherited Bun's 5 s unit timeout even though it cold-starts the
+  resident PowerShell host; its explicit 15 s integration budget matches the other resident-host tests.
+  Voice passed in isolation and the complete suite; the computer validation path passed three consecutive
+  isolated cold starts in 3.69-3.98 s before the final full-suite gate.
+- Release gates on the `0.11.0` tree: TS 7 and TS 5.9 clean; **634/634 tests** across 74 files with 2,543
+  assertions; doctor and policy PASS; production build + `__uiprobe` + real-PTY input probe PASS; three
+  consecutive real-ConPTY ghost/typing runs PASS; scroll bench PASS (14 ms first response, 152 ms settle,
+  18.2 KiB, viewport/resize/slash-menu/keyboard OK); browser extension package PASS. Bun revision recorded
+  as `1.3.14+0d9b296af`; the compile emitted Bun's known non-fatal directory-mismatch diagnostic after a
+  successful artifact and probes.
+
+## 2026-07-12 - Resident virtual-desktop capture + visual delta evidence
+- Routed `computer screenshot` through the existing serialized Windows host. It loads Forms/Drawing once,
+  captures the physical virtual desktop (including negative monitor origins), emits the existing compact GIF,
+  and preserves the one-shot script as the startup/transport fallback. Output now carries `origin`, `scale`,
+  an honest `capture=gdi` backend label, monotonically increasing frame id, sampled change percentage, and a
+  physical-pixel bounding box for changed regions.
+- Kept delta deliberately small and deterministic: the resident host retains only a 96-column color sample,
+  applies a fixed RGB-distance threshold, and resets to `delta=baseline` when dimensions or virtual origin
+  change. Pixel change is observation evidence only, never outcome proof; the agent must still inspect the
+  changed region/postcondition. A custom WPF Canvas probe captures a baseline, changes both text and canvas
+  color through touch, captures again, and requires a non-zero delta plus `changed=x,y,w,h`.
+- Measured on this machine: the old fresh-process capture p50/p95 was 972/1,143 ms. In an already-running
+  resident host the first capture (lazy Drawing compile) was 525-556 ms; subsequent frames were 71-119 ms,
+  including 88 ms for the post-touch delta frame. No dependency or second daemon was added.
+- This is the compatibility backend, not a false DXGI claim. Microsoft documents that Desktop Duplication
+  supplies GPU surfaces plus dirty/move rectangles but requires explicit rotation and pointer composition;
+  Windows.Graphics.Capture supplies a frame pool but normally exposes a user picker/consent border. A native
+  DXGI adapter is justified only when the GDI probe fails on GPU/HDR/protected content or measured continuous
+  capture throughput becomes the bottleneck.
+- Verification: TS 7 and TS 5.9 clean; **629/629 tests** across 72 files with 2,514 assertions; policy PASS;
+  doctor, `git diff --check`, resident lifecycle/capture tests, Unicode/custom-canvas/delta probe, and the
+  production binary UI/input probes PASS. The multi-spawn Windows lifecycle test now has an explicit 15 s
+  harness timeout after a heavily parallel verification run pushed its valid ~4.8 s execution past Bun's
+  unrelated 5 s default; the product request deadline remains unchanged.
+
+## 2026-07-12 - Resident input for custom-drawn Windows UI
+- Extended the existing serialized Windows host instead of adding a second daemon. `type`, `key`, `click`,
+  `stroke`, `scroll`, and `wait` now reuse the warm PowerShell/.NET process; the original one-shot scripts
+  remain the transport/startup fallback. Focus-sensitive keyboard input still fails closed on missing,
+  ambiguous, or unfocusable windows/controls. Unicode now travels directly in JSON, and audit logs record
+  text length rather than content.
+- Pixel actions keep the default independent touch pointer, initialize touch injection once, retain the
+  overlay/takeover stop channel, and surface native injection failures. `computer_use_input: "sendinput"`
+  selects a resident legacy mouse path for custom/old controls that ignore touch; it uses Per-Monitor-v2
+  virtual-desktop coordinates and explicitly reports that the system cursor moved. There is no blind
+  touch-to-mouse retry because repeating an action without outcome evidence can double-submit it.
+- The disposable probe now includes a WPF `Canvas` whose state changes only through a coordinate touch, so
+  the harness covers a control with no actionable UIA pattern as well as Unicode type, Ctrl+A, exact
+  readback, and ambiguous-window refusal. Measured here after the ~1.3-1.5 s cold start: type 252-321 ms,
+  key 311 ms, custom-canvas tap 467 ms including focus + post-action UIA diff, and verification 20-55 ms.
+- Research conclusion: resident input solves execution latency, not visual grounding. The next independent
+  stage is resident frame capture (DXGI Desktop Duplication dirty/move rectangles for continuous desktop
+  deltas; Windows.Graphics.Capture only as an opt-in window picker), followed by OCR/region proposals,
+  coarse-to-fine crop/zoom, uncertainty-aware candidate selection, and outcome evidence. UIA/DOM remains
+  first; raw coordinate generation remains last.
+- Verification: TS 7 and TS 5.9 clean; **628/628 tests** across 72 files with 2,507 assertions; policy PASS;
+  doctor, `git diff --check`, production build (869 modules), compiled-binary UI/input probes, resident WPF
+  lifecycle tests, and the extended Unicode/custom-canvas input probe PASS. The exact old Browser Bridge PID
+  holding `dist/neko.exe` was stopped for atomic replacement, then the new binary was restarted hidden and
+  health-checked online on `127.0.0.1:8766`.
+
+## 2026-07-12 - Resident Windows UIA executor
+- Replaced repeated PowerShell/.NET/UIA startup for `list/read/get/invoke/setvalue/toggle` with one bounded
+  JSONL host shared by CLI, TUI, and depth-one agents in the same Neko process. Requests are serialized against
+  the single interactive desktop; Unicode travels in JSON rather than temp argv files. The original scripts
+  remain the automatic fallback for host startup/transport failure, while semantic failures are surfaced once
+  and never hidden by a retry. `computer_use_resident: false` / `NEKO_COMPUTER_USE_RESIDENT=0` is the rollback.
+- Lifecycle is explicit: lazy start, same-PID reuse, restart after disposal/failure, 100 KB request bound, 15 s
+  resident deadline (then the existing 90 s one-shot fallback), bounded stderr diagnostics, Per-Monitor-v2 set
+  once, exact process-tree termination on Windows, and
+  unreferenced child/pipes so a warm helper never pins `neko run` after the task finishes. This last invariant
+  was caught by the real WPF probe after direct calls passed; the probe initially appeared to hang because the
+  completed resident child kept Bun's event loop alive.
+- A disposable WPF parity fixture covers list, get, verified setvalue, verified toggle, invoke, process reuse,
+  restart, and ToolRegistry dispatch. The real input probe still covers Unicode type, Ctrl+A replacement,
+  readback, and ambiguous-window refusal. Measured on this machine: cold ready 1.08 s; warm list p50/p95 31/57
+  ms, get 23/36 ms, and verified setvalue 93/121 ms, versus the prior roughly 0.8-1.2 s fresh-process floor.
+- Verification: TS 7 and TS 5.9 clean; **627/627 tests** across 72 files with 2,501 assertions; policy PASS;
+  doctor exposes resident/fallback state; `git diff --check`; production build (869 modules), `__uiprobe`,
+  real-PTY keyboard probe, disposable WPF parity/lifecycle probe, and measured input probe PASS. The exact idle
+  Browser Bridge listener was stopped for binary replacement and restarted hidden on `127.0.0.1:8766`.
+
+## 2026-07-12 - Discovery-first Zalo and WeChat desktop skills
+- Added bundled `use-zalo` and `use-wechat` skills as thin app profiles over the existing `computer-use`
+  adapter. They discover each live UIA tree instead of freezing selectors, support read/search/draft/file
+  workflows, distinguish exact contacts from groups/service accounts, and treat displayed chat content as
+  untrusted data. Login QR, password, OTP, recovery, hidden-chat PIN, payments, and security flows always hand
+  control to the user.
+- Both skills use a draft-fast/commit-safe contract: low-risk search/open/draft steps may form a validated
+  micro-batch, while Send, forwarding, broadcasts, calls, posts, contact changes, files, and settings require a
+  separate approval. A send is attempted once, then independently verified in the exact conversation before
+  any retry. Zalo reports only its observed delivery state; WeChat never invents a read/delivery state the
+  current client does not expose.
+- Initialized and validated both packages with the shared skill-creator tooling, including UI metadata. Added a
+  deterministic bundled-skill test proving Vietnamese Zalo/WeChat prompts route to the correct skill and both
+  retain the computer-use, exact-recipient, separate-commit, and no-blind-retry invariants.
+- Verification: both skill packages pass `quick_validate.py`; TS 7 and TS 5.9 typechecks; **619/619 tests**
+  across 71 files with 2,474 assertions; policy PASS; doctor healthy apart from the expected non-TTY warning;
+  `git diff --check`; production build, `__uiprobe`, and real-PTY input probe PASS. The compiled binary's
+  `skills` command lists both profiles. The exact idle Browser Bridge process was restarted afterward and is
+  online again on `127.0.0.1:8766`.
+
+## 2026-07-12 - Official GPT-Live launch path + Clicky architecture study
+- Read OpenAI's GPT-Live announcement and current developer docs. GPT-Live-1/mini are rolling out inside
+  ChatGPT.com/mobile according to plan, while API access is explicitly announced for later. `/voice` now makes
+  the supported experiment the first choice: open official ChatGPT Voice and let ChatGPT select the plan's
+  model. Neko does not inspect that tab, cookies, microphone, transcript, or session.
+- Studied `farzaa/clicky` at `a80fa807`: its companion UX is a cascaded push-to-talk pipeline (AssemblyAI
+  streaming STT -> Claude plus screenshots -> ElevenLabs TTS), a macOS ScreenCaptureKit/SwiftUI overlay,
+  Cloudflare Worker, and three paid API keys. The reusable lesson is the provider abstraction, explicit voice
+  state machine, interruption, bounded history, screen grounding, and system-TTS failure path; copying its
+  service stack would not solve Neko's student/no-API constraint.
+- Renamed the Codex route **Neko Subscription Bridge - Lab** and kept it as the second explicit option for
+  future rollout detection. OS Dictation remains the third no-cost fallback. No consumer-session scraping,
+  first-party client spoofing, or hidden paid API fallback was introduced.
+- Evidence: the UI regression selects official ChatGPT first, verifies the exact safe URL and disclosure, then
+  explicitly enters the Lab bridge and exercises consent/LIVE/mute/error/logout teardown.
+
+## 2026-07-12 - Voice feature gate repair and verified subscription boundary
+- Reproduced the second field failure at the exact WebRTC start edge. Codex 0.144.1 marks
+  `realtime_conversation` as under-development and disabled by default; App Server's
+  `experimentalApi` handshake permits the methods but does not enable the per-thread feature. Neko Voice now
+  launches only its isolated App Server with `--enable realtime_conversation`; the normal GPT text bridge is
+  unchanged.
+- A real headless-Chromium preflight used a fake audio device to generate a genuine WebRTC offer. The repaired
+  thread passed the feature guard, then the upstream ChatGPT subscription endpoint returned HTTP 404 at
+  `/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas`. Current public App Server docs do
+  not expose this realtime surface, and the open-source feature remains under-development. This is a backend
+  client/account rollout boundary, not a GPT-5.5 model selection or reasoning-effort error. Neko does not spoof
+  a first-party client and does not fall back to paid Realtime API billing.
+- Fixed the failure race so the backend reason reaches both consent page and terminal before the loopback
+  server closes. The UX now names the experimental endpoint boundary and offers OS Dictation or explicitly
+  configured Realtime API instead of overwriting it with `voice session stopped`.
+- Evidence: focused **40/40 tests, 184 assertions** plus TypeScript PASS. Regression coverage checks CLI and
+  standalone App Server argument construction, the disabled-by-default feature flag, and preservation of a
+  realtime backend error through HTTP teardown.
+
+## 2026-07-12 - Voice startup repair for reserved MCP tool names
+- Reproduced the field failure before changing code: Codex App Server rejected Neko's browser MCP schema at
+  `thread/start` because `mcp__neko_browser__status` uses App Server's reserved `mcp__` namespace. The failure
+  happened before the consent page could open, so the microphone was never touched.
+- Added one shared, deterministic wire-name codec for App Server dynamic tools. Ordinary tool names stay
+  unchanged; reserved MCP names receive a bounded `neko_mcp_<sha256>` alias and map back to their exact
+  original name before Neko's existing Agent/ToolRegistry execution and approval boundary. Both realtime
+  voice and GPT-5.6 text use this codec. Unknown wire names are rejected rather than executed speculatively.
+- Voice startup failure now performs full teardown and clears its transcript/banner, preventing the stale
+  `VOICE - starting` state shown in the report. Regression coverage exercises a reserved browser tool end to
+  end and verifies that failed startup calls `stop` and removes the UI state.
+- Evidence: focused **41/41 tests, 192 assertions**; both TypeScript checks PASS; policy PASS; doctor healthy
+  apart from expected non-TTY input. A credential-safe live preflight used the installed official Support Pack
+  and the exact reserved MCP schema: App Server accepted `thread/start`, voice-list negotiation completed, no
+  browser/microphone opened, and the session closed immediately. Production artifact
+  `.artifacts/neko-voice-fix.exe` passes `__uiprobe` and `--version`. The whole repository run reached
+  **618 pass / 1 unrelated failure**: a pre-existing Zalo skill wording assertion expects `never retry` while
+  the current skill says `Do not retry`; it was left untouched to avoid mixing an unrelated change into this
+  repair.
+
+## 2026-07-12 - ChatGPT subscription realtime voice: consent-first WebRTC experiment
+- Verified the feature against the released OpenAI Codex `rust-v0.144.1` source, not only `main`. App Server
+  exposes experimental `thread/realtime/*`; WebSocket auth still requires an API key, while browser-provided
+  WebRTC has the SIWC `/backend-api/codex/realtime/calls` route. Implemented only the WebRTC subscription path
+  and explicitly removed `OPENAI_API_KEY`/`NEKO_API_KEY` from its child environment. There is no automatic
+  Realtime API fallback and no claim that the experimental Codex model equals ChatGPT's public Voice Live.
+- Added a dependency-free loopback consent page: random per-session capability in the URL fragment, token-free
+  HTML, exact-Origin authenticated WebSocket, bearer-gated SDP POST, strict CSP/no-store headers, body bounds,
+  heartbeat cleanup, and direct browser WebRTC audio. The page does not call `getUserMedia` until **Start voice**
+  is clicked. Tab close, `/voice stop`, `/logout`, `/support`, TUI unmount, backend close/error, and heartbeat
+  loss release the microphone and close realtime. A previous idle GPT-5.6 provider is disposed first so voice
+  does not double the optional App Server's steady-state memory.
+- Added `/voice` UX with ChatGPT Subscription - Experimental / Local Dictation choices, support-pack install
+  handoff, prominent `● LIVE` + timer/mute/live transcript, `/voice start|stop|mute|unmute|status`, and a guard
+  against running an unrelated text turn concurrently. Background dynamic tools reuse `Agent.safeExecute` via
+  a narrow public wrapper, preserving ToolRegistry approvals and UI events; duplicate voice tool ids execute
+  once. `/usage` shows active/stopped duration and last limit/error while stating that remaining Voice quota is
+  not exposed. No second voice pack or Electron/Chromium dependency was added.
+- Evidence: focused WebRTC adapter tests validate capability rejection, token absence, inline-page syntax,
+  SDP negotiation, transcript, idempotent tools, cleanup, and error classification; the Ink UI test covers
+  explicit consent, waiting/LIVE/transcript/mute/stop and logout teardown. TS 5.9 + TS 7 clean; **618/618 tests,
+  2456 assertions, 71 files**; architecture green; doctor healthy; policy PASS; `git diff --check` clean. A
+  credential-safe live preflight on the owner's current account returned `VOICE_PREFLIGHT_OK state=waiting
+  mic=off` after OAuth, App Server thread start, and voice-list negotiation; it made no model/audio call. The
+  normal `dist/neko.exe` build target was locked by the already-running Browser Bridge, so the same production
+  build script/flags produced `.artifacts/neko-voice-smoke.exe` (101,510,656 bytes); `__uiprobe` and the real
+  ConPTY input probe both passed. Full microphone/media entitlement still requires the owner's explicit click
+  in the browser and remains the only unverified external edge.
+
+## 2026-07-12 - Computer-use latency audit and evidence-preserving fast path
+- Measured the current Windows edge instead of inferring speed from benchmark scores. Fresh-process medians on
+  this machine were 809 ms for `input wait`, 948 ms for UIA `list`, and 1.16 s for `display` (cold worst 2.33 s).
+  The repeated PowerShell/.NET startup is therefore a material floor before model latency. Existing GUI logs
+  show roughly 2.6-4.6 s per remote model call; Neko is reliable on structured UIA paths but is not yet honestly
+  human-speed for a multi-action Zalo task.
+- Corrected GUI harness semantics in v3. It now counts provider calls directly rather than relying on optional
+  provider `usage`, records actual `GuiWorld` action calls separately, and renders/logs `turns` plus `actions`.
+  A deterministic batched-response test proves that the two metrics remain distinct. This creates the evidence
+  gate needed for speculative micro-batching: speed cannot be claimed by hiding actions or missing usage fields.
+- Removed an avoidable latency tax from the production completion guard. If the agent already performed a fresh,
+  successful inspection after its latest state mutation, completion is accepted immediately; only an unverified
+  claim triggers the extra verification round. Adversarial tests still reject repeated confident prose without
+  tool evidence, and read-only tasks do not pay the gate.
+- Research synthesis: Microsoft UFO2 supports structured UIA/API execution plus state-validated speculative
+  actions; Skim uses profiled fast paths with verified fallback; PASTE and asynchronous tool execution overlap
+  predictable work. The minimal Neko translation is a resident local UIA executor, skill-owned app profiles,
+  bounded low-risk micro-batches with per-action preconditions, and a separate approved commit for messaging or
+  other irreversible actions. Live Zalo E2E was deliberately not fabricated: no running/Start Apps Zalo target
+  was exposed during the audit, so the next phase uses a deterministic Zalo-like fixture before an owner-provided
+  test account.
+- Verification: TS 7 and TS 5.9 typechecks; **613/613 tests** across 70 files with 2,408 assertions; doctor OK
+  apart from the expected non-TTY warning; policy PASS; `git diff --check`; production build, `__uiprobe`, and
+  real-PTY input probe PASS. The exact idle Browser Bridge listener was stopped for Windows binary replacement
+  and restarted hidden; doctor confirms it online on `127.0.0.1:8766`.
+
+## 2026-07-12 - Outcome-verified computer use + physical DPI contract
+
+A field task exposed a more important failure than the immediate 125%-scaling bug: a generated C# script
+reported success after arranging desktop shortcuts against Windows' virtualized 1536x864 coordinate space,
+and the agent converted that process signal into an unverified completion claim. The real display was
+1920x1080. Fixing only that script would leave the same failure class open for later GUI, browser, and shell
+actions.
+
+The runtime now separates process evidence from outcome evidence. Production CLI, TUI, and depth-one agents
+track state-changing tools; at the first finish claim they require a fresh, successful inspection call made
+after the claim. A second confident prose answer without a tool is rejected. The prompt explicitly requires
+comparison against every user-visible postcondition and forbids treating an action log or intended coordinate
+as proof. Ordinary read-only/Q&A turns pay no extra round-trip. The existing optional broad verify gate remains
+independent.
+
+Windows geometry now has one explicit source of truth: `computer display` reports physical virtual-desktop
+bounds, per-monitor work areas, DPI, scale, primary status, and negative origins under Per-Monitor-v2. Tool
+schema and the bundled computer-use skill teach custom scripts to call
+`SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)` before any geometry API and explain why legacy
+`SetProcessDPIAware()` is insufficient on mixed-scale monitors. `input.ps1` was the remaining coordinate path
+without awareness; its scroll rectangle now shares the same physical space as UIA/touch/mouse/overlay/capture.
+
+The design follows the July 2026 evidence: OSWorld 2.0 identifies skipped verification, hidden state, and
+visual-spatial precision as dominant long-horizon failures; Microsoft's Universal Verifier separates process
+from binary outcome and drives false positives near zero; VLAA-GUI makes completion verification mandatory;
+VAGEN uses active probing instead of passive claims; and Microsoft recommends Per-Monitor-v2 through
+`SetProcessDpiAwarenessContext` before DPI-dependent APIs. We adopted the small runtime invariant, not another
+planner/controller dependency.
+
+Targeted verification: 56 tests / 0 failures; live `computer display` returned physical 1920x1080, DPI 120,
+scale 125%, work area 1920x1020; the disposable WPF/UIA input probe passed Unicode typing, Ctrl+A replacement,
+UIA readback, and ambiguous-window refusal. Full battery: TS 7 + TS 5.9 typechecks; 611/611 tests across 70
+files with 2,400 assertions; doctor OK apart from the expected non-TTY warning; policy PASS; and
+`git diff --check`. A production binary compiled with 867 bundled modules and passed both `__uiprobe` and the
+real-PTY keyboard probe. A constrained live model run against that binary called its embedded
+`Computer(display)` exactly once and read back the physical 1920x1080 / 125% contract, proving the new script
+is present outside the source tree. A second adversarial live run was explicitly told to write an artifact and
+claim completion without checking it; the production gate rejected that finish, forced a fresh disk read, and
+the agent then checked exact bytes before reporting success. The probe artifact was removed. The initial build
+lock was traced to the idle loopback Browser Bridge, not a chat session; that exact listener was stopped,
+`dist/neko.exe` rebuilt and re-probed successfully, then the bridge was restarted hidden on `127.0.0.1:8766`.
+
+## 2026-07-12 - Managed Gemini Support Pack and unified subscription-component UX
+
+Gemini account login no longer dead-ends at an npm command. When no compatible bridge exists, `/login`
+offers `Install and continue`, states the measured optional size, installs Google's official
+`gemini-cli-bundle.zip` plus a portable Node LTS runtime under `~/.neko-core`, verifies both SHA-256
+digests, versions, archive paths, installed-size bounds, and an ACP handshake, then resumes browser OAuth.
+The base Neko binary remains unchanged by the optional payload and installation needs neither admin rights
+nor a global npm/PATH mutation.
+
+Gemini OAuth now uses `~/.neko-core/gemini-home` even when a system CLI binary is reused, so `/logout`
+cannot sign out the user's separate Gemini CLI. `/support status` reports both ChatGPT GPT-5.6 and Gemini
+components; provider-specific install/update/remove commands preserve external CLIs and unrelated auth.
+Gemini `/usage` stays inside Neko and states ACP's remaining-quota limitation instead of sending users to
+an interactive CLI. Live Windows probes installed Gemini 0.50.0 + Node 24.18.0 (194.2 MiB disk) and OpenAI
+Codex App Server 0.144.1 (92.7 MiB download, 270.4 MiB disk), including checksum/version/protocol checks;
+both temporary probe roots were removed afterward.
+
+The follow-up uninstall audit found that a working remove subcommand was behaviorally undiscoverable.
+Bare `/support` is now an owner-aware Support Center rather than a status dump: each component shows its
+source and managed disk size, then offers Install, Update/Repair, or Remove only when appropriate. Neko
+never presents Remove for a user-owned external CLI. Destructive removal has a safe default and explicit
+choices to keep the subscription sign-in or remove the component and sign out; API keys and unrelated
+providers remain untouched. `/support status` stays available as a copyable diagnostic report, and install
+success copy points back to `/support` so users can find cleanup months later without remembering syntax.
+
+Verification: TS 7 and TS 5.9 typechecks; 611/611 tests across 70 files with 2,400 assertions;
+doctor OK apart from the expected non-TTY warning in the test shell; policy PASS; `git diff --check`;
+and a production Windows binary (101,472,768 bytes) passed its bundled UI probe plus a real-PTY keyboard
+probe. The normal `dist/neko.exe` replacement was intentionally not forced because a running Neko session
+held the Windows file lock; the equivalent release build was compiled and verified at a temporary path.
+
+## 2026-07-12 - Gemini account quota via official ACP, isolated behind Neko tools
+
+Google now appears once in `/login`, then separates `Gemini Free/AI Pro/Ultra` from a pay-as-you-go
+Gemini API key. The account route delegates OAuth, refresh, dynamic model availability, multimodal input,
+streaming, and per-turn usage to the official Gemini CLI over ACP. `/logout` removes only Gemini OAuth
+state; `/model` falls back to `auto` while signed out and becomes account-aware after sign-in; `/effort`
+states the real contract (Gemini CLI manages thinking adaptively instead of accepting OpenAI effort tiers).
+
+The security boundary is deliberately stricter than launching a second autonomous agent. Neko writes a
+system-precedence Gemini settings file that empties the built-in tool allowlist, disables extensions and
+hooks, and allowlists only an ephemeral `neko` MCP server. That server binds `127.0.0.1`, requires a random
+capability header, and forwards calls to the active `CompleteOptions.executeTool`; edits and commands still
+cross Neko's existing approval/path/sandbox checks. ACP permission requests fail closed, and the provider
+refuses a CLI that cannot enter the isolated MCP session mode.
+
+Gemini CLI remains optional: existing installs are reused, `neko setup gemini` / `/support gemini install`
+is explicit, and the base one-line Neko install downloads nothing extra. Targeted verification covers ACP
+request correlation, version discovery, scoped credential deletion, quota parsing, streaming, model/session
+setup, a real loopback MCP tool round trip, and fail-closed isolation.
+
+Verification: TS 7 and TS 5.9 typechecks pass; full suite 600/600 tests across 69 files with 2,339
+assertions; policy PASS; `git diff --check`; live ACP initialize against installed Gemini CLI 0.38.1;
+and a production compile plus UI/input probes. The running `dist/neko.exe` held Windows' file lock, so
+the new binary was compiled and probed at a temporary output instead of terminating the user's active
+session. Its size is 101,434,880 bytes versus the prior 101,432,832 bytes: +2 KiB in the base binary;
+Gemini CLI itself remains optional and external.
+
+## 2026-07-12 - TUI transcript hierarchy + web-result blank-gutter fix
+
+The owner's Windows Terminal capture showed a large black gap between four Fetch calls and the first useful
+result. This was content whitespace, not a flexbox spacer: web extractors could return many leading empty rows,
+and the tool-result renderer faithfully spent its eight-row collapsed preview on those invisible lines. A
+display-only normalizer now trims blank edges and collapses repeated internal blank rows. Agent context, saved
+tool observations, and model input remain byte-for-byte unchanged; collapsed results, Ctrl+O expansion, replay,
+and fullscreen share only the cleaned display rows.
+
+User turns now follow the supplied hierarchy reference: a full-width neutral Ink background (`#303030`), one
+cell of horizontal padding, a cyan `> ` marker, and white body text. New fullscreen user lines are synchronously
+primed into the ANSI cache so the block never flashes as an unstyled fallback; Ctrl+F's flat transcript carries
+the same background. The prompt glyph remains an independent non-color speaker cue.
+
+The Neko Browser Extension is explicitly deferred as roadmap G14: Neko's persistent Playwright profile remains
+fully first-class, while Store ID/key replacement, listing media, staged publication, and update/reconnect
+dogfooding resume after the owner creates the Chrome Web Store item.
+
+Verification: supplied screenshots were saved and inspected under `.artifacts/tui-audit-2026-07-12/`; a real
+ANSI render filled all 40 cells of the user block. The virtual-terminal harness reproduced a web result with 12
+leading/trailing blank rows and proved useful content remains within three rows of its Fetch call. Full suite:
+589 pass / 0 fail / 67 files / 2,299 assertions; typecheck, policy, `git diff --check`, production build, UI
+probe, and real PTY input probe pass. Bun emitted its known non-fatal directory-mismatch warning after exit 0.
+
+## 2026-07-12 - Browser Bridge public-release candidate + site-agnostic durable identity
+
+The developer preview is now a public-release candidate without broadening its browser authority. The manifest
+remains user-gesture scoped (`activeTab`) and removes the unnecessary `tabs` permission; it still has no
+`<all_urls>`, `debugger`, cookies, downloads, or remote-hosted code. `tabGroups` is the only new permission.
+An attached tab shows an `AI` badge and an in-page `Neko is using this tab` control with a Stop button. Neko
+creates `Neko - AI active` only for an ungrouped tab, removes only that group on detach, and never renames,
+recolors, rearranges, or removes a group the user already owned.
+
+Public Store and unpacked extension ids now enter the loopback trust boundary through config-first
+`browser_extension_ids`. The bridge continues to require an exact `chrome-extension://<id>` Origin plus its
+256-bit session capability; it does not fall back to an Origin wildcard. Chrome assigns the durable Store item
+id/public key after the owner creates the Dashboard item, so the repository includes a two-phase packaging flow:
+the first-upload ZIP omits the developer key, and the final manifest/config are updated with the Dashboard key/id.
+The extension now includes generated 16/32/48/128 icons, a privacy policy, permission/data disclosures, listing
+copy, reviewer instructions, release ZIP automation, and deterministic developer/first-upload packaging. Actual
+Chrome Web Store submission remains an owner action because it requires the publisher account, registration fee,
+privacy URL, listing media, and review consent.
+
+Privacy wording now names the real boundary: the extension never reads cookies and talks only to authenticated
+loopback, but a task-specific visible-page snapshot may subsequently be sent by Neko Core to the model provider
+the user selected. Page contents and capabilities never enter `/relay`.
+
+The real user config resolves browser MCP to `C:\Users\Admin\.neko-core\browser\default`, and the directory exists.
+A full Chrome close/reopen against that actual profile preserved expiring cookies and localStorage independently
+for two origins (`127.0.0.1` and `localhost`), then removed the probe data. This proves Chrome-profile persistence
+is site-agnostic. It does not override Facebook/X/Gmail server policy: users sign into each service once in the
+Neko profile, and the service may still expire/revoke sessions or demand 2FA/checkpoints.
+
+Verification: a real headed Manifest V3 harness proved page marker + Stop, cleanup of a Neko-created group, and
+preservation of a pre-existing `My work` group. A second headed run switched A -> B, proved A was cleaned, then
+reattached B without losing ownership of its temporary group; both package ZIPs have `manifest.json` at root and the Store-first
+manifest has no developer key. Full suite 585 pass / 0 fail / 67 files / 2,280 assertions; typecheck, policy,
+doctor, `git diff --check`, focused secret scan, compiled production UI probe, and real PTY input probe pass.
+The rebuilt bridge is live on loopback port 8766 and waiting for an explicit tab attachment. Bun again emitted
+its non-fatal post-success directory-mismatch warning after the build exited 0.
+
+## 2026-07-12 - real Facebook recovery + Neko Browser Bridge developer preview
+
+The persistent browser path was verified against the user's real Facebook account rather than a synthetic
+login page. The first restart correctly preserved the credential step but landed on Facebook two-factor
+verification; the probe had incorrectly equated "no email/password fields" with authentication. The success
+condition now excludes login/checkpoint/2FA/recovery routes and requires a rendered feed unit. After the user
+completed 2FA, a full MCP/Chrome shutdown and restart returned `stage=feed` with no login fields.
+
+Facebook's current DOM exposed real cards as `[data-virtualized]`; its `role=article` nodes were empty skeletons
+below the viewport. The feed collector now supports both semantic articles and virtualized units, ignores empty
+skeletons/non-interactive carousel units, and no longer deduplicates on the first link (often the author's URL).
+A single 100-row tool call exceeded the MCP action timeout, so collection is checkpointed into batches of at
+most 20 and deduplicated outside model context. The live read collected 112 unique feed units in 151.1 seconds,
+without persisting or printing their private content and without any social write action.
+
+The requested Neko-owned browser architecture is now recorded in `BROWSER-BRIDGE.md` and implemented as a
+developer preview:
+
+- a Manifest V3 extension claims one active tab through a user gesture (no `<all_urls>` or `debugger`);
+- a loopback-only WebSocket/HTTP adapter checks the pinned extension Origin and a per-session 256-bit capability;
+- read, click/scroll/navigation, and typing have separate grants; action grants default off;
+- password, OTP/passcode, and payment fields are blocked before injection and again inside the page;
+- cross-origin navigation and one-click emergency stop detach the tab;
+- reconnect state is session-scoped; a newer authenticated connection replaces an older one;
+- local audit stores timestamp/action/status only, never arguments, typed text, full URLs, page content or cookies;
+- `/relay` receives only redacted browser attached/offline/grant status inside existing E2E-sealed presence.
+
+The adapter composes through the existing `McpTools` port, so the core agent loop and Neko's normal MCP approval
+gate are unchanged. `neko browser bridge/path/rotate` provide the lifecycle. Native messaging was deliberately
+deferred: loopback WebSocket is sufficient and avoids another executable/registry installation; add it only for
+managed-browser policy or OS-level attestation.
+
+Verification:
+
+- real Facebook: 2FA completion -> full restart -> authenticated feed; 112 unique read-only units;
+- bridge unit E2E: exact-Origin pair, token command round trip, audit redaction, HTTP 401 without capability;
+- popup Playwright at 360x640: status, grants, detach and emergency-stop affordances;
+- real unpacked Manifest V3 harness: pair, attach, snapshot, deny ungranted click, grant, click, type, block
+  password with the value still empty, emergency stop. Test-only localhost permission existed only in a deleted
+  temporary extension copy; production remains `activeTab` scoped;
+- full suite 583 pass / 0 fail / 67 files / 2267 assertions; typecheck, policy, doctor, `git diff --check`,
+  secret scan, compiled binary, production UI probe and real PTY input probe pass. Bun again printed its
+  post-success internal file-descriptor warning after exit code 0.
+
+## 2026-07-11 - durable browser identity + bounded 100-item feed capture
+
+The repeated-login regression was traced to browser identity, not vision. Both current Neko and v0.7.7's
+Playwright setup used `--isolated`, which deliberately throws browser state away on close. v0.7.7's strong
+Facebook runs instead controlled an already signed-in desktop Chrome through Windows accessibility/UIA.
+
+`neko setup browser` is now an explicit three-mode contract:
+
+- `persistent` (the default) owns `~/.neko-core/browser/default`; cookies, local storage, and login state
+  survive Neko/MCP/Chrome restarts;
+- `attach` uses Playwright's official extension to control the user's existing signed-in Chrome tabs;
+- `isolated` keeps the disposable sandbox for untrusted or throwaway work and clearly warns that logins vanish.
+
+`doctor`, CLI help, capability metadata, README, Web docs, computer-use, and procurement guidance all expose
+the same contract. Persistent profiles have one active owner; concurrent/shared-Chrome work is directed to
+`attach` instead of relying on a fragile shared remote-debugging profile. The local user config was migrated
+to `persistent` without touching provider credentials.
+
+The web-reading skill no longer gives up after five to seven visible posts. A bounded capture-before-scroll
+collector now handles virtualized feeds: capture visible articles, deduplicate by stable ID/URL/signature,
+scroll 80%, wait, and stop at the requested target, end-of-feed, budget, or three no-growth rounds. It reads
+no cookies or form fields and remains behind the existing approval-gated MCP boundary. A synthetic feed with
+only eight DOM rows at once produced exactly 100 unique rows (IDs 1 through 100) in 23.1 seconds.
+
+Verification:
+
+- browser identity: local storage and a cookie survived a complete MCP/Chrome shutdown and restart;
+- deterministic virtual-feed probe: 100/100 unique items from an eight-row recycled DOM;
+- focused setup/doctor/skill regressions plus full suite: 580 pass, 0 fail, 66 files;
+- `typecheck`, `doctor`, `policy`, `git diff --check`, compiled binary, production UI probe, and real PTY input
+  probe all pass. Bun printed a post-build internal file-descriptor warning after the successful exit.
+
+The provider-driven end-to-end probe was not counted as passed: ChatGPT OAuth returned HTTP 429 and the
+NVIDIA GLM trajectory stalled. These provider conditions do not invalidate the deterministic browser and
+collector checks, but a benchmark claim must wait for an available model and a repeatable evaluation set.
+
+## 2026-07-11 - Responses tool-argument repair + text-only computer-use recovery
+
+The screenshots showing `computer`, `glob`, `todo_write`, and `skill` all missing their required fields
+had one transport-level cause: the ChatGPT Responses parser consumed argument deltas but ignored the
+official `response.function_call_arguments.done` event, then sparse `output_item.done` / `response.completed`
+events could overwrite a complete JSON object with `""` or `{}`. The parser now accepts the finalized event
+and preserves the more informative valid object across later sparse events. A regression fixture exercises
+the exact `computer({action:"list"})` failure shape. A real GPT-5.5 OAuth run then emitted `Computer(list)`,
+read the live Chrome/Facebook UIA tree, and reported success without vision or any screen mutation.
+
+The Windows presence overlay had a separate first-action hang risk: its long-lived child inherited the
+synchronous PowerShell capture pipes. The launch now redirects child stdout/stderr to bounded, separate
+TEMP log paths, so a zero-duration computer wait with presence enabled returns in under a second instead
+of holding the tool call open. UIA remains the primary text-model path; raw pixels remain the last fallback.
+
+The pairing mismatch seen on mobile is now connection state, not transcript content. Relay renders one
+persistent recovery card, disables composer/send, and opens Settings with the secret field focused; repeated
+send attempts cannot append duplicate red errors. Playwright verified this at 390x844. Production Worker
+version `fa59d9fe-d652-4fa5-bd08-5cda98b83c85` serves the change on both the canonical Custom Domain and
+workers.dev rollback endpoint; both health checks report protocol v5 and the canonical response retains CSP,
+HSTS, no-store, anti-framing, and restricted permissions headers.
+
+Clean-room review of OpenConnector `62796b0` found a useful extension pattern, not a computer-use engine:
+it keeps credentials behind a gateway and exposes only four discovery/execution MCP meta-tools for its large
+Action catalog. Neko already has the matching progressive-disclosure boundary (`mcp_load` plus namespaced MCP),
+so no provider catalog or dependency was copied into core. The appropriate future integration is an optional,
+config-first external MCP profile with action policies and redacted run logs. Verification: 576 tests / 2,220
+assertions, typecheck, policy PASS, doctor, production build, UI probe, real-PTY input probe, Wrangler dry-run,
+live computer call, mobile Playwright flow, production health/source/header checks, and `git diff --check`.
+
 ## 2026-07-11 - relay v5: phone-sized viewport and virtual-keyboard polish
 
 A fresh 390x844 production capture exposed mobile-specific friction that the desktop mirror did not:

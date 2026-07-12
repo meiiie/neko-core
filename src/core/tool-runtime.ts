@@ -20,6 +20,7 @@ import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
 import { wrapBash } from "./sandbox.ts";
 import { effectivePermission, GATED, resolveTool, toolSchemas } from "./tools.ts";
+import { residentUiaHost } from "./windows-uia-host.ts";
 import { debug, messageOf } from "../shared/debug.ts";
 
 /** An approval gate: given (toolName, the tool's args) -> approve? (may be async).
@@ -81,6 +82,8 @@ export class ToolRegistry {
   /** Agent-presence overlay (computer_use_overlay): when on, bash gets NEKO_PRESENCE=1 so the desktop
    * helpers (mouse.ps1 / ground.ts) show the independent agent cursor + honour click-to-takeover. */
   presence = false;
+  /** Reuse one warm Windows UIA/input/capture process; false keeps the proven one-shot PowerShell path. */
+  residentUia = true;
   /** Desktop input backend (computer_use_input): when "inject"/"sendinput", bash gets NEKO_INPUT=<value> so
    * mouse.ps1 routes clicks/strokes to the non-hijacking touch-injection path or the legacy SendInput path. */
   inputBackend = "";
@@ -388,7 +391,7 @@ export class ToolRegistry {
       const out = name === "bash" ? await this.runBash(args, signal)
         : name === "read_file" ? await this.runReadFile(args)
         : name === "skill" ? this.runSkill(args)
-        : name === "computer" ? this.runComputer(args)
+        : name === "computer" ? await this.runComputer(args)
         : await DISPATCH[name](this.root, args);
       this.runPostHook(name, args, typeof out === "string" ? out : "[image]");
       return out;
@@ -412,7 +415,7 @@ export class ToolRegistry {
   /** First-class desktop/GUI control (Windows): dispatches to the computer-use skill's accessibility-tree
    * scripts. Reads/acts on a window BY NAME (no vision); pointer acts use touch injection (no mouse hijack).
    * Unicode element names go through a temp UTF-8 file (@file) -- the cp1252 console mangles non-ASCII args. */
-  private runComputer(args: Record<string, any>): string | any[] {
+  private async runComputer(args: Record<string, any>): Promise<string | any[]> {
     // An injected backend (e.g. the simulated GUI world in the long-horizon eval) takes over the whole
     // tool: it needs no real desktop, so it also bypasses the Windows-only guard below. Default unset.
     if (this.computerHandler) return this.computerHandler(args);
@@ -434,6 +437,7 @@ export class ToolRegistry {
     let capturePath = "";
     switch (action) {
       case "list": case "read": script = "uia.ps1"; sa = [action]; break;
+      case "display": script = "display.ps1"; sa = []; break;
       case "get": case "invoke": case "toggle": {
         const nm = String(args.name ?? ""); if (!nm) return `Error: computer ${action} needs 'name'.`;
         script = "uia.ps1"; sa = [action, atFile(nm)]; break;
@@ -492,18 +496,50 @@ export class ToolRegistry {
         sa = [capturePath];
         break;
       }
-      default: return `Unknown computer action '${action}'. Use: list | read | get | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
+      default: return `Unknown computer action '${action}'. Use: list | read | get | display | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
     }
     try {
-      const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa], { encoding: "utf-8", cwd: this.root, env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
-      // Surface failures instead of swallowing them into "(no output)" — the agent can only adapt to a
-      // failure it can SEE (same contract as the rest of the loop). Timeout/spawn error -> r.error.
-      if (r.error) {
-        const timedOut = (r.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
-        return `Error: computer ${action} ${timedOut ? "timed out after 90s (the PowerShell action hung)" : "could not run PowerShell"}: ${r.error.message}`;
+      let residentOutput: string | null = null;
+      if (this.residentUia && ["list", "read", "get", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "screenshot"].includes(action)) {
+        try {
+          const response = await residentUiaHost(join(scriptsDir, "resident-uia.ps1")).request({
+            action,
+            window: args.window ? String(args.window) : undefined,
+            name: args.name === undefined ? undefined : String(args.name),
+            value: args.value === undefined ? undefined : String(args.value),
+            text: args.text === undefined ? undefined : String(args.text),
+            keys: args.keys === undefined ? undefined : String(args.keys),
+            direction: args.direction === undefined ? undefined : String(args.direction),
+            amount: args.amount === undefined ? undefined : Number(args.amount),
+            durationMs: args.duration_ms === undefined ? undefined : Number(args.duration_ms),
+            x: args.x === undefined ? undefined : Math.round(Number(args.x)),
+            y: args.y === undefined ? undefined : Math.round(Number(args.y)),
+            points: Array.isArray(args.points) ? args.points.map((n: any) => Math.round(Number(n))) : undefined,
+            presence: this.presence,
+            inputBackend: this.inputBackend,
+            capturePath: capturePath || undefined,
+            width: action === "screenshot" ? 768 : undefined,
+          }, 15_000);
+          if (!response.ok) return `Error: computer ${action} failed (resident Windows host). ${response.error || "unknown error"}`;
+          if (action === "screenshot") residentOutput = response.output?.trim() || "";
+          else return response.output?.trim() || "(no output)";
+        } catch (error) {
+          // Transport/startup failure only: preserve the proven one-shot adapter as the rollback path.
+          debug("computer", () => `resident Windows host unavailable, using one-shot fallback: ${messageOf(error)}`);
+        }
       }
-      const out = (r.stdout || "").trim(), err = (r.stderr || "").trim();
-      if (r.status && r.status !== 0) return `Error: computer ${action} failed (PowerShell exit ${r.status}). ${err || out || ""}`.trim();
+      let out = residentOutput ?? "", err = "";
+      if (residentOutput === null) {
+        const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa], { encoding: "utf-8", cwd: this.root, env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
+        // Surface failures instead of swallowing them into "(no output)" — the agent can only adapt to a
+        // failure it can SEE (same contract as the rest of the loop). Timeout/spawn error -> r.error.
+        if (r.error) {
+          const timedOut = (r.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+          return `Error: computer ${action} ${timedOut ? "timed out after 90s (the PowerShell action hung)" : "could not run PowerShell"}: ${r.error.message}`;
+        }
+        out = (r.stdout || "").trim(); err = (r.stderr || "").trim();
+        if (r.status && r.status !== 0) return `Error: computer ${action} failed (PowerShell exit ${r.status}). ${err || out || ""}`.trim();
+      }
       if (capturePath) {
         if (!existsSync(capturePath)) return `Error: computer screenshot did not create an image. ${err || out || ""}`.trim();
         // Return the observation itself, not a dead temp-file path. This closes the GUI loop in one

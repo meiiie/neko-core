@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { homeDir } from "../shared/home.ts";
+import { LOCAL_CONFIG_DIR } from "./config.ts";
 import { addMcpServer, patchUserConfig } from "./project.ts";
 
 const SEARXNG_PORT = 8888;
@@ -31,13 +32,41 @@ function ok(cmd: string, args: string[]): boolean {
   try { return spawnSync(cmd, args, { encoding: "utf8", timeout: 12000 }).status === 0; } catch { return false; }
 }
 
-/** Wire the browser MCP (headed real-Chrome — least bot-detectable). Needs bunx or npx. */
-function setupBrowser(log: (m: string) => void): boolean {
+type BrowserMode = "persistent" | "attach" | "isolated";
+
+function browserMode(value: string): BrowserMode | null {
+  const mode = (value || "persistent").toLowerCase();
+  if (mode === "persistent" || mode === "attach" || mode === "isolated") return mode;
+  if (mode === "extension") return "attach";
+  if (mode === "sandbox") return "isolated";
+  return null;
+}
+
+/** Wire the browser MCP. Persistent is the everyday default; attach reuses an existing signed-in Chrome;
+ * isolated is deliberately ephemeral for tests/untrusted sites. Needs bunx or npx. */
+function setupBrowser(log: (m: string) => void, requestedMode = ""): boolean {
   const runner = ok("bunx", ["--version"]) ? "bunx" : ok("npx", ["--version"]) ? "npx" : "";
   if (!runner) { log("  [skip] browser MCP — need bunx or npx (install Bun or Node)."); return false; }
-  const base = ["@playwright/mcp@latest", "--isolated", "--browser", "chrome"];
+  const mode = browserMode(requestedMode);
+  if (!mode) { log(`  [fail] unknown browser mode '${requestedMode}'. Use: persistent | attach | isolated`); return false; }
+  const profile = join(homeDir(), LOCAL_CONFIG_DIR, "browser", "default");
+  if (mode === "persistent") mkdirSync(profile, { recursive: true, mode: 0o700 });
+  const base = mode === "attach"
+    ? ["@playwright/mcp@latest", "--extension"]
+    : mode === "isolated"
+      ? ["@playwright/mcp@latest", "--isolated", "--browser", "chrome"]
+      : ["@playwright/mcp@latest", "--browser", "chrome", "--user-data-dir", profile];
   addMcpServer("browser", { command: runner, args: runner === "npx" ? ["-y", ...base] : base });
-  log(`  [ok]   browser MCP -> ${runner} @playwright/mcp (headed Chrome). If Chrome/Chromium missing: '${runner} playwright install chromium'.`);
+  if (mode === "persistent") {
+    log(`  [ok]   browser MCP -> persistent Chrome profile (${profile}). Sign in once; sessions survive Neko restarts.`);
+    log("         One browser process owns this profile at a time; use `neko setup browser attach` for shared existing Chrome.");
+  } else if (mode === "attach") {
+    log("  [ok]   browser MCP -> existing Chrome tabs/profile via Microsoft's Playwright Extension.");
+    log("         Install/enable: https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm");
+  } else {
+    log("  [ok]   browser MCP -> isolated in-memory Chrome. Login state is intentionally discarded on close.");
+  }
+  log(`         If Chrome/Chromium is missing: '${runner} playwright install chromium'.`);
   return true;
 }
 
@@ -109,16 +138,20 @@ async function setupTavily(keyArg: string, log: (m: string) => void): Promise<bo
   return true;
 }
 
-/** `neko setup [web|searxng|browser|tavily]`. Returns a process exit code. */
+/** `neko setup [web|searxng|browser|tavily] [browser-mode|key]`. Returns a process exit code. */
 export async function setupWeb(component: string, log: (m: string) => void, extra = ""): Promise<number> {
   const which = (component || "web").toLowerCase();
   if (!["web", "searxng", "browser", "tavily"].includes(which)) {
     log(`Unknown setup target '${which}'. Use: neko setup [web|searxng|browser|tavily]`);
     return 2;
   }
+  if ((which === "web" || which === "browser") && extra && !browserMode(extra)) {
+    log(`Unknown browser mode '${extra}'. Use: persistent | attach | isolated`);
+    return 2;
+  }
   log(`Setting up the web stack (${which})...`);
   let allOk = true;
-  if (which === "web" || which === "browser") allOk = setupBrowser(log) && allOk;
+  if (which === "web" || which === "browser") allOk = setupBrowser(log, extra) && allOk;
   if (which === "web" || which === "searxng") allOk = (await setupSearxng(log)) && allOk;
   if (which === "tavily") allOk = (await setupTavily(extra, log)) && allOk;
   log(allOk

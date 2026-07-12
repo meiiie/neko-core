@@ -46,6 +46,7 @@ test("relay client keeps terminal semantics and accessible control names", () =>
   expect(script).toContain("connectMirror(true)");
   expect(script).toContain("Math.min(1_000 * 2 ** mirrorFailures++, 25_000)");
   expect(script).toContain('frame.t === "presence"');
+  expect(script).toContain('headerBits.push("browser attached")');
   expect(script).toContain("hostWorking(host)");
   expect(script).toContain("isRelaySetupLine(line)");
   expect(html).toContain(".composer:focus-within");
@@ -67,4 +68,8 @@ test("relay client keeps terminal semantics and accessible control names", () =>
   expect(script).toContain("mirrorSeqByHost[host]");
   expect(script).toContain("moveHistory(-1)");
   expect(script).toContain("navigator.clipboard.writeText(text)");
+  expect(script).toContain('box.dataset.key = "pairing-mismatch"');
+  expect(script).toContain('title.textContent = "Pairing key changed"');
+  expect(script).toContain('$("send").disabled = approval || overlay || kidMismatch');
+  expect(script).not.toContain("if (kidMismatch) { const nk = nekoTurn()");
 });

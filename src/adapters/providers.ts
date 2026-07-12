@@ -11,6 +11,8 @@ import type { MoaRef } from "./config.ts";
 import { AnthropicProvider } from "./anthropic.ts";
 import { ChatGptProvider, isDirectChatGptModel, listChatGptModelCatalog } from "./chatgpt-provider.ts";
 import { HybridChatGptProvider } from "./chatgpt-app-server-provider.ts";
+import { GeminiCliProvider } from "./gemini-provider.ts";
+import { hasGeminiCredentials, listGeminiModels } from "./gemini-cli.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 import { hasChatGptCredentials } from "./chatgpt-auth.ts";
 import type { Usage } from "../core/cost.ts";
@@ -84,10 +86,11 @@ export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "moa") return new MoaProvider(config);
   if (config.provider === "anthropic") return new AnthropicProvider(config);
   if (config.provider === "chatgpt") return new HybridChatGptProvider(config, new ChatGptProvider(config));
+  if (config.provider === "gemini_cli") return new GeminiCliProvider(config);
   if (config.provider === "openai_compat") return new OpenAICompatProvider(config);
   throw new Error(
     `Unknown provider '${config.provider}'. Use openai_compat (any OpenAI /chat/completions endpoint or a ` +
-      "local server), chatgpt (Plus/Pro OAuth), anthropic (Claude Messages API), or moa (mixture-of-agents).",
+      "local server), chatgpt (Plus/Pro OAuth), gemini_cli (Google account/API key), anthropic (Claude Messages API), or moa (mixture-of-agents).",
   );
 }
 
@@ -134,6 +137,31 @@ export async function listModelOptions(config: NekoConfig, codexSupport?: CodexS
     }
     // Keep /model useful while signed out or during a transient catalog failure. A successful live
     // account catalog always wins, so plan/rollout availability remains authoritative when reachable.
+    return fallback;
+  }
+  if (config.provider === "gemini_cli") {
+    const known = config.profile ? config.profiles[config.profile]?.models ?? [] : [];
+    const fallback = [...new Set([config.model, ...known].filter(Boolean))].map((id) => ({
+      id,
+      label: id,
+      description: id === "auto" ? "Gemini CLI chooses the best model for the task and available quota" : undefined,
+      contextWindow: config.contextWindow,
+      vision: true,
+    }));
+    if ((config.usesGeminiAuth && hasGeminiCredentials()) || (!config.usesGeminiAuth && Boolean(config.apiKey))) {
+      try {
+        const live = await listGeminiModels(config.usesGeminiAuth ? undefined : config.apiKey);
+        if (live.length) return live.map((model) => ({
+          id: model.id,
+          label: model.name || model.id,
+          description: model.description,
+          contextWindow: config.contextWindow,
+          vision: true,
+        }));
+      } catch {
+        // Keep /model usable during a transient CLI/auth/catalog failure; completion reports the cause.
+      }
+    }
     return fallback;
   }
   const anthropic = config.provider === "anthropic";

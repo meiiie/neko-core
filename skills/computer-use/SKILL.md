@@ -69,14 +69,15 @@ Keep steps minimal (each screenshot+reason is slow); stop when the goal is visib
 
 ## Quick start — WEB (validated, works today with a text model)
 The web case needs NO vision: `@playwright/mcp`'s snapshot is a DOM/accessibility tree, so a text model
-grounds via the DOM (the browser-use insight: DOM beats pixels). Add it to config:
-```json
-{ "mcp_servers": { "playwright": { "command": "npx", "args": ["-y", "@playwright/mcp@latest", "--headless", "--isolated"] } } }
-```
+grounds via the DOM (the browser-use insight: DOM beats pixels). Run `neko setup browser`: its dedicated
+Chrome profile persists cookies and local storage, so the user signs in once. `neko setup browser attach`
+reuses an existing signed-in Chrome tab through Microsoft's Playwright Extension. Reserve
+`neko setup browser isolated` for tests/untrusted pages because closing it deliberately erases all state.
 (One-time: `npx playwright install chromium`.) Neko then drives the page via `browser_navigate` /
 `browser_type` / `browser_click` / `browser_snapshot` / `browser_evaluate`. **Verified end-to-end with the
 default gpt-oss-120b:** navigate -> type a query into the search box + submit -> open the result -> read it,
-AND self-correct when a tool call errored (retried with a better selector). Drop `--headless` to watch it;
+AND self-correct when a tool call errored (retried with a better selector). The setup is headed so the user
+can take over passwords/OTP/passkeys;
 add stealth (`--device "Desktop Chrome"`, or CloakBrowser via `--cdp-endpoint`) for anti-bot sites — see
 the `procurement` skill.
 
@@ -85,7 +86,7 @@ Native apps have no DOM, but Windows UI Automation (UIA) IS the desktop's access
 DOM. **This is the primary path; use it first.**
 
 **Prefer the first-class `computer` tool** over bash-ing the scripts: `computer({action, window, ...})` —
-`action` is `list | read | get | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait |
+`action` is `list | read | get | display | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait |
 open | screenshot`.
 It dispatches to the scripts below (Unicode names handled via a temp UTF-8 `@file` automatically), gated like
 bash, and honours the presence/input config. Bash + the raw scripts is the fallback / for anything the tool
@@ -126,6 +127,25 @@ computer({ action: "scroll", window: "Notepad", direction: "down", amount: 2 })
 computer({ action: "read", window: "Notepad" })  # verify from fresh state
 ```
 
+### Windows coordinate contract (DPI is part of correctness)
+All Neko coordinates are **physical pixels in the Windows virtual desktop**. Before a spatial task, call
+`computer({action:"display"})`; it reports every monitor's physical bounds, work area, DPI, scale, and negative
+origins. UIA bounds, screenshots, touch injection, mouse fallback, overlay, and scrolling share that space.
+
+If a task genuinely needs a custom C#/PowerShell coordinate script, set
+`SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)` **before any window, Forms, Screen,
+GetWindowRect, or monitor API is touched**. Do not use the older `SetProcessDPIAware()` as the final solution: it
+is only system-DPI-aware and remains wrong when monitors use different scales. Never infer the screen edge from
+an action's success message; read the final physical positions back or inspect a fresh screenshot.
+
+### Completion is an observed state, not a successful action
+For every desktop/browser task, separate **process evidence** ("the click/script ran") from **outcome evidence**
+("the requested end state is now visible/readable"). After the final mutation, wait for the UI to settle and
+perform an independent observation. Check each user-visible postcondition against the original task. If a
+shortcut was meant to be at the right edge, verify its final bounding rectangle against `display`'s work area;
+do not conclude from the coordinate you asked the script to use. Production Neko enforces this at finish time:
+a completion claim after state-changing tools is rejected until a fresh successful inspection is present.
+
 `open` launches a single executable/file/URL; use gated `bash` for commands with arguments, downloads,
 package managers, and installers. Never put a secret in `type`/`setvalue`; hand control to the user.
 WEB note: a browser exposes the page to UIA only when accessibility is on -- launch Chrome with
@@ -165,8 +185,11 @@ When there's genuinely no accessibility tree, it's the screenshot -> ground -> c
 available model does vision + GUI-grounding + tool-calling together, so SEPARATE them: the text driver
 (gpt-oss) orchestrates and calls a vision model as a sub-step to "see". Bundled scripts in
 `skills/computer-use/scripts/`:
-- **Screenshot** — `screenshot.ps1 <out.gif> [width]` captures + downscales to a small **GIF** and prints
-  `scale` (driver maps `real = view / scale`). Why GIF, not JPEG/PNG: NVIDIA's gateway counts the image's
+- **Screenshot** — first-class `computer screenshot` reuses the resident host; `screenshot.ps1 <out.gif>
+  [width]` is its one-shot fallback. Both capture + downscale the physical virtual desktop to a small **GIF**
+  and print `origin` + `scale` (driver maps `real = origin + view / scale`). Resident output also includes a
+  frame id, sampled change percentage, and physical `changed=x,y,w,h` bounds. Pixel change proves only that
+  something changed, not that the requested outcome is correct. Why GIF, not JPEG/PNG: NVIDIA's gateway counts the image's
   base64 toward the prompt-token budget, so it MUST stay small (base64 < ~180 KB or the request 400s with a
   negative `max_tokens`). GIF's indexed colour is tiny for UI and -- unlike the JPEG encoder -- does NOT trip
   antivirus screen-capture heuristics. If a capture script is still blocked, split it: a simple `CopyFromScreen`
@@ -178,7 +201,8 @@ available model does vision + GUI-grounding + tool-calling together, so SEPARATE
   **Verified:** gpt-oss orchestrated `see.ts` to ground a corner button to ~10-20 px.
 - **Control** — `mouse.ps1 <pos|move|click|dblclick> [x] [y]`. `pos`/`move` harmless; `click` is gated (approval).
 - **Loop**: `screenshot.ps1` -> `see.ts` (ground in view px) -> scale to real px -> `mouse.ps1 click` -> re-shot -> reflect.
-- **Multi-monitor**: coordinates are the virtual desktop; map per display (Clicky's `screenN`).
+- **Multi-monitor**: the image spans the physical virtual desktop, including negative origins. Map a view
+  point with `realX = originX + viewX/scale`, `realY = originY + viewY/scale`.
 
 **Honest ceiling — the model, not the machinery.** `ground.ts` implements the SOTA crop-and-zoom
 (ScreenSpot-Pro / iterative focus refinement) correctly, but real-world precision is capped by the available
@@ -201,7 +225,12 @@ in order of reliability (only the last needs a GUI-trained model):
    EXACT bounding rect FROM THE OS, plus the assistive-tech action patterns. A plain text model (gpt-oss)
    `list`s elements, then acts BY NAME: `invoke` (InvokePattern -- click with NO cursor movement / no focus
    steal / works occluded), `setvalue` (ValuePattern -- type with no keyboard), `toggle`, and `get` to verify
-   -- pixel/element-perfect, <100 ms, private, NO vision, NO GUI-training. Falls back to a real coord-click
+   -- pixel/element-perfect, private, NO vision, NO GUI-training. Neko now keeps one PowerShell/.NET UIA/input/capture host
+   warm per process: measured WPF p50/p95 is 31/57 ms for `list`, 23/36 ms for `get`, and 93/121 ms for
+   verified `setvalue` after a ~1.08 s cold start. Keyboard/touch actions reuse that process too: type
+   252-321 ms, key 311 ms, and custom-canvas touch 467 ms including focus + post-action structural check.
+   `computer_use_resident: false` restores the one-shot path.
+   Falls back to a real coord-click
    only if an element exposes no pattern. This is exactly why WEB works with gpt-oss (the DOM); UIA is the
    desktop DOM. **VERIFIED end-to-end:** list -> setvalue -> invoke -> screenshot/get confirmed the action,
    default gpt-oss, no vision. See the DESKTOP quick-start for the loop + the app-type matrix (works on
@@ -215,6 +244,35 @@ pixel-vision only to fill gaps. So Neko controls standard desktop apps RELIABLY 
 `uia.ps1` -- no GUI-trained model required. For the rare pointer action (canvas/drag/non-UIA target), act with
 `inject.ps1` (touch -- does NOT move the user's mouse) or `mouse.ps1` (SendInput -- legacy); see Agent presence
 (A2) for the config-first backend switch.
+
+## Latency contract -- make a known app feel human-speed
+Benchmark success and human wall-clock speed are different metrics. UIA is now warm and human-interactive;
+display remains one-shot, and one remote model turn commonly costs several more
+seconds. For apps such as Zalo, the shortest sound path is:
+
+1. **Resident local executor (landed):** one local JSONL host per Neko process loads UIA, SendInput, touch,
+   and virtual-desktop capture
+   injection once, serializes
+   desktop requests, restarts after failure, does not pin short-lived Neko processes, and keeps the existing
+   scripts as a transport/startup fallback. UIA reads are below the p50 <150 ms / p95 <300 ms target;
+   focus-verified keyboard input is 252-321 ms, a verified custom-canvas tap is 467 ms, and warm capture is
+   71-119 ms with sampled physical change bounds. Native DXGI capture is deferred until GDI measurably fails
+   on GPU/HDR/protected content; model perception remains a separate cost.
+2. **Profiled fast path, not core hard-coding:** an app capability profile discovers the current Zalo window,
+   version, accessible names, and shortcuts. A profile hit may perform deterministic search/draft actions;
+   a miss immediately returns the fresh state to the general agent. Never assume labels from an old version.
+3. **Validated micro-batches:** one model turn may propose several low-risk actions, but the executor checks the
+   expected window/control/fingerprint before each action and stops on the first mismatch. Sending, posting,
+   paying, deleting, or selecting a different recipient is a separate approved commit, never hidden in a batch.
+4. **Lifecycle:** discover/attach -> baseline observation -> plan -> validated low-risk batch -> sensitive
+   approval -> independent outcome verification -> audit -> idle/release. On user takeover: pause, re-perceive,
+   and re-plan; never resume from stale coordinates or stale UIA ids.
+5. **Completion for messaging:** verify the exact recipient, exact draft, one send only, and a fresh delivery
+   state exposed by the app. Never type a password, PIN, OTP, or hidden-chat secret; hand control to the user.
+
+The GUI harness must report **model turns and GUI actions separately**, plus wall time, misses, violations,
+wrong-recipient/duplicate-action counters, and verifier coverage. A fast path ships only when repeated trials
+keep task success flat-or-up and safety failures at zero; fewer turns alone are not evidence of completion.
 
 ## Agent presence + control isolation (clicky-style)
 Three composable layers: **(A) SEE it** (overlay), **(A2) ACT without hijacking your mouse** (touch
@@ -254,15 +312,16 @@ took control"). Off by default = zero overhead. The 3-file protocol (run/target/
 point: ANY tool (or an external agent) that writes the target file drives the same agent cursor -- a uniform
 presence layer across web + desktop, beyond Clicky's point-only macOS app.
 
-**(A2) Independent ACTING pointer — touch injection (no mouse hijack).** `inject.ps1 tap|dbltap|stroke
+**(A2) Independent ACTING pointer — touch injection (no mouse hijack).** The resident computer host, or the
+one-shot fallback `inject.ps1 tap|dbltap|stroke
 <coords>` acts via Windows TOUCH INJECTION (`InitializeTouchInjection`/`InjectTouchInput`) — a SEPARATE
 pointer channel, so the agent clicks/drags/draws on the VISIBLE desktop while the user's MOUSE stays put.
 **VERIFIED:** drew lines in Paint with the real cursor parked in a corner (unmoved before == after); no
 driver, no admin, unpackaged P/Invoke, Win11-Home OK. Pair with (A) overlay = Clicky's "instructor pointer"
 but it actually ACTS: the overlay shows WHERE, injection DOES it, your mouse is free. **Config-first:** set
 `computer_use_input: "inject"` -> bash gets `NEKO_INPUT=inject` -> `mouse.ps1`'s `click`/`dblclick`/`stroke`
-transparently route to `inject.ps1` (agent code unchanged); `"sendinput"` forces the legacy cursor-moving
-path; a NEW backend is a config value + a script, not a rewrite. Honest scope: touch lands on the TOPMOST
+transparently route to touch injection (agent code unchanged); `"sendinput"` forces the legacy cursor-moving
+path in both resident and one-shot modes; a NEW backend is a config value + a script, not a rewrite. Honest scope: touch lands on the TOPMOST
 window at the point, so the target must be VISIBLE (raise it with `NEKO_DRAW_WINDOW=<title>`); a few legacy
 mouse-only apps ignore touch -> fall back to `mouse.ps1` (SendInput) or, for controls, UIA. This is the
 visible-desktop "don't hijack my mouse" answer; controlling a HIDDEN/background app is (B). And for CONTROLS,
@@ -347,6 +406,8 @@ Real caveats that remain (state them, don't hide them):
 - **Grounding is approximate** (general VLM, not GUI-trained): ~tens of px. Fine for big targets; zoom/re-ask
   for small ones. A GUI-trained model (UI-TARS/OpenCUA/Claude CU class) would be pixel-tight.
 - **Vision models don't tool-call** -- that's why the driver (gpt-oss) orchestrates and `see.ts` is a sub-call.
-- **Screenshot capture** may be blocked by antivirus on some machines (false positive on screen-capture
-  scripts); use a trusted capture path. Downscale to stay under NVIDIA's ~180 KB inline-image cap.
+- **Screenshot capture** currently uses the honest `capture=gdi` compatibility backend. It is fast once warm
+  but is not guaranteed for protected video, every GPU overlay, or HDR-faithful color; those measured failures
+  justify the future DXGI backend. Antivirus may also flag screen-capture scripts (false positive); use a
+  trusted capture path. Downscale to stay under NVIDIA's ~180 KB inline-image cap.
 - **Web** computer-use (DOM via `@playwright/mcp`, no vision) is still the most reliable autonomous path.

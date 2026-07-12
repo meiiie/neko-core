@@ -87,6 +87,22 @@ test("ChatGPT provider uses only the fixed Codex backend and parses streamed tex
   expect(eager).toEqual(["call-1"]);
 });
 
+test("Responses parser preserves finalized tool arguments across sparse completion events", async () => {
+  const events = [
+    { type: "response.output_item.added", output_index: 0, item: { id: "fc-computer", type: "function_call", call_id: "call-computer", name: "computer", arguments: "" } },
+    { type: "response.function_call_arguments.done", item_id: "fc-computer", call_id: "call-computer", name: "computer", arguments: '{"action":"list"}' },
+    { type: "response.output_item.done", output_index: 0, item: { id: "fc-computer", type: "function_call", call_id: "call-computer", name: "computer", arguments: "" } },
+    { type: "response.completed", response: { output: [
+      { id: "fc-computer", type: "function_call", call_id: "call-computer", name: "computer", arguments: "{}" },
+    ], usage: {} } },
+  ];
+  const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") + "data: [DONE]\n\n";
+  const eager: any[] = [];
+  const result = await parseResponsesStream(new Response(body), undefined, (call) => eager.push(call));
+  expect(result.tool_calls).toEqual([{ id: "call-computer", name: "computer", arguments: { action: "list" } }]);
+  expect(eager).toEqual([{ id: "call-computer", name: "computer", arguments: { action: "list" } }]);
+});
+
 test("Responses parser rejects a disconnected stream instead of accepting a partial answer", async () => {
   const response = new Response(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: "partial" })}\n\n`);
   await expect(parseResponsesStream(response)).rejects.toThrow("before response.completed");

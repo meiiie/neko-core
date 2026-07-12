@@ -9,6 +9,8 @@ import { SearxngSidecar } from "./sidecar.ts";
 import { VERSION } from "../shared/version.ts";
 import { hasChatGptCredentials } from "./chatgpt-auth.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
+import { discoverGeminiCli, hasGeminiCredentials, type GeminiCliStatus } from "./gemini-cli.ts";
+import { readBrowserCapability, readBrowserBridgeStatus } from "./browser-bridge.ts";
 
 export interface Check {
   status: "ok" | "warn";
@@ -51,16 +53,34 @@ export function collectTerminalChecks(): Check[] {
   ];
 }
 
-export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportStatus): Check[] {
+export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportStatus, geminiSupport?: GeminiCliStatus): Check[] {
   const needsCodexBridge = config.usesChatGptAuth && config.model.startsWith("gpt-5.6-");
   const bridge = needsCodexBridge ? (codexSupport ?? discoverCodexSupport()) : null;
   const bridgeUnavailable = needsCodexBridge && bridge?.state !== "ready";
+  const gemini = config.usesGeminiCli ? (geminiSupport ?? discoverGeminiCli()) : null;
+  const geminiUnavailable = config.usesGeminiCli && gemini?.state !== "ready";
+  const browserArgs = config.mcpServers.browser?.args ?? [];
+  const profileAt = browserArgs.indexOf("--user-data-dir");
+  const browserCheck: Check = !config.mcpServers.browser
+    ? { status: "warn", name: "browser", detail: "not configured - run `neko setup browser` for a persistent signed-in Chrome" }
+    : browserArgs.includes("--extension")
+      ? { status: "ok", name: "browser", detail: "attached to existing Chrome via Playwright Extension (reuses logged-in tabs)" }
+      : profileAt >= 0 && browserArgs[profileAt + 1]
+        ? { status: "ok", name: "browser", detail: `persistent Chrome profile (${browserArgs[profileAt + 1]}); one active owner, use attach for shared Chrome` }
+        : browserArgs.includes("--isolated")
+          ? { status: "warn", name: "browser", detail: "isolated/ephemeral - logins are discarded on close; run `neko setup browser persistent`" }
+          : { status: "warn", name: "browser", detail: "profile persistence is not explicit; run `neko setup browser persistent` or `neko setup browser attach`" };
+  const browserBridge = readBrowserCapability();
+  const browserBridgeStatus = browserBridge ? readBrowserBridgeStatus() : undefined;
+  const browserBridgeCheck: Check | null = !browserBridge ? null : browserBridgeStatus?.online
+    ? { status: "ok", name: "browser_bridge", detail: browserBridgeStatus.attached ? "online; one Chrome tab attached" : "online; waiting for an explicit tab attachment" }
+    : { status: "warn", name: "browser_bridge", detail: "configured but offline - run `neko browser bridge`" };
   return [
     { status: "ok", name: "version", detail: `neko-core ${VERSION}` },
     { status: "ok", name: "provider", detail: config.provider },
     { status: "ok", name: "profile", detail: config.profile ?? "none" },
     {
-      status: config.model && !config.modelShadow && !bridgeUnavailable ? "ok" : "warn",
+      status: config.model && !config.modelShadow && !bridgeUnavailable && !geminiUnavailable ? "ok" : "warn",
       name: "model",
       detail: config.modelShadow
         ? `${config.model} - top-level 'model' in ${config.modelShadow.source} OVERRIDES profile '${config.profile}' ` +
@@ -69,10 +89,21 @@ export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportSta
           ? bridge?.state === "ready"
             ? `${config.model} via Codex bridge (${bridge.detail})`
             : `${config.model} needs the optional GPT-5.6 Support Pack or Codex CLI >= 0.144.0 (${bridge?.detail ?? "not found"})`
+          : config.usesGeminiCli
+            ? gemini?.state === "ready"
+              ? `${config.model} via Gemini CLI ACP (${gemini.detail})`
+              : `${config.model} needs the official Gemini CLI (${gemini?.detail ?? "not found"})`
           : config.model || "(unset - set model or pick a --profile)",
     },
     { status: "ok", name: "max_steps", detail: String(config.maxSteps) },
     { status: "ok", name: "mode", detail: config.mode },
+    {
+      status: "ok",
+      name: "computer_use",
+      detail: config.computerUseResident
+        ? "resident UIA/input/capture on (warm process; set computer_use_resident=false to use one-shot fallback)"
+        : "one-shot PowerShell fallback (resident UIA/input/capture disabled)",
+    },
     {
       status: config.sandbox && detectSandbox() === "none" ? "warn" : "ok",
       name: "bash_sandbox",
@@ -101,13 +132,21 @@ export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportSta
         return state ? `searxng (${state})` : "searxng (no local container found - is it remote, or run `neko setup web`)";
       })(),
     },
-    { status: config.baseUrl ? "ok" : "warn", name: "base_url", detail: config.baseUrl || "(unset)" },
+    browserCheck,
+    ...(browserBridgeCheck ? [browserBridgeCheck] : []),
+    { status: config.usesGeminiCli || config.baseUrl ? "ok" : "warn", name: "base_url", detail: config.usesGeminiCli ? "ACP stdio (no HTTP endpoint in Neko)" : config.baseUrl || "(unset)" },
     config.usesChatGptAuth
       ? {
           status: hasChatGptCredentials() ? "ok" : "warn",
           name: "chatgpt_auth",
           detail: hasChatGptCredentials() ? "signed in (OAuth; API billing is not used)" : "missing - run `neko login openai chatgpt`",
         }
+      : config.usesGeminiAuth
+        ? {
+            status: hasGeminiCredentials() ? "ok" : "warn",
+            name: "gemini_auth",
+            detail: hasGeminiCredentials() ? "signed in through Gemini CLI (OAuth; API billing is not used)" : "missing - run `neko login google gemini` or use /login",
+          }
       : {
           status: config.apiKey || config.isLocalEndpoint ? "ok" : "warn",
           name: "api_key",

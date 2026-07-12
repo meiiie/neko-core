@@ -18,15 +18,19 @@ import { listTools } from "../core/tools.ts";
 import { fmtBytes, relativeTime, trunc } from "./format.ts";
 import type { Overlay } from "./select-list.tsx";
 import type { Line, LineKind } from "./transcript.tsx";
-import { hasChatGptCredentials } from "../adapters/chatgpt-auth.ts";
+import { clearChatGptCredentials, hasChatGptCredentials } from "../adapters/chatgpt-auth.ts";
 import { authChoices, profileDisplayName, providerChoices } from "../adapters/provider-choice.ts";
 import { getChatGptUsage, resolveChatGptEffort, type ChatGptUsageReport, type ChatGptUsageWindow } from "../adapters/chatgpt-provider.ts";
 import { discoverCodexSupport } from "../adapters/codex-app-server.ts";
 import { installCodexSupportPack, readCodexSupportPack, removeCodexSupportPack } from "../adapters/codex-support-pack.ts";
+import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials } from "../adapters/gemini-cli.ts";
+import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
+import { getLastGeminiUsage } from "../adapters/gemini-provider.ts";
+import { getChatGptVoiceUsage } from "../adapters/chatgpt-voice.ts";
 
 export const HELP = [
   "Commands:",
-  "  /help /cost /usage /model /provider /support /tools /skill(s) /init /clear /compact /transcript /reset /exit",
+  "  /help /cost /usage /voice /model /provider /support /tools /skill(s) /init /clear /compact /transcript /reset /exit",
   "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /continue · /retry · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
@@ -39,10 +43,11 @@ export const HELP = [
 export const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
   { name: "/cost", desc: "token usage this session" },
-  { name: "/usage", desc: "ChatGPT plan quota, reset windows, and credits" },
+  { name: "/usage", desc: "subscription/session quota and token usage for the active account" },
+  { name: "/voice", desc: "conversational browser voice, ChatGPT, lab bridge, or dictation" },
   { name: "/model", desc: "show / list / switch model (/model list · /model <id>)" },
   { name: "/provider", desc: "switch provider (account) then pick its model - picker or /provider <name>" },
-  { name: "/support", desc: "GPT-5.6 bridge status/install/remove (optional; other models do not need it)" },
+  { name: "/support", desc: "install, update, or remove optional subscription components" },
   { name: "/tools", desc: "list / toggle tools (/tools bash)" },
   { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
   { name: "/init", desc: "scaffold ./.neko-core/config.json" },
@@ -166,7 +171,11 @@ function switchProfile(ctx: CommandCtx, name: string): boolean {
     addLine("info", `note: provider "${name}" needs ChatGPT sign-in - type /login.`);
     return false;
   }
-  if (!cfg.usesChatGptAuth && !cfg.apiKey && !cfg.isLocalEndpoint) {
+  if (cfg.usesGeminiAuth && !hasGeminiCredentials()) {
+    addLine("info", `note: provider "${name}" needs Google sign-in - type /login.`);
+    return false;
+  }
+  if (!cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.apiKey && !cfg.isLocalEndpoint) {
     addLine("info", `note: provider "${name}" has no API key yet - type /login to add it (it saves to this provider).`);
     return false;
   }
@@ -231,11 +240,116 @@ function openCodexInstallPrompt(ctx: CommandCtx, selected: ModelOption): void {
       if (choice.id !== "install") return ctx.addLine("info", "Support Pack installation cancelled; current model unchanged.");
       ctx.setBusy(true);
       void installCodexSupportPack({ notify: (message) => ctx.addLine("info", message) })
-        .then(() => applyModelSelection(ctx, { ...selected, available: true }))
-        .catch((error) => ctx.addLine("error", `installing GPT-5.6 support: ${error instanceof Error ? error.message : error}`))
+        .then(() => {
+          applyModelSelection(ctx, { ...selected, available: true });
+          ctx.addLine("info", "Manage, update, or remove this optional component anytime with /support.");
+        })
+        .catch((error) => ctx.addLine("error", `GPT-5.6 Support Pack failed: ${error instanceof Error ? error.message : error}. Retry with /support chatgpt install.`))
         .finally(() => ctx.setBusy(false));
     },
   });
+}
+
+type SupportKind = "chatgpt" | "gemini";
+
+/** A discoverable owner-aware management surface. Neko only offers Remove for files it installed. */
+function openSupportCenter(ctx: CommandCtx): void {
+  const codex = discoverCodexSupport();
+  const codexManaged = readCodexSupportPack();
+  const gemini = discoverGeminiCli();
+  const geminiManaged = readGeminiSupportPack();
+  ctx.setOverlay({
+    title: "Manage optional support components",
+    items: [
+      {
+        id: "chatgpt",
+        label: "ChatGPT GPT-5.6 Support Pack",
+        detail: supportDetail("chatgpt", codex.state, codex.detail, codex.executable?.source === "managed", codexManaged?.installedBytes),
+      },
+      {
+        id: "gemini",
+        label: "Gemini account Support Pack",
+        detail: supportDetail("gemini", gemini.state, gemini.detail, gemini.executable?.source === "managed", geminiManaged?.installedBytes),
+      },
+      { id: "close", label: "Close", detail: "No changes" },
+    ],
+    onSelect: (item) => {
+      if (item.id === "close") return ctx.setOverlay(null);
+      openSupportManager(ctx, item.id as SupportKind);
+    },
+  });
+}
+
+function supportDetail(kind: SupportKind, state: string, detail: string, activeManaged: boolean, bytes?: number): string {
+  if (bytes != null) return `installed by Neko - ${formatMiB(bytes)} on disk - ${activeManaged ? state : `available; active bridge ${detail}`}`;
+  if (state === "ready") return `using an existing ${kind === "chatgpt" ? "Codex" : "Gemini"} CLI - Neko installed nothing`;
+  return `not installed - ${kind === "chatgpt" ? "GPT-5.5/API/Ollama still work" : "Gemini API keys still work"}`;
+}
+
+function openSupportManager(ctx: CommandCtx, kind: SupportKind): void {
+  const managed = kind === "chatgpt" ? readCodexSupportPack() : readGeminiSupportPack();
+  const status = kind === "chatgpt" ? discoverCodexSupport() : discoverGeminiCli();
+  const title = kind === "chatgpt" ? "ChatGPT GPT-5.6 Support Pack" : "Gemini account Support Pack";
+  const items = managed ? [
+    { id: "update", label: "Update or repair", detail: `verify and replace the ${formatMiB(managed.installedBytes)} Neko-managed component` },
+    { id: "remove", label: "Remove support pack", detail: kind === "chatgpt"
+      ? `free ${formatMiB(managed.installedBytes)}; ChatGPT sign-in stays and GPT-5.5 still works`
+      : `free ${formatMiB(managed.installedBytes)}; Google sign-in stays for a quick reinstall` },
+    { id: "back", label: "Back", detail: "Return to all support components" },
+  ] : status.state === "ready" ? [
+    { id: "back", label: "Back", detail: `Using an existing ${kind === "chatgpt" ? "Codex" : "Gemini"} CLI. Neko did not install it and will not remove it.` },
+  ] : [
+    { id: "install", label: "Install support pack", detail: kind === "chatgpt" ? "about 95 MiB download / 270 MiB disk" : "about 55 MiB download / 200 MiB disk; no administrator access" },
+    { id: "back", label: "Back", detail: "Download nothing" },
+  ];
+  ctx.setOverlay({
+    title: `Manage ${title}`,
+    items,
+    onSelect: (item) => {
+      if (item.id === "back") return openSupportCenter(ctx);
+      if (item.id === "remove") return openSupportRemoveConfirm(ctx, kind, managed!.installedBytes);
+      ctx.setOverlay(null);
+      ctx.setBusy(true);
+      void (kind === "chatgpt"
+        ? installCodexSupportPack({ force: item.id === "update", notify: (message) => ctx.addLine("info", message) })
+        : installGeminiSupportPack({ force: item.id === "update", notify: (message) => ctx.addLine("info", message) }))
+        .then(() => ctx.addLine("info", `${title} is ready. Return to /support anytime to update or remove it.`))
+        .catch((error) => ctx.addLine("error", `${title} failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`))
+        .finally(() => { ctx.setBusy(false); openSupportCenter(ctx); });
+    },
+  });
+}
+
+function openSupportRemoveConfirm(ctx: CommandCtx, kind: SupportKind, bytes: number): void {
+  const title = kind === "chatgpt" ? "ChatGPT GPT-5.6 Support Pack" : "Gemini account Support Pack";
+  ctx.setOverlay({
+    title: `Remove ${title}?`,
+    items: [
+      { id: "keep", label: "Keep installed", detail: "Recommended if you still use this subscription route" },
+      { id: "remove", label: `Remove and free ${formatMiB(bytes)}`, detail: kind === "chatgpt"
+        ? "ChatGPT sign-in stays; GPT-5.5/API/Ollama are unaffected"
+        : "Google sign-in stays; reinstall the pack to use account quota again" },
+      { id: "remove-and-signout", label: "Remove and sign out", detail: kind === "chatgpt"
+        ? `free ${formatMiB(bytes)} and remove Neko's ChatGPT session; API keys stay`
+        : `free ${formatMiB(bytes)} and remove Neko's Google session; API keys stay` },
+    ],
+    onSelect: (item) => {
+      if (item.id !== "remove" && item.id !== "remove-and-signout") return openSupportManager(ctx, kind);
+      ctx.setOverlay(null);
+      ctx.agent.setProvider(getProvider(ctx.cfg)); // dispose the hidden process before Windows removes it
+      const removed = kind === "chatgpt" ? removeCodexSupportPack() : removeGeminiSupportPack();
+      const signedOut = item.id === "remove-and-signout";
+      if (signedOut) (kind === "chatgpt" ? clearChatGptCredentials : clearGeminiCredentials)();
+      ctx.addLine(removed ? "info" : "error", removed
+        ? `${title} removed; freed ${formatMiB(bytes)}. ${signedOut ? "Neko also signed this account out." : "Your sign-in was kept."} Reinstall anytime from /support.`
+        : `${title} was already absent; no files were removed.`);
+      openSupportCenter(ctx);
+    },
+  });
+}
+
+function formatMiB(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }
 
 function modelDetail(model: ModelOption, current: string): string {
@@ -291,13 +405,13 @@ function openProviderPicker(ctx: CommandCtx, initialFamily?: string): void {
       if (profile.auth === "chatgpt_oauth" || profile.auth === "none") continue;
       try { if (loadConfig({ profile: name }).apiKey) apiProfiles.add(name); } catch { /* status only */ }
     }
-    const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), apiProfiles });
+    const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), apiProfiles });
     if (routes.length === 1) {
       if (switchProfile(ctx, routes[0].id)) void openModelPicker(ctx);
       return;
     }
     ctx.setOverlay({
-      title: `${routes[0]?.label?.startsWith("ChatGPT") ? "OpenAI" : family} - choose account`,
+      title: `${family === "openai" ? "OpenAI" : family === "google" ? "Google" : family} - choose account`,
       items: routes,
       onSelect: async (route) => {
         ctx.setOverlay(null);
@@ -329,33 +443,88 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/cost":
       return addLine("info", agent.cost.summary());
     case "/usage": {
-      if (!cfg.usesChatGptAuth) return addLine("info", "subscription quota is available for ChatGPT login; use /cost for this session's tokens");
+      const voice = formatVoiceUsage();
+      if (cfg.usesGeminiAuth) {
+        const usage = getLastGeminiUsage();
+        const lines = ["Gemini usage (Google account)"];
+        if (usage) {
+          lines.push(`last turn: ${usage.inputTokens} input / ${usage.outputTokens} output tokens`);
+          for (const model of usage.models) lines.push(`${model.model}: ${model.inputTokens} input / ${model.outputTokens} output`);
+        } else lines.push("last turn: no Gemini turn recorded in this Neko session");
+        lines.push("Daily limits depend on the Google account. Google does not expose remaining requests through the app integration yet.");
+        lines.push("Neko will show a clear retry/reset message if Google reports a limit.");
+        if (voice) lines.push("", voice);
+        return addLine("info", lines.join("\n"));
+      }
+      if (!cfg.usesChatGptAuth) return addLine("info", ["subscription quota is available for ChatGPT or Gemini login; use /cost for this session's tokens", voice].filter(Boolean).join("\n\n"));
       ctx.setBusy(true);
-      try { addLine("info", formatChatGptUsage(await getChatGptUsage())); }
+      try { addLine("info", [formatChatGptUsage(await getChatGptUsage()), voice].filter(Boolean).join("\n\n")); }
       catch (error) { addLine("error", `reading usage: ${error instanceof Error ? error.message : error}`); }
       finally { ctx.setBusy(false); }
       return;
     }
     case "/support": {
-      const action = input.slice("/support".length).trim().toLowerCase() || "status";
+      const action = input.slice("/support".length).trim().toLowerCase();
+      if (!action) { openSupportCenter(ctx); return; }
+      if (action === "gemini") { openSupportManager(ctx, "gemini"); return; }
+      if (action === "chatgpt" || action === "codex") { openSupportManager(ctx, "chatgpt"); return; }
+      const geminiAction = action.startsWith("gemini ") ? action.slice("gemini ".length).trim() : null;
+      if (geminiAction === "status") {
+        const status = discoverGeminiCli();
+        const managed = readGeminiSupportPack();
+        const disk = managed ? `; ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
+        return addLine("info", `Gemini support: ${status.state} (${status.detail})${disk}. Google API keys do not require it.`);
+      }
+      if (geminiAction === "remove" || geminiAction === "uninstall") {
+        agent.setProvider(getProvider(cfg));
+        const removed = removeGeminiSupportPack();
+        const fallback = discoverGeminiCli();
+        return addLine("info", removed
+          ? `Gemini Support Pack removed. Bridge status: ${fallback.state} (${fallback.detail}). Your Neko Google sign-in remains until /logout.`
+          : "No Neko-managed Gemini Support Pack is installed; an existing Gemini CLI was not changed.");
+      }
+      if (geminiAction === "install" || geminiAction === "update") {
+        ctx.setBusy(true);
+        try { await installGeminiSupportPack({ force: geminiAction === "update", notify: (message) => addLine("info", message) }); }
+        catch (error) { addLine("error", `Gemini Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`); }
+        finally { ctx.setBusy(false); }
+        return;
+      }
+      if (geminiAction) return addLine("info", "usage: /support gemini [status|install|update|remove]");
       if (action === "status") {
+        const codex = discoverCodexSupport();
+        const codexManaged = readCodexSupportPack();
+        const codexDisk = codexManaged ? `; ${(codexManaged.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
+        const gemini = discoverGeminiCli();
+        const geminiManaged = readGeminiSupportPack();
+        const geminiDisk = geminiManaged ? `; ${(geminiManaged.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
+        return addLine("info", [
+          `ChatGPT GPT-5.6 support: ${codex.state} (${codex.detail})${codexDisk}`,
+          `Gemini account support: ${gemini.state} (${gemini.detail})${geminiDisk}`,
+          "GPT-5.5, API keys, Ollama, and other providers do not require these components.",
+        ].join("\n"));
+      }
+      const codexAction = action.startsWith("chatgpt ") ? action.slice("chatgpt ".length).trim()
+          : action.startsWith("codex ") ? action.slice("codex ".length).trim()
+            : action;
+      if (codexAction === "status") {
         const status = discoverCodexSupport();
         const managed = readCodexSupportPack();
         const disk = managed ? `; ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
-        return addLine("info", `GPT-5.6 support: ${status.state} (${status.detail})${disk}. GPT-5.5/API/Ollama do not require it.`);
+        return addLine("info", `ChatGPT GPT-5.6 support: ${status.state} (${status.detail})${disk}. GPT-5.5/API/Ollama do not require it.`);
       }
-      if (action === "remove" || action === "uninstall") {
+      if (codexAction === "remove" || codexAction === "uninstall") {
         agent.setProvider(getProvider(cfg)); // release an idle App Server before Windows removes it
         const removed = removeCodexSupportPack();
         const fallback = discoverCodexSupport();
         return addLine("info", removed
-          ? `GPT-5.6 Support Pack removed. Bridge status: ${fallback.state} (${fallback.detail}).`
+          ? `GPT-5.6 Support Pack removed. Bridge status: ${fallback.state} (${fallback.detail}). ChatGPT sign-in was kept; GPT-5.5/API/Ollama are unaffected.`
           : "No Neko-managed Support Pack is installed; an existing Codex CLI is never removed by Neko.");
       }
-      if (action !== "install" && action !== "update") return addLine("info", "usage: /support [status|install|update|remove]");
+      if (codexAction !== "install" && codexAction !== "update") return addLine("info", "usage: /support [status|chatgpt|gemini] [status|install|update|remove]");
       ctx.setBusy(true);
-      try { await installCodexSupportPack({ force: action === "update", notify: (message) => addLine("info", message) }); }
-      catch (error) { addLine("error", `installing GPT-5.6 support: ${error instanceof Error ? error.message : error}`); }
+      try { await installCodexSupportPack({ force: codexAction === "update", notify: (message) => addLine("info", message) }); }
+      catch (error) { addLine("error", `GPT-5.6 Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`); }
       finally { ctx.setBusy(false); }
       return;
     }
@@ -371,11 +540,11 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         }
       }
       if (arg) {
-        if (cfg.usesChatGptAuth) {
+        if (cfg.usesChatGptAuth || cfg.usesGeminiCli) {
           ctx.setBusy(true);
           try {
             const selected = (await listModelOptions(cfg)).find((model) => model.id === arg);
-            if (!selected) return addLine("error", `unknown ChatGPT model '${arg}' - use /model list`);
+            if (!selected) return addLine("error", `unknown ${cfg.usesChatGptAuth ? "ChatGPT" : "Gemini"} model '${arg}' - use /model list`);
             if (selected.available === false) { openCodexInstallPrompt(ctx, selected); return; }
             applyModelSelection(ctx, selected);
             return;
@@ -547,6 +716,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return;
     }
     case "/effort": {
+      if (cfg.usesGeminiCli) return addLine("info", "Gemini manages thinking adaptively for the selected model; OpenAI-style effort tiers do not apply.");
       let arg = input.split(/\s+/)[1]?.toLowerCase();
       if (arg === "default") arg = "off";
       let option: ModelOption | undefined;
@@ -641,4 +811,17 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     default:
       return addLine("info", `unknown command ${cmd} - try /help`);
   }
+}
+
+function formatVoiceUsage(): string {
+  const usage = getChatGptVoiceUsage();
+  if (!usage) return "";
+  const seconds = Math.floor(usage.durationMs / 1000);
+  const duration = `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return [
+    "ChatGPT subscription voice (experimental)",
+    `session: ${usage.active ? "LIVE" : "stopped"} - ${duration}`,
+    "remaining voice quota: not exposed by the Codex realtime integration",
+    usage.lastError ? `last limit/error: ${usage.lastError}` : "",
+  ].filter(Boolean).join("\n");
 }

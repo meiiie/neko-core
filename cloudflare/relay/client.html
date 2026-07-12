@@ -394,6 +394,19 @@
     const approval = ui.approval && typeof ui.approval.id === "string" ? ui.approval : null;
     const overlay = ui.overlay && typeof ui.overlay.id === "string" && Array.isArray(ui.overlay.items) ? ui.overlay : null;
     const working = hostWorking();
+    if (kidMismatch) {
+      closeSlash(); m.disabled = true;
+      if (box.dataset.key === "pairing-mismatch") return;
+      box.dataset.key = "pairing-mismatch"; box.replaceChildren(); box.classList.add("show");
+      const title = document.createElement("div"); title.className = "live-title"; title.textContent = "Pairing key changed";
+      const detail = document.createElement("div"); detail.className = "live-meta";
+      detail.textContent = "This phone link no longer matches Neko. Run /relay qr on the computer, then scan or paste the fresh link.";
+      const actions = document.createElement("div"); actions.className = "live-actions";
+      const settings = document.createElement("button"); settings.type = "button"; settings.textContent = "[open settings]";
+      settings.onclick = () => { $("cfg").classList.add("show"); $("gear").classList.add("open"); requestAnimationFrame(() => secret.focus()); };
+      actions.appendChild(settings); box.append(title, detail, actions);
+      return;
+    }
     if (!approval && !overlay && !working && !ui.compactingStartedAt && !(Array.isArray(ui.inflight) && ui.inflight.length)) {
       const hadModal = !!(lastApprovalId || lastOverlayId);
       lastApprovalId = ""; approvalSending = ""; approvalNote = "";
@@ -514,6 +527,7 @@
       : online ? "online · E2E · streaming" : "offline · queued";
     const headerBits = [hostModel || "no model", meta.provider, meta.profile];
     if (meta.effort) headerBits.push(meta.effort + " effort");
+    if (meta.browser?.attached) headerBits.push("browser attached");
     $("hstatus").className = "hstatus";
     $("hstatustxt").textContent = headerBits.filter(Boolean).join(" · ");
     const mode = meta.mode || (!p ? "not paired" : "remote");
@@ -995,8 +1009,8 @@
     const on = hostWorking() && !m.value.trim();
     const approval = !!selectedHost()?.meta?.ui?.approval;
     const overlay = !!selectedHost()?.meta?.ui?.overlay;
-    $("send").disabled = approval || overlay;
-    $("send").classList.toggle("stop", on && !approval && !overlay); $("send").innerHTML = on && !approval && !overlay ? STOP : SEND; $("send").setAttribute("aria-label", approval ? "approval required" : overlay ? "selection required" : on ? "stop" : "send");
+    $("send").disabled = approval || overlay || kidMismatch;
+    $("send").classList.toggle("stop", on && !approval && !overlay && !kidMismatch); $("send").innerHTML = on && !approval && !overlay && !kidMismatch ? STOP : SEND; $("send").setAttribute("aria-label", kidMismatch ? "pairing key changed" : approval ? "approval required" : overlay ? "selection required" : on ? "stop" : "send");
   }
   function setAwaiting(host, on) {
     const count = Number(pending.get(host) || 0);
@@ -1027,7 +1041,7 @@
       else { $("cfg").classList.add("show"); $("gear").classList.add("open"); }
       return;
     }
-    if (kidMismatch) { const nk = nekoTurn(); nekoErr(nk, "The pairing secret doesn't match Neko's. Run /relay qr on your computer and re-scan (or paste the fresh link in settings)."); return; }
+    if (kidMismatch) { $("cfg").classList.add("show"); $("gear").classList.add("open"); requestAnimationFrame(() => secret.focus()); return; }
     if (!host) { const nk = nekoTurn(); nekoErr(nk, "No Neko session is registered yet. Run /relay in a local Neko terminal first."); return; }
     if (!silentControl) { m.value = ""; drafts[host] = ""; historyPosByHost[host] = Infinity; grow(); userTurn(msg, host); }
     const nk = nekoTurn(host);

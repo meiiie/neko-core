@@ -1,11 +1,13 @@
 /** Shared ToolRegistry composition for CLI, TUI, and depth-one subagents. */
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import type { NekoConfig } from "./config.ts";
+import { withBrowserBridge } from "./browser-bridge.ts";
 import { loadSkill } from "./skills.ts";
 import { webPort } from "./web.ts";
 
 /** Apply config-backed capabilities once at a host composition root. */
 export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, options: { noTools?: boolean } = {}): ToolRegistry {
+  registry.mcp = withBrowserBridge(registry.mcp);
   registry.hooks = cfg.hooks;
   registry.allowDangerousBash = cfg.allowDangerousBash;
   registry.sandboxBash = cfg.sandbox;
@@ -18,6 +20,7 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
   registry.vision = cfg.vision;
   registry.noTools = options.noTools ?? false;
   registry.presence = cfg.computerUseOverlay;
+  registry.residentUia = cfg.computerUseResident;
   registry.inputBackend = cfg.computerUseInput;
   registry.web = webPort;
   registry.loadSkill = (name) => {
@@ -41,6 +44,7 @@ export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRe
   target.vision = source.vision;
   target.noTools = source.noTools;
   target.presence = source.presence;
+  target.residentUia = source.residentUia;
   target.inputBackend = source.inputBackend;
   target.searxngUrl = source.searxngUrl;
   target.searchBackend = source.searchBackend;

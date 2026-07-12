@@ -152,6 +152,34 @@ test("STARTUP-fullscreen sim: alt entered BEFORE the first render - content visi
   await tick(50);
 }, 30000);
 
+test("web tool results cannot create a blank gutter between the call and its content", async () => {
+  const vt = new VirtualTerminal(100, 30);
+  const out = new FakeTtyOut(100, 30, vt);
+  const stdin = new FakeStdin();
+  const session: any = {
+    id: "tool-gap", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
+    messages: [
+      { role: "user", content: "fetch the current advisory" },
+      { role: "assistant", content: "", tool_calls: [{ id: "fetch-1", function: { name: "web_fetch", arguments: '{"url":"https://example.com/advisory"}' } }] },
+      { role: "tool", tool_call_id: "fetch-1", content: `${"\n".repeat(12)}FETCH RESULT\n\nBODY${"\n".repeat(12)}` },
+    ],
+  };
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = renderFS(
+    React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "", tool_calls: [] }) }, resumedSession: session, sessionId: "tool-gap", preAltDispose }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(650);
+  const rows = vt.lines();
+  const callAt = rows.findIndex((line) => line.includes("Fetch("));
+  const resultAt = rows.findIndex((line) => line.includes("FETCH RESULT"));
+  expect(callAt).toBeGreaterThanOrEqual(0);
+  expect(resultAt).toBeGreaterThan(callAt);
+  expect(resultAt - callAt).toBeLessThanOrEqual(3);
+  app.unmount();
+  await tick(50);
+}, 30000);
+
 test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for Ctrl+C", async () => {
   const vt = new VirtualTerminal(100, 30);
   const out = new FakeTtyOut(100, 30, vt);

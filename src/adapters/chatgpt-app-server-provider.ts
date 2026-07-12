@@ -6,6 +6,7 @@ import { validChatGptCredentials } from "./chatgpt-auth.ts";
 import { toResponsesInput } from "./chatgpt-provider.ts";
 import {
   discoverCodexSupport,
+  encodeCodexDynamicTools,
   startCodexAppServer,
   type CodexAppServerHandlers,
 } from "./codex-app-server.ts";
@@ -49,6 +50,7 @@ export class ChatGptAppServerProvider implements Provider {
   private threadSignature = "";
   private active: ActiveTurn | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private dynamicToolNames = new Map<string, string>();
 
   constructor(private readonly cfg: NekoConfig, private readonly clientFactory: CodexClientFactory = defaultClientFactory) {}
 
@@ -69,8 +71,9 @@ export class ChatGptAppServerProvider implements Provider {
       .map((message) => textContent(message.content))
       .filter(Boolean)
       .join("\n\n");
-    const dynamicTools = toDynamicTools(tools);
-    const signature = JSON.stringify({ developerInstructions, dynamicTools });
+    const encodedTools = encodeCodexDynamicTools(tools);
+    this.dynamicToolNames = encodedTools.originalNames;
+    const signature = JSON.stringify({ developerInstructions, dynamicTools: encodedTools.tools });
     if (!this.threadId || signature !== this.threadSignature) {
       if (this.threadId) void client.request("thread/unsubscribe", { threadId: this.threadId }).catch(() => {});
       const started = await client.request("thread/start", {
@@ -81,7 +84,7 @@ export class ChatGptAppServerProvider implements Provider {
         sandbox: "read-only",
         ephemeral: true,
         developerInstructions,
-        dynamicTools,
+        dynamicTools: encodedTools.tools,
       }, 60_000);
       const id = String(started?.thread?.id ?? "");
       if (!id) throw new Error("Codex App Server did not return a thread id");
@@ -180,9 +183,10 @@ export class ChatGptAppServerProvider implements Provider {
     const active = this.active;
     if (!active?.executeTool) throw new Error("No active Neko tool executor");
     if (params?.threadId !== active.threadId) throw new Error("Tool request belongs to a different Codex thread");
+    const wireName = String(params?.tool ?? "");
     const call: ToolCall = {
       id: String(params?.callId ?? ""),
-      name: String(params?.tool ?? ""),
+      name: this.dynamicToolNames.get(wireName) ?? "",
       arguments: isObject(params?.arguments) ? params.arguments : {},
     };
     if (!call.id || !call.name) throw new Error("Codex returned an invalid dynamic tool call");
@@ -235,15 +239,6 @@ function makeActiveTurn(threadId: string, onDelta?: DeltaHook, executeTool?: Com
   let reject!: (error: Error) => void;
   const done = new Promise<void>((ok, fail) => { resolve = ok; reject = fail; });
   return { threadId, answer: "", onDelta, executeTool, toolResults: new Map(), resolve, reject, done };
-}
-
-function toDynamicTools(tools: any[]): any[] {
-  return tools.map((tool) => ({
-    type: "function",
-    name: String(tool?.function?.name ?? ""),
-    description: String(tool?.function?.description ?? ""),
-    inputSchema: tool?.function?.parameters ?? { type: "object", properties: {} },
-  })).filter((tool) => tool.name);
 }
 
 function toUserInput(content: any): any[] {

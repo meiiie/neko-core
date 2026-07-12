@@ -4,19 +4,33 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-11) — v0.10.0 release
+## Current status (2026-07-12) — v0.11.0 release
 Neko Code is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
 
-- **Branch:** `self-improve`. **Current release: v0.10.0 (2026-07-11)** - OpenAI login now separates
-  ChatGPT subscription from API billing; account-aware `/model`, model-aware `/effort`, `/usage`, and
-  scoped `/logout` are complete. GPT-5.6 Sol/Terra/Luna use the official Codex App Server through an
-  on-demand bridge that reuses Codex CLI or offers an optional verified Support Pack. The encrypted
-  relay is now a multi-session terminal hub, inline images preserve prompt position, and both one-line
-  installers stage + verify before atomic replacement. v0.9.0 remains the rollback baseline while the
-  new provider/installer path soaks in the field.
+- **Branch:** `self-improve`. **Current release: v0.11.0 (2026-07-12)** - Google is now a grouped auth
+  family with separate Gemini account-quota and API-key routes; browser control can retain signed-in
+  sessions through a dedicated profile or an explicitly attached Chrome tab; voice has local consent and
+  stop controls; and Windows computer use now shares one DPI-aware resident UIA/input/capture host with
+  post-action verification. Relay/mobile and transcript interaction also receive the same terminal-first
+  polish. v0.9.0 remains the rollback baseline while these optional integrations soak in the field.
+- **Gemini account route (released in v0.11.0):** Google is now a grouped auth family with separate Gemini
+  account-quota and API-key routes. The account route uses the official Gemini CLI ACP protocol, dynamic
+  model discovery, scoped login/logout, image streaming, and usage metadata. An isolated loopback MCP proxy
+  disables sidecar-native tools/extensions/hooks and routes every action back through Neko's approval gate;
+  a compatible CLI can be reused, while the one-step managed Support Pack installs Google's verified bundle
+  and a private Node LTS runtime without admin/global npm. It never enlarges the base Neko download.
+- **Outcome-verified computer use (released in v0.11.0, 2026-07-12):** Neko now treats tool success as process
+  evidence, not task completion. After real state changes, CLI/TUI/subagents reject a finish claim until a
+  fresh successful inspection tool call exists. `computer display` establishes one Per-Monitor-v2 physical
+  pixel contract across monitor bounds/work areas, UIA, screenshots and input; the remaining input/scroll DPI
+  gap is closed. UIA, Unicode keyboard, independent touch, legacy SendInput, scroll, and wait now share one
+  resident Windows host; a disposable custom-drawn Canvas probe verifies the coordinate path. Screenshot
+  capture now shares that host too, covers the physical virtual desktop, and emits frame/delta/change-region
+  evidence at 71-119 ms warm. Native DXGI capture and visual grounding remain separate measured upgrades. The verifier-backed GUI pack remains the
+  measurement gate before adding another framework.
 - **Post-v0.8.3 reliability hardening (working tree, 2026-07-10):** shared CLI/TUI/subagent tool
   composition (native web fallback alongside namespaced MCP), inherited safety boundaries, nested-secret
   redaction, typed boolean env overrides, interleaved parallel tool-call parsing, action-sensitive
@@ -301,6 +315,21 @@ cost/token tracking · MCP client · single-binary distribution.
   an `mcp_load` meta-tool pulls schemas on demand -- no flooding context with dozens of unused schemas.
   *(+13 tests incl. a real stdio MCP fixture server for lazy loading; tool-runtime 39/0, policy +
   architecture PASS, full suite green.)*
+- [x] **G13** Neko Browser Bridge public-release candidate: a Neko-owned Manifest V3 extension attaches one
+  user-selected signed-in Chrome tab through an exact-Origin, per-session-capability loopback adapter.
+  Read/click/type are distinct grants; password/OTP/payment fields stay blocked; cross-origin navigation
+  detaches; emergency stop is one click; audit omits content/arguments. The adapter composes through
+  `McpTools`, and only redacted status joins `/relay`'s E2E presence. Real extension E2E covers pair,
+  attach, snapshot, denied action, granted click/type, sensitive block and stop; production remains
+  `activeTab`-only without `<all_urls>` or `debugger`. An `AI` badge, in-page Stop marker, and conservative
+  `tabGroups` lifecycle make control visible without altering existing user groups. Public/unpacked origins
+  are config-allowlisted; Store privacy/listing/reviewer docs, icons, deterministic packages, and release ZIP
+  automation are ready. Dashboard account registration, item-ID issuance, and review remain owner actions.
+  See `docs/process/BROWSER-BRIDGE.md`.
+- [ ] **G14** Finish public Neko Browser Extension distribution after the owner creates the Chrome Web
+  Store item: replace the development key/id with the Dashboard public key/id, capture clean listing media,
+  submit a staged first release, and dogfood update/reconnect behavior. Keep Playwright persistent-profile
+  operation first-class so Neko remains fully usable without the extension.
 
 ## Phase H — real-terminal UX/UI polish (July 2026)
 - [x] **H1** Dogfood-driven polish to Claude-Code quality on a real terminal (full list in the "Current
@@ -314,3 +343,17 @@ cost/token tracking · MCP client · single-binary distribution.
   windowed transcript band at the stdout layer (`FrameDiffer` + ANSI row cache), uses absolute cell
   repainting, hardware scroll where safe, a Unicode-aware VT oracle, and real PTY/ConPTY smoke tests.
   Fullscreen is the primary experience; inline remains the automatic fallback for unfit terminals.
+- [x] **H3** Voice routing and conversational interaction lane — `/voice` defaults to a consent-first browser
+  preview that routes final transcripts through the normal Agent and speaks the result, with restrained
+  Vietnamese backchannels, cooldown/sensitive-input suppression, and barge-in cancellation. Browser speech
+  services may be online and the UI states that boundary; this route does not claim native GPT-Live parity.
+  Open ChatGPT remains an explicit external companion without reading its cookies or session. The Lab route preflights OAuth + the
+  Codex Support Pack, then opens a capability-authenticated localhost consent page for browser WebRTC. The
+  microphone is never opened before an explicit click; the TUI renders LIVE/mute/time/transcript state;
+  close-tab, stop, logout, support management, and exit all tear down media and App Server. Dynamic tool
+  calls return through Neko's existing approval boundary, duplicate call ids are idempotent, API-key env is
+  removed from the subscription-only child, and no paid API fallback exists. `/usage` reports measured voice
+  duration/last limit while naming the upstream quota-visibility gap. Stable Codex 0.144.1 + the owner's real
+  OAuth account passed thread/voice discovery; a genuine WebRTC offer then reached ChatGPT's experimental
+  subscription endpoint and received HTTP 404. Keep the Lab path for rollout detection, not as a promise of
+  GPT-Live parity.

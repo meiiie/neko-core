@@ -30,7 +30,7 @@ import { clearAnsiCache, fallbackRows, getCachedRows, primeAnsiCache, renderNode
 import { DISABLE_MOUSE, isMouseEnabled, parseLastPointer, parseWheelAll } from "./mouse.ts";
 import { brandTitle, saveTitle, setTabTitle, setTerminalTitle, stopTitleDriver } from "./title.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
-import { TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
+import { toolResultDisplayLines, TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
 import { loadConfig } from "../adapters/config.ts";
@@ -39,10 +39,17 @@ import { environmentBlock, projectContextBlock, rememberNote } from "../adapters
 import { readClipboardImage, writeClipboardText } from "../adapters/clipboard.ts";
 import { describeImage } from "../adapters/vision.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
-import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt } from "../adapters/chatgpt-auth.ts";
+import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt, openBrowser } from "../adapters/chatgpt-auth.ts";
+import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginGemini } from "../adapters/gemini-cli.ts";
+import { installGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
+import { compareCodexVersions, discoverCodexSupport } from "../adapters/codex-app-server.ts";
+import { installCodexSupportPack } from "../adapters/codex-support-pack.ts";
+import { ChatGptVoiceSession, CODEX_VOICE_MIN_VERSION, type ChatGptVoiceControl, type ChatGptVoiceOptions, type VoiceSnapshot } from "../adapters/chatgpt-voice.ts";
+import { BrowserVoiceSession, type BrowserVoiceOptions } from "../adapters/browser-voice.ts";
 import { authChoices, providerChoices } from "../adapters/provider-choice.ts";
 import { type RemoteAction, type RemoteHandlers, startRemoteControl, type RemoteControl, type RemoteUiState } from "../adapters/remote-control.ts";
 import { loadOrCreatePairing, loadOrCreateSessionPairing, relaySessionCode, revokeRemoteRelay, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
+import { readBrowserBridgeStatus } from "../adapters/browser-bridge.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { VERSION } from "../shared/version.ts";
@@ -95,9 +102,12 @@ interface ChatProps {
    * instead of mutating NEKO_FULLSCREEN, which is racy under bun's CI test scheduling (shared process.env
    * across file interleavings made inline tests randomly mount fullscreen on GitHub runners). */
   fullscreen?: boolean;
+  voiceFactory?: (options: ChatGptVoiceOptions) => ChatGptVoiceControl;
+  browserVoiceFactory?: (options: BrowserVoiceOptions) => ChatGptVoiceControl;
+  openUrl?: (url: string) => void;
 }
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -116,6 +126,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const remoteSinkRef = useRef<((chunk: string) => void) | null>(null); // streams a turn's output to a remote SSE client
   const remoteActRef = useRef<((line: string) => void) | null>(null); // streams tool-activity lines (the phone's process ticker)
   const remoteLineRef = useRef<((kind: LineKind, text: string) => void) | null>(null); // collects info/error lines for a remote turn
+  const voiceRef = useRef<ChatGptVoiceControl | null>(null);
+  const voiceStoppingRef = useRef(false);
+  const voiceErrorShownRef = useRef(false);
+  const voiceTurnRef = useRef(false);
+  const voiceTurnRunnerRef = useRef<(text: string) => Promise<string>>(async () => { throw new Error("voice turn runner is not ready"); });
+  const voiceModeRef = useRef("voice");
   const [rcOn, setRcOn] = useState(false);
   const cfg = useRef(loadConfig({ profile })).current;
   const idRef = useRef(0);
@@ -154,7 +170,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     if (cfg.usesChatGptAuth && !hasChatGptCredentials()) {
       out.push({ id: idRef.current++, kind: "info", text: "ChatGPT is not signed in - type /login to connect Plus/Pro (no API billing)." });
-    } else if (!cfg.apiKey && !cfg.isLocalEndpoint && !cfg.usesChatGptAuth) {
+    } else if (cfg.usesGeminiAuth && !hasGeminiCredentials()) {
+      out.push({ id: idRef.current++, kind: "info", text: "Google is not signed in - type /login to connect Gemini Free/AI Pro/Ultra (no API billing)." });
+    } else if (!cfg.apiKey && !cfg.isLocalEndpoint && !cfg.usesChatGptAuth && !cfg.usesGeminiAuth) {
       out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
     }
     return out;
@@ -192,6 +210,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [queued, setQueued] = useState(0);
   const [step, setStep] = useState(0);
   const [reasoning, setReasoning] = useState(""); // live model thinking (shown while busy, then cleared)
+  const [voiceSnapshot, setVoiceSnapshot] = useState<VoiceSnapshot | null>(null);
+  const [voiceTranscript, setVoiceTranscript] = useState<{ role: string; text: string } | null>(null);
+  const [voiceNow, setVoiceNow] = useState(Date.now());
   const reasoningRef = useRef("");
   const toolStreamRef = useRef(""); // streamed tool-call args this turn (counted, not displayed)
   const turnInStartRef = useRef(0); // cost.promptTokens at turn start  -> live INPUT (up) counter, this turn's delta
@@ -296,7 +317,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const line = { id: idRef.current++, kind, text, summary };
     // A streamed answer is rich Markdown before commit. Prime its final rows now so fullscreen never
     // flashes the cheap raw-markdown fallback while the asynchronous cache warmer catches up.
-    if (fullscreenRef.current && kind === "assistant") primeAnsiCache(line, contentColsRef.current, cfg);
+    if (fullscreenRef.current && (kind === "assistant" || kind === "user")) primeAnsiCache(line, contentColsRef.current, cfg);
     remoteLineRef.current?.(kind, text); // a remote turn collects info/error output (slash commands answer THERE)
     setLines((prev) => [...prev, line]);
     if (mirror) relayRef.current?.publish({ type: "line", line: { ...line, text: text.slice(0, 200_000) } }, { durable: true });
@@ -393,7 +414,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         parent,
       );
       const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT; // named agent role, else default
-      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps, maxContextTokens: cfg.contextWindow, verifyBeforeExit: cfg.verifyBeforeExit }).run(prompt);
+      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps, maxContextTokens: cfg.contextWindow, verifyBeforeExit: cfg.verifyBeforeExit, verifyStateChangesBeforeExit: true }).run(prompt);
     };
     // web_fetch's optional extractor: one model pass over the fetched page (Claude-style).
     registryRef.current.summarize = async (instruction, content, schema) => {
@@ -428,6 +449,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       maxSteps: cfg.maxSteps,
       maxContextTokens: cfg.contextWindow,
       verifyBeforeExit: cfg.verifyBeforeExit,
+      verifyStateChangesBeforeExit: true,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>
@@ -752,7 +774,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   // Stop the remote-control server when the app exits.
   useEffect(() => { busyRef.current = busy; }, [busy]); // keep the ref in lockstep with the state
-  useEffect(() => () => { rcRef.current?.stop(); relayRef.current?.stop(); }, []);
+  useEffect(() => () => {
+    rcRef.current?.stop();
+    relayRef.current?.stop();
+    const voice = voiceRef.current;
+    voiceRef.current = null;
+    if (voice) void voice.stop("Neko exited");
+  }, []);
+
+  useEffect(() => {
+    if (voiceSnapshot?.state !== "live" && voiceSnapshot?.state !== "muted") return;
+    setVoiceNow(Date.now());
+    const timer = setInterval(() => setVoiceNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [voiceSnapshot?.state, voiceSnapshot?.startedAt]);
   // Startup update check (daily-cached, non-blocking). With auto_update ON (the default, claude-code
   // style) a newer release is INSTALLED in the background - selfUpdate stages the download and swaps the
   // binary (Windows: rename-out-of-the-way trick), so it simply takes effect on the next launch; the
@@ -1061,6 +1096,208 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     { isActive: !busy && approval === null && overlay === null && viewer === null && search === null },
   );
 
+  const voiceFallback = () => process.platform === "win32"
+    ? "Fallback: press Win+H for Windows voice typing (separate from Neko; the OS data policy applies). API Realtime is never selected automatically."
+    : "Fallback: use your operating system's dictation service. API Realtime is never selected automatically.";
+
+  const stopVoice = async (reason = "user", announce = true) => {
+    const voice = voiceRef.current;
+    if (!voice) {
+      if (announce) addLine("info", "voice is not running");
+      return;
+    }
+    voiceStoppingRef.current = true;
+    voiceRef.current = null;
+    try { await voice.stop(reason); }
+    finally {
+      voiceStoppingRef.current = false;
+      setVoiceSnapshot(null);
+      setVoiceTranscript(null);
+      if (announce) addLine("info", `${voiceModeRef.current} stopped; microphone released.`);
+    }
+  };
+
+  const beginBrowserVoice = async () => {
+    if (voiceRef.current) return addLine("info", "voice is already active - use /voice status, /voice mute, or /voice stop");
+    voiceModeRef.current = "Neko conversational voice";
+    setVoiceTranscript(null);
+    const makeVoice = browserVoiceFactory ?? ((options: BrowserVoiceOptions) => new BrowserVoiceSession(options));
+    let voice!: ChatGptVoiceControl;
+    voice = makeVoice({
+      onUtterance: (text) => voiceTurnRunnerRef.current(text),
+      onInterrupt: () => controllerRef.current?.abort(),
+      openUrl,
+      onEvent: (event) => {
+        if (event.type === "state") {
+          setVoiceSnapshot(event.snapshot);
+          if (event.snapshot.state === "stopped" && !voiceStoppingRef.current && voiceRef.current === voice) {
+            voiceRef.current = null;
+            setVoiceSnapshot(null);
+            setVoiceTranscript(null);
+            addLine("info", "Conversational voice stopped from the browser; microphone released.");
+          }
+          return;
+        }
+        if (event.type === "transcript-delta") {
+          setVoiceTranscript({ role: event.role, text: event.delta });
+          return;
+        }
+        setVoiceTranscript(null);
+      },
+    });
+    voiceRef.current = voice;
+    setVoiceSnapshot({ state: "starting", muted: false });
+    try {
+      await voice.start();
+      addLine("info", "Neko Conversational Voice opened. Microphone is OFF until you press Start. Browser speech services may process audio online; Neko receives transcript text only and never selects paid Realtime API automatically.");
+    } catch (error) {
+      if (voiceRef.current === voice) voiceRef.current = null;
+      voiceStoppingRef.current = true;
+      try { await voice.stop("startup failed"); } catch {}
+      voiceStoppingRef.current = false;
+      setVoiceSnapshot(null);
+      setVoiceTranscript(null);
+      addLine("error", `Conversational voice failed: ${error instanceof Error ? error.message : error}`);
+    }
+  };
+
+  const beginVoice = async () => {
+    if (voiceRef.current) return addLine("info", "voice is already active - use /voice status, /voice mute, or /voice stop");
+    if (!hasChatGptCredentials()) {
+      addLine("error", "ChatGPT is not signed in. Run /login > OpenAI > ChatGPT Plus/Pro before using subscription voice.");
+      return;
+    }
+    const support = discoverCodexSupport();
+    const supportVersion = support.executable?.version;
+    const voiceReady = support.state === "ready" && supportVersion
+      ? compareCodexVersions(supportVersion, CODEX_VOICE_MIN_VERSION) >= 0
+      : false;
+    if (!voiceReady) {
+      setOverlay({
+        title: `ChatGPT subscription voice needs Codex Support Pack >= ${CODEX_VOICE_MIN_VERSION}.`,
+        items: [
+          { id: "install", label: "Install and continue", detail: "official OpenAI App Server; about 95 MiB download / 270 MiB disk" },
+          { id: "dictation", label: "Use OS Dictation", detail: process.platform === "win32" ? "press Win+H; no Neko download and no live voice reply" : "use the operating system dictation shortcut" },
+          { id: "cancel", label: "Not now", detail: "download nothing" },
+        ],
+        onSelect: (choice) => {
+          setOverlay(null);
+          if (choice.id === "dictation") return addLine("info", voiceFallback());
+          if (choice.id !== "install") return addLine("info", "Voice setup cancelled; microphone stayed off.");
+          setBusy(true);
+          void installCodexSupportPack({ notify: (message) => addLine("info", message) })
+            .then(async () => { addLine("info", "Codex Support Pack is ready. Opening the voice consent page..."); await beginVoice(); })
+            .catch((error) => addLine("error", `Voice Support Pack failed: ${error instanceof Error ? error.message : error}`))
+            .finally(() => setBusy(false));
+        },
+      });
+      return;
+    }
+
+    voiceModeRef.current = "Neko subscription bridge";
+    voiceErrorShownRef.current = false;
+    setVoiceTranscript(null);
+    // A GPT-5.6 text provider may already own an idle App Server. Recreate it lazily after voice so
+    // the experimental call never doubles the optional sidecar's steady-state memory.
+    if (cfg.usesChatGptAuth) agentRef.current!.setProvider(getProvider(cfg));
+    const makeVoice = voiceFactory ?? ((options: ChatGptVoiceOptions) => new ChatGptVoiceSession(options));
+    let voice!: ChatGptVoiceControl;
+    voice = makeVoice({
+      model: /^gpt-/i.test(cfg.model) ? cfg.model : "gpt-5.5",
+      tools: agentRef.current!.externalToolSchemas(),
+      executeTool: (call) => agentRef.current!.executeExternalTool(call),
+      onEvent: (event) => {
+        if (event.type === "state") {
+          setVoiceSnapshot(event.snapshot);
+          if (event.snapshot.state === "error" && event.snapshot.error && !voiceErrorShownRef.current) {
+            voiceErrorShownRef.current = true;
+            addLine("error", `${event.snapshot.error}\n${voiceFallback()}`);
+          }
+          if (event.snapshot.state === "stopped" && !voiceStoppingRef.current && voiceRef.current === voice) {
+            voiceRef.current = null;
+            setVoiceSnapshot(null);
+            setVoiceTranscript(null);
+            addLine("info", voiceErrorShownRef.current ? "Voice session closed; microphone released." : "Voice stopped from the browser; microphone released.");
+          }
+          return;
+        }
+        if (event.type === "transcript-delta") {
+          setVoiceTranscript((current) => current?.role === event.role
+            ? { role: event.role, text: current.text + event.delta }
+            : { role: event.role, text: event.delta });
+          return;
+        }
+        const text = event.text.trim();
+        setVoiceTranscript(null);
+        if (text) addLine(event.role === "user" ? "user" : "assistant", text);
+      },
+    });
+    voiceRef.current = voice;
+    setVoiceSnapshot({ state: "starting", muted: false });
+    try {
+      await voice.start();
+      addLine("info", "Voice page opened in your browser. Microphone is OFF until you press Start voice. Close the tab or use /voice stop to end it.");
+    } catch (error) {
+      if (voiceRef.current === voice) voiceRef.current = null;
+      voiceStoppingRef.current = true;
+      try { await voice.stop("startup failed"); } catch {}
+      voiceStoppingRef.current = false;
+      setVoiceSnapshot(null);
+      setVoiceTranscript(null);
+      if (!voiceErrorShownRef.current) addLine("error", `${error instanceof Error ? error.message : error}\n${voiceFallback()}`);
+    }
+  };
+
+  const openVoicePicker = () => {
+    const active = voiceRef.current;
+    if (!active) {
+      setOverlay({
+        title: "Voice - choose a mode",
+        items: [
+          { id: "browser", label: "Neko Conversational Voice", detail: "works now in Chrome/Edge; backchannels + interruption; browser data policy applies" },
+          { id: "official", label: "Open ChatGPT", detail: "Voice appears only when available to your account/browser; runs outside Neko" },
+          { id: "chatgpt", label: "Neko Subscription Bridge - Lab", detail: "experimental Codex WebRTC; availability varies; never API billing" },
+          { id: "dictation", label: "OS Dictation", detail: process.platform === "win32" ? "press Win+H; speech-to-text only, OS data policy applies" : "use the operating system dictation shortcut" },
+          { id: "cancel", label: "Cancel", detail: "microphone stays off" },
+        ],
+        onSelect: (choice) => {
+          setOverlay(null);
+          if (choice.id === "browser") void beginBrowserVoice();
+          else if (choice.id === "official") {
+            try {
+              (openUrl ?? openBrowser)("https://chatgpt.com/");
+              addLine("info", "Opened official ChatGPT Voice. Press the Voice button there; GPT-Live runs separately from Neko and Neko does not access that tab, microphone, or session.");
+            } catch (error) {
+              addLine("error", `Could not open ChatGPT: ${error instanceof Error ? error.message : error}. Open https://chatgpt.com/ manually.`);
+            }
+          } else if (choice.id === "chatgpt") void beginVoice();
+          else if (choice.id === "dictation") addLine("info", voiceFallback());
+        },
+      });
+      return;
+    }
+    const muted = active.snapshot().muted;
+    setOverlay({
+      title: `${voiceModeRef.current} - ${active.snapshot().state}`,
+      items: [
+        { id: "mute", label: muted ? "Unmute microphone" : "Mute microphone", detail: "the browser remains connected" },
+        { id: "status", label: "Show status", detail: "duration and quota visibility" },
+        { id: "stop", label: "Stop voice", detail: "release microphone and close the realtime session" },
+        { id: "cancel", label: "Back", detail: "keep voice running" },
+      ],
+      onSelect: (choice) => {
+        setOverlay(null);
+        if (choice.id === "mute") {
+          try { active.setMuted(!muted); } catch (error) { addLine("error", error instanceof Error ? error.message : String(error)); }
+        } else if (choice.id === "status") {
+          const snap = active.snapshot();
+          const seconds = snap.startedAt ? Math.floor((Date.now() - snap.startedAt) / 1000) : 0;
+          addLine("info", `voice: ${snap.state} - ${Math.floor(seconds / 60)}m ${seconds % 60}s\nremaining voice quota is not exposed; Neko never falls back to API billing`);
+        } else if (choice.id === "stop") void stopVoice();
+      },
+    });
+  };
+
   const handle = async (text: string) => {
     if (text.startsWith("#")) {
       addLine("info", rememberNote(text.slice(1)));
@@ -1165,6 +1402,26 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       return;
     }
+    if (text === "/voice" || text.startsWith("/voice ")) {
+      const action = text.slice("/voice".length).trim().toLowerCase();
+      if (!action) { openVoicePicker(); return; }
+      if (action === "start") { await beginBrowserVoice(); return; }
+      if (action === "stop" || action === "off") { await stopVoice(); return; }
+      if (action === "mute" || action === "unmute") {
+        const voice = voiceRef.current;
+        if (!voice) return addLine("info", "voice is not running - use /voice start");
+        try { voice.setMuted(action === "mute"); }
+        catch (error) { addLine("error", error instanceof Error ? error.message : String(error)); }
+        return;
+      }
+      if (action === "status") {
+        const snap = voiceRef.current?.snapshot();
+        if (!snap) return addLine("info", "voice: stopped - use /voice to choose Neko conversational voice, ChatGPT, or dictation");
+        const seconds = snap.startedAt ? Math.floor((Date.now() - snap.startedAt) / 1000) : 0;
+        return addLine("info", `voice: ${snap.state} - ${Math.floor(seconds / 60)}m ${seconds % 60}s\nremaining voice quota is not exposed; API billing fallback is disabled`);
+      }
+      return addLine("info", "usage: /voice [start|stop|mute|unmute|status]");
+    }
     if (text === "/login") {
       // Provider first, auth route second. OpenAI deliberately appears ONCE here; only after choosing
       // it do we distinguish ChatGPT subscription OAuth from pay-as-you-go API-key auth.
@@ -1175,11 +1432,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       };
       const apiProfiles = new Set<string>();
       for (const [name, profile] of Object.entries(cfg.profiles)) {
-        if (profile.auth === "chatgpt_oauth" || profile.auth === "none") continue;
+        if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "none") continue;
         try { if (loadConfig({ profile: name }).apiKey) apiProfiles.add(name); } catch { /* status only */ }
       }
       const openAuthRoutes = (family: string) => {
-        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), apiProfiles });
+        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), apiProfiles });
         const selectRoute = async (route: { id: string }) => {
           setOverlay(null);
           const profile = cfg.profiles[route.id];
@@ -1197,6 +1454,42 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             }
             return;
           }
+          if (profile?.auth === "gemini_oauth") {
+            const support = discoverGeminiCli();
+            if (support.state !== "ready") {
+              setOverlay({
+                title: "Gemini account sign-in needs the optional Gemini Support Pack.",
+                items: [
+                  { id: "install", label: "Install and continue", detail: "Official Google bundle; about 55 MiB download / 200 MiB disk. No admin. Remove later with /support." },
+                  { id: "cancel", label: "Not now", detail: "Keep the current provider; download nothing" },
+                ],
+                onSelect: (choice) => {
+                  setOverlay(null);
+                  if (choice.id !== "install") return addLine("info", "Gemini Support Pack installation cancelled; current provider unchanged.");
+                  setBusy(true);
+                  void installGeminiSupportPack({ notify: (message) => addLine("info", message) })
+                    .then(async () => {
+                      addLine("info", "Gemini Support Pack is ready. Continuing to Google sign-in... Manage or remove it anytime with /support.");
+                      await selectRoute(route);
+                    })
+                    .catch((error) => addLine("error", `Gemini Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and choose Google again to retry.`))
+                    .finally(() => setBusy(false));
+                },
+              });
+              return;
+            }
+            setBusy(true);
+            try {
+              await loginGemini((message) => addLine("info", message));
+              activate(route.id);
+              addLine("info", "Google connected. Free/AI Pro/Ultra quota is active; API billing is not used. Type /model to choose an account-available model.");
+            } catch (error) {
+              addLine("error", `Gemini sign-in failed: ${error instanceof Error ? error.message : error}`);
+            } finally {
+              setBusy(false);
+            }
+            return;
+          }
           activate(route.id);
           setAwaitingKey(true);
           addLine("info", `${profile?.label || route.id}: paste the API key, then Enter (input hidden). Empty Enter cancels without removing the old key.`);
@@ -1206,7 +1499,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
         setOverlay({
-          title: family === "openai" ? "OpenAI - choose how to sign in" : `Sign in to ${family}`,
+          title: family === "openai" ? "OpenAI - choose how to sign in" : family === "google" ? "Google - choose how to sign in" : `Sign in to ${family}`,
           items: routes,
           onSelect: (route) => { void selectRoute(route); },
         });
@@ -1222,10 +1515,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     if (text === "/logout") {
+      if (voiceRef.current) await stopVoice("logout", false);
       if (cfg.usesChatGptAuth) {
         addLine("info", `${clearChatGptCredentials()} OpenAI API keys were left untouched.`);
         // Replacing the provider also disposes a live Codex App Server, so an in-memory external
         // token cannot survive /logout until process exit.
+        agentRef.current?.setProvider(getProvider(cfg));
+        return;
+      }
+      if (cfg.usesGeminiAuth) {
+        addLine("info", `${clearGeminiCredentials()}. ChatGPT sign-in and API keys were left untouched.`);
         agentRef.current?.setProvider(getProvider(cfg));
         return;
       }
@@ -1244,6 +1543,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // /auto <goal>: closed-loop — work + self-review until done (bounded). Runs as a busy turn.
     const loopGoal = /^\/auto\s+([\s\S]+)/.exec(text)?.[1]?.trim() || null;
     if (text.startsWith("/") && !loopGoal) {
+      if (/^\/support(?:\s|$)/.test(text) && voiceRef.current) await stopVoice("support management", true);
       await runSlashCommand(text, {
         cfg,
         agent: agentRef.current!,
@@ -1269,6 +1569,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         exit,
       });
       relayRef.current?.refresh();
+      return;
+    }
+
+    if (voiceRef.current && !voiceTurnRef.current) {
+      addLine("info", "Voice is active. Use /voice stop before starting a separate text turn, or keep speaking in the voice tab.");
       return;
     }
 
@@ -1386,6 +1691,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   };
 
+  voiceTurnRunnerRef.current = async (text: string) => {
+    if (busyRef.current) throw new Error("Neko is still handling the previous voice turn");
+    const before = agentRef.current!.messages.length;
+    voiceTurnRef.current = true;
+    try {
+      await handle(text);
+      const added = agentRef.current!.messages.slice(before);
+      const reply = [...added].reverse().find((message) => message.role === "assistant")?.content;
+      return typeof reply === "string" ? reply : reply ? contentToText(reply) : "";
+    } finally {
+      voiceTurnRef.current = false;
+    }
+  };
+
   // Shared remote handlers for /rc (HTTP) and /relay (outbound poll): run one turn (streaming to a
   // remote sink if given), report status, interrupt.
   const makeRemoteHandlers = (): RemoteHandlers => ({
@@ -1445,6 +1764,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       mode: modeRef.current,
       commands: SLASH,
       ui: relayUiRef.current,
+      browser: readBrowserBridgeStatus(),
       contextPercent: (() => {
         const cost = agentRef.current!.cost;
         const messages = agentRef.current!.messages;
@@ -1791,7 +2111,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       {(() => {
         const l = expandedId != null ? lines.find((x) => x.id === expandedId) : undefined;
         if (!l) return null;
-        const all = l.text.split("\n");
+        const all = toolResultDisplayLines(l.text);
         const CAP = 40;
         return (
           <Box flexDirection="column" marginTop={1}>
@@ -1852,6 +2172,21 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             effort={cfg.effort}
           />
           {registryRef.current?.bashRunning() ? <Text dimColor>{"  (ctrl+b to run in background)"}</Text> : null}
+        </Box>
+      ) : null}
+
+      {voiceSnapshot && voiceSnapshot.state !== "stopped" && voiceSnapshot.state !== "error" ? (
+        <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor={voiceSnapshot.state === "live" || voiceSnapshot.state === "muted" ? "red" : "cyan"} paddingX={1}>
+          <Text>
+            <Text color={voiceSnapshot.state === "live" || voiceSnapshot.state === "muted" ? "red" : "cyan"} bold>
+              {voiceSnapshot.state === "live" || voiceSnapshot.state === "muted" ? "● LIVE" : "VOICE"}
+            </Text>
+            <Text dimColor>{"  ·  "}</Text>
+            <Text>{voiceSnapshot.state === "muted" ? "muted" : voiceSnapshot.state === "waiting" ? "microphone off - press Start voice in the browser" : voiceSnapshot.state}</Text>
+            {voiceSnapshot.startedAt ? <Text dimColor>{`  ·  ${fmtDuration(Math.floor((voiceNow - voiceSnapshot.startedAt) / 1000))}`}</Text> : null}
+            <Text dimColor>{"  ·  /voice mute  ·  /voice stop"}</Text>
+          </Text>
+          {voiceTranscript?.text ? <Text color="gray" italic>{`${voiceTranscript.role === "user" ? ">" : "Neko:"} ${trunc(voiceTranscript.text, Math.max(20, contentCols - 10))}`}</Text> : null}
         </Box>
       ) : null}
 

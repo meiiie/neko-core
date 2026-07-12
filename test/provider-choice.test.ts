@@ -18,12 +18,23 @@ test("provider picker groups ChatGPT subscription and OpenAI API under one OpenA
 });
 
 test("OpenAI auth picker keeps subscription and API billing visibly separate", () => {
-  const choices = authChoices(cfg("chatgpt"), "openai", { chatgpt: true, apiProfiles: new Set() });
+  const choices = authChoices(cfg("chatgpt"), "openai", { chatgpt: true, gemini: false, apiProfiles: new Set() });
   expect(choices.map((choice) => choice.id)).toEqual(["chatgpt", "openai"]);
   expect(choices[0].detail).toContain("subscription, no API billing");
   expect(choices[0].detail).toContain("connected");
   expect(choices[1].detail).toContain("pay-as-you-go API");
   expect(choices[1].detail).toContain("not connected");
+});
+
+test("Google auth picker keeps Gemini account quota and API billing separate", () => {
+  const grouped = providerChoices(cfg("gemini"));
+  expect(grouped.filter((choice) => choice.id === "google")).toHaveLength(1);
+  expect(grouped.find((choice) => choice.id === "google")?.detail).toContain("Gemini Free/AI Pro/Ultra or API key");
+  const choices = authChoices(cfg("gemini"), "google", { chatgpt: false, gemini: true, apiProfiles: new Set() });
+  expect(choices.map((choice) => choice.id)).toEqual(["gemini", "gemini-api"]);
+  expect(choices[0].detail).toContain("Google account quota, no API billing");
+  expect(choices[0].detail).toContain("connected");
+  expect(choices[1].detail).toContain("pay-as-you-go API");
 });
 
 test("profile display and model context name the active OpenAI auth route", () => {

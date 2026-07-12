@@ -10,7 +10,7 @@ import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { ChatApp } from "../src/ui/chat.tsx";
 import { CompactingLine, fmtElapsed, RunningLine, ThinkingLine } from "../src/ui/thinking-line.tsx";
 import { ApprovalBox } from "../src/ui/approval-box.tsx";
-import { TranscriptLine, type Line } from "../src/ui/transcript.tsx";
+import { toolResultDisplayLines, TranscriptLine, type Line } from "../src/ui/transcript.tsx";
 import { TranscriptViewer } from "../src/ui/transcript-viewer.tsx";
 import { RichView } from "../src/ui/rich-transcript.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
@@ -441,6 +441,21 @@ test("a user prompt and a tool call each get a blank line above (turn separation
   const t = strip(render(<TranscriptLine line={{ id: 2, kind: "tool_call", text: "Bash(ls)" }} cfg={CFG} />).lastFrame()).split("\n");
   expect(t[0].trim()).toBe(""); // tool calls separate from the prompt / previous group
   expect(t.some((l) => l.includes("Bash(ls)"))).toBe(true);
+});
+
+test("user prompts render as padded message blocks", () => {
+  const frame = strip(render(<TranscriptLine line={{ id: 1, kind: "user", text: "clear speaker" }} cfg={CFG} cols={40} />).lastFrame());
+  const row = frame.split("\n").find((line) => line.includes("clear speaker")) ?? "";
+  expect(row).toStartWith(" > clear speaker");
+});
+
+test("tool results remove extractor blank gutters without changing content", () => {
+  const raw = `${"\n".repeat(12)}Title\n\n\n\nBody${"\n".repeat(12)}`;
+  expect(toolResultDisplayLines(raw)).toEqual(["Title", "", "Body"]);
+  const frame = strip(render(<TranscriptLine line={{ id: 2, kind: "tool_result", text: raw }} cfg={CFG} cols={60} />).lastFrame());
+  expect(frame.split("\n")[0]).toContain("Title");
+  expect(frame).toContain("Body");
+  expect(frame).not.toContain("\n\n\n");
 });
 
 test("write_file approval previews size + a '+N more lines' hint", () => {

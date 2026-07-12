@@ -64,6 +64,24 @@ export interface Line {
   summary?: string; // 1-line collapse for read-type tool results (full is under Ctrl+O)
 }
 
+/** Display-only cleanup for tool output. Extractors often return a block with many blank rows at the
+ * edges; rendering those rows verbatim creates a large black hole between a tool call and its result.
+ * Preserve indentation/content, trim only blank edges, and collapse internal blank runs to one row. */
+export function toolResultDisplayLines(text: string): string[] {
+  const lines = String(text).replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
+  let start = 0, end = lines.length;
+  while (start < end && !lines[start].trim()) start++;
+  while (end > start && !lines[end - 1].trim()) end--;
+  const out: string[] = [];
+  let blank = false;
+  for (const line of lines.slice(start, end)) {
+    if (!line.trim()) { if (blank) continue; blank = true; }
+    else blank = false;
+    out.push(line);
+  }
+  return out.length ? out : [""];
+}
+
 /** A tool-call line like "Read(src/core/agent.ts)": when the argument resolves to a real local file,
  * hyperlink it (file:// URI) so Ctrl+Click opens it - the Claude-Code affordance. The existsSync gate
  * keeps queries/commands/truncated args as plain text (renders happen once per line via the ANSI cache,
@@ -118,8 +136,8 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
       // A blank line above each user turn so the prompt stands clear of the previous turn's output
       // (Claude-Code's UserPromptMessage does marginTop={1}); otherwise turns run together.
       return (
-        <Box marginTop={1}>
-          <Text color="cyan">{"> "}{line.text}</Text>
+        <Box marginTop={1} width={cols} paddingLeft={1} paddingRight={1} backgroundColor="#303030">
+          <Text><Text color="cyan">{"> "}</Text><Text color="white">{line.text}</Text></Text>
         </Box>
       );
     case "assistant":
@@ -141,7 +159,7 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
         const more = line.text.split("\n").length > 1;
         return <Text dimColor>{`  └ ${line.summary}${more ? " (ctrl+o to expand)" : ""}`}</Text>;
       }
-      const all = line.text.split("\n");
+      const all = toolResultDisplayLines(line.text);
       const isError = /^(Error|Blocked|Denied|Refused)/.test(all[0] ?? "");
       const COLLAPSE = 8;
       const hidden = all.length - COLLAPSE;
@@ -163,7 +181,7 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
     case "tool_result_full":
       return (
         <Box flexDirection="column">
-          {line.text.split("\n").map((l, i) => (
+          {toolResultDisplayLines(line.text).map((l, i) => (
             <DiffLine key={i} raw={l} indent={i === 0 ? "  └ " : "     "} isError={false} />
           ))}
         </Box>

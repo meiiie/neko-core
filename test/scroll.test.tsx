@@ -75,6 +75,7 @@ test("flattenLines: glyphs, wrapping, entry clip", () => {
   ];
   const rows = flattenLines(lines, 40);
   expect(rows[0].text).toBe("> hello");
+  expect(rows[0].background).toBe("#303030");
   expect(rows.some((r) => r.text.startsWith("● "))).toBe(true);
 
   // A long line wraps into multiple rows at the given width.

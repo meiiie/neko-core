@@ -62,6 +62,18 @@ test("ChatGPT subscription defaults to a completion-usable vision model", () => 
   expect(cfg.contextWindow).toBe(272_000);
 });
 
+test("Gemini account and API-key routes are separate config-first profiles", () => {
+  const account = loadConfig({ path: tmpConfig({}), profile: "gemini" });
+  expect(account.provider).toBe("gemini_cli");
+  expect(account.usesGeminiAuth).toBe(true);
+  expect(account.model).toBe("auto");
+  expect(account.vision).toBe(true);
+  expect(account.contextWindow).toBe(1_000_000);
+  const api = loadConfig({ path: tmpConfig({}), profile: "gemini-api" });
+  expect(api.provider).toBe("gemini_cli");
+  expect(api.usesGeminiAuth).toBe(false);
+});
+
 test("withModel clones the config at a different model, same endpoint, original unchanged", () => {
   const cfg = loadConfig({ path: tmpConfig({ base_url: "https://x/v1", model: "main" }) });
   const v = cfg.withModel("vision-x");
@@ -92,6 +104,20 @@ test("mcp_allow / mcp_deny parse to string arrays", () => {
   expect(cfg.mcpAllow).toEqual(["fs"]);
   expect(cfg.mcpDeny).toEqual(["fs__delete", "danger"]);
   expect(loadConfig({ path: tmpConfig({}) }).mcpAllow).toEqual([]); // absent -> empty
+});
+
+test("browser extension ids are config-first, normalized, unique, and validated", () => {
+  const dev = loadConfig({ path: tmpConfig({}) });
+  expect(dev.browserExtensionIds).toEqual(["koalaflndbcddboachbdfmppdeblldje"]);
+  const cfg = loadConfig({ path: tmpConfig({
+    browser_extension_ids: ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "bad", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+  }) });
+  expect(cfg.browserExtensionIds).toEqual(["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
+  process.env.NEKO_BROWSER_EXTENSION_IDS = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,cccccccccccccccccccccccccccccccc";
+  expect(loadConfig({ path: tmpConfig({}) }).browserExtensionIds).toEqual([
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "cccccccccccccccccccccccccccccccc",
+  ]);
 });
 
 test("defaults when overlay missing", () => {
@@ -160,6 +186,13 @@ test("boolean NEKO_* overrides parse false/true instead of using string truthine
   expect(cfg.mcpLazy).toBe(false);
   expect(cfg.vision).toBe(true);
   expect(cfg.data.sandbox).toBe(false);
+});
+
+test("resident UIA is on by default and has config/env rollback switches", () => {
+  expect(loadConfig({ path: tmpConfig({}) }).computerUseResident).toBe(true);
+  expect(loadConfig({ path: tmpConfig({ computer_use_resident: false }) }).computerUseResident).toBe(false);
+  process.env.NEKO_COMPUTER_USE_RESIDENT = "0";
+  expect(loadConfig({ path: tmpConfig({ computer_use_resident: true }) }).computerUseResident).toBe(false);
 });
 
 test("invalid boolean NEKO_* override fails clearly", () => {

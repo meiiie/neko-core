@@ -48,7 +48,10 @@ test("computer action validates inputs deterministically (no NaN/garbage reaches
   expect(String(await tools.execute("computer", { action: "open" }))).toContain("needs 'target'");
   expect(String(await tools.execute("computer", { action: "bogus" }))).toContain("Unknown computer action");
   expect(String(await tools.execute("computer", { action: "wait", duration_ms: 1 }))).toContain("waited 1 ms");
-});
+  if (process.platform === "win32") {
+    expect(String(await tools.execute("computer", { action: "display" }))).toMatch(/coordinate_space=physical_px.*per-monitor-v2/);
+  }
+}, 15_000);
 
 test("computer screenshot embeds vision bytes, while text-only mode keeps the helper path", async () => {
   if (process.platform !== "win32") return;

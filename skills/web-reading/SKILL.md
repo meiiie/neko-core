@@ -1,6 +1,6 @@
 ---
 name: web-reading
-description: Read/extract content from a web page or feed EFFICIENTLY - posts, articles, listings, comments, search results - ESPECIALLY heavy JavaScript SPAs (Facebook, X/Twitter, LinkedIn, Instagram, Reddit, Xiaohongshu) where naive DOM scraping returns empty, thrashes, and burns minutes + tokens. Plan the read first, prefer the accessibility snapshot or a compact markdown/structured extract over raw querySelectorAll, grab ONCE near a loaded state (don't scroll-churn a virtualized feed), extract compact fields at the source, and stop after a couple of failed attempts instead of trying a 7th selector. For "luot/doc/thu thap/scrape/trich noi dung web, feed, bai viet, binh luan, ket qua tim kiem". (doc va trich noi dung trang web mot cach hieu qua, khong lan man).
+description: Read/extract content from a web page or feed EFFICIENTLY - posts, articles, listings, comments, search results - ESPECIALLY heavy JavaScript SPAs (Facebook, X/Twitter, LinkedIn, Instagram, Reddit, Xiaohongshu) where naive DOM scraping returns empty, thrashes, and burns minutes + tokens. Plan the read first, prefer the accessibility snapshot or a compact markdown/structured extract over raw querySelectorAll, and for large feeds capture-before-scroll into a deduplicated disk accumulator instead of carrying every post in model context. Stop after a couple of failed extraction approaches instead of trying a 7th selector. For "luot/doc/thu thap/scrape/trich noi dung web, feed, bai viet, binh luan, ket qua tim kiem". (doc va trich noi dung trang web mot cach hieu qua, khong lan man).
 ---
 
 # Skill: Web reading (extract page/feed content efficiently, no thrashing)
@@ -45,12 +45,30 @@ Name the site type first, then pick the strategy:
   the RENDERED DOM and returns compact Markdown (the SPA equivalent of web_fetch). Grab once; slice/dedupe on
   the returned markdown.
 
-## Virtualized feeds: grab ONCE, do NOT scroll-churn
-On FB/X/etc, scrolling **unmounts** the items you already have - so scroll-then-collect *destroys* your
-data instead of accumulating it, and each `scroll + await 2s` step x20-30 is where the minutes go.
-- Load the feed, let it settle (one wait), then grab everything currently rendered in ONE pass.
-- Want more than one screen holds? Accept the realistic limit. "Latest 5-7 posts from the loaded view" is
-  the honest answer; **churning for an arbitrary "10" is net-negative.** State the limit plainly.
+## Virtualized feeds: capture BEFORE every scroll, persist outside model context
+FB/X/etc unmount old rows while scrolling. That does NOT prevent a large collection; it means the captured
+rows must leave the DOM before the next scroll. For a small ask, one settled snapshot is still best. For a
+target such as 50/100 posts, use this bounded accumulator loop:
+1. Create a session JSONL/JSON artifact with `{id,url,author,time,text}` rows (never cookies or hidden fields).
+2. Extract only the CURRENT visible batch. Prefer compact structured evaluation; if Comet's DOM is opaque but
+   the accessibility snapshot contains posts, parse that snapshot. Dedupe by post URL/id, then normalized
+   author+time+text signature—not by array position.
+3. Append new rows to disk and keep only the batch count + short running summary in model context.
+4. Scroll about 70-80% of the viewport, wait for a NEW anchor/post id, then repeat. Never scroll before the
+   current batch is safely recorded.
+5. Stop at the requested count, end-of-feed, explicit time/step budget, or three consecutive no-growth cycles.
+   Report the exact collected count and reason; never invent padding.
+
+This restores the strong long-feed behavior: virtualization bounds DOM memory while the durable accumulator
+retains earlier rows. The bad pattern is BLIND scroll-churn or repeatedly returning the whole accumulated feed
+to the model—not scrolling itself.
+
+For a read-only request of about 100 items, call `skills/web-reading/scripts/collect-feed.js` through approved
+`browser_run_code_unsafe` calls. Each call returns at most 20 rows so it stays below MCP action timeouts; append
+and dedupe that batch in the session artifact, then call it again on the same page until the global target or
+three no-growth batches. The collector supports semantic articles plus Facebook's `[data-virtualized]` feed
+units and never reads cookies or form fields. If batches remain empty because the site hides its structure,
+fall back to accessibility snapshots with the same disk-accumulator loop; do not keep changing DOM selectors.
 
 ## Extract compact, at the source (LLM extracts, code computes)
 Never return a giant raw blob and parse it in a second step. Have the extraction step return only the

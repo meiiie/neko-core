@@ -40,6 +40,8 @@ and offer the one-line install, don't silently fall back to fragile scraping.
 ## Login-required feeds (Facebook feed, Twitter home, private IG) - read this first
 - These need YOUR authenticated session. Two ways: (a) a browser-session bridge (agent-reach/OpenCLI's Chrome
   extension + daemon) reuses your live login; (b) the browser MCP driving real Chrome that's already logged in.
+- Before collecting a feed—especially a requested count such as 50/100—load the `web-reading` skill. Its
+  capture-before-scroll + disk accumulator preserves rows that a virtualized feed unmounts and bounds context.
 - **Account risk + ToS:** automating a logged-in social account can get it **checkpointed or banned**, and a
   session bridge acts AS you. Warn the user, keep it minimal, prefer public/RSS/API routes, and never do it on
   an account you can't afford to lose. This is the user's call - surface the risk, don't just do it.

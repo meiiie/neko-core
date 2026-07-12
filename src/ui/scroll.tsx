@@ -13,9 +13,9 @@ import { useEffect, useRef, useState } from "react";
 import type { Line, LineKind } from "./transcript.tsx";
 
 /** Per-kind glyph + color, mirroring the live transcript so a review reads the same as the session. */
-export function styleFor(kind: LineKind): { glyph: string; color?: string; dim: boolean } {
+export function styleFor(kind: LineKind): { glyph: string; color?: string; background?: string; dim: boolean } {
   switch (kind) {
-    case "user": return { glyph: "> ", color: "cyan", dim: false };
+    case "user": return { glyph: "> ", color: "white", background: "#303030", dim: false };
     case "assistant": return { glyph: "  ", color: "white", dim: false };
     case "tool_call": return { glyph: "● ", color: "green", dim: false };
     case "tool_result": return { glyph: "  └ ", dim: true };
@@ -24,7 +24,7 @@ export function styleFor(kind: LineKind): { glyph: string; color?: string; dim: 
   }
 }
 
-export interface Row { text: string; color?: string; dim: boolean }
+export interface Row { text: string; color?: string; background?: string; dim: boolean }
 
 /** Flatten Lines into fixed-width display rows: wrap long lines, clip a noisy entry to a few rows with a
  * "+N more" marker, blank separator between entries. Uniform rows -> trivial windowed scroll. */
@@ -32,7 +32,7 @@ export function flattenLines(lines: Line[], width: number): Row[] {
   const rows: Row[] = [];
   for (const l of lines) {
     if (l.kind === "welcome") continue;
-    const { glyph, color, dim } = styleFor(l.kind);
+    const { glyph, color, background, dim } = styleFor(l.kind);
     const body = l.kind === "tool_result" && l.summary ? l.summary : l.text;
     const wrap = Math.max(8, width - glyph.length);
     const segs: string[] = [];
@@ -42,7 +42,7 @@ export function flattenLines(lines: Line[], width: number): Row[] {
     }
     const clip = l.kind === "user" || l.kind === "assistant" ? 12 : 4;
     const shown = segs.slice(0, clip);
-    shown.forEach((s, i) => rows.push({ text: (i === 0 ? glyph : " ".repeat(glyph.length)) + s, color, dim }));
+    shown.forEach((s, i) => rows.push({ text: (i === 0 ? glyph : " ".repeat(glyph.length)) + s, color, background, dim }));
     if (segs.length > clip) rows.push({ text: " ".repeat(glyph.length) + `… +${segs.length - clip} more lines`, color: "gray", dim: true });
     rows.push({ text: "", dim: false }); // separator between entries
   }
@@ -212,9 +212,8 @@ export function ScrollRegion({ rows, offset, height, width, highlight = "", curr
       {Array.from({ length: height }, (_, i) => {
         const r = view[i];
         if (!r) return <Text key={i}> </Text>;
-        return <Box key={i}>{highlightRow(r, highlight, offset + i === currentRow)}</Box>;
+        return <Box key={i} width={width} backgroundColor={r.background}>{highlightRow(r, highlight, offset + i === currentRow)}</Box>;
       })}
     </Box>
   );
 }
-

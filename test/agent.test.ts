@@ -55,6 +55,21 @@ test("a bidirectional provider executes tools through the same safe Agent bounda
   expect(events).toContain("tool_result");
 });
 
+test("an external realtime session cannot bypass the Agent approval boundary", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-external-tool-"));
+  const events: string[] = [];
+  const agent = new Agent({
+    provider: new ScriptedProvider([]) as any,
+    tools: new ToolRegistry(root, "default", () => false),
+    onEvent: (kind) => events.push(kind),
+  });
+  expect(agent.externalToolSchemas().some((tool: any) => tool.function?.name === "write_file")).toBe(true);
+  const result = await agent.executeExternalTool({ id: "voice-write", name: "write_file", arguments: { path: "blocked.txt", content: "no" } });
+  expect(String(result)).toContain("Denied by user");
+  expect(() => readFileSync(join(root, "blocked.txt"), "utf8")).toThrow();
+  expect(events).toEqual(["tool_call", "tool_result"]);
+});
+
 test("provider continuation data survives the assistant tool turn and is replayable", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-cont-"));
   writeFileSync(join(root, "a.txt"), "ok");
@@ -677,6 +692,59 @@ test("verify_before_exit gate fires once, then lets the model finish (off by def
   const gate = on.messages.find((m: any) => m.role === "user" && String(m.content).includes("VERIFY BEFORE FINISHING"));
   expect(gate).toBeTruthy(); // the gate turn was injected exactly once
   expect(on.messages.filter((m: any) => String(m.content).includes("VERIFY BEFORE FINISHING")).length).toBe(1);
+});
+
+test("state-change completion gate requires fresh tool evidence, not a second confident claim", async () => {
+  const tools = {
+    schemas: () => [],
+    execute: async (name: string) => name === "read_file" ? "observed final physical position: x=1822" : "script exited 0",
+  };
+  const agent = new Agent({
+    provider: new ScriptedProvider([
+      { content: null, tool_calls: [{ id: "move", name: "bash", arguments: { command: "move icons" } }] },
+      { content: "Done - the icons were moved.", tool_calls: [] },
+      { content: "I am certain it is done.", tool_calls: [] },
+      { content: null, tool_calls: [{ id: "inspect", name: "read_file", arguments: { path: "positions.txt" } }] },
+      { content: "Verified at the physical right edge.", tool_calls: [] },
+    ]) as any,
+    tools: tools as any,
+    maxSteps: 8,
+    verifyStateChangesBeforeExit: true,
+  });
+  expect(await agent.run("move the shortcuts to the physical right edge")).toBe("Verified at the physical right edge.");
+  expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(true);
+  expect(agent.messages.some((m: any) => String(m.content).includes("NO VERIFICATION EVIDENCE YET"))).toBe(true);
+});
+
+test("read-only computer observation does not add the state-change completion round", async () => {
+  const agent = new Agent({
+    provider: new ScriptedProvider([
+      { content: null, tool_calls: [{ id: "screen", name: "computer", arguments: { action: "read" } }] },
+      { content: "Here is what is on screen.", tool_calls: [] },
+    ]) as any,
+    tools: { schemas: () => [], execute: async () => "desktop state" } as any,
+    maxSteps: 4,
+    verifyStateChangesBeforeExit: true,
+  });
+  expect(await agent.run("what is open?")).toBe("Here is what is on screen.");
+  expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(false);
+});
+
+test("fresh inspection after the last mutation satisfies the gate without a redundant model round", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "move", name: "computer", arguments: { action: "click", x: 10, y: 10 } }] },
+    { content: null, tool_calls: [{ id: "check", name: "computer", arguments: { action: "read" } }] },
+    { content: "Observed and complete.", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider: provider as any,
+    tools: { schemas: () => [], execute: async (_name: string, args: any) => args.action === "read" ? "observed target state" : "clicked" } as any,
+    maxSteps: 6,
+    verifyStateChangesBeforeExit: true,
+  });
+  expect(await agent.run("change and verify the UI")).toBe("Observed and complete.");
+  expect(provider.index).toBe(3);
+  expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(false);
 });
 
 test("an unfinished todo plan gets one persistence check before the agent can finish", async () => {

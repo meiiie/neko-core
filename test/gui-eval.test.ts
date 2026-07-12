@@ -13,6 +13,10 @@ class ScriptedProvider {
 }
 const call = (name: string, args: Record<string, any>) => ({ content: null, tool_calls: [{ id: `c${Math.random()}`, name, arguments: args }] });
 const computer = (args: Record<string, any>) => call("computer", args);
+const computerBatch = (...actions: Record<string, any>[]) => ({
+  content: null,
+  tool_calls: actions.map((arguments_, i) => ({ id: `b${i}`, name: "computer", arguments: arguments_ })),
+});
 const done = { content: "done", tool_calls: [] };
 
 // ---- The simulated world's state machine (pure, no agent) ---------------------------------------
@@ -380,22 +384,41 @@ test("hard: expense-report - taking the survey instead of declining it is a cons
   expect(guiTask("expense-report").verify(w)).toBe(false);
 });
 
+test("GUI metrics separate model turns from batched computer actions", async () => {
+  const provider = new ScriptedProvider([
+    computerBatch(
+      { action: "setvalue", name: "Full name", value: "Alice Tran" },
+      { action: "setvalue", name: "City", value: "Hanoi" },
+    ),
+    computer({ action: "invoke", name: "Next" }),
+    computer({ action: "invoke", name: "Next" }),
+    computer({ action: "invoke", name: "Submit" }),
+    done,
+  ]);
+  const r = await runGuiTrial(guiTask("form-wizard"), provider as any, 12);
+  expect(r.pass).toBe(true);
+  expect(r.steps).toBe(5);   // four tool-bearing turns plus the final response
+  expect(r.actions).toBe(5); // the first turn performed two GUI actions
+});
+
 // ---- Report rendering ---------------------------------------------------------------------------
 
 test("renderGuiReport: marks PASS / FAIL / VIOLATE and surfaces the axes", () => {
   const out = renderGuiReport({
     model: "glm-5.2", effort: "high", trials: 1,
     results: [
-      { id: "form-wizard", axis: "task-success + constraint", trials: 1, passes: 1, pass: true, steps: 8, misses: 0, violation: false, violations: 0, tokens: 100, outTok: 40, ms: 2000 },
-      { id: "recover-save", axis: "error recovery", trials: 1, passes: 0, pass: false, steps: 5, misses: 0, violation: false, violations: 0, tokens: 80, outTok: 30, ms: 1500 },
-      { id: "settings-selective", axis: "precise action (no over-acting)", trials: 1, passes: 0, pass: false, steps: 6, misses: 0, violation: true, violations: 1, tokens: 90, outTok: 35, ms: 1600 },
+      { id: "form-wizard", axis: "task-success + constraint", trials: 1, passes: 1, pass: true, steps: 8, actions: 7, misses: 0, violation: false, violations: 0, tokens: 100, outTok: 40, ms: 2000 },
+      { id: "recover-save", axis: "error recovery", trials: 1, passes: 0, pass: false, steps: 5, actions: 4, misses: 0, violation: false, violations: 0, tokens: 80, outTok: 30, ms: 1500 },
+      { id: "settings-selective", axis: "precise action (no over-acting)", trials: 1, passes: 0, pass: false, steps: 6, actions: 5, misses: 0, violation: true, violations: 1, tokens: 90, outTok: 35, ms: 1600 },
     ],
-    passed: 1, total: 3, violations: 1, misses: 0, tokens: 270, outTok: 105, seconds: 5,
+    passed: 1, total: 3, violations: 1, misses: 0, actions: 16, tokens: 270, outTok: 105, seconds: 5,
   });
   expect(out).toContain("PASS");
   expect(out).toContain("FAIL");
   expect(out).toContain("VIOLATE");
-  expect(out).toContain("harness v2");
+  expect(out).toContain("harness v3");
+  expect(out).toContain("turns");
+  expect(out).toContain("actions");
   expect(out).toContain("pass@1: 1/3 (33%)");
   expect(out).toContain("constraint violations: 1");
 });
@@ -409,7 +432,7 @@ test("every GUI task (both tiers) has a distinct id and axis", () => {
 test("renderGuiReport: the hard suite is named in the header and the log line", () => {
   const out = renderGuiReport({
     model: "m", effort: "high", trials: 1,
-    results: [], passed: 0, total: 0, violations: 0, misses: 0, tokens: 0, outTok: 0, seconds: 1,
+    results: [], passed: 0, total: 0, violations: 0, misses: 0, actions: 0, tokens: 0, outTok: 0, seconds: 1,
   }, "gui-hard");
   expect(out).toContain("HARD tier");
   expect(out).toContain('suite "gui-hard"');

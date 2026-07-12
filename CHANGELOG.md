@@ -6,6 +6,45 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-07-12
+
+### Added
+- **Google-account Gemini is a first-class subscription route.** `/login` can use Free, AI Pro, or Ultra
+  quota through the official Gemini CLI ACP protocol, while Gemini API keys remain a separate billing
+  route. The optional Support Pack verifies Google's published bundle plus a private Node LTS runtime,
+  installs atomically without admin/global npm, and does not enlarge the base Neko binary.
+- **Neko Browser Bridge and a public-ready Chrome extension.** Users can attach exactly one chosen tab,
+  keep existing website sessions, grant click/navigation and non-sensitive typing separately, see an
+  always-visible AI indicator, inspect a redacted audit trail, and emergency-detach. The bridge is
+  loopback-only and capability-scoped; cookies and typed text never travel through Relay.
+- **Subscription voice with local consent.** ChatGPT realtime voice is negotiated through the official
+  App Server route, starts the microphone only after an explicit browser click, keeps terminal tool
+  approvals authoritative, and stops on tab close, heartbeat loss, or the local Stop control. A local
+  browser speech path remains available without silently falling back to paid API billing.
+- **Application skills for Zalo and WeChat.** Both use the shared computer-use primitives and require
+  fresh inspection after state-changing actions instead of claiming completion from an input event alone.
+
+### Changed
+- **Computer use is resident, DPI-aware, and outcome-verified.** UIA, Unicode keyboard input, touch,
+  optional SendInput, scroll, wait, and virtual-desktop screenshots now share one serialized Windows host.
+  On the measured Windows machine, warm screenshots fell from 972/1,143 ms p50/p95 in the one-shot path to
+  71–119 ms and include frame id, sampled delta, and changed-region evidence. A tool returning success no
+  longer permits a completion claim until a fresh inspection confirms the postcondition.
+- **Relay and terminal UX stay in sync more closely.** Mobile layouts, approvals, focus recovery, slash
+  suggestions, transcript hierarchy, user-message contrast, tool-output spacing, and scroll behavior were
+  polished while preserving encrypted multi-session routing and remote Stop.
+- **Web reading handles long feeds more deliberately.** Feed collection and page-to-Markdown paths preserve
+  useful structure while reducing blank transcript space and oversized intermediate output.
+
+### Fixed
+- Windows actions no longer confuse the DPI-virtualized `1536x864` desktop with a physical `1920x1080`
+  display at 125% scaling; display, capture, UIA, and coordinate input now share physical virtual-desktop
+  bounds, origins, and scale metadata.
+- Computer, glob, todo, and skill calls now recover from malformed model arguments more reliably, and
+  completion verification prevents repeated false-success reports after an unverified desktop mutation.
+- Browser sessions can persist across Facebook, X, and other sites in Neko's dedicated profile, while the
+  extension path can reuse an already signed-in selected tab without uploading browser cookies.
+
 ## [0.10.0] — 2026-07-11
 
 ### Added

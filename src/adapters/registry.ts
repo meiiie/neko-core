@@ -103,7 +103,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "skills", group: "registry", summary: "List available skills (~/.neko-core/skills).", example: "neko skills" },
   { name: "recipes", group: "registry", summary: "List runnable recipes (~/.neko-core/recipes).", example: "neko recipes" },
   { name: "mcp", group: "registry", summary: "List configured MCP servers and their tools.", example: "neko mcp" },
-  { name: "setup", group: "config", summary: "One-command SOTA web stack (SearXNG + browser MCP), wired + verified.", example: "neko setup web" },
+  { name: "setup", group: "config", summary: "Web stack + browser identity (persistent, existing-Chrome attach, or isolated).", example: "neko setup browser persistent" },
 ];
 
 export function listCommands(): CommandSpec[] {

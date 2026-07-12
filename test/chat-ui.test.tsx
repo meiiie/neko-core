@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,8 @@ import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
 import { buildReplayLines, clampToRows, contentToText, recoverTodos, renderTail } from "../src/ui/chat-lines.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { setModel } from "../src/adapters/project.ts";
+import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "../src/adapters/chatgpt-voice.ts";
+import type { BrowserVoiceOptions } from "../src/adapters/browser-voice.ts";
 
 test("multimodal tool observations render as metadata + [image], never object coercion", () => {
   const content = [{ type: "text", text: "captured screen\n" }, { type: "image_url", image_url: { url: "data:image/gif;base64,AA" } }];
@@ -179,6 +181,281 @@ test("/login groups OpenAI first, then offers subscription OAuth or API key", as
   expect(frame).toContain("ChatGPT Plus/Pro");
   expect(frame).toContain("API key (pay-as-you-go)");
   expect(frame).toContain("subscription, no API billing");
+  unmount();
+}, 15000);
+
+test("/login groups Google, then separates Gemini account quota from API billing", async () => {
+  const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+  const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+  stdin.write("/login"); await tick(30); stdin.write("\r");
+  expect(await until(() => (lastFrame() ?? "").includes("Sign in - choose a provider"))).toBe(true);
+  stdin.write("google"); await tick(40); stdin.write("\r");
+  expect(await until(() => (lastFrame() ?? "").includes("Google - choose how to sign in"))).toBe(true);
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain("Gemini Free/AI Pro/Ultra");
+  expect(frame).toContain("Gemini API key (pay-as-you-go)");
+  expect(frame).toContain("Google account quota, no API billing");
+  unmount();
+}, 15000);
+
+test("/model on signed-out Gemini remains useful without starting the CLI", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldGeminiHome = process.env.NEKO_GEMINI_HOME;
+  const home = mkdtempSync(join(tmpdir(), "neko-gemini-model-"));
+  process.env.HOME = home; process.env.USERPROFILE = home; process.env.NEKO_GEMINI_HOME = home;
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo profile="gemini" provider={provider} />);
+    stdin.write("/model"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Google · Gemini Free/AI Pro/Ultra"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("auto");
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    if (oldGeminiHome === undefined) delete process.env.NEKO_GEMINI_HOME; else process.env.NEKO_GEMINI_HOME = oldGeminiHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("/logout on Gemini removes only Gemini OAuth state immediately", async () => {
+  const oldGeminiHome = process.env.NEKO_GEMINI_HOME;
+  const home = mkdtempSync(join(tmpdir(), "neko-gemini-logout-"));
+  process.env.NEKO_GEMINI_HOME = home;
+  const geminiDir = home;
+  mkdirSync(geminiDir, { recursive: true });
+  writeFileSync(join(geminiDir, "oauth_creds.json"), "{}\n");
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo profile="gemini" provider={provider} />);
+    stdin.write("/logout"); await tick(30); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("Gemini CLI signed out"))).toBe(true);
+    expect(existsSync(join(geminiDir, "oauth_creds.json"))).toBe(false);
+    expect(frames.join("\n")).toContain("API keys were left untouched");
+    unmount();
+  } finally {
+    if (oldGeminiHome === undefined) delete process.env.NEKO_GEMINI_HOME; else process.env.NEKO_GEMINI_HOME = oldGeminiHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("/login offers one-step Gemini Support Pack setup when the bridge is missing", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldPath = process.env.PATH;
+  const home = mkdtempSync(join(tmpdir(), "neko-gemini-first-run-"));
+  process.env.HOME = home; process.env.USERPROFILE = home; process.env.PATH = "";
+  try {
+    const { clearGeminiCliCache } = await import("../src/adapters/gemini-cli.ts");
+    clearGeminiCliCache();
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+    stdin.write("/login"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Sign in - choose a provider"))).toBe(true);
+    stdin.write("google"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Google - choose how to sign in"))).toBe(true);
+    stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Gemini Support Pack"))).toBe(true);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Install and continue");
+    expect(frame).toContain("No admin");
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("/support opens a management center and confirms managed-pack removal", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldPath = process.env.PATH;
+  const home = mkdtempSync(join(tmpdir(), "neko-support-center-"));
+  process.env.HOME = home; process.env.USERPROFILE = home; process.env.PATH = "";
+  const codexRoot = join(home, ".neko-core", "codex-support");
+  const geminiRoot = join(home, ".neko-core", "gemini-support");
+  mkdirSync(codexRoot, { recursive: true });
+  writeFileSync(join(codexRoot, "codex-app-server.exe"), "codex");
+  writeFileSync(join(codexRoot, "support-pack.json"), JSON.stringify({
+    protocolVersion: "0.144.1", executable: "codex-app-server.exe", installedBytes: 283_537_712,
+    releaseTag: "rust-v0.144.1", assetName: "fixture", assetDigest: `sha256:${"1".repeat(64)}`,
+    archiveBytes: 1, installedAt: new Date().toISOString(), sourceUrl: "https://github.com/openai/codex/releases",
+  }));
+  mkdirSync(join(geminiRoot, "gemini"), { recursive: true });
+  mkdirSync(join(geminiRoot, "node"), { recursive: true });
+  const geminiAuth = join(home, ".neko-core", "gemini-home", "oauth_creds.json");
+  mkdirSync(join(home, ".neko-core", "gemini-home"), { recursive: true });
+  writeFileSync(geminiAuth, "{}\n");
+  writeFileSync(join(geminiRoot, "gemini", "gemini.js"), "gemini");
+  writeFileSync(join(geminiRoot, "node", "node.exe"), "node");
+  writeFileSync(join(geminiRoot, "support-pack.json"), JSON.stringify({
+    protocolVersion: "1", geminiVersion: "0.50.0", nodeVersion: "24.18.0", entry: "gemini/gemini.js", runtime: "node/node.exe",
+    installedBytes: 203_630_624, releaseTag: "v0.50.0", bundleAsset: "fixture", bundleDigest: `sha256:${"2".repeat(64)}`,
+    bundleArchiveBytes: 1, nodeAsset: "fixture", nodeDigest: `sha256:${"3".repeat(64)}`, nodeArchiveBytes: 1,
+    installedAt: new Date().toISOString(), sourceUrl: "https://github.com/google-gemini/gemini-cli/releases", nodeSourceUrl: "https://nodejs.org",
+  }));
+  try {
+    const { clearCodexSupportCache } = await import("../src/adapters/codex-app-server.ts");
+    const { clearGeminiCliCache } = await import("../src/adapters/gemini-cli.ts");
+    clearCodexSupportCache(); clearGeminiCliCache();
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, lastFrame, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+    stdin.write("/support"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Manage optional support components"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("ChatGPT GPT-5.6 Support Pack");
+    expect(lastFrame() ?? "").toContain("270.4 MiB");
+    stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Manage ChatGPT GPT-5.6 Support Pack"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("Remove support pack");
+    expect(lastFrame() ?? "").toContain("ChatGPT sign-in stays");
+    stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Remove ChatGPT GPT-5.6 Support Pack?"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("Keep installed");
+    expect(lastFrame() ?? "").toContain("Remove and sign out");
+    expect(existsSync(join(codexRoot, "codex-app-server.exe"))).toBe(true);
+    stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("freed 270.4 MiB"))).toBe(true);
+    expect(existsSync(codexRoot)).toBe(false);
+    expect(existsSync(geminiRoot)).toBe(true);
+    stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Manage Gemini account Support Pack"))).toBe(true);
+    stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Remove Gemini account Support Pack?"))).toBe(true);
+    stdin.write("\x1b[B"); await tick(20); stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("Neko also signed this account out"))).toBe(true);
+    expect(existsSync(geminiRoot)).toBe(false);
+    expect(existsSync(geminiAuth)).toBe(false);
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("/voice defaults to conversational browser voice and keeps official/lab routes explicit", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldPath = process.env.PATH;
+  const home = mkdtempSync(join(tmpdir(), "neko-voice-ui-"));
+  process.env.HOME = home; process.env.USERPROFILE = home; process.env.PATH = "";
+  const codexRoot = join(home, ".neko-core", "codex-support");
+  mkdirSync(codexRoot, { recursive: true });
+  writeFileSync(join(codexRoot, "codex-app-server.exe"), "codex");
+  writeFileSync(join(codexRoot, "support-pack.json"), JSON.stringify({
+    protocolVersion: "0.144.1", executable: "codex-app-server.exe", installedBytes: 283_537_712,
+  }));
+  saveChatGptCredentials({
+    accessToken: "header.payload.signature", refreshToken: "refresh", expiresAt: Date.now() + 3_600_000, accountId: "acct-ui",
+  });
+  try {
+    const { clearCodexSupportCache } = await import("../src/adapters/codex-app-server.ts");
+    clearCodexSupportCache();
+    let options!: ChatGptVoiceOptions | BrowserVoiceOptions;
+    let snapshot: VoiceSnapshot = { state: "starting", muted: false };
+    let stops = 0, muteCalls = 0, failStart = false;
+    const control: ChatGptVoiceControl = {
+      snapshot: () => snapshot,
+      start: async () => {
+        if (failStart) throw new Error("dynamic tool name is reserved");
+        snapshot = { state: "waiting", muted: false };
+        options.onEvent?.({ type: "state", snapshot });
+        return { url: "http://127.0.0.1:1/#hidden" };
+      },
+      setMuted: (muted) => {
+        muteCalls++;
+        snapshot = { ...snapshot, state: muted ? "muted" : "live", muted };
+        options.onEvent?.({ type: "state", snapshot });
+      },
+      stop: async () => {
+        stops++;
+        snapshot = { ...snapshot, state: "stopped" };
+        options.onEvent?.({ type: "state", snapshot });
+      },
+    };
+    const provider = new MockProvider([{ content: "xin chào từ Neko", tool_calls: [] }]);
+    let officialVoiceUrl = "";
+    const { stdin, lastFrame, frames, unmount } = render(
+      <ChatApp
+        fullscreen={false}
+        yolo
+        profile="chatgpt"
+        provider={provider}
+        voiceFactory={(next) => { options = next; return control; }}
+        browserVoiceFactory={(next) => { options = next; return control; }}
+        openUrl={(url) => { officialVoiceUrl = url; }}
+      />,
+    );
+    stdin.write("/voice"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Voice - choose a mode"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("Neko Conversational Voice");
+    stdin.write("\r");
+    const browserStarted = await until(() => /services\s+may\s+process\s+audio\s+online/.test(frames.join("\n")));
+    if (!browserStarted) throw new Error(`browser voice did not start:\n${frames.slice(-8).join("\n---\n")}`);
+    expect(await (options as BrowserVoiceOptions).onUtterance("xin chào bằng giọng nói")).toBe("xin chào từ Neko");
+    expect(await until(() => frames.join("\n").includes("xin chào bằng giọng nói"))).toBe(true);
+    stdin.write("/voice stop"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("Neko conversational voice stopped"))).toBe(true);
+
+    stdin.write("/voice"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Voice - choose a mode"))).toBe(true);
+    stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
+    expect(await until(() => officialVoiceUrl === "https://chatgpt.com/")).toBe(true);
+    expect(frames.join("\n")).toContain("runs separately from Neko");
+
+    stdin.write("/voice"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Voice - choose a mode"))).toBe(true);
+    stdin.write("\x1b[B"); await tick(20); stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("Voice page opened in your browser"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("microphone off - press Start voice in the browser");
+
+    snapshot = { state: "live", muted: false, startedAt: Date.now() };
+    options.onEvent?.({ type: "state", snapshot });
+    options.onEvent?.({ type: "transcript-delta", role: "user", delta: "xin chao Neko" });
+    expect(await until(() => (lastFrame() ?? "").includes("● LIVE"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("> xin chao Neko");
+    options.onEvent?.({ type: "transcript-done", role: "user", text: "xin chao Neko" });
+    expect(await until(() => frames.join("\n").includes("xin chao Neko"))).toBe(true);
+
+    stdin.write("/voice mute"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("muted"))).toBe(true);
+    expect(muteCalls).toBe(1);
+    stdin.write("/voice stop"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("microphone released"))).toBe(true);
+    expect(stops).toBe(2);
+    failStart = true;
+    stdin.write("/voice start"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("dynamic tool name is reserved"))).toBe(true);
+    expect(lastFrame() ?? "").not.toContain("VOICE  ·  starting");
+    expect(stops).toBe(3); // a failed startup is torn down instead of leaving stale UI state
+    failStart = false;
+    stdin.write("/voice start"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("microphone off - press Start voice"))).toBe(true);
+    stdin.write("/logout"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("OpenAI API keys were left untouched"))).toBe(true);
+    expect(stops).toBe(4); // logout releases microphone before deleting the ChatGPT session
+    unmount();
+  } finally {
+    const { clearCodexSupportCache } = await import("../src/adapters/codex-app-server.ts");
+    clearCodexSupportCache();
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("/support status keeps a copyable text report for diagnostics", async () => {
+  const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+  const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+  stdin.write("/support status"); await tick(30); stdin.write("\r");
+  expect(await until(() => frames.join("\n").includes("ChatGPT GPT-5.6 support:"))).toBe(true);
+  expect(frames.join("\n")).toContain("Gemini account support:");
+  unmount();
+}, 15000);
+
+test("/usage keeps Gemini quota guidance inside Neko", async () => {
+  const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+  const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo profile="gemini" provider={provider} />);
+  stdin.write("/usage"); await tick(30); stdin.write("\r");
+  expect(await until(() => frames.join("\n").includes("Google does not expose remaining requests"))).toBe(true);
+  expect(frames.join("\n")).not.toContain("/stats model");
   unmount();
 }, 15000);
 

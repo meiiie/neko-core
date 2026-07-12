@@ -26,7 +26,7 @@ import type { NekoConfig } from "./config.ts";
 import { getProvider } from "./providers.ts";
 
 // Increment whenever task semantics or verifiers change so bench-log comparisons stay honest.
-export const GUI_HARNESS_VERSION = 2;
+export const GUI_HARNESS_VERSION = 3;
 
 // ---- The simulated GUI world -------------------------------------------------------------------
 
@@ -514,23 +514,32 @@ export const GUI_SYSTEM_PROMPT =
 
 // ---- Runner ------------------------------------------------------------------------------------
 
-export interface GuiRun { id: string; axis: string; pass: boolean; steps: number; misses: number; violation: boolean; tokens: number; outTok: number; err?: string; }
+export interface GuiRun { id: string; axis: string; pass: boolean; steps: number; actions: number; misses: number; violation: boolean; tokens: number; outTok: number; err?: string; }
 export interface GuiTaskResult extends GuiRun { trials: number; passes: number; violations: number; ms: number; }
-export interface GuiReport { model: string; effort: string; trials: number; results: GuiTaskResult[]; passed: number; total: number; violations: number; misses: number; tokens: number; outTok: number; seconds: number; }
+export interface GuiReport { model: string; effort: string; trials: number; results: GuiTaskResult[]; passed: number; total: number; violations: number; misses: number; actions: number; tokens: number; outTok: number; seconds: number; }
 
 /** One trial: the real model (or an injected scripted provider) drives one task's simulated world. */
 export async function runGuiTrial(task: GuiTask, provider: Provider, maxSteps?: number): Promise<GuiRun> {
   const world = task.world();
   const root = mkdtempSync(join(tmpdir(), "neko-gui-"));
   try {
+    let modelTurns = 0;
+    const countedProvider: Provider = {
+      complete: (...args: Parameters<Provider["complete"]>) => {
+        modelTurns++;
+        return provider.complete(...args);
+      },
+    };
     const registry = new ToolRegistry(root, "auto", autoApprove);
     registry.computerHandler = (a) => world.act(a);
-    const agent = new Agent({ provider, tools: registry, maxSteps: maxSteps ?? task.maxSteps, systemPrompt: GUI_SYSTEM_PROMPT });
+    const agent = new Agent({ provider: countedProvider, tools: registry, maxSteps: maxSteps ?? task.maxSteps, systemPrompt: GUI_SYSTEM_PROMPT });
     let err = "";
     try { await agent.run(task.prompt); } catch (e) { err = e instanceof Error ? e.message : String(e); }
     return {
       id: task.id, axis: task.axis, pass: !err && task.verify(world),
-      steps: agent.cost.calls, misses: world.misses, violation: !!world.violation,
+      // A model turn may emit several tool calls. Keep both numbers so batching cannot look faster
+      // merely because the harness used to hide the actual amount of GUI work.
+      steps: modelTurns, actions: world.steps, misses: world.misses, violation: !!world.violation,
       tokens: agent.cost.totalTokens, outTok: agent.cost.completionTokens, err: err || undefined,
     };
   } finally {
@@ -547,25 +556,26 @@ export async function runGuiBench(cfg: NekoConfig, opts: { trials?: number; task
   const t0 = Date.now();
   const results: GuiTaskResult[] = [];
   for (const task of tasks) {
-    let passes = 0, steps = 0, misses = 0, violations = 0, tokens = 0, outTok = 0, ms = 0;
+    let passes = 0, steps = 0, actions = 0, misses = 0, violations = 0, tokens = 0, outTok = 0, ms = 0;
     for (let t = 0; t < trials; t++) {
       onProgress?.(`  ${task.id}${trials > 1 ? ` [${t + 1}/${trials}]` : ""} ...`);
       const ts = Date.now();
       const r = await runGuiTrial(task, provider);
       ms += Date.now() - ts;
       if (r.pass) passes++;
-      steps += r.steps; misses += r.misses; if (r.violation) violations++;
+      steps += r.steps; actions += r.actions; misses += r.misses; if (r.violation) violations++;
       tokens += r.tokens; outTok += r.outTok;
       if (r.err) onProgress?.(`    ! ${task.id} ERRORED: ${r.err.replace(/\s+/g, " ").slice(0, 140)}`);
     }
-    results.push({ id: task.id, axis: task.axis, trials, passes, pass: passes === trials, steps, misses, violation: violations > 0, violations, tokens, outTok, ms });
-    onProgress?.(`  ${task.id} -> ${passes}/${trials}  ${(ms / trials / 1000).toFixed(1)}s  ${Math.round(steps / trials)} steps  ${misses} miss${violations ? `  CONSTRAINT VIOLATED x${violations}` : ""}`);
+    results.push({ id: task.id, axis: task.axis, trials, passes, pass: passes === trials, steps, actions, misses, violation: violations > 0, violations, tokens, outTok, ms });
+    onProgress?.(`  ${task.id} -> ${passes}/${trials}  ${(ms / trials / 1000).toFixed(1)}s  ${Math.round(steps / trials)} turns  ${Math.round(actions / trials)} actions  ${misses} miss${violations ? `  CONSTRAINT VIOLATED x${violations}` : ""}`);
   }
   const sum = (f: (r: GuiTaskResult) => number) => results.reduce((a, r) => a + f(r), 0);
   const report: GuiReport = {
     model: cfg.model, effort: cfg.effort || "off", trials, results,
     passed: sum((r) => r.passes), total: sum((r) => r.trials),
     violations: sum((r) => r.violations), misses: sum((r) => r.misses),
+    actions: sum((r) => r.actions),
     tokens: sum((r) => r.tokens), outTok: sum((r) => r.outTok), seconds: (Date.now() - t0) / 1000,
   };
   appendGuiLog(report, suite);
@@ -580,8 +590,8 @@ function appendGuiLog(r: GuiReport, suite: string): void {
     const rec = {
       ts: new Date().toISOString(), suite, harnessVersion: GUI_HARNESS_VERSION, model: r.model, effort: r.effort,
       pass: r.passed, total: r.total, violations: r.violations, misses: r.misses,
-      seconds: Math.round(r.seconds), tokens: r.tokens, outTok: r.outTok,
-      tasks: r.results.map((x) => ({ id: x.id, axis: x.axis, pass: x.passes, trials: x.trials, steps: x.steps, misses: x.misses, violations: x.violations })),
+      seconds: Math.round(r.seconds), actions: r.actions, tokens: r.tokens, outTok: r.outTok,
+      tasks: r.results.map((x) => ({ id: x.id, axis: x.axis, pass: x.passes, trials: x.trials, turns: x.steps, actions: x.actions, misses: x.misses, violations: x.violations })),
     };
     appendFileSync(join(dir, "bench-log.jsonl"), JSON.stringify(rec) + "\n", "utf8");
   } catch { /* logging must never break the eval */ }
@@ -591,12 +601,12 @@ export function renderGuiReport(r: GuiReport, suite = "gui"): string {
   const rows = r.results.map((x) => {
     const tag = x.violations > 0 ? "VIOLATE" : x.passes === x.trials ? "PASS " : x.passes === 0 ? "FAIL " : "FLAKY";
     const s = (x.ms / x.trials / 1000).toFixed(1);
-    return `  ${tag}  ${x.id.padEnd(19)} ${x.passes}/${x.trials}  ${s.padStart(5)}s  ${String(Math.round(x.steps / x.trials)).padStart(2)} steps  ${String(x.misses).padStart(2)} miss  [${x.axis}]`;
+    return `  ${tag}  ${x.id.padEnd(19)} ${x.passes}/${x.trials}  ${s.padStart(5)}s  ${String(Math.round(x.steps / x.trials)).padStart(2)} turns  ${String(Math.round(x.actions / x.trials)).padStart(2)} actions  ${String(x.misses).padStart(2)} miss  [${x.axis}]`;
   }).join("\n");
   const pct = r.total ? Math.round((r.passed / r.total) * 100) : 0;
   return `Neko GUI eval (long-horizon computer-use${suite === "gui-hard" ? ", HARD tier" : ""}, harness v${GUI_HARNESS_VERSION}) :: ${r.model} (effort ${r.effort}, ${r.trials} trial${r.trials > 1 ? "s" : ""}/task, simulated desktop)\n` +
     `${rows}\n` +
     `  ----------------------------------------------------------------------\n` +
-    `  pass@1: ${r.passed}/${r.total} (${pct}%)   constraint violations: ${r.violations}   grounding misses: ${r.misses}   ${r.outTok} out tok   ${r.seconds.toFixed(0)}s\n` +
+    `  pass@1: ${r.passed}/${r.total} (${pct}%)   constraint violations: ${r.violations}   grounding misses: ${r.misses}   ${r.actions} actions   ${r.outTok} out tok   ${r.seconds.toFixed(0)}s\n` +
     `  (metrics appended to ~/.neko-core/bench-log.jsonl, suite "${suite}")`;
 }

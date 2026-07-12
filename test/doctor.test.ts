@@ -30,6 +30,31 @@ test("doctor accepts GPT-5.6 when the Codex bridge is ready", () => {
   expect(model.detail).toContain("Codex bridge");
 });
 
+test("doctor names the optional Gemini CLI dependency without treating it as an API endpoint", () => {
+  const cfg = new NekoConfig({ provider: "gemini_cli", model: "auto" }, "gemini", { gemini: { auth: "gemini_oauth" } }, "");
+  const checks = collectChecks(cfg, undefined, { state: "missing", detail: "not installed" });
+  expect(checks.find((check) => check.name === "model")).toMatchObject({ status: "warn", detail: expect.stringContaining("official Gemini CLI") });
+  expect(checks.find((check) => check.name === "base_url")).toMatchObject({ status: "ok", detail: expect.stringContaining("ACP stdio") });
+});
+
+test("doctor distinguishes durable, attached, and ephemeral browser sessions", () => {
+  const check = (args?: string[]) => collectChecks(new NekoConfig({
+    provider: "openai_compat", model: "test", base_url: "http://localhost",
+    ...(args ? { mcp_servers: { browser: { command: "bunx", args } } } : {}),
+  }, null, {}, "")).find((item) => item.name === "browser")!;
+  expect(check(["@playwright/mcp", "--user-data-dir", "C:/neko-browser"])).toMatchObject({ status: "ok", detail: expect.stringContaining("persistent") });
+  expect(check(["@playwright/mcp", "--extension"])).toMatchObject({ status: "ok", detail: expect.stringContaining("existing Chrome") });
+  expect(check(["@playwright/mcp", "--isolated"])).toMatchObject({ status: "warn", detail: expect.stringContaining("logins are discarded") });
+  expect(check()).toMatchObject({ status: "warn", detail: expect.stringContaining("not configured") });
+});
+
+test("doctor surfaces the resident UIA fast path and rollback state", () => {
+  const on = collectChecks(new NekoConfig({}, null, {}, "")).find((check) => check.name === "computer_use");
+  const off = collectChecks(new NekoConfig({ computer_use_resident: false }, null, {}, "")).find((check) => check.name === "computer_use");
+  expect(on?.detail).toContain("resident UIA/input/capture on");
+  expect(off?.detail).toContain("fallback");
+});
+
 test("collectTerminalChecks reports terminal, tty state, ui_fps, and the keys-probe pointer", () => {
   const checks = collectTerminalChecks();
   const names = checks.map((c) => c.name);

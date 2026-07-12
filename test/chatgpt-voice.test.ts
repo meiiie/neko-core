@@ -1,0 +1,219 @@
+import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  ChatGptVoiceSession,
+  friendlyVoiceError,
+  type VoiceCodexClientFactory,
+  type VoiceEvent,
+} from "../src/adapters/chatgpt-voice.ts";
+import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
+import type { CodexAppServerHandlers } from "../src/adapters/codex-app-server.ts";
+
+const oldHome = process.env.HOME;
+const oldProfile = process.env.USERPROFILE;
+let tempHome = "";
+let active: ChatGptVoiceSession | null = null;
+
+function setupAuth(): void {
+  tempHome = mkdtempSync(join(tmpdir(), "neko-voice-"));
+  process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
+  saveChatGptCredentials({
+    accessToken: "header.payload.signature",
+    refreshToken: "refresh",
+    expiresAt: Date.now() + 3_600_000,
+    accountId: "acct-voice",
+  });
+}
+
+afterEach(async () => {
+  await active?.stop("test cleanup");
+  active = null;
+  if (tempHome) rmSync(tempHome, { recursive: true, force: true });
+  tempHome = "";
+  if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+  if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+});
+
+function nextMessage(ws: WebSocket): Promise<any> {
+  return new Promise((resolve) => ws.addEventListener("message", (event) => resolve(JSON.parse(String(event.data))), { once: true }));
+}
+
+test("subscription voice keeps consent in the browser and negotiates WebRTC through App Server", async () => {
+  setupAuth();
+  const requests: Array<{ method: string; params: any }> = [];
+  const events: VoiceEvent[] = [];
+  let handlers!: CodexAppServerHandlers;
+  let closed = 0;
+  let readToolCalls = 0;
+  let routedTool = "";
+  const factory: VoiceCodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}),
+      close: () => { closed++; },
+      request: async (method, params: any) => {
+        requests.push({ method, params });
+        if (method === "account/login/start") return {};
+        if (method === "thread/start") return { thread: { id: "voice-thread" } };
+        if (method === "thread/realtime/listVoices") return { voices: { v1: ["cove"] } };
+        if (method === "thread/realtime/start") {
+          setTimeout(() => handlers.onNotification?.("thread/realtime/sdp", { threadId: "voice-thread", sdp: "v=0\r\nanswer" }), 0);
+          return {};
+        }
+        return {};
+      },
+    };
+  };
+  let opened = "";
+  active = new ChatGptVoiceSession({
+    model: "gpt-5.6-terra",
+    tools: [
+      { function: { name: "read_file", description: "Read", parameters: { type: "object" } } },
+      { function: { name: "write_file", description: "Write", parameters: { type: "object" } } },
+      { function: { name: "mcp__neko_browser__status", description: "Browser status", parameters: { type: "object" } } },
+    ],
+    executeTool: async (call) => {
+      routedTool = call.name;
+      if (call.name === "write_file") return "Denied by user: write_file (write blocked.txt)";
+      if (call.name === "mcp__neko_browser__status") return "browser:ready";
+      readToolCalls++;
+      return `read:${call.arguments.path}`;
+    },
+    onEvent: (event) => events.push(event),
+    clientFactory: factory,
+    openUrl: (url) => { opened = url; },
+  });
+
+  const { url } = await active.start();
+  expect(url).toBe(opened);
+  expect(requests.find((request) => request.method === "account/login/start")?.params).toMatchObject({
+    type: "chatgptAuthTokens", chatgptAccountId: "acct-voice",
+  });
+  expect(requests.find((request) => request.method === "thread/start")?.params).toMatchObject({
+    model: "gpt-5.6-terra", sandbox: "read-only", approvalPolicy: "never", ephemeral: true,
+  });
+  expect(requests.find((request) => request.method === "thread/start")?.params.dynamicTools[0].name).toBe("read_file");
+  const browserTool = requests.find((request) => request.method === "thread/start")?.params.dynamicTools
+    .find((tool: any) => tool.description === "Browser status");
+  expect(String(browserTool.name).startsWith("mcp__")).toBe(false);
+
+  const parsed = new URL(url);
+  const token = parsed.hash.slice(1);
+  const origin = parsed.origin;
+  const page = await fetch(origin);
+  const html = await page.text();
+  expect(html).toContain("Start voice");
+  expect(html).toContain("microphone stays off");
+  expect(html).not.toContain(token);
+  expect(page.headers.get("content-security-policy")).toContain("default-src 'none'");
+  const script = html.match(/<script>([\s\S]+)<\/script>/)?.[1] ?? "";
+  expect(script).not.toBe("");
+  expect(() => new Function(script)).not.toThrow();
+
+  const ws = new WebSocket(`${origin.replace("http:", "ws:")}/bridge`, { headers: { origin } } as any);
+  await new Promise<void>((resolve, reject) => {
+    ws.addEventListener("open", () => resolve(), { once: true });
+    ws.addEventListener("error", reject, { once: true });
+  });
+  ws.send(JSON.stringify({ type: "hello", token }));
+  expect(await nextMessage(ws)).toEqual({ type: "ready" });
+  ws.send(JSON.stringify({ type: "connecting" }));
+  ws.send(JSON.stringify({ type: "live" }));
+  ws.send(JSON.stringify({ type: "muted", muted: true }));
+  await Bun.sleep(10);
+  expect(active.snapshot()).toMatchObject({ state: "muted", muted: true });
+
+  const offer = await fetch(`${origin}/offer`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ sdp: "v=0\r\nvalid test offer" }),
+  });
+  expect(offer.status).toBe(200);
+  expect(await offer.json()).toEqual({ sdp: "v=0\r\nanswer" });
+  expect(requests.find((request) => request.method === "thread/realtime/start")?.params).toMatchObject({
+    threadId: "voice-thread", outputModality: "audio", transport: { type: "webrtc", sdp: "v=0\r\nvalid test offer" },
+  });
+
+  const toolRequest = {
+    threadId: "voice-thread", callId: "voice-call", tool: "read_file", arguments: { path: "README.md" },
+  };
+  const [tool, duplicate] = await Promise.all([
+    handlers.onRequest?.("item/tool/call", toolRequest),
+    handlers.onRequest?.("item/tool/call", toolRequest),
+  ]);
+  expect(readToolCalls).toBe(1);
+  expect(tool).toEqual({ contentItems: [{ type: "inputText", text: "read:README.md" }], success: true });
+  expect(duplicate).toEqual(tool);
+  expect(await handlers.onRequest?.("item/tool/call", {
+    threadId: "voice-thread", callId: "voice-denied", tool: "write_file", arguments: { path: "blocked.txt" },
+  })).toEqual({ contentItems: [{ type: "inputText", text: "Denied by user: write_file (write blocked.txt)" }], success: false });
+  expect(await handlers.onRequest?.("item/tool/call", {
+    threadId: "voice-thread", callId: "voice-mcp", tool: browserTool.name, arguments: {},
+  })).toEqual({ contentItems: [{ type: "inputText", text: "browser:ready" }], success: true });
+  expect(routedTool).toBe("mcp__neko_browser__status");
+  handlers.onNotification?.("thread/realtime/transcript/delta", { threadId: "voice-thread", role: "user", delta: "xin " });
+  handlers.onNotification?.("thread/realtime/transcript/done", { threadId: "voice-thread", role: "user", text: "xin chao" });
+  expect(events).toContainEqual({ type: "transcript-delta", role: "user", delta: "xin " });
+  expect(events).toContainEqual({ type: "transcript-done", role: "user", text: "xin chao" });
+
+  await active.stop();
+  active = null;
+  expect(requests.some((request) => request.method === "thread/realtime/stop")).toBe(true);
+  expect(requests.some((request) => request.method === "thread/unsubscribe")).toBe(true);
+  expect(closed).toBe(1);
+  ws.close();
+});
+
+test("voice bridge rejects an SDP offer without its one-session capability", async () => {
+  setupAuth();
+  const factory: VoiceCodexClientFactory = () => ({
+    initialize: async () => ({}), close: () => {},
+    request: async (method) => method === "thread/start" ? { thread: { id: "voice-thread" } } : {},
+  });
+  active = new ChatGptVoiceSession({ model: "gpt-5.5", clientFactory: factory, openUrl: () => {} });
+  const { url } = await active.start();
+  const response = await fetch(`${new URL(url).origin}/offer`, { method: "POST", body: "{}" });
+  expect(response.status).toBe(401);
+});
+
+test("a backend rollout error survives realtime teardown and reaches the consent page", async () => {
+  setupAuth();
+  let handlers!: CodexAppServerHandlers;
+  const factory: VoiceCodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}), close: () => {},
+      request: async (method) => {
+        if (method === "thread/start") return { thread: { id: "voice-thread" } };
+        if (method === "thread/realtime/start") {
+          setTimeout(() => handlers.onNotification?.("thread/realtime/error", {
+            threadId: "voice-thread",
+            message: "unexpected status 404 Not Found at /backend-api/codex/realtime/calls",
+          }), 0);
+        }
+        return {};
+      },
+    };
+  };
+  active = new ChatGptVoiceSession({ model: "gpt-5.5", clientFactory: factory, openUrl: () => {} });
+  const { url } = await active.start();
+  const parsed = new URL(url);
+  const response = await fetch(`${parsed.origin}/offer`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${parsed.hash.slice(1)}`, "content-type": "application/json" },
+    body: JSON.stringify({ sdp: "v=0\r\na=valid-test-offer" }),
+  });
+  expect(response.status).toBe(409);
+  expect(await response.text()).toContain("experimental ChatGPT subscription voice endpoint is not enabled");
+});
+
+test("voice errors distinguish account rollout, limits, and microphone consent", () => {
+  expect(friendlyVoiceError(new Error("HTTP 403 entitlement"))).toContain("not currently eligible");
+  expect(friendlyVoiceError(new Error("429 quota reached"))).toContain("did not switch to paid API billing");
+  expect(friendlyVoiceError(new Error("NotAllowedError: microphone permission denied"))).toContain("Microphone permission was denied");
+  expect(friendlyVoiceError(new Error("404 /backend-api/codex/realtime/calls"))).toContain("did not switch to paid API billing");
+});

@@ -7,6 +7,7 @@
  * app-server support pack later without changing the core agent loop.
  */
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, extname, posix, win32 } from "node:path";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
@@ -32,6 +33,42 @@ export interface CodexSupportStatus {
   state: "ready" | "missing" | "outdated" | "invalid";
   executable?: CodexExecutable;
   detail: string;
+}
+
+export interface CodexDynamicTools {
+  tools: any[];
+  /** Wire name -> Neko's original tool name. */
+  originalNames: Map<string, string>;
+}
+
+/**
+ * Convert Neko tool schemas to App Server dynamic tools.
+ *
+ * App Server owns the `mcp__` namespace and rejects dynamic tools using it. Neko already uses
+ * that prefix for MCP tools, so send a stable opaque alias and reverse it before execution.
+ */
+export function encodeCodexDynamicTools(toolSchemas: any[]): CodexDynamicTools {
+  const source = toolSchemas.map((schema) => ({
+    name: String(schema?.function?.name ?? ""),
+    description: String(schema?.function?.description ?? ""),
+    inputSchema: schema?.function?.parameters ?? { type: "object", properties: {} },
+  })).filter((tool) => tool.name);
+  const originalNames = new Map<string, string>();
+  const originalNameSet = new Set(source.map((tool) => tool.name));
+  const used = new Set<string>();
+  const tools = source.map((tool) => {
+    let name = tool.name;
+    if (/^mcp__/i.test(name)) {
+      const digest = createHash("sha256").update(name).digest("hex").slice(0, 16);
+      name = `neko_mcp_${digest}`;
+      let suffix = 1;
+      while (used.has(name) || originalNameSet.has(name)) name = `neko_mcp_${digest}_${suffix++}`;
+    }
+    used.add(name);
+    originalNames.set(name, tool.name);
+    return { type: "function", name, description: tool.description, inputSchema: tool.inputSchema };
+  });
+  return { tools, originalNames };
 }
 
 interface ManagedManifest {
@@ -331,6 +368,20 @@ export class CodexAppServerClient {
 /** Spawn one hidden, persistent stdio App Server. Call client.close() when the provider is disposed. */
 export interface StartCodexAppServerOptions {
   codexHome?: string;
+  /** Subscription-only callers remove API credentials so no upstream fallback can create API charges. */
+  forbidApiBilling?: boolean;
+  /** Voice is an App Server feature flag in Codex 0.144; experimentalApi alone does not enable it. */
+  enableRealtimeConversation?: boolean;
+}
+
+export function codexAppServerArguments(
+  executable: CodexExecutable,
+  options: StartCodexAppServerOptions,
+): string[] {
+  const args = executable.kind === "cli" ? ["app-server"] : [];
+  if (options.enableRealtimeConversation) args.push("--enable", "realtime_conversation");
+  args.push("--listen", "stdio://");
+  return args;
 }
 
 export function startCodexAppServer(
@@ -338,18 +389,23 @@ export function startCodexAppServer(
   handlers: CodexAppServerHandlers = {},
   options: StartCodexAppServerOptions = {},
 ): CodexAppServerClient {
-  const appArgs = executable.kind === "cli" ? ["app-server", "--listen", "stdio://"] : ["--listen", "stdio://"];
+  const appArgs = codexAppServerArguments(executable, options);
   const launch = commandFor(executable, appArgs);
   // Neko supplies auth and tools over stdio. An isolated home prevents the user's Codex MCP/plugins
   // from slowing startup or gaining an unexpected second execution path beside Neko's approval gate.
   const codexHome = options.codexHome ?? (process.env.NEKO_CODEX_HOME || joinForPlatform(homeDir(), process.platform, ".neko-core", "codex-home"));
   mkdirSync(codexHome, { recursive: true, mode: 0o700 });
   try { chmodSync(codexHome, 0o700); } catch { /* Windows ACLs do not implement POSIX modes. */ }
+  const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: codexHome, RUST_LOG: process.env.RUST_LOG ?? "warn" };
+  if (options.forbidApiBilling) {
+    delete env.OPENAI_API_KEY;
+    delete env.NEKO_API_KEY;
+  }
   const child: ChildProcessWithoutNullStreams = spawn(launch.command, launch.args, {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     shell: launch.shell,
-    env: { ...process.env, CODEX_HOME: codexHome, RUST_LOG: process.env.RUST_LOG ?? "warn" },
+    env,
   });
   let stderr = "";
   child.stderr.setEncoding("utf8");

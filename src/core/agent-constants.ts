@@ -133,4 +133,7 @@ export interface AgentOptions {
    * the model is told to re-inspect the ACTUAL state against the goal before finishing - catching
    * the "declared done without re-running the check" failure mode. (Config: `verify_before_exit`.) */
   verifyBeforeExit?: boolean;
+  /** Production safety net for real state changes: reject completion until the model performs a
+   * fresh, successful inspection after the latest state change. */
+  verifyStateChangesBeforeExit?: boolean;
 }

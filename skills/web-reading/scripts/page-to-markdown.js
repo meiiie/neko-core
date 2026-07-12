@@ -3,8 +3,8 @@
 // It walks the visible content and returns clean Markdown - headings, links, list items, paragraphs -
 // instead of a 400K-char innerText blob or an empty [role=article] on an obfuscated DOM.
 //
-// Usage: browser_evaluate(<paste this whole IIFE>). Returns a string. For a feed, grab ONCE near the top;
-// do NOT scroll-churn (scrolling unmounts virtualized items). Dedupe/slice on the returned markdown.
+// Usage: browser_evaluate(<paste this whole IIFE>). Returns a string. For a large virtualized feed,
+// capture + persist this viewport BEFORE scrolling; dedupe the next viewport against the saved rows.
 (() => {
   const root = document.querySelector("main, article, [role=main]") || document.body;
   const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "SVG", "NAV", "HEADER", "FOOTER", "ASIDE", "FORM", "TEMPLATE", "IFRAME"]);

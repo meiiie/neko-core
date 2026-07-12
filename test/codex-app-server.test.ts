@@ -6,6 +6,7 @@ import { PassThrough } from "node:stream";
 
 import {
   CodexAppServerClient,
+  codexAppServerArguments,
   compareCodexVersions,
   discoverCodexSupport,
   startCodexAppServer,
@@ -37,6 +38,17 @@ test("Codex version comparison handles the 0.144 support boundary", () => {
   expect(compareCodexVersions("0.144.1", "0.144.0")).toBe(1);
   expect(compareCodexVersions("0.143.9", "0.144.0")).toBe(-1);
   expect(compareCodexVersions("0.144.0-beta.1", "0.144.0")).toBe(-1);
+});
+
+test("voice launches App Server with the gated realtime feature enabled", () => {
+  expect(codexAppServerArguments(
+    { path: "codex.cmd", kind: "cli", source: "path", version: "0.144.1" },
+    { enableRealtimeConversation: true },
+  )).toEqual(["app-server", "--enable", "realtime_conversation", "--listen", "stdio://"]);
+  expect(codexAppServerArguments(
+    { path: "codex-app-server.exe", kind: "app-server", source: "managed", version: "0.144.1" },
+    {},
+  )).toEqual(["--listen", "stdio://"]);
 });
 
 test("support discovery prefers a compatible managed pack without requiring Codex Desktop", () => {

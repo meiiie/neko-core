@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use Zalo"
+  short_description: "Operate Zalo chats safely through Neko"
+  default_prompt: "Use $use-zalo to find a Zalo chat, prepare a message, and verify the requested outcome safely."

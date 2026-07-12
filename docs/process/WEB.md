@@ -47,7 +47,10 @@ extract verbatim, compute in code.
 Stands up the whole SOTA web stack and wires it into config (idempotent, key-safe):
 SearXNG in Docker (JSON API on) + the browser MCP (headed real-Chrome). Verifies the JSON
 API, then `neko doctor` shows `web_search: searxng`. Sub-targets: `neko setup searxng` /
-`neko setup browser`. (No Docker? It says so and you can use a Tavily key instead.) The
+`neko setup browser`. Browser setup defaults to a dedicated persistent Chrome profile, so login
+survives restarts. Use `neko setup browser attach` for an existing signed-in Chrome tab (official
+Playwright Extension), or `neko setup browser isolated` for disposable testing. (No Docker? It says
+so and you can use a Tavily key instead.) The
 manual recipe below is what it automates.
 
 ### Managed lifecycle - the Ollama pattern applied to search (2026-07-10)
@@ -113,24 +116,54 @@ For "real-world" web like ds4-agent (a real, non-headless Chrome that looks huma
 use a **browser MCP server** — the same way Goose does browser (an MCP/extension, not core). Neko
 already speaks MCP, so this needs **no Neko code**, no core bloat, and stays a single binary.
 
-Add to `~/.neko-core/config.json`:
+The normal path is one command:
+
+```text
+neko setup browser                 # persistent Neko profile; sign in once
+neko setup browser attach          # reuse existing Chrome tabs/login through the extension
+neko setup browser isolated        # disposable state for tests/untrusted pages
+```
+
+The persistent form written to `~/.neko-core/config.json` is:
 
 ```json
 {
   "mcp_servers": {
-    "browser": { "command": "bunx", "args": ["@playwright/mcp@latest"] }
+    "browser": { "command": "bunx", "args": ["@playwright/mcp@latest", "--browser", "chrome", "--user-data-dir", "~/.neko-core/browser/default"] }
   }
 }
 ```
 
 Then the agent gets the server's browser tools (navigate, click, read, screenshot…) automatically
-(`neko mcp` lists them). For the "use your real logged-in Chrome" trick, point the MCP server at
-your Chrome channel/profile per its docs (e.g. Playwright-MCP `--channel chrome`, or a CDP server
-you started with `--remote-debugging-port`).
+(`neko mcp` lists them). Attach mode uses Microsoft's Playwright Extension and asks which real tab
+to share; it reuses the browser's cookies without copying them into Neko. Do not copy Chrome's
+default profile or cookie database. Chrome 136+ intentionally rejects remote debugging against the
+default data directory; use the extension or Neko's dedicated profile. A persistent profile has one
+browser-process owner; use attach mode when concurrent Neko sessions must share the already-running Chrome.
+The dedicated profile persists Chrome's normal cookies, local storage, and related site state for every origin,
+not only Facebook. A user still signs in once per service (X, Gmail, GitHub, and so on), and each service remains
+free to expire or revoke its own server-side session, request 2FA/checkpoints, or block automation. Persistence
+therefore removes Neko's artificial re-login cycle; it cannot promise that a third-party login never expires.
 
 **Why not bake Playwright into Neko's core?** It's a heavy dependency + a ~150MB browser, can't be
 verified headlessly, and would break the standalone single binary. MCP is the clean seam (Goose,
 Claude Code, and others all do browser this way). Built-in `web_*` covers the simple 90%.
+
+### Neko-owned explicit-tab bridge (developer preview)
+
+For a Claude/Codex-style one-click attachment with Neko's own permissions and audit surface:
+
+```text
+neko browser bridge       # loopback only; capability is never printed
+neko browser path         # folder to Load unpacked in chrome://extensions
+neko browser rotate       # revoke pairing for the next bridge start
+```
+
+The extension uses `activeTab`, separate click/type grants, sensitive-field blocking, cross-origin detach,
+a visible `Neko is using this tab` marker, conservative tab grouping, and emergency stop. Public Store and
+unpacked extension ids are exact config values under `browser_extension_ids`; the bridge never accepts a
+wildcard extension Origin. Its redacted attached/offline status may travel inside `/relay`'s E2E-encrypted presence;
+cookies, page content and the bridge capability never do. Full design: `BROWSER-BRIDGE.md`.
 
 ## Authenticated MCP servers
 - **Static token / API key** (works today): add `headers`:

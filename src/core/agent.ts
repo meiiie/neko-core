@@ -81,6 +81,7 @@ export class Agent {
   private readonly dynamicContext?: () => string;
   private maxContextTokens: number;
   private readonly verifyBeforeExit: boolean;
+  private readonly verifyStateChangesBeforeExit: boolean;
   readonly cost = new CostTracker();
   messages: any[] = [];
   /** The single system message is `<base prompt>` + DYN_MARK + `<live session context>`.
@@ -106,6 +107,7 @@ export class Agent {
     this.dynamicContext = opts.dynamicContext;
     this.maxContextTokens = opts.maxContextTokens ?? 131072;
     this.verifyBeforeExit = Boolean(opts.verifyBeforeExit);
+    this.verifyStateChangesBeforeExit = Boolean(opts.verifyStateChangesBeforeExit);
   }
 
   /** Swap the LLM provider live (used by the REPL's /provider command to switch endpoint+key between turns,
@@ -122,6 +124,22 @@ export class Agent {
   /** Keep overflow/compaction guards accurate after a live /model or /provider switch. */
   setMaxContextTokens(tokens: number): void {
     if (Number.isFinite(tokens) && tokens > 0) this.maxContextTokens = tokens;
+  }
+
+  /** App-owned model sessions (for example realtime voice) use the exact same tool boundary as a
+   * normal Agent turn. Keeping this wrapper here prevents an adapter from bypassing approvals. */
+  externalToolSchemas(): any[] {
+    return this.tools.schemas();
+  }
+
+  async executeExternalTool(
+    call: { id?: string; name: string; arguments: Record<string, any> },
+    signal?: AbortSignal,
+  ): Promise<string | any[]> {
+    this.emit("tool_call", call);
+    const observation = await this.safeExecute(call, signal);
+    this.emit("tool_result", { call, observation });
+    return observation;
   }
 
   /** Summarize the conversation and replace it with the summary, freeing context. */
@@ -367,6 +385,27 @@ export class Agent {
       return val === "" || val === "[]" || val === "{}" || val === "null" || val === "undefined" || val === '""' || val === "0";
     }
 
+    private static isStateChangingCall(call: { name: string; arguments?: Record<string, any> }): boolean {
+      const name = call.name.toLowerCase();
+      if (MUTATING_TOOLS.has(name)) return true;
+      if (name === "computer") {
+        return !new Set(["list", "read", "get", "wait", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
+      }
+      // MCP browser adapters are outside core's static registry. Their read-only snapshot/content
+      // tools deliberately do not match these common state-changing suffixes.
+      return /(?:^|__)(?:browser_)?(?:click|type|fill|press_key|select_option|drag|upload_file|navigate|go_back|close|evaluate|run_code)$/.test(name);
+    }
+
+    private static isVerificationEvidenceCall(call: { name: string; arguments?: Record<string, any> }, observation: unknown): boolean {
+      if ((typeof observation === "string" && Agent.isUnproductiveResult(observation)) || observation == null) return false;
+      const name = call.name.toLowerCase();
+      if (name === "computer") {
+        return new Set(["list", "read", "get", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
+      }
+      if (EDIT_TOOLS.has(name) || Agent.isStateChangingCall(call)) return name === "bash";
+      return !new Set(["todo_write", "skill", "memory", "workflow", "playbook"]).has(name);
+    }
+
   /** Seal any tool_call left UNANSWERED by an interrupted turn (Esc/abort can stop the loop right after
    * the model emitted tool_calls, before their results are appended). A resumed session with a dangling
    * tool_call makes the provider reject the very next request ("tool_use with no tool_result"), which
@@ -412,6 +451,21 @@ export class Agent {
     let mutErrored = false; // tool-error recovery is EDGE-triggered: re-armed by a mutating-tool success
     let verifiedExit = false; // the pre-completion verify gate fires at most once per run
     let planExitChecked = false; // an unfinished todo plan gets one persistence nudge before exit
+    let changedRealState = false;
+    let stateVerificationRequested = false;
+    let stateVerificationEvidence = false;
+    const noteTool = (call: { name: string; arguments?: Record<string, any> }, observation: unknown) => {
+      const changesState = Agent.isStateChangingCall(call);
+      const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
+      if (changesState) {
+        // A later bash can be the verifier for an earlier write/bash (tests, exact-byte checks), but the
+        // first state-changing call cannot verify itself. Other mutations invalidate older evidence.
+        stateVerificationEvidence = changedRealState && call.name.toLowerCase() === "bash" && verifiesState;
+        changedRealState = true;
+      } else if (changedRealState && verifiesState) {
+        stateVerificationEvidence = true;
+      }
+    };
     for (let step = 0; step < this.maxSteps; step++) {
       this.emit("step", step + 1);
       if (signal?.aborted) return "[interrupted]";
@@ -448,6 +502,7 @@ export class Agent {
       const executeTool = async (call: { id: string; name: string; arguments: Record<string, any> }) => {
         this.emit("tool_call", call);
         const observation = await this.safeExecute(call, signal);
+        noteTool(call, observation);
         this.emit("tool_result", { call, observation });
         return observation;
       };
@@ -481,6 +536,35 @@ export class Agent {
           });
           continue;
         }
+        // An action's return value is process evidence, not proof of the user-visible outcome. A
+        // DPI-virtualized script can report success while placing an icon at the wrong physical pixel.
+        // Production agents therefore require one fresh, successful inspection after the latest mutation.
+        // A well-behaved agent that already inspected pays no extra model round; only unverified finishes
+        // are intercepted.
+        if (this.verifyStateChangesBeforeExit && changedRealState && step < this.maxSteps - 1) {
+          if (!stateVerificationEvidence && !stateVerificationRequested) {
+            stateVerificationRequested = true;
+            verifiedExit = true; // stronger than the generic opt-in gate; do not stack both
+            this.messages.push({
+              role: "user",
+              content: "OUTCOME VERIFICATION REQUIRED: you changed real machine/project state. Do not trust " +
+                "the action's success message or the coordinates you intended. Use a tool NOW to inspect the " +
+                "result independently, then compare the observed end state with every user-visible requirement " +
+                "in the original task. For GUI/spatial work, wait for settling and use computer read/list/get/" +
+                "screenshot; use computer display for physical monitor geometry and DPI. If evidence disagrees, " +
+                "keep working. Do not claim completion from an action log alone.",
+            });
+            continue;
+          }
+          if (!stateVerificationEvidence) {
+            this.messages.push({
+              role: "user",
+              content: "NO VERIFICATION EVIDENCE YET: your last reply used no fresh successful inspection tool. " +
+                "Observe the actual end state now; otherwise report that completion is unverified, not done.",
+            });
+            continue;
+          }
+        }
         // Pre-completion gate (opt-in): intercept the FIRST tool-less final once and force a
         // re-inspection of the ACTUAL state - the "declared done without re-running the check"
         // failure mode (LangChain PreCompletionChecklist; ACE reflection-before-exit). Fires at
@@ -511,6 +595,7 @@ export class Agent {
         toolCalls.forEach((call) => this.emit("tool_call", call));
         const observations = await Promise.all(toolCalls.map((call) => eager.get(eagerKey(call)) ?? this.safeExecute(call, signal)));
         toolCalls.forEach((call, i) => {
+          noteTool(call, observations[i]);
           this.emit("tool_result", { call, observation: observations[i] });
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observations[i]) });
         });
@@ -531,6 +616,7 @@ export class Agent {
             const observation = repeats >= 2
               ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
               : await (eager.get(eagerKey(call)) ?? this.safeExecute(call, signal));
+            noteTool(call, observation);
             // Track consecutive UNPRODUCTIVE results (failed OR empty) from ANY tool; a productive result
             // resets the streak. Catches the doom-loop the exact-repeat + edit guards structurally miss:
             // probing a heavy/obfuscated page with a DIFFERENT selector each time, every one returning []

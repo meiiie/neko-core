@@ -11,6 +11,7 @@ test("shared registry composition wires native web and preserves every child saf
     sandbox_network: true,
     vision: true,
     computer_use_overlay: true,
+    computer_use_resident: false,
     computer_use_input: "inject",
     searxng_url: "http://search.local",
     search_backend: "searxng",
@@ -38,6 +39,7 @@ test("shared registry composition wires native web and preserves every child saf
   expect(child.sandboxBash).toBe(true);
   expect(child.sandboxAllowNetwork).toBe(true);
   expect(child.presence).toBe(true);
+  expect(child.residentUia).toBe(false);
   expect(child.inputBackend).toBe("inject");
   expect(child.subagent).toBeUndefined();
 });

@@ -30,8 +30,9 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
 
 1. Commit, push `self-improve`, fast-forward `main`, push, tag `vX.Y.Z`, push the tag.
 2. WATCH the release workflow to completion (a monitor, not hope).
-3. Verify, every time: **5/5 binaries + 5/5 SHA-256 sidecars** attached · `releases/latest` resolves to the new tag ·
-   `isDraft: false` · install one-liner fetches the new version end-to-end when the change warrants it.
+3. Verify, every time: **5/5 binaries + 5/5 SHA-256 sidecars** attached · the browser-extension ZIP when
+   that workflow step exists · `releases/latest` resolves to the new tag · `isDraft: false` · install
+   one-liner fetches the new version end-to-end when the change warrants it.
 
 ## 4. Release notes — curated, for humans
 
