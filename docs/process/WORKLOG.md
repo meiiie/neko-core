@@ -16,6 +16,10 @@ Rules that govern this work live in `RULES.md`.
   A future adapter requires an official protocol or documented SDK consumer-session contract.
 - The audit also found that the API-key route depends on the same Gemini CLI ACP executable. `/login` now
   offers the verified Support Pack before accepting either supported route, closing the prior delayed failure.
+- The first release-candidate CI run exposed a Windows-only WPF/UIA readiness race: the disposable test app
+  could take longer than the old two-second polling budget or briefly stall a provider. The integration probe
+  now retries recoverable host failures to a bounded deadline, reports its last error, and uses explicit
+  integration-test timeouts. Five pre-fix stress rounds reproduced the race; three post-fix rounds passed.
 
 ## 2026-07-12 - v0.11.4 verified self-update fallback
 - The v0.11.3 installed-binary smoke proved its installer fallback and BOM writer fix, then exposed the same

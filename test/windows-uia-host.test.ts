@@ -9,6 +9,22 @@ import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 const script = join(import.meta.dir, "..", "skills", "computer-use", "scripts", "resident-uia.ps1");
 
+async function waitForUiaText(read: () => Promise<string>, needle: string, timeoutMs = 15_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let last = "";
+  let lastError = "";
+  while (Date.now() < deadline) {
+    try {
+      last = await read();
+      if (last.includes(needle)) return last;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await Bun.sleep(100);
+  }
+  throw new Error(`UIA did not expose ${JSON.stringify(needle)} within ${timeoutMs}ms${lastError ? `; last error: ${lastError}` : last ? `; last output: ${last}` : ""}`);
+}
+
 test("resident UIA host reuses one PowerShell process and restarts after disposal", async () => {
   if (process.platform !== "win32") return;
   const host = new ResidentUiaHost(script);
@@ -40,7 +56,7 @@ test("resident host handles waits without spawning another PowerShell process", 
   } finally {
     host.dispose();
   }
-});
+}, 15_000);
 
 test("resident host captures consecutive frames and keeps delta state in one process", async () => {
   if (process.platform !== "win32") return;
@@ -62,7 +78,7 @@ test("resident host captures consecutive frames and keeps delta state in one pro
     rmSync(firstPath, { force: true });
     rmSync(secondPath, { force: true });
   }
-});
+}, 15_000);
 
 test("an idle resident host does not pin a short-lived Neko process", async () => {
   if (process.platform !== "win32") return;
@@ -72,7 +88,7 @@ test("an idle resident host does not pin a short-lived Neko process", async () =
   const exited = await Promise.race([child.exited, Bun.sleep(5_000).then(() => null)]);
   if (exited === null) child.kill();
   expect(exited).toBe(0);
-});
+}, 15_000);
 
 test("resident UIA host reads a disposable WPF accessibility tree", async () => {
   if (process.platform !== "win32") return;
@@ -96,12 +112,11 @@ $w.Content=$p
   const form = Bun.spawn(["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", Buffer.from(source, "utf16le").toString("base64")], { stdout: "ignore", stderr: "ignore" });
   const host = new ResidentUiaHost(script);
   try {
-    let output = "";
-    for (let i = 0; i < 20 && !output.includes("Resident probe input"); i++) {
+    const output = await waitForUiaText(async () => {
       const response = await host.request({ action: "list", window: title }, 5_000);
-      output = response.output ?? "";
-      if (!response.ok) await Bun.sleep(100);
-    }
+      if (!response.ok) throw new Error(response.error ?? "UIA list failed");
+      return response.output ?? "";
+    }, "Resident probe input");
     expect(output).toContain("Resident probe input");
     expect((await host.request({ action: "setvalue", window: title, name: "Resident probe input", value: "Resident" })).output).toContain("set+VERIFIED");
     expect((await host.request({ action: "get", window: title, name: "Resident probe input" })).output).toContain("Resident");
@@ -113,7 +128,7 @@ $w.Content=$p
     form.kill();
     await Promise.race([form.exited, Bun.sleep(1000)]);
   }
-}, 15_000);
+}, 30_000);
 
 test("computer tool dispatches UIA reads through the resident host", async () => {
   if (process.platform !== "win32") return;
@@ -130,14 +145,13 @@ $w.Content=$b
   const form = Bun.spawn(["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", Buffer.from(source, "utf16le").toString("base64")], { stdout: "ignore", stderr: "ignore" });
   const tools = new ToolRegistry(join(import.meta.dir, ".."), "auto", async () => true);
   try {
-    let output = "";
-    for (let i = 0; i < 20 && !output.includes("Dispatch probe input"); i++) {
-      output = String(await tools.execute("computer", { action: "list", window: title }));
-      if (!output.includes("Dispatch probe input")) await Bun.sleep(100);
-    }
+    const output = await waitForUiaText(
+      () => tools.execute("computer", { action: "list", window: title }).then(String),
+      "Dispatch probe input",
+    );
     expect(output).toContain("Dispatch probe input");
   } finally {
     form.kill();
     await Promise.race([form.exited, Bun.sleep(1000)]);
   }
-}, 15_000);
+}, 30_000);
