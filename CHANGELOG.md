@@ -6,6 +6,20 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.5] — 2026-07-12
+
+### Changed
+- Google sign-in now reflects Google's 18 June 2026 product change: Gemini CLI consumer OAuth no longer
+  serves Free, AI Pro, or AI Ultra. Neko recommends the supported Gemini API-key route first and labels CLI
+  OAuth as Code Assist Standard/Enterprise only. Antigravity remains a separate official product; Neko does
+  not reuse its credentials or scrape its TUI.
+- The optional Gemini CLI Support Pack is now offered for both supported Neko routes. Previously the API-key
+  picker accepted a key without ensuring that its required ACP executable existed.
+
+### Fixed
+- Gemini's consumer-deprecation response is converted into an actionable migration message instead of a raw
+  ACP backend error, while unrelated authentication failures remain unchanged.
+
 ## [0.11.4] — 2026-07-12
 
 ### Fixed

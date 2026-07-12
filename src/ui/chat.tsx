@@ -171,7 +171,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (cfg.usesChatGptAuth && !hasChatGptCredentials()) {
       out.push({ id: idRef.current++, kind: "info", text: "ChatGPT is not signed in - type /login to connect Plus/Pro (no API billing)." });
     } else if (cfg.usesGeminiAuth && !hasGeminiCredentials()) {
-      out.push({ id: idRef.current++, kind: "info", text: "Google is not signed in - type /login to connect Gemini Free/AI Pro/Ultra (no API billing)." });
+      out.push({ id: idRef.current++, kind: "info", text: "Google is not configured - type /login for a Gemini API key or Code Assist Enterprise." });
     } else if (!cfg.apiKey && !cfg.isLocalEndpoint && !cfg.usesChatGptAuth && !cfg.usesGeminiAuth) {
       out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
     }
@@ -1440,6 +1440,28 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const selectRoute = async (route: { id: string }) => {
           setOverlay(null);
           const profile = cfg.profiles[route.id];
+          if (profile?.provider === "gemini_cli" && discoverGeminiCli().state !== "ready") {
+            setOverlay({
+              title: `${profile.label || "Gemini"} needs the optional Gemini CLI Support Pack.`,
+              items: [
+                { id: "install", label: "Install and continue", detail: "Official Google bundle; about 55 MiB download / 200 MiB disk. No admin. Remove later with /support." },
+                { id: "cancel", label: "Not now", detail: "Keep the current provider; download nothing" },
+              ],
+              onSelect: (choice) => {
+                setOverlay(null);
+                if (choice.id !== "install") return addLine("info", "Gemini CLI Support Pack installation cancelled; current provider unchanged.");
+                setBusy(true);
+                void installGeminiSupportPack({ notify: (message) => addLine("info", message) })
+                  .then(async () => {
+                    addLine("info", "Gemini CLI Support Pack is ready. Continuing setup... Manage or remove it anytime with /support.");
+                    await selectRoute(route);
+                  })
+                  .catch((error) => addLine("error", `Gemini CLI Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and choose Google again to retry.`))
+                  .finally(() => setBusy(false));
+              },
+            });
+            return;
+          }
           if (profile?.auth === "chatgpt_oauth") {
             setBusy(true);
             addLine("info", "Opening ChatGPT Plus/Pro sign-in in your browser...");
@@ -1455,34 +1477,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             return;
           }
           if (profile?.auth === "gemini_oauth") {
-            const support = discoverGeminiCli();
-            if (support.state !== "ready") {
-              setOverlay({
-                title: "Gemini account sign-in needs the optional Gemini Support Pack.",
-                items: [
-                  { id: "install", label: "Install and continue", detail: "Official Google bundle; about 55 MiB download / 200 MiB disk. No admin. Remove later with /support." },
-                  { id: "cancel", label: "Not now", detail: "Keep the current provider; download nothing" },
-                ],
-                onSelect: (choice) => {
-                  setOverlay(null);
-                  if (choice.id !== "install") return addLine("info", "Gemini Support Pack installation cancelled; current provider unchanged.");
-                  setBusy(true);
-                  void installGeminiSupportPack({ notify: (message) => addLine("info", message) })
-                    .then(async () => {
-                      addLine("info", "Gemini Support Pack is ready. Continuing to Google sign-in... Manage or remove it anytime with /support.");
-                      await selectRoute(route);
-                    })
-                    .catch((error) => addLine("error", `Gemini Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and choose Google again to retry.`))
-                    .finally(() => setBusy(false));
-                },
-              });
-              return;
-            }
             setBusy(true);
             try {
               await loginGemini((message) => addLine("info", message));
               activate(route.id);
-              addLine("info", "Google connected. Free/AI Pro/Ultra quota is active; API billing is not used. Type /model to choose an account-available model.");
+              addLine("info", "Google connected through Gemini Code Assist Standard/Enterprise. Type /model to choose an available model.");
             } catch (error) {
               addLine("error", `Gemini sign-in failed: ${error instanceof Error ? error.message : error}`);
             } finally {

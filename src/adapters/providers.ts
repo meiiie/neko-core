@@ -90,7 +90,7 @@ export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "openai_compat") return new OpenAICompatProvider(config);
   throw new Error(
     `Unknown provider '${config.provider}'. Use openai_compat (any OpenAI /chat/completions endpoint or a ` +
-      "local server), chatgpt (Plus/Pro OAuth), gemini_cli (Google account/API key), anthropic (Claude Messages API), or moa (mixture-of-agents).",
+      "local server), chatgpt (Plus/Pro OAuth), gemini_cli (Gemini API key/Code Assist Enterprise), anthropic (Claude Messages API), or moa (mixture-of-agents).",
   );
 }
 

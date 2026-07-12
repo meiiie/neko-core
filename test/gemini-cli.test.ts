@@ -7,11 +7,21 @@ import { PassThrough } from "node:stream";
 import {
   clearGeminiCredentials,
   discoverGeminiCli,
+  explainGeminiCliError,
   geminiCredentialsPath,
   geminiUsageFromPrompt,
   GeminiAcpClient,
   hasGeminiCredentials,
 } from "../src/adapters/gemini-cli.ts";
+
+test("Gemini consumer OAuth deprecation becomes an actionable supported-route error", () => {
+  const raw = "This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products";
+  const message = explainGeminiCliError(raw);
+  expect(message).toContain("ended Gemini CLI sign-in for Free/AI Pro/Ultra on 2026-06-18");
+  expect(message).toContain("Gemini API key");
+  expect(message).toContain("Standard/Enterprise");
+  expect(message).toContain("does not reuse its credentials");
+});
 
 test("Gemini CLI discovery verifies ACP-capable versions and reports old installs", () => {
   const env = { PATH: "C:\\bin", NEKO_GEMINI_PATH: "" } as NodeJS.ProcessEnv;
@@ -75,6 +85,15 @@ test("Gemini ACP transport correlates responses and fails closed on unsupported 
   output.write(JSON.stringify({ jsonrpc: "2.0", id: 77, method: "session/request_permission", params: {} }) + "\n");
   await Bun.sleep(5);
   expect(written.find((message) => message.id === 77)?.result).toEqual({ outcome: { outcome: "cancelled" } });
+
+  const auth = client.authenticate();
+  await Bun.sleep(5);
+  const authRequest = written.findLast((message) => message.method === "authenticate");
+  output.write(JSON.stringify({ jsonrpc: "2.0", id: authRequest.id, error: {
+    code: -32000,
+    message: "This client is no longer supported for Gemini Code Assist for individuals. Migrate to the Antigravity suite.",
+  } }) + "\n");
+  await expect(auth).rejects.toThrow("use /login -> Google -> Gemini API key");
   client.close();
 });
 

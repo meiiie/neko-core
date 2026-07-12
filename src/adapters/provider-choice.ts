@@ -34,7 +34,7 @@ export function providerChoices(cfg: NekoConfig, authOnly = false): Choice[] {
       detail: family === "openai"
         ? `ChatGPT Plus/Pro or API key${current}`
         : family === "google"
-          ? `Gemini Free/AI Pro/Ultra or API key${current}`
+          ? `Gemini API key or Code Assist Enterprise${current}`
         : `${profile.provider ?? "?"} · ${profile.model ?? "?"}${current}`,
     });
   }
@@ -44,7 +44,9 @@ export function providerChoices(cfg: NekoConfig, authOnly = false): Choice[] {
 export function authChoices(cfg: NekoConfig, family: string, availability: AuthAvailability): Choice[] {
   return Object.entries(cfg.profiles)
     .filter(([name, profile]) => familyOf(name, profile) === family)
-    .sort(([, a], [, b]) => (a.auth?.endsWith("_oauth") ? -1 : b.auth?.endsWith("_oauth") ? 1 : 0))
+    .sort(([, a], [, b]) => family === "google"
+      ? (a.auth === "api_key" ? -1 : b.auth === "api_key" ? 1 : 0)
+      : (a.auth?.endsWith("_oauth") ? -1 : b.auth?.endsWith("_oauth") ? 1 : 0))
     .map(([name, profile]) => {
       const ready = profile.auth === "none"
         || (profile.auth === "chatgpt_oauth" ? availability.chatgpt
@@ -52,7 +54,7 @@ export function authChoices(cfg: NekoConfig, family: string, availability: AuthA
             : availability.apiProfiles.has(name));
       const billing = profile.auth === "none" ? "no sign-in required"
         : profile.auth === "chatgpt_oauth" ? "subscription, no API billing"
-          : profile.auth === "gemini_oauth" ? "Google account quota, no API billing"
+          : profile.auth === "gemini_oauth" ? "Standard/Enterprise only; consumer plans moved to Antigravity"
             : "pay-as-you-go API";
       return {
         id: name,

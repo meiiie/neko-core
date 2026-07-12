@@ -26,15 +26,15 @@ test("OpenAI auth picker keeps subscription and API billing visibly separate", (
   expect(choices[1].detail).toContain("not connected");
 });
 
-test("Google auth picker keeps Gemini account quota and API billing separate", () => {
+test("Google auth picker recommends API billing and keeps enterprise OAuth explicit", () => {
   const grouped = providerChoices(cfg("gemini"));
   expect(grouped.filter((choice) => choice.id === "google")).toHaveLength(1);
-  expect(grouped.find((choice) => choice.id === "google")?.detail).toContain("Gemini Free/AI Pro/Ultra or API key");
+  expect(grouped.find((choice) => choice.id === "google")?.detail).toContain("Gemini API key or Code Assist Enterprise");
   const choices = authChoices(cfg("gemini"), "google", { chatgpt: false, gemini: true, apiProfiles: new Set() });
-  expect(choices.map((choice) => choice.id)).toEqual(["gemini", "gemini-api"]);
-  expect(choices[0].detail).toContain("Google account quota, no API billing");
-  expect(choices[0].detail).toContain("connected");
-  expect(choices[1].detail).toContain("pay-as-you-go API");
+  expect(choices.map((choice) => choice.id)).toEqual(["gemini-api", "gemini"]);
+  expect(choices[0].detail).toContain("pay-as-you-go API");
+  expect(choices[1].detail).toContain("Standard/Enterprise only");
+  expect(choices[1].detail).toContain("connected");
 });
 
 test("profile display and model context name the active OpenAI auth route", () => {

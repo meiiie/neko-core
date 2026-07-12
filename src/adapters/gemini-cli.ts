@@ -12,6 +12,14 @@ import { VERSION } from "../shared/version.ts";
 export const GEMINI_CLI_MIN_VERSION = "0.38.0";
 const RPC_TIMEOUT_MS = 20_000;
 const MAX_RPC_LINE_BYTES = 16 * 1024 * 1024;
+const CONSUMER_OAUTH_ENDED = /no longer supported for Gemini Code Assist for individuals|migrate to the Antigravity/i;
+
+export function explainGeminiCliError(message: string): string {
+  if (!CONSUMER_OAUTH_ENDED.test(message)) return message;
+  return "Google ended Gemini CLI sign-in for Free/AI Pro/Ultra on 2026-06-18. "
+    + "In Neko, use /login -> Google -> Gemini API key. Gemini Code Assist Standard/Enterprise "
+    + "can still use the CLI route. Antigravity is a separate Google product; Neko does not reuse its credentials.";
+}
 
 export interface GeminiExecutable {
   path: string;
@@ -151,7 +159,10 @@ export class GeminiAcpClient {
       if (!pending) return;
       this.pending.delete(id);
       clearTimeout(pending.timer);
-      if (message.error) pending.reject(new Error(`Gemini CLI ACP: ${message.error.message ?? `error ${message.error.code ?? "unknown"}`}`));
+      if (message.error) {
+        const detail = explainGeminiCliError(message.error.message ?? `error ${message.error.code ?? "unknown"}`);
+        pending.reject(new Error(`Gemini CLI ACP: ${detail}`));
+      }
       else pending.resolve(message.result);
       return;
     }
@@ -389,7 +400,7 @@ function requireGeminiExecutable(): GeminiExecutable {
   return status.executable;
 }
 
-/** Browser OAuth owned entirely by the official Gemini CLI. Neko never reads or copies the token. */
+/** Enterprise/Google Cloud OAuth owned by Gemini CLI. Consumer OAuth ended on 2026-06-18. */
 export async function loginGemini(notify: (message: string) => void = () => {}): Promise<void> {
   const client = startGeminiAcp(requireGeminiExecutable());
   try {

@@ -4,26 +4,28 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-12) — v0.11.4 release
+## Current status (2026-07-12) — v0.11.5 release
 Neko Code is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
 
-- **Branch:** `self-improve`. **Current release: v0.11.4 (2026-07-12)** - Google is now a grouped auth
-  family with separate Gemini account-quota and API-key routes; browser control can retain signed-in
+- **Branch:** `self-improve`. **Current release: v0.11.5 (2026-07-12)** - Google is now a grouped auth
+  family with Gemini API-key and Code Assist Enterprise routes; browser control can retain signed-in
   sessions through a dedicated profile or an explicitly attached Chrome tab; voice has local consent and
   stop controls; and Windows computer use now shares one DPI-aware resident UIA/input/capture host with
   post-action verification. Relay/mobile and transcript interaction also receive the same terminal-first
   polish. Installers and the in-binary updater survive GitHub's public API quota without weakening
   checksum/version verification, and plain update reliably clears a PowerShell-written pin. v0.9.0 remains
   the rollback baseline while these optional integrations soak in the field.
-- **Gemini account route (released in v0.11.0):** Google is now a grouped auth family with separate Gemini
-  account-quota and API-key routes. The account route uses the official Gemini CLI ACP protocol, dynamic
+- **Gemini routes (corrected in v0.11.5):** Google ended Gemini CLI consumer OAuth for Free/AI Pro/Ultra on
+  2026-06-18. Neko now recommends the API-key route and retains CLI OAuth only for Code Assist
+  Standard/Enterprise. Both use the official Gemini CLI ACP protocol, dynamic
   model discovery, scoped login/logout, image streaming, and usage metadata. An isolated loopback MCP proxy
   disables sidecar-native tools/extensions/hooks and routes every action back through Neko's approval gate;
   a compatible CLI can be reused, while the one-step managed Support Pack installs Google's verified bundle
-  and a private Node LTS runtime without admin/global npm. It never enlarges the base Neko download.
+  and a private Node LTS runtime without admin/global npm. Antigravity remains separate until Google ships a
+  supported embedding protocol; Neko does not reuse its consumer credentials. The pack never enlarges the base download.
 - **Outcome-verified computer use (released in v0.11.0, 2026-07-12):** Neko now treats tool success as process
   evidence, not task completion. After real state changes, CLI/TUI/subagents reject a finish claim until a
   fresh successful inspection tool call exists. `computer display` establishes one Per-Monitor-v2 physical

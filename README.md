@@ -97,7 +97,7 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > Fallback if the domain is unreachable: swap the URL for
 > `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
-**Current release: [v0.11.4](https://github.com/meiiie/neko-core/releases/tag/v0.11.4).**
+**Current release: [v0.11.5](https://github.com/meiiie/neko-core/releases/tag/v0.11.5).**
 Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
 real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). **Pin or roll back any time**
 (the pin holds — auto-update won't undo it): `neko update 0.9.0`, or at install time
@@ -109,7 +109,7 @@ Then start Neko and use the guided sign-in:
 neko
 # /login -> OpenAI -> ChatGPT Plus/Pro  (subscription, no API billing)
 #                  -> API key          (pay-as-you-go API)
-#        -> Google -> Gemini Free/AI Pro/Ultra (Google account quota, no API billing)
+#        -> Google -> Gemini API key (recommended) or Code Assist Standard/Enterprise
 #                  -> Gemini API key          (pay-as-you-go API)
 ```
 
@@ -199,14 +199,15 @@ installation. It is downloaded from the official `openai/codex` GitHub release, 
 published SHA-256, and required to have a valid OpenAI Authenticode signature before Neko activates it.
 The base Neko install is unchanged because the pack remains opt-in.
 
-Google accounts use the official [Gemini CLI](https://github.com/google-gemini/gemini-cli) over its
+Gemini uses the official [Gemini CLI](https://github.com/google-gemini/gemini-cli) over its
 [Agent Client Protocol (ACP)](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/acp-mode.md).
-Choose `/login -> Google -> Gemini Free/AI Pro/Ultra`; the browser OAuth and credential refresh remain
-owned by Gemini CLI, and Neko never reads or copies the token. `/model` uses ACP's account-aware model
-list (including `auto`) and `/logout` removes only Gemini OAuth state. Gemini manages thinking adaptively,
-so `/effort` explains that OpenAI-style effort tiers do not apply on this route.
+Google ended Gemini CLI consumer OAuth for Free, AI Pro, and AI Ultra on 18 June 2026 and moved those
+users to Antigravity. Neko therefore recommends `/login -> Google -> Gemini API key`; Code Assist
+Standard/Enterprise users may keep using the CLI sign-in route. Antigravity is a separate Google product:
+Neko does not read its keyring, reuse its OAuth token, or scrape its TUI.
 
-Neko reuses a compatible installed Gemini CLI when available. Otherwise `/login` offers one-step installation
+Neko reuses a compatible installed Gemini CLI when available. Both supported routes (API key and Code Assist
+Standard/Enterprise) need the ACP executable. Otherwise `/login` offers one-step installation
 of a Neko-managed Support Pack: Google's official bundle plus a private Node LTS runtime under
 `~/.neko-core/gemini-support`. It requires no administrator access, global npm package, or PATH change and
 does not enlarge the base Neko download. It can also be managed with `neko setup gemini` or
@@ -215,7 +216,7 @@ forces an isolated ACP configuration: Gemini built-in tools, extensions, and hoo
 only advertised MCP server is a random-token loopback proxy. Every read, edit, and command therefore
 returns through Neko's existing ToolRegistry and approval gate.
 
-OAuth state lives in Neko's own `~/.neko-core/gemini-home`, even when Neko reuses a system Gemini binary;
+Enterprise OAuth state lives in Neko's own `~/.neko-core/gemini-home`, even when Neko reuses a system Gemini binary;
 therefore `/logout` cannot sign the user's separate Gemini CLI session out. `/usage` reports token usage
 returned by ACP. Google does not currently expose the remaining daily request count through ACP, so Neko
 reports that limitation without opening another CLI or scraping a private endpoint.

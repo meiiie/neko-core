@@ -3,6 +3,20 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-12 - v0.11.5 Gemini consumer OAuth deprecation correction
+- A real v0.11.1 user login reached the verified Gemini Support Pack, then Google returned that the client is
+  no longer supported for Gemini Code Assist individuals and directed consumer users to Antigravity. Google's
+  deprecation page confirms that Free, AI Pro, and AI Ultra stopped working through Gemini CLI on 2026-06-18;
+  Code Assist Standard/Enterprise and paid API-key paths remain supported.
+- Neko no longer advertises consumer account quota. The Google picker recommends Gemini API key first and
+  labels CLI OAuth as Standard/Enterprise only. The shared error boundary maps Google's exact deprecation to
+  an actionable message while preserving all other backend details.
+- Antigravity CLI currently documents an interactive TUI/keyring but no supported ACP/headless consumer
+  embedding surface. Neko therefore does not scrape its terminal, copy credentials, or proxy consumer quota.
+  A future adapter requires an official protocol or documented SDK consumer-session contract.
+- The audit also found that the API-key route depends on the same Gemini CLI ACP executable. `/login` now
+  offers the verified Support Pack before accepting either supported route, closing the prior delayed failure.
+
 ## 2026-07-12 - v0.11.4 verified self-update fallback
 - The v0.11.3 installed-binary smoke proved its installer fallback and BOM writer fix, then exposed the same
   shared-IP GitHub API limit in `neko update` itself. Auto-update state resumed correctly, but release

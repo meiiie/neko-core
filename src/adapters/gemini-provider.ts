@@ -1,4 +1,4 @@
-/** Gemini Free/AI Pro/Ultra and API-key transport through the official Gemini CLI ACP agent. */
+/** Gemini API-key and Code Assist Standard/Enterprise transport through official Gemini CLI ACP. */
 import { randomBytes } from "node:crypto";
 import { createServer, type Server as HttpServer } from "node:http";
 

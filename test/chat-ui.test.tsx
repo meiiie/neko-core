@@ -184,7 +184,7 @@ test("/login groups OpenAI first, then offers subscription OAuth or API key", as
   unmount();
 }, 15000);
 
-test("/login groups Google, then separates Gemini account quota from API billing", async () => {
+test("/login groups Google, recommends API key, and marks consumer OAuth as migrated", async () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
   const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
   stdin.write("/login"); await tick(30); stdin.write("\r");
@@ -192,9 +192,9 @@ test("/login groups Google, then separates Gemini account quota from API billing
   stdin.write("google"); await tick(40); stdin.write("\r");
   expect(await until(() => (lastFrame() ?? "").includes("Google - choose how to sign in"))).toBe(true);
   const frame = lastFrame() ?? "";
-  expect(frame).toContain("Gemini Free/AI Pro/Ultra");
+  expect(frame).toContain("Gemini Code Assist Standard/Enterprise");
   expect(frame).toContain("Gemini API key (pay-as-you-go)");
-  expect(frame).toContain("Google account quota, no API billing");
+  expect(frame).toContain("consumer plans moved to Antigravity");
   unmount();
 }, 15000);
 
@@ -206,7 +206,7 @@ test("/model on signed-out Gemini remains useful without starting the CLI", asyn
     const provider = new MockProvider([{ content: "", tool_calls: [] }]);
     const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo profile="gemini" provider={provider} />);
     stdin.write("/model"); await tick(30); stdin.write("\r");
-    expect(await until(() => (lastFrame() ?? "").includes("Google · Gemini Free/AI Pro/Ultra"))).toBe(true);
+    expect(await until(() => (lastFrame() ?? "").includes("Google · Gemini Code Assist Standard/Enterprise"))).toBe(true);
     expect(lastFrame() ?? "").toContain("auto");
     unmount();
   } finally {
@@ -238,7 +238,7 @@ test("/logout on Gemini removes only Gemini OAuth state immediately", async () =
   }
 }, 15000);
 
-test("/login offers one-step Gemini Support Pack setup when the bridge is missing", async () => {
+test("/login offers one-step Gemini CLI setup for the recommended API-key route", async () => {
   const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldPath = process.env.PATH;
   const home = mkdtempSync(join(tmpdir(), "neko-gemini-first-run-"));
   process.env.HOME = home; process.env.USERPROFILE = home; process.env.PATH = "";
@@ -252,7 +252,7 @@ test("/login offers one-step Gemini Support Pack setup when the bridge is missin
     stdin.write("google"); await tick(30); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Google - choose how to sign in"))).toBe(true);
     stdin.write("\r");
-    expect(await until(() => (lastFrame() ?? "").includes("Gemini Support Pack"))).toBe(true);
+    expect(await until(() => (lastFrame() ?? "").includes("Gemini CLI Support Pack"))).toBe(true);
     const frame = lastFrame() ?? "";
     expect(frame).toContain("Install and continue");
     expect(frame).toContain("No admin");
@@ -315,9 +315,9 @@ test("/support opens a management center and confirms managed-pack removal", asy
     expect(existsSync(codexRoot)).toBe(false);
     expect(existsSync(geminiRoot)).toBe(true);
     stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
-    expect(await until(() => (lastFrame() ?? "").includes("Manage Gemini account Support Pack"))).toBe(true);
+    expect(await until(() => (lastFrame() ?? "").includes("Manage Gemini CLI Support Pack"))).toBe(true);
     stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
-    expect(await until(() => (lastFrame() ?? "").includes("Remove Gemini account Support Pack?"))).toBe(true);
+    expect(await until(() => (lastFrame() ?? "").includes("Remove Gemini CLI Support Pack?"))).toBe(true);
     stdin.write("\x1b[B"); await tick(20); stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
     expect(await until(() => frames.join("\n").includes("Neko also signed this account out"))).toBe(true);
     expect(existsSync(geminiRoot)).toBe(false);
@@ -446,7 +446,7 @@ test("/support status keeps a copyable text report for diagnostics", async () =>
   const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
   stdin.write("/support status"); await tick(30); stdin.write("\r");
   expect(await until(() => frames.join("\n").includes("ChatGPT GPT-5.6 support:"))).toBe(true);
-  expect(frames.join("\n")).toContain("Gemini account support:");
+  expect(frames.join("\n")).toContain("Gemini CLI support:");
   unmount();
 }, 15000);
 

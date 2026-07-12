@@ -261,7 +261,7 @@ function cmdConfig(args: Args): number {
   }
   // The API key is a secret - only ever report presence, never the value.
   if (cfg.usesChatGptAuth) console.log(`  chatgpt_auth = ${hasChatGptCredentials() ? "signed in" : "missing"} (API billing disabled)`);
-  else if (cfg.usesGeminiAuth) console.log(`  gemini_auth = ${hasGeminiCredentials() ? "signed in" : "missing"} (API billing disabled)`);
+  else if (cfg.usesGeminiAuth) console.log(`  gemini_auth = ${hasGeminiCredentials() ? "signed in" : "missing"} (Code Assist Standard/Enterprise)`);
   else console.log(`  api_key = ${cfg.apiKey ? "set" : "missing"}`);
   return 0;
 }
@@ -383,12 +383,12 @@ async function cmdLogin(args: Args): Promise<number> {
   const geminiMethod = provider === "gemini" || (provider === "google" && ["gemini", "subscription", "oauth"].includes(method));
   if (geminiMethod) {
     if (discoverGeminiCli().state !== "ready") {
-      console.log("Gemini account sign-in needs the optional Support Pack (about 55 MiB download / 200 MiB disk; no administrator access).");
+      console.log("Gemini Code Assist Standard/Enterprise needs the optional CLI Support Pack (about 55 MiB download / 200 MiB disk; no administrator access).");
       await installGeminiSupportPack({ notify: console.log });
     }
     await loginGemini(console.log);
     setActiveProfile("gemini");
-    console.log("Google sign-in complete. Active profile: gemini (Google account quota, not API billing).");
+    console.log("Google enterprise sign-in complete. Active profile: gemini (Code Assist Standard/Enterprise).");
     return 0;
   }
   if (provider === "google" && !["api", "api-key", "apikey"].includes(method)) {
@@ -404,6 +404,10 @@ async function cmdLogin(args: Args): Promise<number> {
   if (!key) {
     console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login openai chatgpt [--device]");
     return 2;
+  }
+  if (provider === "google" && discoverGeminiCli().state !== "ready") {
+    console.log("Gemini API keys use the official Gemini CLI ACP bridge; installing the optional Support Pack first.");
+    await installGeminiSupportPack({ notify: console.log });
   }
   if (provider === "openai") setActiveProfile("openai");
   if (provider === "google") setActiveProfile("gemini-api");
@@ -478,7 +482,7 @@ async function cmdGeminiSupport(action = "status"): Promise<number> {
   }
   if (normalized === "remove" || normalized === "uninstall") {
     console.log(removeGeminiSupportPack()
-      ? "Neko-managed Gemini Support Pack removed. Your Neko Google sign-in remains until `neko logout google gemini`."
+      ? "Neko-managed Gemini CLI Support Pack removed. Your enterprise sign-in remains until `neko logout google gemini`."
       : "No Neko-managed Gemini Support Pack is installed. An existing Gemini CLI was not changed.");
     return 0;
   }
@@ -490,7 +494,7 @@ async function cmdGeminiSupport(action = "status"): Promise<number> {
   console.log(`Gemini support: ${status.state} (${status.detail})`);
   const managed = readGeminiSupportPack();
   if (managed) console.log(`  managed ${managed.geminiVersion}: ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk; source ${managed.sourceUrl}`);
-  console.log("  Gemini API keys do not require this component.");
+  console.log("  Both Gemini API-key and Code Assist Enterprise routes use this ACP component.");
   return status.state === "ready" ? 0 : 1;
 }
 

@@ -84,11 +84,11 @@ export const DEFAULTS: Record<string, any> = {
       effort_ceiling: "xhigh",
       vision: true,
     },
-    // Google account quota (Gemini Free / AI Pro / Ultra) through the official Gemini CLI ACP.
+    // Gemini Code Assist Standard/Enterprise through official Gemini CLI ACP. Consumer OAuth ended 2026-06-18.
     gemini: {
       provider: "gemini_cli",
       family: "google",
-      label: "Gemini Free/AI Pro/Ultra",
+      label: "Gemini Code Assist Standard/Enterprise",
       auth: "gemini_oauth",
       model: "auto",
       models: ["auto"],
