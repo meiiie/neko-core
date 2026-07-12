@@ -238,6 +238,15 @@ test("invalid json throws", () => {
   expect(() => loadConfig({ path })).toThrow();
 });
 
+test("Windows PowerShell UTF-8 BOM does not invalidate config JSON", () => {
+  const dir = mkdtempSync(join(tmpdir(), "neko-cfg-bom-"));
+  const path = join(dir, "config.json");
+  writeFileSync(path, `\uFEFF${JSON.stringify({ model: "bom-model", auto_update: true })}`, "utf8");
+  const cfg = loadConfig({ path });
+  expect(cfg.model).toBe("bom-model");
+  expect(cfg.autoUpdate).toBe(true);
+});
+
 test("mode derives from approval; NEKO_MODE overrides", () => {
   expect(loadConfig({ path: tmpConfig({ approval: "auto" }) }).mode).toBe("auto");
   process.env.NEKO_MODE = "plan";

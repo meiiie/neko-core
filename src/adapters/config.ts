@@ -519,7 +519,9 @@ function readOverlay(path: string): Record<string, any> {
   if (!existsSync(path)) return {};
   let text: string;
   try {
-    text = readFileSync(path, "utf-8");
+    // Windows PowerShell 5 writes UTF-8 text with a BOM by default. Installer/config tooling may
+    // therefore produce valid JSON prefixed by U+FEFF; JSON.parse itself does not accept it.
+    text = readFileSync(path, "utf-8").replace(/^\uFEFF/, "");
   } catch {
     return {};
   }

@@ -62,3 +62,23 @@ test("setAutoUpdate writes the hold flag to the user config (rollback sticks)", 
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("plain update resumes auto-updates even when no binary replacement can run", async () => {
+  const home = mkdtempSync(join(tmpdir(), "neko-resume-update-"));
+  const configDir = join(home, ".neko-core");
+  require("node:fs").mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "config.json"), JSON.stringify({ auto_update: false }));
+  try {
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, "..", "bin", "neko.ts"), "update"], {
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output = await new Response(child.stdout).text();
+    await child.exited;
+    expect(output).toContain("Auto-updates resumed.");
+    expect(JSON.parse(require("node:fs").readFileSync(join(configDir, "config.json"), "utf8")).auto_update).toBe(true);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

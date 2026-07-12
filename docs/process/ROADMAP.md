@@ -4,13 +4,13 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-12) — v0.11.1 release
+## Current status (2026-07-12) — v0.11.2 release
 Neko Code is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
 
-- **Branch:** `self-improve`. **Current release: v0.11.1 (2026-07-12)** - Google is now a grouped auth
+- **Branch:** `self-improve`. **Current release: v0.11.2 (2026-07-12)** - Google is now a grouped auth
   family with separate Gemini account-quota and API-key routes; browser control can retain signed-in
   sessions through a dedicated profile or an explicitly attached Chrome tab; voice has local consent and
   stop controls; and Windows computer use now shares one DPI-aware resident UIA/input/capture host with

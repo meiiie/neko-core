@@ -3,6 +3,19 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-12 - v0.11.2 updater resume contract
+- End-to-end installer verification exposed a real state bug after the v0.11.1 assets passed: installing with
+  `-Version 0.11.1` correctly wrote `auto_update: false`, but plain `neko update` returned early when already
+  current and never cleared the pin. The CLI now writes the latest-channel preference before every no-target
+  updater path, including already-current, network-failure, and source-checkout exits.
+- Added a subprocess regression test that starts with a pinned temporary user config, runs plain update from
+  source (which cannot replace its own Bun executable), and requires the persisted flag to become `true` plus
+  the explicit "Auto-updates resumed" confirmation. This ships as v0.11.2 because v0.11.1 was already public.
+- The first full rerun then exposed the installer-written config's UTF-8 BOM: PowerShell could parse it but
+  Bun's `JSON.parse` could not, so every TUI integration reading the real user overlay failed at startup. The
+  config boundary now strips exactly one leading U+FEFF and has a focused regression test; malformed JSON
+  remains an error.
+
 ## 2026-07-12 - v0.11.1 cross-platform release-gate correction
 - The v0.11.0 release matrix built, smoked, and uploaded all five binaries plus the browser-extension ZIP,
   but `main` CI failed one Gemini discovery test on Linux and macOS. The fixture forced `platform: win32`

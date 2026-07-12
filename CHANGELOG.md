@@ -6,6 +6,16 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.2] — 2026-07-12
+
+### Fixed
+- Running plain `neko update` now resumes automatic updates even when Neko is already on the latest release
+  (or a source checkout cannot replace itself). Previously the updater's no-download early return left
+  `auto_update: false` behind after a pinned installer/update, despite telling users that plain update returns
+  them to the latest channel.
+- Config loading now accepts the single UTF-8 BOM that Windows PowerShell 5 may write before otherwise valid
+  JSON. This prevents the TUI from failing at startup after a pinned installer updates `config.json`.
+
 ## [0.11.1] — 2026-07-12
 
 ### Fixed
