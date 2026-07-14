@@ -13,6 +13,11 @@ visible interactive elements. It can click, scroll, navigate, or type non-sensit
 corresponding permission is enabled in the extension. Password, one-time-code, and payment fields are
 always blocked.
 
+If the user explicitly attaches a mail, chat, or social-network tab, the visible interactive-element
+snapshot can include personal communications shown in that tab. The extension does not scan other tabs or
+store those communications in its audit, but Neko Core may send the task-specific snapshot to the configured
+model provider as described below.
+
 The extension sends this data only to Neko Core over an authenticated loopback connection on the same
 computer (`127.0.0.1`). Neko Core may then send the specific page snapshot required for a task to the
 language-model provider configured by the user. That provider's privacy terms apply. Browser cookies,

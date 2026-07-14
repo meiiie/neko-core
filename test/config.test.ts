@@ -7,7 +7,7 @@ import { loadConfig, NekoConfig, redactSecrets } from "../src/adapters/config.ts
 
 beforeEach(() => {
   for (const key of Object.keys(process.env)) {
-    if (key.startsWith("NEKO_") || key === "OPENAI_API_KEY" || key === "NVIDIA_API_KEY") delete process.env[key];
+    if (key.startsWith("NEKO_") || ["OPENAI_API_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"].includes(key)) delete process.env[key];
   }
 });
 
@@ -54,6 +54,55 @@ test("current GLM and high-resolution Fable routes are first-class profiles", ()
   expect(fable.imageMaxBytes).toBe(4_500_000);
 });
 
+test("Claude and xAI use current official native API profiles", () => {
+  const claude = loadConfig({ path: tmpConfig({}), profile: "claude" });
+  expect(claude.provider).toBe("anthropic");
+  expect(claude.model).toBe("claude-sonnet-5");
+  expect(claude.contextWindow).toBe(1_000_000);
+  expect(claude.maxTokens).toBe(32_768);
+  expect(claude.effortCeiling).toBe("max");
+
+  const grok = loadConfig({ path: tmpConfig({}), profile: "xai" });
+  expect(grok.provider).toBe("responses");
+  expect(grok.model).toBe("grok-4.5");
+  expect(grok.contextWindow).toBe(1_000_000);
+
+  const build = loadConfig({ path: tmpConfig({}), profile: "grok-build" });
+  expect(build.provider).toBe("responses");
+  expect(build.model).toBe("grok-build-0.1");
+  expect(build.contextWindow).toBe(256_000);
+});
+
+test("Kimi and DeepSeek profiles use their current official first-party routes", () => {
+  const kimi = loadConfig({ path: tmpConfig({}), profile: "kimi" });
+  expect(kimi.provider).toBe("kimi");
+  expect(kimi.usesKimiAuth).toBe(true);
+  expect(kimi.baseUrl).toBe("https://api.kimi.com/coding/v1");
+  expect(kimi.model).toBe("kimi-for-coding");
+  expect(kimi.contextWindow).toBe(262_144);
+  expect(kimi.maxTokens).toBe(32_000);
+  expect(kimi.vision).toBe(true);
+  expect(kimi.effortCeiling).toBe("high");
+  expect(kimi.thinkingWire).toBe("toggle");
+  expect(kimi.completionTokensField).toBe("max_tokens");
+
+  const kimiApi = loadConfig({ path: tmpConfig({}), profile: "moonshot" });
+  expect(kimiApi.provider).toBe("kimi");
+  expect(kimiApi.usesKimiAuth).toBe(false);
+  expect(kimiApi.baseUrl).toBe("https://api.moonshot.ai/v1");
+  expect(kimiApi.model).toBe("kimi-k2.5");
+  expect(kimiApi.contextWindow).toBe(262_144);
+  expect(kimiApi.maxTokens).toBe(32_000);
+
+  const deepseek = loadConfig({ path: tmpConfig({}), profile: "deepseek" });
+  expect(deepseek.provider).toBe("openai_compat");
+  expect(deepseek.baseUrl).toBe("https://api.deepseek.com");
+  expect(deepseek.model).toBe("deepseek-v4-pro");
+  expect(deepseek.contextWindow).toBe(1_000_000);
+  expect(deepseek.maxTokens).toBe(65_536);
+  expect(deepseek.thinkingWire).toBe("toggle");
+});
+
 test("ChatGPT subscription defaults to a completion-usable vision model", () => {
   const cfg = loadConfig({ path: tmpConfig({}), profile: "chatgpt" });
   expect(cfg.provider).toBe("chatgpt");
@@ -70,8 +119,13 @@ test("Gemini account and API-key routes are separate config-first profiles", () 
   expect(account.vision).toBe(true);
   expect(account.contextWindow).toBe(1_000_000);
   const api = loadConfig({ path: tmpConfig({}), profile: "gemini-api" });
-  expect(api.provider).toBe("gemini_cli");
+  expect(api.provider).toBe("openai_compat");
   expect(api.usesGeminiAuth).toBe(false);
+  expect(api.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+  expect(api.model).toBe("gemini-3.5-flash");
+  expect(api.contextWindow).toBe(1_048_576);
+  expect(api.vision).toBe(true);
+  expect(api.effortCeiling).toBe("high");
 });
 
 test("withModel clones the config at a different model, same endpoint, original unchanged", () => {
@@ -99,6 +153,24 @@ test("a profile's resolved key beats a stray OPENAI_/NVIDIA_API_KEY (no cross-pr
   delete process.env.DEEPSEEK_API_KEY; delete process.env.NVIDIA_API_KEY;
 });
 
+test("Kimi API accepts the official key env and the legacy Moonshot fallback", () => {
+  process.env.MOONSHOT_API_KEY = "LEGACY";
+  expect(loadConfig({ path: tmpConfig({}), profile: "moonshot" }).apiKey).toBe("LEGACY");
+  process.env.KIMI_API_KEY = "OFFICIAL";
+  expect(loadConfig({ path: tmpConfig({}), profile: "moonshot" }).apiKey).toBe("OFFICIAL");
+  delete process.env.KIMI_API_KEY;
+  delete process.env.MOONSHOT_API_KEY;
+});
+
+test("a scoped profile never falls back to another provider's credential when its own key is missing", () => {
+  process.env.OPENAI_API_KEY = "OPENAI-STRAY";
+  const xai = loadConfig({ path: tmpConfig({}), profile: "xai" });
+  expect(xai.apiKey).toBe("");
+  const claude = loadConfig({ path: tmpConfig({}), profile: "claude" });
+  expect(claude.apiKey).toBe("");
+  delete process.env.OPENAI_API_KEY;
+});
+
 test("mcp_allow / mcp_deny parse to string arrays", () => {
   const cfg = loadConfig({ path: tmpConfig({ mcp_allow: ["fs"], mcp_deny: ["fs__delete", "danger"] }) });
   expect(cfg.mcpAllow).toEqual(["fs"]);
@@ -109,10 +181,13 @@ test("mcp_allow / mcp_deny parse to string arrays", () => {
 test("browser extension ids are config-first, normalized, unique, and validated", () => {
   const dev = loadConfig({ path: tmpConfig({}) });
   expect(dev.browserExtensionIds).toEqual(["koalaflndbcddboachbdfmppdeblldje"]);
+  expect(dev.browserExtensionStoreId).toBe("");
   const cfg = loadConfig({ path: tmpConfig({
     browser_extension_ids: ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "bad", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    browser_extension_store_id: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
   }) });
-  expect(cfg.browserExtensionIds).toEqual(["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
+  expect(cfg.browserExtensionIds).toEqual(["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
+  expect(cfg.browserExtensionStoreId).toBe("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
   process.env.NEKO_BROWSER_EXTENSION_IDS = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,cccccccccccccccccccccccccccccccc";
   expect(loadConfig({ path: tmpConfig({}) }).browserExtensionIds).toEqual([
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -124,6 +199,7 @@ test("defaults when overlay missing", () => {
   const cfg = loadConfig({ path: join(tmpdir(), "neko-missing-xyz.json") });
   expect(cfg.provider).toBe("openai_compat");
   expect(cfg.maxSteps).toBe(40);
+  expect(cfg.adaptiveEffort).toBe(false);
   expect(cfg.profile).toBeNull();
 });
 
@@ -155,6 +231,18 @@ test("env overrides value", () => {
   expect(cfg.maxSteps).toBe(7);
 });
 
+test("bash timeout ceiling is env-configurable and bounded", () => {
+  expect(loadConfig({ path: tmpConfig({}) }).bashTimeoutCapMs).toBe(600_000);
+  process.env.NEKO_BASH_TIMEOUT_CAP_MS = "180000";
+  expect(loadConfig({ path: tmpConfig({}) }).bashTimeoutCapMs).toBe(180_000);
+  process.env.NEKO_BASH_TIMEOUT_CAP_MS = "not-a-number";
+  expect(loadConfig({ path: tmpConfig({}) }).bashTimeoutCapMs).toBe(600_000);
+  process.env.NEKO_BASH_TIMEOUT_CAP_MS = "9999999";
+  expect(loadConfig({ path: tmpConfig({}) }).bashTimeoutCapMs).toBe(600_000);
+  process.env.NEKO_BASH_TIMEOUT_CAP_MS = "1";
+  expect(loadConfig({ path: tmpConfig({}) }).bashTimeoutCapMs).toBe(1_000);
+});
+
 test("modelShadow: a top-level file model that overrides the profile preset is DETECTED (the --profile trap)", () => {
   const path = tmpConfig({ model: "z-ai/glm-4.6" });
   const cfg = loadConfig({ path, profile: "openai" }); // openai preset: gpt-4o-mini
@@ -180,11 +268,13 @@ test("boolean NEKO_* overrides parse false/true instead of using string truthine
   process.env.NEKO_VERIFY_BEFORE_EXIT = "false";
   process.env.NEKO_MCP_LAZY = "off";
   process.env.NEKO_VISION = "yes";
+  process.env.NEKO_ADAPTIVE_EFFORT = "on";
   const cfg = loadConfig({ path: tmpConfig({ sandbox: true, verify_before_exit: true, mcp_lazy: true }) });
   expect(cfg.sandbox).toBe(false);
   expect(cfg.verifyBeforeExit).toBe(false);
   expect(cfg.mcpLazy).toBe(false);
   expect(cfg.vision).toBe(true);
+  expect(cfg.adaptiveEffort).toBe(true);
   expect(cfg.data.sandbox).toBe(false);
 });
 

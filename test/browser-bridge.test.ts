@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { startBrowserBridge, type BrowserCapability } from "../src/adapters/browser-bridge.ts";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startBrowserBridge, startManagedBrowserBridge, type BrowserCapability } from "../src/adapters/browser-bridge.ts";
+import { browserStoreUrl, prepareBrowserExtension } from "../src/adapters/browser-extension-install.ts";
 
 const origin = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -56,10 +59,51 @@ test("browser bridge accepts only explicitly configured extension origins", asyn
   bridge.close();
 });
 
+test("managed browser bridge starts once and shares an existing loopback owner", () => {
+  const reservation = Bun.serve({ port: 0, fetch: () => new Response("reserved") });
+  const port = reservation.port!;
+  reservation.stop(true);
+  const capability: BrowserCapability = { version: 1, host: "127.0.0.1", port, session: "managed-test", token: "managed-token" };
+  const owned = startManagedBrowserBridge({ capability, extensionIds: [origin.slice("chrome-extension://".length)], persistStatus: false });
+  expect(owned).not.toBeNull();
+  expect(startManagedBrowserBridge({ capability, extensionIds: [origin.slice("chrome-extension://".length)], persistStatus: false })).toBeNull();
+  owned?.close();
+});
+
+test("browser install chooses Store when configured and prepares a pinned local fallback", async () => {
+  expect(browserStoreUrl("")).toBeNull();
+  expect(browserStoreUrl("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+    .toBe("https://chromewebstore.google.com/detail/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+  const temp = mkdtempSync(join(tmpdir(), "neko-browser-install-"));
+  const destination = join(temp, "installed");
+  let requests = 0;
+  try {
+    const path = await prepareBrowserExtension({
+      sourceRoot: temp,
+      destination,
+      version: "0.11.5",
+      fetchImpl: (async (input: string | URL | Request) => {
+        requests++;
+        const asset = String(input).split("/browser-extension/")[1];
+        return new Response(readFileSync(new URL(`../browser-extension/${asset}`, import.meta.url)));
+      }) as typeof fetch,
+    });
+    expect(path).toBe(destination);
+    expect(requests).toBe(10);
+    expect(JSON.parse(readFileSync(join(path, "manifest.json"), "utf8")).manifest_version).toBe(3);
+    expect(readFileSync(join(path, ".neko-version"), "utf8").trim()).toBe("0.11.5");
+    await prepareBrowserExtension({ sourceRoot: temp, destination, version: "0.11.5", fetchImpl: (() => { throw new Error("cache missed"); }) as unknown as typeof fetch });
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
 test("browser extension stays active-tab scoped", () => {
   const manifest = JSON.parse(readFileSync(new URL("../browser-extension/manifest.json", import.meta.url), "utf8"));
   expect(manifest.permissions).toContain("activeTab");
   expect(manifest.permissions).toContain("tabGroups");
+  expect(manifest.permissions).toContain("alarms");
   expect(manifest.permissions).not.toContain("debugger");
   expect(manifest.permissions).not.toContain("tabs");
   expect(manifest.host_permissions ?? []).not.toContain("<all_urls>");
@@ -71,9 +115,12 @@ test("browser extension stays active-tab scoped", () => {
   expect(worker).toContain("sensitiveRefs.has");
   expect(worker).toContain("Neko - AI active");
   expect(worker).toContain("control-indicator.js");
+  expect(worker).toContain("chrome.alarms.onAlarm");
+  expect(worker).toContain("authentication failed");
   expect(worker).toContain('detach("switch-tab")');
   expect(worker).not.toContain("document.cookie");
   const popup = readFileSync(new URL("../browser-extension/popup.js", import.meta.url), "utf8");
+  expect(() => new Function(popup)).not.toThrow();
   expect(popup).not.toContain("innerHTML");
   const indicator = readFileSync(new URL("../browser-extension/control-indicator.js", import.meta.url), "utf8");
   expect(() => new Function(indicator)).not.toThrow();

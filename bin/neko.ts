@@ -19,6 +19,7 @@ import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
 import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt } from "../src/adapters/chatgpt-auth.ts";
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginGemini } from "../src/adapters/gemini-cli.ts";
+import { clearKimiCredentials, loginKimi } from "../src/adapters/kimi-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../src/adapters/gemini-support-pack.ts";
 import { HARD_TASKS, renderBenchReport, renderLiftReport, runBench, runHarnessLift } from "../src/adapters/bench.ts";
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setActiveProfile, setApiKey } from "../src/adapters/project.ts";
@@ -142,6 +143,8 @@ async function buildAgent(
 ): Promise<{ agent: Agent; close: () => Promise<void> }> {
   const mode = yolo ? "auto" : cfg.mode;
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);
+  const { startManagedBrowserBridge } = await import("../src/adapters/browser-bridge.ts");
+  const browserBridge = startManagedBrowserBridge({ extensionIds: cfg.browserExtensionIds });
   const registry = configureToolRegistry(
     new ToolRegistry(process.cwd(), mode, promptApprove, hub),
     cfg,
@@ -161,6 +164,7 @@ async function buildAgent(
       maxContextTokens: cfg.contextWindow,
       verifyBeforeExit: cfg.verifyBeforeExit,
       verifyStateChangesBeforeExit: true,
+      adaptiveEffort: cfg.adaptiveEffort,
     }).run(prompt);
   };
   registry.summarize = async (instruction, content, schema) => {
@@ -193,8 +197,15 @@ async function buildAgent(
     onDelta,
     verifyBeforeExit: cfg.verifyBeforeExit,
     verifyStateChangesBeforeExit: true,
+    adaptiveEffort: cfg.adaptiveEffort,
   });
-  return { agent, close: () => hub.close() };
+  return {
+    agent,
+    close: async () => {
+      browserBridge?.close();
+      await hub.close();
+    },
+  };
 }
 
 const HELP = `Neko Code ${VERSION} - local-first agentic CLI.
@@ -217,13 +228,13 @@ Commands:
   sessions      list saved chat sessions
   skills        list available skills (~/.neko-core/skills)
   recipes       list runnable recipes (~/.neko-core/recipes)
-  login         sign in; OpenAI and Google support subscription OAuth or an API key
+  login         sign in; OpenAI, Google, Kimi, DeepSeek, or another API-key provider
   logout        sign out the active route (other provider sessions/keys stay intact)
   support       inspect, install, update, or remove optional ChatGPT/Gemini components
   update [ver]  self-update to the latest release (resumes auto-updates); 'update 0.7.7' pins/rolls
                 back to an EXACT version and PAUSES auto-updates so it sticks
   mcp           list configured MCP servers and their tools
-  browser       local Neko Browser Bridge: 'browser bridge [port]' / 'browser path' / 'browser rotate'
+  browser       browser setup/status; normal users can use /browser inside the interactive app
   setup [web]   one command to stand up the SOTA web stack (SearXNG + browser MCP, wired);
                 'setup browser [persistent|attach|isolated]' controls browser identity;
                 'setup tavily <key>' wires hosted search; 'setup codex' / 'setup gemini' add optional bridges
@@ -391,6 +402,13 @@ async function cmdLogin(args: Args): Promise<number> {
     console.log("Google enterprise sign-in complete. Active profile: gemini (Code Assist Standard/Enterprise).");
     return 0;
   }
+  const kimiOAuth = provider === "kimi" && (!method || ["oauth", "account", "subscription", "code"].includes(method));
+  if (kimiOAuth) {
+    await loginKimi({ notify: console.log });
+    setActiveProfile("kimi");
+    console.log("Kimi Code sign-in complete. Active profile: kimi (official device OAuth; no proxy or API key).");
+    return 0;
+  }
   if (provider === "google" && !["api", "api-key", "apikey"].includes(method)) {
     console.error("usage: neko login google gemini   OR   neko login google api <key>");
     return 2;
@@ -399,18 +417,24 @@ async function cmdLogin(args: Args): Promise<number> {
     console.error("usage: neko login openai chatgpt [--device]   OR   neko login openai api <key>");
     return 2;
   }
-  let key = provider === "openai" || provider === "google" ? (args.positionals[2] ?? "") : (args.positionals[0] ?? "");
-  if (!key && !process.stdin.isTTY) key = (await Bun.stdin.text()).trim(); // piped
-  if (!key) {
-    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login openai chatgpt [--device]");
+  if (provider === "kimi" && !["api", "api-key", "apikey"].includes(method)) {
+    console.error("usage: neko login kimi   OR   neko login kimi api <key>");
     return 2;
   }
-  if (provider === "google" && discoverGeminiCli().state !== "ready") {
-    console.log("Gemini API keys use the official Gemini CLI ACP bridge; installing the optional Support Pack first.");
-    await installGeminiSupportPack({ notify: console.log });
+  let key = provider === "openai" || provider === "google" || provider === "kimi"
+    ? (args.positionals[2] ?? "")
+    : provider === "deepseek"
+      ? (["api", "api-key", "apikey"].includes(method) ? (args.positionals[2] ?? "") : (args.positionals[1] ?? ""))
+      : (args.positionals[0] ?? "");
+  if (!key && !process.stdin.isTTY) key = (await Bun.stdin.text()).trim(); // piped
+  if (!key) {
+    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login kimi   OR   neko login deepseek <key>");
+    return 2;
   }
   if (provider === "openai") setActiveProfile("openai");
   if (provider === "google") setActiveProfile("gemini-api");
+  if (provider === "kimi") setActiveProfile("moonshot");
+  if (provider === "deepseek") setActiveProfile("deepseek");
   console.log(setApiKey(key));
   return 0;
 }
@@ -423,7 +447,9 @@ function cmdLogout(args: Args): number {
   const explicitApi = provider === "openai" && ["api", "api-key", "apikey"].includes(method);
   const explicitGemini = provider === "gemini" || (provider === "google" && ["gemini", "subscription", "oauth"].includes(method));
   const explicitGeminiApi = provider === "google" && ["api", "api-key", "apikey"].includes(method);
-  if (explicitGemini || (!explicitGeminiApi && current.usesGeminiAuth)) {
+  const explicitKimi = provider === "kimi" && (!method || ["oauth", "account", "subscription", "code"].includes(method));
+  const explicitKimiApi = provider === "kimi" && ["api", "api-key", "apikey"].includes(method);
+  if (explicitGemini || (!provider && current.usesGeminiAuth)) {
     console.log(clearGeminiCredentials());
     return 0;
   }
@@ -431,19 +457,28 @@ function cmdLogout(args: Args): number {
     console.error("usage: neko logout openai api   OR   neko logout openai chatgpt");
     return 2;
   }
-  if (explicitChatGpt || (!explicitApi && (current.usesChatGptAuth || (provider === "openai" && current.profile === "chatgpt")))) {
+  if (explicitChatGpt || (!provider && current.usesChatGptAuth)) {
     console.log(clearChatGptCredentials());
     return 0;
   }
-  if (provider && provider !== "openai" && provider !== "google") {
-    console.error("usage: neko logout [openai api|openai chatgpt|google api|google gemini]");
+  if (explicitKimi || (!provider && current.usesKimiAuth)) {
+    console.log(clearKimiCredentials());
+    return 0;
+  }
+  if (provider && !["openai", "google", "kimi", "deepseek"].includes(provider)) {
+    console.error("usage: neko logout [openai api|openai chatgpt|google api|google gemini|kimi|kimi api|deepseek]");
     return 2;
   }
-  const targetProfile = explicitGeminiApi ? "gemini-api" : explicitApi || provider === "openai" ? "openai" : current.profile ?? undefined;
+  const targetProfile = explicitGeminiApi ? "gemini-api"
+    : explicitKimiApi ? "moonshot"
+      : provider === "deepseek" ? "deepseek"
+        : explicitApi || provider === "openai" ? "openai"
+          : current.profile ?? undefined;
   console.log(clearApiKey(targetProfile));
-  const keyEnv = targetProfile ? current.profiles[targetProfile]?.key_env : undefined;
-  if (process.env.NEKO_API_KEY || (keyEnv && process.env[keyEnv])) {
-    console.log(`Environment key still active${keyEnv ? ` (${keyEnv} or NEKO_API_KEY)` : " (NEKO_API_KEY)"}; remove it from your shell settings to stay logged out.`);
+  const target = targetProfile ? current.profiles[targetProfile] : undefined;
+  const keyEnvs = [target?.key_env, ...(target?.key_env_fallbacks ?? [])].filter((name): name is string => Boolean(name));
+  if (process.env.NEKO_API_KEY || keyEnvs.some((name) => process.env[name])) {
+    console.log(`Environment key still active${keyEnvs.length ? ` (${keyEnvs.join(" or ")} or NEKO_API_KEY)` : " (NEKO_API_KEY)"}; remove it from your shell settings to stay logged out.`);
   }
   return 0;
 }
@@ -494,7 +529,7 @@ async function cmdGeminiSupport(action = "status"): Promise<number> {
   console.log(`Gemini support: ${status.state} (${status.detail})`);
   const managed = readGeminiSupportPack();
   if (managed) console.log(`  managed ${managed.geminiVersion}: ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk; source ${managed.sourceUrl}`);
-  console.log("  Both Gemini API-key and Code Assist Enterprise routes use this ACP component.");
+  console.log("  Only Code Assist Standard/Enterprise uses this ACP component; Gemini API keys connect directly to Google.");
   return status.state === "ready" ? 0 : 1;
 }
 
@@ -556,7 +591,14 @@ async function cmdMcp(args: Args): Promise<number> {
 }
 
 async function cmdBrowser(args: Args): Promise<number> {
-  const { browserExtensionPath, ensureBrowserCapability, startBrowserBridge, NEKO_BROWSER_EXTENSION_ID } = await import("../src/adapters/browser-bridge.ts");
+  const {
+    browserExtensionPath,
+    ensureBrowserCapability,
+    startManagedBrowserBridge,
+    NEKO_BROWSER_EXTENSION_ID,
+  } = await import("../src/adapters/browser-bridge.ts");
+  const { openBrowserExtensionSetup } =
+    await import("../src/adapters/browser-extension-install.ts");
   const sub = args.positionals[0]?.toLowerCase() ?? "bridge";
   if (sub === "path") {
     console.log(browserExtensionPath());
@@ -567,8 +609,8 @@ async function cmdBrowser(args: Args): Promise<number> {
     console.log("Neko browser capability rotated. Restart the bridge, then attach the tab again.");
     return 0;
   }
-  if (sub !== "bridge") {
-    console.error("usage: neko browser [bridge [port]|path|rotate]");
+  if (sub !== "bridge" && sub !== "install") {
+    console.error("usage: neko browser [install [port]|bridge [port]|path|rotate]");
     return 2;
   }
   const rawPort = args.positionals[1];
@@ -579,21 +621,59 @@ async function cmdBrowser(args: Args): Promise<number> {
   }
   const capability = ensureBrowserCapability(false, port);
   const config = load(args);
-  const extensionIds = config.browserExtensionIds.length ? config.browserExtensionIds : [NEKO_BROWSER_EXTENSION_ID];
-  const bridge = startBrowserBridge({
+  const configuredIds = config.browserExtensionIds.length ? config.browserExtensionIds : [NEKO_BROWSER_EXTENSION_ID];
+  const extensionIds = [...new Set([...configuredIds, config.browserExtensionStoreId].filter(Boolean))];
+  const setup = sub === "install"
+    ? await openBrowserExtensionSetup({ force: args.force, storeId: config.browserExtensionStoreId })
+    : null;
+  const extensionPath = setup?.path ?? browserExtensionPath();
+  const bridge = startManagedBrowserBridge({
     capability,
-    extensionOrigins: extensionIds.map((id) => `chrome-extension://${id}`),
+    extensionIds,
   });
+  if (sub === "install") {
+    if (setup?.mode === "store") {
+      console.log("Chrome Web Store opened. Choose 'Add to Chrome' once, then open a target tab and choose 'Attach this tab to Neko'.");
+      console.log("Chrome keeps the extension updated; Neko starts the local bridge automatically in future sessions.");
+    } else {
+      console.log("Neko Browser Extension is prepared locally.");
+      console.log(`  folder = ${extensionPath}`);
+      console.log("  1. Enable Developer mode, choose 'Load unpacked', and select the opened folder.");
+      console.log("  2. Open a target tab and choose 'Attach this tab to Neko'.");
+      if (!setup?.opened) console.log("  Open chrome://extensions in Chrome (no supported Chromium browser was detected automatically).");
+      console.log("After Web Store approval, this same command becomes Add-to-Chrome plus one required confirmation.");
+    }
+  }
+  if (!bridge) {
+    console.log("Neko Browser Bridge is already running on this computer.");
+    return 0;
+  }
   console.log("Neko Browser Bridge is ready on loopback only.");
-  console.log(`  extension = ${browserExtensionPath()}`);
   console.log(`  extension_ids = ${extensionIds.join(", ")}`);
   console.log(`  endpoint = http://127.0.0.1:${bridge.port}`);
-  console.log("Open the extension on a Chrome tab and choose 'Attach this tab to Neko'. Ctrl+C stops the bridge.");
-  await new Promise<void>((resolve) => {
-    process.once("SIGINT", resolve);
-    process.once("SIGTERM", resolve);
-  });
-  bridge.close();
+  console.log("Open the extension on a Chrome tab and choose 'Attach this tab to Neko'. Ctrl+C stops this foreground bridge.");
+  let connected = false;
+  let attached = false;
+  const monitor = setInterval(() => {
+    const status = bridge.status() as { extensionConnected?: boolean; attached?: { host?: string } | null };
+    if (!connected && status.extensionConnected) {
+      connected = true;
+      console.log("Browser extension connected.");
+    }
+    if (!attached && status.attached) {
+      attached = true;
+      console.log(`Browser tab attached${status.attached.host ? `: ${status.attached.host}` : ""}. Neko browser tools are ready.`);
+    }
+  }, 250);
+  try {
+    await new Promise<void>((resolve) => {
+      process.once("SIGINT", resolve);
+      process.once("SIGTERM", resolve);
+    });
+  } finally {
+    clearInterval(monitor);
+    bridge.close();
+  }
   console.log("Neko Browser Bridge stopped.");
   return 0;
 }

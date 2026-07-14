@@ -24,31 +24,50 @@ export class CostTracker {
   completionTokens = 0;
   totalTokens = 0;
   cachedTokens = 0; // prompt tokens served from the provider's prefix cache (cheap + fast)
+  cacheWriteTokens = 0; // prompt tokens written to a billed provider cache (not extra context tokens)
   calls = 0;
   lastPrompt = 0; // last call's prompt size ~= current context usage
   lastCompletion = 0; // last call's output size (this turn's reply)
   lastCached = 0; // last call's cache-read size (how much of the context was a cache hit)
+  lastCacheWrite = 0;
 
   add(usage?: Usage): void {
     if (!usage) return;
-    const prompt = usage.prompt_tokens ?? 0;
-    const completion = usage.completion_tokens ?? 0;
-    const cached = usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
+    const count = (value: unknown): number => {
+      const n = Number(value ?? 0);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    };
+    const prompt = count(usage.prompt_tokens);
+    const completion = count(usage.completion_tokens);
+    // A cache read is a subset of input, not extra input. Clamp malformed compat responses so one
+    // provider cannot make the cache percentage exceed 100% or poison every later session counter.
+    const cached = Math.min(prompt, count(usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens));
+    const cacheWrite = Math.min(prompt, count(usage.cache_write_tokens));
+    const reportedTotal = count(usage.total_tokens);
     this.promptTokens += prompt;
     this.completionTokens += completion;
-    this.totalTokens += usage.total_tokens ?? prompt + completion;
+    this.totalTokens += Math.max(reportedTotal, prompt + completion);
     this.cachedTokens += cached;
-    if (usage.prompt_tokens !== undefined) this.lastPrompt = usage.prompt_tokens;
+    this.cacheWriteTokens += cacheWrite;
+    if (usage.prompt_tokens !== undefined) this.lastPrompt = prompt;
     if (usage.completion_tokens !== undefined) this.lastCompletion = completion;
     this.lastCached = cached;
+    this.lastCacheWrite = cacheWrite;
     this.calls += 1;
   }
 
   summary(): string {
     const cache = this.cachedTokens > 0 ? `, ${this.cachedTokens} cached (${Math.round((100 * this.cachedTokens) / Math.max(1, this.promptTokens))}% of in)` : "";
+    const writes = this.cacheWriteTokens > 0 ? `, ${this.cacheWriteTokens} cache-written` : "";
+    const additional = Math.max(0, this.totalTokens - this.promptTokens - this.completionTokens);
+    const extra = additional > 0 ? `, ${additional} additional provider-reported tokens (for example reasoning/advisors)` : "";
     return (
-      `tokens: ${this.totalTokens} total (in ${this.promptTokens} / out ${this.completionTokens}${cache}) over ${this.calls} call(s); ` +
-      `last turn: ${this.lastPrompt} in / ${this.lastCompletion} out`
+      `session cumulative: ${this.totalTokens} tokens over ${this.calls} provider-reported model call(s) ` +
+      `(${this.promptTokens} input / ${this.completionTokens} output${cache}${writes}${extra})\n` +
+      `last request: ${this.lastPrompt} input / ${this.lastCompletion} output` +
+      (this.lastCached > 0 ? ` (${this.lastCached} input cached)` : "") +
+      (this.lastCacheWrite > 0 ? ` (${this.lastCacheWrite} input written to cache)` : "") +
+      (this.calls > 1 ? "\ninput is re-sent as context on each model call; session cumulative is not one prompt" : "")
     );
   }
 }

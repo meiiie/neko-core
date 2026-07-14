@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { McpTools } from "../core/ports.ts";
 import { homeDir } from "../shared/home.ts";
 
@@ -125,6 +125,29 @@ export interface BrowserBridge {
   status(): Record<string, unknown>;
   command(action: string, args?: Record<string, unknown>): Promise<unknown>;
   close(): void;
+}
+
+/** Start the bridge inside a normal Neko process once the user has opted in by creating a capability. */
+export function startManagedBrowserBridge(options: {
+  capability?: BrowserCapability | null;
+  extensionIds?: string[];
+  persistStatus?: boolean;
+} = {}): BrowserBridge | null {
+  const capability = options.capability === undefined ? readBrowserCapability() : options.capability;
+  if (!capability) return null;
+  try {
+    return startBrowserBridge({
+      capability,
+      extensionOrigins: (options.extensionIds?.length ? options.extensionIds : [NEKO_BROWSER_EXTENSION_ID])
+        .map((id) => `chrome-extension://${id}`),
+      persistStatus: options.persistStatus,
+    });
+  } catch (error) {
+    // A dedicated `neko browser bridge` may already own the loopback port. Sharing that authenticated
+    // process is expected; every other startup error must remain visible.
+    if (/EADDRINUSE|address already in use|port .* in use|Failed to start server/i.test(String(error))) return null;
+    throw error;
+  }
 }
 
 export function startBrowserBridge(options: {
@@ -272,6 +295,7 @@ export function startBrowserBridge(options: {
 }
 
 export function browserExtensionPath(root = process.cwd()): string {
-  const path = join(root, "browser-extension");
-  return existsSync(path) ? path : "browser-extension";
+  const installed = join(homeDir(), ".neko-core", "browser-extension");
+  const candidates = [join(root, "browser-extension"), resolve(import.meta.dir, "..", "..", "browser-extension"), installed];
+  return candidates.find((path) => existsSync(path)) ?? installed;
 }

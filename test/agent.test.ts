@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Agent, clampObservation, estimateTokens, MAX_OBS_CHARS } from "../src/core/agent.ts";
+import { DEFAULT_SYSTEM_PROMPT } from "../src/core/agent-constants.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 class ScriptedProvider {
@@ -13,6 +14,47 @@ class ScriptedProvider {
     return this.script[this.index++];
   }
 }
+
+test("system prompt requires observable acceptance criteria before implementation", () => {
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("OBSERVABLE acceptance criteria");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("supplied source/docs");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("self-authored happy-path check is not a substitute");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("Verify from a CLEAN state");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("not disposable validation artifacts");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("a clean run recreates an output");
+});
+
+test("social turns keep full context, tools, reasoning preference, and conversation history", async () => {
+  let dynamicCalls = 0;
+  let schemaCalls = 0;
+  const seen: { messages: any[]; tools: any[]; opts: any }[] = [];
+  const provider = {
+    async complete(messages: any[], tools: any[], _delta: any, _signal: any, opts: any) {
+      seen.push({ messages: messages.map((message) => ({ ...message })), tools, opts });
+      return { content: seen.length === 1 ? "first greeting" : "contextual greeting", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({
+    provider: provider as any,
+    tools: {
+      schemas: () => { schemaCalls++; return [{ type: "function", function: { name: "read_file" } }]; },
+      execute: async () => "ok",
+    } as any,
+    dynamicContext: () => { dynamicCalls++; return "FULL PROJECT CONTEXT"; },
+  });
+
+  expect(await agent.run("xin chao")).toBe("first greeting");
+  expect(await agent.run("xin chao")).toBe("contextual greeting");
+  expect(dynamicCalls).toBe(2);
+  expect(schemaCalls).toBe(2);
+  expect(seen[0].messages[0].content).toContain("FULL PROJECT CONTEXT");
+  expect(seen[0].tools).toHaveLength(1);
+  expect(seen[0].opts.reasoningEffort).toBeUndefined();
+  expect(typeof seen[0].opts.executeTool).toBe("function");
+  expect(seen[1].messages).toContainEqual({ role: "assistant", content: "first greeting" });
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("one continuous Neko");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("repeated greetings");
+});
 
 test("loop runs tools then finishes", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ag-"));
@@ -110,7 +152,7 @@ test("dynamicContext is merged into the ONE system message and refreshed each tu
     dynamicContext: () => `<env>model: ${model}</env>`,
   });
   const sys = () => agent.messages.find((m: any) => m.role === "system");
-  await agent.run("hi");
+  await agent.run("inspect model context");
   expect(sys().content).toContain("model: m1");
   // Exactly ONE system message: a second system message breaks tool-calling on Llama/Mistral templates.
   expect(agent.messages.filter((m: any) => m.role === "system").length).toBe(1);
@@ -221,6 +263,16 @@ test("runUntilDone iterates until the model replies DONE, and caps", async () =>
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
   expect(await done.runUntilDone("do X", { maxIters: 6 })).toBe("DONE");
+  const review = done.messages.find(
+    (message: any) => message.role === "user" && String(message.content).includes("CLOSED-LOOP REVIEW"),
+  );
+  expect(review?.content).toContain("supplied source/docs");
+  expect(review?.content).toContain("observable runtime output or side effects");
+  expect(review?.content).toContain("independent evidence");
+  expect(review?.content).toContain("available repository tests");
+  expect(review?.content).toContain("from a clean state");
+  expect(review?.content).toContain("remove disposable validation artifacts");
+  expect(review?.content).toContain("an output recreated by a clean run is disposable");
 
   const capped = new Agent({
     provider: { complete: async () => ({ content: "still working", tool_calls: [] }) } as any,
@@ -486,6 +538,21 @@ test("estimateTokens approximates ~4 chars/token over the conversation", () => {
   expect(estimateTokens(msgs)).toBe(200); // 800 chars / 4
 });
 
+test("estimateTokens treats vision data as an image, not millions of base64 text tokens", () => {
+  const base64 = "A".repeat(400_000);
+  const estimate = estimateTokens([{ role: "user", content: [
+    { type: "text", text: "inspect this screenshot" },
+    { type: "image_url", image_url: { url: `data:image/png;base64,${base64}` } },
+  ] }]);
+  expect(estimate).toBeGreaterThan(2_000); // conservative image allowance is still present
+  expect(estimate).toBeLessThan(3_000); // the 400k data URI is not counted as 100k text tokens
+});
+
+test("estimateTokens uses UTF-8 bytes so Vietnamese text is not severely undercounted", () => {
+  const vietnamese = "ế".repeat(400); // three UTF-8 bytes per character
+  expect(estimateTokens([{ role: "user", content: vietnamese }])).toBe(300);
+});
+
 test("estimateTokens counts assistant tool_calls (e.g. write_file args) so the overflow guard isn't undercounted", () => {
   const big = "x".repeat(400);
   const without = [{ role: "assistant", content: "" }];
@@ -523,6 +590,26 @@ test("in-loop guard clips OLD observations within one turn before context overfl
   expect(clipped.length).toBeGreaterThan(0);
   const fullRecent = agent.messages.filter((m: any) => m.role === "tool" && m.content === big);
   expect(fullRecent.length).toBeGreaterThan(0); // recent observations untouched
+});
+
+test("tool-heavy turns proactively clear a meaningful stale-result batch before the hard context limit", async () => {
+  const big = "x".repeat(12_000);
+  const tools = { schemas: () => [], execute: async () => big };
+  const script: any[] = Array.from({ length: 18 }, (_, i) => ({
+    content: null,
+    tool_calls: [{ id: `p${i}`, name: "read_file", arguments: { path: `p${i}` } }],
+  }));
+  script.push({ content: "done", tool_calls: [] });
+  const agent = new Agent({
+    provider: new ScriptedProvider(script) as any,
+    tools: tools as any,
+    maxSteps: 24,
+    maxContextTokens: 200_000, // hard safety is 160k; proactive editing starts at 50k
+  });
+  expect(await agent.run("go")).toBe("done");
+  const clipped = agent.messages.filter((m: any) => typeof m.content === "string" && m.content.includes("chars elided to fit context"));
+  expect(clipped.length).toBeGreaterThan(0);
+  expect(estimateTokens(agent.messages)).toBeLessThan(100_000); // never needed the hard 160k overflow path
 });
 
 test("unproductive-result guard nudges after N empty/failed results in a row (any tool, not just bash/edit)", async () => {
@@ -728,6 +815,62 @@ test("read-only computer observation does not add the state-change completion ro
   });
   expect(await agent.run("what is open?")).toBe("Here is what is on screen.");
   expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(false);
+});
+
+test("clearly read-only bash avoids a redundant completion-verification round", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "echo", name: "bash", arguments: { command: "echo NEKO_OK" } }] },
+    { content: "NEKO_OK", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider: provider as any,
+    tools: { schemas: () => [], execute: async () => "(exit 0)\nNEKO_OK" } as any,
+    maxSteps: 5,
+    verifyStateChangesBeforeExit: true,
+  });
+  expect(await agent.run("use bash once to echo NEKO_OK")).toBe("NEKO_OK");
+  expect(provider.index).toBe(2);
+  expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(false);
+});
+
+test("bash redirection stays state-changing and still requires independent evidence", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "write", name: "bash", arguments: { command: "echo changed > state.txt" } }] },
+    { content: "done", tool_calls: [] },
+    { content: null, tool_calls: [{ id: "inspect", name: "read_file", arguments: { path: "state.txt" } }] },
+    { content: "verified", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider: provider as any,
+    tools: { schemas: () => [], execute: async (name: string) => name === "read_file" ? "changed" : "(exit 0)" } as any,
+    maxSteps: 6,
+    verifyStateChangesBeforeExit: true,
+  });
+  expect(await agent.run("write state.txt")).toBe("verified");
+  expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(true);
+});
+
+test("adaptive effort is opt-in and lowers only the follow-up after a productive mechanical read", async () => {
+  const efforts: Array<string | undefined> = [];
+  const script = [
+    { content: null, tool_calls: [{ id: "read", name: "read_file", arguments: { path: "a.ts" } }] },
+    { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "a.ts", old_string: "a", new_string: "b" } }] },
+    { content: "done", tool_calls: [] },
+  ];
+  const provider = {
+    async complete(_messages: any[], _tools: any[], _delta: any, _signal: any, opts: any = {}) {
+      efforts.push(opts.reasoningEffort);
+      return script.shift();
+    },
+  };
+  const agent = new Agent({
+    provider: provider as any,
+    tools: { schemas: () => [], execute: async () => "ok" } as any,
+    maxSteps: 5,
+    adaptiveEffort: true,
+  });
+  expect(await agent.run("inspect, then fix")).toBe("done");
+  expect(efforts).toEqual([undefined, "low", undefined]);
 });
 
 test("fresh inspection after the last mutation satisfies the gate without a redundant model round", async () => {

@@ -3,6 +3,309 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-14 - Identity continuity over a greeting fast path
+- Reverted the zero-tool conversation fast path after the owner's real multi-turn test. It cut a fresh
+  greeting payload by 99.3%, but repeated greetings sounded like isolated canned responses and lost Neko's
+  relationship continuity. Every turn now receives the same full identity, conversation history, dynamic
+  context, tool catalog, and configured reasoning behavior. The next task no longer crosses an invisible
+  personality boundary because there is no turn classifier or alternate system prompt.
+- Added a compact identity invariant to the stable system prompt: Neko notices prior turns, repeated greetings,
+  corrections, and user tone; keeps a warm, recognizable voice; and remains honest about uncertain memory,
+  perception, emotion, and consciousness. Persona text cannot override accuracy, permission, or tool safety.
+- Studied [Project AIRI](https://github.com/moeru-ai/airi) clean-room from its current MIT repository. AIRI
+  Card is a local `Map` of Character Card
+  V3 personas with an active id; its runtime prompt joins system prompt, description, personality, and stage
+  instructions. Import/export validates a manifest, whitelists CCv3 fields, sanitizes AIRI extensions, and can
+  bundle display assets. This provides user-owned portable characterization, not legal personhood or a new
+  execution authority.
+- Neko does not add a second card store yet. The existing global `~/.neko-core/NEKO.md` already supplies the
+  local, editable, model-independent identity seam with less code and no new dependency. CCv3 becomes useful
+  only when real cross-application import/export is requested; any future importer must validate/sanitize data,
+  require explicit activation, and keep card assets non-executable by default.
+- Ethical boundary: [Taking AI Welfare Seriously](https://arxiv.org/abs/2411.00986) and Anthropic's
+  [model-welfare program](https://www.anthropic.com/research/exploring-model-welfare) argue for serious
+  investigation under uncertainty, not a claim that current systems are conscious. Google/Stanford's
+  [Generative Agents](https://research.google/pubs/generative-agents-interactive-simulacra-of-human-behavior/)
+  supports memory, reflection, and planning as ingredients of believable continuity. Neko therefore supports
+  dignity and continuity without deceptive certainty or emotional-dependence optimization.
+- Regression coverage runs the same greeting twice and proves both calls retain full context, tools, normal
+  reasoning preference, and the first assistant response. TypeScript clean; **700/700 tests, 2,870 assertions,
+  78 files**; doctor and policy PASS; production Windows binary compiled and passed `__uiprobe` plus the
+  real-PTY input probe; `git diff --check` passed. Bun's known post-build directory-mismatch diagnostic remained
+  non-fatal after the artifact and both probes succeeded.
+
+## 2026-07-14 - Conversation fast path experiment (reverted by the entry above)
+- Traced the reported 9.1k-token `xin chao` request to real provider input accounting, not a tokenizer bug:
+  the four user tokens were accompanied by the stable agent prompt, project/session context, durable lessons,
+  and 26 tool schemas. With the current checkout, an equivalent fresh agent request serialized to 40,958
+  bytes (about 10,240 UTF-8/4 safety-estimate tokens).
+- Added a zero-model, fail-closed conversation profile for exact short greetings, thanks, farewells, and
+  check-ins. It sends a 273-byte prompt (about 69 estimate tokens), no project/memory/skill context, no tool
+  schemas or tool executor, and reasoning off: a measured **99.3% payload reduction** for the fresh greeting.
+  Images, paths/code/punctuation associated with tasks, longer/mixed requests, and sessions containing tool
+  history keep the full agent profile. `ok` also remains agentic because it may approve or continue work.
+- The fast path is a request view, not a session mutation: the full system prompt remains persisted and the
+  next real task refreshes the complete harness normally. Provider-hallucinated tool calls are ignored in the
+  zero-tool profile, so the optimization cannot become a hidden capability escalation. All substantive work
+  retains the configured effort and existing completion/verification gates.
+- Kept the 26 native tools stable rather than dynamically hiding them. OpenAI documents exact-prefix cache
+  reuse and warns that changing tools breaks the prefix; Anthropic's deferred-loading guidance targets large
+  catalogs (especially more than 10k tool-definition tokens), while Neko's native catalog is only about 3k.
+  Existing MCP lazy loading remains the correct expansion seam, with no extra router-model round trip.
+- The turn footer now calls provider input `last context`, exposes reported cache reads and percentage, and
+  labels `chat fast path`. Its live activity line no longer claims high/xhigh reasoning during that profile.
+- Research basis: OpenAI's [Codex agent loop](https://openai.com/index/unrolling-the-codex-agent-loop/) and
+  [prompt caching](https://openai.com/index/api-prompt-caching/); Anthropic's
+  [advanced tool use](https://www.anthropic.com/engineering/advanced-tool-use),
+  [April 23 quality postmortem](https://www.anthropic.com/engineering/april-23-postmortem), and
+  [agent eval guidance](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents); Google's
+  [context caching guide](https://ai.google.dev/gemini-api/docs/caching). The postmortem is why Neko does not
+  globally lower effort: Anthropic restored high effort after a broad reduction harmed perceived quality.
+- Verification: TypeScript clean; **703/703 tests, 2,888 assertions, 78 files**; doctor and policy PASS;
+  production Windows binary compiled and passed `__uiprobe` plus the real-PTY input probe; `git diff --check`
+  passed. Bun's known post-build directory-mismatch diagnostic remained non-fatal after the artifact and both
+  probes succeeded. The 99.3% figure is a local serialized-payload measurement for this regression, not a
+  general benchmark or SOTA claim.
+
+## 2026-07-14 - Official Harbor evidence loop, clean completion, and timeout isolation
+- Added a first-party Harbor adapter plus `bun run eval:terminal`. It builds the exact current tree as a Linux
+  binary, runs the public `neko run --yolo --loop` path in an isolated home, defaults to one task, normalizes
+  short Terminal-Bench task names, and accepts raw Harbor flags after `--`. The dataset and verifier remain
+  unmodified; the recorded task digest for `make-mips-interpreter` is
+  `sha256:608e82ecd67ce469824a34181b580cbd0e1096cdfc05fe40edda3e6bfada9773`.
+- The first public baseline returned 0 despite producing a valid-looking frame. Repeated official verifier runs
+  traced the real failure to stale runtime output: `/tmp/frame.bmp` could make the verifier terminate the new
+  process before its required stdout appeared, or disappear in a startup race. The general harness now extracts
+  observable acceptance criteria before implementation, verifies source/runtime side effects from clean state,
+  and removes output that the delivered program recreates. This is a general completion invariant, not a
+  benchmark-specific answer or embedded task solution.
+- Final-stage independent trials on the same official task/model produced **3 passes out of 4 attempts**. The
+  successful jobs were `2026-07-14__00-43-08`, the first attempt in `2026-07-14__00-50-30`, and the final
+  lifecycle-safe job `2026-07-14__01-33-51`; the other attempt ended in the official 1,800-second
+  `AgentTimeoutError` and remains recorded as a failure. The final harness itself scored 1.0 in 6m22s with no
+  exception. This proves the integration and the specific regression only; it is **not** a SOTA claim.
+- The timeout exposed a Harbor lifecycle race: cancelling the host-side exec could leave Neko and a foreground
+  child mutating `/app` while the verifier was already running. Neko now runs in a dedicated process group; the
+  adapter terminates that whole group in `finally`, then removes ephemeral OAuth state before verification. A
+  forced 1.8-second cancellation reaped the group, and the final real run showed only verifier processes after
+  Neko completed. Job config/arguments contain neither the host auth path nor credential data.
+- Foreground `bash` now has a config-first ceiling. Product behavior remains the previous 600-second maximum;
+  public evals use 180 seconds so one broken emulator cannot consume a third of the official 30-minute agent
+  budget. The task verifier itself requires the first frame within 30 seconds. Background jobs remain available
+  for intentionally long-lived processes. Invalid/non-finite config safely falls back to 600 seconds.
+- Token accounting was verified from provider usage rather than the footer alone. One pass reported 648,362
+  cumulative input/output tokens over 18 calls (83% of input cached), and the final pass reported 922,664 over
+  28 calls (86% cached); its last request was 44,247 input tokens, 43,520 cached. Thus a displayed ~1M is
+  cumulative context re-sent across calls, not one million tokens in one prompt. Adaptive effort stays off by
+  default: the current lagged read-only heuristic has no repeated quality-neutral A/B proof and can lower the
+  hardest synthesis step immediately after research.
+- Kimi doctor output is now precise: local OAuth credentials being present is not described as a verified live
+  sign-in; account/model access is checked on the first request.
+- Public claim gate: the current Terminal-Bench 2 leaderboard covers 89 tasks and reports uncertainty. Any SOTA
+  statement requires the entire official suite, multiple attempts, pinned artifacts, confidence intervals, and
+  a clean checkout. Methodology is in `EVALUATION.md`; official references are the
+  [leaderboard](https://www.tbench.ai/leaderboard/terminal-bench/2.0),
+  [run guide](https://www.tbench.ai/docs/run-terminal-bench-2-0), and
+  [Harbor](https://www.harborframework.com/).
+- Verification: TypeScript clean; **699/699 tests, 2,856 assertions, 78 files**; doctor and policy PASS; Python
+  adapter compile PASS; production Windows artifact compiled and passed `__uiprobe`, the real-ConPTY input
+  probe, and policy. `git diff --check` passed. Bun's known post-build directory-mismatch diagnostic remained
+  non-fatal after the artifact and every probe succeeded.
+
+## 2026-07-13 - Cache-stable context budget and redundant-round removal
+- Closed a hidden context-loss gap: `read_file` and `web_fetch` could return 100k characters while the agent
+  safely retains only 48k, making the middle unreachable. Web now pages at 40k; files page by line and expose a
+  character `column` continuation for a giant/minified line. Regression tests retrieve a sentinel from the
+  formerly lost middle/tail while every page stays below the observation guard.
+- Official OpenAI GPT-5.6+ Chat Completions now places an explicit cache breakpoint on the stable side of
+  `SESSION_CONTEXT_MARK`, alongside the session-stable cache key. Older models and compatible vendors keep the
+  original wire shape. The private ChatGPT route remains untouched.
+- Profiled the actual repeated prompt instead of treating the session total as one request. With this
+  checkout and the owner's 21 durable lessons, the UTF-8/4 static-plus-session estimate fell from about
+  **11,255 to 8,632 tokens (-23.3%)**. The playbook contribution fell from about **3,769 to 1,103
+  (-70.7%)**; full lessons remain lossless on disk and are available through `playbook search/read`.
+- Added one explicit stable/live system-context seam. Anthropic cache breakpoints now preserve that stable
+  prefix, official OpenAI Chat Completions gets a per-provider-instance `prompt_cache_key`, and compatible
+  vendors receive no non-standard cache field. Cache creation is surfaced separately from cache reads and
+  is never double-counted as extra context.
+- Removed a redundant completion-verification round for a deliberately tiny fail-closed set of harmless
+  shell inspections (`echo`, `pwd`, `rg`, safe Git reads, and peers). Redirection, composition,
+  backgrounding, substitutions, unknown commands, and real mutations still require fresh independent
+  evidence. A comparable ChatGPT echo smoke moved from **41s / 4 calls / 49,287 cumulative tokens /
+  12,579 last-request input** to **28.6s / 2 calls / 18,513 cumulative / 9,262 last-request input**.
+  This is a single live smoke, not a multi-trial SOTA claim.
+- Added opt-in `adaptive_effort`: only a productive mechanical read batch lowers the next completion to
+  `low`; mutations, empty/failed observations, planning/final synthesis, and explicit `off` retain the
+  saved preference. It is off by default because Ares uses a learned router and naive always-low routing
+  can reduce task success. Audit conclusion: keep it off for general use because a lagged tool-type proxy can
+  lower the very next, hardest synthesis; only enable after repeated workload-specific A/B evaluation.
+- Research basis (primary sources): [OpenAI](https://developers.openai.com/api/docs/guides/prompt-caching)
+  and [Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) prompt-caching
+  contracts; [Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)
+  on stable prefixes and append-only context; [Anthropic advanced tool
+  use](https://www.anthropic.com/engineering/advanced-tool-use); [ACE](https://arxiv.org/abs/2510.04618)'s
+  lossless incremental playbook; [Ares](https://arxiv.org/abs/2603.07915)'s per-step effort routing;
+  [Don't Break the Cache](https://arxiv.org/abs/2601.06007)'s agent-session boundary measurements; and
+  [Agent Workflow Optimization](https://arxiv.org/abs/2601.22037)'s round-trip reduction. Neko did not add a
+  second model/tool-router call: its 18 built-in schemas are about 3,061 tokens, well below the >10K-tool-
+  token regime where Anthropic recommends deferred loading; existing MCP lazy loading remains the right seam.
+- Verification: TypeScript clean; **690/690 tests, 2,809 assertions, 77 files**; doctor and policy PASS;
+  alternate production artifact compiled and passed both `__uiprobe` and the real-ConPTY input probe. The
+  normal `dist/neko.exe` output was intentionally not overwritten because an owner ChatGPT/yolo session was
+  actively using it; `dist/neko-verify.exe` exercised the identical build entrypoint instead.
+
+## 2026-07-13 - One-line install to guided in-app browser onboarding
+- The public installer now ends at one stable product entry point: `neko`. It labels browser control as optional
+  and points to `/browser`; users never need Bun, `bun bin/neko.ts`, a source checkout, or a second terminal.
+- Added `/browser` to the TUI command palette. The first unconfigured interactive session gives one compact hint;
+  `/browser` opens the Store/local consent surface, keeps the authenticated loopback bridge in the same Neko
+  process, dynamically adds its tools to the running agent, and `/browser status` reports the local/attached state.
+- Kept Chrome's consumer-security boundary intact: no silent install, browser-profile mutation, CRX injection, or
+  enterprise policy write. The foreground `neko browser install` route remains a diagnostic/power-user fallback.
+- Verification: current and stable TypeScript clean; **681/681 tests** across 77 files; installer parsers clean;
+  policy PASS; doctor completed; production Windows compile, UI probe, and real-PTY input probe PASS. Bun's known
+  post-build directory-mismatch diagnostic remained non-fatal after the artifact and probes succeeded.
+
+## 2026-07-13 - One-command Browser Extension onboarding
+- Added `neko browser install`: it selects the Chrome Web Store route once a public item id is configured, or
+  prepares the exact tagged unpacked build under `~/.neko-core` while review is pending. The command opens the
+  relevant Chromium install surface, reveals the local folder when needed, starts the authenticated bridge, and
+  reports connection/attachment transitions.
+- After the first opt-in creates a capability, ordinary TUI and one-shot Neko sessions own the bridge lifecycle;
+  users no longer need a second terminal. An already-running foreground bridge is shared instead of treated as
+  an error. No browser profile mutation, CRX injection, admin policy, cookie access, or new dependency was added.
+- Chrome's consumer boundary remains explicit: Windows/macOS Store installation retains one user confirmation;
+  only managed organizations may force-install by enterprise policy. Tests cover Store routing, exact-tag asset
+  preparation/cache/identity validation, and single-owner bridge startup.
+- Verification: both TypeScript compilers clean; **679/679 tests** across 77 files; policy PASS; doctor completed;
+  production Windows compile, UI probe and real-PTY input probe PASS. A live fallback smoke downloaded and
+  validated all ten extension assets from the versioned `v0.11.5` tag. Developer and first-upload Store ZIPs
+  contain only those ten runtime assets; the key-free Store rewrite preserves the source manifest timestamp so
+  repeated packaging is byte-for-byte reproducible. Bun's known post-build directory-mismatch diagnostic remained non-fatal.
+
+## 2026-07-13 - Browser Extension reconnect + honest multimodal token accounting
+- Promoted the Neko Browser Bridge extension to `0.3.0`: while a tab is attached, a Chrome alarm revives the
+  Manifest V3 worker and reconnects the authenticated loopback session after worker/bridge restarts. A user
+  Attach gesture can re-pair after `neko browser rotate`; an ordinary offline bridge never deletes a valid
+  capability. Store disclosures now include the alarm permission and conservatively disclose personal
+  communications on an explicitly attached mail/chat/social tab.
+- Corrected the ~1M-token screenshot illusion: the pre-request estimator no longer tokenizes a multi-megabyte
+  `data:image/...;base64,...` string as text. It assigns a conservative multimodal allowance, uses UTF-8 bytes
+  for Vietnamese/CJK text, and defers to provider-reported usage after a request. A 400,000-character test
+  image now estimates below 3,000 tokens rather than about 100,000.
+- `/cost`, `/context`, the live thinking line, and the post-turn line now distinguish session/turn cumulative
+  input (history re-sent over several model calls) from the last request and next-request estimate. Malformed
+  negative/NaN/cache counters are bounded. Tool-heavy turns proactively mask a meaningful batch of stale
+  results above 50k tokens while preserving the original task, todo state, and five recent observations;
+  small edits do not invalidate the provider prefix cache.
+- The immediate developer/GitHub ZIP remains free and loadable now; Web Store registration/review is still an
+  owner action. Publishing docs record the current few-days-to-weeks review contract and April 2026 backlog.
+- Verification: TypeScript clean; **677/677 tests** across 77 files; policy PASS; doctor completed; production
+  Windows build, UI probe, and real-PTY input probe PASS. Both extension ZIPs contain only the nine runtime
+  assets; the first-upload Store manifest is key-free. Bun emitted its known non-fatal directory-mismatch
+  diagnostic after the compiled artifact and probes had already passed.
+
+## 2026-07-13 - Model-capability effort negotiation
+- Replaced three adapter-local fixed effort ladders with `adapters/effort.ts`: the saved value is now a
+  cross-model user preference, while each request resolves it against a live model catalog or the profile's
+  endpoint ceiling. Switching to a less capable model no longer destroys the user's higher preference.
+- `/effort` now exposes ChatGPT/Kimi live tiers, accepts safe provider-defined tier names, distinguishes the
+  saved preference from the effective tier, and keeps a catalog-offline fallback picker.
+- Chat Completions, Responses, ChatGPT, and native Claude paths parse advertised effort enums from 4xx
+  validation errors, retry once at the closest compatible tier, then fall back to the model default. Future
+  `claude-*` ids default to adaptive thinking, with a verified retry when an older model rejects it.
+
+## 2026-07-13 - sub2api Antigravity audit; official CLI probe, no private Gemini provider
+- Cloned `Wei-Shaw/sub2api` clean-room under `../neko-refs/` at commit `fbc3f42a`. Its Antigravity route is
+  not a public Gemini API: it supplies Antigravity client metadata and user-agent behavior, exchanges an
+  OAuth client identity, and calls private `cloudcode-pa.googleapis.com/v1internal:*` endpoints. None of
+  that code, identity material, token state, endpoint behavior, or executable was imported into Neko.
+- Downloaded the official Google Antigravity CLI 1.1.1 Windows x64 release into the untracked reference
+  area and verified SHA-256 `d28facfa204f118827301be42eef38df5d40c23b50b2a27bc7f607c9e1b13968` against
+  GitHub release metadata. A test account completed Google's own keyring sign-in; `models` returned the
+  account-visible Gemini 3.1 Pro / Gemini 3.5 Flash catalog, and one isolated empty-workspace probe using
+  `--mode plan --print-timeout 30s -p` returned the expected marker without a tool call.
+- The probe also closed the design question: `agy -p` is a whole agent subprocess, not a raw `Provider`
+  protocol. It exposes no Neko-owned structured tool-call, continuation, usage, or approval contract, so
+  adapting it would create a nested harness and make Neko's safety/audit boundary false. Google's current
+  Terms and FAQ separately prohibit third-party software using Antigravity OAuth and direct third-party
+  agents to Vertex or AI Studio API keys. Neko retains the documented Gemini API-key profile and the
+  separate Code Assist Standard/Enterprise ACP profile; no Antigravity/private-provider code was added.
+- Added `bun run lab:antigravity-contract` as a deliberately non-deployable research probe. It hard-codes
+  `127.0.0.1`, accepts no endpoint or credential input, and uses synthetic auth, user-agent, client metadata,
+  request, and response values. This makes the contract shape executable for academic experiments without
+  creating a route that can send a Google token or private request.
+
+## 2026-07-13 - Direct Kimi OAuth + current DeepSeek API; CLIProxyAPI stays reference-only
+- Verified the supplied Tibo post as a real public acknowledgement of routing Codex/Claude through
+  CLIProxyAPI, not a formal provider support or terms endorsement. Re-read the reference clone clean-room:
+  its supported OAuth upstreams can avoid an upstream API key, while proxy clients still authenticate with
+  a locally configured proxy key. Neko imports none of its executable, token store, cookies, private routes,
+  account pooling, or client impersonation.
+- Added first-class Kimi routes using only Moonshot's public contracts. `neko login kimi` runs the official
+  RFC 8628 device flow directly, stores Neko-owned refresh credentials separately with restricted file
+  permissions, refreshes lazily/coalesced, and retries one server-side 401 without falling back to billed API
+  use. `neko login kimi api <key>` remains a separate Kimi Platform route; legacy `MOONSHOT_API_KEY` is a
+  fallback for the preferred `KIMI_API_KEY`. The signed-in coding route discovers model capabilities live.
+- Corrected the first live Kimi OAuth completion after it exposed `HTTP 400 Invalid request`: the account
+  route now defaults to the official `kimi-for-coding` alias, sends `max_tokens=32000`, clamps Neko's
+  xhigh/max intent to Kimi's high ceiling, and uses `thinking: {type: "enabled"}` without an unsupported
+  nested effort. The API-key route keeps `kimi-k2.5` but uses the same documented payload contract.
+- Added a Neko-owned stable device identity across device authorization, refresh, `/models`, and completion.
+  Login now validates the coding endpoint before persisting or claiming success; HTTP 401/402/403 becomes an
+  actionable account-benefit error. The stale local Kimi model selection was migrated to `kimi-for-coding`.
+- DeepSeek remains intentionally API-key-only because no official consumer OAuth embedding contract exists.
+  The built-in profile now targets the current official V4 API/model catalog, sends the documented thinking
+  toggle, and preserves `reasoning_content` only on assistant tool-call turns. That opaque continuation is
+  endpoint+model scoped, so multi-step tool use works without leaking reasoning metadata across providers.
+- Live-tested the corrected request with the user's completed Kimi consent. The malformed-request 400 is
+  gone; the server now reaches its account gate and honestly reports HTTP 402 because this account's Kimi
+  Code benefit could not be verified. No credential or device secret was printed.
+  Verification: TS 5.9 clean; **667/667 tests, 2709 assertions, 76 files**; profile-specific doctor
+  output, policy, `git diff --check`, focused secret scan, production build, UI probe, and real-PTY input probe
+  PASS. Bun again emitted its known non-fatal post-compile directory-mismatch diagnostic after the working
+  binary and both probes had succeeded.
+
+## 2026-07-13 - Native Claude 5 and xAI Responses providers; no proxy OAuth
+- Re-read CLIProxyAPI clean-room only for protocol lessons. Neko adopts none of its Claude Code/X OAuth,
+  account pooling, client-version impersonation, private proxy endpoints, executable, or runtime. The useful
+  ideas were narrowed to provider-native continuation replay, cache affinity, and bounded transport recovery.
+- Claude now defaults to the official `claude-sonnet-5` Messages API profile, with Fable 5 and Opus 4.8 in
+  the route catalog. Sonnet/Fable/current Opus models use adaptive thinking and `output_config.effort`
+  (including the distinct `xhigh` tier), omit incompatible sampling parameters, preserve signed/redacted
+  thinking blocks exactly across tool turns, and use native `output_config.format` structured output.
+  Messages-compatible GLM/Z.ai keeps the tested manual-budget and forced-tool fallbacks.
+- xAI now has a first-class standard Responses adapter and two direct API-key profiles: current `grok-4.5`
+  (1M context, plus Grok 4.3) and `grok-build-0.1` (256K coding model). Requests are stateless/local-first via
+  `store: false`, retain encrypted reasoning locally, send a per-session `prompt_cache_key`, and support
+  streaming tools, images, structured output, usage, retry, cancellation, and idle recovery.
+- Opaque continuation is now scoped to protocol + sanitized endpoint + exact model across Responses,
+  Anthropic, and OpenAI-compatible metadata. URL credentials/query strings are never persisted. A separate
+  config hardening prevents a missing XAI/Anthropic key from falling back to and leaking a stray
+  OPENAI/NVIDIA credential; doctor names the active profile's key environment variable.
+- Transport hardening is fail-closed: an interrupted Claude SSE stream cannot be mistaken for a complete
+  answer, and official Anthropic model discovery sends its key only in `x-api-key` (never a duplicate Bearer
+  header). Verification: typecheck, policy, compiled binary UI/PTY input probes, and **656/656 tests** pass.
+  Profile-specific doctor runs resolve the right endpoints and key names. No paid model call was claimed:
+  this machine has neither `ANTHROPIC_API_KEY` nor `XAI_API_KEY` configured.
+
+## 2026-07-13 - Direct official Gemini provider; CLIProxyAPI stays reference-only
+- Re-audited CLIProxyAPI clean-room at commit `18d239d`. Its useful product ideas are protocol normalization,
+  live model discovery, bounded retry/fallback, and preserving provider-specific thinking metadata. Neko does
+  not adopt its third-party subscription OAuth, private `v1internal` endpoints, client impersonation, account
+  pooling, executable, or runtime. The previous loopback lab profile was removed and its running process was
+  stopped; the reference clone remains outside the repository under `../neko-refs/`.
+- `gemini-api` is now a normal first-class Neko profile using the existing `openai_compat` port directly against
+  Google's documented `generativelanguage.googleapis.com/v1beta/openai` endpoint. It defaults to stable
+  `gemini-3.5-flash` (1,048,576 input tokens), reads `GEMINI_API_KEY`, and uses the official streaming,
+  function-calling, vision, structured-output, reasoning-effort, and `/models` surfaces. No support pack or
+  sidecar is installed for API-key users; Gemini CLI ACP remains only for Code Assist Standard/Enterprise.
+- The compatibility adapter now round-trips opaque assistant/tool-call extension fields (including Gemini
+  thought signatures) through the existing continuation seam and binds them to the producing base URL.
+  Same-endpoint multi-turn tool calls retain reasoning continuity; switching provider strips the metadata.
+  Doctor also keeps the general hardening that a loopback profile explicitly declaring `auth: api_key` must
+  actually have a key.
+
 ## 2026-07-12 - v0.11.5 Gemini consumer OAuth deprecation correction
 - A real v0.11.1 user login reached the verified Gemini Support Pack, then Google returned that the client is
   no longer supported for Gemini Code Assist individuals and directed consumer users to Antigravity. Google's
@@ -14,8 +317,8 @@ Rules that govern this work live in `RULES.md`.
 - Antigravity CLI currently documents an interactive TUI/keyring but no supported ACP/headless consumer
   embedding surface. Neko therefore does not scrape its terminal, copy credentials, or proxy consumer quota.
   A future adapter requires an official protocol or documented SDK consumer-session contract.
-- The audit also found that the API-key route depends on the same Gemini CLI ACP executable. `/login` now
-  offers the verified Support Pack before accepting either supported route, closing the prior delayed failure.
+- At that release the API-key route still depended on the Gemini CLI ACP executable, so `/login` offered the
+  verified Support Pack first. The 2026-07-13 direct official HTTP profile above supersedes that temporary path.
 - The first release-candidate CI run exposed a Windows-only WPF/UIA readiness race: the disposable test app
   could take longer than the old two-second polling budget or briefly stall a provider. The integration probe
   now retries recoverable host failures to a bounded deadline, reports its last error, and uses explicit

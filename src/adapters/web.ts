@@ -9,12 +9,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { debug, messageOf } from "../shared/debug.ts";
 import type { WebPort } from "../core/ports.ts";
+import { MAX_OBS_PAGE_CHARS } from "../core/agent-constants.ts";
 import { dockerAvailable, SearxngSidecar } from "./sidecar.ts";
 
 const WEB_HEADERS = { "User-Agent": "Mozilla/5.0 (NekoCore)" };
 
-/** Pagination page size for web_fetch (own copy — adapter must not import core's MAX_READ_CHARS). */
-const WEB_MAX_CHARS = 100_000;
+/** Page below core's 48k observation guard, with room for the continuation footer. If this were
+ * larger, Agent would head/tail-clamp the result and silently make the middle unreachable. */
+const WEB_MAX_CHARS = MAX_OBS_PAGE_CHARS;
 
 interface SearchResult { title: string; url: string; snippet: string; }
 

@@ -9,17 +9,17 @@
 <body>
   <main>
     <header>
-      <div class="mark">/\ . . &gt;</div>
+      <img class="mark" src="icons/icon-32.png" alt="">
       <div><strong>Neko Browser</strong><small>local tab capability</small></div>
-      <span id="status" class="pill">offline</span>
+      <span id="status" class="pill" aria-live="polite">offline</span>
     </header>
 
-    <section class="tab">
-      <span class="dot" aria-hidden="true"></span>
+    <section class="tab" aria-live="polite">
+      <span class="dot offline" aria-hidden="true"></span>
       <div><strong id="tab-title">No tab attached</strong><small id="tab-host">Open Neko bridge, then attach this tab.</small></div>
     </section>
 
-    <button id="attach" class="primary">Attach this tab to Neko</button>
+    <button id="attach" class="primary" aria-describedby="tab-host">Attach this tab to Neko</button>
     <div class="row">
       <button id="detach">Detach</button>
       <button id="stop" class="danger">Emergency stop</button>
@@ -27,7 +27,7 @@
 
     <section class="permissions">
       <h2>Session permissions</h2>
-      <label><span><strong>Read visible page</strong><small>Granted only while this tab is attached</small></span><input type="checkbox" checked disabled></label>
+      <label><span><strong>Read visible page</strong><small>Granted only while this tab is attached</small></span><input id="read-grant" type="checkbox" disabled></label>
       <label><span><strong>Click, scroll, navigate</strong><small>Off by default</small></span><input id="click-grant" type="checkbox"></label>
       <label><span><strong>Type non-sensitive text</strong><small>Passwords, OTP and payment fields stay blocked</small></span><input id="type-grant" type="checkbox"></label>
     </section>

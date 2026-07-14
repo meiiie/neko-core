@@ -5,6 +5,16 @@ const windows = readFileSync("install.ps1", "utf8");
 const unix = readFileSync("install.sh", "utf8");
 const release = readFileSync(".github/workflows/release.yml", "utf8");
 
+test("one-line installers hand optional browser setup to the installed Neko app", () => {
+  for (const installer of [windows, unix]) {
+    expect(installer).toContain("Run 'neko' to get started.");
+    expect(installer).toContain("Inside Neko: /login");
+    expect(installer).toContain("/browser");
+    expect(installer).toContain("no Bun command needed");
+    expect(installer).not.toContain("bun bin/neko.ts browser install");
+  }
+});
+
 test("Windows one-line installer verifies metadata, digest, and version before atomic replacement", () => {
   const download = windows.indexOf("Get-NekoBinary $url $stage");
   const digest = windows.indexOf("Get-FileHash -LiteralPath $stage -Algorithm SHA256");

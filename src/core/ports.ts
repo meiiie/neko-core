@@ -29,6 +29,9 @@ export type DeltaHook = (text: string, kind?: "content" | "reasoning" | "tool") 
  * e.g. enumerating every product variant instead of collapsing to one value. */
 export interface CompleteOptions {
   responseSchema?: Record<string, any>;
+  /** Optional per-call compute tier selected by the host. Adapters keep the saved user effort as an
+   * upper bound, so an adaptive controller can spend less on mechanical steps but never more. */
+  reasoningEffort?: string;
   /** Fired the moment a STREAMED tool call is fully parsed - long before the whole response finishes.
    * Lets the agent overlap read-only tool execution with the rest of the generation ("Executing as
    * You Generate", arXiv 2604.00491). Best-effort: non-streaming responses may never fire it. */

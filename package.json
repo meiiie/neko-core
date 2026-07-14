@@ -1,6 +1,6 @@
 {
   "name": "neko-core",
-  "version": "0.11.5",
+  "version": "0.12.0",
   "description": "Mot chu meo trong terminal, chi muon meo meo - va lam viec. Local-first, config-first, offline-capable.",
   "type": "module",
   "license": "MIT",
@@ -19,6 +19,8 @@
   },
   "scripts": {
     "neko": "bun bin/neko.ts",
+    "eval:terminal": "bun scripts/harbor-eval.ts",
+    "lab:antigravity-contract": "bun scripts/antigravity-contract-lab.ts",
     "build": "bun scripts/build.ts && dist/neko __uiprobe && bun scripts/input-probe.ts",
       "test": "bun test",
       "typecheck": "bun node_modules/typescript/bin/tsc --noEmit",

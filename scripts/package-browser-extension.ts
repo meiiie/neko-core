@@ -1,11 +1,13 @@
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { basename, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 
 const mode = process.argv.includes("--store-first-upload") ? "store-first-upload" : "developer";
 const root = resolve(import.meta.dir, "..");
 const source = join(root, "browser-extension");
-const manifest = JSON.parse(await readFile(join(source, "manifest.json"), "utf8"));
+const sourceManifest = join(source, "manifest.json");
+const manifest = JSON.parse(await readFile(sourceManifest, "utf8"));
+const manifestTimes = await stat(sourceManifest);
 const outputDir = join(root, "dist");
 const output = join(outputDir, `neko-browser-extension-${manifest.version}-${mode}.zip`);
 const stage = join(tmpdir(), `neko-browser-extension-${crypto.randomUUID()}`);
@@ -21,9 +23,13 @@ try {
     await rm(join(stage, name), { force: true });
   }
   if (mode === "store-first-upload") {
-    const stagedManifest = JSON.parse(await readFile(join(stage, "manifest.json"), "utf8"));
+    const stagedManifestPath = join(stage, "manifest.json");
+    const stagedManifest = JSON.parse(await readFile(stagedManifestPath, "utf8"));
     delete stagedManifest.key;
-    await writeFile(join(stage, "manifest.json"), JSON.stringify(stagedManifest, null, 2) + "\n");
+    await writeFile(stagedManifestPath, JSON.stringify(stagedManifest, null, 2) + "\n");
+    // Compress-Archive records file timestamps. Preserve the source time after rewriting the key-free
+    // manifest so two packages from the same commit produce the same bytes and SHA-256.
+    await utimes(stagedManifestPath, manifestTimes.atime, manifestTimes.mtime);
   }
 
   await rm(output, { force: true });

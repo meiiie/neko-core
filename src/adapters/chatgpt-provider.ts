@@ -5,6 +5,8 @@ import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 import { VERSION } from "../shared/version.ts";
 import type { NekoConfig } from "./config.ts";
+import { providerScope } from "./provider-scope.ts";
+import { effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
 import { setModel } from "./project.ts";
 import { CHATGPT_CODEX_MODELS_URL, CHATGPT_CODEX_RESPONSES_URL, CHATGPT_CODEX_USAGE_URL, validChatGptCredentials } from "./chatgpt-auth.ts";
 
@@ -105,19 +107,7 @@ export async function listChatGptModels(fetchImpl: typeof fetch = fetch): Promis
 
 /** Clamp only when the selected model's live catalog explicitly declares its supported levels. */
 export function resolveChatGptEffort(requested: string, model?: { efforts?: ChatGptModelInfo["efforts"]; defaultEffort?: string }): string {
-  const effort = requested.trim().toLowerCase();
-  if (!effort || effort === "off" || !model?.efforts?.length) return effort;
-  const supported = model.efforts.map((level) => level.effort);
-  if (supported.includes(effort)) return effort;
-  const order = ["none", "low", "medium", "high", "xhigh", "max", "ultra"];
-  const wanted = order.indexOf(effort);
-  if (wanted >= 0) {
-    const lower = supported
-      .filter((level) => order.indexOf(level) >= 0 && order.indexOf(level) <= wanted)
-      .sort((a, b) => order.indexOf(b) - order.indexOf(a))[0];
-    if (lower) return lower;
-  }
-  return model.defaultEffort || supported[0] || effort;
+  return resolveEffort(requested, model);
 }
 
 /** Read ChatGPT subscription windows/credits. This endpoint is read-only and does not consume model quota. */
@@ -197,10 +187,13 @@ export class ChatGptProvider implements Provider {
     if (!this.cfg.model) throw new Error("chatgpt provider needs a model (the chatgpt profile supplies one).");
     let modelId = this.cfg.model;
     let modelInfo: ChatGptModelInfo | undefined;
+    const configuredEffort = requestEffort(this.cfg.effort, opts?.reasoningEffort);
+    const effortNeedsCatalog = Boolean(configuredEffort && configuredEffort !== "off"
+      && !["low", "medium", "high", "xhigh"].includes(configuredEffort));
     // 5.6 is currently returned in the account catalog but gated to the official Codex identity.
     // Recover old saved selections before spending a request on a guaranteed 404. The live picker
     // filters these entries, so this path is primarily a migration for existing configurations.
-    if (modelId.startsWith("gpt-5.6-") || this.cfg.effort === "max" || this.cfg.effort === "ultra") {
+    if (modelId.startsWith("gpt-5.6-") || effortNeedsCatalog) {
       this.catalog ??= listChatGptModelCatalog().catch(() => []);
       const catalog = await this.catalog;
       modelInfo = catalog.find((candidate) => candidate.slug === modelId);
@@ -221,7 +214,8 @@ export class ChatGptProvider implements Provider {
         } catch { /* runtime recovery remains valid even when settings cannot be written */ }
       }
     }
-    const { instructions, input } = toResponsesInput(messages);
+    const continuationScope = providerScope("responses", CHATGPT_CODEX_RESPONSES_URL, modelId);
+    const { instructions, input } = toResponsesInput(messages, continuationScope);
     const responseTools = toResponsesTools(tools ?? []);
     const payload: Record<string, any> = {
       model: modelId,
@@ -236,10 +230,10 @@ export class ChatGptProvider implements Provider {
       payload.tool_choice = "auto";
       payload.parallel_tool_calls = true;
     }
-    let effort = this.cfg.effort;
-    // Resolve high saved tiers from the account catalog once per provider instance so a legacy
-    // `max`/`ultra` cannot cause a 400 after capability fallback or a model switch.
-    if (effort === "max" || effort === "ultra") {
+    let effort = configuredEffort;
+    // The live account catalog is authoritative for every explicit tier, including provider-defined
+    // future names. Preserve the saved preference; only this request is negotiated for this model.
+    if (effort && effort !== "off" && (modelInfo || effortNeedsCatalog)) {
       this.catalog ??= listChatGptModelCatalog().catch(() => []);
       modelInfo ??= (await this.catalog).find((candidate) => candidate.slug === modelId);
       const resolved = resolveChatGptEffort(effort, modelInfo);
@@ -251,6 +245,7 @@ export class ChatGptProvider implements Provider {
 
     let attempt = 0;
     let refreshedAfter401 = false;
+    let healedEffort = false;
     let forceRefresh = false;
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
@@ -282,6 +277,7 @@ export class ChatGptProvider implements Provider {
             response,
             (text, kind) => { if (text) streamActivity = true; onDelta?.(text, kind); },
             (call) => { streamActivity = true; opts?.onToolCallReady?.(call); },
+            continuationScope,
           );
         } catch (error) {
           if (!streamActivity && isRetryableStreamFailure(error) && attempt < this.cfg.maxRetries) {
@@ -295,6 +291,21 @@ export class ChatGptProvider implements Provider {
       if (response.status === 401 && !refreshedAfter401) {
         refreshedAfter401 = true;
         forceRefresh = true;
+        continue;
+      }
+      if (payload.reasoning?.effort && (response.status === 400 || response.status === 422) && /reasoning|effort/i.test(body)) {
+        if (!healedEffort) {
+          healedEffort = true;
+          const advertised = effortLevelsFromError(body);
+          const resolved = resolveEffort(String(payload.reasoning.effort), { efforts: advertised.map((item) => ({ effort: item })) });
+          if (advertised.includes(resolved) && resolved !== payload.reasoning.effort) {
+            payload.reasoning.effort = resolved;
+            onDelta?.(`(effort -> ${resolved}; highest compatible tier advertised by ${modelId})`, "reasoning");
+            continue;
+          }
+        }
+        delete payload.reasoning.effort;
+        onDelta?.(`(${modelId} rejected explicit effort; retrying with its default)`, "reasoning");
         continue;
       }
       if (RETRYABLE.has(response.status) && attempt < this.cfg.maxRetries) {
@@ -330,8 +341,17 @@ function isRetryableStreamFailure(error: unknown): boolean {
     || message.includes("temporarily unavailable");
 }
 
+const RESPONSES_CONTINUATION = "neko_responses_continuation";
+
+function responsesContinuation(providerData: any, scope: string): any[] {
+  if (!Array.isArray(providerData)) return [];
+  if (!scope) return providerData;
+  const scoped = providerData.find((item) => item?.type === RESPONSES_CONTINUATION && item?.scope === scope);
+  return Array.isArray(scoped?.items) ? scoped.items : [];
+}
+
 /** Convert Neko's Chat-Completions-shaped history into Responses input items. */
-export function toResponsesInput(messages: any[]): { instructions: string; input: any[] } {
+export function toResponsesInput(messages: any[], scope = ""): { instructions: string; input: any[] } {
   const systems: string[] = [];
   const input: any[] = [];
   for (const message of messages) {
@@ -340,7 +360,7 @@ export function toResponsesInput(messages: any[]): { instructions: string; input
       continue;
     }
     if (message?.role === "assistant") {
-      if (Array.isArray(message.provider_data)) input.push(...message.provider_data);
+      input.push(...responsesContinuation(message.provider_data, scope));
       const text = textContent(message.content);
       if (text) input.push({ role: "assistant", content: [{ type: "output_text", text }] });
       for (const call of message.tool_calls ?? []) {
@@ -390,9 +410,15 @@ function textContent(content: any): string {
   return Array.isArray(content) ? content.filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? "")).join("\n") : "";
 }
 
-/** Parse the standard Responses SSE events emitted by the Codex backend. */
-export async function parseResponsesStream(response: Response, onDelta?: DeltaHook, onToolCallReady?: (call: ToolCall) => void): Promise<ProviderResponse> {
-  if (!response.body) throw new Error("ChatGPT streaming response had no body.");
+/** Parse standard Responses SSE events (OpenAI Codex, xAI, and compatible APIs). */
+export async function parseResponsesStream(
+  response: Response,
+  onDelta?: DeltaHook,
+  onToolCallReady?: (call: ToolCall) => void,
+  scope = "",
+  onActivity?: () => void,
+): Promise<ProviderResponse> {
+  if (!response.body) throw new Error("Responses streaming response had no body.");
   let content = "";
   let reasoning = "";
   let usage: Usage | undefined;
@@ -433,7 +459,7 @@ export async function parseResponsesStream(response: Response, onDelta?: DeltaHo
     return call;
   };
 
-  for await (const event of responseEvents(response)) {
+  for await (const event of responseEvents(response, onActivity)) {
     const type = String(event?.type ?? "");
     if (type === "response.output_text.delta") {
       const delta = String(event.delta ?? ""); content += delta; onDelta?.(delta, "content");
@@ -488,10 +514,10 @@ export async function parseResponsesStream(response: Response, onDelta?: DeltaHo
         emitCall(key, true);
       }
     } else if (type === "response.failed" || type === "response.incomplete" || type === "error") {
-      throw new Error(`ChatGPT response failed: ${String(event.response?.error?.message ?? event.response?.incomplete_details?.reason ?? event.error?.message ?? event.message ?? "unknown error").slice(0, 300)}`);
+      throw new Error(`Responses request failed: ${String(event.response?.error?.message ?? event.response?.incomplete_details?.reason ?? event.error?.message ?? event.message ?? "unknown error").slice(0, 300)}`);
     }
   }
-  if (!completed) throw new Error("ChatGPT stream disconnected before response.completed.");
+  if (!completed) throw new Error("Responses stream disconnected before response.completed.");
   for (const key of calls.keys()) emitCall(key, true);
   const toolCalls = [...calls.keys()].map((key) => {
     const item = calls.get(key)!;
@@ -499,7 +525,11 @@ export async function parseResponsesStream(response: Response, onDelta?: DeltaHo
     try { args = JSON.parse(item.arguments || "{}"); } catch { args = { _raw: item.arguments }; }
     return { id: item.id, name: item.name, arguments: args };
   });
-  return { content: content || null, tool_calls: toolCalls, usage, reasoning: reasoning || undefined, continuation: [...continuation.values()] };
+  const continuationItems = [...continuation.values()];
+  const keptContinuation = scope && continuationItems.length
+    ? [{ type: RESPONSES_CONTINUATION, scope, items: continuationItems }]
+    : continuationItems;
+  return { content: content || null, tool_calls: toolCalls, usage, reasoning: reasoning || undefined, continuation: keptContinuation };
 }
 
 function reasoningContinuation(item: any): any | null {
@@ -512,13 +542,14 @@ function reasoningContinuation(item: any): any | null {
   };
 }
 
-async function* responseEvents(response: Response): AsyncGenerator<any> {
+async function* responseEvents(response: Response, onActivity?: () => void): AsyncGenerator<any> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    onActivity?.();
     buffer += decoder.decode(value, { stream: true });
     let match: RegExpExecArray | null;
     while ((match = /\r?\n\r?\n/.exec(buffer))) {

@@ -271,7 +271,7 @@ try {
 } catch { }
 
 Write-Host ''
-Write-Ok "Run 'neko' to get started!  Then use /login to choose ChatGPT, API, or another provider."
-Write-Dim "  neko doctor          - check provider / model / authentication"
-Write-Dim "  neko support status  - optional GPT-5.6 Sol/Terra/Luna support"
-Write-Dim "  neko --yolo   - auto-approve mode: Neko runs tools without asking"
+Write-Ok "Run 'neko' to get started."
+Write-Dim "  Inside Neko: /login connects ChatGPT, an API key, or another provider."
+Write-Dim "               /browser starts optional signed-in Chrome setup (no Bun command needed)."
+Write-Dim "  neko doctor - check provider / model / authentication"

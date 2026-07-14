@@ -23,12 +23,18 @@ another `McpTools` source. The extension contains no model, planner, cloud clien
 
 ## User contract
 
-1. Run `neko browser bridge` and keep it open.
-2. Install the public extension when available, or load `browser-extension/` unpacked during development.
-3. Open a target page, click the extension, and choose **Attach this tab to Neko**.
-4. Reading is scoped to that attached tab. Click/scroll/navigation and typing are separate switches, off
+1. Install Neko with the normal one-line installer, then run `neko`. Browser control is optional; Neko shows a
+   one-time hint, and a natural browser request offers guided setup while preserving the request. `/browser`
+   opens the same flow directly. No Bun/source command is required.
+   `neko browser install` remains a foreground non-TUI fallback and diagnostic.
+2. `/browser` prepares the exact extension for this release, opens the Store listing when a public id is
+   configured (otherwise the unpacked developer surface), and starts the loopback bridge without leaving Neko.
+3. Confirm Add-extension once in Chrome, or choose **Load unpacked** once while the Store item is pending.
+4. Open a target page, click the extension, and choose **Attach this tab to Neko**. Normal `neko` sessions now
+   own the bridge lifecycle automatically; the foreground `neko browser bridge` command remains diagnostic.
+5. Reading is scoped to that attached tab. Click/scroll/navigation and typing are separate switches, off
    by default. Password, OTP, passcode and payment fields remain blocked even when typing is enabled.
-5. **Emergency stop** immediately detaches the tab and clears action grants.
+6. **Emergency stop** immediately detaches the tab and clears action grants.
 
 The attached page always gets an `AI` toolbar badge and a visible **Neko is using this tab** marker with
 its own Stop button. If the tab was ungrouped, Neko creates a temporary `Neko - AI active` group and removes
@@ -38,11 +44,16 @@ it on detach. An existing user-created group is never renamed, recolored, rearra
 0600 in `~/.neko-core/browser-bridge.json`; it is never printed, committed, placed in a URL, or sent to the
 Cloudflare relay.
 
+Chrome deliberately keeps one user confirmation in consumer installs. Neko does not edit the browser profile,
+inject a CRX, or write enterprise force-install policy. Managed organizations may deploy the Store id through
+Chrome Enterprise policy; that is an administrator contract, not a consumer-install shortcut.
+
 ## Protocol and trust boundaries
 
 - The server binds only `127.0.0.1` and accepts WebSocket upgrades only from exact extension Origins whose
   32-character ids are in config-first `browser_extension_ids`. The deterministic unpacked id is the default;
-  the Chrome Web Store item id is added after the Dashboard creates it. Arbitrary extensions are never accepted.
+  the Chrome Web Store item id is added after the Dashboard creates it, with the public install route recorded
+  separately as `browser_extension_store_id`. Arbitrary extensions are never accepted.
 - Initial pairing is available for ten minutes after bridge start and requires the extension's attach
   user gesture. Reconnect uses the per-session 256-bit capability.
 - Local HTTP commands require the same bearer capability, cap request/message sizes at 64 KiB, validate
@@ -61,9 +72,12 @@ booleans. The TUI includes that object inside the existing E2E-sealed relay pres
 
 ## Reconnect and ownership
 
-The extension stores `{session, token, tab id, tab origin, grants, Neko-created group id}` in its own Chrome storage and resumes the
-same local session while the capability remains valid. Only one extension connection owns a bridge session;
-a newer authenticated connection replaces the older one. Closing the tab or crossing origins detaches it.
+The extension stores `{session, token, tab id, tab origin, grants, Neko-created group id}` in its own Chrome
+storage and resumes the same local session while the capability remains valid. A low-frequency Chrome alarm
+wakes the Manifest V3 worker while attached, so suspend/restart does not silently strand the tab. A deliberate
+Attach gesture self-repairs only an authentication failure caused by `neko browser rotate`; an ordinary offline
+bridge never erases the saved capability. Only one extension connection owns a bridge session; a newer
+authenticated connection replaces the older one. Closing the tab or crossing origins detaches it.
 
 ## Verification
 

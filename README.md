@@ -28,7 +28,14 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
 ### The foundation
 
 - **Streaming agent loop** — `complete → tool-calls → observe`, capped by `max_steps`, with live token
-  streaming, read-only tool fan-out (parallel), a stuck-loop guard, and auto-compaction.
+  streaming, read-only tool fan-out (parallel), a stuck-loop guard, and auto-compaction. Token UX separates
+  the cumulative multi-call turn/session from the last request's actual context; multimodal estimates count
+  decoded images rather than their base64 transport bytes. Stable prompt prefixes and provider cache affinity
+  reduce repeated prefill; the evolving playbook sends a compact index and retrieves full lessons on demand.
+  Experimental `adaptive_effort: true` (or `NEKO_ADAPTIVE_EFFORT=1`) lowers the completion after a
+  productive mechanical read. Leave it off for general-purpose work: unlike a learned history-aware router,
+  this lagged heuristic can mistake the hardest post-read synthesis for an easy step. Enable it only after a
+  representative repeated eval shows no quality regression for your retrieval-heavy workload.
 - **Tools** — `read_file` · `search` · `glob` · `ls` (safe) and `write_file` · `edit` · `multi_edit` ·
   `bash` · `computer` (approval-gated). `search` uses ripgrep when present; `bash` takes a per-call timeout
   and can run in the background; `read_file` pages large files and reads images/PDFs. On Windows,
@@ -43,7 +50,11 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
   `neko setup browser attach` for existing Chrome tabs or `isolated` for disposable tests. Each rung
   falls back to the next automatically. See
   [`docs/process/WEB.md`](docs/process/WEB.md).
-- **Explicit-tab browser bridge** — `neko browser bridge` pairs Neko's own Manifest V3 extension with one
+- **Explicit-tab browser bridge** — ask Neko to browse a signed-in site and it offers setup at the point of
+  need; `/browser` opens the same flow directly. Neko prepares the extension, opens the
+  supported Chrome install surface, and starts the authenticated loopback bridge. `neko browser install` remains
+  the non-TUI diagnostic/fallback; users never need a Bun or source-tree command after the one-line installer.
+  After setup, normal `neko` sessions start the bridge automatically. Neko's Manifest V3 extension controls one
   user-selected Chrome tab. Read/click/type grants are separate, sensitive fields stay blocked, and
   emergency stop detaches immediately; an `AI` badge, page marker, and non-destructive tab group make control
   visible. No cookie or capability is sent through `/relay`. The public-release bundle, privacy policy, and
@@ -70,6 +81,8 @@ Neko is built to take on new roles, one skill and one tool at a time:
   markdown file, not a fork; built-in skills and their helper scripts ship inside the single binary.
 - **Self-improving memory** — durable facts (`memory`), learned `workflows` (procedures it distills by
   doing), and an always-on `playbook` it refines over time, so it gets better with use.
+  Neko's identity is local-first too: `~/.neko-core/NEKO.md` carries the user's chosen voice and durable
+  relationship context across projects and models without weakening tool permissions.
 - **Remote control from any device** — type `/relay`, scan the QR, and drive Neko from your phone
   anywhere; the agent **dials out** (no open port) over an **end-to-end-encrypted** relay you host.
 - **Auto-update** — Neko keeps itself current like Claude Code: a daily startup check installs new
@@ -97,7 +110,7 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > Fallback if the domain is unreachable: swap the URL for
 > `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
-**Current release: [v0.11.5](https://github.com/meiiie/neko-core/releases/tag/v0.11.5).**
+**Current release: [v0.12.0](https://github.com/meiiie/neko-core/releases/tag/v0.12.0).**
 Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
 real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). **Pin or roll back any time**
 (the pin holds — auto-update won't undo it): `neko update 0.9.0`, or at install time
@@ -109,9 +122,19 @@ Then start Neko and use the guided sign-in:
 neko
 # /login -> OpenAI -> ChatGPT Plus/Pro  (subscription, no API billing)
 #                  -> API key          (pay-as-you-go API)
-#        -> Google -> Gemini API key (recommended) or Code Assist Standard/Enterprise
-#                  -> Gemini API key          (pay-as-you-go API)
+#        -> Google -> Gemini API key    (official free tier / optional paid; recommended)
+#                  -> Code Assist Standard/Enterprise (OAuth)
+#        -> Anthropic -> Claude Sonnet 5 / Fable 5 API key
+#        -> xAI       -> Grok 4.5 / Grok Build API key
+#        -> Kimi      -> Kimi Code account (OAuth) / Kimi Platform API key
+#        -> DeepSeek  -> DeepSeek V4 API key
 ```
+
+Browser control is optional and progressively disclosed. The first Neko session mentions it, and a natural
+request such as "browse Facebook in Chrome" opens a setup choice while keeping the request intact; `/browser`
+opens the same flow directly. Use it only when you want Neko to control one explicitly attached, already
+signed-in Chrome tab. Chrome still shows
+its required extension-permission confirmation. There is no second `bun bin/neko.ts ...` install step.
 
 The equivalent non-TUI commands are:
 
@@ -120,12 +143,29 @@ neko login openai chatgpt
 neko login openai api <key>
 neko login google gemini
 neko login google api <key>
+neko login kimi
+neko login kimi api <key>
+neko login deepseek <key>
 
 # Headless/SSH alternative: prints a URL and one-time device code
 neko login openai chatgpt --device
 
 neko doctor
 ```
+
+Anthropic and xAI are direct, official API-key routes (not subscription/OAuth proxies). For a non-TUI
+session, set `ANTHROPIC_API_KEY` and run `neko --profile claude`, or set `XAI_API_KEY` and run
+`neko --profile xai` (current Grok 4.5) / `neko --profile grok-build` (the dedicated coding model).
+`/model` can switch among the models exposed by the selected route.
+
+Kimi is also first-class and connects directly to Moonshot AI. `neko login kimi` uses Moonshot AI's public
+RFC 8628 device flow and stores Neko's own refreshable session in `~/.neko-core/kimi-auth.json`; it never
+reads another CLI's credentials. `neko login kimi api <key>` is a separate Kimi Platform route, using
+`KIMI_API_KEY` (the older `MOONSHOT_API_KEY` name remains compatible). The account route reads the live
+model/capability catalog after sign-in. DeepSeek remains an official API-key route because DeepSeek does
+not publish an account OAuth contract: `DEEPSEEK_API_KEY` selects current `deepseek-v4-pro` by default,
+with V4 Flash in `/model`, 1M context metadata, thinking controls, and tool-turn `reasoning_content`
+continuation. Neither route starts a local proxy or sends cookies to Neko.
 
 The ChatGPT profile uses the Codex Responses backend and never falls back to an OpenAI API key. Usage
 is governed by the limits and model access of your ChatGPT plan; it does not create API pay-as-you-go
@@ -199,22 +239,43 @@ installation. It is downloaded from the official `openai/codex` GitHub release, 
 published SHA-256, and required to have a valid OpenAI Authenticode signature before Neko activates it.
 The base Neko install is unchanged because the pack remains opt-in.
 
-Gemini uses the official [Gemini CLI](https://github.com/google-gemini/gemini-cli) over its
-[Agent Client Protocol (ACP)](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/acp-mode.md).
-Google ended Gemini CLI consumer OAuth for Free, AI Pro, and AI Ultra on 18 June 2026 and moved those
-users to Antigravity. Neko therefore recommends `/login -> Google -> Gemini API key`; Code Assist
-Standard/Enterprise users may keep using the CLI sign-in route. Antigravity is a separate Google product:
-Neko does not read its keyring, reuse its OAuth token, or scrape its TUI.
+The recommended `gemini-api` profile connects directly to Google's documented
+[OpenAI-compatible Gemini endpoint](https://ai.google.dev/gemini-api/docs/openai) with `GEMINI_API_KEY`.
+There is no local proxy, bundled third-party service, or OAuth token reuse. Neko's existing adapter gets
+streaming, function calling, vision, structured output, reasoning effort, and the live `/models` catalog;
+Gemini-specific opaque tool metadata is replayed only to the same endpoint so multi-turn thinking remains
+intact without leaking it after a provider switch. The stable default is `gemini-3.5-flash`; `/model` can
+select any model the key is entitled to. Google offers a limited free tier and optional paid tiers.
 
-Neko reuses a compatible installed Gemini CLI when available. Both supported routes (API key and Code Assist
-Standard/Enterprise) need the ACP executable. Otherwise `/login` offers one-step installation
-of a Neko-managed Support Pack: Google's official bundle plus a private Node LTS runtime under
-`~/.neko-core/gemini-support`. It requires no administrator access, global npm package, or PATH change and
-does not enlarge the base Neko download. It can also be managed with `neko setup gemini` or
-`/support gemini install|update|remove`. The sidecar is persistent only for the Neko session. Neko
-forces an isolated ACP configuration: Gemini built-in tools, extensions, and hooks are disabled, and the
-only advertised MCP server is a random-token loopback proxy. Every read, edit, and command therefore
-returns through Neko's existing ToolRegistry and approval gate.
+The separate `gemini` profile is only for Code Assist Standard/Enterprise. It uses the official
+[Gemini CLI](https://github.com/google-gemini/gemini-cli) over
+[Agent Client Protocol (ACP)](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/acp-mode.md).
+Google [ended Gemini CLI consumer OAuth](https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals)
+for Free, AI Pro, and AI Ultra on 18 June 2026 and moved those users to Antigravity. A Google AI Pro account
+still receives its higher quota in [Antigravity](https://antigravity.google/docs/plans?app=cli), but that
+subscription does not become Gemini API billing or quota. To use Neko with the same Google account, create a
+separate restricted [Gemini API key](https://ai.google.dev/gemini-api/docs/api-key) in AI Studio; Neko then
+uses that API project's free tier or separately enabled API billing. Neko does not read Antigravity's keyring,
+reuse its token, imitate its client identity, or call its private endpoints.
+
+Antigravity CLI 1.1.1 does publish a headless `agy -p` command, but it is a complete agent harness rather
+than a model transport: it owns its own tools, permissions, conversations, and workspace access and does not
+expose the structured completion/tool/continuation contract required by Neko's `Provider` port. Wrapping it
+would create an agent-inside-an-agent and bypass Neko's approval and audit boundary. More importantly,
+Google's [Antigravity terms](https://antigravity.google/terms) and
+[FAQ](https://antigravity.google/docs/faq) explicitly prohibit using third-party software with Antigravity
+OAuth and recommend Vertex or an AI Studio API key for third-party coding agents. Neko therefore does not
+offer an Antigravity subscription profile, including for lab builds.
+
+For Code Assist Standard/Enterprise only, Neko reuses a compatible installed Gemini CLI when available.
+Otherwise `/login` offers one-step installation of a Neko-managed Support Pack: Google's official bundle
+plus a private Node LTS runtime under `~/.neko-core/gemini-support`. It requires no administrator access,
+global npm package, or PATH change and does not enlarge the base Neko download. Manage it with
+`neko setup gemini` or `/support gemini install|update|remove`. The sidecar is persistent only for the Neko
+session. Neko forces an isolated ACP configuration: Gemini built-in tools, extensions, and hooks are
+disabled, and the only advertised MCP server is a random-token loopback proxy. Every read, edit, and command
+therefore returns through Neko's existing ToolRegistry and approval gate. Gemini API-key users do not need
+this Support Pack.
 
 Enterprise OAuth state lives in Neko's own `~/.neko-core/gemini-home`, even when Neko reuses a system Gemini binary;
 therefore `/logout` cannot sign the user's separate Gemini CLI session out. `/usage` reports token usage

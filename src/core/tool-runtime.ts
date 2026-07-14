@@ -8,10 +8,9 @@
  * tool never crashes the agent loop. Path-taking tools refuse to escape the project root.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { createInterface } from "node:readline";
 
 import type { McpTools, WebPort } from "./ports.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
@@ -22,12 +21,16 @@ import { wrapBash } from "./sandbox.ts";
 import { effectivePermission, GATED, resolveTool, toolSchemas } from "./tools.ts";
 import { residentUiaHost } from "./windows-uia-host.ts";
 import { debug, messageOf } from "../shared/debug.ts";
+import { MAX_OBS_PAGE_CHARS } from "./agent-constants.ts";
 
 /** An approval gate: given (toolName, the tool's args) -> approve? (may be async).
  * Receiving args lets a UI render a preview/diff before approving. */
 export type ApprovalGate = (toolName: string, args: Record<string, any>) => boolean | Promise<boolean>;
 
-const MAX_READ_CHARS = 100_000;
+// Leave headroom below core's 48k per-observation guard for the header/continuation hint. Pagination
+// must happen here: letting Agent clamp a 100k result would silently discard its middle.
+const MAX_READ_BODY_CHARS = MAX_OBS_PAGE_CHARS;
+const MAX_INLINE_READ_BYTES = MAX_READ_BODY_CHARS * 4; // UTF-8 is <= 4 bytes/char
 const MAX_SEARCH_MATCHES = 200;
 const MAX_LIST = 200;
 const MAX_OUTPUT_CHARS = 20_000;
@@ -71,6 +74,8 @@ export class ToolRegistry {
   computerHandler?: (args: Record<string, any>) => string | any[];
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
+  /** Maximum foreground bash timeout. Product default is 10min; bounded evals can fail fast. */
+  bashTimeoutCapMs = 600_000;
   /** Opt-in OS sandbox for bash (fs read-only except cwd). Set from config by the host. */
   sandboxBash = false;
   sandboxAllowNetwork = false;
@@ -164,7 +169,10 @@ export class ToolRegistry {
   private async runBash(args: Record<string, any>, signal?: AbortSignal): Promise<string> {
     const command = requireArg(args, "command");
     // Per-call timeout (default 60s, clamped to [1s, 10min]) so slow builds/tests aren't cut off.
-    const timeoutMs = Math.min(Math.max(Math.floor(Number(args.timeout) || BASH_TIMEOUT_MS), 1000), 600_000);
+    const timeoutMs = Math.min(
+      Math.max(Math.floor(Number(args.timeout) || BASH_TIMEOUT_MS), 1000),
+      Math.min(600_000, Math.max(1_000, this.bashTimeoutCapMs)),
+    );
     const sb = wrapBash(command, this.root, { enabled: this.sandboxBash, allowNetwork: this.sandboxAllowNetwork });
     // Agent-presence opt-in: desktop helpers read NEKO_PRESENCE to show the independent cursor + honour takeover.
     // Desktop input backend opt-in: NEKO_INPUT picks the non-hijacking (inject) vs legacy (sendinput) path.
@@ -408,7 +416,7 @@ export class ToolRegistry {
     if (!existsSync(path)) return `Error: no such file: ${raw}`;
     const ext = (raw.split(".").pop() ?? "").toLowerCase();
     if (IMAGE_EXTS.has(ext)) return readImageFile(path, raw, ext, this.vision);
-    if (ext === "pdf") return readPdfFile(path, raw);
+    if (ext === "pdf") return readPdfFile(path, raw, args);
     return await toolReadFile(this.root, args);
   }
 
@@ -586,75 +594,161 @@ async function toolReadFile(root: string, args: Record<string, any>): Promise<st
   const stat = statSync(path);
   if (stat.isDirectory()) return `Error: is a directory: ${raw}`;
   const offset = Math.max(1, Math.floor(Number(args.offset) || 1)); // 1-based
+  const column = Math.max(1, Math.floor(Number(args.column) || 1)); // 1-based
   const limit = Number(args.limit) > 0 ? Math.floor(Number(args.limit)) : undefined;
-  const MAX_READ_BYTES = MAX_READ_CHARS * 4; // UTF-8 is <= 4 bytes/char
-  if (stat.size > MAX_READ_BYTES && (offset > 1 || limit !== undefined)) {
-    return await readLargeFileWindow(path, offset, limit);
-  }
+  if (stat.size > MAX_INLINE_READ_BYTES) return await readLargeFileWindow(path, raw, offset, column, limit);
   let text: string;
   try {
-    // Read at most a bounded prefix: a giant file (multi-GB log/data) must not be slurped whole into
-    // memory only to be truncated — that OOMs the process. The result is capped to MAX_READ_CHARS anyway.
-    if (stat.size > MAX_READ_BYTES) {
-      const fd = openSync(path, "r");
-      try {
-        const buf = Buffer.alloc(MAX_READ_BYTES);
-        const n = readSync(fd, buf, 0, MAX_READ_BYTES, 0);
-        text = buf.subarray(0, n).toString("utf-8");
-      } finally {
-        closeSync(fd);
-      }
-    } else {
-      text = readFileSync(path, "utf-8");
-    }
+    text = readFileSync(path, "utf-8");
   } catch {
     return `Error: cannot read file: ${raw}`;
   }
-  if (text.length > MAX_READ_CHARS) {
-    text = text.slice(0, MAX_READ_CHARS) + `\n... (truncated at ${MAX_READ_CHARS} chars)`;
-  }
-  // offset/limit: read a slice of a large file instead of the whole prefix (Claude-style paging).
-  const allLines = text.split("\n");
-  const start = offset - 1;
-  const slice = limit !== undefined ? allLines.slice(start, start + limit) : allLines.slice(start);
-  // Line-numbered for reference (the model cites lines; numbers are display-only).
-  const body = slice.map((l, i) => `${String(start + i + 1).padStart(5)}  ${l}`).join("\n");
-  const windowed = start > 0 || (limit !== undefined && start + slice.length < allLines.length);
-  return windowed ? `(lines ${start + 1}-${start + slice.length} of ${allLines.length})\n${body}` : body;
+  return formatReadWindow(text.split("\n"), raw, offset, column, limit);
 }
 
-/** Stream an explicit line window from a large file without retaining the skipped prefix in memory. */
-async function readLargeFileWindow(path: string, offset: number, limit?: number): Promise<string> {
-  const input = createReadStream(path, { encoding: "utf-8" });
-  const reader = createInterface({ input, crlfDelay: Infinity });
-  const lines: string[] = [];
-  let lineNo = 0;
+/** Format an in-memory line window below the agent observation cap. A rare overlong single line is
+ * character-pageable via `column`, so minified JSON/bundles stay lossless too. */
+function formatReadWindow(lines: string[], raw: string, offset: number, column = 1, limit?: number): string {
+  const start = offset - 1;
+  if (start >= lines.length) return `(offset ${offset} is beyond end of file at line ${lines.length})`;
+  const rendered: string[] = [];
+  let chars = 0;
+  let index = start;
+  let partialColumn: number | undefined;
+  while (index < lines.length && (limit === undefined || index - start < limit)) {
+    const lineNo = index + 1;
+    const source = index === start ? lines[index].slice(column - 1) : lines[index];
+    const prefix = `${String(lineNo).padStart(5)}  `;
+    const separator = rendered.length ? 1 : 0;
+    const needed = separator + prefix.length + source.length;
+    if (chars + needed <= MAX_READ_BODY_CHARS) {
+      rendered.push(prefix + source);
+      chars += needed;
+      index++;
+      continue;
+    }
+    if (!rendered.length) {
+      const available = Math.max(1, MAX_READ_BODY_CHARS - prefix.length);
+      const chunk = source.slice(0, available);
+      rendered.push(prefix + chunk);
+      chars = prefix.length + chunk.length;
+      partialColumn = column + chunk.length;
+    }
+    break;
+  }
+  const end = partialColumn !== undefined ? offset : Math.max(offset, index);
+  const hasMore = partialColumn !== undefined || index < lines.length;
+  const explicitlyWindowed = offset > 1 || column > 1 || limit !== undefined;
+  const header = explicitlyWindowed || hasMore ? `(lines ${offset}-${end} of ${lines.length})\n` : "";
+  const continuation = !hasMore ? "" : partialColumn !== undefined
+    ? `\n... (more available; continue with read_file path:${JSON.stringify(raw)} offset:${offset} column:${partialColumn})`
+    : `\n... (more available; continue with read_file path:${JSON.stringify(raw)} offset:${index + 1})`;
+  return header + rendered.join("\n") + continuation;
+}
+
+/** Stream a line window from a large file without retaining the skipped prefix in memory. */
+async function readLargeFileWindow(path: string, raw: string, offset: number, column = 1, limit?: number): Promise<string> {
+  const input = createReadStream(path, { encoding: "utf-8", highWaterMark: 64 * 1024 });
+  const rendered: string[] = [];
+  let lineNo = 1;
+  let currentColumn = 1;
+  let currentIndex = -1;
+  let selectedLines = 0;
+  let lastRenderedLine = 0;
   let chars = 0;
   let more = false;
-  try {
-    for await (const line of reader) {
-      lineNo++;
-      if (lineNo < offset) continue;
-      if (limit !== undefined && lines.length >= limit) { more = true; break; }
-      const remaining = MAX_READ_CHARS - chars;
-      if (remaining <= 0) { more = true; break; }
-      if (line.length + 1 > remaining) {
-        lines.push(line.slice(0, remaining));
-        chars = MAX_READ_CHARS;
-        more = true;
-        break;
+  let nextOffset = offset;
+  let nextColumn = 1;
+  let stopped = false;
+  let currentHasData = false;
+
+  const stopBefore = (atColumn = 1) => {
+    more = true;
+    nextOffset = lineNo;
+    nextColumn = atColumn;
+    stopped = true;
+  };
+  const startSelectedLine = (): boolean => {
+    if (currentIndex >= 0) return true;
+    const prefix = `${String(lineNo).padStart(5)}  `;
+    const separator = rendered.length ? 1 : 0;
+    if (chars + separator + prefix.length > MAX_READ_BODY_CHARS) {
+      stopBefore(lineNo === offset ? Math.max(column, currentColumn) : currentColumn);
+      return false;
+    }
+    rendered.push(prefix);
+    currentIndex = rendered.length - 1;
+    chars += separator + prefix.length;
+    lastRenderedLine = lineNo;
+    return true;
+  };
+  const appendPiece = (piece: string): boolean => {
+    currentHasData ||= piece.length > 0;
+    if (lineNo < offset) { currentColumn += piece.length; return true; }
+    if (limit !== undefined && selectedLines >= limit) { stopBefore(); return false; }
+    const skip = lineNo === offset && currentColumn < column
+      ? Math.min(piece.length, column - currentColumn)
+      : 0;
+    const displayColumn = currentColumn + skip;
+    const content = piece.slice(skip);
+    currentColumn += piece.length;
+    if (!content.length) return true;
+    if (!startSelectedLine()) return false;
+    const remaining = MAX_READ_BODY_CHARS - chars;
+    if (content.length > remaining) {
+      rendered[currentIndex] += content.slice(0, remaining);
+      chars += remaining;
+      stopBefore(displayColumn + remaining);
+      return false;
+    }
+    rendered[currentIndex] += content;
+    chars += content.length;
+    return true;
+  };
+  const finishLine = (): boolean => {
+    if (lineNo >= offset && (limit === undefined || selectedLines < limit)) {
+      if (!startSelectedLine()) return false;
+      // createReadStream preserves CR in CRLF; match readFile(...).split("\n") line content.
+      if (rendered[currentIndex].endsWith("\r")) {
+        rendered[currentIndex] = rendered[currentIndex].slice(0, -1);
+        chars--;
       }
-      lines.push(line);
-      chars += line.length + 1;
+      selectedLines++;
+    }
+    lineNo++;
+    currentColumn = 1;
+    currentIndex = -1;
+    currentHasData = false;
+    return true;
+  };
+  try {
+    for await (const chunk of input) {
+      const text = String(chunk);
+      let cursor = 0;
+      while (!stopped && cursor < text.length) {
+        if (limit !== undefined && selectedLines >= limit) { stopBefore(); break; }
+        const newline = text.indexOf("\n", cursor);
+        const end = newline < 0 ? text.length : newline;
+        if (!appendPiece(text.slice(cursor, end))) break;
+        if (newline < 0) break;
+        if (!finishLine()) break;
+        cursor = newline + 1;
+      }
+      if (stopped) break;
     }
   } finally {
-    reader.close();
     input.destroy();
   }
-  if (!lines.length) return `(offset ${offset} is beyond end of file at line ${lineNo})`;
-  const end = offset + lines.length - 1;
-  const body = lines.map((line, i) => `${String(offset + i).padStart(5)}  ${line}`).join("\n");
-  return `(lines ${offset}-${end}${more ? "; more available" : ""})\n${body}${more && chars >= MAX_READ_CHARS ? `\n... (truncated at ${MAX_READ_CHARS} chars)` : ""}`;
+  // A final non-newline-terminated line still counts. Empty large files never reach this path.
+  if (!stopped && currentHasData && lineNo >= offset && (limit === undefined || selectedLines < limit)) {
+    startSelectedLine();
+    lastRenderedLine = lineNo;
+  }
+  if (!rendered.length) return `(offset ${offset} is beyond end of file at line ${lineNo})`;
+  const continuation = !more ? "" : nextColumn > 1
+    ? `\n... (more available; continue with read_file path:${JSON.stringify(raw)} offset:${nextOffset} column:${nextColumn})`
+    : `\n... (more available; continue with read_file path:${JSON.stringify(raw)} offset:${nextOffset})`;
+  return `(lines ${offset}-${lastRenderedLine}${more ? "; more available" : ""})\n${rendered.join("\n")}${continuation}`;
 }
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
@@ -675,20 +769,22 @@ function readImageFile(path: string, raw: string, ext: string, vision: boolean):
 }
 
 /** Extract text from a PDF via pdftotext (poppler) when available; else explain how to read it. */
-function readPdfFile(path: string, raw: string): string {
+function readPdfFile(path: string, raw: string, args: Record<string, any>): string {
   const exe = Bun.which("pdftotext");
   if (!exe) return `[PDF ${raw}] - text extraction needs 'pdftotext' (poppler) on PATH (not found). Install it, or open the pages with a vision model.`;
   const r = spawnSync(exe, ["-layout", path, "-"], { encoding: "utf-8", maxBuffer: 16 * 1024 * 1024, timeout: 30_000 });
   if (r.error) return `Error extracting PDF: ${r.error.message}`;
-  let text = String(r.stdout || "");
+  const text = String(r.stdout || "");
   if (!text.trim()) {
     const err = String(r.stderr || "").trim().slice(0, 150);
     return r.status !== 0 && err
       ? `[PDF ${raw}] - could not extract text: ${err}`
       : `[PDF ${raw}] - no extractable text (likely a scanned/image PDF; needs OCR or a vision model).`;
   }
-  if (text.length > MAX_READ_CHARS) text = text.slice(0, MAX_READ_CHARS) + `\n... (truncated at ${MAX_READ_CHARS} chars)`;
-  return text;
+  const offset = Math.max(1, Math.floor(Number(args.offset) || 1));
+  const column = Math.max(1, Math.floor(Number(args.column) || 1));
+  const limit = Number(args.limit) > 0 ? Math.floor(Number(args.limit)) : undefined;
+  return formatReadWindow(text.split("\n"), raw, offset, column, limit);
 }
 
 /** Cheap width/height from common image headers (PNG/GIF/JPEG), or null. No decoding, no deps. */

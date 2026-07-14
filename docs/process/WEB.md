@@ -10,7 +10,8 @@ Two layers, simplest first.
 - **`web_fetch`** — fetches a URL as clean **Markdown** (deterministic HTML→markdown: keeps headings,
   links, lists; drops nav/footer/scripts — a flat text-strip used to throw links away). A **small page
   comes back whole with NO model call** (fast + cheap — the markdown IS the answer); a **large page
-  paginates** (`page:N` in the footer) instead of truncating and silently dropping the rest; results
+  paginates in resumable 40k-character windows** (`page:N` in the footer), below the agent observation
+  guard, instead of truncating and silently dropping the middle; results
   cache ~5 min so pagination doesn't re-download. With a `prompt`/`schema` on a *large* page, a single
   fast model pass still extracts just what you asked (now over clean markdown). *(Size policy + compact
   reads learned from Hermes Agent + lightweight scrapers; our own implementation.)*
@@ -154,7 +155,9 @@ Claude Code, and others all do browser this way). Built-in `web_*` covers the si
 For a Claude/Codex-style one-click attachment with Neko's own permissions and audit surface:
 
 ```text
-neko browser bridge       # loopback only; capability is never printed
+/browser                  # preferred: guided setup/status without leaving the interactive Neko session
+neko browser install      # non-TUI fallback + foreground live bridge (never requires Bun/source checkout)
+neko browser bridge       # foreground diagnostic; normal Neko sessions auto-start it after setup
 neko browser path         # folder to Load unpacked in chrome://extensions
 neko browser rotate       # revoke pairing for the next bridge start
 ```

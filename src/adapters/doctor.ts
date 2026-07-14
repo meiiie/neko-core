@@ -10,6 +10,7 @@ import { VERSION } from "../shared/version.ts";
 import { hasChatGptCredentials } from "./chatgpt-auth.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 import { discoverGeminiCli, hasGeminiCredentials, type GeminiCliStatus } from "./gemini-cli.ts";
+import { hasKimiCredentials } from "./kimi-auth.ts";
 import { readBrowserCapability, readBrowserBridgeStatus } from "./browser-bridge.ts";
 
 export interface Check {
@@ -59,6 +60,8 @@ export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportSta
   const bridgeUnavailable = needsCodexBridge && bridge?.state !== "ready";
   const gemini = config.usesGeminiCli ? (geminiSupport ?? discoverGeminiCli()) : null;
   const geminiUnavailable = config.usesGeminiCli && gemini?.state !== "ready";
+  const profileNeedsApiKey = Boolean(config.profile && config.profiles[config.profile]?.auth === "api_key");
+  const profileKeyEnvs = config.profileKeyEnvs;
   const browserArgs = config.mcpServers.browser?.args ?? [];
   const profileAt = browserArgs.indexOf("--user-data-dir");
   const browserCheck: Check = !config.mcpServers.browser
@@ -74,7 +77,7 @@ export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportSta
   const browserBridgeStatus = browserBridge ? readBrowserBridgeStatus() : undefined;
   const browserBridgeCheck: Check | null = !browserBridge ? null : browserBridgeStatus?.online
     ? { status: "ok", name: "browser_bridge", detail: browserBridgeStatus.attached ? "online; one Chrome tab attached" : "online; waiting for an explicit tab attachment" }
-    : { status: "warn", name: "browser_bridge", detail: "configured but offline - run `neko browser bridge`" };
+    : { status: "warn", name: "browser_bridge", detail: "configured but offline - start Neko (auto-managed) or run `neko browser bridge`" };
   return [
     { status: "ok", name: "version", detail: `neko-core ${VERSION}` },
     { status: "ok", name: "provider", detail: config.provider },
@@ -147,10 +150,22 @@ export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportSta
             name: "gemini_auth",
             detail: hasGeminiCredentials() ? "signed in through Gemini CLI (OAuth; API billing is not used)" : "missing - run `neko login google gemini` or use /login",
           }
+      : config.usesKimiAuth
+        ? {
+            status: hasKimiCredentials() ? "ok" : "warn",
+            name: "kimi_auth",
+            detail: hasKimiCredentials()
+              ? "credentials present; Kimi Code access is checked on the first request (official device OAuth; no proxy or API key)"
+              : "missing - run `neko login kimi` or use /login",
+          }
       : {
-          status: config.apiKey || config.isLocalEndpoint ? "ok" : "warn",
+          status: config.apiKey || (config.isLocalEndpoint && !profileNeedsApiKey) ? "ok" : "warn",
           name: "api_key",
-          detail: config.apiKey ? "set" : config.isLocalEndpoint ? "not needed (local endpoint)" : "missing - set NEKO_API_KEY or run `neko init-user`",
+          detail: config.apiKey
+            ? "set"
+            : config.isLocalEndpoint && !profileNeedsApiKey
+              ? "not needed (local endpoint)"
+              : `missing - set ${profileKeyEnvs.length ? `${profileKeyEnvs.join(" or ")} or ` : ""}NEKO_API_KEY, or use /login`,
         },
   ];
 }

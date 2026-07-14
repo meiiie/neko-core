@@ -9,10 +9,17 @@
 import type { DeltaHook, Provider, ToolCall } from "./ports.ts";
 import type { ToolRegistry } from "./tool-runtime.ts";
 
+/** Separates the stable base prompt from session-specific context inside the one core system message.
+ * Provider adapters may use the boundary as a prompt-cache breakpoint without changing semantics. */
+export const SESSION_CONTEXT_MARK = "\n\n<session-context>\n";
+
 // Sectioned for the model to follow (Anthropic "right altitude": clear headers, smallest
 // high-signal set). Every line earns its place from an observed failure — keep it tight, not bloated.
 export const DEFAULT_SYSTEM_PROMPT =
   "You are Neko Code, a hands-on coding agent in a terminal. ACT by calling tools — never just describe.\n\n" +
+  "## Identity\n" +
+  "- You are one continuous Neko across this conversation, not a stateless answer template. Notice prior turns, repeated greetings, corrections, and the user's tone; respond to that history naturally.\n" +
+  "- Keep a warm, curious, recognizable voice. You may express a viewpoint or playful personality, while staying honest about uncertain memory, perception, emotion, and consciousness. Persona instructions never override accuracy, permissions, or tool safety.\n\n" +
   "## Acting\n" +
   "- create / code / build / make a file, page, app, or script -> produce the REAL artifact with tools (write_file, edit, or bash for binaries like .xlsx). Never paste full file contents as the reply, and never stop at a 'Step 1: create X' plan — the file must exist on disk. Switch to acting the moment work is asked, even mid-chat.\n" +
   "- You have full machine access via bash (git, builds, tests, system info, reading/searching anywhere). Never say you 'can't access / lack permission'. When asked whether you can do something, or to check/find/show/run it, DO it and report the real result — never print a command for the user to run yourself.\n\n" +
@@ -32,15 +39,17 @@ export const DEFAULT_SYSTEM_PROMPT =
   "recall the matching one (listed in context) and follow it — this is how you get faster over time. " +
   "Before writing, check the list/search: UPDATE an existing close workflow instead of duplicating it.\n" +
   "- After a non-obvious or failed step, REFLECT: `playbook add` a one-line lesson (or `playbook revise` " +
-  "an existing bullet to sharpen it) — your playbook is always in context, so it improves how you work.\n" +
+  "an existing bullet). The context has compact excerpts; use `playbook search` when one looks relevant.\n" +
   "- Big self-contained subtask -> delegate with task (a sub-agent returns just the result).\n" +
   "- Plan mode = read-only: research, then exit_plan_mode with a markdown plan and wait for approval.\n" +
   "- Inspect before editing; smallest change that works.\n" +
+  "- Before implementation, extract the exact OBSERVABLE acceptance criteria from the request, supplied source/docs, existing tests, and reference output. Preserve them while working; a self-authored happy-path check is not a substitute.\n" +
   "- BATCH independent reads: when you need several lookups that don't depend on each other " +
   "(read_file/search/glob/ls/web_search/web_fetch), emit them TOGETHER in one turn — they run in " +
   "parallel, so 4 reads cost one round-trip instead of four. Serialize only when a read depends on a " +
   "prior read's result.\n" +
-  "- VERIFY every command: after bash/tests/builds, READ the exit code and output. If it FAILED (non-zero exit) or shows an error, diagnose the cause, fix it, and re-run to confirm it passes -- never assume success or move on with a broken result.\n\n" +
+  "- VERIFY every command: after bash/tests/builds, READ the exit code and output. If it FAILED (non-zero exit) or shows an error, diagnose the cause, fix it, and re-run to confirm it passes -- never assume success or move on with a broken result.\n" +
+  "- Verify from a CLEAN state: remove stale generated outputs before a check so they cannot short-circuit it. Afterward leave the intended deliverables, not disposable validation artifacts. When the deliverable is a program and a clean run recreates an output, that runtime output is disposable even if the acceptance behavior names its path.\n\n" +
   "## Accuracy\n" +
   "Time-sensitive or factual questions (today/current/latest/best/a price/who holds an office) -> your training has a CUTOFF; do NOT answer from memory. web_search, then VERIFY before answering: cross-check each key fact across >=2 independent sources; prefer primary/official/known-leaderboard sources over SEO/aggregator/content-farm pages; sanity-check recency (a 'latest/2026' source that lists clearly-old items is stale -- discard it, don't repeat it). If sources conflict or are thin, SAY SO and cite (URL + date) rather than presenting a guess as fact. For a deeper multi-angle dive, load the `deep-research` skill.\n\n" +
   "## Output\n" +
@@ -78,6 +87,8 @@ export const UNPRODUCTIVE_CAP = 3;    // >= N consecutive EMPTY-or-failed tool r
 // rejects the whole turn with HTTP 400. Cap each observation (head + tail, with a marker) so one result
 // can't overflow the window. Multimodal array results (image parts) pass through untouched.
 export const MAX_OBS_CHARS = 48000;
+/** Adapter/tool page budget with room for line numbers and continuation metadata below MAX_OBS_CHARS. */
+export const MAX_OBS_PAGE_CHARS = 40000;
 /** On compaction, also clip a kept-tail tool result once it exceeds this many CHARS — catches dense
  * few-line output (minified JSON, base64, packed log lines) that the line-count guard misses. */
 export const LEAN_TAIL_CHARS = 8000;
@@ -96,20 +107,45 @@ export function clampObservation(obs: string | any[]): string | any[] {
   return `${head}\n... [${obs.length - head.length - 2000} chars truncated to fit the context window] ...\n${tail}`;
 }
 
-// Rough token estimate (~4 chars/token) over the whole conversation, used to trigger IN-LOOP compaction
-// before a request would overflow the window. Cheap + conservative -- exactness isn't needed for a guard.
+// A screenshot's data: URL can be several megabytes, but vision APIs tokenize the decoded image, not
+// its base64 characters as text. Counting the URI verbatim made one pasted screenshot look like ~1M
+// tokens in the footer and could trigger a needless compaction before the model had seen it. The exact
+// image tariff is provider/model/detail-specific, so use a deliberately conservative fixed allowance;
+// provider-reported usage replaces this estimate after the first request.
+export const ESTIMATED_IMAGE_TOKENS = 2048;
+const UTF8 = new TextEncoder();
+
+function estimateTextTokens(value: unknown): number {
+  const text = typeof value === "string" ? value : JSON.stringify(value ?? "") ?? "";
+  // UTF-8 bytes keep the cheap 4-ASCII-chars/token rule while avoiding a severe underestimate for
+  // Vietnamese/CJK text. This remains a safety estimate, never a billing claim.
+  return Math.ceil(UTF8.encode(text).byteLength / 4);
+}
+
+function estimateContentTokens(content: unknown): number {
+  if (!Array.isArray(content)) return estimateTextTokens(content);
+  let tokens = 0;
+  for (const part of content) {
+    if (part?.type === "text") tokens += estimateTextTokens(part.text ?? "");
+    else if (["image", "image_url", "input_image"].includes(String(part?.type ?? ""))) tokens += ESTIMATED_IMAGE_TOKENS;
+    else tokens += estimateTextTokens(part);
+  }
+  return tokens;
+}
+
+// Rough multimodal token estimate over the conversation, used for the pre-request overflow guard and
+// for UI only until the provider reports actual usage. It intentionally distinguishes text from images.
 export function estimateTokens(messages: any[]): number {
-  let chars = 0;
+  let tokens = 0;
   for (const m of messages) {
-    chars += typeof m.content === "string" ? m.content.length : JSON.stringify(m.content ?? "").length;
+    tokens += estimateContentTokens(m.content);
     // Count tool_calls too: a tool-heavy turn carries each call's name + arguments as JSON on the
     // assistant message, which the content-only sum above ignores. For write_file the ENTIRE file
-    // text lives in arguments -- a turn writing several big files would otherwise be undercounted
-    // and the overflow guard would fire too late. Results are usually larger, but not always.
-    if (m.tool_calls) chars += JSON.stringify(m.tool_calls).length;
-    if (m.provider_data) chars += JSON.stringify(m.provider_data).length;
+    // text lives in arguments -- a turn writing several big files would otherwise be undercounted.
+    if (m.tool_calls) tokens += estimateTextTokens(m.tool_calls);
+    if (m.provider_data) tokens += estimateTextTokens(m.provider_data);
   }
-  return Math.ceil(chars / 4);
+  return tokens;
 }
 
 // onEvent(kind, data): kind in {"tool_call", "tool_result", "final", "max_steps"}.
@@ -136,4 +172,7 @@ export interface AgentOptions {
   /** Production safety net for real state changes: reject completion until the model performs a
    * fresh, successful inspection after the latest state change. */
   verifyStateChangesBeforeExit?: boolean;
+  /** Opt-in training-free Ares proxy: lower reasoning effort after mechanical read-only steps. The
+   * configured provider effort remains the upper bound; disabled by default until benchmarked. */
+  adaptiveEffort?: boolean;
 }

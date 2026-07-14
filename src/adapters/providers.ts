@@ -6,15 +6,21 @@
  * nothing more than pointing base_url at a local server, so there is no in-process GGUF
  * provider in the TS build (that lives only in the Python reference).
  */
+import { randomUUID } from "node:crypto";
 import { NekoConfig } from "./config.ts";
 import type { MoaRef } from "./config.ts";
-import { AnthropicProvider } from "./anthropic.ts";
+import { AnthropicProvider, isOfficialAnthropic } from "./anthropic.ts";
 import { ChatGptProvider, isDirectChatGptModel, listChatGptModelCatalog } from "./chatgpt-provider.ts";
 import { HybridChatGptProvider } from "./chatgpt-app-server-provider.ts";
 import { GeminiCliProvider } from "./gemini-provider.ts";
+import { providerScope } from "./provider-scope.ts";
+import { ResponsesProvider } from "./responses-provider.ts";
 import { hasGeminiCredentials, listGeminiModels } from "./gemini-cli.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 import { hasChatGptCredentials } from "./chatgpt-auth.ts";
+import { explainKimiAccessError, hasKimiCredentials, kimiIdentityHeaders, validKimiAccessToken } from "./kimi-auth.ts";
+import { clampEffort, effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
+import { SESSION_CONTEXT_MARK } from "../core/agent-constants.ts";
 import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
@@ -23,15 +29,7 @@ export type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/po
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic-style overloaded_error (Z.ai sends it too)
 
-const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max", "ultra"];
-/** Clamp a configured reasoning effort down to the endpoint's declared ceiling. Unknown tiers pass through. */
-export function clampEffort(effort: string, ceiling: string): string {
-  if (!effort || !ceiling) return effort;
-  const e = EFFORT_ORDER.indexOf(effort);
-  const c = EFFORT_ORDER.indexOf(ceiling);
-  if (e === -1 || c === -1) return effort;
-  return e > c ? ceiling : effort;
-}
+export { clampEffort } from "./effort.ts";
 
 /** NVIDIA NIM vision endpoints take the image embedded as an <img> tag inside the message content
  * STRING, not as an OpenAI image_url content-part. Fold any image_url parts into <img> tags so these
@@ -82,15 +80,78 @@ export function normalizeToolResultImages(messages: any[]): any[] {
   return out;
 }
 
+const OPENAI_COMPAT_METADATA = "openai_compat_message_metadata";
+
+function record(value: any): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function omit(value: any, keys: Set<string>): Record<string, any> {
+  return Object.fromEntries(Object.entries(record(value)).filter(([key]) => !keys.has(key)));
+}
+
+function mergeRecords(base: Record<string, any>, overlay: Record<string, any>): Record<string, any> {
+  const out = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    out[key] = Object.keys(record(out[key])).length && Object.keys(record(value)).length
+      ? mergeRecords(record(out[key]), record(value))
+      : value;
+  }
+  return out;
+}
+
+function messageMetadata(message: any, keepReasoning = false): Record<string, any> {
+  const omitted = new Set(["role", "content", "tool_calls"]);
+  if (!keepReasoning) { omitted.add("reasoning"); omitted.add("reasoning_content"); }
+  return omit(message, omitted);
+}
+
+function toolCallMetadata(call: any): Record<string, any> {
+  const metadata = omit(call, new Set(["index", "id", "type", "function"]));
+  const functionMetadata = omit(call?.function, new Set(["name", "arguments"]));
+  if (Object.keys(functionMetadata).length) metadata.function = functionMetadata;
+  return metadata;
+}
+
+function metadataContinuation(
+  origin: string,
+  message: Record<string, any>,
+  calls: Array<{ id: string; index: number; fields: Record<string, any> }>,
+): any[] | undefined {
+  const keptCalls = calls.filter((call) => Object.keys(call.fields).length);
+  if (!origin || (!Object.keys(message).length && !keptCalls.length)) return undefined;
+  return [{ type: OPENAI_COMPAT_METADATA, origin, message, calls: keptCalls }];
+}
+
+/** Replay opaque Chat Completions metadata only to the endpoint that produced it. Gemini uses this for
+ * encrypted thought signatures on multi-turn tool calls; a provider switch must not leak those fields. */
+function restoreOpenAICompatMetadata(message: any, origin: string): any {
+  if (!message || typeof message !== "object" || !("provider_data" in message)) return message;
+  const { provider_data: providerData, ...portable } = message;
+  const metadata = Array.isArray(providerData)
+    ? providerData.find((item) => item?.type === OPENAI_COMPAT_METADATA && item?.origin === origin)
+    : undefined;
+  if (!metadata) return portable;
+  const restored = mergeRecords(record(metadata.message), portable);
+  if (!Array.isArray(restored.tool_calls) || !Array.isArray(metadata.calls)) return restored;
+  restored.tool_calls = restored.tool_calls.map((call: any, index: number) => {
+    const saved = metadata.calls.find((item: any) => item?.id === call?.id || (!item?.id && item?.index === index));
+    return saved ? mergeRecords(record(saved.fields), call) : call;
+  });
+  return restored;
+}
+
 export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "moa") return new MoaProvider(config);
   if (config.provider === "anthropic") return new AnthropicProvider(config);
   if (config.provider === "chatgpt") return new HybridChatGptProvider(config, new ChatGptProvider(config));
   if (config.provider === "gemini_cli") return new GeminiCliProvider(config);
+  if (config.provider === "responses") return new ResponsesProvider(config);
+  if (config.provider === "kimi") return new KimiProvider(config);
   if (config.provider === "openai_compat") return new OpenAICompatProvider(config);
   throw new Error(
     `Unknown provider '${config.provider}'. Use openai_compat (any OpenAI /chat/completions endpoint or a ` +
-      "local server), chatgpt (Plus/Pro OAuth), gemini_cli (Gemini API key/Code Assist Enterprise), anthropic (Claude Messages API), or moa (mixture-of-agents).",
+      "local server), responses (standard Responses API), chatgpt (Plus/Pro OAuth), gemini_cli (Code Assist Enterprise), kimi (Kimi OAuth/API), anthropic (Claude Messages API), or moa (mixture-of-agents).",
   );
 }
 
@@ -105,6 +166,61 @@ export interface ModelOption {
   /** Model is account-visible but needs the optional local Codex bridge on this machine. */
   requiresCodexSupport?: boolean;
   available?: boolean;
+}
+
+async function listKimiModelOptions(config: NekoConfig): Promise<ModelOption[]> {
+  const profile = config.profile ? config.profiles[config.profile] : undefined;
+  const fallback = [...new Set([config.model, ...(profile?.models ?? [])].filter(Boolean))].map((id) => ({
+    id,
+    label: id,
+    contextWindow: profile?.model_context?.[id] ?? profile?.context_window ?? config.contextWindow,
+    vision: profile?.vision ?? config.vision,
+  }));
+  if (config.usesKimiAuth && !hasKimiCredentials()) return fallback;
+  let key = "";
+  try { key = config.usesKimiAuth ? await validKimiAccessToken() : config.apiKey; }
+  catch { return fallback; }
+  if (!key) return fallback;
+
+  const request = async (force = false): Promise<Response> => {
+    const token = force && config.usesKimiAuth ? await validKimiAccessToken({ force: true }) : key;
+    return fetch(`${config.baseUrl}/models`, {
+      headers: {
+        ...(config.usesKimiAuth ? kimiIdentityHeaders() : {}),
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+  };
+  try {
+    let response = await request();
+    if (response.status === 401 && config.usesKimiAuth) response = await request(true);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json() as { data?: any[] };
+    const live = (payload.data ?? []).flatMap((model): ModelOption[] => {
+      const id = typeof model?.id === "string" ? model.id : "";
+      const contextWindow = Number(model?.context_length ?? 0);
+      if (!id) return [];
+      const efforts = Array.isArray(model?.think_efforts?.valid_efforts)
+        ? model.think_efforts.valid_efforts.filter((value: unknown): value is string => typeof value === "string")
+        : undefined;
+      const features = [model?.supports_reasoning ? "thinking" : "", model?.supports_image_in ? "vision" : "", model?.supports_video_in ? "video" : ""]
+        .filter(Boolean).join(", ");
+      return [{
+        id,
+        label: typeof model?.display_name === "string" ? model.display_name : id,
+        description: features || undefined,
+        defaultEffort: typeof model?.think_efforts?.default_effort === "string" ? model.think_efforts.default_effort : undefined,
+        efforts: efforts?.map((effort: string) => ({ effort, description: "" })),
+        contextWindow: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : config.contextWindow,
+        vision: Boolean(model?.supports_image_in),
+      }];
+    });
+    return live.length ? live : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 /** Rich model metadata when the provider exposes it; plain `/models` endpoints degrade to ids. */
@@ -164,17 +280,36 @@ export async function listModelOptions(config: NekoConfig, codexSupport?: CodexS
     }
     return fallback;
   }
+  if (config.provider === "kimi") return listKimiModelOptions(config);
   const anthropic = config.provider === "anthropic";
+  const profile = config.profile ? config.profiles[config.profile] : undefined;
+  const configured = [...new Set([config.model, ...(profile?.models ?? [])].filter(Boolean))].map((id) => ({
+    id,
+    label: id,
+    contextWindow: profile?.model_context?.[id] ?? profile?.context_window ?? config.contextWindow,
+    vision: profile?.vision ?? config.vision,
+  }));
+  if (!config.apiKey && configured.length) return configured;
   const url = `${config.baseUrl}${anthropic ? "/v1/models" : "/models"}`;
-  const headers: Record<string, string> = {};
-  if (config.apiKey) {
-    if (anthropic) { headers["x-api-key"] = config.apiKey; headers.authorization = `Bearer ${config.apiKey}`; headers["anthropic-version"] = "2023-06-01"; }
-    else headers.Authorization = `Bearer ${config.apiKey}`;
+    const headers: Record<string, string> = {};
+    if (config.apiKey) {
+      if (anthropic) {
+        headers["x-api-key"] = config.apiKey;
+        if (!isOfficialAnthropic(config.baseUrl)) headers.authorization = `Bearer ${config.apiKey}`;
+        headers["anthropic-version"] = "2023-06-01";
+      }
+      else headers.Authorization = `Bearer ${config.apiKey}`;
   }
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  return ((data?.data ?? []) as any[]).map((m) => String(m?.id ?? "")).filter(Boolean).sort().map((id) => ({ id, label: id }));
+  try {
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const live = ((data?.data ?? []) as any[]).map((m) => String(m?.id ?? "")).filter(Boolean).sort().map((id) => ({ id, label: id }));
+    return live.length ? live : configured;
+  } catch (error) {
+    if (configured.length) return configured;
+    throw error;
+  }
 }
 
 /** Backward-compatible id-only view for CLI/tests and callers that do not need metadata. */
@@ -199,14 +334,49 @@ function fallbackChatGptOption(id: string): ModelOption {
   };
 }
 
+export function isOfficialOpenAI(baseUrl: string): boolean {
+  try { return new URL(baseUrl).hostname.toLowerCase() === "api.openai.com"; }
+  catch { return false; }
+}
+
+/** GPT-5.6+ Chat Completions supports explicit cache breakpoints on text blocks. Mark Neko's stable
+ * system prefix, leaving volatile session context after it. Older models and compatible vendors keep
+ * the ordinary string message shape. */
+function withOpenAICacheBreakpoint(messages: any[], model: string): any[] {
+  const version = model.match(/^gpt-(\d+)(?:\.(\d+))?/i);
+  if (!version) return messages;
+  const major = Number(version[1]);
+  const minor = version[2] === undefined ? 0 : Number(version[2]);
+  if (major < 5 || (major === 5 && minor < 6)) return messages;
+  let marked = false;
+  return messages.map((message) => {
+    if (marked || message?.role !== "system" || typeof message.content !== "string") return message;
+    const seam = message.content.indexOf(SESSION_CONTEXT_MARK);
+    if (seam <= 0) return message;
+    marked = true;
+    return {
+      ...message,
+      content: [
+        { type: "text", text: message.content.slice(0, seam), prompt_cache_breakpoint: { mode: "explicit" } },
+        { type: "text", text: message.content.slice(seam) },
+      ],
+    };
+  });
+}
+
 export class OpenAICompatProvider implements Provider {
+  private readonly promptCacheKey = randomUUID();
   /** Models whose endpoint rejected `reasoning_effort` (HTTP 400/422). We then omit the field for
    * that model for the rest of the session, so a configured effort degrades gracefully instead of
    * hard-failing — and any value (low..high, 'max', future tiers) still passes through where supported. */
   private readonly effortUnsupported = new Set<string>();
   /** Per-model effort clamp: an endpoint that caps at 'high' makes 'max' -> 'high' (intent preserved). */
   private readonly effortOverride = new Map<string, string>();
-  constructor(private readonly cfg: NekoConfig) {}
+  constructor(
+    private readonly cfg: NekoConfig,
+    private readonly resolveApiKey: () => string | Promise<string> = () => cfg.apiKey,
+    private readonly resolveHeaders: () => Record<string, string> | Promise<Record<string, string>> = () => ({}),
+  ) {}
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
     if (!this.cfg.baseUrl) {
@@ -215,10 +385,11 @@ export class OpenAICompatProvider implements Provider {
     if (!this.cfg.model) {
       throw new Error("openai_compat needs a model (set model or pick a --profile).");
     }
-    const key = this.cfg.apiKey;
+    const key = await this.resolveApiKey();
     if (!key && !this.cfg.isLocalEndpoint) {
+      const keyEnv = this.cfg.profile ? this.cfg.profiles[this.cfg.profile]?.key_env : undefined;
       throw new Error(
-        "No API key. Set NEKO_API_KEY (or OPENAI_API_KEY / NVIDIA_API_KEY), or add " +
+        `No API key. Set NEKO_API_KEY${keyEnv ? ` or ${keyEnv}` : " (or OPENAI_API_KEY / NVIDIA_API_KEY)"}, or add ` +
           '"api_key" to ~/.neko-core/config.json (run `neko init-user`). ' +
           "For a local model (Ollama/llama.cpp) no key is needed - point base_url at it.",
       );
@@ -229,26 +400,36 @@ export class OpenAICompatProvider implements Provider {
     // image_url part (which they silently ignore). Convert when the endpoint needs it -- config-first,
     // auto for an NVIDIA base_url. No-op for text-only messages, so it's safe to always apply.
     const imgTag = this.cfg.imageFormat === "img-tag" || (this.cfg.imageFormat === "auto" && /nvidia/i.test(this.cfg.baseUrl));
-    // Opaque continuation belongs to the provider that created it (currently ChatGPT Responses).
-    // Never leak an encrypted provider item to a different endpoint after a live profile switch.
-    const normalizedMessages = normalizeToolResultImages(messages.map((message) => {
-      if (!message || typeof message !== "object" || !("provider_data" in message)) return message;
-      const { provider_data: _providerData, ...portable } = message;
-      return portable;
-    }));
+    // Opaque metadata belongs to the protocol, endpoint, and model that created it. Never leak an
+    // encrypted thought signature after a live endpoint or model switch.
+    const continuationScope = providerScope("chat-completions", this.cfg.baseUrl, this.cfg.model);
+    const normalizedMessages = normalizeToolResultImages(messages.map((message) => restoreOpenAICompatMetadata(message, continuationScope)));
+    const cacheAwareMessages = isOfficialOpenAI(this.cfg.baseUrl)
+      ? withOpenAICacheBreakpoint(normalizedMessages, this.cfg.model)
+      : normalizedMessages;
     const payload: Record<string, any> = {
       model: this.cfg.model,
-      messages: imgTag ? toImgTagMessages(normalizedMessages) : normalizedMessages,
+      messages: imgTag ? toImgTagMessages(cacheAwareMessages) : cacheAwareMessages,
       temperature: this.cfg.temperature,
       stream,
     };
-    if (this.cfg.maxTokens > 0) payload.max_tokens = this.cfg.maxTokens; // 0 -> omit (model's full budget)
+    // OpenAI's current cache router needs a stable per-session key for the most reliable prefix
+    // matching (especially GPT-5.6+). Do not send the non-standard field to compatibility vendors.
+    if (isOfficialOpenAI(this.cfg.baseUrl)) payload.prompt_cache_key = this.promptCacheKey;
+    if (this.cfg.maxTokens > 0) payload[this.cfg.completionTokensField] = this.cfg.maxTokens; // 0 -> omit (model's full budget)
     if (stream) payload.stream_options = { include_usage: true };
     if (tools && tools.length) payload.tools = tools;
     // Proactively map a configured effort down to the endpoint's declared ceiling (e.g. 'max' -> 'high'
     // for an endpoint that caps at high), so the intent is honored without a wasted 400 round-trip.
-    const effort = clampEffort(this.effortOverride.get(this.cfg.model) ?? this.cfg.effort, this.cfg.effortCeiling);
-    if (effort && !this.effortUnsupported.has(this.cfg.model)) payload.reasoning_effort = effort;
+    const requestedEffort = requestEffort(this.cfg.effort, opts?.reasoningEffort);
+    const effort = clampEffort(requestedEffort, this.effortOverride.get(this.cfg.model) ?? this.cfg.effortCeiling);
+    if (effort && !this.effortUnsupported.has(this.cfg.model)) {
+      payload.reasoning_effort = effort;
+      if (this.cfg.thinkingWire) payload.thinking = {
+        type: "enabled",
+        ...(this.cfg.thinkingWire === "effort" ? { effort } : {}),
+      };
+    }
     // Schema-constrained structured output: the endpoint fills the given JSON Schema (constrained
     // decoding where supported). Self-healed below if the endpoint rejects it.
     if (opts?.responseSchema) {
@@ -256,7 +437,7 @@ export class OpenAICompatProvider implements Provider {
     }
 
     const url = `${this.cfg.baseUrl}/chat/completions`;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = { ...(await this.resolveHeaders()), "Content-Type": "application/json" };
     if (key) headers.Authorization = `Bearer ${key}`; // local servers need no auth
 
     // HTTP errors (429/5xx) retry a bounded number of times. A LOST CONNECTION (fetch throws -
@@ -299,7 +480,9 @@ export class OpenAICompatProvider implements Provider {
         // Committed (no mid-stream retry). Keep the idle timer live through the body read — bumpIdle on
         // each chunk resets it — and clear it once the stream is fully consumed.
         try {
-          return stream ? await parseStream(res, onDelta!, bumpIdle, opts?.onToolCallReady) : parseOpenAIMessage(await res.json());
+          return stream
+            ? await parseStream(res, onDelta!, bumpIdle, opts?.onToolCallReady, continuationScope)
+            : parseOpenAIMessage(await res.json(), continuationScope);
         } finally {
           if (idleTimer) clearTimeout(idleTimer);
         }
@@ -320,17 +503,28 @@ export class OpenAICompatProvider implements Provider {
       // e.g. NVIDIA's vLLM takes only low/medium/high, not 'max'). If that's the sole problem, drop the
       // field once and retry, so a configured effort works where supported and degrades where it isn't.
       if ((res.status === 400 || res.status === 422) && payload.reasoning_effort !== undefined && /reasoning_effort/i.test(body)) {
-        // The field is supported but this VALUE isn't (e.g. 'max' on an endpoint that caps at 'high').
-        // Clamp to the highest accepted tier first, so high-effort intent survives instead of vanishing.
-        if (payload.reasoning_effort !== "high" && /high/i.test(body) && /(low|medium)/i.test(body)) {
-          this.effortOverride.set(this.cfg.model, "high");
-          payload.reasoning_effort = "high";
-          onDelta?.("(endpoint accepts only low/medium/high - retrying with 'high')", "reasoning");
+        const advertised = effortLevelsFromError(body);
+        const resolved = resolveEffort(String(payload.reasoning_effort), {
+          efforts: advertised.map((effort) => ({ effort })),
+        });
+        if (advertised.includes(resolved) && resolved !== payload.reasoning_effort) {
+          this.effortOverride.set(this.cfg.model, resolved);
+          payload.reasoning_effort = resolved;
+          if (payload.thinking?.effort) payload.thinking.effort = resolved;
+          onDelta?.(`(effort -> ${resolved}; highest compatible tier advertised by this model)`, "reasoning");
           continue;
         }
         this.effortUnsupported.add(this.cfg.model);
         delete payload.reasoning_effort;
+        if (payload.thinking?.effort) delete payload.thinking.effort;
         onDelta?.("(this endpoint rejected reasoning_effort - retrying without it)", "reasoning");
+        continue;
+      }
+      // `thinking` is an optional compatibility extension. If an endpoint/model does not implement
+      // it, fall back to that endpoint's default reasoning mode without failing the turn.
+      if ((res.status === 400 || res.status === 422) && payload.thinking !== undefined && /thinking/i.test(body)) {
+        delete payload.thinking;
+        onDelta?.("(this endpoint rejected the thinking toggle - retrying with its default)", "reasoning");
         continue;
       }
       // Self-heal: if the endpoint rejects response_format/json_schema, drop it once and retry - the
@@ -361,12 +555,46 @@ export class OpenAICompatProvider implements Provider {
   }
 }
 
+/** Kimi uses the same Chat Completions transport with either a platform key or Neko-owned OAuth. */
+export class KimiProvider implements Provider {
+  private forceRefresh = false;
+  private readonly delegate: OpenAICompatProvider;
+
+  constructor(private readonly cfg: NekoConfig) {
+    this.delegate = new OpenAICompatProvider(cfg, async () => {
+      if (!cfg.usesKimiAuth) return cfg.apiKey;
+      const token = await validKimiAccessToken({ force: this.forceRefresh });
+      this.forceRefresh = false;
+      return token;
+    }, () => cfg.usesKimiAuth ? kimiIdentityHeaders() : {});
+  }
+
+  async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
+    try {
+      return await this.delegate.complete(messages, tools, onDelta, signal, opts);
+    } catch (error) {
+      // One forced refresh repairs a token revoked server-side before its local expiry. A second 401
+      // is authoritative and surfaces normally; never loop or silently switch to API billing.
+      if (!this.cfg.usesKimiAuth) throw error;
+      if (!/\bHTTP 401\b/i.test(messageOf(error))) throw explainKimiAccessError(error);
+      this.forceRefresh = true;
+      try {
+        return await this.delegate.complete(messages, tools, onDelta, signal, opts);
+      } catch (retryError) {
+        throw explainKimiAccessError(retryError);
+      }
+    } finally {
+      this.forceRefresh = false;
+    }
+  }
+}
+
 /**
  * Normalize an OpenAI-style response into the provider contract. Throws a clear error
  * (not a raw TypeError) when the endpoint returns an error object / unexpected shape,
  * so the CLI shows the API message and the chat REPL can stay alive.
  */
-export function parseOpenAIMessage(data: any): ProviderResponse {
+export function parseOpenAIMessage(data: any, origin = ""): ProviderResponse {
   const choices = data?.choices;
   if (!choices || !choices.length) {
     const error = data?.error;
@@ -389,7 +617,14 @@ export function parseOpenAIMessage(data: any): ProviderResponse {
   const split = splitThink(message.content);
   const fieldReasoning = message.reasoning_content ?? message.reasoning ?? "";
   const reasoning = [fieldReasoning, split.reasoning].filter(Boolean).join("\n") || undefined;
-  return { content: split.content, tool_calls: toolCalls, usage: data.usage, reasoning };
+  const continuation = metadataContinuation(
+    origin,
+    // DeepSeek/Kimi require reasoning_content to be replayed on the assistant tool-call turn.
+    // Keep it opaque and endpoint/model-scoped; final non-tool reasoning is deliberately not stored.
+    messageMetadata(message, toolCalls.length > 0),
+    (message.tool_calls ?? []).map((call: any, index: number) => ({ id: String(call?.id ?? ""), index, fields: toolCallMetadata(call) })),
+  );
+  return { content: split.content, tool_calls: toolCalls, usage: data.usage, reasoning, continuation };
 }
 
 const THINK_OPEN = "<think>";
@@ -434,12 +669,20 @@ function splitThink(text: string | null | undefined): { content: string | null; 
 }
 
 /** Parse a streamed (SSE) chat completion, calling onDelta for each content chunk. */
-async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () => void, onToolCallReady?: (call: ToolCall) => void): Promise<ProviderResponse> {
+async function parseStream(
+  res: Response,
+  onDelta: DeltaHook,
+  onActivity?: () => void,
+  onToolCallReady?: (call: ToolCall) => void,
+  origin = "",
+): Promise<ProviderResponse> {
   if (!res.body) throw new Error("streaming response had no body (the endpoint returned a 200 with an empty stream)");
   let content = "";
   let reasoning = "";
   let usage: Usage | undefined;
-  const acc: { id: string; name: string; argString: string }[] = [];
+  let reasoningField: "reasoning_content" | "reasoning" | null = null;
+  const acc: { id: string; name: string; argString: string; metadata: Record<string, any> }[] = [];
+  let streamedMessageMetadata: Record<string, any> = {};
   const announced = new Set<number>(); // tool calls whose name we've already surfaced
   // OpenAI streams index-keyed argument deltas and may interleave several indexes in one chunk. There
   // is no per-call stop marker, so an index switch does NOT mean completion. A call is eager-ready only
@@ -480,7 +723,10 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
     if (chunk.usage) usage = chunk.usage;
     const delta = chunk.choices?.[0]?.delta;
     if (!delta) continue;
+    streamedMessageMetadata = mergeRecords(streamedMessageMetadata, messageMetadata(delta));
     if (delta.content) think.push(delta.content); // routes <think>..</think> -> reasoning, rest -> content
+    if (delta.reasoning_content !== undefined) reasoningField = "reasoning_content";
+    else if (delta.reasoning !== undefined) reasoningField = "reasoning";
     const r = delta.reasoning_content ?? delta.reasoning;
     if (r) {
       reasoning += r;
@@ -488,7 +734,8 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
     }
     for (const tc of delta.tool_calls ?? []) {
       const i = tc.index ?? 0;
-      acc[i] ??= { id: "", name: "", argString: "" };
+      acc[i] ??= { id: "", name: "", argString: "", metadata: {} };
+      acc[i].metadata = mergeRecords(acc[i].metadata, toolCallMetadata(tc));
       if (tc.id) acc[i].id = tc.id;
       if (tc.function?.name) {
         acc[i].name = tc.function.name;
@@ -507,7 +754,13 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
   // response from the SAME finalized objects so eager consumers and the loop see identical calls.
   acc.forEach((_t, i) => finalize(i, true));
   const toolCalls: ToolCall[] = acc.map((_t, i) => finalized.get(i)!).filter(Boolean);
-  return { content: content || null, tool_calls: toolCalls, usage, reasoning: reasoning || undefined };
+  if (toolCalls.length && reasoning && reasoningField) streamedMessageMetadata[reasoningField] = reasoning;
+  const continuation = metadataContinuation(
+    origin,
+    streamedMessageMetadata,
+    acc.map((call, index) => ({ id: call.id, index, fields: call.metadata })),
+  );
+  return { content: content || null, tool_calls: toolCalls, usage, reasoning: reasoning || undefined, continuation };
 }
 
 /** Yield non-empty lines from an SSE response body. */

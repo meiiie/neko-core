@@ -82,7 +82,11 @@ test("ChatGPT provider uses only the fixed Codex backend and parses streamed tex
   expect(result.content).toBe("Hello");
   expect(result.tool_calls).toEqual([{ id: "call-1", name: "read_file", arguments: { path: "README.md" } }]);
   expect(result.usage).toMatchObject({ prompt_tokens: 20, completion_tokens: 5, cached_tokens: 7 });
-  expect(result.continuation).toEqual([{ type: "reasoning", id: "r-1", encrypted_content: "encrypted", summary: [] }]);
+  expect(result.continuation).toEqual([{
+    type: "neko_responses_continuation",
+    scope: "responses:https://chatgpt.com/backend-api/codex/responses:gpt-5.4",
+    items: [{ type: "reasoning", id: "r-1", encrypted_content: "encrypted", summary: [] }],
+  }]);
   expect(deltas).toEqual(["Hello"]);
   expect(eager).toEqual(["call-1"]);
 });

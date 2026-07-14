@@ -6,6 +6,41 @@ All notable changes to Neko Code are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-07-14
+
+### Added
+- Claude and xAI now have direct first-party adapters for their official Messages and Responses APIs,
+  including streaming tools, vision, structured output, provider-native reasoning continuation, live model
+  capabilities, and bounded recovery. Kimi Code adds an official device-OAuth route alongside Kimi Platform;
+  DeepSeek V4 and Gemini API remain direct API-key routes. No local subscription proxy is involved.
+- Browser control now has an in-app `/browser` setup flow. After the user explicitly opts in and attaches a
+  tab, ordinary Neko sessions own the authenticated loopback bridge lifecycle. Extension 0.3.0 reconnects
+  after Manifest V3 worker or bridge restarts while preserving separate read, click, and typing grants.
+- `bun run eval:terminal` runs the exact working-tree binary through the public Harbor/Terminal-Bench 2
+  runner with isolated homes, bounded defaults, unmodified task verifiers, and ephemeral OAuth transfer.
+
+### Changed
+- Reasoning effort is a durable user preference negotiated against each model's advertised vocabulary or
+  endpoint ceiling. Unknown future tiers pass through unchanged; the experimental read-heavy adaptive
+  heuristic remains opt-in because it has not yet shown workload-neutral quality.
+- Token UX separates cumulative multi-call traffic, the last request's actual context, cache reads, and the
+  next estimate. Image estimates count decoded multimodal content instead of base64 transport text. Stable
+  prompt seams and a compact playbook index reduced the measured repeated fresh-session estimate by 23.3%,
+  while full lessons remain available on demand.
+- Neko keeps one continuous identity and normal reasoning path across greetings and task turns. Repeated
+  greetings retain conversation history and tone instead of entering a context-free fast path.
+
+### Fixed
+- Long file and web observations are paged below the retention guard, so formerly unreachable middle or tail
+  content can be retrieved without a blank transcript gap.
+- Kimi Code requests now use the official coding model and thinking contract, validate account access before
+  claiming sign-in success, and refresh one Neko-owned device session without importing another CLI's tokens.
+- Provider-native reasoning data is replayed only to the exact protocol, sanitized endpoint, and model that
+  produced it. Missing Anthropic/xAI credentials can no longer fall back to an unrelated provider key.
+- Completion verification now checks clean-state acceptance criteria and terminates an evaluation process
+  group before the external verifier runs, preventing stale output and timeout races from becoming false
+  completion evidence.
+
 ## [0.11.5] — 2026-07-12
 
 ### Changed

@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 
-import { addCacheBreakpoints, AnthropicProvider, extractJsonLoose, parseMessage, stripCacheBreakpoints, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
+import { addCacheBreakpoints, anthropicThinkingPolicy, AnthropicProvider, extractJsonLoose, parseMessage, stripCacheBreakpoints, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
+import { SESSION_CONTEXT_MARK } from "../src/core/agent-constants.ts";
 
 test("thinkingBudget maps the effort ladder; off/unset => 0 (no extended thinking)", () => {
   expect(thinkingBudget("off")).toBe(0);
@@ -12,6 +13,14 @@ test("thinkingBudget maps the effort ladder; off/unset => 0 (no extended thinkin
   expect(thinkingBudget("high")).toBeGreaterThan(thinkingBudget("medium"));
   expect(thinkingBudget("xhigh")).toBeGreaterThan(thinkingBudget("high"));
   expect(thinkingBudget("max")).toBeGreaterThan(thinkingBudget("xhigh"));
+});
+
+test("current Claude models use adaptive thinking while compatible endpoints keep manual budgets", () => {
+  expect(anthropicThinkingPolicy("claude-sonnet-5")).toBe("sonnet5");
+  expect(anthropicThinkingPolicy("claude-fable-5")).toBe("always-adaptive");
+  expect(anthropicThinkingPolicy("claude-opus-4-8")).toBe("adaptive");
+  expect(anthropicThinkingPolicy("claude-opus-6-preview")).toBe("adaptive");
+  expect(anthropicThinkingPolicy("glm-5.2")).toBe("manual");
 });
 
 test("toAnthropicMessages: system folds to top-level, tool_calls -> tool_use, tool result -> user block", () => {
@@ -115,6 +124,18 @@ test("addCacheBreakpoints: a plain-string last message is lifted to block form; 
   expect(p2.system).toBe("");
 });
 
+test("cache breakpoints preserve a stable base when session context changes", () => {
+  const original = `BASE${SESSION_CONTEXT_MARK}volatile todos`;
+  const payload: Record<string, any> = { system: original, messages: [{ role: "user", content: "go" }] };
+  addCacheBreakpoints(payload);
+  expect(payload.system).toHaveLength(2);
+  expect(payload.system[0]).toEqual({ type: "text", text: "BASE", cache_control: { type: "ephemeral" } });
+  expect(payload.system[1].text).toBe(`${SESSION_CONTEXT_MARK}volatile todos`);
+  expect(payload.system[1].cache_control).toEqual({ type: "ephemeral" });
+  stripCacheBreakpoints(payload);
+  expect(payload.system).toBe(original);
+});
+
 test("HTTP 529 (Anthropic overloaded_error) is retried, not fatal - found live on Z.ai", async () => {
   const orig = globalThis.fetch;
   let calls = 0;
@@ -153,6 +174,50 @@ test("self-heals when an endpoint rejects cache_control: strips the breakpoints,
     const res = await provider.complete([{ role: "system", content: "S" }, { role: "user", content: "hi" }]);
     expect(res.content).toBe("ok");
     expect(sawCache).toEqual([true, false]); // first try with breakpoints, healed retry without
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("Claude effort self-heals to an arbitrary advertised tier without losing adaptive thinking", async () => {
+  const orig = globalThis.fetch;
+  const efforts: string[] = [];
+  globalThis.fetch = (async (_url: string, init: any) => {
+    const sent = JSON.parse(init.body);
+    efforts.push(sent.output_config?.effort ?? "default");
+    if (efforts.length === 1) {
+      return new Response(JSON.stringify({ error: { message: "effort should be 'low', 'medium' or 'xhigh'" } }), { status: 400 });
+    }
+    return Response.json({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } });
+  }) as typeof fetch;
+  try {
+    const cfg = new NekoConfig({
+      provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-opus-6-preview",
+      reasoning_effort: "max", effort_ceiling: "max", prompt_cache: false,
+    }, null, {}, "k");
+    expect((await new AnthropicProvider(cfg).complete([{ role: "user", content: "hi" }])).content).toBe("ok");
+    expect(efforts).toEqual(["max", "xhigh"]);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("unsupported adaptive thinking falls back once to the model default", async () => {
+  const orig = globalThis.fetch;
+  const thinking: unknown[] = [];
+  globalThis.fetch = (async (_url: string, init: any) => {
+    const sent = JSON.parse(init.body);
+    thinking.push(sent.thinking);
+    if (thinking.length === 1) return new Response(JSON.stringify({ error: { message: "adaptive thinking is not supported" } }), { status: 400 });
+    return Response.json({ content: [{ type: "text", text: "ok" }], usage: {} });
+  }) as typeof fetch;
+  try {
+    const cfg = new NekoConfig({
+      provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-legacy",
+      reasoning_effort: "high", prompt_cache: false,
+    }, null, {}, "k");
+    expect((await new AnthropicProvider(cfg).complete([{ role: "user", content: "hi" }])).content).toBe("ok");
+    expect(thinking).toEqual([{ type: "adaptive", display: "summarized" }, undefined]);
   } finally {
     globalThis.fetch = orig;
   }
@@ -218,6 +283,126 @@ test("responseSchema self-heals when tool_choice is rejected: prompt-JSON fallba
   }
 });
 
+test("Claude Sonnet 5 sends adaptive thinking + output_config effort without temperature or manual budget", async () => {
+  const orig = globalThis.fetch;
+  let sent: any;
+  let headers = new Headers();
+  globalThis.fetch = (async (_url: string, init: any) => {
+    sent = JSON.parse(init.body);
+    headers = new Headers(init.headers);
+    return Response.json({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 2, output_tokens: 1 } });
+  }) as any;
+  try {
+    const cfg = new NekoConfig({
+      provider: "anthropic",
+      base_url: "https://api.anthropic.com",
+      model: "claude-sonnet-5",
+      reasoning_effort: "xhigh",
+      effort_ceiling: "max",
+      temperature: 0.7,
+    }, "claude", {}, "key");
+    await new AnthropicProvider(cfg).complete([{ role: "user", content: "hi" }]);
+    expect(sent.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(sent.output_config).toEqual({ effort: "xhigh" });
+    expect(sent.temperature).toBeUndefined();
+    expect(sent.thinking.budget_tokens).toBeUndefined();
+    expect(headers.get("x-api-key")).toBe("key");
+    expect(headers.get("authorization")).toBeNull();
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("an unset Claude effort enables adaptive thinking at the model default", async () => {
+  const orig = globalThis.fetch;
+  let sent: any;
+  globalThis.fetch = (async (_url: string, init: any) => {
+    sent = JSON.parse(init.body);
+    return Response.json({ content: [{ type: "text", text: "ok" }], usage: {} });
+  }) as any;
+  try {
+    const cfg = new NekoConfig({ provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-opus-4-8" }, "claude", {}, "key");
+    await new AnthropicProvider(cfg).complete([{ role: "user", content: "hi" }]);
+    expect(sent.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(sent.output_config).toBeUndefined();
+    expect(sent.temperature).toBeUndefined();
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("official Anthropic structured output uses output_config.format instead of a forced tool", async () => {
+  const orig = globalThis.fetch;
+  let sent: any;
+  globalThis.fetch = (async (_url: string, init: any) => {
+    sent = JSON.parse(init.body);
+    return Response.json({ content: [{ type: "text", text: '{"ok":true}' }], usage: { input_tokens: 2, output_tokens: 2 } });
+  }) as any;
+  try {
+    const cfg = new NekoConfig({ provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-5", reasoning_effort: "off" }, "claude", {}, "key");
+    const result = await new AnthropicProvider(cfg).complete(
+      [{ role: "user", content: "extract" }], undefined, undefined, undefined,
+      { responseSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] } },
+    );
+    expect(sent.output_config.format).toEqual({
+      type: "json_schema",
+      schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    });
+    expect(sent.tool_choice).toBeUndefined();
+    expect(sent.tools).toBeUndefined();
+    expect(sent.thinking).toEqual({ type: "disabled" });
+    expect(result.content).toBe('{"ok":true}');
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("Claude stream preserves thinking signatures and native block order for the exact tool-loop scope", async () => {
+  const events = [
+    { type: "message_start", message: { usage: { input_tokens: 3 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "inspect" } },
+    { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "signed-value" } },
+    { type: "content_block_stop", index: 0 },
+    { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "tool-1", name: "read_file", input: {} } },
+    { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"path":"README.md"}' } },
+    { type: "content_block_stop", index: 1 },
+    { type: "message_delta", usage: { output_tokens: 4 } },
+    { type: "message_stop" },
+  ];
+  const body = events.map((event) => `data: ${JSON.stringify(event)}\n`).join("");
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(body, { status: 200 })) as any;
+  try {
+    const cfg = new NekoConfig({ provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-5", reasoning_effort: "high" }, "claude", {}, "key");
+    const result = await new AnthropicProvider(cfg).complete([{ role: "user", content: "inspect" }], undefined, () => {});
+    const scope = "anthropic:https://api.anthropic.com/v1/messages:claude-sonnet-5";
+    expect(result.continuation).toEqual([{
+      type: "neko_anthropic_continuation",
+      scope,
+      blocks: [
+        { type: "thinking", thinking: "inspect", signature: "signed-value" },
+        { type: "tool_use", id: "tool-1", name: "read_file", input: { path: "README.md" } },
+      ],
+    }]);
+    const replay = toAnthropicMessages([{
+      role: "assistant",
+      content: "portable fallback",
+      provider_data: result.continuation,
+      tool_calls: [{ id: "tool-1", function: { name: "read_file", arguments: '{"path":"README.md"}' } }],
+    }], scope);
+    expect(replay.msgs[0].content).toEqual((result.continuation as any[])[0].blocks);
+    const switched = toAnthropicMessages([{
+      role: "assistant",
+      content: "portable fallback",
+      provider_data: result.continuation,
+    }], "anthropic:https://api.anthropic.com/v1/messages:claude-fable-5");
+    expect(switched.msgs[0].content).toEqual([{ type: "text", text: "portable fallback" }]);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 test("anthropic stream fires onToolCallReady at content_block_stop, BEFORE the stream ends", async () => {
   const events = [
     { type: "message_start", message: { usage: { input_tokens: 1 } } },
@@ -245,5 +430,22 @@ test("anthropic stream fires onToolCallReady at content_block_stop, BEFORE the s
     expect(res.tool_calls).toEqual([{ id: "t1", name: "read_file", arguments: { path: "a" } }]);
   } finally {
     globalThis.fetch = orig;
+  }
+});
+
+test("anthropic stream rejects a disconnected partial response", async () => {
+  const originalFetch = globalThis.fetch;
+  const body = [
+    { type: "message_start", message: { usage: { input_tokens: 1 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } },
+  ].map((event) => `data: ${JSON.stringify(event)}\n`).join("");
+  globalThis.fetch = (async () => new Response(body, { status: 200 })) as any;
+  try {
+    const cfg = new NekoConfig({ provider: "anthropic", base_url: "http://x", model: "m", reasoning_effort: "off" }, null, {}, "k");
+    await expect(new AnthropicProvider(cfg).complete([{ role: "user", content: "hi" }], undefined, () => {}))
+      .rejects.toThrow("disconnected before message_stop");
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });

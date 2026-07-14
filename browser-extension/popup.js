@@ -7,14 +7,20 @@ async function request(message) {
 }
 
 function render(state) {
+  const attached = !!state.attached;
+  const ready = state.connection === "ready";
   $("#status").textContent = state.connection;
   $("#status").className = `pill ${state.connection}`;
-  $("#tab-title").textContent = state.attached ? state.tabTitle || "Attached tab" : "No tab attached";
-  $("#tab-host").textContent = state.attached ? state.tabHost : "Open Neko bridge, then attach this tab.";
+  $(".dot").className = `dot ${state.connection}`;
+  $("#tab-title").textContent = attached ? state.tabTitle || "Attached tab" : "No tab attached";
+  $("#tab-host").textContent = attached ? state.tabHost : "Open Neko bridge, then attach this tab.";
+  $("#read-grant").checked = attached;
   $("#click-grant").checked = !!state.grants.click;
   $("#type-grant").checked = !!state.grants.type;
-  $("#detach").disabled = !state.attached;
-  $("#stop").disabled = !state.attached && state.connection === "offline";
+  $("#attach").textContent = attached ? ready ? "Attached to Neko" : state.connection === "connecting" ? "Connecting..." : "Reconnect this tab" : "Attach this tab to Neko";
+  $("#attach").disabled = attached && state.connection !== "offline";
+  $("#detach").disabled = !attached;
+  $("#stop").disabled = !attached;
   $("#session").textContent = `session ${state.session || "-"}`;
   const audit = state.audit || [];
   const list = $("#audit");

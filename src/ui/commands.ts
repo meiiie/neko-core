@@ -4,7 +4,7 @@
  * render, and this file owns "what the commands do".
  */
 import type { Agent } from "../core/agent.ts";
-import { COMPACT_AT } from "../core/agent.ts";
+import { COMPACT_AT, estimateTokens } from "../core/agent.ts";
 import { loadConfig, type NekoConfig } from "../adapters/config.ts";
 import { rememberNote, renderContext } from "../adapters/context.ts";
 import { initProject } from "../adapters/project.ts";
@@ -20,17 +20,20 @@ import type { Overlay } from "./select-list.tsx";
 import type { Line, LineKind } from "./transcript.tsx";
 import { clearChatGptCredentials, hasChatGptCredentials } from "../adapters/chatgpt-auth.ts";
 import { authChoices, profileDisplayName, providerChoices } from "../adapters/provider-choice.ts";
-import { getChatGptUsage, resolveChatGptEffort, type ChatGptUsageReport, type ChatGptUsageWindow } from "../adapters/chatgpt-provider.ts";
+import { getChatGptUsage, type ChatGptUsageReport, type ChatGptUsageWindow } from "../adapters/chatgpt-provider.ts";
 import { discoverCodexSupport } from "../adapters/codex-app-server.ts";
 import { installCodexSupportPack, readCodexSupportPack, removeCodexSupportPack } from "../adapters/codex-support-pack.ts";
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials } from "../adapters/gemini-cli.ts";
+import { hasKimiCredentials } from "../adapters/kimi-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
 import { getLastGeminiUsage } from "../adapters/gemini-provider.ts";
 import { getChatGptVoiceUsage } from "../adapters/chatgpt-voice.ts";
+import { clampEffort, effortSuggestions, isEffortName, resolveEffort } from "../adapters/effort.ts";
+import { readBrowserCapability, readBrowserBridgeStatus, withBrowserBridge } from "../adapters/browser-bridge.ts";
 
 export const HELP = [
   "Commands:",
-  "  /help /cost /usage /voice /model /provider /support /tools /skill(s) /init /clear /compact /transcript /reset /exit",
+  "  /help /cost /usage /voice /model /provider /support /browser /tools /skill(s) /init /clear /compact /transcript /reset /exit",
   "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /continue · /retry · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
@@ -42,12 +45,13 @@ export const HELP = [
 
 export const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
-  { name: "/cost", desc: "token usage this session" },
+  { name: "/cost", desc: "session cumulative tokens vs the last model request" },
   { name: "/usage", desc: "subscription/session quota and token usage for the active account" },
   { name: "/voice", desc: "conversational browser voice, ChatGPT, lab bridge, or dictation" },
   { name: "/model", desc: "show / list / switch model (/model list · /model <id>)" },
   { name: "/provider", desc: "switch provider (account) then pick its model - picker or /provider <name>" },
   { name: "/support", desc: "install, update, or remove optional subscription components" },
+  { name: "/browser", desc: "connect a signed-in Chrome tab (guided setup/status)" },
   { name: "/tools", desc: "list / toggle tools (/tools bash)" },
   { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
   { name: "/init", desc: "scaffold ./.neko-core/config.json" },
@@ -64,8 +68,8 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/resume", desc: "resume a session (/resume [id])" },
   { name: "/continue", desc: "pick up an interrupted task where it left off" },
   { name: "/retry", desc: "re-run the last message (e.g. after an error)" },
-  { name: "/effort", desc: "model-aware reasoning effort picker (/effort low..ultra|off)" },
-  { name: "/context", desc: "context window usage" },
+  { name: "/effort", desc: "model-aware reasoning preference (/effort <level>|default|list)" },
+  { name: "/context", desc: "window capacity, last request, and next-request estimate" },
   { name: "/memory", desc: "show NEKO.md memory/context files" },
   { name: "/remember", desc: "save a note to NEKO.md (or start a line with #)" },
   { name: "/recipe", desc: "run a saved recipe (/recipe <name> [args])" },
@@ -82,6 +86,23 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
 ];
+
+/** Conservative, model-free routing for tasks that need an interactive or signed-in browser tab. */
+export function isInteractiveBrowserRequest(input: string): boolean {
+  const text = input
+    .normalize("NFKD")
+    .replace(/\p{Mark}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || text.startsWith("/")) return false;
+
+  const signedInSite = /\b(facebook|x\.com|twitter|gmail|zalo|wechat|linkedin|instagram|tiktok|notion|google (?:docs|drive))\b/.test(text);
+  const browserTarget = /\b(browser|chrome|chromium|edge|trinh duyet|tab|website|trang web)\b/.test(text);
+  const browserAction = /\b(browse|open|use|control|navigate|visit|read|check|sign in|login|duyet|luot|mo|dung|dieu khien|truy cap|doc|kiem tra|dang nhap)\b/.test(text);
+  const explicitWebBrowse = /\b(?:browse (?:the )?web|duyet web|luot web)\b/.test(text);
+  return explicitWebBrowse || (browserAction && (browserTarget || signedInSite));
+}
 
 /** What a command may do to the REPL. */
 export interface CommandCtx {
@@ -103,6 +124,7 @@ export interface CommandCtx {
   copy: (arg: string) => void; // copy last response / whole conversation to the clipboard (OSC 52)
   setFps: (choice: number | "auto") => void; // /fps: persist + apply the UI frame rate
   setTitle: (name: string) => void; // /title: name the session + pin the tab title
+  setupBrowser?: () => Promise<string>; // /browser: open consented Store/local setup and start the bridge
   exit: () => void;
 }
 
@@ -175,7 +197,11 @@ function switchProfile(ctx: CommandCtx, name: string): boolean {
     addLine("info", `note: provider "${name}" needs Google sign-in - type /login.`);
     return false;
   }
-  if (!cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.apiKey && !cfg.isLocalEndpoint) {
+  if (cfg.usesKimiAuth && !hasKimiCredentials()) {
+    addLine("info", `note: provider "${name}" needs Kimi Code sign-in - type /login.`);
+    return false;
+  }
+  if (!cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.usesKimiAuth && !cfg.apiKey && !cfg.isLocalEndpoint) {
     addLine("info", `note: provider "${name}" has no API key yet - type /login to add it (it saves to this provider).`);
     return false;
   }
@@ -217,11 +243,9 @@ function applyModelSelection(ctx: CommandCtx, selected: ModelOption): void {
   setModel(selected.id, cfg.profile, selected.contextWindow, selected.vision);
   ctx.agent.setMaxContextTokens(cfg.contextWindow);
   const before = cfg.effort;
-  const resolved = resolveChatGptEffort(before, selected);
+  const resolved = resolveEffort(before, selected);
   if (before && before !== "off" && resolved !== before) {
-    cfg.data.reasoning_effort = resolved;
-    setEffort(resolved);
-    addLine("info", `model -> ${selected.id}; effort ${before} -> ${resolved} (highest supported)`);
+    addLine("info", `model -> ${selected.id}; effort preference ${before} -> ${resolved} for this model`);
   } else {
     const defaultNote = !before && selected.defaultEffort ? `; default effort ${selected.defaultEffort}` : "";
     addLine("info", `model -> ${selected.id}${defaultNote}`);
@@ -283,7 +307,7 @@ function openSupportCenter(ctx: CommandCtx): void {
 function supportDetail(kind: SupportKind, state: string, detail: string, activeManaged: boolean, bytes?: number): string {
   if (bytes != null) return `installed by Neko - ${formatMiB(bytes)} on disk - ${activeManaged ? state : `available; active bridge ${detail}`}`;
   if (state === "ready") return `using an existing ${kind === "chatgpt" ? "Codex" : "Gemini"} CLI - Neko installed nothing`;
-  return `not installed - ${kind === "chatgpt" ? "GPT-5.5/API/Ollama still work" : "required for Gemini API-key and Enterprise ACP routes"}`;
+  return `not installed - ${kind === "chatgpt" ? "GPT-5.5/API/Ollama still work" : "required only for Code Assist Standard/Enterprise ACP"}`;
 }
 
 function openSupportManager(ctx: CommandCtx, kind: SupportKind): void {
@@ -402,10 +426,10 @@ function openProviderPicker(ctx: CommandCtx, initialFamily?: string): void {
   const chooseFamily = (family: string) => {
     const apiProfiles = new Set<string>();
     for (const [name, profile] of Object.entries(cfg.profiles)) {
-      if (profile.auth === "chatgpt_oauth" || profile.auth === "none") continue;
+      if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "kimi_oauth" || profile.auth === "none") continue;
       try { if (loadConfig({ profile: name }).apiKey) apiProfiles.add(name); } catch { /* status only */ }
     }
-    const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), apiProfiles });
+    const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), kimi: hasKimiCredentials(), apiProfiles });
     if (routes.length === 1) {
       if (switchProfile(ctx, routes[0].id)) void openModelPicker(ctx);
       return;
@@ -463,6 +487,39 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       finally { ctx.setBusy(false); }
       return;
     }
+    case "/browser": {
+      const action = input.slice("/browser".length).trim().toLowerCase();
+      if (action && action !== "install" && action !== "setup" && action !== "status") {
+        return addLine("info", "usage: /browser [setup|status]");
+      }
+      const capability = readBrowserCapability();
+      const status = capability ? readBrowserBridgeStatus() : undefined;
+      if (action === "status" || (!action && capability)) {
+        if (!capability) return addLine("info", "browser control is not set up yet - type /browser to start guided setup");
+        const state = status?.online
+          ? status.attached ? "ready - one Chrome tab is attached" : "online - open the extension and attach a tab"
+          : "configured - this Neko session will start the local bridge automatically";
+        return addLine("info", `browser: ${state}\nBrowser access stays local and only the tab you explicitly attach is controllable.`);
+      }
+      if (!ctx.setupBrowser) return addLine("error", "browser setup is unavailable in this host; run `neko browser install`");
+      ctx.setBusy(true);
+      const hadCapability = !!capability;
+      try {
+        const message = await ctx.setupBrowser();
+        addLine("info", message);
+      } catch (error) {
+        addLine("error", `browser setup failed: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        // setup creates the local capability before opening Chrome. Keep the live agent/tool index in
+        // sync even if Chrome itself could not be opened; the user can still attach it manually.
+        if (!hadCapability && readBrowserCapability()) {
+          ctx.registry.mcp = withBrowserBridge(ctx.registry.mcp);
+          ctx.agent.refreshSystemPrompt();
+        }
+        ctx.setBusy(false);
+      }
+      return;
+    }
     case "/support": {
       const action = input.slice("/support".length).trim().toLowerCase();
       if (!action) { openSupportCenter(ctx); return; }
@@ -473,7 +530,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         const status = discoverGeminiCli();
         const managed = readGeminiSupportPack();
         const disk = managed ? `; ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
-        return addLine("info", `Gemini CLI support: ${status.state} (${status.detail})${disk}. API-key and Code Assist Enterprise routes both use it.`);
+        return addLine("info", `Gemini CLI support: ${status.state} (${status.detail})${disk}. Only Code Assist Standard/Enterprise uses it; Gemini API keys connect directly to Google.`);
       }
       if (geminiAction === "remove" || geminiAction === "uninstall") {
         agent.setProvider(getProvider(cfg));
@@ -501,7 +558,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         return addLine("info", [
           `ChatGPT GPT-5.6 support: ${codex.state} (${codex.detail})${codexDisk}`,
           `Gemini CLI support: ${gemini.state} (${gemini.detail})${geminiDisk}`,
-          "GPT-5.5, non-Gemini API keys, Ollama, and other providers do not require these components.",
+          "GPT-5.5, Gemini API keys, other API providers, and Ollama do not require these components.",
         ].join("\n"));
       }
       const codexAction = action.startsWith("chatgpt ") ? action.slice("chatgpt ".length).trim()
@@ -717,26 +774,44 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     }
     case "/effort": {
       if (cfg.usesGeminiCli) return addLine("info", "Gemini manages thinking adaptively for the selected model; OpenAI-style effort tiers do not apply.");
-      let arg = input.split(/\s+/)[1]?.toLowerCase();
+      let arg = input.slice("/effort".length).trim().toLowerCase();
       if (arg === "default") arg = "off";
       let option: ModelOption | undefined;
-      if (cfg.usesChatGptAuth) {
+      if (cfg.usesChatGptAuth || cfg.provider === "kimi") {
         ctx.setBusy(true);
         try { option = (await listModelOptions(cfg)).find((model) => model.id === cfg.model); }
+        catch { /* fallback suggestions remain usable while the model catalog is offline */ }
         finally { ctx.setBusy(false); }
       }
-      const supported = option?.efforts?.map((level) => level.effort) ?? ["low", "medium", "high", "xhigh", "max", "ultra"];
+      const advertised = option?.efforts?.map((level) => level.effort).filter(Boolean);
+      const negotiate = (level: string) => {
+        const modelLevel = advertised?.length ? resolveEffort(level, option) : level;
+        return cfg.usesChatGptAuth ? modelLevel : clampEffort(modelLevel, cfg.effortCeiling);
+      };
+      const supported = advertised?.length
+        ? [...new Set(advertised)].filter((level) => negotiate(level) === level)
+        : effortSuggestions(cfg.effortCeiling, cfg.effort);
+      if (cfg.effort && !supported.includes(cfg.effort)) supported.push(cfg.effort);
       const levels = ["off", ...supported];
       const apply = (lvl: string) => {
         if (lvl === "off") delete cfg.data.reasoning_effort;
         else cfg.data.reasoning_effort = lvl;
         setEffort(lvl); // persist across sessions
         const shown = cfg.effort || `default${option?.defaultEffort ? ` (${option.defaultEffort})` : ""}`;
-        addLine("info", `effort -> ${shown}`);
+        if (!cfg.effort) return addLine("info", `effort preference -> ${shown}`);
+        const effective = negotiate(cfg.effort);
+        addLine("info", effective === cfg.effort
+          ? `effort preference -> ${shown}`
+          : `effort preference -> ${shown}; ${cfg.model} uses ${effective}`);
       };
-      if (arg === "list") return addLine("info", `${cfg.model} effort: default, ${supported.join(", ")}  (current: ${cfg.effort || "default"})`);
+      if (arg === "list") {
+        const effective = cfg.effort
+          ? negotiate(cfg.effort)
+          : option?.defaultEffort || "model default";
+        return addLine("info", `${cfg.model} effort: default, ${supported.join(", ")}  (preference: ${cfg.effort || "default"}; effective: ${effective})`);
+      }
       if (arg) {
-        if (!levels.includes(arg)) return addLine("error", `${cfg.model} supports: default, ${supported.join(", ")}`);
+        if (arg !== "off" && !isEffortName(arg)) return addLine("error", "effort must be one provider tier name (letters, digits, '.', '_' or '-')");
         return apply(arg);
       }
       // No arg -> interactive picker (Faster -> Smarter), Claude-style.
@@ -744,8 +819,11 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         title: `Reasoning effort for ${cfg.model}  (Faster -> Smarter)`,
         items: levels.map((level) => {
           const metadata = option?.efforts?.find((candidate) => candidate.effort === level);
-          const description = level === "off" ? `use model default${option?.defaultEffort ? ` (${option.defaultEffort})` : ""}` : metadata?.description;
-          return { id: level, label: level === "off" ? "default" : level, detail: [level === (cfg.effort || "off") ? "current" : "", description ?? ""].filter(Boolean).join(" - ") };
+          const effective = level === "off" ? "" : negotiate(level);
+          const description = level === "off"
+            ? `use model default${option?.defaultEffort ? ` (${option.defaultEffort})` : ""}`
+            : metadata?.description || (effective !== level ? `${cfg.model} uses ${effective}` : "");
+          return { id: level, label: level === "off" ? "default" : level, detail: [level === (cfg.effort || "off") ? "current preference" : "", description].filter(Boolean).join(" - ") };
         }),
         onSelect: (it) => {
           ctx.setOverlay(null);
@@ -756,11 +834,16 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     }
     case "/context": {
       const win = cfg.contextWindow;
-      const used = agent.cost.lastPrompt;
+      const last = agent.cost.lastPrompt;
+      const next = estimateTokens(agent.messages);
+      const used = last || next;
       const pct = Math.min(100, Math.max(0, Math.round((100 * used) / win)));
       return addLine(
         "info",
-        `context: ${used} / ${win} tokens used (${pct}%; auto-compacts past ${Math.round(COMPACT_AT * 100)}%) · last turn ${agent.cost.lastPrompt} in / ${agent.cost.lastCompletion} out`,
+        `context window capacity: ${win} tokens\n` +
+        (last ? `last request: ${last} input / ${agent.cost.lastCompletion} output (${pct}% of capacity)\n` : "") +
+        `next request estimate: ~${next} tokens${last ? " (multimodal-safe estimate; provider usage above is authoritative)" : ` (${pct}% of capacity)`}\n` +
+        `auto-compacts past ${Math.round(COMPACT_AT * 100)}%`,
       );
     }
     case "/remember": {

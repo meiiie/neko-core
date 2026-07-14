@@ -274,7 +274,7 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number; tasks?:
         for (const [name, content] of Object.entries(task.files)) writeFileSync(join(dir, name), content);
         onProgress?.(`  ${task.id}${trials > 1 ? ` [${t + 1}/${trials}]` : ""} ...`);
         const registry = new ToolRegistry(dir, "auto", async () => true);
-        const agent = new Agent({ provider: getProvider(cfg), tools: registry, maxSteps: cfg.maxSteps, systemPrompt: DEFAULT_SYSTEM_PROMPT });
+        const agent = new Agent({ provider: getProvider(cfg), tools: registry, maxSteps: cfg.maxSteps, systemPrompt: DEFAULT_SYSTEM_PROMPT, adaptiveEffort: cfg.adaptiveEffort });
         const tStart = Date.now();
         let pass = false, err = "";
         try { await agent.run(task.prompt); pass = task.verify(dir); } catch (e) { err = e instanceof Error ? e.message : String(e); }
@@ -361,7 +361,7 @@ export async function runHarnessLift(cfg: NekoConfig, onProgress?: (msg: string)
       for (const [n, c] of Object.entries(task.files)) writeFileSync(join(hdir, n), c);
       onProgress?.(`  ${task.id}: +neko ...`);
       const reg = new ToolRegistry(hdir, "auto", async () => true);
-      const agent = new Agent({ provider: getProvider(cfg), tools: reg, maxSteps: cfg.maxSteps, systemPrompt: DEFAULT_SYSTEM_PROMPT });
+      const agent = new Agent({ provider: getProvider(cfg), tools: reg, maxSteps: cfg.maxSteps, systemPrompt: DEFAULT_SYSTEM_PROMPT, adaptiveEffort: cfg.adaptiveEffort });
       let harness = false; try { await agent.run(task.prompt); harness = task.verify(hdir); } catch { harness = false; }
       rows.push({ id: task.id, raw, harness });
       onProgress?.(`  ${task.id} -> raw ${raw ? "PASS" : "fail"} | +neko ${harness ? "PASS" : "fail"}`);

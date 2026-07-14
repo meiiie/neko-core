@@ -1,4 +1,4 @@
-/** Gemini API-key and Code Assist Standard/Enterprise transport through official Gemini CLI ACP. */
+/** Code Assist Standard/Enterprise transport through official Gemini CLI ACP. */
 import { randomBytes } from "node:crypto";
 import { createServer, type Server as HttpServer } from "node:http";
 

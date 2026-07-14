@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #181920;
+    --panel: #202129;
+    --panel2: #15161b;
+    --line: #383a44;
+    --ink: #f2f2f4;
+    --muted: #9a9da8;
+    --amber: #f5a026;
+    --cyan: #20cfd0;
+    --green: #45d267;
+    --red: #f05b67;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+    padding: 44px;
+  }
+  .board {
+    width: 100%; height: 100%;
+    display: grid;
+    grid-template-columns: 1.15fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 20px;
+  }
+  .panel {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--panel);
+    padding: 30px;
+  }
+  .eyebrow { color: var(--muted); font-size: 14px; letter-spacing: .16em; text-transform: uppercase; }
+  .index { position: absolute; top: 20px; right: 24px; color: #686b75; font-size: 13px; }
+  .cover {
+    grid-row: 1 / span 2;
+    display: flex; flex-direction: column; justify-content: space-between;
+    background:
+      linear-gradient(180deg, rgba(245,160,38,.05), transparent 42%),
+      radial-gradient(circle at 30% 25%, rgba(245,160,38,.08), transparent 31%),
+      var(--panel2);
+  }
+  .cover-logo { width: 90%; margin: auto 0; image-rendering: pixelated; }
+  .cover h1 { margin: 0 0 12px; font-size: 58px; letter-spacing: -.04em; }
+  .cover p { margin: 0; max-width: 560px; color: #c6c8cf; font: 24px/1.45 system-ui, sans-serif; }
+  .tag { color: var(--amber); }
+  .terminal { padding: 0; background: #101116; }
+  .terminal img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+  .terminal::after {
+    content: "REAL PRODUCT FRAME  /  v0.11.5";
+    position: absolute; left: 24px; bottom: 18px;
+    padding: 8px 12px; border-radius: 8px;
+    background: rgba(16,17,22,.88); color: var(--muted); font-size: 13px;
+  }
+  .architecture { background: var(--panel2); }
+  .architecture h2, .system h2, .palette h2 { margin: 18px 0 22px; font-size: 27px; }
+  .layers { display: grid; grid-template-columns: 1fr 44px 1fr; align-items: center; gap: 10px; margin-top: 28px; }
+  .stack { display: grid; gap: 11px; }
+  .box { border: 1px solid #444752; border-radius: 11px; padding: 13px 15px; color: #d9dae0; background: #24262e; }
+  .box.core { border-color: var(--amber); color: var(--amber); background: rgba(245,160,38,.06); }
+  .arrow { text-align: center; color: var(--amber); font-size: 28px; }
+  .rule { margin-top: 20px; color: var(--muted); font-size: 14px; }
+  .system { background: linear-gradient(145deg, #202129, #18191f); }
+  .chips { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .chip { padding: 12px 15px; border: 1px solid #464954; border-radius: 999px; font-size: 15px; }
+  .chip:nth-child(1), .chip:nth-child(5) { border-color: var(--amber); color: var(--amber); }
+  .chip:nth-child(2), .chip:nth-child(6) { border-color: var(--cyan); color: var(--cyan); }
+  .chip:nth-child(3) { border-color: var(--green); color: var(--green); }
+  .chip:nth-child(4) { border-color: #8d91ff; color: #aeb0ff; }
+  .promise { margin-top: 34px; color: #c8cad1; font: 23px/1.4 system-ui, sans-serif; }
+  .palette { background: #f2f2f4; color: #181920; }
+  .palette .eyebrow { color: #6d707a; }
+  .swatches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 26px 0 30px; }
+  .swatch { height: 68px; border-radius: 10px; border: 1px solid rgba(0,0,0,.14); }
+  .type { display: flex; justify-content: space-between; gap: 22px; align-items: end; }
+  .glyph { color: var(--amber); font-size: 54px; letter-spacing: .06em; image-rendering: pixelated; }
+  .type-note { max-width: 270px; color: #555862; font: 16px/1.45 system-ui, sans-serif; }
+  .footer { position: absolute; left: 44px; bottom: 18px; color: #646772; font-size: 12px; letter-spacing: .12em; }
+</style>
+</head>
+<body>
+<main class="board">
+  <section class="panel cover">
+    <div><div class="eyebrow">The Wiii Lab / Brand system 2026</div><div class="index">01</div></div>
+    <img class="cover-logo" src="01-logo-dark.png" alt="Neko Core logo" />
+    <div>
+      <h1>Build locally.<br><span class="tag">Extend without limits.</span></h1>
+      <p>A terminal-native agent that codes, browses, remembers and acts through explicit safety boundaries.</p>
+    </div>
+  </section>
+
+  <section class="panel terminal">
+    <img src="04-terminal-real.png" alt="Real Neko terminal task" />
+    <div class="index">02</div>
+  </section>
+
+  <section class="panel architecture">
+    <div class="eyebrow">Ports &amp; Adapters</div><div class="index">03</div>
+    <h2>Dependencies point inward.</h2>
+    <div class="layers">
+      <div class="stack">
+        <div class="box">Ink TUI / CLI / Relay</div>
+        <div class="box">Providers / MCP / Browser</div>
+        <div class="box">Sessions / Skills / Config</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stack">
+        <div class="box core">AGENT LOOP</div>
+        <div class="box core">TOOLS + POLICY</div>
+        <div class="box core">PORTS</div>
+      </div>
+    </div>
+    <div class="rule">new model = profile &nbsp;·&nbsp; new protocol = adapter &nbsp;·&nbsp; new role = skill</div>
+  </section>
+
+  <section class="panel system">
+    <div class="eyebrow">One core / many capabilities</div><div class="index">04</div>
+    <h2>Terminal-native. Machine-capable.</h2>
+    <div class="chips">
+      <div class="chip">CODE</div><div class="chip">WEB</div><div class="chip">COMPUTER</div>
+      <div class="chip">MCP</div><div class="chip">SKILLS</div><div class="chip">E2E RELAY</div>
+    </div>
+    <div class="promise">SAFE reads. GATED mutations. Human-visible control.</div>
+  </section>
+
+  <section class="panel palette">
+    <div class="eyebrow">Visual language</div><div class="index">05</div>
+    <h2>Quiet dark-tech, one amber signal.</h2>
+    <div class="swatches">
+      <div class="swatch" style="background:#181920"></div>
+      <div class="swatch" style="background:#f2f2f4"></div>
+      <div class="swatch" style="background:#f5a026"></div>
+      <div class="swatch" style="background:#20cfd0"></div>
+      <div class="swatch" style="background:#45d267"></div>
+    </div>
+    <div class="type">
+      <div class="glyph">/\ · · ▽</div>
+      <div class="type-note">Pixel mark + monospace product type. Sparse motion, terminal rhythm, no generic AI glow.</div>
+    </div>
+  </section>
+</main>
+<div class="footer">NEKO CORE / LOCAL-FIRST EXTENSIBLE AGENT / VIDEO DIRECTION BOARD</div>
+</body>
+</html>

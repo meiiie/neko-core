@@ -18,7 +18,7 @@ test("provider picker groups ChatGPT subscription and OpenAI API under one OpenA
 });
 
 test("OpenAI auth picker keeps subscription and API billing visibly separate", () => {
-  const choices = authChoices(cfg("chatgpt"), "openai", { chatgpt: true, gemini: false, apiProfiles: new Set() });
+  const choices = authChoices(cfg("chatgpt"), "openai", { chatgpt: true, gemini: false, kimi: false, apiProfiles: new Set() });
   expect(choices.map((choice) => choice.id)).toEqual(["chatgpt", "openai"]);
   expect(choices[0].detail).toContain("subscription, no API billing");
   expect(choices[0].detail).toContain("connected");
@@ -26,15 +26,34 @@ test("OpenAI auth picker keeps subscription and API billing visibly separate", (
   expect(choices[1].detail).toContain("not connected");
 });
 
-test("Google auth picker recommends API billing and keeps enterprise OAuth explicit", () => {
+test("Google auth picker recommends the official API free tier and keeps enterprise OAuth explicit", () => {
   const grouped = providerChoices(cfg("gemini"));
   expect(grouped.filter((choice) => choice.id === "google")).toHaveLength(1);
   expect(grouped.find((choice) => choice.id === "google")?.detail).toContain("Gemini API key or Code Assist Enterprise");
-  const choices = authChoices(cfg("gemini"), "google", { chatgpt: false, gemini: true, apiProfiles: new Set() });
+  const choices = authChoices(cfg("gemini"), "google", { chatgpt: false, gemini: true, kimi: false, apiProfiles: new Set() });
   expect(choices.map((choice) => choice.id)).toEqual(["gemini-api", "gemini"]);
-  expect(choices[0].detail).toContain("pay-as-you-go API");
+  expect(choices[0].detail).toContain("official API; free tier available");
   expect(choices[1].detail).toContain("Standard/Enterprise only");
   expect(choices[1].detail).toContain("connected");
+});
+
+test("Anthropic and xAI group their official API routes without exposing proxy OAuth", () => {
+  const choices = providerChoices(cfg("claude"));
+  expect(choices.find((choice) => choice.id === "anthropic")).toMatchObject({ label: "Anthropic", detail: expect.stringContaining("Claude API key") });
+  expect(choices.find((choice) => choice.id === "xai")).toMatchObject({ label: "xAI", detail: expect.stringContaining("Grok or Grok Build API key") });
+  expect(authChoices(cfg("claude"), "anthropic", { chatgpt: false, gemini: false, kimi: false, apiProfiles: new Set(["claude"]) }).map((choice) => choice.id)).toEqual(["claude", "fable"]);
+  expect(authChoices(cfg("xai"), "xai", { chatgpt: false, gemini: false, kimi: false, apiProfiles: new Set(["xai"]) }).map((choice) => choice.id)).toEqual(["xai", "grok-build"]);
+});
+
+test("Kimi groups official account OAuth and API billing while DeepSeek stays API-key only", () => {
+  const grouped = providerChoices(cfg("kimi"));
+  expect(grouped.filter((choice) => choice.id === "kimi")).toHaveLength(1);
+  expect(grouped.find((choice) => choice.id === "kimi")?.detail).toContain("Kimi Code account or API key");
+  const kimi = authChoices(cfg("kimi"), "kimi", { chatgpt: false, gemini: false, kimi: true, apiProfiles: new Set() });
+  expect(kimi.map((choice) => choice.id)).toEqual(["kimi", "moonshot"]);
+  expect(kimi[0].detail).toContain("connected");
+  expect(kimi[0].detail).toContain("no API key");
+  expect(providerChoices(cfg("deepseek")).find((choice) => choice.id === "deepseek")?.detail).toContain("DeepSeek API key");
 });
 
 test("profile display and model context name the active OpenAI auth route", () => {

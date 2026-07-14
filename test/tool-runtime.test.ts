@@ -247,12 +247,16 @@ test("skill tool loads a skill body on demand via the injected hook (progressive
   expect(await reg.execute("skill", { name: "nope" })).toContain("no skill");
 });
 
-test("read_file reads only a bounded prefix of a huge file (no whole-file slurp -> OOM)", async () => {
+test("read_file streams a bounded, resumable page of a huge file (no whole-file slurp -> OOM)", async () => {
   const { root, reg } = makeReg("auto", () => true);
-  writeFileSync(join(root, "big.txt"), "x".repeat(600_000)); // > read-byte cap (400KB) and char cap (100K)
-  const out = await reg.execute("read_file", { path: "big.txt" });
-  expect(out).toContain("truncated");
-  expect(out.length).toBeLessThan(200_000); // result bounded, not the full 600KB
+  writeFileSync(join(root, "big.txt"), "A".repeat(45_000) + "STREAM_NEEDLE" + "B".repeat(555_000));
+  const out = String(await reg.execute("read_file", { path: "big.txt" }));
+  expect(out).toContain("more available");
+  const column = Number(out.match(/column:(\d+)/)?.[1]);
+  expect(column).toBeGreaterThan(1);
+  expect(out.length).toBeLessThan(48_000);
+  const second = String(await reg.execute("read_file", { path: "big.txt", offset: 1, column }));
+  expect(second).toContain("STREAM_NEEDLE");
 });
 
 test("catastrophic bash is refused even in auto mode (seatbelt)", async () => {
@@ -331,6 +335,32 @@ test("read_file offset pages beyond the bounded prefix of a large file", async (
   expect(out).not.toContain("line-50002-");
 });
 
+test("read_file auto-pages dense short lines below the observation cap without losing the middle", async () => {
+  const { root, reg } = makeReg();
+  const lines = Array.from({ length: 12_000 }, (_, i) => i === 6_999 ? "needle-middle" : "x");
+  writeFileSync(join(root, "dense.txt"), lines.join("\n"));
+  const first = String(await reg.execute("read_file", { path: "dense.txt" }));
+  expect(first.length).toBeLessThan(48_000);
+  expect(first).toContain("more available");
+  expect(first).not.toContain("needle-middle");
+  const next = Number(first.match(/offset:(\d+)/)?.[1]);
+  expect(next).toBeGreaterThan(1);
+  const second = String(await reg.execute("read_file", { path: "dense.txt", offset: next }));
+  expect(second).toContain("needle-middle");
+});
+
+test("read_file character-pages one very long line without discarding its tail", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "minified.json"), "A".repeat(45_000) + "TAIL_NEEDLE" + "B".repeat(45_000));
+  const first = String(await reg.execute("read_file", { path: "minified.json" }));
+  expect(first.length).toBeLessThan(48_000);
+  expect(first).not.toContain("TAIL_NEEDLE");
+  const column = Number(first.match(/column:(\d+)/)?.[1]);
+  expect(column).toBeGreaterThan(1);
+  const second = String(await reg.execute("read_file", { path: "minified.json", offset: 1, column }));
+  expect(second).toContain("TAIL_NEEDLE");
+});
+
 test("search: case-insensitive is opt-in", async () => {
   const { root, reg } = makeReg();
   writeFileSync(join(root, "a.txt"), "Hello World\n");
@@ -357,9 +387,10 @@ test("search: context shows surrounding lines", async () => {
   expect(out).not.toContain("one"); // beyond a context of 1
 });
 
-test("bash honors a per-call timeout arg (clamped to a 1s floor)", async () => {
+test("bash honors the configured timeout ceiling", async () => {
   const { reg } = makeReg("auto", () => true);
-  const out = await reg.execute("bash", { command: "sleep 9", timeout: 1000 });
+  reg.bashTimeoutCapMs = 1000;
+  const out = await reg.execute("bash", { command: "sleep 9", timeout: 9000 });
   expect(out).toContain("timed out after 1000ms");
 });
 

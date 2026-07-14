@@ -5,8 +5,11 @@
  * not a core change. Converts Neko's internal OpenAI-shaped messages/tools to Anthropic blocks and back.
  */
 import type { Usage } from "../core/cost.ts";
+import { SESSION_CONTEXT_MARK } from "../core/agent-constants.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 import { NekoConfig } from "./config.ts";
+import { providerScope } from "./provider-scope.ts";
+import { clampEffort, effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic's documented overloaded_error
 
@@ -20,35 +23,54 @@ export class AnthropicProvider implements Provider {
     if (!key && !this.cfg.isLocalEndpoint) throw new Error("No API key for the anthropic provider. Set it in the profile's api_key or NEKO_API_KEY.");
 
     const stream = Boolean(onDelta);
-    const { system, msgs } = toAnthropicMessages(messages);
+    const url = `${this.cfg.baseUrl.replace(/\/+$/, "")}/v1/messages`;
+    const continuationScope = providerScope("anthropic", url, this.cfg.model);
+    const { system, msgs } = toAnthropicMessages(messages, continuationScope);
     const payload: Record<string, any> = {
       model: this.cfg.model,
       max_tokens: this.cfg.maxTokens > 0 ? this.cfg.maxTokens : 8192, // Anthropic REQUIRES max_tokens
       messages: msgs,
       stream,
-      temperature: this.cfg.temperature,
     };
+    const thinkingPolicy = anthropicThinkingPolicy(this.cfg.model);
+    const officialAnthropic = isOfficialAnthropic(this.cfg.baseUrl);
+    if (thinkingPolicy === "manual") payload.temperature = this.cfg.temperature;
     if (system) payload.system = system;
     if (tools && tools.length) payload.tools = toAnthropicTools(tools);
-    // Schema-constrained structured output (CompleteOptions.responseSchema): the Anthropic format has no
-    // `response_format`, so use its STANDARD structured-output pattern - a FORCED tool call whose
-    // input_schema IS the schema; the validated tool_use input comes back as the JSON result. Without
-    // this, schema extraction silently degrades to free-text on anthropic-format endpoints (found by
-    // the harsh-eval going 0/8 on glm-5.2: markdown-fenced replies crashed JSON.parse downstream).
+    // Anthropic's native structured output lives under output_config.format. Compatible Messages
+    // endpoints such as Z.ai still use the portable forced-tool fallback.
     let schemaMode = Boolean(opts?.responseSchema);
-    if (schemaMode) {
+    const nativeSchema = schemaMode && officialAnthropic;
+    if (nativeSchema) {
+      payload.output_config = { format: { type: "json_schema", schema: opts!.responseSchema } };
+    } else if (schemaMode) {
       payload.tools = [{ name: "emit_extraction", description: "Return the extraction result in the required schema.", input_schema: opts!.responseSchema }];
       payload.tool_choice = { type: "tool", name: "emit_extraction" };
     }
-    // Reasoning EFFORT on the Anthropic API = extended thinking. Map Neko's effort -> a `thinking` budget so
-    // low..max actually deepen GLM's reasoning on Z.ai (the OpenAI `reasoning_effort` field doesn't apply here).
-    // Forced tool_choice is incompatible with extended thinking -> schema calls skip the budget
-    // (extraction needs precision, not depth; it's also faster).
-    const budget = schemaMode ? 0 : thinkingBudget(this.cfg.effort);
-    if (budget > 0) {
-      payload.thinking = { type: "enabled", budget_tokens: budget };
-      payload.max_tokens = Math.max(payload.max_tokens, budget + 8192); // room for the answer AFTER thinking
-      delete payload.temperature; // extended thinking requires the default temperature (can't set it)
+
+    // Current Claude models use adaptive thinking + output_config.effort. Manual token budgets and a
+    // non-default temperature are rejected by Sonnet 5. Legacy Messages-compatible models retain the
+    // explicit budget path. Forced tool choice remains incompatible with thinking on compat endpoints.
+    const requestedEffort = requestEffort(this.cfg.effort, opts?.reasoningEffort);
+    const effort = anthropicEffort(requestedEffort, this.cfg.effortCeiling);
+    if (thinkingPolicy !== "manual") {
+      if (effort) {
+        payload.thinking = { type: "adaptive", display: "summarized" };
+        payload.output_config = { ...payload.output_config, effort };
+      } else if (!requestedEffort && this.cfg.effort === "off" && thinkingPolicy === "sonnet5") {
+        payload.thinking = { type: "disabled" };
+      } else if (this.cfg.effort !== "off" || thinkingPolicy === "always-adaptive") {
+        // Empty effort means the model's default effort, not "disable reasoning". Explicit adaptive
+        // also opts into readable summaries; newest Claude models otherwise return omitted thinking.
+        payload.thinking = { type: "adaptive", display: "summarized" };
+      }
+    } else {
+      const budget = schemaMode ? 0 : thinkingBudget(effort);
+      if (budget > 0) {
+        payload.thinking = { type: "enabled", budget_tokens: budget };
+        payload.max_tokens = Math.max(payload.max_tokens, budget + 8192);
+        delete payload.temperature;
+      }
     }
 
     // Prompt caching (Anthropic-style explicit breakpoints). Z.ai's compatible endpoint accepts
@@ -57,12 +79,14 @@ export class AnthropicProvider implements Provider {
     let cacheOn = this.cfg.promptCache;
     if (cacheOn) addCacheBreakpoints(payload);
 
-    const url = `${this.cfg.baseUrl.replace(/\/+$/, "")}/v1/messages`;
     const headers: Record<string, string> = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
-    if (key) { headers["x-api-key"] = key; headers["authorization"] = `Bearer ${key}`; } // x-api-key (Anthropic) + Bearer (Z.ai)
+    if (key) {
+      headers["x-api-key"] = key;
+      if (!officialAnthropic) headers.authorization = `Bearer ${key}`; // Z.ai-compatible endpoints use Bearer
+    }
 
     const offlineDeadline = Date.now() + this.cfg.offlineRetrySeconds * 1000;
-    let httpAttempt = 0, netAttempt = 0;
+    let httpAttempt = 0, netAttempt = 0, effortHealTried = false;
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
       // IDLE timeout (reset on every streamed chunk), NOT a total request cap: a long-but-healthy
@@ -90,8 +114,11 @@ export class AnthropicProvider implements Provider {
       }
       if (res.ok) {
         try {
-          const out = stream ? await parseStream(res, onDelta!, bumpIdle, opts?.onToolCallReady) : parseMessage(await res.json());
-          if (!schemaMode && !payload.tool_choice) return out;
+          const out = stream
+            ? await parseStream(res, onDelta!, bumpIdle, opts?.onToolCallReady, continuationScope)
+            : parseMessage(await res.json(), continuationScope);
+          if (!schemaMode) return out;
+          if (nativeSchema) return { ...out, content: extractJsonLoose(out.content ?? ""), tool_calls: [] };
           // Schema mode: the forced tool's validated input IS the result; in the healed (prompt-JSON)
           // fallback the model may fence/pad the JSON, so extract it loosely before returning.
           const call = out.tool_calls?.[0];
@@ -109,6 +136,29 @@ export class AnthropicProvider implements Provider {
       if (cacheOn && res.status >= 400 && res.status < 500 && /cache_control/i.test(body)) {
         cacheOn = false;
         stripCacheBreakpoints(payload);
+        continue;
+      }
+      if (payload.output_config?.effort && res.status >= 400 && res.status < 500 && /effort/i.test(body)) {
+        if (!effortHealTried) {
+          effortHealTried = true;
+          const advertised = effortLevelsFromError(body);
+          const resolved = resolveEffort(String(payload.output_config.effort), { efforts: advertised.map((item) => ({ effort: item })) });
+          if (advertised.includes(resolved) && resolved !== payload.output_config.effort) {
+            payload.output_config.effort = resolved;
+            onDelta?.(`(effort -> ${resolved}; highest compatible tier advertised by this Claude model)`, "reasoning");
+            continue;
+          }
+        }
+        delete payload.output_config.effort;
+        if (!Object.keys(payload.output_config).length) delete payload.output_config;
+        onDelta?.("(this Claude model rejected explicit effort; retrying with adaptive default)", "reasoning");
+        continue;
+      }
+      if (payload.thinking && res.status >= 400 && res.status < 500 && /thinking|adaptive/i.test(body)) {
+        delete payload.thinking;
+        if (payload.output_config?.effort) delete payload.output_config.effort;
+        if (payload.output_config && !Object.keys(payload.output_config).length) delete payload.output_config;
+        onDelta?.("(this model rejected explicit thinking controls; retrying with its default)", "reasoning");
         continue;
       }
       // Self-heal: an endpoint that rejects forced tool_choice falls back to prompt-JSON (the reply is
@@ -141,7 +191,19 @@ export class AnthropicProvider implements Provider {
 /** Neko's OpenAI-shaped messages -> Anthropic {system, messages}. System messages fold into the top-level
  * `system` string; tool results become tool_result blocks grouped into a user message; assistant tool_calls
  * become tool_use blocks; image_url parts become image blocks. */
-export function toAnthropicMessages(messages: any[]): { system: string; msgs: any[] } {
+const ANTHROPIC_CONTINUATION = "neko_anthropic_continuation";
+
+function anthropicContinuation(providerData: any, scope: string): any[] | undefined {
+  if (!scope || !Array.isArray(providerData)) return undefined;
+  const match = providerData.find((item) => item?.type === ANTHROPIC_CONTINUATION && item?.scope === scope);
+  return Array.isArray(match?.blocks) ? match.blocks : undefined;
+}
+
+function wrappedAnthropicContinuation(scope: string, blocks: any[]): any[] | undefined {
+  return scope && blocks.length ? [{ type: ANTHROPIC_CONTINUATION, scope, blocks: structuredClone(blocks) }] : undefined;
+}
+
+export function toAnthropicMessages(messages: any[], scope = ""): { system: string; msgs: any[] } {
   const sys: string[] = [];
   const msgs: any[] = [];
   for (const m of messages) {
@@ -158,6 +220,13 @@ export function toAnthropicMessages(messages: any[]): { system: string; msgs: an
       continue;
     }
     if (m.role === "assistant") {
+      // Thinking/signature/redacted_thinking blocks must be replayed byte-for-byte and in their
+      // original order during a tool loop. Only trust blocks scoped to this endpoint + model.
+      const native = anthropicContinuation(m.provider_data, scope);
+      if (native?.length) {
+        msgs.push({ role: "assistant", content: structuredClone(native) });
+        continue;
+      }
       const content: any[] = [];
       const text = typeof m.content === "string" ? m.content : textOf(m.content);
       if (text) content.push({ type: "text", text });
@@ -201,7 +270,13 @@ export function toAnthropicTools(tools: any[]): any[] {
  * A last message that is a plain string is lifted to block form (cache_control is block-only). */
 export function addCacheBreakpoints(payload: Record<string, any>): void {
   if (typeof payload.system === "string" && payload.system) {
-    payload.system = [{ type: "text", text: payload.system, cache_control: { type: "ephemeral" } }];
+    const boundary = payload.system.indexOf(SESSION_CONTEXT_MARK);
+    const blocks = boundary > 0
+      ? [payload.system.slice(0, boundary), payload.system.slice(boundary)]
+      : [payload.system];
+    payload.system = blocks
+      .filter(Boolean)
+      .map((text) => ({ type: "text", text, cache_control: { type: "ephemeral" } }));
   }
   const last = payload.messages?.[payload.messages.length - 1];
   if (!last) return;
@@ -226,12 +301,34 @@ export function extractJsonLoose(s: string): string {
 
 /** Undo addCacheBreakpoints (the self-heal path for endpoints that reject cache_control). */
 export function stripCacheBreakpoints(payload: Record<string, any>): void {
-  if (Array.isArray(payload.system) && payload.system.length === 1 && payload.system[0]?.type === "text") {
-    payload.system = payload.system[0].text;
+  if (Array.isArray(payload.system) && payload.system.every((block: any) => block?.type === "text")) {
+    payload.system = payload.system.map((block: any) => String(block.text ?? "")).join("");
   }
   for (const m of payload.messages ?? []) {
     if (Array.isArray(m.content)) for (const b of m.content) if (b && typeof b === "object") delete b.cache_control;
   }
+}
+
+export function isOfficialAnthropic(baseUrl: string): boolean {
+  try { return new URL(baseUrl).hostname.toLowerCase() === "api.anthropic.com"; }
+  catch { return false; }
+}
+
+type AnthropicThinkingPolicy = "manual" | "adaptive" | "sonnet5" | "always-adaptive";
+
+/** Current native Claude thinking contract. Unknown/compatible models stay on the legacy budget path. */
+export function anthropicThinkingPolicy(model: string): AnthropicThinkingPolicy {
+  const id = model.toLowerCase();
+  if (/claude-(?:fable|mythos)-5/.test(id)) return "always-adaptive";
+  if (/claude-sonnet-5(?:$|-)/.test(id)) return "sonnet5";
+  if (/claude-(?:opus-4-(?:6|7|8)|sonnet-4-6)/.test(id)) return "adaptive";
+  if (/^claude-/.test(id)) return "adaptive"; // forward-compatible official Claude family default
+  return "manual";
+}
+
+function anthropicEffort(effort: string, ceiling: string): string {
+  if (!effort || effort === "off") return "";
+  return clampEffort(effort, ceiling);
 }
 
 /** Neko reasoning effort -> Anthropic extended-thinking budget (tokens). 0 = no extended thinking (fast).
@@ -252,34 +349,63 @@ function textOf(content: any): string {
 }
 
 /** Non-streamed Anthropic message -> ProviderResponse. */
-export function parseMessage(data: any): ProviderResponse {
+export function parseMessage(data: any, scope = ""): ProviderResponse {
   if (data?.type === "error" || data?.error) throw new Error(`anthropic API error: ${String(data?.error?.message ?? JSON.stringify(data)).slice(0, 300)}`);
   let content = "", reasoning = "";
   const toolCalls: ToolCall[] = [];
-  for (const block of data?.content ?? []) {
+  const nativeBlocks = Array.isArray(data?.content) ? data.content : [];
+  for (const block of nativeBlocks) {
     if (block.type === "text") content += block.text;
     else if (block.type === "thinking") reasoning += block.thinking ?? "";
     else if (block.type === "tool_use") toolCalls.push({ id: block.id ?? "", name: block.name ?? "", arguments: block.input ?? {} });
   }
-  return { content: content || null, tool_calls: toolCalls, usage: usageOf(data?.usage), reasoning: reasoning || undefined };
+  return {
+    content: content || null,
+    tool_calls: toolCalls,
+    usage: usageOf(data?.usage),
+    reasoning: reasoning || undefined,
+    continuation: wrappedAnthropicContinuation(scope, nativeBlocks),
+  };
 }
 
 /** Streamed (SSE) Anthropic response: text_delta -> content, thinking_delta -> reasoning, input_json_delta
- * accumulates a tool_use's args. */
-async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () => void, onToolCallReady?: (call: ToolCall) => void): Promise<ProviderResponse> {
+ * accumulates a tool_use's args. Native blocks and thinking signatures are retained for exact replay. */
+async function parseStream(
+  res: Response,
+  onDelta: DeltaHook,
+  onActivity?: () => void,
+  onToolCallReady?: (call: ToolCall) => void,
+  scope = "",
+): Promise<ProviderResponse> {
   if (!res.body) throw new Error("anthropic streaming response had no body");
   let content = "", reasoning = "";
-  const blocks: Record<number, { type: string; id?: string; name?: string; json: string }> = {};
+  const blocks: Record<number, { type: string; id?: string; name?: string; json: string; raw: Record<string, any> }> = {};
+  const completedBlocks: Record<number, any> = {};
   const toolCalls: ToolCall[] = [];
   const usage: Usage = {};
+  let completed = false;
   for await (const ev of sseEvents(res, onActivity)) {
     switch (ev.type) {
       case "message_start": { const u = ev.message?.usage ?? {}; const su = usageOf(u); if (u.input_tokens != null) usage.prompt_tokens = su.prompt_tokens; if (u.output_tokens != null) usage.completion_tokens = su.completion_tokens; if (su.cached_tokens) usage.cached_tokens = su.cached_tokens; if (su.cache_write_tokens) usage.cache_write_tokens = su.cache_write_tokens; break; }
-      case "content_block_start": blocks[ev.index] = { type: ev.content_block?.type, id: ev.content_block?.id, name: ev.content_block?.name, json: "" }; break;
+      case "content_block_start": {
+        const raw = structuredClone(ev.content_block ?? {});
+        const block = blocks[ev.index] = { type: raw.type, id: raw.id, name: raw.name, json: "", raw };
+        if (block.type === "text" && raw.text) { content += raw.text; onDelta(raw.text); }
+        else if (block.type === "thinking" && raw.thinking) { reasoning += raw.thinking; onDelta(raw.thinking, "reasoning"); }
+        break;
+      }
       case "content_block_delta": {
         const d = ev.delta;
-        if (d?.type === "text_delta") { content += d.text; onDelta(d.text); }
-        else if (d?.type === "thinking_delta") { reasoning += d.thinking; onDelta(d.thinking, "reasoning"); }
+        const b = blocks[ev.index];
+        if (d?.type === "text_delta") {
+          content += d.text; onDelta(d.text);
+          if (b) b.raw.text = `${b.raw.text ?? ""}${d.text ?? ""}`;
+        }
+        else if (d?.type === "thinking_delta") {
+          reasoning += d.thinking; onDelta(d.thinking, "reasoning");
+          if (b) b.raw.thinking = `${b.raw.thinking ?? ""}${d.thinking ?? ""}`;
+        }
+        else if (d?.type === "signature_delta" && b) b.raw.signature = `${b.raw.signature ?? ""}${d.signature ?? ""}`;
         else if (d?.type === "input_json_delta") { const b = blocks[ev.index]; if (b) { b.json += d.partial_json; onDelta(d.partial_json, "tool"); } }
         break;
       }
@@ -287,22 +413,33 @@ async function parseStream(res: Response, onDelta: DeltaHook, onActivity?: () =>
         const b = blocks[ev.index];
         if (b?.type === "tool_use") {
           let input: any = {};
-          try { input = b.json ? JSON.parse(b.json) : {}; } catch { input = { _raw: b.json }; }
+          try { input = b.json ? JSON.parse(b.json) : (b.raw.input ?? {}); } catch { input = { _raw: b.json }; }
+          b.raw.input = input;
           const call = { id: b.id ?? "", name: b.name ?? "", arguments: input };
           toolCalls.push(call);
           // The call is complete while the rest of the response still streams - let the agent
           // start a read-only execution NOW (stream-eager execution). Errors must not kill the stream.
           try { onToolCallReady?.(call); } catch { /* an eager-start failure never breaks parsing */ }
         }
+        if (b) completedBlocks[ev.index] = structuredClone(b.raw);
         break;
       }
       case "message_delta": { const u = ev.usage ?? {}; if (u.output_tokens != null) usage.completion_tokens = u.output_tokens; if (u.input_tokens != null) usage.prompt_tokens = u.input_tokens; break; }
       case "error": throw new Error(`anthropic stream error: ${String(JSON.stringify(ev.error)).slice(0, 200)}`);
-      case "message_stop": break;
+      case "message_stop": completed = true; break;
     }
   }
+  if (!completed) throw new Error("anthropic stream disconnected before message_stop");
   usage.total_tokens = (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0);
-  return { content: content || null, tool_calls: toolCalls, usage, reasoning: reasoning || undefined };
+  for (const [index, block] of Object.entries(blocks)) completedBlocks[Number(index)] ??= structuredClone(block.raw);
+  const nativeBlocks = Object.keys(completedBlocks).map(Number).sort((a, b) => a - b).map((index) => completedBlocks[index]);
+  return {
+    content: content || null,
+    tool_calls: toolCalls,
+    usage,
+    reasoning: reasoning || undefined,
+    continuation: wrappedAnthropicContinuation(scope, nativeBlocks),
+  };
 }
 
 function usageOf(u: any): Usage {

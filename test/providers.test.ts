@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 
 import { NekoConfig } from "../src/adapters/config.ts";
-import { clampEffort, getProvider, makeThinkSplitter, normalizeToolResultImages, OpenAICompatProvider, parseOpenAIMessage, toImgTagMessages } from "../src/adapters/providers.ts";
+import { clampEffort, getProvider, listModelOptions, makeThinkSplitter, normalizeToolResultImages, OpenAICompatProvider, parseOpenAIMessage, toImgTagMessages } from "../src/adapters/providers.ts";
+import { ResponsesProvider } from "../src/adapters/responses-provider.ts";
+import { SESSION_CONTEXT_MARK } from "../src/core/agent-constants.ts";
 
 function cfg(provider: string) {
   return new NekoConfig({ provider }, null, {}, "");
@@ -74,10 +76,51 @@ test("complete sends response_format json_schema only when a responseSchema is g
     expect(sent.response_format?.json_schema?.schema).toEqual(schema);
     await provider.complete([{ role: "user", content: "hi" }]); // no schema -> no response_format
     expect(sent.response_format).toBeUndefined();
+    expect(sent.prompt_cache_key).toBeUndefined(); // do not leak OpenAI-only fields to compatible vendors
   } finally {
     globalThis.fetch = realFetch;
     if (realKey === undefined) delete process.env.NEKO_API_KEY;
     else process.env.NEKO_API_KEY = realKey;
+  }
+});
+
+test("official OpenAI chat completions use a stable key, stable-prefix breakpoint, and per-call effort", async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies: any[] = [];
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    bodies.push(JSON.parse(String(init.body)));
+    return Response.json({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 10, completion_tokens: 1 } });
+  }) as typeof fetch;
+  try {
+    const config = new NekoConfig({
+      provider: "openai_compat",
+      base_url: "https://api.openai.com/v1",
+      model: "gpt-5.6",
+      reasoning_effort: "high",
+      effort_ceiling: "high",
+    }, null, {}, "test-key");
+    const provider = new OpenAICompatProvider(config);
+    await provider.complete([
+      { role: "system", content: `stable rules${SESSION_CONTEXT_MARK}volatile cwd` },
+      { role: "user", content: "one" },
+    ], undefined, undefined, undefined, { reasoningEffort: "low" });
+    await provider.complete([{ role: "user", content: "two" }]);
+    expect(bodies[0].prompt_cache_key).toBeString();
+    expect(bodies[1].prompt_cache_key).toBe(bodies[0].prompt_cache_key);
+    expect(bodies[0].reasoning_effort).toBe("low");
+    expect(bodies[1].reasoning_effort).toBe("high");
+    expect(bodies[0].messages[0].content).toEqual([
+      { type: "text", text: "stable rules", prompt_cache_breakpoint: { mode: "explicit" } },
+      { type: "text", text: `${SESSION_CONTEXT_MARK}volatile cwd` },
+    ]);
+    expect(typeof bodies[1].messages[0].content).toBe("string"); // no seam -> ordinary message shape
+    const older = new OpenAICompatProvider(new NekoConfig({
+      provider: "openai_compat", base_url: "https://api.openai.com/v1", model: "gpt-5.5",
+    }, null, {}, "test-key"));
+    await older.complete([{ role: "system", content: `stable${SESSION_CONTEXT_MARK}volatile` }]);
+    expect(typeof bodies[2].messages[0].content).toBe("string"); // explicit breakpoints start at GPT-5.6
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 
@@ -123,6 +166,32 @@ test("parseOpenAIMessage extracts <think> from a non-streamed body", () => {
 
 test("factory returns OpenAICompatProvider", () => {
   expect(getProvider(cfg("openai_compat"))).toBeInstanceOf(OpenAICompatProvider);
+});
+
+test("factory returns the standard Responses provider", () => {
+  expect(getProvider(cfg("responses"))).toBeInstanceOf(ResponsesProvider);
+});
+
+test("official Anthropic model discovery never sends the API key as a Bearer token", async () => {
+  const originalFetch = globalThis.fetch;
+  let sentHeaders: Headers | undefined;
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    sentHeaders = new Headers(init?.headers);
+    return Response.json({ data: [{ id: "claude-sonnet-5" }] });
+  }) as any;
+  try {
+    const config = new NekoConfig(
+      { provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-5" },
+      "claude",
+      { claude: { provider: "anthropic", key_env: "ANTHROPIC_API_KEY" } },
+      "anthropic-key",
+    );
+    expect((await listModelOptions(config)).map((model) => model.id)).toEqual(["claude-sonnet-5"]);
+    expect(sentHeaders?.get("x-api-key")).toBe("anthropic-key");
+    expect(sentHeaders?.has("authorization")).toBe(false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 function netCfg(offlineSeconds: number) {
@@ -380,6 +449,152 @@ test("openai stream accumulates interleaved parallel tool-call deltas by index",
     );
     expect(ready.map((x) => x.arguments)).toEqual([{ path: "x" }, { pattern: "y" }]);
     expect(res.tool_calls.map((x) => x.arguments)).toEqual([{ path: "x" }, { pattern: "y" }]);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("OpenAI-compatible tool metadata replays only to the endpoint and model that produced it", async () => {
+  const origin = "https://generativelanguage.googleapis.com/v1beta/openai";
+  const firstChunk = {
+    choices: [{ delta: { tool_calls: [{
+      index: 0,
+      id: "call_1",
+      type: "function",
+      function: { name: "read_file", arguments: '{"path":"package.json"}' },
+      extra_content: { google: { thought_signature: "encrypted-signature" } },
+    }] } }],
+  };
+  const stream = `data: ${JSON.stringify(firstChunk)}\n\ndata: [DONE]\n\n`;
+  const sent: Array<{ url: string; body: any }> = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init: any) => {
+    sent.push({ url: String(url), body: JSON.parse(init.body) });
+    if (sent.length === 1) return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+    return new Response(JSON.stringify({ choices: [{ message: { content: "done" } }] }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as any;
+  try {
+    const provider = new OpenAICompatProvider(new NekoConfig(
+      { provider: "openai_compat", base_url: origin, model: "gemini-3.5-flash", reasoning_effort: "off" },
+      "gemini-api",
+      {},
+      "key",
+    ));
+    const first = await provider.complete([{ role: "user", content: "read package.json" }], undefined, () => {});
+    const assistant = {
+      role: "assistant",
+      content: null,
+      tool_calls: first.tool_calls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+      })),
+      provider_data: first.continuation,
+    };
+    const history = [
+      { role: "user", content: "read package.json" },
+      assistant,
+      { role: "tool", tool_call_id: "call_1", content: "{}" },
+    ];
+    await provider.complete(history);
+    expect(sent[1].body.messages[1].extra_content).toBeUndefined();
+    expect(sent[1].body.messages[1].tool_calls[0].extra_content.google.thought_signature).toBe("encrypted-signature");
+    expect(sent[1].body.messages[1].provider_data).toBeUndefined();
+
+    const switchedModel = new OpenAICompatProvider(new NekoConfig(
+      { provider: "openai_compat", base_url: origin, model: "gemini-other" },
+      null,
+      {},
+      "key",
+    ));
+    await switchedModel.complete(history);
+    expect(sent[2].body.messages[1].tool_calls[0].extra_content).toBeUndefined();
+
+    const other = new OpenAICompatProvider(new NekoConfig(
+      { provider: "openai_compat", base_url: "https://api.example/v1", model: "other" },
+      null,
+      {},
+      "key",
+    ));
+    await other.complete(history);
+    expect(sent[3].body.messages[1].tool_calls[0].extra_content).toBeUndefined();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("DeepSeek V4 sends current thinking controls and replays tool-turn reasoning_content", async () => {
+  const orig = globalThis.fetch;
+  const sent: any[] = [];
+  let calls = 0;
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    sent.push(JSON.parse(String(init?.body ?? "{}")));
+    calls++;
+    if (calls === 1) return Response.json({ choices: [{ message: {
+      role: "assistant",
+      content: null,
+      reasoning_content: "opaque tool reasoning",
+      tool_calls: [{ id: "call_1", type: "function", function: { name: "read_file", arguments: '{"path":"x"}' } }],
+    } }] });
+    return Response.json({ choices: [{ message: { role: "assistant", content: "done" } }] });
+  }) as typeof fetch;
+  try {
+    const config = new NekoConfig({
+      provider: "openai_compat",
+      base_url: "https://api.deepseek.com",
+      model: "deepseek-v4-pro",
+      reasoning_effort: "max",
+      effort_ceiling: "max",
+      thinking_wire: "toggle",
+      max_tokens: 65_536,
+    }, "deepseek", { deepseek: { key_env: "DEEPSEEK_API_KEY" } }, "secret");
+    const provider = new OpenAICompatProvider(config);
+    const first = await provider.complete([{ role: "user", content: "inspect" }]);
+    await provider.complete([
+      { role: "user", content: "inspect" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: first.tool_calls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments) } })),
+        provider_data: first.continuation,
+      },
+      { role: "tool", tool_call_id: "call_1", content: "ok" },
+    ]);
+    expect(sent[0].thinking).toEqual({ type: "enabled" });
+    expect(sent[0].reasoning_effort).toBe("max");
+    expect(sent[0].max_tokens).toBe(65_536);
+    expect(sent[1].messages[1].reasoning_content).toBe("opaque tool reasoning");
+    expect(sent[1].messages[1].provider_data).toBeUndefined();
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("Kimi API route uses the official completion budget and thinking wire without a proxy", async () => {
+  const orig = globalThis.fetch;
+  let body: any;
+  let authorization = "";
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body ?? "{}"));
+    authorization = new Headers(init?.headers).get("authorization") ?? "";
+    return Response.json({ choices: [{ message: { role: "assistant", content: "ok" } }] });
+  }) as typeof fetch;
+  try {
+    const config = new NekoConfig({
+      provider: "kimi",
+      base_url: "https://api.moonshot.ai/v1",
+      model: "kimi-k2.5",
+      reasoning_effort: "max",
+      effort_ceiling: "high",
+      thinking_wire: "toggle",
+      max_tokens: 32_000,
+    }, "moonshot", { moonshot: { auth: "api_key", key_env: "KIMI_API_KEY" } }, "kimi-secret");
+    await getProvider(config).complete([{ role: "user", content: "hello" }]);
+    expect(authorization).toBe("Bearer kimi-secret");
+    expect(body.max_tokens).toBe(32_000);
+    expect(body.max_completion_tokens).toBeUndefined();
+    expect(body.reasoning_effort).toBe("high");
+    expect(body.thinking).toEqual({ type: "enabled" });
   } finally {
     globalThis.fetch = orig;
   }

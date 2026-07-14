@@ -44,3 +44,14 @@ test("revise refines ONE bullet (anti-collapse), remove drops it", () => {
   expect(playbookTool({ action: "remove", find: "warehouses" })).toContain("Removed");
   expect(playbookTool({ action: "read" })).not.toContain("warehouses");
 });
+
+test("context uses compact excerpts while search returns the lossless lesson", () => {
+  freshHome();
+  const lesson = ("When a provider repeats a large stable prefix, keep dynamic state at the end and measure cache reads before changing the harness. " + "detail ".repeat(80)).trim();
+  playbookTool({ action: "add", content: lesson });
+  const block = playbookContextBlock();
+  expect(block).toContain("excerpts only");
+  expect(block.length).toBeLessThan(lesson.length * 0.7);
+  expect(block).not.toContain(lesson.slice(-120));
+  expect(playbookTool({ action: "search", query: "stable prefix cache" })).toContain(lesson);
+});

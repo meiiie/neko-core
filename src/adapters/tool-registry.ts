@@ -10,6 +10,7 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
   registry.mcp = withBrowserBridge(registry.mcp);
   registry.hooks = cfg.hooks;
   registry.allowDangerousBash = cfg.allowDangerousBash;
+  registry.bashTimeoutCapMs = cfg.bashTimeoutCapMs;
   registry.sandboxBash = cfg.sandbox;
   registry.sandboxAllowNetwork = cfg.sandboxNetwork;
   registry.searxngUrl = cfg.searxngUrl;
@@ -39,6 +40,7 @@ export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRe
   target.checkAction = source.checkAction;
   target.loadSkill = source.loadSkill;
   target.allowDangerousBash = source.allowDangerousBash;
+  target.bashTimeoutCapMs = source.bashTimeoutCapMs;
   target.sandboxBash = source.sandboxBash;
   target.sandboxAllowNetwork = source.sandboxAllowNetwork;
   target.vision = source.vision;

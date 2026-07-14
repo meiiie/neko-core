@@ -113,7 +113,7 @@ export function ThinkingLine(props: { verb: string; elapsed: number; step: numbe
     `${fmtElapsed(elapsed)}` +
     (effort ? ` · ${effort} effort` : "") +
     (step > 1 ? ` · step ${step}` : "") +
-    ` · ${UP}${fmtTok(inTok)} ${DOWN}${fmtTok(outTok)}` +
+    ` · turn total ${UP}${fmtTok(inTok)} ${DOWN}${fmtTok(outTok)}` +
     (queued > 0 ? ` · ${queued} queued` : "") +
     " · esc to interrupt";
 

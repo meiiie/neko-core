@@ -28,18 +28,27 @@ export interface Profile {
   /** UI grouping: several auth routes can belong to one provider brand (OpenAI API + ChatGPT OAuth). */
   family?: string;
   label?: string;
-  auth?: "api_key" | "chatgpt_oauth" | "gemini_oauth" | "none";
+  auth?: "api_key" | "chatgpt_oauth" | "gemini_oauth" | "kimi_oauth" | "none";
   /** Models known to the auth route when it has no model-list endpoint. `/model <id>` still accepts newer ids. */
   models?: string[];
   model_context?: Record<string, number>;
+  context_window?: number;
+  max_tokens?: number;
   effort_ceiling?: string;
+  adaptive_effort?: boolean;
   vision?: boolean;
   image_long_edge?: number;
   image_max_bytes?: number;
+  /** Some OpenAI-compatible reasoning endpoints also require a top-level `thinking` object. */
+  thinking_wire?: "toggle" | "effort";
+  /** Override the completion-budget field for compatibility endpoints that renamed `max_tokens`. */
+  completion_tokens_field?: "max_tokens" | "max_completion_tokens";
   /** Env var holding this provider's API key (e.g. "ZAI_API_KEY"), so multi-provider works with no config
    * editing: pick the profile, set its env var. It's a FALLBACK — an explicit config api_key wins over it
    * (a stale/foreign env var can't override a key you wrote into config). NEKO_API_KEY still overrides all. */
   key_env?: string;
+  /** Previous/alternate official env names, tried after key_env for compatibility. */
+  key_env_fallbacks?: string[];
 }
 
 export const DEFAULTS: Record<string, any> = {
@@ -50,6 +59,7 @@ export const DEFAULTS: Record<string, any> = {
   temperature: 0,
   max_tokens: 8192, // headroom so a large file write isn't truncated mid-tool-call (was 2048)
   timeout_seconds: 120,
+  bash_timeout_cap_ms: 600_000, // per-command ceiling; eval/sandbox profiles may fail fast with a lower cap
   max_retries: 4,
   retry_base_delay_seconds: 1.5,
   retry_max_delay_seconds: 30,
@@ -57,6 +67,7 @@ export const DEFAULTS: Record<string, any> = {
   codex_keepalive: 15, // GPT-5.6 App Server idle minutes; 0 keeps it alive until logout/exit
   approval: "prompt", // prompt | auto (--yolo flips gated tools to auto)
   effort_ceiling: "high", // highest reasoning_effort the endpoint accepts (OpenAI standard caps at high); a profile can raise it
+  adaptive_effort: false, // experimental lagged proxy; keep full effort unless a workload-specific eval proves it safe
   image_long_edge: 1568, // conservative cross-provider vision input; high-resolution profiles may raise it
   image_max_bytes: 450_000, // protects strict OpenAI-compatible endpoints from oversized inline data URLs
   auto_update_check: true, // check for a newer release at startup (daily-cached; set false to silence)
@@ -65,6 +76,7 @@ export const DEFAULTS: Record<string, any> = {
   // Exact Chrome extension ids allowed to pair with the loopback Browser Bridge. The bundled
   // developer id is deterministic; add the Chrome Web Store item id here after its first upload.
   browser_extension_ids: ["koalaflndbcddboachbdfmppdeblldje"],
+  browser_extension_store_id: "", // owner fills this after Web Store item issuance; install then opens the listing
   active_profile: null,
   profiles: {
     // A new model/endpoint is a data edit, not a code change. "Offline" = point a
@@ -96,29 +108,135 @@ export const DEFAULTS: Record<string, any> = {
       vision: true,
     },
     "gemini-api": {
-      provider: "gemini_cli",
+      provider: "openai_compat",
       family: "google",
-      label: "Gemini API key (pay-as-you-go)",
+      label: "Gemini API key (free tier / optional paid)",
       auth: "api_key",
-      model: "auto",
-      models: ["auto"],
-      context_window: 1_000_000,
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+      model: "gemini-3.5-flash",
+      models: ["gemini-3.5-flash"],
+      context_window: 1_048_576,
+      effort_ceiling: "high",
       vision: true,
       key_env: "GEMINI_API_KEY",
     },
-    // Anthropic Messages API (provider: anthropic). Real Claude, and Z.ai's GLM coding-plan endpoint:
-    claude: { provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-4-6", key_env: "ANTHROPIC_API_KEY" },
-    fable: { provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-fable-5", key_env: "ANTHROPIC_API_KEY", vision: true, image_long_edge: 2576, image_max_bytes: 4_500_000 },
+    // Official Anthropic Messages API. Native Claude keeps signed thinking blocks across tool turns.
+    claude: {
+      provider: "anthropic",
+      family: "anthropic",
+      label: "Claude Sonnet 5 API",
+      auth: "api_key",
+      base_url: "https://api.anthropic.com",
+      model: "claude-sonnet-5",
+      models: ["claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"],
+      model_context: { "claude-sonnet-5": 1_000_000, "claude-opus-4-8": 1_000_000, "claude-fable-5": 1_000_000 },
+      context_window: 1_000_000,
+      max_tokens: 32_768,
+      effort_ceiling: "max",
+      vision: true,
+      key_env: "ANTHROPIC_API_KEY",
+    },
+    fable: {
+      provider: "anthropic",
+      family: "anthropic",
+      label: "Claude Fable 5 API",
+      auth: "api_key",
+      base_url: "https://api.anthropic.com",
+      model: "claude-fable-5",
+      models: ["claude-fable-5"],
+      context_window: 1_000_000,
+      max_tokens: 32_768,
+      effort_ceiling: "max",
+      key_env: "ANTHROPIC_API_KEY",
+      vision: true,
+      image_long_edge: 2576,
+      image_max_bytes: 4_500_000,
+    },
     zai: { provider: "anthropic", base_url: "https://api.z.ai/api/anthropic", model: "glm-4.6", key_env: "ZAI_API_KEY" },         // GLM Coding Plan quota
     "zai-openai": { provider: "openai_compat", base_url: "https://api.z.ai/api/paas/v4", model: "glm-4.6", key_env: "ZAI_API_KEY" }, // Z.ai pay-as-you-go
     // Most hosted providers are OpenAI-compatible -> a profile, not new code. Set your model with /model.
     groq: { provider: "openai_compat", base_url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile", key_env: "GROQ_API_KEY" },
-    deepseek: { provider: "openai_compat", base_url: "https://api.deepseek.com/v1", model: "deepseek-chat", key_env: "DEEPSEEK_API_KEY" },
+    deepseek: {
+      provider: "openai_compat",
+      family: "deepseek",
+      label: "DeepSeek API key",
+      auth: "api_key",
+      base_url: "https://api.deepseek.com",
+      model: "deepseek-v4-pro",
+      models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+      model_context: { "deepseek-v4-pro": 1_000_000, "deepseek-v4-flash": 1_000_000 },
+      context_window: 1_000_000,
+      max_tokens: 65_536,
+      effort_ceiling: "max",
+      thinking_wire: "toggle",
+      key_env: "DEEPSEEK_API_KEY",
+    },
     mistral: { provider: "openai_compat", base_url: "https://api.mistral.ai/v1", model: "mistral-large-latest", key_env: "MISTRAL_API_KEY" },
     together: { provider: "openai_compat", base_url: "https://api.together.xyz/v1", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo", key_env: "TOGETHER_API_KEY" },
     fireworks: { provider: "openai_compat", base_url: "https://api.fireworks.ai/inference/v1", model: "accounts/fireworks/models/llama-v3p3-70b-instruct", key_env: "FIREWORKS_API_KEY" },
-    xai: { provider: "openai_compat", base_url: "https://api.x.ai/v1", model: "grok-2-latest", key_env: "XAI_API_KEY" },
-    moonshot: { provider: "openai_compat", base_url: "https://api.moonshot.ai/v1", model: "kimi-k2-0905-preview", key_env: "MOONSHOT_API_KEY" },
+    xai: {
+      provider: "responses",
+      family: "xai",
+      label: "Grok 4.5 API",
+      auth: "api_key",
+      base_url: "https://api.x.ai/v1",
+      model: "grok-4.5",
+      models: ["grok-4.5", "grok-4.3"],
+      model_context: { "grok-4.5": 1_000_000, "grok-4.3": 1_000_000 },
+      context_window: 1_000_000,
+      effort_ceiling: "high",
+      vision: true,
+      key_env: "XAI_API_KEY",
+    },
+    "grok-build": {
+      provider: "responses",
+      family: "xai",
+      label: "Grok Build 0.1 (coding)",
+      auth: "api_key",
+      base_url: "https://api.x.ai/v1",
+      model: "grok-build-0.1",
+      models: ["grok-build-0.1"],
+      context_window: 256_000,
+      effort_ceiling: "high",
+      vision: true,
+      key_env: "XAI_API_KEY",
+    },
+    // Kimi Code account OAuth is an official RFC 8628 public-client flow. Neko owns its token file;
+    // it never imports Kimi CLI or CLIProxyAPI credentials.
+    kimi: {
+      provider: "kimi",
+      family: "kimi",
+      label: "Kimi Code account",
+      auth: "kimi_oauth",
+      base_url: "https://api.kimi.com/coding/v1",
+      model: "kimi-for-coding",
+      models: ["kimi-for-coding"],
+      model_context: { "kimi-for-coding": 262_144 },
+      context_window: 262_144,
+      max_tokens: 32_000,
+      effort_ceiling: "high",
+      thinking_wire: "toggle",
+      vision: true,
+      image_max_bytes: 4_500_000,
+    },
+    moonshot: {
+      provider: "kimi",
+      family: "kimi",
+      label: "Kimi Platform API key",
+      auth: "api_key",
+      base_url: "https://api.moonshot.ai/v1",
+      model: "kimi-k2.5",
+      models: ["kimi-k2.5"],
+      model_context: { "kimi-k2.5": 262_144 },
+      context_window: 262_144,
+      max_tokens: 32_000,
+      effort_ceiling: "high",
+      thinking_wire: "toggle",
+      vision: true,
+      image_max_bytes: 4_500_000,
+      key_env: "KIMI_API_KEY",
+      key_env_fallbacks: ["MOONSHOT_API_KEY"],
+    },
     openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "", key_env: "OPENROUTER_API_KEY" },
     // Mixture-of-Agents: diverse advisors analyze, a strong aggregator synthesizes + acts. `neko
     // --profile moa`. Opt-in quality mode (N+1 model calls/turn) — best where one model is weak.
@@ -135,6 +253,7 @@ export const DEFAULTS: Record<string, any> = {
 };
 
 const BOOLEAN_ENV_KEYS = new Set([
+  "adaptive_effort",
   "adversarial_check",
   "allow_dangerous_bash",
   "auto_loop",
@@ -210,6 +329,7 @@ export class NekoConfig {
   get usesChatGptAuth(): boolean { return this.provider === "chatgpt"; }
   get usesGeminiCli(): boolean { return this.provider === "gemini_cli"; }
   get usesGeminiAuth(): boolean { return this.usesGeminiCli && this.profile != null && this.profiles[this.profile]?.auth === "gemini_oauth"; }
+  get usesKimiAuth(): boolean { return this.provider === "kimi" && this.profile != null && this.profiles[this.profile]?.auth === "kimi_oauth"; }
   get model(): string { return String(this.data.model ?? "").trim(); }
   /** Model for a VISION pre-pass (reading an image into text the main agent can use): `vision_model`
    * config, else a verified-good default on an NVIDIA endpoint, else "" (no auto vision). */
@@ -247,10 +367,17 @@ export class NekoConfig {
     if (perModel && typeof perModel === "object" && m && perModel[m] != null) return Number(perModel[m]);
     return Number(this.data.context_window ?? 131072);
   }
-  /** Reasoning effort (low|medium|high, or higher tiers where supported) sent as `reasoning_effort`; "" = omit. */
+  /** User reasoning preference. Common and provider-defined tiers are negotiated per model; "" = model default. */
   get effort(): string { return String(this.data.reasoning_effort ?? "").trim().toLowerCase(); }
   /** The highest effort tier the endpoint accepts; a configured effort above it is clamped down to it. "" = no clamp. */
   get effortCeiling(): string { return String(this.data.effort_ceiling ?? "").trim().toLowerCase(); }
+  get thinkingWire(): "toggle" | "effort" | "" {
+    const value = String(this.data.thinking_wire ?? "");
+    return value === "toggle" || value === "effort" ? value : "";
+  }
+  get completionTokensField(): "max_tokens" | "max_completion_tokens" {
+    return this.data.completion_tokens_field === "max_completion_tokens" ? "max_completion_tokens" : "max_tokens";
+  }
   /** Check for a newer release at startup (daily-cached, non-blocking). */
   get autoUpdateCheck(): boolean { return this.data.auto_update_check !== false; }
   /** Auto-INSTALL a newer release found by the startup check (claude-code style: on by default; the
@@ -346,10 +473,16 @@ export class NekoConfig {
    * NEKO_BROWSER_EXTENSION_IDS value) keeps public-store and unpacked builds explicit and auditable. */
   get browserExtensionIds(): string[] {
     const raw = this.data.browser_extension_ids;
-    const values = Array.isArray(raw) ? raw : String(raw ?? "").split(",");
+    const values = Array.isArray(raw) ? [...raw] : String(raw ?? "").split(",");
+    values.push(this.data.browser_extension_store_id ?? "");
     return [...new Set(values.map((value) => String(value).trim().toLowerCase()))]
       .filter((value) => /^[a-p]{32}$/.test(value))
       .slice(0, 8);
+  }
+  /** Public Chrome Web Store item id. Kept separate because other allowed ids may be unpacked test builds. */
+  get browserExtensionStoreId(): string {
+    const value = String(this.data.browser_extension_store_id ?? "").trim().toLowerCase();
+    return /^[a-p]{32}$/.test(value) ? value : "";
   }
   /** Opt-in pre-completion gate: intercept the first tool-less final answer once and force a
    * re-inspection of the actual state before finishing (quality over speed; +1 turn when it fires). */
@@ -358,6 +491,9 @@ export class NekoConfig {
    * (tools + system) and the growing conversation are cached across steps/turns. ON by default —
    * an endpoint that rejects cache_control is self-healed with one retry; `prompt_cache: false` opts out. */
   get promptCache(): boolean { return this.data.prompt_cache !== false; }
+  /** Opt-in per-step compute routing: mechanical read-only follow-ups request low effort, while
+   * planning, mutations, failures, and final verification retain the configured effort ceiling. */
+  get adaptiveEffort(): boolean { return Boolean(this.data.adaptive_effort); }
   /** When true, read_file returns image files as vision content (needs a vision-capable model). Off by
    * default so text-only models never receive image content in a tool result (which some endpoints reject). */
   get vision(): boolean { return Boolean(this.data.vision); }
@@ -395,6 +531,10 @@ export class NekoConfig {
     return { preToolUse: h.pre_tool_use, postToolUse: h.post_tool_use };
   }
   get timeoutSeconds(): number { return Number(this.data.timeout_seconds ?? 120); }
+  get bashTimeoutCapMs(): number {
+    const value = Number(this.data.bash_timeout_cap_ms ?? 600_000);
+    return Number.isFinite(value) ? Math.min(600_000, Math.max(1_000, value)) : 600_000;
+  }
   get maxRetries(): number { return Math.max(0, Number(this.data.max_retries ?? 4)); }
   get retryBaseDelaySeconds(): number { return Number(this.data.retry_base_delay_seconds ?? 1.5); }
   get retryMaxDelaySeconds(): number { return Number(this.data.retry_max_delay_seconds ?? 30); }
@@ -423,15 +563,22 @@ export class NekoConfig {
   /** Read on demand; NEVER stored in `data` (so it can't leak via `neko config`). */
   get apiKey(): string {
     // NEKO_API_KEY is the explicit override; then this profile's key (its key_env or config api_key, resolved
-    // in loadConfig); then the broad legacy fallbacks. The profile key sits ABOVE OPENAI_/NVIDIA_ so a
-    // multi-provider setup (each profile -> its own key_env) isn't hijacked by a stray OPENAI_/NVIDIA_API_KEY.
+    // in loadConfig). Broad OPENAI/NVIDIA fallbacks exist only for an unscoped legacy configuration: a
+    // profile declaring key_env must never send another provider's credential to its endpoint.
+    const hasScopedKeyEnv = Boolean(this.profile && this.profiles[this.profile]?.key_env);
     return (
       process.env.NEKO_API_KEY ||
       this.apiKeyFromFile ||
-      process.env.OPENAI_API_KEY ||
-      process.env.NVIDIA_API_KEY ||
+      (!hasScopedKeyEnv ? (process.env.OPENAI_API_KEY || process.env.NVIDIA_API_KEY) : "") ||
       ""
     ).trim();
+  }
+
+  /** Environment names that can supply or retain this profile's key, primary first. */
+  get profileKeyEnvs(): string[] {
+    if (!this.profile) return [];
+    const profile = this.profiles[this.profile];
+    return [profile?.key_env, ...(profile?.key_env_fallbacks ?? [])].filter((name): name is string => Boolean(name));
   }
 }
 
@@ -477,13 +624,17 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
   }
 
   // Pull the file-provided key out before building the printable dict (never printed).
-  // Resolve the key. An EXPLICIT config api_key (the user set it deliberately) wins; key_env (the profile's
-  // provider-specific env var, e.g. ZAI_API_KEY) is the FALLBACK — so a built-in preset with no key still
-  // works from its env var, but a stale/foreign env var can't override a key the user wrote into config.
+  // Resolve the key. Explicit config > profile env.
   const keyEnv = merged.key_env ? String(merged.key_env) : "";
-  const apiKeyFromFile = String(merged.api_key ?? "") || (keyEnv ? (process.env[keyEnv] ?? "").trim() : "");
+  const fallbackKeyEnvs = Array.isArray(merged.key_env_fallbacks) ? merged.key_env_fallbacks.map(String) : [];
+  const envKey = [keyEnv, ...fallbackKeyEnvs]
+    .filter(Boolean)
+    .map((name) => (process.env[name] ?? "").trim())
+    .find(Boolean) ?? "";
+  const apiKeyFromFile = String(merged.api_key ?? "") || envKey;
   delete merged.api_key;
   delete merged.key_env;
+  delete merged.key_env_fallbacks;
   delete merged.profiles;
   delete merged.active_profile;
 

@@ -15,6 +15,8 @@ export interface Prefs {
   resumeAlwaysFull?: boolean;
   /** /fps choice: a fixed rate, or "auto" (follow the detected display refresh rate). Unset = auto. */
   uiFps?: number | "auto";
+  /** One-time progressive-disclosure hint for optional signed-in-tab browser control. */
+  browserHintSeen?: boolean;
 }
 
 function prefsPath(): string {

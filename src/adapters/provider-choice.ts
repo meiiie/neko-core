@@ -10,11 +10,22 @@ export interface Choice {
 export interface AuthAvailability {
   chatgpt: boolean;
   gemini: boolean;
+  kimi: boolean;
   apiProfiles: Set<string>;
 }
 
 function familyOf(name: string, profile: Profile): string {
   return profile.family || name;
+}
+
+function familyLabel(family: string): string {
+  if (family === "openai") return "OpenAI";
+  if (family === "google") return "Google";
+  if (family === "anthropic") return "Anthropic";
+  if (family === "xai") return "xAI";
+  if (family === "kimi") return "Kimi";
+  if (family === "deepseek") return "DeepSeek";
+  return family;
 }
 
 export function providerChoices(cfg: NekoConfig, authOnly = false): Choice[] {
@@ -30,12 +41,20 @@ export function providerChoices(cfg: NekoConfig, authOnly = false): Choice[] {
     const current = routes.some(([n]) => n === cfg.profile) ? "  (current)" : "";
     choices.push({
       id: family,
-      label: family === "openai" ? "OpenAI" : family === "google" ? "Google" : family,
+      label: familyLabel(family),
       detail: family === "openai"
         ? `ChatGPT Plus/Pro or API key${current}`
         : family === "google"
           ? `Gemini API key or Code Assist Enterprise${current}`
-        : `${profile.provider ?? "?"} · ${profile.model ?? "?"}${current}`,
+          : family === "anthropic"
+            ? `Claude API key${current}`
+            : family === "xai"
+              ? `Grok or Grok Build API key${current}`
+              : family === "kimi"
+                ? `Kimi Code account or API key${current}`
+                : family === "deepseek"
+                  ? `DeepSeek API key${current}`
+                  : `${profile.provider ?? "?"} · ${profile.model ?? "?"}${current}`,
     });
   }
   return choices;
@@ -51,11 +70,14 @@ export function authChoices(cfg: NekoConfig, family: string, availability: AuthA
       const ready = profile.auth === "none"
         || (profile.auth === "chatgpt_oauth" ? availability.chatgpt
           : profile.auth === "gemini_oauth" ? availability.gemini
+          : profile.auth === "kimi_oauth" ? availability.kimi
             : availability.apiProfiles.has(name));
       const billing = profile.auth === "none" ? "no sign-in required"
         : profile.auth === "chatgpt_oauth" ? "subscription, no API billing"
           : profile.auth === "gemini_oauth" ? "Standard/Enterprise only; consumer plans moved to Antigravity"
-            : "pay-as-you-go API";
+            : profile.auth === "kimi_oauth" ? "Kimi Code account; no API key"
+            : family === "google" ? "official API; free tier available"
+              : "pay-as-you-go API";
       return {
         id: name,
         label: profile.label || name,
@@ -67,6 +89,6 @@ export function authChoices(cfg: NekoConfig, family: string, availability: AuthA
 export function profileDisplayName(cfg: NekoConfig): string {
   if (!cfg.profile) return cfg.provider;
   const profile = cfg.profiles[cfg.profile];
-  const family = profile?.family === "openai" ? "OpenAI" : profile?.family === "google" ? "Google" : (profile?.family || cfg.profile);
+  const family = familyLabel(profile?.family || cfg.profile);
   return profile?.label ? `${family} · ${profile.label}` : family;
 }

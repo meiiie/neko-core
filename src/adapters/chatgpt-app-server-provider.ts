@@ -2,6 +2,7 @@
 import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 import type { NekoConfig } from "./config.ts";
+import { requestEffort } from "./effort.ts";
 import { validChatGptCredentials } from "./chatgpt-auth.ts";
 import { toResponsesInput } from "./chatgpt-provider.ts";
 import {
@@ -104,7 +105,8 @@ export class ChatGptAppServerProvider implements Provider {
     try {
       const input = toUserInput(messages.at(-1)?.content);
       const params: Record<string, any> = { threadId, input, model: this.cfg.model };
-      if (this.cfg.effort && this.cfg.effort !== "off") params.effort = this.cfg.effort;
+      const effort = requestEffort(this.cfg.effort, opts.reasoningEffort);
+      if (effort) params.effort = effort;
       params.summary = "auto";
       if (opts.responseSchema) params.outputSchema = opts.responseSchema;
       const started = await client.request("turn/start", params, 60_000);

@@ -1,4 +1,5 @@
 const DEFAULT_PORT = 8766;
+const RECONNECT_ALARM = "neko-browser-reconnect";
 const state = {
   port: DEFAULT_PORT,
   session: "",
@@ -22,7 +23,18 @@ async function restore() {
   const saved = await chrome.storage.local.get(Object.keys(state));
   Object.assign(state, saved);
   state.grants = { click: false, type: false, ...(saved.grants || {}) };
-  if (state.token && state.tabId != null) void connect(false).catch(() => {});
+  if (state.token && state.tabId != null) {
+    armReconnect();
+    void connect(false).catch(() => {});
+  }
+}
+
+function armReconnect() {
+  if (state.tabId != null) chrome.alarms.create(RECONNECT_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
+}
+
+function disarmReconnect() {
+  void chrome.alarms.clear(RECONNECT_ALARM);
 }
 
 async function persist() {
@@ -131,13 +143,14 @@ async function connect(allowPair) {
         if (state.tabId != null) void showIndicator().catch(() => {});
         clearInterval(pingTimer);
         pingTimer = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "ping" })), 20_000);
+        armReconnect();
         resolve();
       } else if (message.type === "command") {
         void execute(message);
       }
     };
     ws.onerror = () => reject(new Error("Neko bridge is offline"));
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       clearTimeout(timeout);
       clearInterval(pingTimer);
       pingTimer = null;
@@ -145,6 +158,8 @@ async function connect(allowPair) {
       readyPromise = null;
       state.connection = "offline";
       badge(state.tabId == null ? "" : "!", "#ef4444");
+      if (state.tabId != null) armReconnect();
+      reject(new Error(event.reason || `Neko bridge closed (${event.code})`));
     };
   }).finally(() => { readyPromise = null; });
   return readyPromise;
@@ -160,7 +175,18 @@ async function attachActiveTab() {
   if (!tab?.id || !/^https?:/.test(tab.url || "")) throw new Error("Open an http(s) tab before attaching");
   const sameTab = state.tabId === tab.id;
   if (!sameTab && state.tabId != null) await detach("switch-tab");
-  await connect(true);
+  try {
+    await connect(true);
+  } catch (error) {
+    // A deliberate attach gesture may repair a capability rotated with `neko browser rotate`.
+    // Never discard a valid saved capability merely because the bridge is temporarily offline.
+    if (!state.token || !/authentication failed/i.test(error?.message || String(error))) throw error;
+    state.session = "";
+    state.token = "";
+    await persist();
+    await connect(true);
+    record("pair", "rotated");
+  }
   const url = new URL(tab.url);
   if (sameTab) {
     state.tabHost = url.host;
@@ -177,6 +203,7 @@ async function attachActiveTab() {
   state.tabHost = url.host;
   state.tabOrigin = url.origin;
   state.tabTitle = tab.title || url.host;
+  armReconnect();
   try {
     await markAttachedTab(tab);
   } catch (error) {
@@ -206,6 +233,7 @@ async function detach(reason = "user") {
   state.createdGroupId = null;
   state.grants = { click: false, type: false };
   sensitiveRefs.clear();
+  disarmReconnect();
   await persist();
   badge("", null);
   record("detach", reason);
@@ -340,6 +368,11 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (tabId !== state.tabId || !change.url) return;
   try { if (new URL(change.url).origin !== state.tabOrigin) void detach("cross-origin-navigation"); }
   catch { void detach("invalid-navigation"); }
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== RECONNECT_ALARM || state.tabId == null || !state.token || state.connection !== "offline") return;
+  void connect(false).catch(() => {});
 });
 
 void restore();

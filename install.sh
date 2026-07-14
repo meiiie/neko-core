@@ -165,7 +165,7 @@ if [ -n "$FOUND" ] && [ "$FOUND" != "$TARGET" ]; then
 fi
 
 echo ""
-echo "Run 'neko' to get started!  Then use /login to choose ChatGPT, API, or another provider."
-echo "  neko doctor          - check provider / model / authentication"
-echo "  neko support status  - optional GPT-5.6 Sol/Terra/Luna support"
-echo "  neko --yolo   - auto-approve mode: Neko runs tools without asking"
+echo "Run 'neko' to get started."
+echo "  Inside Neko: /login connects ChatGPT, an API key, or another provider."
+echo "               /browser starts optional signed-in Chrome setup (no Bun command needed)."
+echo "  neko doctor - check provider / model / authentication"

@@ -30,12 +30,13 @@ test("htmlToMarkdown: HTML -> compact markdown (headings/links/lists kept; scrip
 test("paginateWeb: small page whole; large page split with a next-page footer (no truncation/content loss)", () => {
   // small -> returned as-is
   expect(paginateWeb("short content", 1)).toBe("short content");
-  // large (> MAX_READ_CHARS=100k) -> paginated, footer tells how to get more, nothing dropped
-  const big = "A".repeat(100_000) + "B".repeat(60_000); // 160k -> 2 pages
+  // large (> 40k safe observation page) -> paginated, footer tells how to get more, nothing dropped
+  const big = "A".repeat(40_000) + "B".repeat(25_000); // 65k -> 2 pages
   const p1 = paginateWeb(big, 1);
   expect(p1).toContain("page 1/2");
   expect(p1).toContain("page:2");        // tells the model how to continue
   expect(p1.startsWith("A")).toBe(true);
+  expect(p1.length).toBeLessThan(48_000); // never reaches Agent's head/tail clamp
   const p2 = paginateWeb(big, 2);
   expect(p2).toContain("page 2/2");
   expect(p2).toContain("last page");

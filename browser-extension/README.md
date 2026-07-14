@@ -7,13 +7,22 @@ see [PRIVACY.md](PRIVACY.md) for the exact boundary.
 
 ## Load locally
 
-1. Run `neko browser bridge` and keep that terminal open.
-2. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this folder.
-3. Open the target page, click the Neko extension, then **Attach this tab to Neko**.
-4. Enable click or typing only when the current task needs it. Emergency stop detaches immediately.
+Run `neko`, then ask it to browse a signed-in site or type `/browser`. Neko prepares this folder, opens `chrome://extensions`, starts the loopback
+bridge, and reports the setup in the same TUI. `neko browser install` is the non-TUI fallback; neither route
+requires Bun or a source checkout. Until the Chrome Web Store item is approved, enable Developer mode and
+choose **Load unpacked** once; the folder is opened for you. After Store publication, the same command opens the
+listing and Chrome asks for its one required Add-extension confirmation.
+
+Then open the target page, click Neko, and choose **Attach this tab to Neko**. Enable click or typing only when
+the current task needs it. Emergency stop detaches immediately. Later `neko` sessions start the bridge themselves;
+`neko browser bridge` remains a foreground diagnostic command.
 
 The attached page gets a visible indicator and `AI` badge. If it was not already grouped, Neko creates a
 temporary `Neko - AI active` tab group; existing user groups are left untouched.
+
+The extension reconnects the same attached tab after Chrome's background worker sleeps or Neko restarts.
+If `neko browser rotate` revoked the old capability, clicking **Attach** once performs a fresh user-approved
+pairing; temporary network/bridge outages never erase a valid saved pairing.
 
 The unpacked extension id is pinned to `koalaflndbcddboachbdfmppdeblldje`. The bridge accepts only that
 Chrome extension origin on loopback and authenticates reconnects with a per-session capability stored in

@@ -12,6 +12,8 @@ import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { setModel } from "../src/adapters/project.ts";
 import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "../src/adapters/chatgpt-voice.ts";
 import type { BrowserVoiceOptions } from "../src/adapters/browser-voice.ts";
+import { ensureBrowserCapability } from "../src/adapters/browser-bridge.ts";
+import { isInteractiveBrowserRequest } from "../src/ui/commands.ts";
 
 test("multimodal tool observations render as metadata + [image], never object coercion", () => {
   const content = [{ type: "text", text: "captured screen\n" }, { type: "image_url", image_url: { url: "data:image/gif;base64,AA" } }];
@@ -99,6 +101,75 @@ test("slash menu: Down navigates suggestions instead of rewinding the prompt; Ta
   await tick();
   expect(lastFrame() ?? "").toMatch(/\/h\w+/); // a full command name was filled into the prompt
   unmount();
+});
+
+test("/browser runs guided setup inside Neko without a Bun/source command", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-browser-onboarding-"));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  let setups = 0;
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const setupBrowser = async () => {
+      setups++;
+      ensureBrowserCapability(false, 18766);
+      return "Browser setup opened. Add to Chrome, then attach this tab to Neko.";
+    };
+    const { stdin, frames, unmount } = render(
+      <ChatApp fullscreen={false} yolo provider={provider} browserHint setupBrowser={setupBrowser} />,
+    );
+    expect(frames.join("\n")).toContain("no Bun or source command is required");
+    stdin.write("/browser"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("Browser setup opened"))).toBe(true);
+    expect(setups).toBe(1);
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("natural browser tasks offer setup without requiring the user to know /browser", async () => {
+  expect(isInteractiveBrowserRequest("hãy duyệt web và đọc Facebook của tôi")).toBe(true);
+  expect(isInteractiveBrowserRequest("search the web for Chrome extension docs")).toBe(false);
+
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-browser-intent-"));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  let setups = 0;
+  try {
+    const provider = new MockProvider([{ content: "Browser task started.", tool_calls: [] }]);
+    const setupBrowser = async () => {
+      setups++;
+      ensureBrowserCapability(false, 18767);
+      writeFileSync(join(home, ".neko-core", "browser-bridge-status.json"), JSON.stringify({
+        online: true,
+        updatedAt: Date.now(),
+        attached: { tabId: 7, host: "facebook.com", grants: { click: true, type: false } },
+      }));
+      return "Browser setup opened.";
+    };
+    const { stdin, frames, unmount } = render(
+      <ChatApp fullscreen={false} yolo provider={provider} setupBrowser={setupBrowser} />,
+    );
+    stdin.write("browse Facebook in Chrome"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("This task can use a signed-in browser tab"))).toBe(true);
+    expect(provider.index).toBe(0);
+
+    stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("Attach one Chrome tab, then continue"))).toBe(true);
+    expect(setups).toBe(1);
+
+    stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("Browser task started"))).toBe(true);
+    expect(provider.index).toBe(1);
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("auto mode: a safe tool call + markdown answer render end-to-end", async () => {
@@ -193,7 +264,7 @@ test("/login groups Google, recommends API key, and marks consumer OAuth as migr
   expect(await until(() => (lastFrame() ?? "").includes("Google - choose how to sign in"))).toBe(true);
   const frame = lastFrame() ?? "";
   expect(frame).toContain("Gemini Code Assist Standard/Enterprise");
-  expect(frame).toContain("Gemini API key (pay-as-you-go)");
+  expect(frame).toContain("Gemini API key (free tier / optional paid)");
   expect(frame).toContain("consumer plans moved to Antigravity");
   unmount();
 }, 15000);
@@ -238,7 +309,7 @@ test("/logout on Gemini removes only Gemini OAuth state immediately", async () =
   }
 }, 15000);
 
-test("/login offers one-step Gemini CLI setup for the recommended API-key route", async () => {
+test("/login keeps the recommended Gemini API-key route direct and Support-Pack free", async () => {
   const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldPath = process.env.PATH;
   const home = mkdtempSync(join(tmpdir(), "neko-gemini-first-run-"));
   process.env.HOME = home; process.env.USERPROFILE = home; process.env.PATH = "";
@@ -252,10 +323,11 @@ test("/login offers one-step Gemini CLI setup for the recommended API-key route"
     stdin.write("google"); await tick(30); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Google - choose how to sign in"))).toBe(true);
     stdin.write("\r");
-    expect(await until(() => (lastFrame() ?? "").includes("Gemini CLI Support Pack"))).toBe(true);
+    expect(await until(() => (lastFrame() ?? "").includes("paste the API key"))).toBe(true);
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("Install and continue");
-    expect(frame).toContain("No admin");
+    expect(frame).toContain("Gemini API key (free tier / optional paid)");
+    expect(frame).not.toContain("Install and continue");
+    expect(frame).not.toContain("Gemini CLI Support Pack");
     unmount();
   } finally {
     if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;

@@ -26,6 +26,7 @@ import {
   COMPACT_SAFETY_AT,
   clampObservation,
   estimateTokens,
+  SESSION_CONTEXT_MARK,
   type EventHook,
   type AgentOptions,
 } from "./agent-constants.ts";
@@ -82,13 +83,12 @@ export class Agent {
   private maxContextTokens: number;
   private readonly verifyBeforeExit: boolean;
   private readonly verifyStateChangesBeforeExit: boolean;
+  private readonly adaptiveEffort: boolean;
   readonly cost = new CostTracker();
   messages: any[] = [];
-  /** The single system message is `<base prompt>` + DYN_MARK + `<live session context>`.
+  /** The single system message is `<base prompt>` + SESSION_CONTEXT_MARK + `<live session context>`.
    * One system message only: some chat templates (Llama/Mistral on vLLM) suppress tool-calling
    * when a SECOND system message is present, so session context is merged in, never split out. */
-    private static readonly DYN_MARK = "\n\n<session-context>\n";
-
     // BROAD doom-loop state (distinct from the per-step exact-repeat `lastSig`/`repeats` guard):
     // (a) edits-per-path: the agent often loops editing ONE file with DIFFERENT args chasing a build
     //     error -- the exact-repeat guard never trips because every sig differs. Track per-path count
@@ -108,6 +108,7 @@ export class Agent {
     this.maxContextTokens = opts.maxContextTokens ?? 131072;
     this.verifyBeforeExit = Boolean(opts.verifyBeforeExit);
     this.verifyStateChangesBeforeExit = Boolean(opts.verifyStateChangesBeforeExit);
+    this.adaptiveEffort = Boolean(opts.adaptiveEffort);
   }
 
   /** Swap the LLM provider live (used by the REPL's /provider command to switch endpoint+key between turns,
@@ -209,8 +210,8 @@ export class Agent {
    * place -- head + a marker -- keeping the most recent ones full and never breaking tool_call/result
    * pairing. This is the "observation masking" approach SOTA long-horizon agents use. Returns true if
    * it freed anything (so the caller only falls back to a summary when there's nothing left to clip). */
-  private shrinkOldObservations(): boolean {
-    const CLIP = 1200, KEEP_RECENT = 3, MARK = "chars elided to fit context";
+  private shrinkOldObservations(keepRecent = 3, minSavingsChars = 0): boolean {
+    const CLIP = 1200, MARK = "chars elided to fit context";
     // A GUI loop can produce several base64 screenshots inside one user turn. Summarizing cannot help
     // that shape (there is no older user-turn boundary), so keep the two most recent visual states and
     // mask older tool images before clipping text. Two supports before/after comparison while bounding
@@ -218,8 +219,25 @@ export class Agent {
     const imageIdx = this.messages
       .map((m, i) => (m.role === "tool" && Array.isArray(m.content) && m.content.some((p: any) => p?.type === "image_url") ? i : -1))
       .filter((i) => i >= 0);
+    const oldImageIdx = imageIdx.slice(0, Math.max(0, imageIdx.length - 2));
+    const lastUser = this.messages.map((m, i) => (m.role === "user" ? i : -1)).filter((i) => i >= 0).pop() ?? -1;
+    const oldUserImageIdx = this.messages
+      .map((m, i) => (m.role === "user" && i !== lastUser && Array.isArray(m.content) && m.content.some((p: any) => p?.type === "image_url") ? i : -1))
+      .filter((i) => i >= 0);
+    const toolIdx = this.messages
+      .map((m, i) => (m.role === "tool" && typeof m.content === "string" ? i : -1))
+      .filter((i) => i >= 0);
+    const oldTextIdx = toolIdx.slice(0, Math.max(0, toolIdx.length - keepRecent))
+      .filter((i) => this.messages[i].content.length > CLIP + 80 && !this.messages[i].content.includes(MARK));
+    const imageSavings = [...oldImageIdx, ...oldUserImageIdx]
+      .reduce((sum, i) => sum + JSON.stringify(this.messages[i].content).length, 0);
+    const textSavings = oldTextIdx.reduce((sum, i) => sum + Math.max(0, this.messages[i].content.length - CLIP), 0);
+    // Context editing invalidates a cached prefix. Only do the proactive pass when it removes a
+    // meaningful chunk; the emergency overflow path passes zero and always frees whatever it can.
+    if (imageSavings + textSavings < minSavingsChars) return false;
+
     let shrank = false;
-    for (const i of imageIdx.slice(0, Math.max(0, imageIdx.length - 2))) {
+    for (const i of oldImageIdx) {
       const m = this.messages[i];
       m.content = m.content.map((p: any) => p?.type === "image_url"
         ? { type: "text", text: "[older tool image elided; capture/read it again if the current state is insufficient]" }
@@ -230,25 +248,17 @@ export class Agent {
     // created a death spiral: one oversized pasted image overflowed the window, the 400'd request left
     // the image in history, and every later turn re-sent it and 400'd forever - nothing could free it.
     // The CURRENT user turn's attachment is preserved (the model must get one full look at it).
-    const lastUser = this.messages.map((m, i) => (m.role === "user" ? i : -1)).filter((i) => i >= 0).pop() ?? -1;
-    for (let i = 0; i < this.messages.length; i++) {
+    for (const i of oldUserImageIdx) {
       const m = this.messages[i];
-      if (m.role !== "user" || i === lastUser || !Array.isArray(m.content)) continue;
-      if (!m.content.some((p: any) => p?.type === "image_url")) continue;
       m.content = m.content.map((p: any) => p?.type === "image_url"
         ? { type: "text", text: "[pasted image from an earlier turn elided to fit the context window - attach it again if still needed]" }
         : p);
       shrank = true;
     }
-    const toolIdx = this.messages
-      .map((m, i) => (m.role === "tool" && typeof m.content === "string" ? i : -1))
-      .filter((i) => i >= 0);
-    for (const i of toolIdx.slice(0, Math.max(0, toolIdx.length - KEEP_RECENT))) {
+    for (const i of oldTextIdx) {
       const m = this.messages[i];
-      if (m.content.length > CLIP + 80 && !m.content.includes(MARK)) {
-        m.content = m.content.slice(0, CLIP) + `\n... [${m.content.length - CLIP} ${MARK}] ...`;
-        shrank = true;
-      }
+      m.content = m.content.slice(0, CLIP) + `\n... [${m.content.length - CLIP} ${MARK}] ...`;
+      shrank = true;
     }
     return shrank;
   }
@@ -277,6 +287,10 @@ export class Agent {
         `CLOSED-LOOP REVIEW (pass ${i + 1}/${maxIters}). Goal: "${goal}".\n` +
           `First RE-INSPECT the ACTUAL current state (re-run the check / re-read the file / re-screenshot ` +
           `or re-read the UI) — judge what IS, not your memory of what you intended. Then compare against ` +
+          `the supplied source/docs and observable runtime output or side effects; use independent evidence, ` +
+          `not only the same happy-path check you authored. Run available repository tests from a clean state, ` +
+          `then remove disposable validation artifacts while preserving intended deliverables. If the deliverable ` +
+          `is a program, an output recreated by a clean run is disposable even when the goal names its path. Compare against ` +
           `the goal and a high quality bar. If it is FULLY met, reply with exactly "DONE" and nothing else. ` +
           `Otherwise, keep working: do the next concrete step now (don't stop until the goal is achieved).`,
         opts.signal,
@@ -294,9 +308,9 @@ export class Agent {
     this.messages = this.messages.filter((m) => !m.dynamic); // migrate legacy two-system sessions
     const sys = this.messages.find((m) => m.role === "system");
     if (!sys || typeof sys.content !== "string") return;
-    const base = sys.content.split(Agent.DYN_MARK)[0];
+    const base = sys.content.split(SESSION_CONTEXT_MARK)[0];
     const text = this.dynamicContext();
-    sys.content = text ? `${base}${Agent.DYN_MARK}${text}` : base;
+    sys.content = text ? `${base}${SESSION_CONTEXT_MARK}${text}` : base;
   }
 
   /** Replace the base system message with the current systemPrompt — so prompt improvements apply
@@ -304,8 +318,8 @@ export class Agent {
   refreshSystemPrompt(): void {
     const sys = this.messages.find((m) => m.role === "system");
     if (!sys || typeof sys.content !== "string") return;
-    const dyn = sys.content.split(Agent.DYN_MARK)[1]; // preserve any live session-context tail
-    sys.content = this.systemPrompt + (dyn !== undefined ? Agent.DYN_MARK + dyn : "");
+    const dyn = sys.content.split(SESSION_CONTEXT_MARK)[1]; // preserve any live session-context tail
+    sys.content = this.systemPrompt + (dyn !== undefined ? SESSION_CONTEXT_MARK + dyn : "");
   }
 
   /** Append text to the base system prompt (used by /skill). Inserted before the live session-context
@@ -316,8 +330,8 @@ export class Agent {
       this.messages.unshift({ role: "system", content: this.systemPrompt + "\n\n" + text });
       return;
     }
-    const [base, dyn] = sys.content.split(Agent.DYN_MARK);
-    sys.content = `${base}\n\n${text}` + (dyn !== undefined ? Agent.DYN_MARK + dyn : "");
+    const [base, dyn] = sys.content.split(SESSION_CONTEXT_MARK);
+    sys.content = `${base}\n\n${text}` + (dyn !== undefined ? SESSION_CONTEXT_MARK + dyn : "");
   }
 
     /** Execute a tool but NEVER throw: a malformed/failed tool call (e.g. a model emitting web_fetch with no
@@ -387,6 +401,7 @@ export class Agent {
 
     private static isStateChangingCall(call: { name: string; arguments?: Record<string, any> }): boolean {
       const name = call.name.toLowerCase();
+      if (name === "bash") return !Agent.isClearlyReadOnlyBash(call.arguments);
       if (MUTATING_TOOLS.has(name)) return true;
       if (name === "computer") {
         return !new Set(["list", "read", "get", "wait", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
@@ -394,6 +409,36 @@ export class Agent {
       // MCP browser adapters are outside core's static registry. Their read-only snapshot/content
       // tools deliberately do not match these common state-changing suffixes.
       return /(?:^|__)(?:browser_)?(?:click|type|fill|press_key|select_option|drag|upload_file|navigate|go_back|close|evaluate|run_code)$/.test(name);
+    }
+
+    /** Fail-closed shell effect classifier used only by the completion verifier. It does not change
+     * approvals or execution. A tiny whitelist avoids charging an extra model round for commands such
+     * as `echo ok`; any shell composition, substitution, redirection, backgrounding, or unknown command
+     * remains state-changing because it may alter files/processes or user-visible state. */
+    private static isClearlyReadOnlyBash(args?: Record<string, any>): boolean {
+      if (args?.run_in_background === true) return false;
+      const command = String(args?.command ?? "").trim();
+      if (!command || /[\r\n;&|<>`()]/.test(command) || /\$\(|@\(/.test(command)) return false;
+      const words = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+      const executable = String(words[0] ?? "").toLowerCase();
+      if (new Set([
+        ":", "echo", "printf", "pwd", "whoami", "hostname", "date", "true", "false",
+        "ls", "dir", "cat", "head", "tail", "wc", "stat", "file", "readlink", "realpath",
+        "rg", "grep",
+      ]).has(executable)) return true;
+      if (executable !== "git") return false;
+      const subcommand = String(words[1] ?? "").toLowerCase();
+      return new Set(["status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "describe"]).has(subcommand);
+    }
+
+    private static isMechanicalReadCall(call: { name: string; arguments?: Record<string, any> }): boolean {
+      const name = call.name.toLowerCase();
+      if (name === "bash") return Agent.isClearlyReadOnlyBash(call.arguments);
+      if (new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "mcp_load"]).has(name)) return true;
+      if (name === "computer") {
+        return new Set(["list", "read", "get", "display", "wait", "screenshot"]).has(String(call.arguments?.action ?? "").toLowerCase());
+      }
+      return false;
     }
 
     private static isVerificationEvidenceCall(call: { name: string; arguments?: Record<string, any> }, observation: unknown): boolean {
@@ -454,6 +499,7 @@ export class Agent {
     let changedRealState = false;
     let stateVerificationRequested = false;
     let stateVerificationEvidence = false;
+    let nextReasoningEffort: string | undefined;
     const noteTool = (call: { name: string; arguments?: Record<string, any> }, observation: unknown) => {
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
@@ -472,7 +518,15 @@ export class Agent {
       // In-loop overflow guard: within ONE turn (e.g. many huge browser snapshots) context can grow
       // past the window with no chance for the between-turn UI compaction to run. Compact here BEFORE a
       // request would overflow -- otherwise the server computes a negative max_tokens and 400s the turn.
-      if (estimateTokens(this.messages) > COMPACT_SAFETY_AT * this.maxContextTokens) {
+      let estimatedTokens = estimateTokens(this.messages);
+      // Cost guard, before the hard overflow guard: once a tool-heavy turn is substantial, clear old
+      // results only when doing so saves >=8k estimated tokens. Keep five recent observations. This
+      // mirrors provider context-editing guidance without churning the prompt cache for tiny wins.
+      const editAt = Math.min(50_000, 0.5 * this.maxContextTokens);
+      if (step > 0 && estimatedTokens > editAt && this.shrinkOldObservations(5, 32_000)) {
+        estimatedTokens = estimateTokens(this.messages);
+      }
+      if (estimatedTokens > COMPACT_SAFETY_AT * this.maxContextTokens) {
         // One long turn has a single user message, so compact()'s snap-to-user boundary frees nothing;
         // clip the oldest observations in place first (cheap, synchronous), and only pay for a summarizer
         // call if that found nothing to clip. The compact/compact_done events bracket ONLY that slow path,
@@ -508,7 +562,17 @@ export class Agent {
       };
       let response;
       try {
-        response = await this.provider.complete(this.messages, this.tools.schemas(), this.onDelta, signal, { onToolCallReady, executeTool });
+        response = await this.provider.complete(
+          this.messages,
+          this.tools.schemas(),
+          this.onDelta,
+          signal,
+          {
+            onToolCallReady,
+            executeTool,
+            ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : {}),
+          },
+        );
       } catch (error) {
         if (signal?.aborted) return "[interrupted]";
         throw error;
@@ -586,6 +650,7 @@ export class Agent {
 
       this.messages.push(assistantToolMessage(response.content, toolCalls, response.continuation));
       if (signal?.aborted) return "[interrupted]";
+      let stepHadUnproductiveResult = false;
 
       // Fleet fan-out: if every call in this batch is concurrency-safe (read-only or a sub-agent
       // task), run them in parallel; results are recorded in call order. Anything that mutates
@@ -596,6 +661,7 @@ export class Agent {
         const observations = await Promise.all(toolCalls.map((call) => eager.get(eagerKey(call)) ?? this.safeExecute(call, signal)));
         toolCalls.forEach((call, i) => {
           noteTool(call, observations[i]);
+          if (Agent.isUnproductiveResult(observations[i])) stepHadUnproductiveResult = true;
           this.emit("tool_result", { call, observation: observations[i] });
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observations[i]) });
         });
@@ -617,6 +683,7 @@ export class Agent {
               ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
               : await (eager.get(eagerKey(call)) ?? this.safeExecute(call, signal));
             noteTool(call, observation);
+            if (Agent.isUnproductiveResult(observation)) stepHadUnproductiveResult = true;
             // Track consecutive UNPRODUCTIVE results (failed OR empty) from ANY tool; a productive result
             // resets the streak. Catches the doom-loop the exact-repeat + edit guards structurally miss:
             // probing a heavy/obfuscated page with a DIFFERENT selector each time, every one returning []
@@ -657,6 +724,11 @@ export class Agent {
             }
           }
       }
+      nextReasoningEffort = this.adaptiveEffort
+        && !stepHadUnproductiveResult
+        && toolCalls.every((call) => Agent.isMechanicalReadCall(call))
+        ? "low"
+        : undefined;
     }
 
     // Step limit reached: instead of an abrupt stop, ask for one tool-less wrap-up so the user gets

@@ -4,28 +4,33 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-12) — v0.11.5 release
+## Current status (2026-07-14) — v0.12.0 release
 Neko Code is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
 
-- **Branch:** `self-improve`. **Current release: v0.11.5 (2026-07-12)** - Google is now a grouped auth
-  family with Gemini API-key and Code Assist Enterprise routes; browser control can retain signed-in
-  sessions through a dedicated profile or an explicitly attached Chrome tab; voice has local consent and
-  stop controls; and Windows computer use now shares one DPI-aware resident UIA/input/capture host with
-  post-action verification. Relay/mobile and transcript interaction also receive the same terminal-first
-  polish. Installers and the in-binary updater survive GitHub's public API quota without weakening
-  checksum/version verification, and plain update reliably clears a PowerShell-written pin. v0.9.0 remains
-  the rollback baseline while these optional integrations soak in the field.
-- **Gemini routes (corrected in v0.11.5):** Google ended Gemini CLI consumer OAuth for Free/AI Pro/Ultra on
-  2026-06-18. Neko now recommends the API-key route and retains CLI OAuth only for Code Assist
-  Standard/Enterprise. Both use the official Gemini CLI ACP protocol, dynamic
-  model discovery, scoped login/logout, image streaming, and usage metadata. An isolated loopback MCP proxy
-  disables sidecar-native tools/extensions/hooks and routes every action back through Neko's approval gate;
-  a compatible CLI can be reused, while the one-step managed Support Pack installs Google's verified bundle
-  and a private Node LTS runtime without admin/global npm. Antigravity remains separate until Google ships a
-  supported embedding protocol; Neko does not reuse its consumer credentials. The pack never enlarges the base download.
+- **Branch:** `main`. **Current release: v0.12.0 (2026-07-14)** - direct official Claude, xAI, Kimi,
+  DeepSeek, Gemini, and ChatGPT routes share provider-scoped continuation, model-aware effort, honest token
+  accounting, and stable cache seams. Browser control now has guided in-app onboarding and a reconnecting
+  explicit-tab extension; the public Harbor adapter evaluates the exact shipped harness against unmodified
+  Terminal-Bench verifiers. Neko preserves one continuous identity across social and task turns. v0.9.0
+  remains the rollback baseline while these provider and browser integrations soak in the field.
+- **Gemini routes (corrected 2026-07-13):** Google ended Gemini CLI consumer OAuth for Free/AI Pro/Ultra on
+  2026-06-18. The recommended API-key route now connects directly to Google's documented OpenAI-compatible
+  endpoint, including live model discovery, streaming, tools, vision, structured output, and scoped key
+  storage; it needs no sidecar. CLI OAuth and the isolated ACP Support Pack remain only for Code Assist
+  Standard/Enterprise, with all sidecar actions routed back through Neko's approval gate. Antigravity remains
+  separate; Neko does not reuse its credentials, imitate its client, or call private endpoints.
+- **Kimi/DeepSeek routes (released in v0.12.0):** Kimi Code now has a direct official device-OAuth
+  route with a Neko-owned restricted token store, automatic refresh, live model capabilities, and a separate
+  Platform API-key route. DeepSeek remains honestly API-key-only and targets V4 Pro/Flash with 1M context.
+  Tool-turn reasoning continuation is endpoint/model scoped, closing the multi-step harness gap without a
+  local proxy, shared cookies, or imported CLI credentials.
+- **Claude/xAI routes (released in v0.12.0):** Claude uses the official Messages API with adaptive thinking,
+  native structured output, and signed/redacted thinking continuation. xAI uses the official Responses API
+  for Grok 4.5 and Grok Build, with local encrypted continuation, cache affinity, streaming tools, vision,
+  retry, cancellation, and scoped API-key handling. Neither route impersonates a subscription client.
 - **Outcome-verified computer use (released in v0.11.0, 2026-07-12):** Neko now treats tool success as process
   evidence, not task completion. After real state changes, CLI/TUI/subagents reject a finish claim until a
   fresh successful inspection tool call exists. `computer display` establishes one Per-Monitor-v2 physical
@@ -328,11 +333,15 @@ cost/token tracking · MCP client · single-binary distribution.
   `activeTab`-only without `<all_urls>` or `debugger`. An `AI` badge, in-page Stop marker, and conservative
   `tabGroups` lifecycle make control visible without altering existing user groups. Public/unpacked origins
   are config-allowlisted; Store privacy/listing/reviewer docs, icons, deterministic packages, and release ZIP
-  automation are ready. Dashboard account registration, item-ID issuance, and review remain owner actions.
+  automation are ready. In-app `/browser` now provides the normal guided Store/local onboarding flow;
+  `neko browser install` remains its non-TUI fallback, and normal
+  Neko sessions own the bridge lifecycle automatically. Dashboard registration, item-ID issuance, and review
+  remain owner actions because consumer Chrome keeps the final installation confirmation.
   See `docs/process/BROWSER-BRIDGE.md`.
 - [ ] **G14** Finish public Neko Browser Extension distribution after the owner creates the Chrome Web
   Store item: replace the development key/id with the Dashboard public key/id, capture clean listing media,
-  submit a staged first release, and dogfood update/reconnect behavior. Keep Playwright persistent-profile
+  submit a staged first release, and dogfood Store update behavior. The developer/GitHub ZIP is usable now;
+  reconnect across worker/Neko restarts and explicit re-pair after capability rotation are implemented. Keep Playwright persistent-profile
   operation first-class so Neko remains fully usable without the extension.
 
 ## Phase H — real-terminal UX/UI polish (July 2026)

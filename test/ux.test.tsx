@@ -38,7 +38,7 @@ function renderFullscreen(node: any) {
 class Echo implements Provider {
   async complete(_m: any, _t: any, onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
     onDelta?.("hello");
-    return { content: "hello", tool_calls: [], usage: { prompt_tokens: 1000, completion_tokens: 10, total_tokens: 1010 } };
+    return { content: "hello", tool_calls: [], usage: { prompt_tokens: 1000, completion_tokens: 10, total_tokens: 1010, cached_tokens: 800 } };
   }
 }
 
@@ -93,6 +93,7 @@ test("first-run status bar names the missing model instead of showing a dangling
 test("ThinkingLine shows effort + per-turn tokens split input/output", () => {
   const f = strip(render(<ThinkingLine verb="Thinking" elapsed={11} liveIn={() => 1200} liveOut={() => 340} step={1} queued={0} effort="xhigh" />).lastFrame());
   expect(f).toContain("xhigh effort");
+  expect(f).toContain("turn total");
   expect(f).toContain("↑1.2k");   // input (context sent)
   expect(f).toContain("↓340");    // output (generated)
   expect(f).toContain("esc to interrupt");
@@ -373,6 +374,10 @@ test("post-turn run-time line + placeholder drops after first turn", async () =>
   await tick(20);
   c.stdin.write("\r");
   expect(await until(c, (f) => /for \d+s/.test(f))).toBe(true); // completion line appears
+  const frames = strip(c.frames.join("\n"));
+  expect(frames).toContain("last context ↑1.0k ↓10");
+  expect(frames).toContain("cache ↑800 (80%)");
+  expect(frames).not.toMatch(/chat\s+fast path/);
   expect(strip(c.lastFrame())).not.toContain("Try:"); // placeholder gone
   c.unmount();
 });

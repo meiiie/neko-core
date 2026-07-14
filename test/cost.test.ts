@@ -33,6 +33,18 @@ test("CostTracker.add handles missing usage, total fallback, and partial fields"
   expect(t.totalTokens).toBe(1099); // 100 + 999, the explicit value, not 100 + 70
   expect(t.lastPrompt).toBe(50);
   expect(t.lastCompletion).toBe(20);
+  expect(t.summary()).toContain("last request: 50 input / 20 output");
+  expect(t.summary()).toContain("session cumulative is not one prompt");
+});
+
+test("CostTracker rejects malformed negative/NaN counters and clamps cached input to the prompt", () => {
+  const t = new CostTracker();
+  t.add({ prompt_tokens: 100, completion_tokens: Number.NaN, total_tokens: -1, cached_tokens: 500 });
+  expect(t.promptTokens).toBe(100);
+  expect(t.completionTokens).toBe(0);
+  expect(t.totalTokens).toBe(100);
+  expect(t.cachedTokens).toBe(100);
+  expect(t.summary()).toContain("100% of in");
 });
 
 // Cache-read accounting is provider-shape-agnostic: the anthropic adapter reports a flat
@@ -58,4 +70,13 @@ test("CostTracker counts cached tokens from both usage shapes and reports the hi
   const noCache = new CostTracker();
   noCache.add({ prompt_tokens: 10, completion_tokens: 1 });
   expect(noCache.summary()).not.toContain("cached"); // silent when the provider reports none
+});
+
+test("CostTracker reports cache writes separately without inflating context tokens", () => {
+  const t = new CostTracker();
+  t.add({ prompt_tokens: 100, completion_tokens: 5, cache_write_tokens: 80 });
+  expect(t.cacheWriteTokens).toBe(80);
+  expect(t.lastCacheWrite).toBe(80);
+  expect(t.totalTokens).toBe(105);
+  expect(t.summary()).toContain("80 cache-written");
 });

@@ -1,11 +1,12 @@
 /** `neko doctor` terminal/input diagnostics - the "renders but won't take keys" triage surface. */
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { loadConfig, NekoConfig } from "../src/adapters/config.ts";
 import { collectChecks, collectTerminalChecks, terminalName } from "../src/adapters/doctor.ts";
+import { saveKimiCredentials } from "../src/adapters/kimi-auth.ts";
 
 test("terminalName identifies the host from the env, most-specific first", () => {
   expect(terminalName({ TERM_PROGRAM: "WezTerm", WT_SESSION: "x" } as any)).toBe("WezTerm");
@@ -35,6 +36,45 @@ test("doctor names the optional Gemini CLI dependency without treating it as an 
   const checks = collectChecks(cfg, undefined, { state: "missing", detail: "not installed" });
   expect(checks.find((check) => check.name === "model")).toMatchObject({ status: "warn", detail: expect.stringContaining("official Gemini CLI") });
   expect(checks.find((check) => check.name === "base_url")).toMatchObject({ status: "ok", detail: expect.stringContaining("ACP stdio") });
+});
+
+test("doctor requires a client key when a loopback profile declares API-key auth", () => {
+  const cfg = new NekoConfig(
+    { provider: "openai_compat", model: "test", base_url: "http://127.0.0.1:9999/v1" },
+    "gateway",
+    { gateway: { auth: "api_key" } },
+    "",
+  );
+  expect(collectChecks(cfg).find((check) => check.name === "api_key")).toMatchObject({ status: "warn", detail: expect.stringContaining("missing") });
+});
+
+test("doctor names the active provider's key environment variable", () => {
+  const cfg = new NekoConfig(
+    { provider: "responses", model: "grok-4.5", base_url: "https://api.x.ai/v1" },
+    "xai",
+    { xai: { auth: "api_key", key_env: "XAI_API_KEY" } },
+    "",
+  );
+  expect(collectChecks(cfg).find((check) => check.name === "api_key")?.detail).toContain("XAI_API_KEY");
+});
+
+test("doctor does not claim Kimi account access before the first request verifies it", () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-doctor-kimi-"));
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  try {
+    saveKimiCredentials({ accessToken: "access", refreshToken: "refresh", expiresAt: Math.floor(Date.now() / 1000) + 3600, expiresIn: 3600 });
+    const config = new NekoConfig({ provider: "kimi" }, "kimi", { kimi: { auth: "kimi_oauth" } }, "");
+    const check = collectChecks(config).find((item) => item.name === "kimi_auth")!;
+    expect(check.status).toBe("ok");
+    expect(check.detail).toContain("access is checked on the first request");
+    expect(check.detail.includes("signed in")).toBe(false);
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("doctor distinguishes durable, attached, and ephemeral browser sessions", () => {

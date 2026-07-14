@@ -22,8 +22,8 @@ Neko Browser Bridge makes browser control visible and reversible:
 - a local, redacted action audit;
 - no cookie access and no connection to Neko Relay.
 
-The extension requires Neko Core running on the same computer. Start `neko browser bridge`, open the
-extension on the tab you want to use, and choose **Attach this tab to Neko**.
+The extension requires Neko Core running on the same computer. Start `neko`, ask it to browse a signed-in
+site (or type `/browser`), then open the extension on the tab you want and choose **Attach this tab to Neko**.
 
 ## Single purpose
 
@@ -38,22 +38,25 @@ least-privilege browser controls.
 - `storage`: preserves the local pairing capability, permission switches, and a redacted 20-entry audit.
 - `tabGroups`: marks an otherwise ungrouped attached tab as `Neko - AI active`. Existing user groups are
   never renamed or rearranged, and a Neko-created group is removed on detach.
+- `alarms`: wakes the Manifest V3 background worker every 30 seconds only while a tab remains attached, so
+  the authenticated loopback connection can recover after Chrome suspends the worker or Neko restarts.
 
 The extension requests no host permissions, `cookies`, `debugger`, `downloads`, or `<all_urls>` access.
 It executes no remote-hosted code. The loopback protocol accepts only a fixed, reviewable command set.
 
 ## Data-use disclosure
 
-Disclose **Website content**, **Web browsing activity**, and **User activity** because visible page data
-is processed even though it first stays on the user's machine. State that the extension does not collect
-authentication information, financial information, personal communications, or location, and link the
-published `PRIVACY.md`. Keep the Dashboard answers exactly consistent with the privacy policy.
+Disclose **Website content**, **Web browsing activity**, **User activity**, and **Personal communications**:
+an explicitly attached mail/chat/social tab can contain communications even though Neko only reads a compact
+visible-element snapshot. State that authentication information, financial information, and location are not
+collected, and link the published `PRIVACY.md`. Keep the Dashboard answers exactly consistent with the policy.
 
 ## Required listing media
 
 - 128 x 128 extension icon: `icons/icon-128.png` (already included).
 - At least one 1280 x 800 or 640 x 400 screenshot showing the popup and visible page indicator.
 - 440 x 280 small promotional tile.
+- A public YouTube promo video URL is listed among the current Dashboard graphic assets.
 - Optional 1400 x 560 marquee tile.
 
 Do not include private sites, account names, cookies, tokens, or personal content in screenshots.

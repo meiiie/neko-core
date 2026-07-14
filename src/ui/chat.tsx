@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { readFileSync, rmSync } from "node:fs";
 
 import { ApprovalBox, type Approval, type ApprovalFlash } from "./approval-box.tsx";
-import { runSlashCommand, SLASH } from "./commands.ts";
+import { isInteractiveBrowserRequest, runSlashCommand, SLASH } from "./commands.ts";
 import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { loadPrefs, savePrefs } from "../adapters/prefs.ts";
 import { clampFps, detectRefreshRate, resolveUiFps } from "../adapters/display.ts";
@@ -41,6 +41,7 @@ import { describeImage } from "../adapters/vision.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
 import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt, openBrowser } from "../adapters/chatgpt-auth.ts";
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginGemini } from "../adapters/gemini-cli.ts";
+import { clearKimiCredentials, hasKimiCredentials, loginKimi } from "../adapters/kimi-auth.ts";
 import { installGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
 import { compareCodexVersions, discoverCodexSupport } from "../adapters/codex-app-server.ts";
 import { installCodexSupportPack } from "../adapters/codex-support-pack.ts";
@@ -49,7 +50,13 @@ import { BrowserVoiceSession, type BrowserVoiceOptions } from "../adapters/brows
 import { authChoices, providerChoices } from "../adapters/provider-choice.ts";
 import { type RemoteAction, type RemoteHandlers, startRemoteControl, type RemoteControl, type RemoteUiState } from "../adapters/remote-control.ts";
 import { loadOrCreatePairing, loadOrCreateSessionPairing, relaySessionCode, revokeRemoteRelay, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
-import { readBrowserBridgeStatus } from "../adapters/browser-bridge.ts";
+import {
+  ensureBrowserCapability,
+  readBrowserBridgeStatus,
+  readBrowserCapability,
+  startManagedBrowserBridge,
+} from "../adapters/browser-bridge.ts";
+import { openBrowserExtensionSetup } from "../adapters/browser-extension-install.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { VERSION } from "../shared/version.ts";
@@ -105,9 +112,11 @@ interface ChatProps {
   voiceFactory?: (options: ChatGptVoiceOptions) => ChatGptVoiceControl;
   browserVoiceFactory?: (options: BrowserVoiceOptions) => ChatGptVoiceControl;
   openUrl?: (url: string) => void;
+  browserHint?: boolean;
+  setupBrowser?: () => Promise<string>;
 }
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -123,6 +132,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const relayRef = useRef<RemoteRelay | null>(null);
   const relayScopeRef = useRef<{ key: string; hub: boolean; url: string } | null>(null);
   const relayHostIdRef = useRef(newSessionId()); // one opaque remote-control slot per running TUI
+  const browserRequestBypassRef = useRef<string | null>(null);
   const remoteSinkRef = useRef<((chunk: string) => void) | null>(null); // streams a turn's output to a remote SSE client
   const remoteActRef = useRef<((line: string) => void) | null>(null); // streams tool-activity lines (the phone's process ticker)
   const remoteLineRef = useRef<((kind: LineKind, text: string) => void) | null>(null); // collects info/error lines for a remote turn
@@ -172,8 +182,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       out.push({ id: idRef.current++, kind: "info", text: "ChatGPT is not signed in - type /login to connect Plus/Pro (no API billing)." });
     } else if (cfg.usesGeminiAuth && !hasGeminiCredentials()) {
       out.push({ id: idRef.current++, kind: "info", text: "Google is not configured - type /login for a Gemini API key or Code Assist Enterprise." });
-    } else if (!cfg.apiKey && !cfg.isLocalEndpoint && !cfg.usesChatGptAuth && !cfg.usesGeminiAuth) {
+    } else if (cfg.usesKimiAuth && !hasKimiCredentials()) {
+      out.push({ id: idRef.current++, kind: "info", text: "Kimi Code is not signed in - type /login to connect your account (no API key)." });
+    } else if (!cfg.apiKey && !cfg.isLocalEndpoint && !cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.usesKimiAuth) {
       out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
+    }
+    if (browserHint) {
+      out.push({
+        id: idRef.current++,
+        kind: "info",
+        text: "Browser control is optional - ask Neko to browse, or type /browser. Guided setup appears only when needed; no Bun or source command is required.",
+      });
     }
     return out;
   });
@@ -217,6 +236,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const toolStreamRef = useRef(""); // streamed tool-call args this turn (counted, not displayed)
   const turnInStartRef = useRef(0); // cost.promptTokens at turn start  -> live INPUT (up) counter, this turn's delta
   const turnOutStartRef = useRef(0); // cost.completionTokens at turn start -> live OUTPUT (down) counter, this turn's delta
+  const turnCallsStartRef = useRef(0); // usage-bearing provider calls; distinguishes a turn sum from one request
   const turnStartedAtRef = useRef(0);
   // Recover the todo tracker for a session resumed AT STARTUP (--resume/--continue), so its plan shows.
   const [todos, setTodos] = useState<{ content: string; status: string }[]>(() =>
@@ -414,7 +434,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         parent,
       );
       const systemPrompt = (type && loadAgent(type)?.body) || DEFAULT_SYSTEM_PROMPT; // named agent role, else default
-      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps, maxContextTokens: cfg.contextWindow, verifyBeforeExit: cfg.verifyBeforeExit, verifyStateChangesBeforeExit: true }).run(prompt);
+      return await new Agent({ provider: provider ?? getProvider(cfg), tools: subReg, systemPrompt, maxSteps: cfg.maxSteps, maxContextTokens: cfg.contextWindow, verifyBeforeExit: cfg.verifyBeforeExit, verifyStateChangesBeforeExit: true, adaptiveEffort: cfg.adaptiveEffort }).run(prompt);
     };
     // web_fetch's optional extractor: one model pass over the fetched page (Claude-style).
     registryRef.current.summarize = async (instruction, content, schema) => {
@@ -450,6 +470,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       maxContextTokens: cfg.contextWindow,
       verifyBeforeExit: cfg.verifyBeforeExit,
       verifyStateChangesBeforeExit: true,
+      adaptiveEffort: cfg.adaptiveEffort,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () =>
@@ -1298,6 +1319,70 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     });
   };
 
+  const runBrowserRequest = (text: string) => {
+    browserRequestBypassRef.current = text;
+    setInput("");
+    void handle(text).catch((error) => addLine("error", error instanceof Error ? error.message : String(error)));
+  };
+
+  const offerBrowserAttach = (text: string) => {
+    setInput(text);
+    setOverlay({
+      title: "Attach one Chrome tab, then continue",
+      items: [
+        { id: "continue", label: "Continue with attached tab", detail: "Neko verifies the local bridge before running your request" },
+        { id: "setup", label: "Open browser setup again", detail: "use this if Neko Browser is not installed or needs repair" },
+        { id: "without", label: "Continue without browser control", detail: "use web search/fetch or other available tools" },
+      ],
+      onSelect: (choice) => {
+        if (choice.id === "continue") {
+          const status = readBrowserBridgeStatus();
+          if (!status?.online || !status.attached) {
+            addLine("info", "No attached tab detected yet. In Chrome, open Neko Browser on the target tab and choose 'Attach this tab to Neko'.");
+            return;
+          }
+          setOverlay(null);
+          runBrowserRequest(text);
+          return;
+        }
+        if (choice.id === "without") {
+          setOverlay(null);
+          runBrowserRequest(text);
+          return;
+        }
+        setOverlay(null);
+        void handle("/browser setup")
+          .then(() => offerBrowserAttach(text))
+          .catch((error) => {
+            setInput(text);
+            addLine("error", error instanceof Error ? error.message : String(error));
+          });
+      },
+    });
+  };
+
+  const offerBrowserSetup = (text: string) => {
+    if (readBrowserCapability()) return offerBrowserAttach(text);
+    setInput(text);
+    setOverlay({
+      title: "This task can use a signed-in browser tab",
+      items: [
+        { id: "setup", label: "Set up Neko Browser", detail: "recommended - Chrome asks once; only the tab you attach is controllable" },
+        { id: "without", label: "Continue without browser control", detail: "use web search/fetch or other available tools" },
+      ],
+      onSelect: (choice) => {
+        setOverlay(null);
+        if (choice.id === "without") return runBrowserRequest(text);
+        void handle("/browser setup")
+          .then(() => offerBrowserAttach(text))
+          .catch((error) => {
+            setInput(text);
+            addLine("error", error instanceof Error ? error.message : String(error));
+          });
+      },
+    });
+  };
+
   const handle = async (text: string) => {
     if (text.startsWith("#")) {
       addLine("info", rememberNote(text.slice(1)));
@@ -1432,11 +1517,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       };
       const apiProfiles = new Set<string>();
       for (const [name, profile] of Object.entries(cfg.profiles)) {
-        if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "none") continue;
+        if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "kimi_oauth" || profile.auth === "none") continue;
         try { if (loadConfig({ profile: name }).apiKey) apiProfiles.add(name); } catch { /* status only */ }
       }
       const openAuthRoutes = (family: string) => {
-        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), apiProfiles });
+        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), kimi: hasKimiCredentials(), apiProfiles });
         const selectRoute = async (route: { id: string }) => {
           setOverlay(null);
           const profile = cfg.profiles[route.id];
@@ -1489,6 +1574,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             }
             return;
           }
+          if (profile?.auth === "kimi_oauth") {
+            setBusy(true);
+            addLine("info", "Opening official Kimi Code device sign-in in your browser...");
+            try {
+              await loginKimi({ notify: (message) => addLine("info", message) });
+              activate(route.id);
+              addLine("info", "Kimi Code connected. Neko owns and refreshes this session; no API key or proxy is used. Type /model to load your account catalog.");
+            } catch (error) {
+              addLine("error", `Kimi sign-in failed: ${error instanceof Error ? error.message : error}`);
+            } finally {
+              setBusy(false);
+            }
+            return;
+          }
           activate(route.id);
           setAwaitingKey(true);
           addLine("info", `${profile?.label || route.id}: paste the API key, then Enter (input hidden). Empty Enter cancels without removing the old key.`);
@@ -1527,10 +1626,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         agentRef.current?.setProvider(getProvider(cfg));
         return;
       }
-      const keyEnv = cfg.profile ? cfg.profiles[cfg.profile]?.key_env : undefined;
-      const hadEnvironmentKey = Boolean(process.env.NEKO_API_KEY || (keyEnv && process.env[keyEnv]));
+      if (cfg.usesKimiAuth) {
+        addLine("info", `${clearKimiCredentials()} Kimi API keys and other provider sessions were left untouched.`);
+        agentRef.current?.setProvider(getProvider(cfg));
+        return;
+      }
+      const keyEnvs = cfg.profileKeyEnvs;
+      const hadEnvironmentKey = Boolean(process.env.NEKO_API_KEY || keyEnvs.some((name) => process.env[name]));
       delete process.env.NEKO_API_KEY;
-      if (keyEnv) delete process.env[keyEnv];
+      for (const name of keyEnvs) delete process.env[name];
       const profile = cfg.profile;
       const result = clearApiKey(profile ?? undefined);
       cfg.adopt(loadConfig({ profile: profile ?? undefined }));
@@ -1565,10 +1669,21 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         copy: copyTranscript,
         setFps: applyFps,
         setTitle: applyTitle,
+        setupBrowser,
         exit,
       });
       relayRef.current?.refresh();
       return;
+    }
+
+    const bypassBrowserSetup = browserRequestBypassRef.current === text;
+    if (bypassBrowserSetup) browserRequestBypassRef.current = null;
+    else if (!voiceTurnRef.current && setupBrowser && isInteractiveBrowserRequest(text)) {
+      const status = readBrowserBridgeStatus();
+      if (!status?.online || !status.attached) {
+        offerBrowserSetup(text);
+        return;
+      }
     }
 
     if (voiceRef.current && !voiceTurnRef.current) {
@@ -1642,6 +1757,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // Baselines at turn start -> the spinner shows THIS turn's tokens (delta), split input/output.
     turnInStartRef.current = agentRef.current!.cost.promptTokens;
     turnOutStartRef.current = agentRef.current!.cost.completionTokens;
+    turnCallsStartRef.current = agentRef.current!.cost.calls;
     turnStartedAtRef.current = turnStart;
     busyRef.current = true; // sync now so a keystroke landing this instant queues (not just after render)
     setBusy(true);
@@ -1661,7 +1777,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // Whole-turn tokens split by direction (input up / output down), matching the live spinner.
         const inTok = Math.max(0, agentRef.current!.cost.promptTokens - turnInStartRef.current);
         const outTok = Math.max(0, agentRef.current!.cost.completionTokens - turnOutStartRef.current);
-        addLine("info", `${verbRef.current} for ${fmtDuration(secs)} · ${UP}${fmtTok(inTok)} ${DOWN}${fmtTok(outTok)} tokens`);
+        const calls = Math.max(0, agentRef.current!.cost.calls - turnCallsStartRef.current);
+        const lastPrompt = agentRef.current!.cost.lastPrompt;
+        const lastCached = agentRef.current!.cost.lastCached;
+        const cache = lastCached > 0
+          ? ` · cache ${UP}${fmtTok(lastCached)} (${Math.round((100 * lastCached) / Math.max(1, lastPrompt))}%)`
+          : "";
+        const last = calls > 0
+          ? ` · last context ${UP}${fmtTok(lastPrompt)} ${DOWN}${fmtTok(agentRef.current!.cost.lastCompletion)}${cache}`
+          : " · provider usage unavailable";
+        addLine("info", `${verbRef.current} for ${fmtDuration(secs)} · turn total ${UP}${fmtTok(inTok)} ${DOWN}${fmtTok(outTok)} tokens` +
+          (calls > 1 ? ` across ${calls} model calls` : "") + last);
       }
       // Auto-compact when the context window is nearly full (Claude-style), on the ACCURATE last-request
       // token count. runCompaction shows the progress bar + a "freed ~Nk" line, so no bare notice needed.
@@ -2158,7 +2284,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             verb={todos.find((t) => t.status === "in_progress")?.content ?? verbRef.current}
             elapsed={elapsed}
             // Both re-read every 80ms frame so the meters count up live.
-            // liveIn: input (context) tokens billed this turn — grows each step as history is re-sent.
+            // liveIn: cumulative input billed this turn — grows each step as history is re-sent.
             liveIn={() => Math.max(0, agentRef.current!.cost.promptTokens - turnInStartRef.current)}
             // liveOut: output tokens counted this turn + a ~4-chars/token estimate of whatever is
             // streaming NOW (content, reasoning, or a big tool-call's args) — so it climbs even mid-write.
@@ -2324,6 +2450,30 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const id = resumed?.id ?? newSessionId();
   const cfg = loadConfig({ profile: opts.profile });
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);
+  const showBrowserHint = !readBrowserCapability() && !loadPrefs().browserHintSeen;
+  if (showBrowserHint) savePrefs({ browserHintSeen: true });
+  let browserBridge = startManagedBrowserBridge({ extensionIds: cfg.browserExtensionIds });
+  const setupBrowser = async (): Promise<string> => {
+    const capability = ensureBrowserCapability(false);
+    if (!browserBridge) {
+      browserBridge = startManagedBrowserBridge({ capability, extensionIds: cfg.browserExtensionIds });
+    }
+    const setup = await openBrowserExtensionSetup({ storeId: cfg.browserExtensionStoreId });
+    if (setup.mode === "store") {
+      return [
+        "Neko Browser Extension opened in the Chrome Web Store.",
+        "Choose 'Add to Chrome', then open the extension on the tab you want and choose 'Attach this tab to Neko'.",
+        "Neko stays running, detects the connection, and starts this local bridge automatically next time.",
+      ].join("\n");
+    }
+    return [
+      "Neko Browser Extension is prepared locally while the public Store listing is pending.",
+      `folder: ${setup.path}`,
+      "In the opened extensions page: enable Developer mode, choose 'Load unpacked', and select that folder.",
+      "Then open the extension on the tab you want and choose 'Attach this tab to Neko'.",
+      setup.opened ? "" : "No supported Chromium browser was detected; open chrome://extensions manually.",
+    ].filter(Boolean).join("\n");
+  };
   // Ink's own synchronized clear (app.clear) threaded in via a holder - the app instance doesn't exist
   // until render() returns, so ChatApp calls the holder, which we point at app.clear right after.
   // Synchronized-output support: trust the env allowlist first (fast, covers all common local terminals);
@@ -2373,7 +2523,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const startFullscreen = cfg.fullscreen && canFullscreen(process.stdout);
   const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
   const app = render(
-    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} />,
+    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} />,
     // Bracket each (already-minimized) write in BSU/ESU on terminals that support DEC 2026
     // (synchronized output) so redraws are atomic - no flicker, no Windows scrollback yank.
     {
@@ -2399,6 +2549,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     // conversation lives in the session file, one `neko --resume` away.
     differ?.dispose(); // stop the self-heal timer before the terminal is restored
     emergencyRestore(); // full terminal restore (cursor, mouse, main screen, title) - idempotent on clean exits
+    browserBridge?.close();
     await hub.close();
     console.log(`\nResume this session with:\n  neko --resume ${id}\n`);
   }

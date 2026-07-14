@@ -29,6 +29,7 @@ export const TOOL_SPECS: ToolSpec[] = [
     parameters: {
       path: { type: "string", description: "File path, relative to the project root." },
       offset: { type: "number", description: "1-based line number to start from (for paging large files)." },
+      column: { type: "number", description: "1-based character offset within the first selected line (for paging a very long/minified line)." },
       limit: { type: "number", description: "Maximum number of lines to return from offset." },
     },
     required: ["path"],
@@ -240,11 +241,12 @@ export const TOOL_SPECS: ToolSpec[] = [
     name: "playbook",
     permission: SAFE,
     gatedActions: ["add", "revise", "remove"],
-    summary: "Your evolving operating playbook (always in your context). read | add | revise | remove. Mutating actions are approval-gated.",
+    summary: "Your evolving operating playbook. read | search | add | revise | remove. The context has compact excerpts; search returns matching full lessons. Mutations are approval-gated.",
     parameters: {
-      action: { type: "string", enum: ["read", "add", "revise", "remove"], description: "What to do." },
+      action: { type: "string", enum: ["read", "search", "add", "revise", "remove"], description: "What to do." },
       content: { type: "string", description: "The lesson/strategy bullet (for add, or the refined text for revise)." },
       find: { type: "string", description: "Text identifying the bullet to revise/remove." },
+      query: { type: "string", description: "Keywords that all must occur in a lesson, for search." },
     },
     required: ["action"],
   },

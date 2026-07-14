@@ -370,7 +370,9 @@ one never blocks another.
   budget (the Terminal-Bench failure mode). Bench: flat-or-up pass-rate, fewer wasted steps on
   error-prone tasks; primarily a *correctness/budget* win.
 
-- [ ] **Per-step adaptive reasoning effort (Ares).** Neko sends ONE fixed `reasoning_effort`
+- [x] **Per-step adaptive reasoning effort (Ares).** *(done 2026-07-13: provider-port request hint,
+  fail-closed mechanical-read classifier, cross-adapter effort negotiation, and deterministic tests;
+  remains opt-in until a multi-trial model benchmark justifies changing the quality default.)* Neko previously sent ONE fixed `reasoning_effort`
   for the whole run: `cfg.effort` is baked into the provider payload on every `complete()`
   (`adapters/providers.ts` + `adapters/anthropic.ts` thinking budget), and the user only
   changes it manually via `/effort`. So a run either burns maximum thinking tokens on a
