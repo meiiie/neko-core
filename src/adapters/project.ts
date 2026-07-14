@@ -1,6 +1,6 @@
 /**
  * Scaffold the local config files (config-first). `neko init-user` writes the
- * claude.json-style ~/.neko-core/config.json; `neko init` writes a project-local
+ * claude.json-style ~/.neko-core/config.json plus create-once identity/core-memory files; `neko init` writes a project-local
  * ./.neko-core/config.json. Neither is committed (both gitignored). Env vars override.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -9,6 +9,7 @@ import { homeDir } from "../shared/home.ts";
 import { dirname, join } from "node:path";
 
 import { LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME } from "./config.ts";
+import { ensureNekoHome } from "./context.ts";
 
 const userConfigPath = () => join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME);
 
@@ -194,14 +195,24 @@ const PROJECT_TEMPLATE = {
 };
 
 export function initUser(force = false): string {
-  return write(join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), USER_TEMPLATE, force);
+  const config = write(join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), USER_TEMPLATE, force);
+  const state = ensureNekoHome();
+  const identity = state.identity;
+  const identityMessage = identity.error
+    ? `Neko Core identity unavailable: ${identity.error}`
+    : `Neko Core identity ${identity.created ? "ready" : "kept"}: ${identity.path}`;
+  const memoryMessage = state.memory.errors.length
+    ? `Neko Core memory unavailable: ${state.memory.errors.join("; ")}`
+    : `Neko Core memory ${state.memory.created.length ? "ready" : "kept"}: ${state.memory.dir}`;
+  return `${config}\n${identityMessage}\n${memoryMessage}`;
 }
 
 function nekoMdTemplate(name: string): string {
-  return `# ${name} — notes for Neko
+  return `# ${name} — notes for Neko Core
 
 What this project is, how to run it, and the conventions Neko should follow. Neko loads this
-file (and any NEKO.md up to the repo root, plus ~/.neko-core/NEKO.md) into its context.
+project file after the global identity in ~/.neko-core/NEKO.md, so project rules stay separate
+from Neko Core's biography and ~/.neko-core/memory/ observations.
 
 ## Commands
 - build:

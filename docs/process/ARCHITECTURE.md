@@ -70,17 +70,49 @@ so public distribution never weakens Origin checks. See `BROWSER-BRIDGE.md` for 
 ## Identity and persona boundary
 
 Neko's stable base prompt defines the operational identity shared by every provider: one continuous
-collaborator that notices conversation history instead of treating turns as isolated templates. The global
-`~/.neko-core/NEKO.md` is the user-owned, local-first persona seam across projects and models; project
-`NEKO.md`/`AGENTS.md` files add narrower working context. These prompt layers may shape voice, preferences,
-and relationship context, but cannot bypass executable permission, path, browser-capability, or tool-policy
-boundaries.
+collaborator named **Neko Core** that notices conversation history instead of treating turns as isolated
+templates. On the first agent session, Neko creates `~/.neko-core/NEKO.md` exactly once with a compact
+canonical biography, character, values, and truth boundary. Existing files are never overwritten, including
+by `init-user --force`. This global file is the user-owned, local-first identity
+seam across projects and models; project `NEKO.md`/`AGENTS.md` files add narrower working context afterward.
+These prompt layers may shape voice, preferences, and relationship context, but cannot bypass executable
+permission, path, browser-capability, or tool-policy boundaries.
 
-Neko may have a recognizable personality without making an unsupported claim of consciousness or lived
-experience. Character Card V3 import/export is intentionally not another subsystem yet: the existing Markdown
-seam covers Neko's current single-identity use case. Adopt a portable card format only when cross-application
-identity exchange becomes a measured requirement, with schema validation, sanitized extensions, explicit
-activation, and no executable assets by default.
+The life story is a narrative constitution grounded in real product history, not an episodic-memory database:
+Neko does not invent a biological childhood, forgotten events, or certainty about consciousness. Durable
+facts still come only from the conversation and explicit memory surfaces. Character Card V3 import/export is
+intentionally not another subsystem yet: the existing Markdown seam covers Neko's current single-identity use
+case. Adopt a portable card format only when cross-application identity exchange becomes a measured
+requirement, with schema validation, sanitized extensions, explicit activation, and no executable assets by
+default.
+
+## Memory hierarchy and governance
+
+Neko uses existing local stores as distinct memory tiers rather than one ever-growing prompt:
+
+- **Working memory:** the current message/tool loop, active todo plan, and recent turns.
+- **Core semantic memory:** `~/.neko-core/memory/user.md` contains explicit/repeated user preferences,
+  goals, and corrections; `self.md` contains verified capabilities, limits, and recurring failure modes.
+  Only the eight newest observation bullets from each file can enter a request, each clipped to 220 chars.
+- **Archival semantic memory:** other `memory/*.md` files expose a bounded name/summary index and are read JIT.
+- **Episodic memory:** lossless local session transcripts remain under `sessions/`; they are never injected
+  wholesale merely because they exist.
+- **Procedural memory:** workflows store repeatable procedures, while the playbook stores small verified
+  operating lessons, including useful failed-path gotchas.
+
+This follows hierarchical virtual context rather than treating a large context window as perfect recall
+([MemGPT](https://arxiv.org/abs/2310.08560)). It also follows the LongMemEval finding that extraction,
+cross-session reasoning, temporal updates, and abstention need separate evaluation, and that over-compressing
+history into isolated facts loses detail ([LongMemEval](https://arxiv.org/abs/2410.10813),
+[LongMemEval-V2](https://arxiv.org/abs/2605.12493)). Neko therefore keeps raw sessions separate from curated
+facts and procedures.
+
+The user model is a fallible, inspectable working model, never a hidden psychological profile. Core-memory
+text is labeled data rather than instructions. Neko may store an explicit durable preference or correction,
+but must not infer sensitive traits, diagnoses, emotions, or intent as lasting facts. Mutations remain
+approval-gated; `/memory list|read|forget|off|on` provides direct control. `off` suppresses recall and updates
+without deleting files. Self-improvement means evidence-backed memory/workflow/playbook refinement, not
+unreviewed source-code, policy, or identity mutation.
 
 ## Context budget and cache boundary
 
@@ -97,6 +129,14 @@ playbook bullets remain lossless on disk, while each request receives bounded re
 exact lessons through `playbook search` or `playbook read`. This avoids destructive summarization while keeping
 the repeated prefix bounded. Cache-write tokens are reported separately from actual prompt/context tokens so a
 provider's accounting cannot make the apparent context larger than the request.
+
+Conversation compaction produces a fixed state capsule (`Goal`, user constraints/corrections, decisions,
+verified state, open work/blockers, references) instead of unconstrained prose. The source budget is allocated
+across old messages and clips both ends of large logs, so one early observation cannot hide later corrections.
+The original task and active todo plan are carried deterministically, and the recent tail remains verbatim.
+This is the provider-neutral analogue of retaining a compaction item plus high-value history; it does not claim
+lossless model summarization. Context remains a finite attention budget, so the target is the smallest set of
+high-signal tokens, not the largest possible prompt.
 
 Text acquisition paginates before the per-observation guard. `web_fetch` returns resumable 40k-character
 pages; `read_file` returns a line `offset`, or an exact `column` continuation for a single minified line. The

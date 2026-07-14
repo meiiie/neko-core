@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Agent, clampObservation, estimateTokens, MAX_OBS_CHARS } from "../src/core/agent.ts";
-import { DEFAULT_SYSTEM_PROMPT } from "../src/core/agent-constants.ts";
+import { COMPACTION_PROMPT, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent-constants.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 class ScriptedProvider {
@@ -16,6 +16,8 @@ class ScriptedProvider {
 }
 
 test("system prompt requires observable acceptance criteria before implementation", () => {
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("You are Neko Core");
+  expect(DEFAULT_SYSTEM_PROMPT).not.toContain("You are Neko Code");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("OBSERVABLE acceptance criteria");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("supplied source/docs");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("self-authored happy-path check is not a substitute");
@@ -168,6 +170,7 @@ test("compact keeps system + recent turns verbatim and summarizes the older ones
     provider: new ScriptedProvider([{ content: "SUMMARY HERE", tool_calls: [] }]) as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
+
   agent.messages = [
     { role: "system", content: "base" },
     { role: "user", content: "OLD1" }, // older than the tail -> summarized
@@ -190,6 +193,37 @@ test("compact keeps system + recent turns verbatim and summarizes the older ones
     expect(contents).toContain("RECENT"); // recent turn kept verbatim
     expect(contents).not.toContain("OLD1"); // oldest turn folded into the summary
   });
+
+test("compaction uses a structured capsule and a giant tool result cannot hide a later correction", async () => {
+  let request: any[] = [];
+  const provider = {
+    async complete(messages: any[]) {
+      request = messages;
+      return { content: "## Goal\ncontinue", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "ORIGINAL GOAL" },
+    { role: "assistant", content: "working" },
+    { role: "tool", content: `TOOL-BEGIN ${"x".repeat(30_000)} TOOL-END` },
+    { role: "assistant", content: "first interpretation" },
+    { role: "user", content: "CORRECTION: keep the public API backwards compatible" },
+    { role: "assistant", content: "understood" },
+    { role: "user", content: "tail 1" }, { role: "assistant", content: "a1" },
+    { role: "user", content: "tail 2" }, { role: "assistant", content: "a2" },
+    { role: "user", content: "tail 3" }, { role: "assistant", content: "a3" },
+    { role: "user", content: "tail 4" }, { role: "assistant", content: "a4" },
+  ];
+  await agent.compact();
+  expect(request[0].content).toBe(COMPACTION_PROMPT);
+  expect(request[0].content).toContain("## Verified state");
+  expect(request[1].content).toContain("TOOL-BEGIN");
+  expect(request[1].content).toContain("TOOL-END");
+  expect(request[1].content).toContain("CORRECTION: keep the public API backwards compatible");
+  expect(request[1].content.length).toBeLessThanOrEqual(40_000);
+});
 
   test("compact clips a dense few-line tool result by char count (line guard alone misses it)", async () => {
     // A minified/base64-style blob: long in chars, short in lines -> the line-count guard (>40 lines)

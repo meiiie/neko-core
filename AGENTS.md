@@ -1,7 +1,7 @@
-# Neko Code — working notes for Codex
+# Neko Core — working notes for Codex
 
-**Neko Code** is a local-first terminal coding agent (Codex / Codex-CLI class), built
-in **TypeScript + Bun + Ink**. Its engine/library is **Neko Core** (package `neko-core`).
+**Neko Core** is a local-first terminal coding agent (Codex / Codex-CLI class), built
+in **TypeScript + Bun + Ink**. Its engine/library is the package `neko-core`.
 The command is `neko`. Roadmap + history: `docs/process/ROADMAP.md`, `docs/process/WORKLOG.md`.
 Working rules: `docs/process/RULES.md`.
 
@@ -20,7 +20,7 @@ enforced by `test/architecture.test.ts`).
 | **`adapters/`** (edge) | |
 | `adapters/providers.ts` | `openai_compat` over `fetch`: SSE streaming, retry, abort (implements `Provider`). |
 | `adapters/config.ts` | Config-first loader: overlay (built-in → profile preset → `~/.neko-core` → `./.neko-core` → `NEKO_*`) + profiles. Key read on demand, never stored/printed. |
-| `adapters/mcp.ts` · `adapters/session.ts` · `adapters/context.ts` · `adapters/skills.ts` | MCP client · session persistence/resume · project context (NEKO.md/AGENTS.md) · `.md` skills. |
+| `adapters/mcp.ts` · `adapters/session.ts` · `adapters/context.ts` · `adapters/skills.ts` | MCP client · session persistence/resume · global identity + project context (NEKO.md/AGENTS.md) · `.md` skills. |
 | `adapters/registry.ts` · `adapters/doctor.ts` · `adapters/project.ts` | capabilities + `policy` audit · `doctor` diagnostics · `init` scaffolds. |
 | `adapters/tool-registry.ts` | Shared CLI/TUI/subagent composition for native web, skills, vision, sandbox and inherited safety boundaries. |
 | **`shared/`** | `version.ts` (leaf). |

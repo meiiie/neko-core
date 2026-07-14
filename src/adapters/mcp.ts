@@ -383,7 +383,7 @@ export function renderMcp(hub: McpHub): string {
   if (!hub.serverNames.length) {
     return "No MCP servers connected.";
   }
-  const lines = [`Neko Code MCP — ${hub.serverNames.length} server(s):`];
+  const lines = [`Neko Core MCP — ${hub.serverNames.length} server(s):`];
   for (const name of hub.serverNames) {
     const m = hub.serverInfo(name);
     lines.push(`  ${name} [${m?.type ?? "?"}] — ${m?.tools ?? 0} tools, ${m?.resources ?? 0} resources, ${m?.prompts ?? 0} prompts`);

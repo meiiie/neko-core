@@ -1,21 +1,20 @@
-# Neko Code — Roadmap to "Claude-Code level"
+# Neko Core — Roadmap to "Claude-Code level"
 
-> **Goal:** evolve the Neko Core engine into **Neko Code**, a terminal coding agent in the
+> **Goal:** evolve **Neko Core** into a terminal coding agent in the
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-14) — v0.12.0 release
-Neko Code is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
+## Current status (2026-07-14) — v0.12.1 release
+Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
 
-- **Branch:** `main`. **Current release: v0.12.0 (2026-07-14)** - direct official Claude, xAI, Kimi,
-  DeepSeek, Gemini, and ChatGPT routes share provider-scoped continuation, model-aware effort, honest token
-  accounting, and stable cache seams. Browser control now has guided in-app onboarding and a reconnecting
-  explicit-tab extension; the public Harbor adapter evaluates the exact shipped harness against unmodified
-  Terminal-Bench verifiers. Neko preserves one continuous identity across social and task turns. v0.9.0
-  remains the rollback baseline while these provider and browser integrations soak in the field.
+- **Branch:** `main`. **Current release: v0.12.1 (2026-07-14)** - Neko Core now has one public name and
+  a create-once local identity. Bounded, inspectable user/self memory is separate from raw sessions and
+  workflows; structured compaction preserves goals, corrections, evidence, and open work. The direct official
+  Claude, xAI, Kimi, DeepSeek, Gemini, and ChatGPT routes from v0.12.0 remain unchanged. v0.9.0 remains the
+  rollback baseline while these identity and memory changes soak in the field.
 - **Gemini routes (corrected 2026-07-13):** Google ended Gemini CLI consumer OAuth for Free/AI Pro/Ultra on
   2026-06-18. The recommended API-key route now connects directly to Google's documented OpenAI-compatible
   endpoint, including live model discovery, streaming, tools, vision, structured output, and scoped key
@@ -81,9 +80,10 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `CLAUDE.md` (codebase map) · `docs/self-improve/` (the Neko-improves-Neko loop + its idea `BACKLOG.md`).
 
 ## Naming
-- **Neko Code** = the product / CLI experience (the Claude-Code analog).
-- **Neko Core** = the engine/library at the heart of it (package `neko-core`, `src/`).
-- The command stays `neko`. Full doc/brand rename is the last milestone (avoid churn now).
+- **Neko Core** is the single product, agent identity, engine, and public brand (package `neko-core`).
+- The command stays `neko`; `neko core` is an explicit alias and `neko code` remains a legacy alias so
+  existing scripts do not break.
+- The earlier two-name split is preserved only in historical worklog/changelog entries.
 
 ## IP / legal boundary (non-negotiable)
 The local `claude-code` tree is studied **only as a reference for patterns/architecture/UX**.
@@ -104,7 +104,7 @@ cost/token tracking · MCP client · single-binary distribution.
 - [x] **A3** Real coding tool set: `edit` (exact unique string replace, gated), `glob` (Bun.Glob), `ls` (safe); `search` is the scoped grep. *(done — typecheck clean, policy PASS; smoke: edit unique/not-found/ambiguous, glob, ls)*
 - [x] **A4** Streaming responses (SSE) + token tracking (`src/cost.ts`; per-call usage accumulated). *(done — live `neko run` streams tokens via SSE and prints `tokens: in/out/total`. $-cost left to a future per-model price config.)*
 
-### Phase B — UX (the Ink TUI = "Neko Code")
+### Phase B — UX (the Ink TUI = Neko Core)
 - [x] **B1** Ink chat REPL (`src/ui/chat.tsx`): streaming render, interleaved tool-call lines, inline approval prompt (y/a/n), thinking spinner, one Agent across turns, `/reset`/`/exit`. *(typecheck clean; module imports under Bun; non-TTY guard degrades to a hint. Full interactive render pending the owner's terminal.)*
 - [x] **B2** Slash commands (`/help` `/cost` `/model` `/profiles` `/init` `/clear` `/reset` `/exit`), input history (↑/↓), multiline (trailing `\` continuation). *(typecheck clean; module imports under Bun)*
 - [x] **B3** Permission modes (`src/permissions.ts`): default / accept-edits / plan / auto; Shift+Tab cycles in chat; surfaced in doctor/capabilities/policy; `NEKO_MODE` override. *(verified: plan denies writes, accept-edits auto-approves edits but prompts bash, auto allows all; typecheck clean)*
@@ -117,7 +117,8 @@ cost/token tracking · MCP client · single-binary distribution.
 ### Phase D — Polish & distribution
 - [x] **D1** `bun test` suite — 44 tests across config, providers, permissions, tools, runtime, registry, agent, context, session. *(all pass; typecheck clean)*
 - [x] **D2** `bun build --compile` single binary (`dist/neko`, react-devtools-core bundled for Ink); re-pointed the `neko` command from the pipx(Python) install to the TS binary in `~/.local/bin`. *(verified: `which neko` → the binary; live `neko run` called a tool)*
-- [x] **D3** Renamed to **Neko Code** (README + CLAUDE.md refreshed for the TS product; engine stays "Neko Core"); secret-scan + merge to `main` + push (owner-approved).
+- [x] **D3** The TS product was initially named **Neko Code**; the owner later unified product, engine,
+  and agent identity under **Neko Core** while retaining `neko code` as a compatibility alias.
 
 ## Loop rules
 - One milestone per iteration: implement → verify (typecheck + `bun test` + run) → commit → tick here + note in `WORKLOG.md`.

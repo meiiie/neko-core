@@ -1,11 +1,11 @@
 ![Neko Core](assets/neko-core-banner.png)
 
-# Neko Code
+# Neko Core
 
 > **Một chú mèo trong terminal — chỉ muốn meo meo, và làm việc.** A **local-first, extensible terminal
 > agent** that codes, browses, remembers — and through **skills, MCP, and an evolving memory** grows into
 > new roles, from sourcing goods to driving a browser. Built on **TypeScript + Bun + Ink**,
-> **provider-agnostic**, **offline-capable**. Engine: **Neko Core**.
+> **provider-agnostic**, **offline-capable**.
 
 **By [The Wiii Lab](https://github.com/meiiie).** MIT-licensed — contributions welcome.
 
@@ -79,10 +79,14 @@ Neko is built to take on new roles, one skill and one tool at a time:
   (research, source, and plan a purchase across Vietnamese retailers — humans approve and buy); another
   drives a browser and reads screenshots back with vision to verify a UI frame by frame. A skill is a
   markdown file, not a fork; built-in skills and their helper scripts ship inside the single binary.
-- **Self-improving memory** — durable facts (`memory`), learned `workflows` (procedures it distills by
-  doing), and an always-on `playbook` it refines over time, so it gets better with use.
-  Neko's identity is local-first too: `~/.neko-core/NEKO.md` carries the user's chosen voice and durable
-  relationship context across projects and models without weakening tool permissions.
+- **Governable memory** — raw episodes stay in local sessions; durable facts use JIT-recalled `memory`;
+  verified procedures use `workflows`; and an evidence-grounded `playbook` captures operating lessons.
+  Two bounded core profiles keep only recent `user.md` and `self.md` observations in active context.
+  `/memory` shows the whole layout; `/memory off` stops recall and updates without deleting anything;
+  `list`, `read`, and `forget` keep the user in control.
+  Neko's identity is local-first too: the first agent session creates `~/.neko-core/NEKO.md` once with
+  Neko Core's compact origin story, character, values, and truth boundary. It is never overwritten and
+  cannot weaken tool permissions. Project `NEKO.md` files remain separate project instructions.
 - **Remote control from any device** — type `/relay`, scan the QR, and drive Neko from your phone
   anywhere; the agent **dials out** (no open port) over an **end-to-end-encrypted** relay you host.
 - **Auto-update** — Neko keeps itself current like Claude Code: a daily startup check installs new
@@ -110,7 +114,7 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > Fallback if the domain is unreachable: swap the URL for
 > `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
-**Current release: [v0.12.0](https://github.com/meiiie/neko-core/releases/tag/v0.12.0).**
+**Current release: [v0.12.1](https://github.com/meiiie/neko-core/releases/tag/v0.12.1).**
 Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
 real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). **Pin or roll back any time**
 (the pin holds — auto-update won't undo it): `neko update 0.9.0`, or at install time
@@ -287,10 +291,10 @@ and [quota](https://github.com/google-gemini/gemini-cli/blob/main/docs/resources
 For API-key or local-model providers:
 
 ```bash
-neko init-user                 # scaffold ~/.neko-core/config.json (API key + profile)
+neko init-user                 # scaffold user config + identity + bounded local memory
 # edit ~/.neko-core/config.json: set api_key + model (or use env NEKO_API_KEY)
 neko doctor                    # check provider/model/key
-neko                           # start the interactive session  (also: neko code / neko core)
+neko                           # start the interactive session  (also: neko core; legacy: neko code)
 ```
 
 Keep it current with `neko update`.
@@ -310,7 +314,7 @@ bun bin/neko.ts doctor         # or run directly via Bun, no build needed
 `neko` (session, default) · `run <task>` · `config` · `doctor` · `profiles` · `init[-user]` · `tools` ·
 `agents` · `commands` · `capabilities` · `policy` · `context` · `sessions` · `mcp` · `login` · `logout` · `update`.
 
-Bare `neko` (or `neko code` / `neko core`) starts the interactive session.
+Bare `neko` (or `neko core`; legacy `neko code`) starts the interactive session.
 `--profile <name>` selects a runtime profile · `--yolo` auto-approves gated tools ·
 `neko --resume` continues the latest session.
 
@@ -324,7 +328,7 @@ safe/gated boundary). The architecture (Ports & Adapters) is in
 
 ## Heritage
 
-Neko Code began as a config-first inference harness for **HackAIthon 2026 — Bảng C** (team Neko Core,
+Neko Core began as a config-first inference harness for **HackAIthon 2026 — Bảng C** (team Neko Core,
 Vietnam Maritime University). The competition entry stays frozen at
 [`meiiie/bang_c`](https://github.com/meiiie/bang_c). The original standalone port was written in Python
 and is preserved as the **spec/reference** under [`reference/python/`](reference/python/); the shipping

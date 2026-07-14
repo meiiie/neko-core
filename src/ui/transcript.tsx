@@ -121,7 +121,7 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
           <Logo />
           <Box flexDirection="column" marginLeft={2}>
             <Text>
-              <Text bold color="white">Neko Code</Text> <Text color="#9a9a9a">v{VERSION}</Text>
+              <Text bold color="white">Neko Core</Text> <Text color="#9a9a9a">v{VERSION}</Text>
             </Text>
             <Text color="#9a9a9a">
               <Text color="white">{(cfg.model || "no model").split("/").pop()}</Text>

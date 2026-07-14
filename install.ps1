@@ -1,4 +1,4 @@
-# Neko Code installer (Windows) — downloads a standalone binary; no Bun required.
+# Neko Core installer (Windows) — downloads a standalone binary; no Bun required.
 #   Latest:  irm https://neko.holilihu.online/install.ps1 | iex
 #   Pinned:  & ([scriptblock]::Create((irm https://neko.holilihu.online/install.ps1))) -Version 0.9.0
 #            (or set $env:NEKO_VERSION='v0.9.0' before the one-liner)
@@ -97,7 +97,7 @@ if ($rel) {
 }
 $label = $tag
 
-Write-Step "Installing Neko Code $tag (windows-x64)..."
+Write-Step "Installing Neko Core $tag (windows-x64)..."
 
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $stage = Join-Path $dir ".neko-download-$PID.exe"

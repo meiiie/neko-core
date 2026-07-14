@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { clearApiKey, patchUserConfig, setActiveProfile, setApiKey, setModel } from "../src/adapters/project.ts";
+import { clearApiKey, initUser, patchUserConfig, setActiveProfile, setApiKey, setModel } from "../src/adapters/project.ts";
 import { loadConfig } from "../src/adapters/config.ts";
 
 // project.ts resolves the user config under homedir(); point that at a temp dir per test.
@@ -29,6 +29,21 @@ test("a malformed user config is NOT clobbered by setModel (no data loss)", () =
   const path = withTempHome('{ "api_key": "SECRET", "mcp_servers": { "x": {} } BROKEN');
   expect(() => setModel("m")).toThrow(/invalid JSON/);
   expect(readFileSync(path, "utf-8")).toContain("SECRET"); // api_key preserved, not overwritten
+});
+
+test("init-user creates Neko Core identity once and force never overwrites it", () => {
+  const configPath = withTempHome("{}");
+  const identityPath = join(process.env.USERPROFILE!, ".neko-core", "NEKO.md");
+  const first = initUser();
+  expect(first).toContain("Neko Core identity ready");
+  expect(first).toContain("Neko Core memory ready");
+  expect(readFileSync(identityPath, "utf-8")).toContain("## Life story");
+
+  writeFileSync(identityPath, "# User-owned identity\n", "utf-8");
+  const forced = initUser(true);
+  expect(forced).toContain("Neko Core identity kept");
+  expect(readFileSync(identityPath, "utf-8")).toBe("# User-owned identity\n");
+  expect(JSON.parse(readFileSync(configPath, "utf-8"))).toBeTruthy();
 });
 
 test("setModel with an ACTIVE profile writes into that profile and clears the shadowing top-level model", () => {

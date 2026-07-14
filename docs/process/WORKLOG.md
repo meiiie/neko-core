@@ -3,6 +3,51 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-14 - Governable memory hierarchy and loss-aware compaction
+- Reused the stores Neko already had instead of adding a vector/graph database: current turns are working
+  memory, sessions are raw episodic history, `memory/*.md` is semantic memory, and workflows/playbook are
+  procedural memory. First startup now creates `memory/user.md` and `self.md` once beside the existing global
+  identity; user edits are never overwritten.
+- Added a bounded always-on core-memory view: at most eight recent observation bullets per core file, clipped
+  to 220 chars. Everything else remains JIT behind a bounded index. Search now normalizes accents, scores query
+  terms, and returns the ten strongest files instead of requiring one exact substring. `append` preserves the
+  rest of a profile rather than asking a model to rewrite it.
+- The user model is explicitly a fallible working model, not a hidden psychological profile. It accepts only
+  explicit/repeated preferences, goals, and corrections with provenance/confidence/date; sensitive traits,
+  diagnoses, inferred emotion/intent, secrets, and one-off chatter are excluded. `self.md` is restricted to
+  verified capabilities/limits. Core-memory text is labeled data, not instructions, and mutations stay gated.
+- `/memory` now shows the storage tiers and supports `on`, `off`, `list`, `read`, `forget`, and `identity`.
+  Turning memory off suppresses recall and mutation while preserving local files; `/remember --user` writes an
+  explicit dated observation into `user.md` instead of growing the identity prompt.
+- Replaced free-form compaction with a fixed continuation capsule for the goal, corrections, decisions,
+  verified state, open work/blockers, and references. A fair per-message source budget plus head/tail clipping
+  prevents a huge early tool result from hiding later corrections; original task, todos, and recent turns keep
+  their deterministic/verbatim paths.
+- Research basis: Anthropic's finite attention-budget/context-engineering guidance, OpenAI's compaction-item
+  design and memory controls, MemGPT's tiered virtual context, Stanford's observation/reflection/planning
+  architecture, and LongMemEval/V2's separation of raw rounds, facts, temporal updates, workflows, gotchas,
+  and abstention. No SOTA claim is made without running those capability classes as repeatable evals.
+- Verification: TypeScript current + stable clean; **710/710 tests, 2,920 assertions, 78 files**; policy PASS;
+  production Windows binary compiled and passed `__uiprobe` plus the real-PTY input probe; existing 2,181-char
+  user identity remained untouched. The `v0.12.1` release candidate also passed the real-ConPTY ghost/input
+  gate 3/3 and the scroll/resize/slash-keyboard bench (14 ms first response, 157 ms settle). Bun's post-build
+  directory-mismatch diagnostic remained non-fatal after the artifact and both probes succeeded.
+
+## 2026-07-14 - One Neko Core name and a local life story
+- Unified the current public product, agent prompt, TUI, installer, Relay fallback, MCP client, context lists,
+  and living documentation under **Neko Core**. `neko` remains the primary command; `neko core` is explicit
+  and `neko code` remains a legacy alias so existing automation is not broken. Historical changelog/worklog
+  entries retain the old two-name record instead of rewriting history.
+- The global `~/.neko-core/NEKO.md` now has a compact canonical template: identity, an origin story grounded in
+  the real HackAIthon/The Wiii Lab lineage, character, values, and continuity/truth rules. It is
+  created on the first agent session or `init-user` with exclusive-create semantics and is never overwritten,
+  even by `--force`; project `NEKO.md` remains a separate project-instruction layer. Mutable cross-project
+  observations moved to the separate memory hierarchy in the entry above.
+- The biography is a narrative constitution, not synthetic episodic memory or a consciousness claim. It tells
+  Neko to preserve continuity across model providers, admit absent memories, distinguish preference/inference
+  from verified fact, and avoid guilt, exclusivity, or dependency. Permission and tool policy remain
+  authoritative.
+
 ## 2026-07-14 - Identity continuity over a greeting fast path
 - Reverted the zero-tool conversation fast path after the owner's real multi-turn test. It cut a fresh
   greeting payload by 99.3%, but repeated greetings sounded like isolated canned responses and lost Neko's

@@ -75,5 +75,5 @@ export function renderRecipes(): string {
   if (!list.length) {
     return "No recipes. Add *.md to ~/.neko-core/recipes/ or ./.neko-core/recipes/ (body = the prompt; use $ARGUMENTS).";
   }
-  return ["Neko Code recipes:", ...list.map((r) => `- ${r.name}${r.description ? "  " + r.description : ""}`)].join("\n");
+  return ["Neko Core recipes:", ...list.map((r) => `- ${r.name}${r.description ? "  " + r.description : ""}`)].join("\n");
 }

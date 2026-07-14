@@ -1,4 +1,4 @@
-# Neko Code — Claude-Code parity backlog
+# Neko Core — Claude-Code parity backlog
 
 Continuous goal: keep closing the gap to Claude Code, clean-room (study patterns, never copy),
 karpathy + ponytail. Tick as shipped (each verified + committed).

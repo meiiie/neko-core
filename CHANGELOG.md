@@ -1,10 +1,30 @@
 # Changelog
 
-All notable changes to Neko Code are documented here. The format follows
+All notable changes to Neko Core are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
 
 ## [Unreleased]
+
+## [0.12.1] — 2026-07-14
+
+### Added
+- The first agent session now creates `~/.neko-core/NEKO.md` once with a compact, editable origin story,
+  character, values, and truth boundary. Existing identity files are never
+  overwritten, including by forced config initialization.
+- Zero-setup memory bootstrap creates separate `memory/user.md` and `self.md` core profiles once. `/memory`
+  exposes status, list/read/forget, identity, and non-destructive on/off controls.
+
+### Changed
+- Product, agent, TUI, installer, Relay, MCP, and documentation naming is unified under **Neko Core**.
+  The `neko code` command remains as a compatibility alias for existing scripts.
+- Global `NEKO.md` is explicitly the cross-project identity/life-story layer, while project `NEKO.md` files
+  remain project-specific instructions and memory. Mutable cross-project observations stay in bounded core
+  profiles instead of growing the identity prompt. Narrative history cannot grant permissions or substitute
+  invented memories for evidence.
+- Compaction now emits a structured continuation capsule and fairly clips every old message, preserving goals,
+  corrections, decisions, verification evidence, open work, and references without letting one huge tool result
+  consume the summarizer input. Archival search uses token/accent matching instead of exact-substring-only recall.
 
 ## [0.12.0] — 2026-07-14
 

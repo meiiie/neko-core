@@ -15,6 +15,7 @@ import { listSessionMetas, loadSession, renameSession, sessionTitle, type Sessio
 import { listSkills, loadSkill } from "../adapters/skills.ts";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { listTools } from "../core/tools.ts";
+import { deleteMemoryFile, listMemories, memoryEnabled, readMemoryFile, setMemoryEnabled } from "../core/memory.ts";
 import { fmtBytes, relativeTime, trunc } from "./format.ts";
 import type { Overlay } from "./select-list.tsx";
 import type { Line, LineKind } from "./transcript.tsx";
@@ -70,8 +71,8 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/retry", desc: "re-run the last message (e.g. after an error)" },
   { name: "/effort", desc: "model-aware reasoning preference (/effort <level>|default|list)" },
   { name: "/context", desc: "window capacity, last request, and next-request estimate" },
-  { name: "/memory", desc: "show NEKO.md memory/context files" },
-  { name: "/remember", desc: "save a note to NEKO.md (or start a line with #)" },
+  { name: "/memory", desc: "inspect/control local memory (/memory [on|off|list|read|forget|identity])" },
+  { name: "/remember", desc: "save a project note or explicit cross-project user observation" },
   { name: "/recipe", desc: "run a saved recipe (/recipe <name> [args])" },
   { name: "/recipes", desc: "list saved recipes" },
   { name: "/mcp", desc: "list connected MCP tools + prompts" },
@@ -853,8 +854,40 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       if (!note) return addLine("info", "usage: /remember [--user] <note>   (or just start a line with #)");
       return addLine("info", rememberNote(note, userScope ? "user" : "project"));
     }
-    case "/memory":
-      return addLine("info", renderContext() + "\n(edit NEKO.md for project memory, ~/.neko-core/NEKO.md for global; or use /remember / #note)");
+    case "/memory": {
+      const rest = input.slice("/memory".length).trim();
+      const [action = "status", ...parts] = rest.split(/\s+/);
+      const name = parts.join(" ").trim();
+      if (action === "on") return addLine("info", setMemoryEnabled(true));
+      if (action === "off") return addLine("info", setMemoryEnabled(false));
+      if (action === "identity") return addLine("info", renderContext());
+      if (action === "list") {
+        const memories = listMemories();
+        return addLine("info", memories.length ? memories.map((memory) => `- ${memory.name}: ${memory.summary}`).join("\n") : "(no memories yet)");
+      }
+      if (action === "read") {
+        if (!name) return addLine("info", "usage: /memory read <name>");
+        return addLine("info", readMemoryFile(name));
+      }
+      if (action === "forget" || action === "delete") {
+        if (!name) return addLine("info", "usage: /memory forget <name>");
+        return addLine("info", deleteMemoryFile(name));
+      }
+      if (action !== "status" && action !== "help") {
+        return addLine("info", "usage: /memory [on|off|list|read <name>|forget <name>|identity]");
+      }
+      const memories = listMemories();
+      return addLine("info", [
+        `Neko memory: ${memoryEnabled() ? "on" : "off"}`,
+        "identity: ~/.neko-core/NEKO.md (create once; always user-owned)",
+        "core profiles: ~/.neko-core/memory/user.md + self.md (bounded in context)",
+        `saved memory files: ${memories.length}`,
+        "episodes: ~/.neko-core/sessions (raw history; not injected wholesale)",
+        "procedures: ~/.neko-core/workflows + playbook.md",
+        "controls: /memory list | read <name> | forget <name> | off | on | identity",
+        "save an explicit preference: /remember --user <note>",
+      ].join("\n"));
+    }
     case "/mcp": {
       const mcp = ctx.registry.mcp;
       if (!mcp) return addLine("info", "no MCP servers connected (configure mcp_servers / neko mcp add)");

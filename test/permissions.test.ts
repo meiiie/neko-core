@@ -38,6 +38,7 @@ test("action-sensitive tools gate only their mutating actions", () => {
   expect(decide("plan", memory, { action: "search" })).toBe("allow");
   expect(decide("plan", memory, { action: "write" })).toBe("deny");
   expect(decide("default", memory, { action: "delete" })).toBe("prompt");
+  expect(decide("default", memory, { action: "append" })).toBe("prompt");
   expect(decide("auto", memory, { action: "write" })).toBe("allow");
 });
 

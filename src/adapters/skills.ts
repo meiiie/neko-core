@@ -138,5 +138,5 @@ export function renderSkills(): string {
   if (!list.length) {
     return "No skills found. Add *.md to ~/.neko-core/skills/ or ./.neko-core/skills/.";
   }
-  return ["Neko Code skills:", ...list.map((s) => `- ${s.name}${s.description ? "  " + s.description : ""}`)].join("\n");
+  return ["Neko Core skills:", ...list.map((s) => `- ${s.name}${s.description ? "  " + s.description : ""}`)].join("\n");
 }

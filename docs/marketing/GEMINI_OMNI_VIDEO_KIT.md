@@ -9,7 +9,7 @@
 
 ## Sự thật sản phẩm phải giữ nguyên
 
-- Tên hiển thị: **Neko Core**; CLI/product shell: **Neko Code**; lệnh chạy: `neko`.
+- Tên sản phẩm, agent và engine thống nhất: **Neko Core**; lệnh chạy: `neko`.
 - Phiên bản trong ảnh thật: **v0.11.5**.
 - Sản phẩm local-first, config-first, terminal-native; viết bằng TypeScript + Bun + Ink/React.
 - Kiến trúc Ports & Adapters; core không phụ thuộc UI/provider cụ thể.
@@ -56,7 +56,7 @@ REFERENCE ASSET CONTRACT
 - Preserve the supplied logo geometry and pixels exactly. Never redraw it as a realistic cat, cat face, robot, brain, sparkle, paw, anime mascot or generic AI symbol.
 
 PRODUCT TRUTH
-Neko Core is a local-first, config-first, terminal-native coding and automation agent. The product shell is Neko Code and the command is `neko`. It is built with TypeScript, Bun and Ink/React. Its architecture follows Ports & Adapters: the core agent loop, tools, policy and ports remain independent from providers, UI, MCP, browser and other adapters. The agent can plan with todos, read/search/edit files, run commands, reach the web, use MCP and skills, maintain sessions and memory, control an explicitly attached browser tab, and use Windows computer automation. Read-only operations are SAFE; writes, shell commands and state-changing computer actions are GATED by explicit permission modes. `/relay` can mirror and control a session remotely through end-to-end encryption while cookies and browser capabilities remain local. New models are normally profiles, new protocols are adapters, and new roles can be Markdown skills.
+Neko Core is a local-first, config-first, terminal-native coding and automation agent; its command is `neko`. It is built with TypeScript, Bun and Ink/React. Its architecture follows Ports & Adapters: the core agent loop, tools, policy and ports remain independent from providers, UI, MCP, browser and other adapters. The agent can plan with todos, read/search/edit files, run commands, reach the web, use MCP and skills, maintain sessions and memory, control an explicitly attached browser tab, and use Windows computer automation. Read-only operations are SAFE; writes, shell commands and state-changing computer actions are GATED by explicit permission modes. `/relay` can mirror and control a session remotely through end-to-end encryption while cookies and browser capabilities remain local. New models are normally profiles, new protocols are adapters, and new roles can be Markdown skills.
 
 NARRATIVE ARC
 The film should feel like a precise terminal boot turning into an extensible operating system for agency:

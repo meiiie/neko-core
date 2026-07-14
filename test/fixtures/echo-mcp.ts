@@ -1,5 +1,5 @@
 /**
- * A tiny stdio MCP server used only to verify Neko Code's MCP client end-to-end.
+ * A tiny stdio MCP server used only to verify Neko Core's MCP client end-to-end.
  * Exposes one tool, `echo`, that returns its input prefixed with "echo: ".
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

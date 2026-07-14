@@ -1,4 +1,4 @@
-# Neko Code — scheduling & automation
+# Neko Core — scheduling & automation
 
 Neko is a local-first CLI, so it does **not** ship a background scheduler daemon (that would mean a
 long-running process + its own cron engine — the wrong shape for a CLI). The schedulable unit is the

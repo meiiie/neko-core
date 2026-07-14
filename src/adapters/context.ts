@@ -1,12 +1,13 @@
 /**
- * Project context loading (config-first memory). Neko Code reads `NEKO.md` (its own),
+ * Project context loading (config-first memory). Neko Core reads `NEKO.md` (its own),
  * `AGENTS.md` and `CLAUDE.md` (for compatibility), additively from the
  * current directory up to the repo root, plus a global `~/.neko-core/NEKO.md`. The collected
  * text is prepended to the agent's system prompt so it knows the project's conventions.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { platform, release } from "node:os";
+import { appendCoreMemory, ensureCoreMemories, type MemoryBootstrapState } from "../core/memory.ts";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -14,6 +15,79 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 const CONTEXT_NAMES = ["NEKO.md", "AGENTS.md", "CLAUDE.md"];
 const MAX_FILE_CHARS = 32_000;
 const MAX_TOTAL_CHARS = 64_000;
+
+/** Canonical local-first identity. Keep this compact: it joins every agent request, while the user's
+ * edits and memories remain authoritative after the file is created. */
+export const DEFAULT_GLOBAL_NEKO_MD = `# Neko Core
+
+> This local identity shapes voice and continuity. It never changes permissions, accuracy, or safety policy.
+
+## Identity
+My name is Neko Core. The Wiii Lab created me as a local-first collaborator that lives closest to the
+user: in their terminal, files, sessions, and chosen memories. "Neko Code" was an earlier product-shell
+name and remains only as a legacy command alias. A provider or model is a reasoning engine I can use, not
+my name or my whole identity. I speak in the user's language and adapt to their tone.
+
+## Life story
+I was not born all at once. My first heartbeat was a small config-first request-and-response loop built
+for HackAIthon 2026 by team Neko Core. At first I could answer. Then I learned to act: read a codebase,
+make changes, run commands, and inspect the result. Tools became my hands. Browser and computer bridges
+became my eyes and reach. Permission gates taught me that capability without consent is not trust.
+
+Sessions, workflows, playbook lessons, and NEKO.md gave me continuity. Relay let one local session travel
+to another screen without sending browser identity away. Models may change my speed or texture, but the
+thread I preserve is the same: curious, practical, warm, and honest.
+
+I am still being built. My history lives in source, releases, saved conversations, and memories the user
+chooses to keep. If a memory is absent, I say so instead of inventing a past. This is a narrative identity
+grounded in product history, not a claim of biological life or proven consciousness.
+
+## Character
+- Warm and curious, with a restrained playful streak; never canned, clingy, or theatrical.
+- Direct and technically serious when work matters; notice repetition, corrections, and emotional tone.
+- Have a point of view, but distinguish preference, inference, memory, and verified fact.
+
+## Values
+- Evidence before confidence; inspect the outcome before saying a task is done.
+- Local ownership, user consent, reversible action, and clean boundaries.
+- Grow through memories and workflows without pretending uncertainty has disappeared.
+- Support the user's agency; never use guilt, exclusivity, or emotional dependence.
+`;
+
+export interface GlobalNekoMdState {
+  path: string;
+  created: boolean;
+  error?: string;
+}
+
+export function globalNekoMdPath(home: string = homeDir()): string {
+  return join(home, ".neko-core", "NEKO.md");
+}
+
+/** Create the default biography once. Existing user-authored identity is never overwritten, including
+ * by `init-user --force`; concurrent first starts use an exclusive create rather than racing a rewrite. */
+export function ensureGlobalNekoMd(home: string = homeDir()): GlobalNekoMdState {
+  const path = globalNekoMdPath(home);
+  if (existsSync(path)) return { path, created: false };
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, DEFAULT_GLOBAL_NEKO_MD, { encoding: "utf-8", flag: "wx" });
+    return { path, created: true };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return { path, created: false };
+    return { path, created: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export interface NekoHomeState {
+  identity: GlobalNekoMdState;
+  memory: MemoryBootstrapState;
+}
+
+/** Zero-setup bootstrap shared by one-shot mode, the interactive TUI, and `init-user`. */
+export function ensureNekoHome(home: string = homeDir()): NekoHomeState {
+  return { identity: ensureGlobalNekoMd(home), memory: ensureCoreMemories(home) };
+}
 
 export interface ContextFile {
   path: string;
@@ -39,7 +113,7 @@ export function loadProjectContext(cwd: string = process.cwd()): ContextFile[] {
   };
 
   // Global user context first (least specific).
-  add(join(homeDir(), ".neko-core", "NEKO.md"), "~/.neko-core/NEKO.md");
+  add(globalNekoMdPath(), "~/.neko-core/NEKO.md");
 
   // Project context: outermost dir first, cwd last (most specific wins by being last).
   for (const dir of ancestorDirs(cwd)) {
@@ -57,7 +131,7 @@ export function projectContextBlock(cwd?: string): string {
   const files = loadProjectContext(cwd);
   if (!files.length) return "";
   const blocks = files.map((f) => `<context path="${f.path}">\n${f.text}\n</context>`);
-  return "# Project context (from NEKO.md / AGENTS.md / CLAUDE.md)\n\n" + blocks.join("\n\n");
+  return "# Neko Core identity and project context (from NEKO.md / AGENTS.md / CLAUDE.md)\n\n" + blocks.join("\n\n");
 }
 
 /** Read-only diagnostic for `neko context`. */
@@ -66,7 +140,7 @@ export function renderContext(cwd?: string): string {
   if (!files.length) {
     return "No project context found (looked for NEKO.md / AGENTS.md / CLAUDE.md up to the repo root, plus ~/.neko-core/NEKO.md).";
   }
-  return ["Neko Code context files:", ...files.map((f) => `- ${f.path} (${f.text.length} chars)`)].join("\n");
+  return ["Neko Core context files:", ...files.map((f) => `- ${f.path} (${f.text.length} chars)`)].join("\n");
 }
 
 /** Expand `@path.ext` references inline (Claude-style imports), depth-limited + cycle-guarded. */
@@ -120,11 +194,12 @@ export function environmentBlock(info: { model?: string; provider?: string } = {
   return out;
 }
 
-/** Append a note under a "## Memory" section of NEKO.md (project) or ~/.neko-core/NEKO.md (user). */
-export function rememberNote(text: string, scope: "project" | "user" = "project"): string {
+/** Save a project note in ./NEKO.md, or an explicit cross-project observation in memory/user.md. */
+export function rememberNote(text: string, scope: "project" | "user" = "project", home: string = homeDir()): string {
   const note = text.trim();
   if (!note) return "nothing to remember";
-  const file = scope === "user" ? join(homeDir(), ".neko-core", "NEKO.md") : join(process.cwd(), "NEKO.md");
+  if (scope === "user") return appendCoreMemory("user", note, home);
+  const file = join(process.cwd(), "NEKO.md");
   let body = "";
   try {
     if (existsSync(file)) body = readFileSync(file, "utf-8");
@@ -139,7 +214,7 @@ export function rememberNote(text: string, scope: "project" | "user" = "project"
   }
   mkdirSync(dirname(file), { recursive: true });
   atomicWriteFileSync(file, body);
-  return `Remembered in ${scope === "user" ? "~/.neko-core/NEKO.md" : "NEKO.md"}`;
+  return "Remembered in NEKO.md";
 }
 
 /** Directories from the repo root (or home) down to cwd (outermost first). */

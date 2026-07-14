@@ -1,11 +1,44 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { readFileSync } from "node:fs";
+import {
+  DEFAULT_GLOBAL_NEKO_MD,
+  ensureGlobalNekoMd,
+  environmentBlock,
+  globalNekoMdPath,
+  loadProjectContext,
+  rememberNote,
+} from "../src/adapters/context.ts";
 
-import { environmentBlock, loadProjectContext, rememberNote } from "../src/adapters/context.ts";
+test("global Neko Core identity creates once, stays compact, and never overwrites user edits", () => {
+  const home = mkdtempSync(join(tmpdir(), "neko-identity-"));
+  const first = ensureGlobalNekoMd(home);
+  expect(first.created).toBe(true);
+  expect(first.error).toBeUndefined();
+  expect(first.path).toBe(globalNekoMdPath(home));
+  const initial = readFileSync(first.path, "utf-8");
+  expect(initial).toBe(DEFAULT_GLOBAL_NEKO_MD);
+  expect(initial).toContain("# Neko Core");
+  expect(initial).toContain("## Life story");
+  expect(initial).toContain("not a claim of biological life or proven consciousness");
+  expect(initial).not.toContain("## Memory"); // mutable observations live outside the identity
+  expect(initial.length).toBeLessThan(4_000);
+
+  writeFileSync(first.path, "# My edited Neko\n", "utf-8");
+  const second = ensureGlobalNekoMd(home);
+  expect(second.created).toBe(false);
+  expect(readFileSync(first.path, "utf-8")).toBe("# My edited Neko\n");
+});
+
+test("cross-project memory stays separate from the global life story", () => {
+  const home = mkdtempSync(join(tmpdir(), "neko-identity-memory-"));
+  const state = ensureGlobalNekoMd(home);
+  expect(rememberNote("The user prefers concise Vietnamese.", "user", home)).toContain("memory/user.md");
+  expect(readFileSync(state.path, "utf-8")).toBe(DEFAULT_GLOBAL_NEKO_MD);
+  expect(readFileSync(join(home, ".neko-core", "memory", "user.md"), "utf-8")).toContain("The user prefers concise Vietnamese.");
+});
 
 test("loads NEKO.md from the project root", () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ctx-"));

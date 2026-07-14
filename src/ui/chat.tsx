@@ -1,5 +1,5 @@
 /**
- * `neko chat` — the Ink (React-for-terminal) REPL. The "Neko Code" UX surface.
+ * `neko chat` — the Ink (React-for-terminal) REPL. The Neko Core UX surface.
  *
  * Clean-room reimplementation of the terminal-coding-agent UX (welcome box, markdown
  * streaming, tool-call lines, inline approval with a diff preview, spinner + elapsed,
@@ -35,7 +35,7 @@ import { toolResultDisplayLines, TranscriptLine, type Line, type LineKind } from
 import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
 import { loadConfig } from "../adapters/config.ts";
 import { agentsContextBlock, loadAgent } from "../adapters/agents.ts";
-import { environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
+import { ensureNekoHome, environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
 import { readClipboardImage, writeClipboardText } from "../adapters/clipboard.ts";
 import { describeImage } from "../adapters/vision.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
@@ -65,7 +65,7 @@ import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
 import { latestSession, loadSession, newSessionId, renameSession, saveSession, type Session } from "../adapters/session.ts";
-import { memoryIndexBlock } from "../core/memory.ts";
+import { coreMemoryBlock, memoryIndexBlock } from "../core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
 import { playbookContextBlock } from "../core/playbook.ts";
 import { matchSkill, skillsContextBlock } from "../adapters/skills.ts";
@@ -478,7 +478,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // request), so anything that changes between turns kills the provider's prompt-prefix cache for
         // the whole conversation. Todos deliberately NOT included — the todo_write tool result already
         // recites the plan into the message stream (append-only, cache-friendly).
-        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), registryRef.current?.mcp?.indexBlock?.() ?? ""]
+        [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), coreMemoryBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), registryRef.current?.mcp?.indexBlock?.() ?? ""]
           .filter(Boolean)
           .join("\n\n"),
       onDelta: (t, kind) => {
@@ -2443,6 +2443,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     console.error('neko needs an interactive terminal (TTY) for the session. Use `neko run "<task>"` for one-shot.');
     return;
   }
+  ensureNekoHome();
   // Bare `neko` starts FRESH; you pick up an interrupted task explicitly with /resume (or --resume/-c).
   // The resumed session shows its full thread + recovers todos, and typing anything continues it.
   const resumed = opts.resumeId ? loadSession(opts.resumeId) : opts.resume ? latestSession(process.cwd()) : null;

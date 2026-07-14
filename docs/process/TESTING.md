@@ -1,4 +1,4 @@
-# Neko Code — test plan & log
+# Neko Core — test plan & log
 
 A thorough, repeatable test of every layer: pure logic, the agentic loop, the tools, MCP, and the
 whole TUI/UX — plus live end-to-end runs against a real provider, tiered easy → hard → edge.

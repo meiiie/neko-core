@@ -91,14 +91,14 @@ export const COMMANDS: CommandSpec[] = [
   { name: "config", group: "config", summary: "Show the resolved config-first settings.", example: "neko config" },
   { name: "doctor", group: "config", summary: "Read-only diagnostics (provider/model/key).", example: "neko doctor" },
   { name: "profiles", group: "config", summary: "List the named runtime profiles.", example: "neko profiles" },
-  { name: "init-user", group: "config", summary: "Scaffold ~/.neko-core/config.json.", example: "neko init-user" },
+  { name: "init-user", group: "config", summary: "Scaffold user config, Neko Core identity, and bounded local memory.", example: "neko init-user" },
   { name: "init", group: "config", summary: "Scaffold ./.neko-core/config.json.", example: "neko init" },
   { name: "tools", group: "registry", summary: "List tool contracts (safe/gated).", example: "neko tools write_file" },
   { name: "agents", group: "registry", summary: "List agent roles and boundaries.", example: "neko agents coder" },
   { name: "commands", group: "registry", summary: "List the CLI command surface.", example: "neko commands" },
   { name: "capabilities", group: "registry", summary: "List runtime/CLI capabilities.", example: "neko capabilities" },
   { name: "policy", group: "registry", summary: "Audit the safe/gated permission boundary.", example: "neko policy" },
-  { name: "context", group: "registry", summary: "Show the project context (NEKO.md / CLAUDE.md) loaded.", example: "neko context" },
+  { name: "context", group: "registry", summary: "Show global identity and project context files.", example: "neko context" },
   { name: "sessions", group: "config", summary: "List saved chat sessions.", example: "neko sessions" },
   { name: "skills", group: "registry", summary: "List available skills (~/.neko-core/skills).", example: "neko skills" },
   { name: "recipes", group: "registry", summary: "List runnable recipes (~/.neko-core/recipes).", example: "neko recipes" },
@@ -162,7 +162,7 @@ export interface PolicyReport {
 const MUST_BE_GATED = new Set(["write_file", "edit", "multi_edit", "bash", "computer"]);
 const MUST_BE_SAFE = new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "skill"]);
 const MUST_GATE_ACTIONS: Record<string, string[]> = {
-  memory: ["write", "delete"],
+  memory: ["write", "append", "delete"],
   workflow: ["write", "delete"],
   playbook: ["add", "revise", "remove"],
 };

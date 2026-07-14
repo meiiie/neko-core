@@ -1,5 +1,5 @@
 #!/bin/sh
-# Neko Code installer (macOS / Linux) — downloads a standalone binary; no Bun required.
+# Neko Core installer (macOS / Linux) — downloads a standalone binary; no Bun required.
 #   Latest:  curl -fsSL https://neko.holilihu.online/install.sh | sh
 #   Pinned:  curl -fsSL https://neko.holilihu.online/install.sh | sh -s -- --version 0.9.0
 #            (or set NEKO_VERSION=v0.9.0 before the one-liner)
@@ -51,7 +51,7 @@ case "$PIN" in
 esac
 LABEL="${TAG:-latest}"
 case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "neko: could not resolve a stable release tag" >&2; exit 1 ;; esac
-echo "Installing Neko Code $LABEL ($ASSET)..."
+echo "Installing Neko Core $LABEL ($ASSET)..."
 if [ -n "$TAG" ]; then URL="https://github.com/$REPO/releases/download/$TAG/$ASSET"
 else URL="https://github.com/$REPO/releases/latest/download/$ASSET"; fi
 SUM_URL="$URL.sha256"

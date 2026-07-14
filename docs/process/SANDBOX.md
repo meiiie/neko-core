@@ -1,4 +1,4 @@
-# Neko Code — sandboxing
+# Neko Core — sandboxing
 
 Neko has layered safety for the gated tools:
 

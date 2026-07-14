@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Neko Code is pre-1.0 and ships from `main`. Security fixes land on `main` and in the next tagged release;
+Neko Core is pre-1.0 and ships from `main`. Security fixes land on `main` and in the next tagged release;
 please run the latest version (`neko update`).
 
 | Version | Supported |

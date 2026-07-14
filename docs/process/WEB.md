@@ -1,4 +1,4 @@
-# Neko Code — web access
+# Neko Core — web access
 
 Two layers, simplest first.
 

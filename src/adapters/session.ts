@@ -194,7 +194,7 @@ export function renderSessions(): string {
     return "No saved sessions. Start one with `neko chat`; resume the latest with `neko chat --resume`.";
   }
   return [
-    "Neko Code sessions (newest first):",
+    "Neko Core sessions (newest first):",
     ...list.slice(0, 20).map((s) => `- ${s.id}  ${s.cwd}\n    "${sessionTitle(s)}"`),
   ].join("\n");
 }

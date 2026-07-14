@@ -1,4 +1,4 @@
-# Release Rules — how a Neko Code version ships
+# Release Rules — how a Neko Core version ships
 
 Every rule here was paid for by a real incident (v0.7.0–v0.7.7, 2026-07-06/07). Follow the order;
 skipping a gate is how field bugs happen.

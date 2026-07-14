@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent.ts";
 import { loadConfig, redactSecrets, type NekoConfig } from "../src/adapters/config.ts";
 import { agentsContextBlock, loadAgent } from "../src/adapters/agents.ts";
-import { environmentBlock, projectContextBlock, renderContext } from "../src/adapters/context.ts";
+import { ensureNekoHome, environmentBlock, projectContextBlock, renderContext } from "../src/adapters/context.ts";
 import { collectChecks, collectTerminalChecks, render } from "../src/adapters/doctor.ts";
 import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
@@ -26,7 +26,7 @@ import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setA
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
 import { loadSkill, matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
-import { memoryIndexBlock } from "../src/core/memory.ts";
+import { coreMemoryBlock, memoryIndexBlock } from "../src/core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../src/core/workflows.ts";
 import { playbookContextBlock } from "../src/core/playbook.ts";
 import { ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
@@ -141,6 +141,7 @@ async function buildAgent(
   onDelta?: (t: string, kind?: string) => void,
   noTools = false,
 ): Promise<{ agent: Agent; close: () => Promise<void> }> {
+  ensureNekoHome();
   const mode = yolo ? "auto" : cfg.mode;
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);
   const { startManagedBrowserBridge } = await import("../src/adapters/browser-bridge.ts");
@@ -190,7 +191,7 @@ async function buildAgent(
     maxSteps: cfg.maxSteps,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     dynamicContext: () =>
-      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), registry.mcp?.indexBlock?.() ?? "", todosContextBlock(registry.todos)]
+      [environmentBlock({ model: cfg.model, provider: cfg.provider }), projectContextBlock(), coreMemoryBlock(), agentsContextBlock(), skillsContextBlock(), memoryIndexBlock(), workflowsContextBlock(), playbookContextBlock(), registry.mcp?.indexBlock?.() ?? "", todosContextBlock(registry.todos)]
         .filter(Boolean)
         .join("\n\n"),
     onEvent: printEvent,
@@ -208,23 +209,23 @@ async function buildAgent(
   };
 }
 
-const HELP = `Neko Code ${VERSION} - local-first agentic CLI.
+const HELP = `Neko Core ${VERSION} - local-first agentic CLI.
 
 Usage: neko [command] [options]
-  Run 'neko' with no command (or 'neko code' / 'neko core') to start the session.
+  Run 'neko' with no command (or 'neko core'; legacy 'neko code') to start the session.
 
 Commands:
   config        show the resolved config-first settings
   doctor [keys] read-only diagnostics (provider/model/key/terminal); 'keys' = raw key-input probe
   profiles      list the named runtime profiles
-  init-user     scaffold ~/.neko-core/config.json
+  init-user     scaffold user config + identity + bounded local memory
   init          scaffold ./.neko-core/config.json (project-local)
   tools         list tool contracts (safe/gated)
   agents        list agent roles and boundaries
   commands      list the CLI command surface
   capabilities  list runtime/CLI capabilities
   policy        audit the safe/gated permission boundary
-  context       show the project context files (NEKO.md / CLAUDE.md) loaded
+  context       show global identity + project context files loaded
   sessions      list saved chat sessions
   skills        list available skills (~/.neko-core/skills)
   recipes       list runnable recipes (~/.neko-core/recipes)
@@ -238,7 +239,7 @@ Commands:
   setup [web]   one command to stand up the SOTA web stack (SearXNG + browser MCP, wired);
                 'setup browser [persistent|attach|isolated]' controls browser identity;
                 'setup tavily <key>' wires hosted search; 'setup codex' / 'setup gemini' add optional bridges
-  chat          interactive session (default - same as bare 'neko' / 'neko code')
+  chat          interactive session (default - same as bare 'neko' / 'neko core')
   run <task>    one-shot: run a single instruction
   bench         run a tiny agentic-coding benchmark against the configured model (pass@1)
   bench hard    the multi-file / real-algorithm capability tier (non-saturated score)
@@ -360,6 +361,7 @@ function cmdPolicy(args: Args): number {
 }
 
 function cmdContext(): number {
+  ensureNekoHome();
   console.log(renderContext());
   return 0;
 }
@@ -806,7 +808,7 @@ async function main(): Promise<number> {
     return 0;
   }
   if (args.doctor) return cmdDoctor(args);
-  // Activation: bare `neko` (or `neko code` / `neko core`) starts the interactive session.
+  // Activation: bare `neko` (or `neko core`; legacy `neko code`) starts the interactive session.
   if (!cmd || cmd === "chat" || cmd === "code" || cmd === "core") {
     try {
       return await cmdChat(args);

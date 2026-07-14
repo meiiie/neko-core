@@ -276,7 +276,7 @@
   <header>
     <div class="mark">ハ・・マ</div>
     <div class="hgrid">
-      <div class="htitle"><span id="htitle">Neko Code</span> <small id="hversion">v0.9.0</small></div>
+      <div class="htitle"><span id="htitle">Neko Core</span> <small id="hversion">v0.9.0</small></div>
       <div class="hstatus" id="hstatus"><span class="dot"></span><span id="hstatustxt">not paired</span></div>
       <div class="hhost" id="hhost"></div>
     </div>
@@ -535,7 +535,7 @@
     paintStatus(mode, working, connectionLabel);
     const pct = Number.isFinite(Number(meta.contextPercent)) ? Math.max(0, Math.min(100, Math.round(Number(meta.contextPercent)))) : 0;
     $("statusr").textContent = (hostModel || "no model") + " · " + pct + "% ctx";
-    $("htitle").textContent = "Neko Code";
+    $("htitle").textContent = "Neko Core";
     $("hversion").textContent = "v" + (meta.version || "0.9.0");
     $("hhost").textContent = meta.cwd || location.host;
     $("hostpick").textContent = hosts.length ? `${hosts.length} session${hosts.length === 1 ? "" : "s"}` : "sessions";
@@ -560,7 +560,7 @@
     const r = await fetch(base() + "/sessions?session=" + encodeURIComponent(session.value.trim()), { headers: auth() });
     if (!r.ok) {
       // v2 Worker compatibility: it has one implicit host and ignores the extra hostId field.
-      if (r.status === 404 && !hosts.length) { hosts = [{ id: "default", online, meta: { title: "Neko Code" } }]; activeHost = "default"; renderSessions(); switchHost(activeHost, false); }
+      if (r.status === 404 && !hosts.length) { hosts = [{ id: "default", online, meta: { title: "Neko Core" } }]; activeHost = "default"; renderSessions(); switchHost(activeHost, false); }
       return;
     }
     const data = await r.json();

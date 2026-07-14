@@ -1,4 +1,4 @@
-# Contributing to Neko Code
+# Contributing to Neko Core
 
 Thanks for being here — Neko is a small, friendly codebase and contributions of every size are welcome:
 bug fixes, a new provider profile, a skill, docs, tests, or just a sharp issue.

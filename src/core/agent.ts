@@ -14,6 +14,7 @@ import type { DeltaHook, Provider, ToolCall } from "./ports.ts";
 import { todosContextBlock, type ToolRegistry } from "./tool-runtime.ts";
 import {
   DEFAULT_SYSTEM_PROMPT,
+  COMPACTION_PROMPT,
   CONCURRENCY_SAFE,
   EAGER_SAFE,
   EDIT_TOOLS,
@@ -33,6 +34,7 @@ import {
 
 export {
   DEFAULT_SYSTEM_PROMPT,
+  COMPACTION_PROMPT,
   MAX_OBS_CHARS,
   LEAN_TAIL_CHARS,
   COMPACT_AT,
@@ -41,6 +43,27 @@ export {
   estimateTokens,
 };
 export type { EventHook, AgentOptions };
+
+/** Give every old message a fair share of the summarizer input. This prevents one giant early tool
+ * result from consuming the fixed budget and erasing later corrections/decisions. Keep both ends
+ * because errors and totals often land at the bottom of logs. */
+function compactionSource(messages: any[], budget = 40_000): string {
+  const perMessage = Math.max(120, Math.floor((budget - 2000) / Math.max(1, messages.length)) - 50);
+  const clip = (raw: string, limit: number) => {
+    if (raw.length <= limit) return raw;
+    const tail = Math.max(120, Math.floor(limit * 0.35));
+    const omitted = raw.length - limit;
+    return `${raw.slice(0, limit - tail)}\n... [${omitted} chars omitted for compaction] ...\n${raw.slice(-tail)}`;
+  };
+  const source = messages.map((message) => {
+    const raw = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+    const roleCap = message.role === "tool" ? 1200 : 3000;
+    return `${message.role}: ${clip(raw, Math.min(roleCap, perMessage))}`;
+  }).join("\n");
+  if (source.length <= budget) return source;
+  const first = 4000;
+  return `${source.slice(0, first)}\n... [middle omitted for compaction budget] ...\n${source.slice(-(budget - first - 60))}`;
+}
 
 export interface NumberedImageAttachment { id: number; url: string }
 export type ImageAttachment = string | NumberedImageAttachment;
@@ -157,17 +180,14 @@ export class Agent {
     const tail = convo.slice(cut);
     if (!head.length) return ""; // nothing old enough to compact
 
-    const text = head
-      .map((m) => `${m.role}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`)
-      .join("\n")
-      .slice(0, 40000);
+    const text = compactionSource(head);
     // Compaction MUST always free context. If the summarizer call fails (a transient model error),
     // fall back to a crude marker rather than leaving the oversized context in place -- otherwise the
     // next call just overflows again and the turn is stuck. The recent tail is kept verbatim regardless.
     let summary: string;
     try {
       const res = await this.provider.complete([
-        { role: "system", content: "Summarize the conversation below concisely: the task, key decisions, files changed, and the current state. Be brief." },
+        { role: "system", content: COMPACTION_PROMPT },
         { role: "user", content: text },
       ]);
       this.cost.add(res.usage);

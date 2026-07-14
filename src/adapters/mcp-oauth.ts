@@ -43,7 +43,7 @@ export class NekoOAuthProvider implements OAuthClientProvider {
   }
   get clientMetadata(): any {
     return {
-      client_name: "Neko Code",
+      client_name: "Neko Core",
       redirect_uris: [this.redirectUrl],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
@@ -85,7 +85,7 @@ export async function connectWithOAuth(client: Client, server: string, url: stri
   const codePromise = new Promise<string>((res, rej) => { resolveCode = res; rejectCode = rej; });
   const httpServer = createServer((req, res) => {
     const code = new URL(req.url ?? "/", `http://localhost:${CALLBACK_PORT}`).searchParams.get("code");
-    res.end(code ? "Neko Code: login complete - you can close this tab." : "Neko Code: waiting for login...");
+    res.end(code ? "Neko Core: login complete - you can close this tab." : "Neko Core: waiting for login...");
     if (code) resolveCode(code);
   });
   const timeout = setTimeout(() => rejectCode(new Error("OAuth login timed out (2 min)")), 120_000);
