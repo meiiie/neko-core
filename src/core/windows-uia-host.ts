@@ -14,6 +14,7 @@ export interface UiaRequest {
   direction?: string;
   amount?: number;
   durationMs?: number;
+  settleMs?: number;
   x?: number;
   y?: number;
   points?: number[];
@@ -31,6 +32,14 @@ export interface UiaResponse {
   pid?: number;
 }
 
+type PendingRequest = {
+  resolve: (response: UiaResponse) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+};
+
 /** One warm PowerShell Windows-desktop process. Requests are serialized against one interactive desktop. */
 export class ResidentUiaHost {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -38,12 +47,12 @@ export class ResidentUiaHost {
   private nextId = 0;
   private queue: Promise<void> = Promise.resolve();
   private stderrTail = "";
-  private pending = new Map<number, { resolve: (r: UiaResponse) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  private pending = new Map<number, PendingRequest>();
 
   constructor(private readonly script: string) {}
 
-  request(request: UiaRequest, timeoutMs = 90_000): Promise<UiaResponse> {
-    const run = () => this.requestNow(request, timeoutMs);
+  request(request: UiaRequest, timeoutMs = 90_000, signal?: AbortSignal): Promise<UiaResponse> {
+    const run = () => this.requestNow(request, timeoutMs, signal);
     const result = this.queue.then(run, run);
     this.queue = result.then(() => undefined, () => undefined);
     return result;
@@ -64,25 +73,39 @@ export class ResidentUiaHost {
     this.failPending(new Error("resident Windows host stopped"));
   }
 
-  private requestNow(request: UiaRequest, timeoutMs: number): Promise<UiaResponse> {
+  private requestNow(request: UiaRequest, timeoutMs: number, signal?: AbortSignal): Promise<UiaResponse> {
+    if (signal?.aborted) return Promise.reject(new Error("resident Windows request interrupted"));
     const child = this.ensureChild();
     const id = ++this.nextId;
     const payload = JSON.stringify({ id, ...request });
     if (payload.length > 100_000) return Promise.reject(new Error("resident Windows request is too large"));
     return new Promise<UiaResponse>((resolve, reject) => {
+      const onAbort = () => {
+        const pending = this.pending.get(id);
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        this.pending.delete(id);
+        this.dispose();
+        reject(new Error("resident Windows request interrupted"));
+      };
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        signal?.removeEventListener("abort", onAbort);
         this.dispose();
         const detail = this.stderrTail.trim().slice(-1000);
         reject(new Error(`resident Windows request timed out after ${timeoutMs}ms${detail ? `: ${detail}` : ""}`));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, signal, onAbort });
+      signal?.addEventListener("abort", onAbort, { once: true });
+      // Close the small race between the early aborted check and listener registration.
+      if (signal?.aborted) { onAbort(); return; }
       child.stdin.write(payload + "\n", "utf8", (error) => {
         if (!error) return;
         const pending = this.pending.get(id);
         if (!pending) return;
         clearTimeout(pending.timer);
         this.pending.delete(id);
+        signal?.removeEventListener("abort", onAbort);
         reject(error);
       });
     });
@@ -129,12 +152,14 @@ export class ResidentUiaHost {
     if (!pending) return;
     clearTimeout(pending.timer);
     this.pending.delete(Number(response.id));
+    pending.signal?.removeEventListener("abort", pending.onAbort!);
     pending.resolve(response);
   }
 
   private failPending(error: Error): void {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
+      pending.signal?.removeEventListener("abort", pending.onAbort!);
       pending.reject(error);
     }
     this.pending.clear();

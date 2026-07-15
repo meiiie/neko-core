@@ -113,6 +113,13 @@ test("browser extension stays active-tab scoped", () => {
   const worker = readFileSync(new URL("../browser-extension/service-worker.js", import.meta.url), "utf8");
   expect(() => new Function(worker)).not.toThrow();
   expect(worker).toContain("sensitiveRefs.has");
+  expect(worker).toContain("MutationObserver");
+  expect(worker).toContain("waitForVisibleChange");
+  expect(worker).toContain("visibleText");
+  expect(worker).toContain("editableRoot");
+  expect(worker).toContain("detectedMs");
+  expect(worker).toContain("state: stateId(last)");
+  expect(worker).toContain("typing verification failed");
   expect(worker).toContain("Neko - AI active");
   expect(worker).toContain("control-indicator.js");
   expect(worker).toContain("chrome.alarms.onAlarm");

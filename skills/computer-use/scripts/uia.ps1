@@ -142,7 +142,7 @@ switch($cmd){
   }
   "setvalue" {
     $e=FindByName $name; if(-not $e){ Write-Output "not found: $name"; exit 1 }
-    $vp=Pat $e ([System.Windows.Automation.ValuePattern]::Pattern); if(-not $vp){ Write-Output "no ValuePattern on: $name"; exit 1 }
+    $vp=Pat $e ([System.Windows.Automation.ValuePattern]::Pattern); if(-not $vp){ Write-Output "no ValuePattern on: $name; this may be contenteditable - use computer type with the freshly observed element name"; exit 1 }
     if($vp.Current.IsReadOnly){ Write-Output "FAIL setvalue: '$name' is READ-ONLY (cannot set)"; exit 1 }
     $vp.SetValue($value)
     # act -> VERIFY (deterministic): read the value back and confirm it landed. Catches input the field

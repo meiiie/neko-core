@@ -52,7 +52,11 @@ export interface Provider {
 export interface McpTools {
   toolSchemas(): any[];
   has(name: string): boolean;
-  call(name: string, args: Record<string, any>): Promise<string>;
+  call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string>;
+  /** External adapters may explicitly mark read-only calls safe. Unknown tools stay gated. */
+  permission?(name: string): "safe" | "gated";
+  /** True when an equal call observes a new time interval rather than repeating the same operation. */
+  temporal?(name: string): boolean;
   /** MCP prompts (optional): list templates and render one to text. */
   promptList?(): { server: string; name: string }[];
   getPrompt?(server: string, name: string, args: Record<string, any>): Promise<string>;

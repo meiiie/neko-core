@@ -33,8 +33,8 @@ least-privilege browser controls.
 ## Permission justifications
 
 - `activeTab`: grants temporary access only after the user opens the extension on the current tab.
-- `scripting`: reads a compact visible-element snapshot, performs explicitly approved actions, and shows
-  the in-page control indicator on that selected tab.
+- `scripting`: reads a compact visible-text/element snapshot, waits for visible text changes when requested,
+  performs explicitly approved actions, and shows the in-page control indicator on that selected tab.
 - `storage`: preserves the local pairing capability, permission switches, and a redacted 20-entry audit.
 - `tabGroups`: marks an otherwise ungrouped attached tab as `Neko - AI active`. Existing user groups are
   never renamed or rearranged, and a Neko-created group is removed on detach.
@@ -48,7 +48,7 @@ It executes no remote-hosted code. The loopback protocol accepts only a fixed, r
 
 Disclose **Website content**, **Web browsing activity**, **User activity**, and **Personal communications**:
 an explicitly attached mail/chat/social tab can contain communications even though Neko only reads a compact
-visible-element snapshot. State that authentication information, financial information, and location are not
+visible snapshot. State that authentication information, financial information, and location are not
 collected, and link the published `PRIVACY.md`. Keep the Dashboard answers exactly consistent with the policy.
 
 ## Required listing media

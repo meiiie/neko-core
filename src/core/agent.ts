@@ -424,7 +424,7 @@ export class Agent {
       if (name === "bash") return !Agent.isClearlyReadOnlyBash(call.arguments);
       if (MUTATING_TOOLS.has(name)) return true;
       if (name === "computer") {
-        return !new Set(["list", "read", "get", "wait", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
+        return !new Set(["list", "read", "get", "watch", "wait", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
       }
       // MCP browser adapters are outside core's static registry. Their read-only snapshot/content
       // tools deliberately do not match these common state-changing suffixes.
@@ -451,21 +451,31 @@ export class Agent {
       return new Set(["status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "describe"]).has(subcommand);
     }
 
-    private static isMechanicalReadCall(call: { name: string; arguments?: Record<string, any> }): boolean {
+    private isMechanicalReadCall(call: { name: string; arguments?: Record<string, any> }): boolean {
       const name = call.name.toLowerCase();
       if (name === "bash") return Agent.isClearlyReadOnlyBash(call.arguments);
       if (new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "mcp_load"]).has(name)) return true;
       if (name === "computer") {
-        return new Set(["list", "read", "get", "display", "wait", "screenshot"]).has(String(call.arguments?.action ?? "").toLowerCase());
+        return new Set(["list", "read", "get", "display", "watch", "wait", "screenshot"]).has(String(call.arguments?.action ?? "").toLowerCase());
       }
-      return false;
+      return this.tools.mcp?.permission?.(name) === "safe";
+    }
+
+    /** Waiting for the next event is intentionally repeatable: equal arguments observe a different time
+     * interval. The ordinary exact-call guard still protects every non-temporal tool. */
+    private isRepeatableWaitCall(call: { name: string; arguments?: Record<string, any> }): boolean {
+      const name = call.name.toLowerCase();
+      if (name === "computer") {
+        return new Set(["watch", "wait"]).has(String(call.arguments?.action ?? "").toLowerCase());
+      }
+      return this.tools.mcp?.permission?.(name) === "safe" && this.tools.mcp.temporal?.(name) === true;
     }
 
     private static isVerificationEvidenceCall(call: { name: string; arguments?: Record<string, any> }, observation: unknown): boolean {
       if ((typeof observation === "string" && Agent.isUnproductiveResult(observation)) || observation == null) return false;
       const name = call.name.toLowerCase();
       if (name === "computer") {
-        return new Set(["list", "read", "get", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
+        return new Set(["list", "read", "get", "watch", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
       }
       if (EDIT_TOOLS.has(name) || Agent.isStateChangingCall(call)) return name === "bash";
       return !new Set(["todo_write", "skill", "memory", "workflow", "playbook"]).has(name);
@@ -569,7 +579,8 @@ export class Agent {
         c.id || `${c.name}:${JSON.stringify(c.arguments ?? {})}`;
       let eagerOk = true;
       const onToolCallReady = (call: { id: string; name: string; arguments: Record<string, any> }) => {
-        if (!EAGER_SAFE.has(call.name)) { eagerOk = false; return; }
+        const adapterSafe = this.tools.mcp?.permission?.(call.name) === "safe";
+        if (!EAGER_SAFE.has(call.name) && !adapterSafe) { eagerOk = false; return; }
         if (!eagerOk || signal?.aborted || eager.has(eagerKey(call))) return;
         eager.set(eagerKey(call), this.safeExecute(call, signal));
       };
@@ -634,7 +645,7 @@ export class Agent {
               content: "OUTCOME VERIFICATION REQUIRED: you changed real machine/project state. Do not trust " +
                 "the action's success message or the coordinates you intended. Use a tool NOW to inspect the " +
                 "result independently, then compare the observed end state with every user-visible requirement " +
-                "in the original task. For GUI/spatial work, wait for settling and use computer read/list/get/" +
+                "in the original task. For GUI/spatial work, wait for settling and use computer read/list/get/watch/" +
                 "screenshot; use computer display for physical monitor geometry and DPI. If evidence disagrees, " +
                 "keep working. Do not claim completion from an action log alone.",
             });
@@ -692,8 +703,9 @@ export class Agent {
             // Loop guard: if the model makes the SAME call 3x in a row, it's stuck — nudge instead of
             // re-running it, so it changes approach or finishes (prevents lag/chaos/spinning).
             const sig = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
-            repeats = sig === lastSig ? repeats + 1 : 0;
-            lastSig = sig;
+            const repeatableWait = this.isRepeatableWaitCall(call);
+            repeats = !repeatableWait && sig === lastSig ? repeats + 1 : 0;
+            lastSig = repeatableWait ? "" : sig;
             // BROAD doom-loop guard: counts repeated edits to ONE path with DIFFERENT args (which the
             // exact-repeat guard above structurally cannot — every sig differs). It only WARNS (appended
             // below after the edit runs), so a legitimate multi-edit is never blocked; only an EXACT
@@ -746,7 +758,7 @@ export class Agent {
       }
       nextReasoningEffort = this.adaptiveEffort
         && !stepHadUnproductiveResult
-        && toolCalls.every((call) => Agent.isMechanicalReadCall(call))
+        && toolCalls.every((call) => this.isMechanicalReadCall(call))
         ? "low"
         : undefined;
     }

@@ -9,11 +9,12 @@ direct cloud/relay connection.
 ## Data the extension handles
 
 While a tab is attached, the extension can read its URL origin/path, title, and a compact snapshot of
-visible interactive elements. It can click, scroll, navigate, or type non-sensitive text only when the
+visible text and interactive elements. At Neko's request it can wait locally for visible text to change,
+then return a fresh snapshot; the wait does not retain page contents. It can click, scroll, navigate, or type non-sensitive text only when the
 corresponding permission is enabled in the extension. Password, one-time-code, and payment fields are
 always blocked.
 
-If the user explicitly attaches a mail, chat, or social-network tab, the visible interactive-element
+If the user explicitly attaches a mail, chat, or social-network tab, the visible snapshot
 snapshot can include personal communications shown in that tab. The extension does not scan other tabs or
 store those communications in its audit, but Neko Core may send the task-specific snapshot to the configured
 model provider as described below.

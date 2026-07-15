@@ -275,7 +275,70 @@ function snapshotPage(maxItems) {
       sensitive: type === "password" || /(password|passcode|otp|one-time|cc-number|cc-csc|card number|cvv)/.test(`${autocomplete} ${fieldName}`),
     };
   });
-  return { page: { title: document.title, url: location.origin + location.pathname }, items };
+  const visibleText = [];
+  const seenText = new Set();
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (visibleText.length < maxItems && walker.nextNode()) {
+    const element = walker.currentNode.parentElement;
+    const text = (walker.currentNode.textContent || "").replace(/\s+/g, " ").trim();
+    const editableRoot = element?.closest("input,textarea,select,[role=textbox],[contenteditable=true],[contenteditable=''],[contenteditable=plaintext-only]");
+    if (!element || !text || seenText.has(text) || editableRoot || element.closest("script,style,noscript")) continue;
+    const box = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    if (box.width <= 0 || box.height <= 0 || box.bottom <= 0 || box.top >= innerHeight
+      || style.visibility === "hidden" || style.display === "none") continue;
+    seenText.add(text);
+    visibleText.push({
+      role: element.getAttribute("role") || element.tagName.toLowerCase(),
+      text: text.slice(0, 500),
+      box: [Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)],
+    });
+  }
+  return { page: { title: document.title, url: location.origin + location.pathname }, items, visibleText };
+}
+
+function waitForVisibleChange(durationMs, settleMs) {
+  const stateId = (text) => {
+    let first = 0x811c9dc5;
+    let second = 0x9e3779b9;
+    for (let index = 0; index < text.length; index++) {
+      const code = text.charCodeAt(index);
+      first = Math.imul(first ^ code, 0x01000193);
+      second = Math.imul(second ^ code, 0x85ebca6b);
+    }
+    return [first, second].map((value) => (value >>> 0).toString(16).padStart(8, "0")).join("");
+  };
+  const signature = () => {
+    const root = document.querySelector("main,[role=main]") || document.body;
+    return (root?.innerText || "").replace(/\s+/g, " ").trim().slice(-100_000);
+  };
+  const baseline = signature();
+  const started = Date.now();
+  return new Promise((resolve) => {
+    let last = baseline;
+    let detectedMs = -1;
+    let settleTimer;
+    let timeoutTimer;
+    let finished = false;
+    const finish = (status) => {
+      if (finished) return;
+      finished = true;
+      observer.disconnect();
+      clearTimeout(settleTimer);
+      clearTimeout(timeoutTimer);
+      resolve({ status, changed: last !== baseline, elapsedMs: Date.now() - started, detectedMs, state: stateId(last) });
+    };
+    const observer = new MutationObserver(() => {
+      const next = signature();
+      if (next === last) return;
+      last = next;
+      detectedMs = next === baseline ? -1 : Date.now() - started;
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => finish(last === baseline ? "timeout" : "changed"), settleMs);
+    });
+    observer.observe(document.body, { childList: true, characterData: true, subtree: true });
+    timeoutTimer = setTimeout(() => finish(last === baseline ? "timeout" : "changed_unsettled"), durationMs);
+  });
 }
 
 function clickRef(ref) {
@@ -295,15 +358,26 @@ function typeRef(ref, text) {
     throw new Error("sensitive input is blocked; type it yourself");
   }
   element.focus();
-  if (element.isContentEditable) element.textContent = text;
-  else {
+  if (element.isContentEditable) {
+    const selection = getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    let inserted = false;
+    try { inserted = document.execCommand("insertText", false, text); } catch { /* fallback below */ }
+    if (!inserted) element.textContent = text;
+  } else {
     const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
     setter ? setter.call(element, text) : (element.value = text);
   }
   element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
   element.dispatchEvent(new Event("change", { bubbles: true }));
-  return { typed: ref, length: text.length };
+  const normalize = (value) => String(value || "").replace(/\u200b/g, "").replace(/\r\n/g, "\n").trimEnd();
+  const actual = element.isContentEditable ? (element.innerText || element.textContent || "") : element.value;
+  if (normalize(actual) !== normalize(text)) throw new Error("typing verification failed; take a fresh snapshot before retrying");
+  return { typed: ref, length: text.length, verified: true };
 }
 
 async function execute(message) {
@@ -313,6 +387,17 @@ async function execute(message) {
     if (action === "status") result = publicState();
     else if (action === "snapshot") {
       result = await inTab(snapshotPage, [Math.max(1, Math.min(200, Number(args.maxItems) || 100))]);
+      sensitiveRefs = new Set((result?.items || []).filter((item) => item.sensitive).map((item) => item.ref));
+    }
+    else if (action === "watch") {
+      const durationMs = Number(args.durationMs) || 10_000;
+      const settleMs = Number(args.settleMs) || 500;
+      const maxItems = Math.max(1, Math.min(200, Number(args.maxItems) || 100));
+      if (!Number.isInteger(durationMs) || durationMs < 250 || durationMs > 30_000) throw new Error("watch durationMs must be 250..30000");
+      if (!Number.isInteger(settleMs) || settleMs < 100 || settleMs > 2_000 || settleMs >= durationMs) throw new Error("watch settleMs must be 100..2000 and less than durationMs");
+      const watch = await inTab(waitForVisibleChange, [durationMs, settleMs]);
+      const snapshot = await inTab(snapshotPage, [maxItems]);
+      result = { watch, ...snapshot };
       sensitiveRefs = new Set((result?.items || []).filter((item) => item.sensitive).map((item) => item.ref));
     }
     else if (action === "click") {

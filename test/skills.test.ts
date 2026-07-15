@@ -51,10 +51,11 @@ test("the bundled computer-use skill includes its executable input helper", () =
   expect(skill!.body).toContain("Completion is an observed state");
 });
 
-test("bundled messaging skills route Zalo/WeChat tasks and keep send behind verification", () => {
+test("bundled messaging skills route Zalo/WeChat/Messenger tasks and keep send behind verification", () => {
   const cases = [
     ["use-zalo", "dung Zalo gui tin nhan cho mot lien he"],
     ["use-wechat", "dung WeChat gui tin nhan cho mot lien he"],
+    ["use-messenger", "theo doi Messenger va tra loi tin nhan moi"],
   ] as const;
   for (const [name, prompt] of cases) {
     const skill = loadSkill(name);
@@ -65,6 +66,13 @@ test("bundled messaging skills route Zalo/WeChat tasks and keep send behind veri
     expect(skill!.body).toMatch(/(?:never|do not) (?:blind-)?retry/i);
     expect(matchSkill(prompt)?.name).toBe(name);
   }
+
+  const messenger = loadSkill("use-messenger")!;
+  expect(messenger.body).toContain("computer watch");
+  expect(messenger.body).toContain("last_seen");
+  expect(messenger.body).toContain("Pre-send race gate");
+  expect(messenger.body).toContain("one outbound for one stable inbound");
+  expect(messenger.body).toContain("elapsed_ms");
 });
 
 test("web-reading supports large virtualized feeds without keeping every post in model context", () => {

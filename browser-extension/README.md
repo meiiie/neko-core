@@ -5,6 +5,9 @@ It does not read Chrome cookies, passwords, or session stores, and it never talk
 Visible page snapshots requested by Neko may be sent by Neko Core to the model provider the user configured;
 see [PRIVACY.md](PRIVACY.md) for the exact boundary.
 
+For live pages such as chat, the extension can wait inside the attached tab for visible text to change and
+settle before returning a fresh snapshot. This avoids repeated model polling and does not store message text.
+
 ## Load locally
 
 Run `neko`, then ask it to browse a signed-in site or type `/browser`. Neko prepares this folder, opens `chrome://extensions`, starts the loopback

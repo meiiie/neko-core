@@ -122,13 +122,13 @@ export const TOOL_SPECS: ToolSpec[] = [
     name: "computer",
     permission: GATED,
     summary:
-      "Drive the Windows desktop/GUI through the accessibility tree plus human input. Use bash first for files, downloads, installs, and other programmatic work; use this for apps that require a GUI. Set `window` to a title substring; omit = foreground. Pointer acts use touch injection and do not move the user's mouse. Re-perceive after actions that cannot self-verify.",
+      "Drive the Windows desktop/GUI through the accessibility tree plus human input. Use bash first for files, downloads, installs, and other programmatic work; use this for apps that require a GUI. Set `window` to a title substring; omit = foreground. Pointer acts use touch injection and do not move the user's mouse. `watch` waits locally for readable UI changes without model polling. Re-perceive after actions that cannot self-verify.",
     parameters: {
       action: {
         type: "string",
-        enum: ["list", "read", "get", "display", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "open", "screenshot"],
+        enum: ["list", "read", "get", "display", "watch", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "open", "screenshot"],
         description:
-          "list/read/get perceive; display reports physical monitor bounds, work areas, DPI and scale; invoke/setvalue/toggle act by accessible name; click/stroke use touch; type enters Unicode text into the focused control; key sends a shortcut such as CTRL+L or ENTER; scroll moves the target window; wait lets dynamic UI settle; open launches an app/file/URL; screenshot captures the physical virtual desktop and returns it directly when vision is enabled, with frame/delta metadata when the resident host is on. setvalue/toggle self-verify; after other actions call list/read/get/screenshot to verify. Pixel delta proves change, not the requested outcome. If bash/C#/PowerShell computes screen coordinates, set PerMonitorV2 BEFORE reading geometry; legacy SetProcessDPIAware is only system-aware.",
+          "list/read/get perceive; display reports physical monitor bounds, work areas, DPI and scale; watch blocks in the resident UIA host until readable text changes and settles, returning elapsed_ms, detected_ms, a state id, and the fresh text; invoke/setvalue/toggle act by accessible name; click/stroke use touch; type enters Unicode text into the focused control; key sends a shortcut such as CTRL+L or ENTER; scroll moves the target window; wait lets dynamic UI settle; open launches an app/file/URL; screenshot captures the physical virtual desktop and returns it directly when vision is enabled, with frame/delta metadata when the resident host is on. setvalue/toggle self-verify; after other actions call list/read/get/screenshot to verify. Pixel delta proves change, not the requested outcome. If bash/C#/PowerShell computes screen coordinates, set PerMonitorV2 BEFORE reading geometry; legacy SetProcessDPIAware is only system-aware.",
       },
       window: { type: "string", description: "Distinctive target window title substring (e.g. 'Paint'). Omit = foreground window; type/key refuse ambiguous matches." },
       name: { type: "string", description: "Element NAME for get/invoke/setvalue/toggle, or an optional exact focus target for type/key (copy it from `list`/`read`)." },
@@ -140,7 +140,8 @@ export const TOOL_SPECS: ToolSpec[] = [
       keys: { type: "string", description: "Key or shortcut, for key (e.g. ENTER, CTRL+L, ALT+TAB). Pass name to focus a specific control first." },
       direction: { type: "string", enum: ["up", "down", "left", "right"], description: "Content direction, for scroll." },
       amount: { type: "number", description: "Scroll gestures, 1-10 (default 1)." },
-      duration_ms: { type: "number", description: "Delay in milliseconds, 0-10000 (default 500), for wait." },
+      duration_ms: { type: "number", description: "Delay/timeout in milliseconds: 0-10000 for wait; 250-30000 for watch (default 10000)." },
+      settle_ms: { type: "number", description: "For watch, require readable state to stay unchanged for 100-2000 ms before returning (default 500)." },
       target: { type: "string", description: "Executable, file path, or URL to launch, for open. Use bash when arguments are needed." },
     },
     required: ["action"],

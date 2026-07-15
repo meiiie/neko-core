@@ -63,6 +63,7 @@ export function readBrowserBridgeStatus(): Record<string, unknown> | undefined {
 const BRIDGE_SCHEMAS = [
   { name: "status", description: "Read the locally attached Neko Browser Bridge tab and permission state.", properties: {} },
   { name: "snapshot", description: "Read a compact visible accessibility snapshot from the explicitly attached tab.", properties: { maxItems: { type: "number", minimum: 1, maximum: 200 } } },
+  { name: "watch", description: "Wait inside the attached tab until visible text changes and settles, then return the fresh compact snapshot plus elapsed time. Avoids model-side polling for chat and other live pages.", properties: { durationMs: { type: "number", minimum: 250, maximum: 30000 }, settleMs: { type: "number", minimum: 100, maximum: 2000 }, maxItems: { type: "number", minimum: 1, maximum: 200 } } },
   { name: "click", description: "Click an element reference from the latest Neko browser snapshot.", properties: { ref: { type: "string" }, reason: { type: "string" } }, required: ["ref"] },
   { name: "type", description: "Type text into a non-sensitive element reference. Password, payment, and one-time-code fields are always blocked.", properties: { ref: { type: "string" }, text: { type: "string" }, reason: { type: "string" } }, required: ["ref", "text"] },
   { name: "scroll", description: "Scroll the attached tab by a bounded number of CSS pixels.", properties: { deltaY: { type: "number", minimum: -4000, maximum: 4000 }, reason: { type: "string" } }, required: ["deltaY"] },
@@ -81,15 +82,33 @@ class BrowserBridgeTools implements McpTools {
   constructor(private readonly capability: BrowserCapability) {}
   toolSchemas(): any[] { return BRIDGE_SCHEMAS; }
   has(name: string): boolean { return BRIDGE_SCHEMAS.some((spec) => spec.function.name === name); }
+  permission(name: string): "safe" | "gated" {
+    return new Set([
+      "mcp__neko_browser__status",
+      "mcp__neko_browser__snapshot",
+      "mcp__neko_browser__watch",
+    ]).has(name) ? "safe" : "gated";
+  }
+  temporal(name: string): boolean { return name === "mcp__neko_browser__watch"; }
   indexBlock(): string { return "Neko Browser Bridge tools are local-only and control only the tab explicitly attached in the extension."; }
-  async call(name: string, args: Record<string, any>): Promise<string> {
+  async call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
     const action = name.replace("mcp__neko_browser__", "");
+    const requestedDuration = Number(args.durationMs);
+    const watchDuration = Number.isFinite(requestedDuration)
+      ? Math.max(250, Math.min(30_000, requestedDuration))
+      : 10_000;
+    const timeoutSignal = AbortSignal.timeout(action === "watch" ? watchDuration + 10_000 : 35_000);
+    const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     const response = await fetch(`http://${this.capability.host}:${this.capability.port}/command`, {
       method: "POST",
       headers: { authorization: `Bearer ${this.capability.token}`, "content-type": "application/json" },
       body: JSON.stringify({ action, args }),
-      signal: AbortSignal.timeout(35_000),
-    }).catch((error) => { throw new Error(`Neko Browser Bridge is offline: ${(error as Error).message}`); });
+      signal: requestSignal,
+    }).catch((error) => {
+      if (signal?.aborted) throw new Error("Neko Browser Bridge request interrupted");
+      if (timeoutSignal.aborted) throw new Error("Neko Browser Bridge request timed out");
+      throw new Error(`Neko Browser Bridge is offline: ${(error as Error).message}`);
+    });
     const text = await response.text();
     if (!response.ok) throw new Error(text || `bridge HTTP ${response.status}`);
     return text;
@@ -100,10 +119,18 @@ class CompositeTools implements McpTools {
   constructor(private readonly sources: McpTools[]) {}
   toolSchemas(): any[] { return this.sources.flatMap((source) => source.toolSchemas()); }
   has(name: string): boolean { return this.sources.some((source) => source.has(name)); }
-  call(name: string, args: Record<string, any>): Promise<string> {
+  permission(name: string): "safe" | "gated" {
+    const source = this.sources.find((candidate) => candidate.has(name));
+    return source?.permission?.(name) ?? "gated";
+  }
+  temporal(name: string): boolean {
+    const source = this.sources.find((candidate) => candidate.has(name));
+    return source?.temporal?.(name) ?? false;
+  }
+  call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
     const source = this.sources.find((candidate) => candidate.has(name));
     if (!source) return Promise.resolve(`Error: unknown external tool ${name}`);
-    return source.call(name, args);
+    return source.call(name, args, signal);
   }
   indexBlock(): string { return this.sources.map((source) => source.indexBlock?.() ?? "").filter(Boolean).join("\n"); }
   loadTools(names: string[]): string {
@@ -198,7 +225,12 @@ export function startBrowserBridge(options: {
     if (!client || !attached) throw new Error("no browser tab is attached");
     const id = randomUUID();
     return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`browser command '${action}' timed out`)); }, 30_000);
+      const requestedDuration = Number(args.durationMs);
+      const watchDuration = Number.isFinite(requestedDuration)
+        ? Math.max(250, Math.min(30_000, requestedDuration))
+        : 10_000;
+      const timeoutMs = action === "watch" ? watchDuration + 5_000 : 30_000;
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`browser command '${action}' timed out`)); }, timeoutMs);
       pending.set(id, { resolve, reject, timer });
       client!.send(JSON.stringify({ type: "command", id, action, args }));
       record(action, "sent");

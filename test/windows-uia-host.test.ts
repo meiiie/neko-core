@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { ResidentUiaHost } from "../src/core/windows-uia-host.ts";
+import { ResidentUiaHost, residentUiaHost } from "../src/core/windows-uia-host.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 const script = join(import.meta.dir, "..", "skills", "computer-use", "scripts", "resident-uia.ps1");
@@ -53,6 +53,23 @@ test("resident host handles waits without spawning another PowerShell process", 
     expect(waited.ok).toBe(true);
     expect(waited.output).toContain("waited 1 ms");
     expect(waited.pid).toBe(ready.pid);
+  } finally {
+    host.dispose();
+  }
+}, 15_000);
+
+test("a resident wait can be interrupted and the host recovers", async () => {
+  if (process.platform !== "win32") return;
+  const host = new ResidentUiaHost(script);
+  const abort = new AbortController();
+  try {
+    const before = await host.request({ action: "ping" });
+    setTimeout(() => abort.abort(), 50);
+    await expect(host.request({ action: "wait", durationMs: 10_000 }, 15_000, abort.signal))
+      .rejects.toThrow("interrupted");
+    const after = await host.request({ action: "ping" });
+    expect(after.ok).toBe(true);
+    expect(after.pid).not.toBe(before.pid);
   } finally {
     host.dispose();
   }
@@ -123,6 +140,54 @@ $w.Content=$p
     expect((await host.request({ action: "toggle", window: title, name: "Resident probe toggle" })).output).toContain("toggled+VERIFIED");
     expect((await host.request({ action: "invoke", window: title, name: "Resident probe button" })).output).toContain("invoked");
     expect((await host.request({ action: "get", window: title, name: "Resident probe input" })).output).toContain("Invoked");
+  } finally {
+    host.dispose();
+    form.kill();
+    await Promise.race([form.exited, Bun.sleep(1000)]);
+  }
+}, 30_000);
+
+test("resident UIA watch returns only after readable state changes and settles", async () => {
+  if (process.platform !== "win32") return;
+  const title = `Neko Resident Watch ${process.pid}`;
+  const source = `
+Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
+$w=New-Object System.Windows.Window
+$w.Title='${title}'; $w.Width=420; $w.Height=180
+$script:panel=New-Object System.Windows.Controls.StackPanel
+$script:message=New-Object System.Windows.Controls.TextBlock
+$script:message.Text='Repeated message'
+$button=New-Object System.Windows.Controls.Button
+$button.Content='Schedule inbound'
+$button.Add_Click({
+  $script:timer=New-Object System.Windows.Threading.DispatcherTimer
+  $script:timer.Interval=[TimeSpan]::FromMilliseconds(700)
+  $script:timer.Add_Tick({
+    $duplicate=New-Object System.Windows.Controls.TextBlock
+    $duplicate.Text='Repeated message'
+    [void]$script:panel.Children.Insert(1,$duplicate)
+    $script:timer.Stop()
+  })
+  $script:timer.Start()
+})
+[void]$script:panel.Children.Add($script:message); [void]$script:panel.Children.Add($button)
+$w.Content=$script:panel
+[void]$w.ShowDialog()
+`;
+  const form = Bun.spawn(["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", Buffer.from(source, "utf16le").toString("base64")], { stdout: "ignore", stderr: "ignore" });
+  const host = residentUiaHost(script);
+  const tools = new ToolRegistry(join(import.meta.dir, ".."), "auto", async () => true);
+  try {
+    await waitForUiaText(async () => {
+      return String(await tools.execute("computer", { action: "read", window: title }));
+    }, "Repeated message");
+    expect(String(await tools.execute("computer", { action: "invoke", window: title, name: "Schedule inbound" }))).toContain("invoked");
+    const watched = String(await tools.execute("computer", { action: "watch", window: title, duration_ms: 3_000, settle_ms: 200 }));
+    expect(watched).toContain("WATCH changed");
+    expect(watched).toContain("elapsed_ms=");
+    expect(watched).toMatch(/detected_ms=\d+/);
+    expect(watched).toMatch(/state=[a-f0-9]{12}/);
+    expect(watched).toContain("Repeated message");
   } finally {
     host.dispose();
     form.kill();

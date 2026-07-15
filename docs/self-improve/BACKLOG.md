@@ -1077,14 +1077,19 @@ one never blocks another.
   search+draft p50 <3 s, zero wrong recipients/duplicate sends, and 100% final-state verification. Do not use a
   real contact or type credentials/PIN/OTP in an automated benchmark.
   **Resident UIA + input foundation landed 2026-07-12:** a bounded JSONL PowerShell host is shared per Neko
-  process for `list/read/get/invoke/setvalue/toggle/type/key/click/stroke/scroll/wait`, serializes requests, restarts after disposal/failure,
+  process for `list/read/get/watch/invoke/setvalue/toggle/type/key/click/stroke/scroll/wait`, serializes requests, restarts after disposal/failure,
   unrefs its child/pipes so short-lived commands exit, and falls back to the original one-shot scripts on
   transport/startup failure. Disposable WPF measurements: cold 1.08 s; warm `list` p50/p95 31/57 ms, `get`
   23/36 ms, verified `setvalue` 93/121 ms; resident type 252-321 ms, key 311 ms, and a custom-canvas touch
   467 ms including focus + structural verification. Config rollback: `computer_use_resident: false` or
   `NEKO_COMPUTER_USE_RESIDENT=0`. Resident GDI virtual-desktop capture now adds 71-119 ms warm frames with
   sampled physical change bounds; native DXGI capture is reserved for measured GPU/HDR/protected-surface
-  failures. App-profile fast paths, visual grounding/uncertainty calibration, and repeated Zalo E2E remain.
+  failures. **Live-chat foundation landed 2026-07-15:** UIA `watch` and the attached-tab Browser Bridge now
+  wait locally for stable readable changes, report latency/state metadata, survive cancellation, and permit
+  intentional repeat waits without defeating the loop guard. A Messenger skill adds exact-conversation state,
+  pre-send race checks, one outbound per stable inbound, contenteditable fallback, and independent post-send
+  evidence. Repeated test-account Messenger/Zalo E2E, a cross-app app-profile pack, visual grounding/uncertainty
+  calibration, and a separately governed persistent watcher service remain open.
 
 ## Done
 <!-- the loop appends:  [x] <item>  (commit <hash>, bench delta <±tok / ±pass>) -->

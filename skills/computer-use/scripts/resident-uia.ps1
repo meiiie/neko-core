@@ -169,6 +169,53 @@ function Get-AllControls($root) {
   } finally { $h.Dispose() }
 }
 
+function Get-TextId([string]$text) {
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $hash = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($text))
+    return ([BitConverter]::ToString($hash).Replace('-', '').Substring(0, 12)).ToLowerInvariant()
+  } finally { $sha.Dispose() }
+}
+
+function Get-ReadableState($root, [int]$max = 120) {
+  $lines = New-Object 'System.Collections.Generic.List[string]'
+  $lines.Add('WINDOW: ' + $root.Current.Name)
+  $signature = New-Object 'System.Collections.Generic.List[string]'
+  $types = @('Text', 'Document', 'Edit', 'Hyperlink', 'ListItem', 'Button')
+  $seen = @{}
+  $count = 0
+  $cap = [Math]::Max($max, 300)
+  $scanned = 0
+  foreach ($element in (Get-AllControls $root)) {
+    $cached = $element.Cached
+    $type = $cached.ControlType.ProgrammaticName -replace 'ControlType.', ''
+    if ($types -notcontains $type) { continue }
+    $label = [string]$cached.Name
+    if (-not $label) { continue }
+    $label = $label.Trim()
+    if ($label.Length -lt 2) { continue }
+    # The watch fingerprint keeps duplicates + geometry: two identical incoming messages are still two
+    # events, while the human-facing read stays deduplicated and compact.
+    if ($scanned -lt 1000) {
+      $rect = $cached.BoundingRectangle
+      $fingerprintLabel = if ($label.Length -gt 1000) { $label.Substring(0, 1000) } else { $label }
+      $signature.Add("$type|$([int]$rect.X),$([int]$rect.Y),$([int]$rect.Width),$([int]$rect.Height)|$fingerprintLabel")
+      $scanned++
+    }
+    if ($count -ge $cap -or $seen.ContainsKey($label)) { continue }
+    $seen[$label] = $true
+    $lines.Add($label)
+    $count++
+  }
+  $lines.Add("($count text blocks)")
+  $text = ('WINDOW|' + $root.Current.Name + "`n" + ($signature -join "`n"))
+  return [PSCustomObject]@{ Lines = $lines.ToArray(); Text = $text; Id = (Get-TextId $text) }
+}
+
+function Get-ReadableSnapshot($root, [int]$max = 120) {
+  return (Get-ReadableState $root $max).Lines
+}
+
 function Find-ByName($root, [string]$name) {
   $h = $cr.Activate()
   try {
@@ -213,6 +260,15 @@ function Write-ActionAudit([string]$action, [string]$name, [string]$value) {
     $log = if ($env:NEKO_ACTION_LOG) { $env:NEKO_ACTION_LOG } else { "$env:TEMP\neko_actions.log" }
     $detail = if ($action -in @('setvalue', 'type')) { " ($($value.Length) chars)" } else { '' }
     ("{0}  uia {1} '{2}'{3}" -f (Get-Date -Format 'HH:mm:ss'), $action, $name, $detail) |
+      Out-File $log -Append -Encoding utf8
+  } catch {}
+}
+
+function Write-ObservationAudit([string]$status, [string]$window, [long]$elapsed, [long]$detected, [string]$state) {
+  try {
+    $log = if ($env:NEKO_OBSERVATION_LOG) { $env:NEKO_OBSERVATION_LOG } else { "$env:TEMP\neko_observations.log" }
+    $windowId = Get-TextId (($window -replace '[\r\n\t]+', ' ').Trim())
+    ("{0}  watch {1} elapsed_ms={2} detected_ms={3} state={4} window_id={5}" -f (Get-Date -Format 'HH:mm:ss.fff'), $status, $elapsed, $detected, $state, $windowId) |
       Out-File $log -Append -Encoding utf8
   } catch {}
 }
@@ -491,26 +547,41 @@ function Invoke-UiaRequest($request) {
       return $lines.ToArray()
     }
     'read' {
-      $lines = New-Object 'System.Collections.Generic.List[string]'
-      $lines.Add('WINDOW: ' + $root.Current.Name)
-      $types = @('Text', 'Document', 'Edit', 'Hyperlink', 'ListItem', 'Button')
-      $seen = @{}
-      $count = 0
-      $cap = [Math]::Max($max, 300)
-      foreach ($element in (Get-AllControls $root)) {
-        if ($count -ge $cap) { break }
-        $cached = $element.Cached
-        $type = $cached.ControlType.ProgrammaticName -replace 'ControlType.', ''
-        if ($types -notcontains $type) { continue }
-        $label = [string]$cached.Name
-        if (-not $label) { continue }
-        $label = $label.Trim()
-        if ($label.Length -lt 2 -or $seen.ContainsKey($label)) { continue }
-        $seen[$label] = $true
-        $lines.Add($label)
-        $count++
+      return @(Get-ReadableSnapshot $root $max)
+    }
+    'watch' {
+      $duration = if ($null -ne $request.durationMs) { [int]$request.durationMs } else { 10000 }
+      $settle = if ($null -ne $request.settleMs) { [int]$request.settleMs } else { 500 }
+      if ($duration -lt 250 -or $duration -gt 30000) { throw 'watch duration must be 250..30000 ms' }
+      if ($settle -lt 100 -or $settle -gt 2000 -or $settle -ge $duration) { throw 'watch settle must be 100..2000 ms and less than duration' }
+      $clock = [Diagnostics.Stopwatch]::StartNew()
+      $baseline = Get-ReadableState $root $max
+      $last = $baseline
+      [long]$changedAt = -1
+      while ($clock.ElapsedMilliseconds -lt $duration) {
+        $remaining = $duration - $clock.ElapsedMilliseconds
+        Start-Sleep -Milliseconds ([Math]::Max(1, [Math]::Min(150, $remaining)))
+        $current = Get-ReadableState $root $max
+        if ($current.Text -cne $last.Text) {
+          $last = $current
+          $changedAt = if ($current.Text -cne $baseline.Text) { $clock.ElapsedMilliseconds } else { -1 }
+          continue
+        }
+        if ($changedAt -ge 0 -and ($clock.ElapsedMilliseconds - $changedAt) -ge $settle) {
+          $elapsed = $clock.ElapsedMilliseconds
+          Write-ObservationAudit 'changed' $root.Current.Name $elapsed $changedAt $last.Id
+          $lines = New-Object 'System.Collections.Generic.List[string]'
+          $lines.Add("WATCH changed elapsed_ms=$elapsed detected_ms=$changedAt state=$($last.Id)")
+          foreach ($line in $last.Lines) { $lines.Add([string]$line) }
+          return $lines.ToArray()
+        }
       }
-      $lines.Add("($count text blocks)")
+      $status = if ($last.Text -cne $baseline.Text) { 'changed_unsettled' } else { 'timeout' }
+      $elapsed = $clock.ElapsedMilliseconds
+      Write-ObservationAudit $status $root.Current.Name $elapsed $changedAt $last.Id
+      $lines = New-Object 'System.Collections.Generic.List[string]'
+      $lines.Add("WATCH $status elapsed_ms=$elapsed detected_ms=$changedAt state=$($last.Id)")
+      foreach ($line in $last.Lines) { $lines.Add([string]$line) }
       return $lines.ToArray()
     }
     'get' {
@@ -528,7 +599,7 @@ function Invoke-UiaRequest($request) {
       $element = Find-ByName $root $name
       if (-not $element) { throw "not found: $name" }
       $vp = Get-Pattern $element ([System.Windows.Automation.ValuePattern]::Pattern)
-      if (-not $vp) { throw "no ValuePattern on: $name" }
+      if (-not $vp) { throw "no ValuePattern on: $name; this may be contenteditable - use computer type with the freshly observed element name" }
       if ($vp.Current.IsReadOnly) { throw "setvalue: '$name' is READ-ONLY" }
       $vp.SetValue($value)
       Start-Sleep -Milliseconds 40

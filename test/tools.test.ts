@@ -101,6 +101,10 @@ test("schema shape", () => {
   expect(s.type).toBe("function");
   expect(s.function.name).toBe("read_file");
   expect(s.function.parameters.required).toEqual(["path"]);
+
+  const computer = toOpenAISchema(resolveTool("computer"));
+  expect(computer.function.parameters.properties.action.enum).toContain("watch");
+  expect(computer.function.parameters.properties.settle_ms.type).toBe("number");
 });
 
 test("tool order", () => {

@@ -186,6 +186,28 @@ test("adversarial check also vets auto-approved MCP tools", async () => {
   expect(await reg.execute("mcp__x__do", {})).toBe("ran mcp");
 });
 
+test("an external adapter can declare an attached-tab observation safe", async () => {
+  let prompts = 0;
+  let checks = 0;
+  let receivedSignal: AbortSignal | undefined;
+  const { reg } = makeReg("default", () => { prompts++; return false; });
+  reg.mcp = {
+    toolSchemas: () => [],
+    has: (name: string) => name === "mcp__neko_browser__watch",
+    permission: () => "safe",
+    call: async (_name: string, _args: Record<string, any>, signal?: AbortSignal) => {
+      receivedSignal = signal;
+      return "watched";
+    },
+  };
+  reg.checkAction = async () => { checks++; return { ok: false, reason: "should not run" }; };
+  const abort = new AbortController();
+  expect(await reg.execute("mcp__neko_browser__watch", { durationMs: 250 }, abort.signal)).toBe("watched");
+  expect(prompts).toBe(0);
+  expect(checks).toBe(0);
+  expect(receivedSignal).toBe(abort.signal);
+});
+
 test("checkpoint/restore reverts this turn's file edits (and deletes new files)", async () => {
   const { root, reg } = makeReg("auto", () => true);
   writeFileSync(join(root, "keep.ts"), "original\n");

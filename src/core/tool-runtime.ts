@@ -351,20 +351,21 @@ export class ToolRegistry {
       return this.mcp.loadTools(names);
     }
 
-    // MCP tools: their effects are unknown, so treat them as gated (mode-governed).
+    // MCP tools default to gated. A trusted adapter may explicitly declare a read-only call safe.
     if (this.mcp?.has(name)) {
-      const decision = this.mode === "auto" ? "allow" : this.mode === "plan" ? "deny" : "prompt";
+      const declaredSafe = this.mcp.permission?.(name) === "safe";
+      const decision = declaredSafe ? "allow" : this.mode === "auto" ? "allow" : this.mode === "plan" ? "deny" : "prompt";
       if (decision === "deny") return `Blocked: ${name} (MCP) is not allowed in 'plan' mode.`;
       if (decision === "prompt" && !(await this.prompt(name, args))) {
         return `Denied by user: ${name}`;
       }
       // Auto-approved + adversarial review on: vet the call (MCP tools are a prime injection vector).
-      if (decision === "allow" && this.checkAction) {
+      if (!declaredSafe && decision === "allow" && this.checkAction) {
         const v = await this.checkAction(name, args);
         if (!v.ok) return `Blocked by adversarial check: ${v.reason || "looks unsafe"}`;
       }
       try {
-        return await this.mcp.call(name, args);
+        return await this.mcp.call(name, args, signal);
       } catch (error) {
         return `Error: ${(error as Error).message}`;
       }
@@ -399,7 +400,7 @@ export class ToolRegistry {
       const out = name === "bash" ? await this.runBash(args, signal)
         : name === "read_file" ? await this.runReadFile(args)
         : name === "skill" ? this.runSkill(args)
-        : name === "computer" ? await this.runComputer(args)
+        : name === "computer" ? await this.runComputer(args, signal)
         : await DISPATCH[name](this.root, args);
       this.runPostHook(name, args, typeof out === "string" ? out : "[image]");
       return out;
@@ -423,7 +424,7 @@ export class ToolRegistry {
   /** First-class desktop/GUI control (Windows): dispatches to the computer-use skill's accessibility-tree
    * scripts. Reads/acts on a window BY NAME (no vision); pointer acts use touch injection (no mouse hijack).
    * Unicode element names go through a temp UTF-8 file (@file) -- the cp1252 console mangles non-ASCII args. */
-  private async runComputer(args: Record<string, any>): Promise<string | any[]> {
+  private async runComputer(args: Record<string, any>, signal?: AbortSignal): Promise<string | any[]> {
     // An injected backend (e.g. the simulated GUI world in the long-horizon eval) takes over the whole
     // tool: it needs no real desktop, so it also bypasses the Windows-only guard below. Default unset.
     if (this.computerHandler) return this.computerHandler(args);
@@ -489,6 +490,15 @@ export class ToolRegistry {
         if (!Number.isInteger(duration) || duration < 0 || duration > 10_000) return "Error: computer wait 'duration_ms' must be an integer from 0 to 10000.";
         script = "input.ps1"; sa = ["wait", "", String(duration)]; break;
       }
+      case "watch": {
+        const duration = args.duration_ms === undefined ? 10_000 : Number(args.duration_ms);
+        const settle = args.settle_ms === undefined ? 500 : Number(args.settle_ms);
+        if (!Number.isInteger(duration) || duration < 250 || duration > 30_000) return "Error: computer watch 'duration_ms' must be an integer from 250 to 30000.";
+        if (!Number.isInteger(settle) || settle < 100 || settle > 2_000 || settle >= duration) return "Error: computer watch 'settle_ms' must be an integer from 100 to 2000 and less than duration_ms.";
+        // watch is a resident-only event primitive. The assignments satisfy the shared fallback shape;
+        // an unavailable/disabled host returns an explicit wait+read alternative below.
+        script = "uia.ps1"; sa = ["read"]; break;
+      }
       case "open": {
         const target = String(args.target ?? "");
         if (!target) return "Error: computer open needs 'target' (an executable, file path, or URL).";
@@ -504,11 +514,11 @@ export class ToolRegistry {
         sa = [capturePath];
         break;
       }
-      default: return `Unknown computer action '${action}'. Use: list | read | get | display | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
+      default: return `Unknown computer action '${action}'. Use: list | read | get | display | watch | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
     }
     try {
       let residentOutput: string | null = null;
-      if (this.residentUia && ["list", "read", "get", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "screenshot"].includes(action)) {
+      if (this.residentUia && ["list", "read", "get", "watch", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "screenshot"].includes(action)) {
         try {
           const response = await residentUiaHost(join(scriptsDir, "resident-uia.ps1")).request({
             action,
@@ -520,6 +530,7 @@ export class ToolRegistry {
             direction: args.direction === undefined ? undefined : String(args.direction),
             amount: args.amount === undefined ? undefined : Number(args.amount),
             durationMs: args.duration_ms === undefined ? undefined : Number(args.duration_ms),
+            settleMs: args.settle_ms === undefined ? undefined : Number(args.settle_ms),
             x: args.x === undefined ? undefined : Math.round(Number(args.x)),
             y: args.y === undefined ? undefined : Math.round(Number(args.y)),
             points: Array.isArray(args.points) ? args.points.map((n: any) => Math.round(Number(n))) : undefined,
@@ -527,17 +538,19 @@ export class ToolRegistry {
             inputBackend: this.inputBackend,
             capturePath: capturePath || undefined,
             width: action === "screenshot" ? 768 : undefined,
-          }, 15_000);
+          }, action === "watch" ? Number(args.duration_ms ?? 10_000) + 5_000 : 15_000, signal);
           if (!response.ok) return `Error: computer ${action} failed (resident Windows host). ${response.error || "unknown error"}`;
           if (action === "screenshot") residentOutput = response.output?.trim() || "";
           else return response.output?.trim() || "(no output)";
         } catch (error) {
+          if (signal?.aborted) return "(interrupted)";
           // Transport/startup failure only: preserve the proven one-shot adapter as the rollback path.
           debug("computer", () => `resident Windows host unavailable, using one-shot fallback: ${messageOf(error)}`);
         }
       }
       let out = residentOutput ?? "", err = "";
       if (residentOutput === null) {
+        if (action === "watch") return "Error: computer watch requires the resident Windows UIA host. Enable computer_use_resident, or use wait then read as the slower fallback.";
         const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa], { encoding: "utf-8", cwd: this.root, env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
         // Surface failures instead of swallowing them into "(no output)" — the agent can only adapt to a
         // failure it can SEE (same contract as the rest of the loop). Timeout/spawn error -> r.error.

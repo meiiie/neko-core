@@ -454,6 +454,43 @@ test("concurrency-safe tool calls in one turn run in parallel", async () => {
     expect(agent.messages.some((m: any) => String(m.content).includes("loop guard"))).toBe(true);
   });
 
+test("temporal watchers may repeat without tripping the loop guard or completion verifier", async () => {
+  let execs = 0;
+  const efforts: Array<string | undefined> = [];
+  const calls = [
+    ...Array.from({ length: 3 }, (_, i) => ({ id: `ui${i}`, name: "computer", arguments: { action: "watch", duration_ms: 250 } })),
+    ...Array.from({ length: 3 }, (_, i) => ({ id: `web${i}`, name: "mcp__neko_browser__watch", arguments: { durationMs: 250 } })),
+  ];
+  const script: any[] = calls.map((call) => ({ content: null, tool_calls: [call] }));
+  script.push({ content: "watch complete", tool_calls: [] });
+  const provider = {
+    async complete(_messages: any[], _tools: any[], _delta: any, _signal: any, opts: any = {}) {
+      efforts.push(opts.reasoningEffort);
+      return script.shift();
+    },
+  };
+  const tools = {
+    mcp: {
+      permission: (name: string) => name === "mcp__neko_browser__watch" ? "safe" : "gated",
+      temporal: (name: string) => name === "mcp__neko_browser__watch",
+    },
+    schemas: () => [],
+    execute: async () => { execs++; return "WATCH timeout elapsed_ms=250 detected_ms=-1 state=0123456789ab"; },
+  };
+  const agent = new Agent({
+    provider: provider as any,
+    tools: tools as any,
+    maxSteps: 8,
+    adaptiveEffort: true,
+    verifyStateChangesBeforeExit: true,
+  });
+  expect(await agent.run("watch this conversation")).toBe("watch complete");
+  expect(execs).toBe(6);
+  expect(efforts).toEqual([undefined, "low", "low", "low", "low", "low", "low"]);
+  expect(agent.messages.some((message: any) => String(message.content).includes("loop guard"))).toBe(false);
+  expect(agent.messages.some((message: any) => String(message.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(false);
+});
+
 test("BROAD loop guard WARNS (does not block) on many DISTINCT edits to ONE path", async () => {
   // The doom-loop SIGNAL: editing the SAME file with DIFFERENT args many times chasing a build error.
   // Every call signature differs, so the exact-repeat guard (lastSig/repeats) NEVER trips. The broad
@@ -715,6 +752,34 @@ test("stream-eager execution: a ready read-only call starts DURING generation, n
   expect(log.indexOf("exec-start")).toBeLessThan(log.indexOf("provider-resolved")); // overlapped with generation
   const obs = agent.messages.find((m: any) => m.role === "tool");
   expect(String(obs.content)).toBe("CONTENT"); // the eager result is the observation
+});
+
+test("stream-eager execution honors an adapter-declared safe observation", async () => {
+  const log: string[] = [];
+  let turn = 0;
+  const provider = {
+    async complete(_messages: any[], _tools: any, _delta: any, _signal: any, opts: any) {
+      turn++;
+      if (turn === 1) {
+        const call = { id: "watch", name: "mcp__neko_browser__watch", arguments: { durationMs: 250 } };
+        opts.onToolCallReady(call);
+        await Bun.sleep(30);
+        log.push("provider-resolved");
+        return { content: null, tool_calls: [call] };
+      }
+      return { content: "done", tool_calls: [] };
+    },
+  };
+  let execs = 0;
+  const tools = {
+    mcp: { permission: () => "safe" },
+    schemas: () => [],
+    execute: async () => { execs++; log.push("watch-start"); return "WATCH timeout"; },
+  };
+  const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 4 });
+  expect(await agent.run("watch")).toBe("done");
+  expect(execs).toBe(1);
+  expect(log.indexOf("watch-start")).toBeLessThan(log.indexOf("provider-resolved"));
 });
 
 test("stream-eager: order safety - a read AFTER a mutating call is NOT eager-started", async () => {

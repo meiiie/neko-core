@@ -87,7 +87,9 @@ DOM. **This is the primary path; use it first.**
 
 **Prefer the first-class `computer` tool** over bash-ing the scripts: `computer({action, window, ...})` —
 `action` is `list | read | get | display | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait |
-open | screenshot`.
+watch | open | screenshot`. `watch` waits inside the resident UIA process until readable state changes and
+stays stable, then returns `elapsed_ms`, `detected_ms`, a compact state id, and the fresh text without
+model-side polling.
 It dispatches to the scripts below (Unicode names handled via a temp UTF-8 `@file` automatically), gated like
 bash, and honours the presence/input config. Bash + the raw scripts is the fallback / for anything the tool
 doesn't expose. The underlying `uia.ps1` lets a text model perceive + act + verify with no vision and (for
@@ -125,6 +127,7 @@ computer({ action: "type", window: "Notepad", name: "Text editor", text: "Hello 
 computer({ action: "key", window: "Notepad", keys: "CTRL+S" })
 computer({ action: "scroll", window: "Notepad", direction: "down", amount: 2 })
 computer({ action: "read", window: "Notepad" })  # verify from fresh state
+computer({ action: "watch", window: "Messenger", duration_ms: 10000, settle_ms: 500 })
 ```
 
 ### Windows coordinate contract (DPI is part of correctness)
@@ -350,6 +353,9 @@ tap/click/stroke, `input` type/key/scroll/open) is appended, timestamped, to `%T
 (override via `NEKO_ACTION_LOG`; typed text and launch targets are redacted from this log).
 To answer "what steps did you take?" or to review/replay, `read` that log -- a human-readable trace of the
 real OS-level actions (complements the agent transcript). Cheap, always-on.
+Resident `computer watch` writes separate metadata-only events to `%TEMP%\neko_observations.log` (override
+via `NEKO_OBSERVATION_LOG`): status, `elapsed_ms`, `detected_ms`, state id, and an opaque window id. It stores
+neither the window title nor the private text body.
 
 **2. Intervention + auto-resume (state-managed interruption / shared autonomy -- SOTA).** While Neko drives,
 the overlay's low-level hook detects a REAL (non-injected) user click/move and writes the stop-file; the next

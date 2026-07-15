@@ -3,6 +3,29 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-15 - Low-latency Messenger watcher and lifecycle-safe waits
+- Turned the field report in `loi1.txt` into executable primitives instead of another prompt-only promise.
+  Resident Windows UIA now has `computer watch`: it samples the warm accessibility tree locally, waits for a
+  changed state to settle, and returns fresh readable evidence with `elapsed_ms`, `detected_ms`, and an opaque
+  state id. Duplicate messages with identical text still change the fingerprint because occurrence geometry is
+  retained in the state signature while human/model output stays compact.
+- Neko Browser Bridge gained an attached-tab `watch` backed by `MutationObserver`, followed by one fresh visible
+  snapshot. Editable fields are excluded from the broad text scan; password/OTP/payment blocking remains; typed
+  content is verified in the page. Watch timeouts include response headroom and Esc/abort now propagates through
+  the external-tool port. Observation logs retain only timing/status/opaque ids, not titles or message bodies.
+- Fixed the harness lifecycle conflict that made the third identical wait look like a stuck loop. Temporal waits
+  may repeat, remain bounded by `max_steps`, count as read-only verification, and use low adaptive effort on the
+  next mechanical observation. An adapter can explicitly mark read-only external tools safe, so snapshot/watch
+  on a human-attached tab do not prompt on every interval; click/type/navigation remain gated.
+- Added the `use-messenger` skill with exact-conversation verification, compact `last_seen`/`last_outbound` state,
+  a pre-send race gate, contenteditable fallback, one outbound per stable inbound, independent post-send
+  evidence, short-reply guidance, identity/consent boundaries, and measurable completion reporting.
+- Verification: TypeScript clean; targeted watcher/harness suite **131/131**; full suite **718/718 tests, 2,984
+  assertions, 78 files**; doctor and policy PASS; production binary compiled and passed UI plus real-PTY keyboard
+  probes. Bun again printed its known non-fatal post-build directory-mismatch diagnostic after every build/probe
+  had succeeded. A separately governed always-on background watcher and repeated Messenger test-account E2E
+  remain open; this change does not claim those unmeasured capabilities or SOTA.
+
 ## 2026-07-15 - Clean-room Neko Prompt Constitution
 - Audited a 24.8 KB Codex Desktop operating prompt supplied as a design reference. It was not portable: it
   named the wrong product and model, assumed Codex-only channels/tools/threads, contained unresolved sandbox
