@@ -5,31 +5,38 @@ Rules that govern this work live in `RULES.md`.
 
 ## 2026-07-15 - Verified Office artifact capability, clean-room from OfficeCLI
 - Studied [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) v1.0.136 at a pinned source commit and release
-  without copying its implementation. The
-  transferable ideas are a layered structured command surface, schema/help discovery instead of guessed
-  properties, stable element paths, resident sessions, batched mutations, and render-based human review.
-  Neko keeps the dependency optional: no Office engine, binary, installer, or unaudited MCP authority entered
-  core; normal `bash` approval and artifact scope remain authoritative.
-- Added the bundled `office-artifacts` skill for `.docx`, `.xlsx`, and `.pptx`. It preserves source files by
-  default and requires inspect -> exact mutation plan -> stop-on-error batch -> close/flush -> fresh reopen ->
-  schema validation -> targeted semantic readback -> visual review. Macro-enabled formats, blind mutation
-  retries, silent installation, unverified formula caches, and raw OOXML-first editing are explicitly refused.
-- Ran a clean-room smoke against the official Windows release downloaded into the untracked reference tree,
-  pinned to v1.0.136 and matched against its published SHA-256 manifest. Word, Excel, and PowerPoint artifacts
-  created, persisted, reopened, validated, and rendered. The adversarially useful finding: a dark PowerPoint
-  slide returned zero schema errors and zero reported issues while its inherited black title was visibly
-  unreadable. That proves exit status and schema checks are necessary but insufficient; Neko's vision gate is
-  not optional when layout matters.
+  (`4ba79f0b984e`) without copying its implementation. The transferable ideas are typed document paths,
+  discoverable schema/help, stop-on-error batching, fresh reads, Open XML validation, and render-based review.
+  Neko keeps the engine optional and excludes its raw XML, plugin, network, watch, and implicit resident surfaces.
+- Added an owner-aware Office Support Pack for all published Windows/macOS/Linux x64/arm64 targets. Installation
+  is explicit, no-admin, bounded, and atomic: Neko requires the exact official GitHub URL and asset SHA-256,
+  verifies bytes/executable/version plus a real create/validate protocol probe, records ownership, disables
+  self-update/auto-install/implicit resident behavior, and re-hashes managed bytes before first tool execution.
+  PATH installs remain user-owned and removal never touches them or user documents.
+- Added three first-class tools through the existing `McpTools` port: safe targeted inspection, gated typed
+  apply, and gated render. Mutations preserve the source by default and use workspace/symlink bounds, adjacent
+  staging, a 1-500 operation allowlist, stop-on-error batch, close, validation, non-empty/digest checks, optimistic
+  SHA-256 for same-file edits, atomic replacement, and rollback. Inspect/render read a private snapshot of the
+  current disk bytes, so an existing resident cannot mix unflushed memory with a different reported digest.
+  CLI/TUI/subagents now inherit the same composed MCP/Browser/Office boundary.
+- Extended the production outcome verifier so namespaced `apply` and `render` count as real state changes. A
+  later fresh inspection is required before completion; the bundled `office-artifacts` skill further requires
+  exact-target readback and visual evidence when layout matters.
+- Ran a clean-room value eval against the official Windows x64 release in an isolated temporary home. The exact
+  adapter created, persisted, reopened, validated, targeted-read, and rendered Word, Excel, and PowerPoint. The
+  adversarially useful finding: a dark slide returned zero schema errors while its inherited black title was
+  unreadable. Vision review caught it and the corrected artifact rendered legibly. Repeated three-format runs
+  took roughly 40-105 seconds, so rendering is a bounded evidence step rather than a blind retry loop.
 - Research basis: [ECMA-376/ISO 29500](https://ecma-international.org/publications-and-standards/standards/ecma-376/)
-  packaging and markup, [Microsoft Open XML validation](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.validation.openxmlvalidator),
-  [SpreadsheetBench 2](https://arxiv.org/abs/2606.29955)'s workflow-level failure analysis, and
-  [PPTAgent](https://arxiv.org/abs/2501.03936)/[PreGenie](https://arxiv.org/abs/2505.21660)'s separate
-  content/design/coherence plus render-review loops. The implementation adopts their measurable verification
-  principles without claiming benchmark parity.
-- Verification: skill schema validation PASS; deterministic English/Vietnamese routing and safety-contract tests
-  PASS; TypeScript clean; full suite **723/723 tests, 3,022 assertions, 78 files**; doctor and policy PASS;
-  production binary compiled, passed UI/real-PTY input probes, and listed the embedded skill. Bun printed its
-  known non-fatal post-build directory-mismatch diagnostic after every build probe had succeeded.
+  packaging and markup, [Microsoft Open XML design considerations](https://learn.microsoft.com/en-us/office/open-xml/open-xml-sdk-design-considerations),
+  [SpreadsheetBench 2](https://arxiv.org/abs/2606.29955), [SpreadsheetAgent](https://arxiv.org/abs/2604.12282),
+  [PPT-Eval](https://arxiv.org/abs/2606.31154), and [WindowsWorld](https://arxiv.org/abs/2604.27776). These become
+  measurable gates; Neko does not claim external benchmark parity without comparable runs.
+- Verification: deterministic support-pack, transaction/rollback, permission, path, digest-tamper, harness-exit,
+  skill-routing, and Ink Support Center tests pass; TypeScript clean; full suite **739/739 tests, 3,088
+  assertions, 80 files**; real three-format value eval PASS; doctor and policy PASS; production binary compiled,
+  passed the production UI probe, and heard keyboard input through a real PTY. Bun printed its known non-fatal
+  post-build directory-mismatch diagnostic after every build probe had succeeded. See `docs/process/OFFICE.md`.
 
 ## 2026-07-15 - Browser onboarding that preserves and resumes the task
 - Replaced the manual "attach, return to Neko, press Continue, retry status" loop with a two-stage guide.

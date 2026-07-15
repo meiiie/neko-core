@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { McpTools } from "../core/ports.ts";
+import { composeMcpTools } from "./mcp-compose.ts";
 import { homeDir } from "../shared/home.ts";
 
 export const NEKO_BROWSER_EXTENSION_ID = "koalaflndbcddboachbdfmppdeblldje";
@@ -129,35 +130,12 @@ class BrowserBridgeTools implements McpTools {
   }
 }
 
-class CompositeTools implements McpTools {
-  constructor(private readonly sources: McpTools[]) {}
-  toolSchemas(): any[] { return this.sources.flatMap((source) => source.toolSchemas()); }
-  has(name: string): boolean { return this.sources.some((source) => source.has(name)); }
-  permission(name: string): "safe" | "gated" {
-    const source = this.sources.find((candidate) => candidate.has(name));
-    return source?.permission?.(name) ?? "gated";
-  }
-  temporal(name: string): boolean {
-    const source = this.sources.find((candidate) => candidate.has(name));
-    return source?.temporal?.(name) ?? false;
-  }
-  call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
-    const source = this.sources.find((candidate) => candidate.has(name));
-    if (!source) return Promise.resolve(`Error: unknown external tool ${name}`);
-    return source.call(name, args, signal);
-  }
-  indexBlock(): string { return this.sources.map((source) => source.indexBlock?.() ?? "").filter(Boolean).join("\n"); }
-  loadTools(names: string[]): string {
-    return this.sources.map((source) => source.loadTools?.(names) ?? "").filter(Boolean).join("\n");
-  }
-}
-
 /** Add the bridge as another edge tool source only after `neko browser bridge` created its capability. */
 export function withBrowserBridge(source?: McpTools): McpTools | undefined {
   const capability = readBrowserCapability();
   if (!capability) return source;
   const bridge = new BrowserBridgeTools(capability);
-  return source ? new CompositeTools([source, bridge]) : bridge;
+  return composeMcpTools(source, bridge);
 }
 
 export interface BrowserBridge {

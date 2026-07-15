@@ -45,10 +45,10 @@ test("office artifacts route in English and Vietnamese and require saved-result 
 
   const skill = loadSkill("office-artifacts");
   expect(skill?.body).toContain("fresh on-disk reopen");
-  expect(skill?.body).toContain("--stop-on-error");
+  expect(skill?.body).toContain("mcp__neko_office__apply");
   expect(skill?.body).toContain("Never silently install");
   expect(skill?.body).toContain("Do not claim calculated values are current");
-  expect(skill?.body).toContain("Read the PNGs through Neko's vision bridge");
+  expect(skill?.body).toContain("Read every returned PNG through Neko's vision bridge");
 });
 
 test("the bundled computer-use skill includes its executable input helper", () => {

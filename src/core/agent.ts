@@ -428,7 +428,7 @@ export class Agent {
       }
       // MCP browser adapters are outside core's static registry. Their read-only snapshot/content
       // tools deliberately do not match these common state-changing suffixes.
-      return /(?:^|__)(?:browser_)?(?:click|type|fill|press_key|select_option|drag|upload_file|navigate|go_back|close|evaluate|run_code)$/.test(name);
+      return /(?:^|__)(?:(?:browser_)?(?:click|type|fill|press_key|select_option|drag|upload_file|navigate|go_back|close|evaluate|run_code)|apply|render)$/.test(name);
     }
 
     /** Fail-closed shell effect classifier used only by the completion verifier. It does not change

@@ -425,6 +425,7 @@ test("/support opens a management center and confirms managed-pack removal", asy
     stdin.write("/support"); await tick(30); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Manage optional support components"))).toBe(true);
     expect(lastFrame() ?? "").toContain("ChatGPT GPT-5.6 Support Pack");
+    expect(lastFrame() ?? "").toContain("Office Artifact Support Pack");
     expect(lastFrame() ?? "").toContain("270.4 MiB");
     stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Manage ChatGPT GPT-5.6 Support Pack"))).toBe(true);

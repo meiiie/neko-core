@@ -344,6 +344,15 @@ cost/token tracking · MCP client · single-binary distribution.
   submit a staged first release, and dogfood Store update behavior. The developer/GitHub ZIP is usable now;
   reconnect across worker/Neko restarts and explicit re-pair after capability rotation are implemented. Keep Playwright persistent-profile
   operation first-class so Neko remains fully usable without the extension.
+- [x] **G15** Verified Office artifacts, clean-room from public OfficeCLI v1.0.136. Word, Excel, and PowerPoint
+  now enter through a typed `McpTools` adapter: inspection is safe; bounded batch mutation and rendering are
+  gated. The optional owner-aware support pack verifies the official GitHub asset digest, executable/version,
+  and a real protocol probe, installs atomically, disables implicit updater/resident behavior, and is re-hashed
+  before first execution. Mutations use source preservation, adjacent staging, stop-on-error batching, validation,
+  optimistic SHA-256 for same-file edits, and atomic replacement. The completion harness recognizes namespaced
+  apply/render as state changes and requires later fresh evidence. A real isolated value eval created, reopened,
+  validated, and rendered all three formats; it also caught a schema-valid but visually unreadable slide. See
+  `docs/process/OFFICE.md`. External benchmark parity is deliberately not claimed.
 
 ## Phase H — real-terminal UX/UI polish (July 2026)
 - [x] **H1** Dogfood-driven polish to Claude-Code quality on a real terminal (full list in the "Current

@@ -61,6 +61,13 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
   emergency stop detaches immediately; an `AI` badge, page marker, and non-destructive tab group make control
   visible. No cookie or capability is sent through `/relay`. The public-release bundle, privacy policy, and
   Chrome Web Store submission checklist live in [`browser-extension/`](browser-extension/).
+- **Verified Office artifacts** — Word, Excel, and PowerPoint use a typed optional adapter rather than GUI
+  coordinate scripts or arbitrary shell strings. Read/help/validate calls are safe; create/edit/render calls
+  remain approval-gated. An edit is staged, applied as one stop-on-error batch, closed, validated, and only
+  then atomically moved into place. Same-file edits require the SHA-256 returned by a fresh inspection.
+  Completion still requires targeted readback and visual evidence because valid OOXML does not prove correct
+  layout or current Excel calculations. Install or remove the optional engine from `/support office`; Neko
+  never downloads it silently. See [`docs/process/OFFICE.md`](docs/process/OFFICE.md).
 - **Permission modes** — `default` / `accept-edits` / `plan` / `auto`, cycled with **Shift+Tab** (a
   *named* bounded-autonomy state, audited by `neko policy`); a seatbelt blocks catastrophic shell.
 - **Fullscreen terminal UI** — an app-owned, flicker-free viewport (alt-screen, like vim/htop):
@@ -235,7 +242,7 @@ neko support update           # verify and replace with the latest stable offici
 neko support remove           # remove only Neko's managed pack, never the user's Codex CLI
 ```
 
-Inside the TUI, bare `/support` opens the Support Center: it shows both optional components, who owns
+Inside the TUI, bare `/support` opens the Support Center: it shows all three optional components, who owns
 each installation, and the exact managed disk usage. Selecting a Neko-managed component offers
 Update/Repair and Remove. Removal has a safe confirmation screen and lets the user either preserve the
 subscription sign-in or remove the component and sign out. If Neko is reusing a CLI the user installed,
@@ -246,6 +253,23 @@ On Windows x64, the tested OpenAI `0.144.1` standalone archive is 92.7 MiB and o
 installation. It is downloaded from the official `openai/codex` GitHub release, checked against the asset's
 published SHA-256, and required to have a valid OpenAI Authenticode signature before Neko activates it.
 The base Neko install is unchanged because the pack remains opt-in.
+
+Office artifact support follows the same owner-aware pattern without becoming a model/provider dependency:
+
+```bash
+neko support office status
+neko support office install   # explicit opt-in, no administrator access
+neko support office update
+neko support office remove    # removes only Neko's managed binary, never your documents/PATH install
+```
+
+Neko downloads the single Apache-2.0 OfficeCLI binary from the official `iOfficeAI/OfficeCLI` GitHub release,
+requires GitHub's published asset SHA-256, checks the platform executable and a real create/validate probe,
+then installs atomically under `~/.neko-core/office-support`. The tested Windows x64 v1.0.136 binary is
+31.6 MiB. Neko disables OfficeCLI self-update, auto-install, and implicit resident mode so the recorded digest,
+process lifecycle, and on-disk verification remain authoritative; the managed digest is checked again before
+the first Office tool execution in each Neko process. Existing PATH installs are reused but clearly labelled as
+user-owned and are never removed by Neko.
 
 The recommended `gemini-api` profile connects directly to Google's documented
 [OpenAI-compatible Gemini endpoint](https://ai.google.dev/gemini-api/docs/openai) with `GEMINI_API_KEY`.

@@ -20,6 +20,8 @@ edges swappable as the project grows. Enforced by `test/architecture.test.ts`.
      session · context · skills          │ │
      project · doctor · registry         │ │
      browser-bridge (loopback adapter)   │ │
+     office-tools + optional support pack│ │
+     mcp-compose (edge-tool fan-in)      │ │
      tool-registry (composition)         │ │
    src/shared/  version                    ←── leaf utilities
 ```
@@ -66,6 +68,20 @@ commands through the existing `McpTools` port, so the agent loop and permission 
 Manifest V3 extension claims one tab with a user gesture; a loopback server authenticates an exact,
 config-allowlisted extension origin with a per-session capability. Store and unpacked ids remain explicit,
 so public distribution never weakens Origin checks. See `BROWSER-BRIDGE.md` for the protocol and threat model.
+
+## Office artifact boundary
+
+The optional Office adapter also enters through `McpTools`; core never imports an Office library or knows which
+document engine is active. `mcp-compose.ts` fans MCP, browser, and Office sources into one port while preserving
+each source's permission declaration. `office-tools.ts` exposes a deliberately smaller surface than its backend:
+typed read/help/validate, bounded add/set/remove/move/swap batches, and render. Raw XML, plugins, watch servers,
+network resource fetching, and arbitrary command strings stay outside the first-class adapter.
+
+Mutations are transactional at the adapter boundary: source -> adjacent staging file -> stop-on-error batch ->
+close -> schema validate -> atomic replacement. Same-file edits add an optimistic SHA-256 precondition; managed
+binary integrity is checked before first execution. Safe reads and renders operate on a temporary disk snapshot,
+so an unrelated resident cannot replace on-disk evidence with unflushed memory. `/support office` owns the optional binary lifecycle and
+never confuses an existing PATH install with Neko-owned files. See `OFFICE.md` for the evidence model and limits.
 
 ## Identity and persona boundary
 

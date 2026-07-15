@@ -30,6 +30,7 @@ test("shared registry composition wires native web and preserves every child saf
   expect(parent.sandboxAllowNetwork).toBe(true);
 
   const child = inheritToolRegistrySettings(new ToolRegistry(".", parent.mode, parent.prompt), parent);
+  expect(child.mcp).toBe(parent.mcp);
   expect(child.web).toBe(parent.web);
   expect(child.checkAction).toBe(parent.checkAction);
   expect(child.summarize).toBe(parent.summarize);

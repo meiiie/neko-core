@@ -21,6 +21,7 @@ import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt } from "..
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginGemini } from "../src/adapters/gemini-cli.ts";
 import { clearKimiCredentials, loginKimi } from "../src/adapters/kimi-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../src/adapters/gemini-support-pack.ts";
+import { discoverOfficeCli, installOfficeSupportPack, readOfficeSupportPack, removeOfficeSupportPack } from "../src/adapters/office-support-pack.ts";
 import { HARD_TASKS, renderBenchReport, renderLiftReport, runBench, runHarnessLift } from "../src/adapters/bench.ts";
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setActiveProfile, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
@@ -231,7 +232,7 @@ Commands:
   recipes       list runnable recipes (~/.neko-core/recipes)
   login         sign in; OpenAI, Google, Kimi, DeepSeek, or another API-key provider
   logout        sign out the active route (other provider sessions/keys stay intact)
-  support       inspect, install, update, or remove optional ChatGPT/Gemini components
+  support       inspect, install, update, or remove optional ChatGPT/Gemini/Office components
   update [ver]  self-update to the latest release (resumes auto-updates); 'update 0.7.7' pins/rolls
                 back to an EXACT version and PAUSES auto-updates so it sticks
   mcp           list configured MCP servers and their tools
@@ -539,12 +540,49 @@ async function cmdSupport(args: Args): Promise<number> {
   const target = args.positionals[0]?.toLowerCase();
   if (target === "gemini") return cmdGeminiSupport(args.positionals[1] ?? "status");
   if (target === "chatgpt" || target === "codex") return cmdCodexSupport(args.positionals[1] ?? "status");
+  if (target === "office" || target === "officecli") return cmdOfficeSupport(args.positionals[1] ?? "status");
   if (!target || target === "status") {
     const codex = await cmdCodexSupport("status");
     const gemini = await cmdGeminiSupport("status");
-    return codex === 0 && gemini === 0 ? 0 : 1;
+    const office = await cmdOfficeSupport("status");
+    return codex === 0 && gemini === 0 && office === 0 ? 0 : 1;
   }
   return cmdCodexSupport(target);
+}
+
+async function cmdOfficeSupport(action: string): Promise<number> {
+  const normalized = action.toLowerCase();
+  if (normalized === "install" || normalized === "update") {
+    try {
+      const installed = await installOfficeSupportPack({
+        force: normalized === "update",
+        notify: (message) => console.log(message),
+      });
+      console.log(`Office artifact tools are ready through OfficeCLI ${installed.officeVersion}.`);
+      console.log("This optional Apache-2.0 component can be removed anytime with `neko support office remove`.");
+      return 0;
+    } catch (error) {
+      console.error(`Office Support Pack failed: ${error instanceof Error ? error.message : error}`);
+      return 1;
+    }
+  }
+  if (normalized === "remove" || normalized === "uninstall") {
+    const removed = removeOfficeSupportPack();
+    console.log(removed
+      ? "Office Support Pack removed. Office files and any separate PATH installation were not changed."
+      : "No Neko-managed Office Support Pack is installed. An existing OfficeCLI was not changed.");
+    return 0;
+  }
+  if (normalized !== "status") {
+    console.error("usage: neko support office [status|install|update|remove]");
+    return 2;
+  }
+  const status = discoverOfficeCli();
+  console.log(`Office support: ${status.state} (${status.detail})`);
+  const managed = readOfficeSupportPack();
+  if (managed) console.log(`  managed ${managed.officeVersion}: ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk; source ${managed.sourceUrl}`);
+  console.log("  Optional Apache-2.0 backend for typed .docx/.xlsx/.pptx work; no Microsoft Office installation is required.");
+  return status.state === "ready" ? 0 : 1;
 }
 
 function cmdSkills(): number {

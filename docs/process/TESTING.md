@@ -16,6 +16,7 @@ rtk bun run build                        # binary + production UI + real PTY key
 rtk bun scripts/bench-scroll-conpty.ts worktree  # compiled TUI under a real PTY/ConPTY
 rtk bash scripts/selftest.sh            # LIVE end-to-end (drives `neko run`; uses real API tokens)
 rtk bun bin/neko.ts policy              # safe/gated tool-boundary audit
+rtk bun run eval:office                 # OPT-IN network: official support pack + real Office artifacts
 ```
 
 ## Layer 1 — headless unit/integration (`bun test`, no network)
@@ -32,6 +33,7 @@ rtk bun bin/neko.ts policy              # safe/gated tool-boundary audit
 | Sessions | session.test | per-cwd isolation, save/load |
 | Context | context.test | NEKO.md, @import, environmentBlock, rememberNote |
 | MCP | mcp-oauth, remote-control | OAuth provider storage; /rc token-gated round-trip |
+| Office | office-support-pack, office-tools | official asset/digest contract, atomic ownership, safe/gated tools, workspace/symlink bounds, transaction rollback, hash precondition, render evidence |
 | Recipes/registry | recipes, registry | $ARGUMENTS fill; capability/policy audit |
 
 ## Layer 2 — UX/UI (headless Ink snapshots)
@@ -55,7 +57,15 @@ rtk bun bin/neko.ts policy              # safe/gated tool-boundary audit
 | `scripts/bench-scroll-conpty.ts` | Current `dist/neko` under a real PTY/ConPTY: `/help`, scroll, resize, slash menu and keyboard completion |
 | `scripts/probe-computer-input.ts` | Disposable Windows WPF window: Unicode `type`, exact-control focus, `Ctrl+A`, replacement, UIA value readback, wait, and close |
 
-## Layer 4 — live end-to-end (`scripts/selftest.sh`, real provider)
+## Layer 4 — Office artifact value eval (opt-in network)
+
+`bun run eval:office` downloads the current official OfficeCLI release into an isolated temporary home. It
+uses Neko's real adapter to create, reopen, validate, target-read, and render `.docx`, `.xlsx`, and `.pptx`, then
+removes the temporary pack and artifacts. It does not run as part of ordinary `bun test`, and it never installs
+into the user's real Neko home. Visual PNGs must still be reviewed by a human or vision model; a green command is
+not a visual assertion.
+
+## Layer 5 — live end-to-end (`scripts/selftest.sh`, real provider)
 
 Tiered, with deterministic checks where possible (file contents, grep on output):
 
@@ -69,7 +79,7 @@ Tiered, with deterministic checks where possible (file contents, grep on output)
 | Hard | multi_edit (2 edits, atomic) | both edits land on disk |
 | Edge | read missing file | reports the error gracefully (no crash/loop) |
 
-## Layer 5 — stress / adversarial (`scripts/stresstest.sh`, real provider)
+## Layer 6 — stress / adversarial (`scripts/stresstest.sh`, real provider)
 
 | Scenario | What it stresses | Check |
 |---|---|---|

@@ -27,6 +27,7 @@ import { installCodexSupportPack, readCodexSupportPack, removeCodexSupportPack }
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials } from "../adapters/gemini-cli.ts";
 import { hasKimiCredentials } from "../adapters/kimi-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
+import { discoverOfficeCli, installOfficeSupportPack, readOfficeSupportPack, removeOfficeSupportPack } from "../adapters/office-support-pack.ts";
 import { getLastGeminiUsage } from "../adapters/gemini-provider.ts";
 import { getChatGptVoiceUsage } from "../adapters/chatgpt-voice.ts";
 import { clampEffort, effortSuggestions, isEffortName, resolveEffort } from "../adapters/effort.ts";
@@ -51,7 +52,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/voice", desc: "conversational browser voice, ChatGPT, lab bridge, or dictation" },
   { name: "/model", desc: "show / list / switch model (/model list · /model <id>)" },
   { name: "/provider", desc: "switch provider (account) then pick its model - picker or /provider <name>" },
-  { name: "/support", desc: "install, update, or remove optional subscription components" },
+  { name: "/support", desc: "manage optional model and Office components" },
   { name: "/browser", desc: "connect a signed-in Chrome tab (guided setup/status)" },
   { name: "/tools", desc: "list / toggle tools (/tools bash)" },
   { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
@@ -275,7 +276,7 @@ function openCodexInstallPrompt(ctx: CommandCtx, selected: ModelOption): void {
   });
 }
 
-type SupportKind = "chatgpt" | "gemini";
+type SupportKind = "chatgpt" | "gemini" | "office";
 
 /** A discoverable owner-aware management surface. Neko only offers Remove for files it installed. */
 function openSupportCenter(ctx: CommandCtx): void {
@@ -283,6 +284,8 @@ function openSupportCenter(ctx: CommandCtx): void {
   const codexManaged = readCodexSupportPack();
   const gemini = discoverGeminiCli();
   const geminiManaged = readGeminiSupportPack();
+  const office = discoverOfficeCli();
+  const officeManaged = readOfficeSupportPack();
   ctx.setOverlay({
     title: "Manage optional support components",
     items: [
@@ -296,6 +299,11 @@ function openSupportCenter(ctx: CommandCtx): void {
         label: "Gemini CLI Support Pack",
         detail: supportDetail("gemini", gemini.state, gemini.detail, gemini.executable?.source === "managed", geminiManaged?.installedBytes),
       },
+      {
+        id: "office",
+        label: "Office Artifact Support Pack",
+        detail: supportDetail("office", office.state, office.detail, office.executable?.source === "managed", officeManaged?.installedBytes),
+      },
       { id: "close", label: "Close", detail: "No changes" },
     ],
     onSelect: (item) => {
@@ -307,24 +315,25 @@ function openSupportCenter(ctx: CommandCtx): void {
 
 function supportDetail(kind: SupportKind, state: string, detail: string, activeManaged: boolean, bytes?: number): string {
   if (bytes != null) return `installed by Neko - ${formatMiB(bytes)} on disk - ${activeManaged ? state : `available; active bridge ${detail}`}`;
-  if (state === "ready") return `using an existing ${kind === "chatgpt" ? "Codex" : "Gemini"} CLI - Neko installed nothing`;
-  return `not installed - ${kind === "chatgpt" ? "GPT-5.5/API/Ollama still work" : "required only for Code Assist Standard/Enterprise ACP"}`;
+  if (state === "ready") return `using an existing ${kind === "chatgpt" ? "Codex" : kind === "gemini" ? "Gemini" : "OfficeCLI"} - Neko installed nothing`;
+  return `not installed - ${kind === "chatgpt" ? "GPT-5.5/API/Ollama still work" : kind === "gemini" ? "required only for Code Assist Standard/Enterprise ACP" : "optional for typed Word/Excel/PowerPoint work"}`;
 }
 
 function openSupportManager(ctx: CommandCtx, kind: SupportKind): void {
-  const managed = kind === "chatgpt" ? readCodexSupportPack() : readGeminiSupportPack();
-  const status = kind === "chatgpt" ? discoverCodexSupport() : discoverGeminiCli();
-  const title = kind === "chatgpt" ? "ChatGPT GPT-5.6 Support Pack" : "Gemini CLI Support Pack";
+  const managed = kind === "chatgpt" ? readCodexSupportPack() : kind === "gemini" ? readGeminiSupportPack() : readOfficeSupportPack();
+  const status = kind === "chatgpt" ? discoverCodexSupport() : kind === "gemini" ? discoverGeminiCli() : discoverOfficeCli();
+  const title = kind === "chatgpt" ? "ChatGPT GPT-5.6 Support Pack" : kind === "gemini" ? "Gemini CLI Support Pack" : "Office Artifact Support Pack";
   const items = managed ? [
     { id: "update", label: "Update or repair", detail: `verify and replace the ${formatMiB(managed.installedBytes)} Neko-managed component` },
     { id: "remove", label: "Remove support pack", detail: kind === "chatgpt"
       ? `free ${formatMiB(managed.installedBytes)}; ChatGPT sign-in stays and GPT-5.5 still works`
-      : `free ${formatMiB(managed.installedBytes)}; enterprise sign-in stays for a quick reinstall` },
+      : kind === "gemini" ? `free ${formatMiB(managed.installedBytes)}; enterprise sign-in stays for a quick reinstall`
+        : `free ${formatMiB(managed.installedBytes)}; your Office files and separate installs stay untouched` },
     { id: "back", label: "Back", detail: "Return to all support components" },
   ] : status.state === "ready" ? [
-    { id: "back", label: "Back", detail: `Using an existing ${kind === "chatgpt" ? "Codex" : "Gemini"} CLI. Neko did not install it and will not remove it.` },
+    { id: "back", label: "Back", detail: `Using an existing ${kind === "chatgpt" ? "Codex" : kind === "gemini" ? "Gemini" : "OfficeCLI"}. Neko did not install it and will not remove it.` },
   ] : [
-    { id: "install", label: "Install support pack", detail: kind === "chatgpt" ? "about 95 MiB download / 270 MiB disk" : "about 55 MiB download / 200 MiB disk; no administrator access" },
+    { id: "install", label: "Install support pack", detail: kind === "chatgpt" ? "about 95 MiB download / 270 MiB disk" : kind === "gemini" ? "about 55 MiB download / 200 MiB disk; no administrator access" : "about 35 MiB; verified official checksum; no Microsoft Office required" },
     { id: "back", label: "Back", detail: "Download nothing" },
   ];
   ctx.setOverlay({
@@ -337,7 +346,9 @@ function openSupportManager(ctx: CommandCtx, kind: SupportKind): void {
       ctx.setBusy(true);
       void (kind === "chatgpt"
         ? installCodexSupportPack({ force: item.id === "update", notify: (message) => ctx.addLine("info", message) })
-        : installGeminiSupportPack({ force: item.id === "update", notify: (message) => ctx.addLine("info", message) }))
+        : kind === "gemini"
+          ? installGeminiSupportPack({ force: item.id === "update", notify: (message) => ctx.addLine("info", message) })
+          : installOfficeSupportPack({ force: item.id === "update", notify: (message) => ctx.addLine("info", message) }))
         .then(() => ctx.addLine("info", `${title} is ready. Return to /support anytime to update or remove it.`))
         .catch((error) => ctx.addLine("error", `${title} failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`))
         .finally(() => { ctx.setBusy(false); openSupportCenter(ctx); });
@@ -346,27 +357,31 @@ function openSupportManager(ctx: CommandCtx, kind: SupportKind): void {
 }
 
 function openSupportRemoveConfirm(ctx: CommandCtx, kind: SupportKind, bytes: number): void {
-  const title = kind === "chatgpt" ? "ChatGPT GPT-5.6 Support Pack" : "Gemini CLI Support Pack";
+  const title = kind === "chatgpt" ? "ChatGPT GPT-5.6 Support Pack" : kind === "gemini" ? "Gemini CLI Support Pack" : "Office Artifact Support Pack";
+  const items = kind === "office" ? [
+    { id: "keep", label: "Keep installed", detail: "Recommended if you still create or edit Office artifacts" },
+    { id: "remove", label: `Remove and free ${formatMiB(bytes)}`, detail: "Office files and any separate OfficeCLI installation stay untouched" },
+  ] : [
+    { id: "keep", label: "Keep installed", detail: "Recommended if you still use this subscription route" },
+    { id: "remove", label: `Remove and free ${formatMiB(bytes)}`, detail: kind === "chatgpt"
+      ? "ChatGPT sign-in stays; GPT-5.5/API/Ollama are unaffected"
+      : "Enterprise sign-in stays; reinstall the pack to use Code Assist again" },
+    { id: "remove-and-signout", label: "Remove and sign out", detail: kind === "chatgpt"
+      ? `free ${formatMiB(bytes)} and remove Neko's ChatGPT session; API keys stay`
+      : `free ${formatMiB(bytes)} and remove Neko's Google session; API keys stay` },
+  ];
   ctx.setOverlay({
     title: `Remove ${title}?`,
-    items: [
-      { id: "keep", label: "Keep installed", detail: "Recommended if you still use this subscription route" },
-      { id: "remove", label: `Remove and free ${formatMiB(bytes)}`, detail: kind === "chatgpt"
-        ? "ChatGPT sign-in stays; GPT-5.5/API/Ollama are unaffected"
-        : "Enterprise sign-in stays; reinstall the pack to use Code Assist again" },
-      { id: "remove-and-signout", label: "Remove and sign out", detail: kind === "chatgpt"
-        ? `free ${formatMiB(bytes)} and remove Neko's ChatGPT session; API keys stay`
-        : `free ${formatMiB(bytes)} and remove Neko's Google session; API keys stay` },
-    ],
+    items,
     onSelect: (item) => {
       if (item.id !== "remove" && item.id !== "remove-and-signout") return openSupportManager(ctx, kind);
       ctx.setOverlay(null);
-      ctx.agent.setProvider(getProvider(ctx.cfg)); // dispose the hidden process before Windows removes it
-      const removed = kind === "chatgpt" ? removeCodexSupportPack() : removeGeminiSupportPack();
-      const signedOut = item.id === "remove-and-signout";
+      if (kind !== "office") ctx.agent.setProvider(getProvider(ctx.cfg)); // dispose a hidden provider process before Windows removes it
+      const removed = kind === "chatgpt" ? removeCodexSupportPack() : kind === "gemini" ? removeGeminiSupportPack() : removeOfficeSupportPack();
+      const signedOut = kind !== "office" && item.id === "remove-and-signout";
       if (signedOut) (kind === "chatgpt" ? clearChatGptCredentials : clearGeminiCredentials)();
       ctx.addLine(removed ? "info" : "error", removed
-        ? `${title} removed; freed ${formatMiB(bytes)}. ${signedOut ? "Neko also signed this account out." : "Your sign-in was kept."} Reinstall anytime from /support.`
+        ? `${title} removed; freed ${formatMiB(bytes)}. ${kind === "office" ? "Office files and separate installs were kept." : signedOut ? "Neko also signed this account out." : "Your sign-in was kept."} Reinstall anytime from /support.`
         : `${title} was already absent; no files were removed.`);
       openSupportCenter(ctx);
     },
@@ -531,6 +546,30 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       if (!action) { openSupportCenter(ctx); return; }
       if (action === "gemini") { openSupportManager(ctx, "gemini"); return; }
       if (action === "chatgpt" || action === "codex") { openSupportManager(ctx, "chatgpt"); return; }
+      if (action === "office" || action === "officecli") { openSupportManager(ctx, "office"); return; }
+      const officeAction = action.startsWith("office ") ? action.slice("office ".length).trim()
+        : action.startsWith("officecli ") ? action.slice("officecli ".length).trim()
+          : null;
+      if (officeAction === "status") {
+        const status = discoverOfficeCli();
+        const managed = readOfficeSupportPack();
+        const disk = managed ? `; ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
+        return addLine("info", `Office artifact support: ${status.state} (${status.detail})${disk}. Optional for typed .docx/.xlsx/.pptx work; no Microsoft Office installation is required.`);
+      }
+      if (officeAction === "remove" || officeAction === "uninstall") {
+        const removed = removeOfficeSupportPack();
+        return addLine("info", removed
+          ? "Office Support Pack removed. Office files and any separate OfficeCLI installation were kept."
+          : "No Neko-managed Office Support Pack is installed; an existing OfficeCLI was not changed.");
+      }
+      if (officeAction === "install" || officeAction === "update") {
+        ctx.setBusy(true);
+        try { await installOfficeSupportPack({ force: officeAction === "update", notify: (message) => addLine("info", message) }); }
+        catch (error) { addLine("error", `Office Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`); }
+        finally { ctx.setBusy(false); }
+        return;
+      }
+      if (officeAction) return addLine("info", "usage: /support office [status|install|update|remove]");
       const geminiAction = action.startsWith("gemini ") ? action.slice("gemini ".length).trim() : null;
       if (geminiAction === "status") {
         const status = discoverGeminiCli();
@@ -561,10 +600,14 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         const gemini = discoverGeminiCli();
         const geminiManaged = readGeminiSupportPack();
         const geminiDisk = geminiManaged ? `; ${(geminiManaged.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
+        const office = discoverOfficeCli();
+        const officeManaged = readOfficeSupportPack();
+        const officeDisk = officeManaged ? `; ${(officeManaged.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
         return addLine("info", [
           `ChatGPT GPT-5.6 support: ${codex.state} (${codex.detail})${codexDisk}`,
           `Gemini CLI support: ${gemini.state} (${gemini.detail})${geminiDisk}`,
-          "GPT-5.5, Gemini API keys, other API providers, and Ollama do not require these components.",
+          `Office artifact support: ${office.state} (${office.detail})${officeDisk}`,
+          "GPT-5.5, Gemini API keys, other API providers, Ollama, and non-Office tasks do not require these components.",
         ].join("\n"));
       }
       const codexAction = action.startsWith("chatgpt ") ? action.slice("chatgpt ".length).trim()
@@ -584,7 +627,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
           ? `GPT-5.6 Support Pack removed. Bridge status: ${fallback.state} (${fallback.detail}). ChatGPT sign-in was kept; GPT-5.5/API/Ollama are unaffected.`
           : "No Neko-managed Support Pack is installed; an existing Codex CLI is never removed by Neko.");
       }
-      if (codexAction !== "install" && codexAction !== "update") return addLine("info", "usage: /support [status|chatgpt|gemini] [status|install|update|remove]");
+      if (codexAction !== "install" && codexAction !== "update") return addLine("info", "usage: /support [status|chatgpt|gemini|office] [status|install|update|remove]");
       ctx.setBusy(true);
       try { await installCodexSupportPack({ force: codexAction === "update", notify: (message) => addLine("info", message) }); }
       catch (error) { addLine("error", `GPT-5.6 Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`); }

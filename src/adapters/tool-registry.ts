@@ -2,12 +2,14 @@
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import type { NekoConfig } from "./config.ts";
 import { withBrowserBridge } from "./browser-bridge.ts";
+import { withOfficeTools } from "./office-tools.ts";
 import { loadSkill } from "./skills.ts";
 import { webPort } from "./web.ts";
 
 /** Apply config-backed capabilities once at a host composition root. */
 export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, options: { noTools?: boolean } = {}): ToolRegistry {
   registry.mcp = withBrowserBridge(registry.mcp);
+  registry.mcp = withOfficeTools(registry.root, registry.mcp);
   registry.hooks = cfg.hooks;
   registry.allowDangerousBash = cfg.allowDangerousBash;
   registry.bashTimeoutCapMs = cfg.bashTimeoutCapMs;
@@ -34,6 +36,7 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
 /** Copy every runtime boundary/capability a child must inherit, deliberately excluding subagent recursion. */
 export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRegistry): ToolRegistry {
   target.disabled = new Set(source.disabled);
+  target.mcp = source.mcp;
   target.hooks = source.hooks;
   target.summarize = source.summarize;
   target.web = source.web;

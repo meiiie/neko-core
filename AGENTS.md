@@ -23,6 +23,8 @@ enforced by `test/architecture.test.ts`).
 | `adapters/mcp.ts` · `adapters/session.ts` · `adapters/context.ts` · `adapters/skills.ts` | MCP client · session persistence/resume · global identity + project context (NEKO.md/AGENTS.md) · `.md` skills. |
 | `adapters/registry.ts` · `adapters/doctor.ts` · `adapters/project.ts` | capabilities + `policy` audit · `doctor` diagnostics · `init` scaffolds. |
 | `adapters/tool-registry.ts` | Shared CLI/TUI/subagent composition for native web, skills, vision, sandbox and inherited safety boundaries. |
+| `adapters/office-tools.ts` · `adapters/office-support-pack.ts` | Typed, workspace-bounded Office tools + optional checksummed OfficeCLI support pack. |
+| `adapters/mcp-compose.ts` | Composes independent edge-tool sources behind the single `McpTools` port. |
 | **`shared/`** | `version.ts` (leaf). |
 | **`ui/`** | Ink REPL, split by concern: `chat.tsx` (lifecycle + turn loop + render), `commands.ts` (slash commands + `runSlashCommand`), `transcript.tsx` (line renderer), `select-list.tsx` (reusable picker), `thinking-line.tsx`, `approval-box.tsx`, `markdown.tsx`, `highlight.tsx`, `logo.tsx`, `text-input.tsx`, `format.ts`. |
 | `bin/neko.ts` | The `neko` CLI entry point. |
