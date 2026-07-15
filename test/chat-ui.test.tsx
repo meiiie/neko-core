@@ -52,8 +52,10 @@ const until = async (pred: () => boolean, ms = 8000) => { for (let w = 0; w < ms
 /** Scripted provider: step responses in order; streams content via onDelta. */
 class MockProvider implements Provider {
   index = 0;
+  messages: any[] = [];
   constructor(private script: ProviderResponse[]) {}
-  async complete(_messages: any[], _tools?: any[], onDelta?: (t: string) => void): Promise<ProviderResponse> {
+  async complete(messages: any[], _tools?: any[], onDelta?: (t: string) => void): Promise<ProviderResponse> {
+    this.messages = messages;
     const res = this.script[Math.min(this.index, this.script.length - 1)];
     this.index++;
     if (res.content && onDelta) onDelta(res.content);
@@ -223,6 +225,89 @@ test("cancelling browser onboarding keeps the original request editable", async 
     if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("natural Office tasks offer one-time install and resume the saved request", async () => {
+  let installed = false;
+  let installs = 0;
+  const provider = new MockProvider([{ content: "Office task started.", tool_calls: [] }]);
+  const request = "create a PowerPoint presentation and verify the pptx file";
+  const { stdin, frames, unmount } = render(
+    <ChatApp
+      fullscreen={false}
+      yolo
+      provider={provider}
+      officeSupportStatus={() => installed
+        ? { state: "ready", detail: "test Office support" }
+        : { state: "missing", detail: "not installed" }}
+      installOfficeSupport={async ({ notify }) => {
+        installs++;
+        notify("Verifying Office Support Pack...");
+        installed = true;
+      }}
+    />,
+  );
+
+  stdin.write(request); await tick(20); stdin.write("\r");
+  expect(await until(() => frames.join("\n").includes("Install Office support and continue?"))).toBe(true);
+  expect(frames.join("\n")).toContain("Your request is saved");
+  expect(provider.index).toBe(0);
+
+  stdin.write("\r");
+  expect(await until(() => frames.join("\n").includes("Office task started"))).toBe(true);
+  expect(installs).toBe(1);
+  expect(provider.index).toBe(1);
+  expect(frames.join("\n")).toContain("Office support is ready - continuing your saved request");
+  expect(frames.join("\n")).toContain(request);
+  unmount();
+});
+
+test("cancelling Office onboarding keeps the original request editable", async () => {
+  let installs = 0;
+  const provider = new MockProvider([{ content: "should not run", tool_calls: [] }]);
+  const request = "tao tai lieu Word docx va kiem tra dinh dang";
+  const { stdin, lastFrame, frames, unmount } = render(
+    <ChatApp
+      fullscreen={false}
+      yolo
+      provider={provider}
+      officeSupportStatus={() => ({ state: "missing", detail: "not installed" })}
+      installOfficeSupport={async () => { installs++; }}
+    />,
+  );
+
+  stdin.write(request); await tick(20); stdin.write("\r");
+  expect(await until(() => frames.join("\n").includes("Install Office support and continue?"))).toBe(true);
+  stdin.write("\x1b");
+  expect(await until(() => (lastFrame() ?? "").includes(request))).toBe(true);
+  expect(frames.join("\n")).toContain("Your request is still in the input");
+  expect(installs).toBe(0);
+  expect(provider.index).toBe(0);
+  unmount();
+});
+
+test("declining Office installation continues once without asking again", async () => {
+  let installs = 0;
+  const provider = new MockProvider([{ content: "Used a local fallback.", tool_calls: [] }]);
+  const request = "create an Excel xlsx budget and verify the file";
+  const { stdin, frames, unmount } = render(
+    <ChatApp
+      fullscreen={false}
+      yolo
+      provider={provider}
+      officeSupportStatus={() => ({ state: "missing", detail: "not installed" })}
+      installOfficeSupport={async () => { installs++; }}
+    />,
+  );
+
+  stdin.write(request); await tick(20); stdin.write("\r");
+  expect(await until(() => frames.join("\n").includes("Install Office support and continue?"))).toBe(true);
+  stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
+  expect(await until(() => frames.join("\n").includes("Used a local fallback"))).toBe(true);
+  expect(installs).toBe(0);
+  expect(provider.index).toBe(1);
+  expect(JSON.stringify(provider.messages)).toContain("explicitly chose to continue without installing");
+  unmount();
 });
 
 test("auto mode: a safe tool call + markdown answer render end-to-end", async () => {

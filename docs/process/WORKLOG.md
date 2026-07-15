@@ -3,6 +3,20 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-15 - One-step Office onboarding for natural requests
+- A normal Word, Excel, or PowerPoint request now checks the optional Office engine before spending a model
+  call. If support is absent or broken, Neko offers **Install and continue** (the default) with source, size,
+  verification, admin, and Microsoft Office facts shown in the TUI. It still never installs silently.
+- The original request remains visible and editable on Esc. Choosing installation verifies the official pack
+  and resumes that exact request automatically; choosing **Continue without installing** lets the existing
+  fallback policy run without a download. A failed install restores the request instead of losing the turn.
+- Reused the existing overlay, busy queue, support-pack installer, dynamic Office tool resolution, and skill
+  matcher. No second onboarding framework or new dependency was added.
+- Verification: Office onboarding/decline/cancel journeys **3/3**; targeted suite **51/51**; full suite
+  **742/742 tests, 3,106 assertions, 80 files**; TypeScript, doctor, and policy clean; production binary,
+  UI probe, and real-PTY keyboard probe PASS. Bun printed its known non-fatal directory-mismatch diagnostic
+  only after the build and both probes succeeded.
+
 ## 2026-07-15 - Verified Office artifact capability, clean-room from OfficeCLI
 - Studied [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) v1.0.136 at a pinned source commit and release
   (`4ba79f0b984e`) without copying its implementation. The transferable ideas are typed document paths,

@@ -45,6 +45,7 @@ import { clearKimiCredentials, hasKimiCredentials, loginKimi } from "../adapters
 import { installGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
 import { compareCodexVersions, discoverCodexSupport } from "../adapters/codex-app-server.ts";
 import { installCodexSupportPack } from "../adapters/codex-support-pack.ts";
+import { discoverOfficeCli, installOfficeSupportPack, type OfficeSupportStatus } from "../adapters/office-support-pack.ts";
 import { ChatGptVoiceSession, CODEX_VOICE_MIN_VERSION, type ChatGptVoiceControl, type ChatGptVoiceOptions, type VoiceSnapshot } from "../adapters/chatgpt-voice.ts";
 import { BrowserVoiceSession, type BrowserVoiceOptions } from "../adapters/browser-voice.ts";
 import { authChoices, providerChoices } from "../adapters/provider-choice.ts";
@@ -116,9 +117,11 @@ interface ChatProps {
   openUrl?: (url: string) => void;
   browserHint?: boolean;
   setupBrowser?: () => Promise<string>;
+  officeSupportStatus?: () => OfficeSupportStatus;
+  installOfficeSupport?: (options: { force?: boolean; notify: (message: string) => void }) => Promise<unknown>;
 }
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -135,6 +138,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const relayScopeRef = useRef<{ key: string; hub: boolean; url: string } | null>(null);
   const relayHostIdRef = useRef(newSessionId()); // one opaque remote-control slot per running TUI
   const browserRequestBypassRef = useRef<string | null>(null);
+  const officeRequestBypassRef = useRef<{ text: string; withoutInstall: boolean } | null>(null);
   const browserSetupTaskRef = useRef<string | undefined>(undefined);
   const browserAttachSeqRef = useRef(0);
   const browserAttachFlowRef = useRef<{ id: number; stage?: BrowserBridgeStage; timer?: ReturnType<typeof setInterval> } | null>(null);
@@ -1448,6 +1452,59 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     });
   };
 
+  const runOfficeRequest = (text: string, withoutInstall = false) => {
+    officeRequestBypassRef.current = { text, withoutInstall };
+    setInput("");
+    void handle(text).catch((error) => addLine("error", error instanceof Error ? error.message : String(error)));
+  };
+
+  const offerOfficeSupport = (text: string, status: OfficeSupportStatus) => {
+    const repair = status.state === "broken";
+    const keepRequest = (message: string) => {
+      setInput(text);
+      addLine("info", message);
+    };
+    setInput(text);
+    setOverlay({
+      title: repair ? "Repair Office support and continue?" : "Install Office support and continue?",
+      description: repair
+        ? "The current Office component did not pass its checks. Neko can install a verified managed copy, then continue your saved request."
+        : "One-time setup: about 35 MiB from the official iOfficeAI release, verified before use. No administrator access or Microsoft Office is required. Your request is saved.",
+      search: false,
+      showCount: false,
+      items: [
+        { id: "install", label: repair ? "Repair and continue" : "Install and continue", detail: "recommended - verify the download and resume this request automatically" },
+        { id: "without", label: "Continue without installing", detail: "download nothing; Neko will try available local alternatives" },
+      ],
+      onCancel: () => keepRequest("Office setup cancelled. Your request is still in the input."),
+      onSelect: (choice) => {
+        setOverlay(null);
+        if (choice.id === "without") {
+          addLine("info", "Continuing without Office Support Pack; Neko will use available local alternatives.");
+          return runOfficeRequest(text, true);
+        }
+        setInput("");
+        busyRef.current = true;
+        setBusy(true);
+        void installOfficeSupport({ force: repair, notify: (message) => addLine("info", message) })
+          .then(() => {
+            busyRef.current = false;
+            setBusy(false);
+            addLine("info", "Office support is ready - continuing your saved request.");
+            runOfficeRequest(text);
+          })
+          .catch((error) => {
+            busyRef.current = false;
+            setBusy(false);
+            keepRequest(`Office Support Pack failed: ${error instanceof Error ? error.message : error}. Your request is still in the input.`);
+            const next = queueRef.current.shift();
+            setQueued(queueRef.current.length);
+            if (next !== undefined) void handle(next).catch((nextError) => addLine("error", nextError instanceof Error ? nextError.message : String(nextError)));
+          });
+      },
+    });
+  };
+
   const handle = async (text: string) => {
     if (text.startsWith("#")) {
       addLine("info", rememberNote(text.slice(1)));
@@ -1767,6 +1824,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
     }
 
+    const officeBypass = officeRequestBypassRef.current?.text === text ? officeRequestBypassRef.current : null;
+    if (officeBypass) officeRequestBypassRef.current = null;
+    else if (!voiceTurnRef.current && matchSkill(loopGoal ?? text)?.name === "office-artifacts") {
+      const status = officeSupportStatus();
+      if (status.state !== "ready") {
+        offerOfficeSupport(text, status);
+        return;
+      }
+    }
+
     if (voiceRef.current && !voiceTurnRef.current) {
       addLine("info", "Voice is active. Use /voice stop before starting a separate text turn, or keep speaking in the voice tab.");
       return;
@@ -1774,6 +1841,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
     // @file mentions: expand @path into file context (read_file is safe). Skipped for /auto.
     let toSend = loopGoal ?? text;
+    if (officeBypass?.withoutInstall) {
+      toSend += "\n\n[Neko UI: The user explicitly chose to continue without installing Office Support Pack. Do not offer installation again in this turn; use an available local fallback or report the exact limitation.]";
+    }
     const mentions = loopGoal ? null : text.match(/@\S+/g);
     if (mentions) {
       for (const m of [...new Set(mentions)]) {

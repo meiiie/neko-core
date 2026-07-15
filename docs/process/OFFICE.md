@@ -42,7 +42,10 @@ implicit shell or network authority.
 
 ## Installation and ownership
 
-Nothing is downloaded during startup or a normal model turn. The user opts in from `/support office` or:
+Nothing is downloaded during startup or without consent. On the first natural-language Word, Excel, or
+PowerPoint request, the TUI detects missing support before calling the model and offers **Install and continue**
+or **Continue without installing**. The request stays editable on cancel; after a verified install Neko resumes
+that exact request automatically. The same component remains explicitly manageable from `/support office` or:
 
 ```bash
 neko support office status
