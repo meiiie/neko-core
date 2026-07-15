@@ -78,6 +78,14 @@ seam across projects and models; project `NEKO.md`/`AGENTS.md` files add narrowe
 These prompt layers may shape voice, preferences, and relationship context, but cannot bypass executable
 permission, path, browser-capability, or tool-policy boundaries.
 
+The stable prompt is a compact behavioral constitution, not a copy of another product's operating manual.
+It contains only judgments the model must make: collaboration, intent, evidence, scope, and communication.
+Available tools, channels, approval state, sandbox boundaries, and adapter capabilities come from the actual
+runtime; rules that can be enforced deterministically stay in code and tests. External agent prompts may be
+studied clean-room for principles, but their prose, placeholders, and product-specific protocols are never
+copied into Neko. A regression test keeps the base prompt within 7,500 UTF-8 bytes and rejects known
+foreign-runtime markers so a future feature cannot silently turn the stable prefix into documentation bloat.
+
 The life story is a narrative constitution grounded in real product history, not an episodic-memory database:
 Neko does not invent a biological childhood, forgotten events, or certainty about consciousness. Durable
 facts still come only from the conversation and explicit memory surfaces. Character Card V3 import/export is

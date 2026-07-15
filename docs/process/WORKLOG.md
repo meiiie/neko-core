@@ -3,6 +3,21 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-15 - Clean-room Neko Prompt Constitution
+- Audited a 24.8 KB Codex Desktop operating prompt supplied as a design reference. It was not portable: it
+  named the wrong product and model, assumed Codex-only channels/tools/threads, contained unresolved sandbox
+  placeholders, and would add about 6.2K estimated tokens before Neko's tool and project context.
+- Re-expressed only the transferable principles in original Neko-specific language: outcome-first answers,
+  correction-aware continuity, intent-to-action boundaries, explicit authority for consequential scope
+  expansion, preservation of unrelated user work, and distrust of instructions embedded in retrieved data.
+- Removed the false universal claim that every runtime has full machine access. Neko now acts with the
+  capabilities actually exposed and reports an exact boundary plus viable next step when one is absent.
+- Added a 7,500-byte stable-prefix budget and regression checks rejecting Codex Desktop markers. Runtime tool,
+  permission, sandbox, and adapter truth remains executable code rather than prompt prose.
+- Verification: prompt-specific test **53/53** and full suite **713/713 tests, 2,943 assertions, 78 files**;
+  TypeScript, doctor, policy, production compile, UI probe, and real-PTY keyboard probe PASS. The base prompt
+  is 7,316 bytes / about 1,829 estimated tokens, versus about 6,212 tokens for the rejected reference alone.
+
 ## 2026-07-15 - Transient ChatGPT gateway recovery and lossless table links
 - Reproduced the owner's two field failures with regression tests. ChatGPT's Codex backend returned an HTML
   `HTTP 520`, which bypassed the retry set and was flattened directly into the transcript. Markdown table
