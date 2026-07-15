@@ -103,6 +103,9 @@ export const COMMANDS: CommandSpec[] = [
   { name: "skills", group: "registry", summary: "List available skills (~/.neko-core/skills).", example: "neko skills" },
   { name: "recipes", group: "registry", summary: "List runnable recipes (~/.neko-core/recipes).", example: "neko recipes" },
   { name: "mcp", group: "registry", summary: "List configured MCP servers and their tools.", example: "neko mcp" },
+  { name: "support", group: "config", summary: "Inspect or manage optional local support packs.", example: "neko support meeting status" },
+  { name: "browser", group: "local", summary: "Set up or inspect explicit-tab browser control.", example: "neko browser status" },
+  { name: "meeting", group: "local", summary: "Consented local meeting capture, transcription, evidence, and evaluation.", example: "neko meeting status" },
   { name: "setup", group: "config", summary: "Web stack + browser identity (persistent, existing-Chrome attach, or isolated).", example: "neko setup browser persistent" },
 ];
 
@@ -139,6 +142,7 @@ export function collectCapabilities(config: NekoConfig): Capability[] {
     { name: "approval_gate", klass: "agent", status: "enabled", detail: `mode=${config.mode}` },
     { name: "bounded_autopilot", klass: "agent", status: auto ? "enabled" : "disabled", detail: "mode=auto (--yolo): gated tools run without prompting; a named state, not hidden" },
     { name: "introspection", klass: "cli", status: "enabled", detail: "tools/agents/commands/capabilities/policy registries" },
+    { name: "meeting_companion", klass: "tool", status: "enabled", detail: "explicit-consent local capture; optional local transcription; timestamped evidence" },
   ];
 }
 

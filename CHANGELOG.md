@@ -6,6 +6,36 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-07-16
+
+### Added
+
+- **Consent-first local meeting capture.** `/meeting` opens a responsive loopback page, then the browser's
+  native picker lets the user choose the tab/window/screen and whether to share audio. Microphone and system
+  audio are stored as two PCM16 channels in a local WAV; no video frame crosses the page boundary or reaches
+  disk. The browser indicator, page button, TUI command, and CLI interrupt can all stop capture.
+- **Optional local Vietnamese transcription.** `/support meeting` installs either a 56.9 MiB quick or 181.3
+  MiB balanced multilingual model plus a current stable official whisper.cpp engine where upstream publishes
+  one. Exact release host/path, byte counts, SHA-256 digests, binary version, and archive paths are verified;
+  installs are atomic and removable without deleting recordings.
+- **Timestamp-grounded meeting notes.** The bundled `meeting-notes` skill reads canonical transcript pages
+  instead of putting a whole meeting in context. Decisions, actions, risks, and missing owners/dates must point
+  to timestamps. Remote participants remain `Meeting audio`; two capture channels are not presented as
+  person-level diarization.
+- **Measured upgrade seam.** `neko meeting eval` reports weighted WER, CER, real-time factor, and optional
+  channel-source accuracy for user-owned reference cases. The report explicitly does not turn a smoke fixture
+  into a Vietnamese quality, speaker-identity, summary-quality, or SOTA claim.
+
+### Changed
+
+- Meeting start/transcribe/delete remain approval-gated, while emergency stop is always safe. Every meeting
+  mutation now enters the same fresh-observation completion gate used for files and computer use.
+- Transcription has a per-meeting process lock, rejects concurrent writers, records engine/model provenance,
+  preserves audio on failure, and recovers an interrupted `transcribing` state for a later retry.
+- Built-in skill embedding now defers its Bun build-time macro behind the source-tree path. This avoids the
+  unresolved macro binding seen on a second source invocation under the Windows canary transpiler cache while
+  preserving standalone-binary embedding.
+
 ## [0.13.0] — 2026-07-16
 
 ### Added

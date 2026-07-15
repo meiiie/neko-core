@@ -1031,6 +1031,25 @@ test("namespaced Office apply cannot finish before a fresh artifact inspection",
   expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(true);
 });
 
+test("namespaced meeting mutations require a fresh bounded inspection", async () => {
+  for (const operation of ["start", "stop", "transcribe", "delete"]) {
+    const provider = new ScriptedProvider([
+      { content: null, tool_calls: [{ id: operation, name: `mcp__neko_meeting__${operation}`, arguments: {} }] },
+      { content: `${operation} complete.`, tool_calls: [] },
+      { content: null, tool_calls: [{ id: "inspect", name: "mcp__neko_meeting__inspect", arguments: { operation: "status" } }] },
+      { content: `${operation} independently verified.`, tool_calls: [] },
+    ]);
+    const agent = new Agent({
+      provider: provider as any,
+      tools: { schemas: () => [], execute: async (name: string) => name.endsWith("__inspect") ? "fresh meeting state" : "action accepted" } as any,
+      maxSteps: 7,
+      verifyStateChangesBeforeExit: true,
+    });
+    expect(await agent.run(`${operation} the meeting`)).toBe(`${operation} independently verified.`);
+    expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(true);
+  }
+});
+
 test("an unfinished todo plan gets one persistence check before the agent can finish", async () => {
   const script = [
     { content: "looks done", tool_calls: [] },

@@ -8,7 +8,6 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { readBuiltinSkillFiles } from "./builtin-skills.macro.ts" with { type: "macro" };
 
-const EMBEDDED = readBuiltinSkillFiles();
 let extracted: string | null = null;
 
 export function builtinSkillsDir(): string {
@@ -16,8 +15,13 @@ export function builtinSkillsDir(): string {
   if (existsSync(sourceDir)) return sourceDir;
   if (extracted) return extracted;
 
+  // Keep the build-time macro behind the source-tree fast path. Bun's runtime transpiler cache can
+  // otherwise restore this module with an unresolved macro binding on the second source invocation
+  // (observed on the Windows 1.4 canary used by release CI). Compiled binaries still evaluate and
+  // embed the macro here because their source tree does not exist at runtime.
+  const embedded = readBuiltinSkillFiles();
   const root = mkdtempSync(join(tmpdir(), "neko-core-skills-"));
-  for (const [relative, encoded] of Object.entries(EMBEDDED)) {
+  for (const [relative, encoded] of Object.entries(embedded)) {
     const normalized = relative.replace(/\\/g, "/");
     if (!normalized || isAbsolute(normalized) || normalized.split("/").includes("..")) {
       throw new Error(`invalid embedded skill path: ${relative}`);

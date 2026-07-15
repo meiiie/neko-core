@@ -4,14 +4,19 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-16) — v0.13.0 release
+## Current status (2026-07-16) — v0.14.0 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
 
-- **Branch:** `main`. **Current release: v0.13.0 (2026-07-16)** - Natural Word, Excel, and PowerPoint requests
-  now enter a verified Office artifact path with guided install-and-resume, typed inspection/mutation/rendering,
+- **Branch:** `main`. **Current release: v0.14.0 (2026-07-16)** - Neko now has a consent-first local meeting
+  companion: browser/OS-selected system audio plus a separate microphone channel streams to bounded local WAV,
+  a verified optional whisper.cpp pack transcribes Vietnamese, and timestamped evidence is paged into context for
+  grounded minutes/action items. Stop is always safe; capture/transcribe/delete remain governed. It deliberately
+  does not claim universal bot joins, person-level diarization, or SOTA without the new WER/CER/RTF/channel eval.
+  The v0.13 verified Office path remains unchanged: natural Word, Excel, and PowerPoint requests enter a verified
+  Office artifact path with guided install-and-resume, typed inspection/mutation/rendering,
   atomic source-preserving writes, and optional LibreOffice cross-render evidence. Browser onboarding likewise
   preserves and resumes the original task, while resident UIA/browser watchers provide bounded changed-state
   evidence for conversational apps. Skill routing remains local and compositional, adding no model call or
@@ -360,6 +365,14 @@ cost/token tracking · MCP client · single-binary distribution.
   A real LibreOffice 26.2.4.2 gate cross-rendered and visually reviewed all three formats; Windows discovery uses
   the waitable `soffice.com` entry point rather than detached `soffice.exe`. See
   `docs/process/OFFICE.md`. External benchmark parity is deliberately not claimed.
+- [x] **G16** Consent-first local meeting evidence, clean-room after studying public Meetily at pinned commit
+  `0281737d87d26352fb0adc78c8c0975f691b23d1`. Native browser selection/indicators gate mic + system audio;
+  AudioWorklet sends two-channel PCM through an authenticated loopback bridge; video never crosses the page.
+  Canonical WAV/JSON/Markdown stay local, transcript reads are bounded, and the optional verified whisper.cpp
+  pack offers balanced/quick multilingual models with Vietnamese support. The bundled skill forbids invented
+  speaker identity and requires timestamp citations. `neko meeting eval` measures WER/CER/RTF/channel labels;
+  vendor-native bots, streaming ASR, and person-level diarization remain separate measured adapters. See
+  `docs/process/MEETINGS.md`.
 
 ## Phase H — real-terminal UX/UI polish (July 2026)
 - [x] **H1** Dogfood-driven polish to Claude-Code quality on a real terminal (full list in the "Current

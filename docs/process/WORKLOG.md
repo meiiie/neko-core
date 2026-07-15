@@ -3,6 +3,41 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-16 - v0.14 local meeting companion
+
+- Studied Meetily clean-room at pinned commit `0281737d87d26352fb0adc78c8c0975f691b23d1`: retained the useful
+  local mic/system capture, optional local ASR, durable evidence and summary concepts without copying its
+  Tauri/Rust application or claiming its planned/proprietary capabilities.
+- Chose browser `getDisplayMedia` as the cross-product consent shell. A local responsive page makes recording
+  rights, source selection, Share-audio, active state and Stop explicit. An AudioWorklet streams microphone/system
+  as separate PCM16 channels through an exact-Origin, random-token 127.0.0.1 WebSocket; video is never sent or
+  stored. Capture is size/packet bounded and finalized to a canonical local WAV.
+- Added an owner-aware Meeting Support Pack using current stable official whisper.cpp release assets and fixed
+  digest/size model records. Installs are host/path constrained, archive-safe, atomic, verified before first use,
+  and re-verified after file metadata changes; unsupported targets fail honestly. Balanced and quick multilingual
+  tiers support Vietnamese without changing the base binary. The official Linux v1.9.1 archive was checked too:
+  internal `.so` links remain supported while traversal and out-of-tree links are refused.
+- Added canonical meeting manifests/transcripts, retryable ASR provenance, timestamp Markdown, bounded MCP/TUI
+  reads, safe emergency stop, gated start/transcribe/delete, `/meeting`, Support Center integration, and the
+  auto-routed `meeting-notes` skill. Remote people remain `Meeting audio`; two channels are not advertised as
+  diarization. A per-meeting lock prevents concurrent transcript writers and recovers an interrupted process to a
+  retryable recorded state without losing audio.
+- Added a reproducible evaluator for weighted WER/CER/RTF/channel-source accuracy and documented the frozen-corpus
+  requirements for any future SOTA statement. Research boundaries follow W3C capture consent, current Google Meet
+  Developer Preview constraints, Microsoft's recommendation against real-time media bots for meeting AI,
+  Vietnamese ASR work (PhoWhisper/Parakeet), and current diarization alternatives.
+- Regression coverage exercises real local HTTP/WebSocket capture, CSP/worklet delivery, stereo WAV headers,
+  consent/provenance, interrupted/concurrent retry, deletion, support integrity, permissions, routing, and metrics.
+- Value gate: an isolated quick pack installed the official whisper.cpp v1.9.1 engine plus the fixed 56.9 MiB
+  model, then Neko's real adapter transcribed an 11-second stereo fixture in 2,119 ms (RTF 0.193) with the expected
+  sentence. This proves the install/execute/parse path on that Windows host, not Vietnamese accuracy or SOTA.
+- Full release gates: both TypeScript compilers clean; **761/761 tests, 3,247 assertions, 82 files**; doctor reports
+  v0.14.0 with only expected non-TTY/offline browser-bridge warnings; policy PASS; production binary + UI/input
+  probes PASS; meeting skill present in the compiled binary; three real-ConPTY runs report typed input and no
+  ghost; scroll bench reports 63 ms first response / 175 ms settle and all checks OK; staged-addition secret scan
+  CLEAN; Agent Reach v1.5.0 already current. Bun printed its known non-fatal directory-mismatch diagnostic only
+  after every build probe had passed.
+
 ## 2026-07-15 - Multilingual capability routing and Office onboarding recovery
 
 - Reproduced the owner's exact natural request (`tao moi ... file Word ...`) against the real router. It scored

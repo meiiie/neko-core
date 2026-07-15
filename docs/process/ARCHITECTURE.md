@@ -86,6 +86,24 @@ temporary user profile. It is discovered but never installed or owned by Neko. `
 lightweight typed binary lifecycle and never confuses existing PATH/system installs with Neko-owned files. See
 `OFFICE.md` for the evidence model and limits.
 
+## Meeting evidence boundary
+
+Meeting capability also composes through `McpTools`; `core/` knows nothing about browser capture, audio codecs,
+whisper.cpp, vendor APIs, or transcript storage. `browser-meeting.ts` is a consent shell around native
+`getDisplayMedia`/`getUserMedia`: an exact-Origin, random-token loopback WebSocket accepts only bounded stereo
+PCM16 from an AudioWorklet. The browser must expose system audio and the user must select it every time. A video
+track is required by the platform API but never crosses the page/server boundary.
+
+`meeting.ts` owns canonical local evidence, state transitions, atomic metadata/transcript writes, and WAV
+finalization. `meeting-transcription.ts` adapts a verified local transcriber to timestamped canonical segments;
+`meeting-support-pack.ts` owns optional upstream engine/model installation and integrity. `meeting-tools.ts`
+exposes bounded inspection plus gated start/transcribe/delete, while emergency stop is classified safe because it
+reduces access. Transcript pagination prevents recording length from becoming prompt length.
+
+The capture contract has two source channels, not arbitrary speaker identities. Person-level diarization and
+vendor-native meeting bots remain new adapters with distinct licenses, consent rules, provenance, and evals.
+See `MEETINGS.md`.
+
 ## Identity and persona boundary
 
 Neko's stable base prompt defines the operational identity shared by every provider: one continuous

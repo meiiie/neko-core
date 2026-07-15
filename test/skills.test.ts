@@ -35,6 +35,16 @@ test("matchSkill returns null for unrelated work (no false trigger)", () => {
   expect(matchSkill("hello")).toBeNull(); // too short to match anything
 });
 
+test("meeting-notes routes Vietnamese and English meeting capture requests without generic chat false positives", () => {
+  for (const prompt of [
+    "Nghe va chep loi cuoc hop Teams nay, sau do tom tat bien ban va viec can lam",
+    "Record this Zoom meeting and produce timestamped action items",
+    "Tom tat cuoc hop online dang phat tren may tinh",
+  ]) expect(matchesSkill("meeting-notes", prompt)).toBe(true);
+  for (const prompt of ["xin chao", "tom tat file README", "mo Zoom de kiem tra cap nhat"])
+    expect(matchesSkill("meeting-notes", prompt)).toBe(false);
+});
+
 test("office artifacts route in English and Vietnamese and require saved-result verification", () => {
   const prompts = [
     "tạo mới một file mới đi word mô tả đầy đủ về bài thơ Kiều",

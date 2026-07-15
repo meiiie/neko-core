@@ -22,6 +22,11 @@ import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginG
 import { clearKimiCredentials, loginKimi } from "../src/adapters/kimi-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../src/adapters/gemini-support-pack.ts";
 import { discoverOfficeCli, installOfficeSupportPack, readOfficeSupportPack, removeOfficeSupportPack } from "../src/adapters/office-support-pack.ts";
+import { activeBrowserMeeting, startBrowserMeeting, stopBrowserMeeting } from "../src/adapters/browser-meeting.ts";
+import { discoverMeetingSupport, installMeetingSupportPack, readMeetingSupportPack, removeMeetingSupportPack, type MeetingModelTier } from "../src/adapters/meeting-support-pack.ts";
+import { deleteMeeting, latestMeeting, listMeetings, readMeeting, readMeetingTranscript } from "../src/adapters/meeting.ts";
+import { transcribeMeeting } from "../src/adapters/meeting-transcription.ts";
+import { evaluateMeetingAsr, renderMeetingEval } from "../src/adapters/meeting-eval.ts";
 import { HARD_TASKS, renderBenchReport, renderLiftReport, runBench, runHarnessLift } from "../src/adapters/bench.ts";
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setActiveProfile, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
@@ -232,11 +237,12 @@ Commands:
   recipes       list runnable recipes (~/.neko-core/recipes)
   login         sign in; OpenAI, Google, Kimi, DeepSeek, or another API-key provider
   logout        sign out the active route (other provider sessions/keys stay intact)
-  support       inspect, install, update, or remove optional ChatGPT/Gemini/Office components
+  support       inspect, install, update, or remove optional ChatGPT/Gemini/Office/Meeting components
   update [ver]  self-update to the latest release (resumes auto-updates); 'update 0.7.7' pins/rolls
                 back to an EXACT version and PAUSES auto-updates so it sticks
   mcp           list configured MCP servers and their tools
   browser       browser setup/status; normal users can use /browser inside the interactive app
+  meeting       consented local meeting capture, transcription, status, list, show, or delete
   setup [web]   one command to stand up the SOTA web stack (SearXNG + browser MCP, wired);
                 'setup browser [persistent|attach|isolated]' controls browser identity;
                 'setup tavily <key>' wires hosted search; 'setup codex' / 'setup gemini' add optional bridges
@@ -541,13 +547,166 @@ async function cmdSupport(args: Args): Promise<number> {
   if (target === "gemini") return cmdGeminiSupport(args.positionals[1] ?? "status");
   if (target === "chatgpt" || target === "codex") return cmdCodexSupport(args.positionals[1] ?? "status");
   if (target === "office" || target === "officecli") return cmdOfficeSupport(args.positionals[1] ?? "status");
+  if (target === "meeting" || target === "meetings") return cmdMeetingSupport(args.positionals[1] ?? "status", args.positionals[2]);
   if (!target || target === "status") {
     const codex = await cmdCodexSupport("status");
     const gemini = await cmdGeminiSupport("status");
     const office = await cmdOfficeSupport("status");
-    return codex === 0 && gemini === 0 && office === 0 ? 0 : 1;
+    const meeting = await cmdMeetingSupport("status");
+    return codex === 0 && gemini === 0 && office === 0 && meeting === 0 ? 0 : 1;
   }
   return cmdCodexSupport(target);
+}
+
+async function cmdMeetingSupport(action: string, tierArg?: string): Promise<number> {
+  const normalized = action.toLowerCase();
+  if (normalized === "install" || normalized === "update") {
+    const tier: MeetingModelTier = tierArg === "quick" ? "quick" : "balanced";
+    try {
+      const installed = await installMeetingSupportPack({
+        force: normalized === "update",
+        tier,
+        notify: console.log,
+      });
+      console.log(`Meeting transcription is ready (${installed.model.id}; ${installed.model.tier}).`);
+      console.log("Audio and transcripts stay under ~/.neko-core/meetings and are never uploaded by this adapter.");
+      return 0;
+    } catch (error) {
+      console.error(`Meeting Support Pack failed: ${error instanceof Error ? error.message : error}`);
+      return 1;
+    }
+  }
+  if (normalized === "remove" || normalized === "uninstall") {
+    console.log(removeMeetingSupportPack()
+      ? "Meeting Support Pack removed. Existing meeting audio and transcripts were kept."
+      : "No Neko-managed Meeting Support Pack is installed.");
+    return 0;
+  }
+  if (normalized !== "status") {
+    console.error("usage: neko support meeting [status|install|update|remove] [balanced|quick]");
+    return 2;
+  }
+  const status = discoverMeetingSupport();
+  console.log(`Meeting transcription support: ${status.state} (${status.detail})`);
+  const managed = readMeetingSupportPack();
+  if (managed) console.log(`  ${managed.model.id}: ${(managed.model.bytes / 1024 / 1024).toFixed(1)} MiB model; local-only`);
+  return status.state === "ready" ? 0 : 1;
+}
+
+async function cmdMeeting(args: Args): Promise<number> {
+  const action = (args.positionals[0] ?? "status").toLowerCase();
+  if (action === "status") {
+    const active = activeBrowserMeeting()?.snapshot();
+    const support = discoverMeetingSupport();
+    const latest = latestMeeting();
+    console.log(`Capture: ${active ? `${active.state} (${active.meeting.id})` : "idle"}`);
+    console.log(`Transcription: ${support.state} (${support.detail})`);
+    console.log(`Latest: ${latest ? `${latest.id}  ${latest.state}  ${latest.title}` : "none"}`);
+    return 0;
+  }
+  if (action === "list") {
+    const meetings = listMeetings();
+    if (!meetings.length) console.log("No local meetings yet.");
+    for (const meeting of meetings.slice(0, 100)) {
+      const duration = meeting.capture?.durationMs ? `  ${Math.round(meeting.capture.durationMs / 1000)}s` : "";
+      console.log(`${meeting.id}  ${meeting.state}${duration}  ${meeting.title}`);
+    }
+    return 0;
+  }
+  if (action === "show") {
+    const requested = args.positionals[1] ?? "latest";
+    const meeting = requested === "latest" ? latestMeeting() : readMeeting(requested);
+    if (!meeting) { console.error("Meeting not found."); return 1; }
+    console.log(JSON.stringify(meeting, null, 2));
+    const transcript = readMeetingTranscript(meeting.id);
+    if (transcript) {
+      console.log("\nTranscript:");
+      for (const segment of transcript.segments) console.log(`[${Math.floor(segment.startMs / 1000)}s] ${segment.speaker}: ${segment.text}`);
+    }
+    return 0;
+  }
+  if (action === "start") {
+    const title = args.positionals.slice(1).join(" ");
+    const support = discoverMeetingSupport();
+    if (support.state !== "ready") {
+      console.log("Local capture can start now, but transcription support is not installed.");
+      console.log("Install it before or after the meeting with: neko support meeting install");
+    }
+    const session = await startBrowserMeeting({
+      title,
+      onEvent: (event) => {
+        if (event.type === "state") console.log(`Meeting ${event.meetingId}: ${event.state}${event.message ? ` (${event.message})` : ""}`);
+      },
+    });
+    console.log(`Meeting ${session.meeting.id} is waiting in the local consent page.`);
+    console.log("Choose a screen/tab, enable Share audio, and press Start. Video is never stored.");
+    console.log("Keep this command open. Stop from the page or press Ctrl+C.");
+    const onInterrupt = () => { void session.stop("terminal interrupt"); };
+    process.once("SIGINT", onInterrupt);
+    let meeting;
+    try { meeting = await session.waitUntilStopped(); }
+    finally { process.removeListener("SIGINT", onInterrupt); }
+    if (!meeting) { console.log("Capture ended before audio was recorded; no meeting evidence was kept."); return 1; }
+    console.log(`Audio finalized locally for ${meeting.id}.`);
+    if (discoverMeetingSupport().state === "ready") {
+      try {
+        const transcript = await transcribeMeeting(meeting.id, { language: "vi", notify: console.log });
+        console.log(`Transcript ready: ${transcript.segments.length} timestamped segments.`);
+      } catch (error) {
+        console.error(`Transcription failed; audio was kept for retry: ${error instanceof Error ? error.message : error}`);
+        return 1;
+      }
+    } else {
+      console.log(`To transcribe later: neko support meeting install && neko meeting transcribe ${meeting.id} vi`);
+    }
+    return 0;
+  }
+  if (action === "stop") {
+    const meeting = await stopBrowserMeeting("CLI stop");
+    console.log(meeting ? `Stopped and finalized ${meeting.id}.` : "No active meeting capture in this process.");
+    return 0;
+  }
+  if (action === "transcribe") {
+    const requested = args.positionals[1] ?? "latest";
+    const meeting = requested === "latest" ? latestMeeting() : readMeeting(requested);
+    if (!meeting) { console.error("Meeting not found."); return 1; }
+    const language = args.positionals[2] ?? "vi";
+    try {
+      const transcript = await transcribeMeeting(meeting.id, { language, notify: console.log });
+      console.log(`Transcript ready: ${transcript.segments.length} timestamped segments.`);
+      return 0;
+    } catch (error) {
+      console.error(`Meeting transcription failed: ${error instanceof Error ? error.message : error}`);
+      return 1;
+    }
+  }
+  if (action === "delete") {
+    const requested = args.positionals[1];
+    if (!requested) { console.error("usage: neko meeting delete <meeting-id|latest>"); return 2; }
+    const meeting = requested === "latest" ? latestMeeting() : readMeeting(requested);
+    if (!meeting) { console.error("Meeting not found."); return 1; }
+    if (!args.force) {
+      console.error(`Refusing irreversible deletion without --force: neko meeting delete ${meeting.id} --force`);
+      return 2;
+    }
+    deleteMeeting(meeting.id);
+    console.log(`Deleted local audio, transcript, and metadata for ${meeting.id}.`);
+    return 0;
+  }
+  if (action === "eval") {
+    const file = args.positionals[1];
+    if (!file) { console.error("usage: neko meeting eval <reference-cases.json>"); return 2; }
+    try {
+      const report = evaluateMeetingAsr(JSON.parse(readFileSync(file, "utf8")));
+      console.log(renderMeetingEval(report));
+      return 0;
+    } catch (error) {
+      console.error(`Meeting eval failed: ${error instanceof Error ? error.message : error}`);
+      return 1;
+    }
+  }
+  console.error("usage: neko meeting [status|list|show|start|stop|transcribe|delete|eval]");
+  return 2;
 }
 
 async function cmdOfficeSupport(action: string): Promise<number> {
@@ -889,6 +1048,7 @@ async function main(): Promise<number> {
       case "login": return await cmdLogin(args);
       case "logout": return cmdLogout(args);
       case "support": return await cmdSupport(args);
+      case "meeting": return await cmdMeeting(args);
       case "update": {
         const { selfUpdate } = await import("../src/adapters/update.ts");
         const { setAutoUpdate } = await import("../src/adapters/project.ts");

@@ -423,6 +423,12 @@ export class Agent {
       const name = call.name.toLowerCase();
       if (name === "bash") return !Agent.isClearlyReadOnlyBash(call.arguments);
       if (MUTATING_TOOLS.has(name)) return true;
+      // Meeting capture is an adapter-owned state machine. Keep the core free of adapter
+      // dependencies, but classify its public contract explicitly so start/stop/transcribe/delete
+      // cannot be declared complete from their action response alone. A fresh bounded inspect is
+      // the independent evidence. Emergency stop remains permission-safe even though it changes
+      // state: reducing access must never be approval-blocked.
+      if (/^mcp__neko_meeting__(?:start|stop|transcribe|delete)$/.test(name)) return true;
       if (name === "computer") {
         return !new Set(["list", "read", "get", "watch", "wait", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
       }

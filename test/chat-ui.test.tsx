@@ -511,6 +511,7 @@ test("/support opens a management center and confirms managed-pack removal", asy
     expect(await until(() => (lastFrame() ?? "").includes("Manage optional support components"))).toBe(true);
     expect(lastFrame() ?? "").toContain("ChatGPT GPT-5.6 Support Pack");
     expect(lastFrame() ?? "").toContain("Office Artifact Support Pack");
+    expect(lastFrame() ?? "").toContain("Meeting Transcription Support Pack");
     expect(lastFrame() ?? "").toContain("270.4 MiB");
     stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Manage ChatGPT GPT-5.6 Support Pack"))).toBe(true);
@@ -533,6 +534,29 @@ test("/support opens a management center and confirms managed-pack removal", asy
     expect(await until(() => frames.join("\n").includes("Neko also signed this account out"))).toBe(true);
     expect(existsSync(geminiRoot)).toBe(false);
     expect(existsSync(geminiAuth)).toBe(false);
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("/meeting opens a consent-first guided surface without starting capture", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldPath = process.env.PATH;
+  const home = mkdtempSync(join(tmpdir(), "neko-meeting-ui-"));
+  process.env.HOME = home; process.env.USERPROFILE = home; process.env.PATH = "";
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+    stdin.write("/meeting"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Meeting companion - local, consented"))).toBe(true);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Install local transcription, then start");
+    expect(frame).toContain("Record now, transcribe later");
+    expect(frame).toContain("Transcription support");
+    expect(frame).not.toContain("recording");
     unmount();
   } finally {
     if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;

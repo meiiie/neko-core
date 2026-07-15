@@ -33,10 +33,14 @@ import { getLastGeminiUsage } from "../adapters/gemini-provider.ts";
 import { getChatGptVoiceUsage } from "../adapters/chatgpt-voice.ts";
 import { clampEffort, effortSuggestions, isEffortName, resolveEffort } from "../adapters/effort.ts";
 import { browserBridgeStage, readBrowserCapability, readBrowserBridgeStatus, withBrowserBridge } from "../adapters/browser-bridge.ts";
+import { activeBrowserMeeting, startBrowserMeeting, stopBrowserMeeting } from "../adapters/browser-meeting.ts";
+import { discoverMeetingSupport, installMeetingSupportPack, readMeetingSupportPack, removeMeetingSupportPack } from "../adapters/meeting-support-pack.ts";
+import { deleteMeeting, formatMeetingTime, latestMeeting, listMeetings, readMeeting, readMeetingTranscript, type MeetingManifest } from "../adapters/meeting.ts";
+import { transcribeMeeting } from "../adapters/meeting-transcription.ts";
 
 export const HELP = [
   "Commands:",
-  "  /help /cost /usage /voice /model /provider /support /browser /tools /skill(s) /init /clear /compact /transcript /reset /exit",
+  "  /help /cost /usage /voice /model /provider /support /browser /meeting /tools /skill(s) /init /clear /compact /transcript /reset /exit",
   "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /continue · /retry · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
@@ -55,6 +59,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/provider", desc: "switch provider (account) then pick its model - picker or /provider <name>" },
   { name: "/support", desc: "manage optional model and Office components" },
   { name: "/browser", desc: "connect a signed-in Chrome tab (guided setup/status)" },
+  { name: "/meeting", desc: "consented local meeting capture, transcription, and evidence" },
   { name: "/tools", desc: "list / toggle tools (/tools bash)" },
   { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
   { name: "/init", desc: "scaffold ./.neko-core/config.json" },
@@ -288,6 +293,8 @@ function openSupportCenter(ctx: CommandCtx): void {
   const office = discoverOfficeCli();
   const officeManaged = readOfficeSupportPack();
   const libreOffice = discoverLibreOffice();
+  const meeting = discoverMeetingSupport();
+  const meetingManaged = readMeetingSupportPack();
   ctx.setOverlay({
     title: "Manage optional support components",
     items: [
@@ -306,11 +313,197 @@ function openSupportCenter(ctx: CommandCtx): void {
         label: "Office Artifact Support Pack",
         detail: `${supportDetail("office", office.state, office.detail, office.executable?.source === "managed", officeManaged?.installedBytes)}; PDF verifier ${libreOffice.state === "ready" ? "ready" : "optional"}`,
       },
+      {
+        id: "meeting",
+        label: "Meeting Transcription Support Pack",
+        detail: meetingManaged
+          ? `installed by Neko - ${formatMiB(meetingPackBytes(meetingManaged))} managed files - ${meeting.state}`
+          : meeting.state === "ready" ? `using existing local whisper.cpp - Neko installed nothing` : "not installed - capture still works; local transcription is optional",
+      },
       { id: "close", label: "Close", detail: "No changes" },
     ],
     onSelect: (item) => {
       if (item.id === "close") return ctx.setOverlay(null);
+      if (item.id === "meeting") return openMeetingSupportManager(ctx);
       openSupportManager(ctx, item.id as SupportKind);
+    },
+  });
+}
+
+function openMeetingSupportManager(ctx: CommandCtx): void {
+  const managed = readMeetingSupportPack();
+  const status = discoverMeetingSupport();
+  const bytes = managed ? meetingPackBytes(managed) : 0;
+  const items = managed ? [
+    { id: "update", label: "Update or repair", detail: `verify and replace ${formatMiB(bytes)} of managed local ASR files` },
+    { id: "remove", label: "Remove support pack", detail: `free managed engine/model files; meeting audio and transcripts stay` },
+    { id: "back", label: "Back", detail: "Return to all support components" },
+  ] : status.state === "ready" ? [
+    { id: "back", label: "Back", detail: "Using an existing whisper.cpp with Neko's verified model. Neko will not remove the external engine." },
+  ] : [
+    { id: "install", label: "Install balanced Vietnamese support", detail: "about 190 MiB model plus engine; local-only; no administrator access" },
+    { id: "quick", label: "Install quick support", detail: "about 60 MiB model; faster and smaller, with lower accuracy" },
+    { id: "back", label: "Back", detail: "Download nothing; recording can still be kept for later transcription" },
+  ];
+  ctx.setOverlay({
+    title: "Manage Meeting Transcription Support Pack",
+    items,
+    onSelect: (item) => {
+      if (item.id === "back") return openSupportCenter(ctx);
+      if (item.id === "remove") {
+        ctx.setOverlay(null);
+        const removed = removeMeetingSupportPack();
+        ctx.addLine("info", removed
+          ? `Meeting Support Pack removed; freed about ${formatMiB(bytes)}. Existing meeting audio/transcripts were kept.`
+          : "No Neko-managed Meeting Support Pack was installed.");
+        return openSupportCenter(ctx);
+      }
+      ctx.setOverlay(null);
+      ctx.setBusy(true);
+      const tier = item.id === "quick" ? "quick" : "balanced";
+      void installMeetingSupportPack({ force: item.id === "update", tier, notify: (message) => ctx.addLine("info", message) })
+        .then(() => ctx.addLine("info", "Meeting transcription is ready. Audio remains local; use /meeting to start."))
+        .catch((error) => ctx.addLine("error", `Meeting Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`))
+        .finally(() => { ctx.setBusy(false); openSupportCenter(ctx); });
+    },
+  });
+}
+
+function meetingPackBytes(pack: NonNullable<ReturnType<typeof readMeetingSupportPack>>): number {
+  return pack.model.bytes + (pack.engine?.executableBytes ?? 0);
+}
+
+function openMeetingCenter(ctx: CommandCtx): void {
+  const active = activeBrowserMeeting()?.snapshot();
+  const support = discoverMeetingSupport();
+  const latest = latestMeeting();
+  const items: { id: string; label: string; detail: string }[] = [];
+  if (active) {
+    items.push({ id: "stop", label: "Stop recording now", detail: `${active.meeting.title} - ${active.state}; finalizes local audio immediately` });
+  } else if (support.state === "ready") {
+    items.push({ id: "start", label: "Start a meeting", detail: "native browser consent picker; mic/system channels; video is never stored" });
+  } else {
+    items.push({ id: "install-start", label: "Install local transcription, then start", detail: "recommended; about 190 MiB model plus engine; Vietnamese; no administrator access" });
+    items.push({ id: "start", label: "Record now, transcribe later", detail: "download nothing now; audio stays local for a later retry" });
+  }
+  if (latest?.state === "recorded") items.push({ id: "transcribe", label: "Transcribe latest recording", detail: `${latest.title} - local-only ASR` });
+  if (latest?.state === "ready") items.push({ id: "show", label: "Read latest transcript", detail: `${latest.title} - ${latest.transcription?.segmentCount ?? 0} timestamped segments` });
+  items.push(
+    { id: "list", label: "Recent meetings", detail: `${listMeetings().length} local meeting(s)` },
+    { id: "support", label: "Transcription support", detail: `${support.state} - ${support.detail}` },
+    { id: "close", label: "Close", detail: "No changes" },
+  );
+  ctx.setOverlay({
+    title: "Meeting companion - local, consented, timestamp-grounded",
+    items,
+    onSelect: (item) => {
+      if (item.id === "close") return ctx.setOverlay(null);
+      if (item.id === "support") return openMeetingSupportManager(ctx);
+      ctx.setOverlay(null);
+      if (item.id === "start") return void startMeetingCapture(ctx, "");
+      if (item.id === "stop") return void stopMeetingCapture(ctx);
+      if (item.id === "transcribe" && latest) return void transcribeMeetingInTui(ctx, latest);
+      if (item.id === "show" && latest) return showMeetingInTui(ctx, latest);
+      if (item.id === "list") return listMeetingsInTui(ctx);
+      if (item.id === "install-start") {
+        ctx.setBusy(true);
+        void installMeetingSupportPack({ tier: "balanced", notify: (message) => ctx.addLine("info", message) })
+          .then(() => startMeetingCapture(ctx, ""))
+          .catch((error) => ctx.addLine("error", `Meeting Support Pack failed: ${error instanceof Error ? error.message : error}. Recording was not started; retry or choose Record now.`))
+          .finally(() => ctx.setBusy(false));
+      }
+    },
+  });
+}
+
+async function startMeetingCapture(ctx: CommandCtx, title: string): Promise<void> {
+  if (activeBrowserMeeting()) return ctx.addLine("info", "A meeting capture is already active. Open /meeting to inspect or stop it.");
+  try {
+    const session = await startBrowserMeeting({
+      title,
+      onEvent: (event) => {
+        if (event.type === "state" && event.state !== "waiting" && event.state !== "finalizing") {
+          ctx.addLine(event.state === "failed" ? "error" : "info", `meeting ${event.meetingId}: ${event.state}${event.message ? ` - ${event.message}` : ""}`);
+        }
+      },
+    });
+    const support = discoverMeetingSupport();
+    ctx.addLine("info", [
+      `Meeting ${session.meeting.id} opened in a local consent page.`,
+      "Choose a screen/tab, enable Share audio, confirm recording rights, then press Start.",
+      "Mic and meeting audio use separate channels; video is never sent or stored. /meeting stop always stops immediately.",
+      support.state === "ready" ? "When stopped, choose Transcribe latest from /meeting." : "Transcription support is not installed; the WAV can be kept and transcribed later from /support meeting.",
+    ].join("\n"));
+    void session.waitUntilStopped().then((meeting) => {
+      if (meeting?.state === "recorded") ctx.addLine("info", `Meeting audio finalized locally: ${meeting.id}. Open /meeting to transcribe it.`);
+      else if (!meeting) ctx.addLine("info", "Meeting capture ended before audio was recorded; no evidence was kept.");
+    });
+  } catch (error) {
+    ctx.addLine("error", `meeting capture failed: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+async function stopMeetingCapture(ctx: CommandCtx): Promise<void> {
+  try {
+    const meeting = await stopBrowserMeeting("TUI stop");
+    ctx.addLine("info", meeting ? `Stopped and finalized meeting ${meeting.id}.` : "No meeting capture is active.");
+  } catch (error) {
+    ctx.addLine("error", `meeting stop failed: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+async function transcribeMeetingInTui(ctx: CommandCtx, meeting: MeetingManifest, language = "vi"): Promise<void> {
+  const support = discoverMeetingSupport();
+  if (support.state !== "ready") {
+    ctx.addLine("info", "Local transcription support is not ready. Choose Install in the Meeting Support Pack; the recording is safe and can be retried.");
+    return openMeetingSupportManager(ctx);
+  }
+  ctx.setBusy(true);
+  try {
+    const transcript = await transcribeMeeting(meeting.id, { language, notify: (message) => ctx.addLine("info", message) });
+    ctx.addLine("info", `Transcript ready for ${meeting.id}: ${transcript.segments.length} timestamped segments. Open /meeting show ${meeting.id}.`);
+  } catch (error) {
+    ctx.addLine("error", `meeting transcription failed; audio was kept for retry: ${error instanceof Error ? error.message : error}`);
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
+function resolveMeetingForUi(value?: string): MeetingManifest | null {
+  return !value || value === "latest" ? latestMeeting() : readMeeting(value);
+}
+
+function showMeetingInTui(ctx: CommandCtx, meeting: MeetingManifest, offset = 0): void {
+  const transcript = readMeetingTranscript(meeting.id);
+  if (!transcript) return ctx.addLine("info", `${meeting.id} - ${meeting.title} - ${meeting.state}\nNo transcript is ready.`);
+  const limit = 50;
+  const page = transcript.segments.slice(offset, offset + limit);
+  const lines = [
+    `${meeting.title} (${meeting.id}) - ${transcript.language} - ${transcript.segments.length} segments`,
+    ...page.map((segment) => `[${formatMeetingTime(segment.startMs)}] ${segment.speaker}: ${segment.text}`),
+  ];
+  if (offset + limit < transcript.segments.length) lines.push(`... ${transcript.segments.length - offset - limit} more; /meeting show ${meeting.id} ${offset + limit}`);
+  ctx.addLine("info", lines.join("\n"));
+}
+
+function listMeetingsInTui(ctx: CommandCtx): void {
+  const meetings = listMeetings();
+  if (!meetings.length) return ctx.addLine("info", "No local meetings yet. Open /meeting to start one.");
+  ctx.addLine("info", meetings.slice(0, 30).map((meeting) => `${meeting.id}  ${meeting.state}  ${meeting.title}`).join("\n"));
+}
+
+function confirmMeetingDelete(ctx: CommandCtx, meeting: MeetingManifest): void {
+  ctx.setOverlay({
+    title: `Permanently delete ${meeting.title}?`,
+    items: [
+      { id: "keep", label: "Keep meeting", detail: "Recommended if you may need the evidence later" },
+      { id: "delete", label: "Delete local evidence", detail: "irreversible: audio, transcript, and metadata" },
+    ],
+    onSelect: (item) => {
+      ctx.setOverlay(null);
+      if (item.id !== "delete") return ctx.addLine("info", "Meeting kept.");
+      try { deleteMeeting(meeting.id); ctx.addLine("info", `Deleted all local evidence for ${meeting.id}.`); }
+      catch (error) { ctx.addLine("error", `meeting delete failed: ${error instanceof Error ? error.message : error}`); }
     },
   });
 }
@@ -523,6 +716,44 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       finally { ctx.setBusy(false); }
       return;
     }
+    case "/meeting": {
+      const rest = input.slice("/meeting".length).trim();
+      if (!rest) { openMeetingCenter(ctx); return; }
+      const [actionRaw, idRaw, third] = rest.split(/\s+/);
+      const action = actionRaw.toLowerCase();
+      if (action === "status") {
+        const active = activeBrowserMeeting()?.snapshot();
+        const support = discoverMeetingSupport();
+        const latest = latestMeeting();
+        return addLine("info", [
+          `capture: ${active ? `${active.state} (${active.meeting.id})` : "idle"}`,
+          `transcription: ${support.state} (${support.detail})`,
+          `latest: ${latest ? `${latest.id} - ${latest.state} - ${latest.title}` : "none"}`,
+          "privacy: native browser consent; local audio/transcript; video is never stored",
+        ].join("\n"));
+      }
+      if (action === "start") return await startMeetingCapture(ctx, rest.slice(actionRaw.length).trim());
+      if (action === "stop") return await stopMeetingCapture(ctx);
+      if (action === "list") return listMeetingsInTui(ctx);
+      if (action === "show" || action === "read") {
+        const meeting = resolveMeetingForUi(idRaw);
+        if (!meeting) return addLine("error", "meeting not found - use /meeting list");
+        const offset = third == null ? 0 : Number(third);
+        if (!Number.isInteger(offset) || offset < 0) return addLine("info", "usage: /meeting show [id|latest] [segment-offset]");
+        return showMeetingInTui(ctx, meeting, offset);
+      }
+      if (action === "transcribe") {
+        const meeting = resolveMeetingForUi(idRaw);
+        if (!meeting) return addLine("error", "meeting not found - use /meeting list");
+        return await transcribeMeetingInTui(ctx, meeting, third ?? "vi");
+      }
+      if (action === "delete") {
+        const meeting = resolveMeetingForUi(idRaw);
+        if (!meeting) return addLine("error", "meeting not found - use /meeting list");
+        return confirmMeetingDelete(ctx, meeting);
+      }
+      return addLine("info", "usage: /meeting [status|start [title]|stop|list|show [id] [offset]|transcribe [id] [vi|en|auto]|delete <id>] ");
+    }
     case "/browser": {
       const action = input.slice("/browser".length).trim().toLowerCase();
       if (action && action !== "install" && action !== "setup" && action !== "status") {
@@ -567,6 +798,37 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       if (action === "gemini") { openSupportManager(ctx, "gemini"); return; }
       if (action === "chatgpt" || action === "codex") { openSupportManager(ctx, "chatgpt"); return; }
       if (action === "office" || action === "officecli") { openSupportManager(ctx, "office"); return; }
+      if (action === "meeting" || action === "meetings") { openMeetingSupportManager(ctx); return; }
+      const meetingAction = action.startsWith("meeting ") ? action.slice("meeting ".length).trim()
+        : action.startsWith("meetings ") ? action.slice("meetings ".length).trim()
+          : null;
+      if (meetingAction === "status") {
+        const status = discoverMeetingSupport();
+        const managed = readMeetingSupportPack();
+        const disk = managed ? `; ${formatMiB(meetingPackBytes(managed))} managed files` : "";
+        return addLine("info", `Meeting transcription: ${status.state} (${status.detail})${disk}. Capture remains available without the pack; audio and transcripts stay local.`);
+      }
+      if (meetingAction === "remove" || meetingAction === "uninstall") {
+        const removed = removeMeetingSupportPack();
+        return addLine("info", removed
+          ? "Meeting Support Pack removed. Existing meeting audio and transcripts were kept."
+          : "No Neko-managed Meeting Support Pack is installed.");
+      }
+      if (meetingAction === "install" || meetingAction === "update" || meetingAction === "quick") {
+        ctx.setBusy(true);
+        try {
+          await installMeetingSupportPack({
+            force: meetingAction === "update",
+            tier: meetingAction === "quick" ? "quick" : "balanced",
+            notify: (message) => addLine("info", message),
+          });
+          addLine("info", "Meeting transcription is ready. Open /meeting to start.");
+        } catch (error) {
+          addLine("error", `Meeting Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`);
+        } finally { ctx.setBusy(false); }
+        return;
+      }
+      if (meetingAction) return addLine("info", "usage: /support meeting [status|install|quick|update|remove]");
       const officeAction = action.startsWith("office ") ? action.slice("office ".length).trim()
         : action.startsWith("officecli ") ? action.slice("officecli ".length).trim()
           : null;
@@ -629,11 +891,15 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         const officeManaged = readOfficeSupportPack();
         const officeDisk = officeManaged ? `; ${(officeManaged.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
         const libreOffice = discoverLibreOffice();
+        const meeting = discoverMeetingSupport();
+        const meetingManaged = readMeetingSupportPack();
+        const meetingDisk = meetingManaged ? `; ${formatMiB(meetingPackBytes(meetingManaged))} managed files` : "";
         return addLine("info", [
           `ChatGPT GPT-5.6 support: ${codex.state} (${codex.detail})${codexDisk}`,
           `Gemini CLI support: ${gemini.state} (${gemini.detail})${geminiDisk}`,
           `Office artifact support: ${office.state} (${office.detail})${officeDisk}`,
           `LibreOffice PDF verifier: ${libreOffice.state} (${libreOffice.detail})`,
+          `Meeting transcription: ${meeting.state} (${meeting.detail})${meetingDisk}`,
           "GPT-5.5, Gemini API keys, other API providers, Ollama, and non-Office tasks do not require these components.",
         ].join("\n"));
       }
@@ -654,7 +920,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
           ? `GPT-5.6 Support Pack removed. Bridge status: ${fallback.state} (${fallback.detail}). ChatGPT sign-in was kept; GPT-5.5/API/Ollama are unaffected.`
           : "No Neko-managed Support Pack is installed; an existing Codex CLI is never removed by Neko.");
       }
-      if (codexAction !== "install" && codexAction !== "update") return addLine("info", "usage: /support [status|chatgpt|gemini|office] [status|install|update|remove]");
+      if (codexAction !== "install" && codexAction !== "update") return addLine("info", "usage: /support [status|chatgpt|gemini|office|meeting] [status|install|update|remove]");
       ctx.setBusy(true);
       try { await installCodexSupportPack({ force: codexAction === "update", notify: (message) => addLine("info", message) }); }
       catch (error) { addLine("error", `GPT-5.6 Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`); }

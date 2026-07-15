@@ -68,6 +68,12 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
   Completion still requires targeted readback and visual evidence because valid OOXML does not prove correct
   layout or current Excel calculations. Install or remove the optional engine from `/support office`; Neko
   never downloads it silently. See [`docs/process/OFFICE.md`](docs/process/OFFICE.md).
+- **Local meeting companion** — `/meeting` opens a consent-first capture surface for audio already playing on
+  this computer plus an optional separate microphone channel. Audio streams to a local stereo WAV; video is
+  never read or stored. A verified optional whisper.cpp pack transcribes Vietnamese locally, and the
+  `meeting-notes` skill produces decisions/actions only with timestamp evidence. It works with meeting products
+  through the browser/OS audio source rather than pretending to be a bot that can silently join every service.
+  See [`docs/process/MEETINGS.md`](docs/process/MEETINGS.md).
 - **Permission modes** — `default` / `accept-edits` / `plan` / `auto`, cycled with **Shift+Tab** (a
   *named* bounded-autonomy state, audited by `neko policy`); a seatbelt blocks catastrophic shell.
 - **Fullscreen terminal UI** — an app-owned, flicker-free viewport (alt-screen, like vim/htop):
@@ -89,7 +95,8 @@ Neko is built to take on new roles, one skill and one tool at a time:
   creates or edits Word, Excel, and PowerPoint artifacts through an optional structured backend, then reopens,
   validates, reads back, and visually checks the saved file. Browser and computer-use skills likewise verify
   real UI state frame by frame. A skill is a markdown file, not a fork; built-in skills and their helper
-  scripts ship inside the single binary.
+  scripts ship inside the single binary. The meeting skill pages long transcripts from disk and requires cited
+  decisions/action items instead of putting an entire recording into model context.
 - **Governable memory** — raw episodes stay in local sessions; durable facts use JIT-recalled `memory`;
   verified procedures use `workflows`; and an evidence-grounded `playbook` captures operating lessons.
   Two bounded core profiles keep only recent `user.md` and `self.md` observations in active context.
@@ -125,7 +132,7 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > Fallback if the domain is unreachable: swap the URL for
 > `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
-**Current release: [v0.13.0](https://github.com/meiiie/neko-core/releases/tag/v0.13.0).**
+**Current release: [v0.14.0](https://github.com/meiiie/neko-core/releases/tag/v0.14.0).**
 Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
 real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). **Pin or roll back any time**
 (the pin holds — auto-update won't undo it): `neko update 0.9.0`, or at install time
@@ -145,11 +152,15 @@ neko
 #        -> DeepSeek  -> DeepSeek V4 API key
 ```
 
-Browser control is optional and progressively disclosed. The first Neko session mentions it, and a natural
+Browser control and meeting capture are optional and progressively disclosed. The first Neko session mentions browser control, and a natural
 request such as "browse Facebook in Chrome" opens a setup choice while keeping the request intact; `/browser`
 opens the same flow directly. Use it only when you want Neko to control one explicitly attached, already
 signed-in Chrome tab. Chrome still shows
 its required extension-permission confirmation. There is no second `bun bin/neko.ts ...` install step.
+
+For a meeting, use `/meeting` inside Neko. Its guided surface can install local Vietnamese transcription and
+start in one choice, or record immediately and transcribe later. The standalone equivalent is
+`neko meeting start "Weekly sync"`; see the [meeting guide](docs/process/MEETINGS.md).
 
 The equivalent non-TUI commands are:
 
@@ -242,7 +253,7 @@ neko support update           # verify and replace with the latest stable offici
 neko support remove           # remove only Neko's managed pack, never the user's Codex CLI
 ```
 
-Inside the TUI, bare `/support` opens the Support Center: it shows all three optional components, who owns
+Inside the TUI, bare `/support` opens the Support Center: it shows all optional components, who owns
 each installation, and the exact managed disk usage. Selecting a Neko-managed component offers
 Update/Repair and Remove. Removal has a safe confirmation screen and lets the user either preserve the
 subscription sign-in or remove the component and sign out. If Neko is reusing a CLI the user installed,
@@ -276,6 +287,20 @@ whole-file PDF. Every export uses a new private LibreOffice profile and an on-di
 the user's LibreOffice profile nor joins a running desktop instance. This is independent evidence, not a
 replacement for typed editing and not an OS sandbox. Neko does not silently download the roughly 350 MiB suite;
 `/support office status` reports both engines and their distinct roles.
+
+Meeting transcription follows the same owner-aware pattern:
+
+```bash
+neko support meeting install          # balanced multilingual model (Vietnamese supported)
+neko support meeting install quick    # smaller/faster model
+neko meeting start "Weekly sync"
+neko meeting eval ./my-reference-cases.json
+```
+
+The pack uses verified official whisper.cpp release/model artifacts and installs under
+`~/.neko-core/meeting-support`; recordings remain separately under `~/.neko-core/meetings`. Removing the pack
+never deletes evidence. Neko does not claim person-level diarization from its two-channel mic/system capture or
+claim SOTA ASR without a frozen corpus; the built-in evaluator reports WER, CER, RTF, and channel-source accuracy.
 
 The recommended `gemini-api` profile connects directly to Google's documented
 [OpenAI-compatible Gemini endpoint](https://ai.google.dev/gemini-api/docs/openai) with `GEMINI_API_KEY`.

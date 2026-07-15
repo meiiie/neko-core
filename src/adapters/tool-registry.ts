@@ -3,6 +3,7 @@ import type { ToolRegistry } from "../core/tool-runtime.ts";
 import type { NekoConfig } from "./config.ts";
 import { withBrowserBridge } from "./browser-bridge.ts";
 import { withOfficeTools } from "./office-tools.ts";
+import { withMeetingTools } from "./meeting-tools.ts";
 import { loadSkill } from "./skills.ts";
 import { webPort } from "./web.ts";
 
@@ -10,6 +11,7 @@ import { webPort } from "./web.ts";
 export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, options: { noTools?: boolean } = {}): ToolRegistry {
   registry.mcp = withBrowserBridge(registry.mcp);
   registry.mcp = withOfficeTools(registry.root, registry.mcp);
+  registry.mcp = withMeetingTools(registry.mcp);
   registry.hooks = cfg.hooks;
   registry.allowDangerousBash = cfg.allowDangerousBash;
   registry.bashTimeoutCapMs = cfg.bashTimeoutCapMs;
