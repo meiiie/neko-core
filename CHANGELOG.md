@@ -6,6 +6,30 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-07-16
+
+### Added
+- Word, Excel, and PowerPoint tasks now use typed inspect, mutation, and render tools through the existing
+  approval boundary. The optional Office Support Pack is installed without administrator rights only after
+  explicit consent, verifies its source, digest, executable, version, and protocol, and preserves source files
+  through staged, validated, atomic replacement.
+- An existing LibreOffice installation can provide independent whole-file PDF render evidence from an isolated
+  temporary profile. Neko does not silently install LibreOffice or treat a successful render as semantic proof.
+- Resident Windows UIA and the attached browser bridge can wait for a stable visible change locally. The bundled
+  Messenger workflow uses those bounded watchers, fresh readback, and one-send-per-stable-message guards instead
+  of repeatedly spending model turns on unchanged screens.
+- Neko's compact prompt constitution now defines continuity, authority, evidence, retrieved-data distrust, and
+  preservation of unrelated user work without importing product-specific assumptions from another agent.
+
+### Changed
+- Browser and Office requests now have state-aware guided setup. Neko keeps the original request, detects when
+  setup becomes ready, and resumes it automatically; cancellation restores the request for editing.
+- Natural bilingual Office artifact requests are routed before the provider call using high-confidence skill
+  metadata, while up to three relevant skills may compose for mixed tasks. This adds no model call, embedding
+  service, network route, or runtime dependency.
+- Browser setup reports files-ready, bridge-online, extension-connected, and tab-attached as separate states
+  instead of implying that opening Chrome's extensions page installed an unpacked extension.
+
 ### Fixed
 - ChatGPT gateway `520`-`524` responses are retried as transient failures, and an exhausted HTML error page
   is reduced to a short upstream-error message instead of dumping markup and CSS into the transcript.

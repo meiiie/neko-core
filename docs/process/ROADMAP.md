@@ -4,17 +4,19 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-14) — v0.12.1 release
+## Current status (2026-07-16) — v0.13.0 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
 
-- **Branch:** `main`. **Current release: v0.12.1 (2026-07-14)** - Neko Core now has one public name and
-  a create-once local identity. Bounded, inspectable user/self memory is separate from raw sessions and
-  workflows; structured compaction preserves goals, corrections, evidence, and open work. The direct official
-  Claude, xAI, Kimi, DeepSeek, Gemini, and ChatGPT routes from v0.12.0 remain unchanged. v0.9.0 remains the
-  rollback baseline while these identity and memory changes soak in the field.
+- **Branch:** `main`. **Current release: v0.13.0 (2026-07-16)** - Natural Word, Excel, and PowerPoint requests
+  now enter a verified Office artifact path with guided install-and-resume, typed inspection/mutation/rendering,
+  atomic source-preserving writes, and optional LibreOffice cross-render evidence. Browser onboarding likewise
+  preserves and resumes the original task, while resident UIA/browser watchers provide bounded changed-state
+  evidence for conversational apps. Skill routing remains local and compositional, adding no model call or
+  embedding service. The direct official provider routes and bounded identity/memory hierarchy remain unchanged;
+  v0.9.0 stays the rollback baseline while these capabilities soak in the field.
 - **Gemini routes (corrected 2026-07-13):** Google ended Gemini CLI consumer OAuth for Free/AI Pro/Ultra on
   2026-06-18. The recommended API-key route now connects directly to Google's documented OpenAI-compatible
   endpoint, including live model discovery, streaming, tools, vision, structured output, and scoped key
