@@ -63,7 +63,10 @@ rtk bun run eval:office                 # OPT-IN network: official support pack 
 uses Neko's real adapter to create, reopen, validate, target-read, and render `.docx`, `.xlsx`, and `.pptx`, then
 removes the temporary pack and artifacts. It does not run as part of ordinary `bun test`, and it never installs
 into the user's real Neko home. Visual PNGs must still be reviewed by a human or vision model; a green command is
-not a visual assertion.
+not a visual assertion. When an existing LibreOffice is detected, the eval also cross-renders every format to
+PDF on a private per-job profile. `NEKO_OFFICE_REQUIRE_LIBREOFFICE=1` makes that optional gate mandatory on a
+dedicated runner; `NEKO_LIBREOFFICE_PATH` may select its exact executable. Neko never installs LibreOffice as
+part of the eval.
 
 ## Layer 5 — live end-to-end (`scripts/selftest.sh`, real provider)
 

@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createOfficeTools, type OfficeRunner } from "../src/adapters/office-tools.ts";
 
@@ -14,12 +15,13 @@ afterEach(() => {
 describe("typed Office tools", () => {
   test("separates safe inspection from gated writes and reports guided setup", async () => {
     const root = workspace();
-    const missing = createOfficeTools(root, { executable: null });
+    const missing = createOfficeTools(root, { executable: null, libreOffice: null });
     expect(missing.permission?.("mcp__neko_office__inspect")).toBe("safe");
     expect(missing.permission?.("mcp__neko_office__apply")).toBe("gated");
     expect(missing.permission?.("mcp__neko_office__render")).toBe("gated");
     const status = await missing.call("mcp__neko_office__inspect", { operation: "status" });
     expect(status).toContain("neko support office install");
+    expect(status).toContain("LibreOffice PDF verifier is not installed");
   });
 
   test("inspection is targeted, workspace-bounded, and returns a fresh file digest", async () => {
@@ -110,6 +112,66 @@ describe("typed Office tools", () => {
       file: "deck.pptx", mode: "screenshot", output: "evidence/missing.png", overwrite: true,
     })).rejects.toThrow("without producing non-empty evidence");
     expect(readFileSync(join(root, "evidence", "missing.png"), "utf8")).toBe("previous evidence");
+  });
+
+  test("LibreOffice cross-renders a whole PDF without requiring OfficeCLI", async () => {
+    const root = workspace();
+    const source = join(root, "deck.pptx");
+    writeFileSync(source, "deck");
+    let profile = "";
+    let snapshot = "";
+    const tools = createOfficeTools(root, {
+      executable: null,
+      libreOffice: { path: "soffice-test", source: "system", version: "26.2.4" },
+      libreOfficeRunner: async (_exe, args) => {
+        profile = fileURLToPath(args[0].slice("-env:UserInstallation=".length));
+        snapshot = args.at(-1)!;
+        expect(args).toContain("--headless");
+        expect(args).toContain("pdf:impress_pdf_Export");
+        const outDir = args[args.indexOf("--outdir") + 1];
+        writeFileSync(join(outDir, `${basename(snapshot, extname(snapshot))}.pdf`), "pdf evidence");
+        return { stdout: "convert ok", stderr: "" };
+      },
+    });
+    const result = await tools.call("mcp__neko_office__render", {
+      file: "deck.pptx", mode: "pdf", output: "evidence/deck.pdf",
+    });
+    expect(readFileSync(join(root, "evidence", "deck.pdf"), "utf8")).toBe("pdf evidence");
+    expect(snapshot).not.toBe(source);
+    expect(existsSync(snapshot)).toBe(false);
+    expect(existsSync(profile)).toBe(false);
+    expect(result).toContain("LibreOffice 26.2.4 (system; isolated profile)");
+    expect(result).toContain("cross-renderability");
+  });
+
+  test("LibreOffice PDF failure preserves existing evidence and rejects page subsets", async () => {
+    const root = workspace();
+    writeFileSync(join(root, "book.xlsx"), "book");
+    const evidence = join(root, "book.pdf");
+    writeFileSync(evidence, "previous evidence");
+    let calls = 0;
+    const tools = createOfficeTools(root, {
+      executable: null,
+      libreOffice: { path: "soffice-test", source: "path" },
+      libreOfficeRunner: async () => { calls++; return { stdout: "", stderr: "synthetic failure" }; },
+    });
+    await expect(tools.call("mcp__neko_office__render", {
+      file: "book.xlsx", mode: "pdf", output: "book.pdf", overwrite: true,
+    })).rejects.toThrow("without producing a non-empty PDF");
+    expect(readFileSync(evidence, "utf8")).toBe("previous evidence");
+    await expect(tools.call("mcp__neko_office__render", {
+      file: "book.xlsx", mode: "pdf", output: "other.pdf", page: "1",
+    })).rejects.toThrow("exports the complete artifact");
+    expect(calls).toBe(1);
+  });
+
+  test("PDF evidence explains how to add LibreOffice instead of installing it silently", async () => {
+    const root = workspace();
+    writeFileSync(join(root, "report.docx"), "report");
+    const tools = createOfficeTools(root, { executable: null, libreOffice: null });
+    await expect(tools.call("mcp__neko_office__render", {
+      file: "report.docx", mode: "pdf", output: "report.pdf",
+    })).rejects.toThrow("libreoffice.org/download");
   });
 
   test("rejects raw/network mutations before executing the third-party engine", async () => {

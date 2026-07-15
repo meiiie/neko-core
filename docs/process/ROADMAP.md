@@ -351,7 +351,12 @@ cost/token tracking · MCP client · single-binary distribution.
   before first execution. Mutations use source preservation, adjacent staging, stop-on-error batching, validation,
   optimistic SHA-256 for same-file edits, and atomic replacement. The completion harness recognizes namespaced
   apply/render as state changes and requires later fresh evidence. A real isolated value eval created, reopened,
-  validated, and rendered all three formats; it also caught a schema-valid but visually unreadable slide. See
+  validated, and rendered all three formats; it also caught a schema-valid but visually unreadable slide.
+  An existing LibreOffice is now a second, explicitly separate evidence backend: Neko discovers/probes it and
+  exports whole-file PDF from a disk snapshot on a private per-job profile, without reading the user's profile,
+  joining a resident, silently installing the large suite, or pretending cross-render success is semantic proof.
+  A real LibreOffice 26.2.4.2 gate cross-rendered and visually reviewed all three formats; Windows discovery uses
+  the waitable `soffice.com` entry point rather than detached `soffice.exe`. See
   `docs/process/OFFICE.md`. External benchmark parity is deliberately not claimed.
 
 ## Phase H — real-terminal UX/UI polish (July 2026)

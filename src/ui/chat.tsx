@@ -1468,8 +1468,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setOverlay({
       title: repair ? "Repair Office support and continue?" : "Install Office support and continue?",
       description: repair
-        ? "The current Office component did not pass its checks. Neko can install a verified managed copy, then continue your saved request."
-        : "One-time setup: about 35 MiB from the official iOfficeAI release, verified before use. No administrator access or Microsoft Office is required. Your request is saved.",
+        ? "The typed Office component did not pass its checks. Neko can install a verified managed copy, then continue your saved request. An existing LibreOffice remains a separate PDF verifier."
+        : "One-time typed editing setup: about 35 MiB from the official iOfficeAI release, verified before use. No administrator access or Microsoft Office is required. If LibreOffice is installed, Neko also uses it separately for PDF verification. Your request is saved.",
       search: false,
       showCount: false,
       items: [

@@ -11,10 +11,11 @@ The user asks for an artifact, not a successful process exit. Neko therefore sep
 agent + permission mode
         |
         v
-McpTools port -> Neko Office adapter -> optional OfficeCLI executable
+McpTools port -> Neko Office adapter -> optional OfficeCLI typed engine
+                       |                    -> staged artifact -> validate -> atomic publish
+                       |                    -> targeted readback -> PNG/HTML
                        |
-                       +-> staged artifact -> validation -> atomic publish
-                       +-> targeted readback -> render -> vision review
+                       +-> installed LibreOffice -> private profile -> whole-file PDF evidence
 ```
 
 The first-class surface is deliberately small:
@@ -23,7 +24,7 @@ The first-class surface is deliberately small:
 |---|---|---|
 | `mcp__neko_office__inspect` | safe | status, help, structure, text, issues, targeted get/query, schema validation |
 | `mcp__neko_office__apply` | gated | one bounded typed batch against a new or copied artifact |
-| `mcp__neko_office__render` | gated | PNG or standalone HTML evidence inside the workspace |
+| `mcp__neko_office__render` | gated | PNG/HTML through the typed engine, or whole-file PDF through installed LibreOffice |
 
 Raw OOXML, plugins, watch servers, arbitrary command strings, remote resources, and macro-enabled mutation
 are not exposed. A task that truly needs one of those capabilities must use a separately approved fallback and
@@ -39,6 +40,34 @@ fresh reads, validation, and visual rendering - behind its own ports, permission
 OfficeCLI also exposes broader resident, raw, plugin, and network surfaces. Neko intentionally excludes them
 from the normal path. This keeps the dependency optional and prevents a document helper from becoming an
 implicit shell or network authority.
+
+## Why LibreOffice is a verifier, not the typed editor
+
+LibreOffice is a mature independent implementation, but `soffice --headless` is not a granular document-editing
+protocol. Its documented CLI surface primarily opens, prints, and converts files. Full structural automation is
+the [UNO component model](https://api.libreoffice.org/), with language bindings, document models, controllers,
+frames, services, and a suite lifecycle. Replacing five bounded Neko operations with an ad-hoc UNO bridge would
+add a second large object model and make target selection harder to verify.
+
+Neko therefore uses both engines for different claims:
+
+| Capability | Primary engine | What success proves |
+|---|---|---|
+| targeted inspect/get/query | OfficeCLI adapter | exact package structure was read from a snapshot |
+| typed add/set/remove/move/swap | OfficeCLI adapter | a bounded batch validated and published atomically |
+| PNG/HTML preview | OfficeCLI adapter | the typed engine produced inspectable visual evidence |
+| PDF cross-render | installed LibreOffice | an independent suite opened and laid out the complete saved package |
+
+The LibreOffice runner passes a unique `-env:UserInstallation=file:///...` profile for every call, as required by
+the [official command-line documentation](https://help.libreoffice.org/latest/en-US/text/shared/guide/start_parameters.html).
+It also uses `--headless`, a private output directory, an on-disk source snapshot, a bounded timeout, non-empty
+output checks, and atomic publication. The profile and snapshot are removed afterward. This prevents accidental
+attachment to the user's running LibreOffice process and avoids user-profile locks or state contamination.
+
+Profile isolation is not an operating-system sandbox. A hostile document can still exercise LibreOffice's file
+parser, installed fonts, and system-wide components. Neko therefore limits this adapter to non-macro
+`.docx`/`.xlsx`/`.pptx`, never follows embedded links as part of verification, and describes PDF export as
+cross-render evidence rather than a security or semantic proof.
 
 ## Installation and ownership
 
@@ -68,6 +97,19 @@ The executable runs without administrator access. Neko disables its self-update,
 resident behavior, so one lifecycle remains authoritative. A compatible `officecli` already on `PATH` is reused
 and labelled user-owned; Neko never deletes or upgrades that installation. Removing the managed pack never
 touches user documents.
+
+LibreOffice has a separate ownership boundary. Neko discovers `soffice`/`libreoffice` on `PATH` and standard
+Windows, macOS, and Linux locations, probes its version, and uses it only when the user requests a PDF evidence
+write. Neko neither installs nor removes the desktop suite. On 15 July 2026 the official Windows x64 LibreOffice
+26.2.4 MSI was about 355 MiB, more than ten times the typed support binary, and its installation model differs
+across MSI, DMG, DEB, RPM, and system package managers. Silently turning that into a managed dependency would be
+a worse onboarding and ownership contract. `/support office status` reports the typed engine and LibreOffice
+verifier separately. See the [official download page](https://www.libreoffice.org/download/download-libreoffice/)
+for platform packages and current release metadata.
+
+Dedicated CI or a portable administrative extraction can set `NEKO_LIBREOFFICE_PATH` to the exact waitable
+executable (`soffice.com` on Windows, `soffice` elsewhere). An invalid explicit path fails closed instead of
+silently choosing a different installation. Normal users do not need this override.
 
 GitHub asset metadata plus a digest proves that the bytes match the official release asset. It is not a claim of
 publisher code signing or a security audit of the third-party project. It detects download corruption and a
@@ -116,7 +158,8 @@ Completion claims should name the evidence actually collected:
 3. **Semantic** - a fresh process reads the exact changed cells, paragraphs, shapes, formulas, counts, and
    invariants requested by the user.
 4. **Visual** - every affected Word page or PowerPoint slide, and representative workbook views, are rendered
-   and reviewed for clipping, overlap, contrast, typography, and overflow.
+   and reviewed for clipping, overlap, contrast, typography, and overflow. When LibreOffice is available, its
+   whole-file PDF supplies an independent layout implementation; export alone is not review.
 5. **Calculation** - formula-heavy workbooks are recalculated in an independent spreadsheet engine before
    numerical results are asserted.
 
@@ -135,6 +178,12 @@ data refresh.
 - [PPT-Eval](https://arxiv.org/abs/2606.31154) reports a large gap to humans and explicitly penalizes unnecessary
   edits and weak aesthetics. Neko stages a derivative, limits the mutation surface, and keeps semantic and visual
   evidence separate.
+- [Office Comprehension Benchmark](https://arxiv.org/abs/2607.01245) evaluates both native structure and visual
+  evidence across DOCX/XLSX/PPTX, including formulas, charts, headers, notes, and named ranges. That supports
+  Neko's dual structural/render evidence rather than flattening an artifact into text.
+- [OSWorld 2.0](https://arxiv.org/abs/2606.29537) highlights hidden state and post-action verification as dominant
+  long-horizon failure modes. Neko uses fresh process boundaries and saved-file evidence instead of accepting a
+  GUI or process-success claim.
 - [WindowsWorld](https://arxiv.org/abs/2604.27776) shows that multi-application desktop workflows remain both
   low-success and inefficient. Structured artifact operations are therefore preferred over coordinate-driven
   Office GUI automation; computer use remains the fallback for features that require the native app.
@@ -151,6 +200,10 @@ then drives the exact Neko adapter:
 rtk bun run eval:office
 ```
 
+If LibreOffice is installed, the same evaluation additionally exports all three artifacts through the exact PDF
+adapter. Set `NEKO_OFFICE_REQUIRE_LIBREOFFICE=1` to turn absence into a failing release gate on a dedicated
+LibreOffice runner; `NEKO_LIBREOFFICE_PATH` can point that runner at an explicit portable executable.
+
 On Windows x64 with OfficeCLI v1.0.136, the evaluation created, reopened, validated, and rendered Word, Excel,
 and PowerPoint artifacts. A first PowerPoint attempt was schema-valid but rendered a black inherited title on a
 dark navy background; the vision review caught it, and the corrected artifact used an explicit white title.
@@ -158,10 +211,21 @@ This is the concrete reason the visual gate is mandatory. Repeated Windows runs 
 all three renders, so rendering remains a bounded high-latency evidence step rather than an operation to repeat
 blindly.
 
+A clean administrative extraction of the official LibreOffice 26.2.4.2 MSI was then selected through
+`NEKO_LIBREOFFICE_PATH` without system installation. The exact Neko adapter cross-rendered the same DOCX, XLSX,
+and PPTX to non-empty PDFs (36,230 / 33,189 / 35,963 bytes). Rasterized page review showed legible text, preserved
+spacing, and the intended dark-slide contrast in all three. The complete typed + PNG + PDF gate took 82.6 seconds.
+The run also caught a Windows lifecycle trap before release: `soffice.exe` detaches and cannot provide a reliable
+waitable probe, while `soffice.com` returned version and conversion completion correctly. Windows discovery now
+accepts the console executable only, and a regression test fixes that contract.
+
 ## Known limits
 
 - Open XML validation does not prove intended content, visual quality, accessibility, or current formula values.
-- OfficeCLI rendering is a headless approximation, not Microsoft Office's layout engine.
+- OfficeCLI and LibreOffice rendering are independent approximations, not Microsoft Office's layout engine.
+- LibreOffice PDF export is whole-file in the bounded adapter. Page subsets require a later local PDF operation.
+- A successful LibreOffice export does not prove formula caches, external data, links, or native Office features
+  are current; numerical claims still need independent calculation readback.
 - `.docm`, `.xlsm`, and `.pptm` are preserved but not rewritten by the typed adapter.
 - Complex formulas, external links, pivot caches, macros, fonts, and native-only features need independent checks.
 - The support pack is a third-party optional component. Without it, Neko remains fully usable for coding, MCP,

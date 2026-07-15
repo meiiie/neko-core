@@ -3,6 +3,33 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-15 - LibreOffice independent evidence backend
+- Kept the Office architecture capability-based instead of replacing the typed editor with a broad UNO bridge.
+  OfficeCLI still owns bounded structural inspect/mutation; an existing LibreOffice now cross-renders a saved
+  DOCX/XLSX/PPTX snapshot to whole-file PDF through the same gated Office tool. The tool status and `/support
+  office` label the two roles separately, and the Support Center can open only LibreOffice's official download
+  page; Neko never silently installs or claims ownership of the roughly 350 MiB desktop suite.
+- Added cross-platform discovery plus an explicit `NEKO_LIBREOFFICE_PATH` for portable/dedicated CI. Every export
+  gets a unique `UserInstallation` profile, private output directory, timeout/abort boundary, non-empty evidence
+  check, adjacent atomic publish, and cleanup. Existing evidence survives conversion failure. The adapter accepts
+  only non-macro DOCX/XLSX/PPTX snapshots and documents that profile isolation is not an OS sandbox or semantic,
+  calculation, accessibility, or Microsoft Office proof.
+- Real binary testing caught and fixed a Windows lifecycle bug that mocks missed: `soffice.exe` detaches and made
+  version/completion probes unreliable, while the official `soffice.com` console entry point waits correctly.
+  Windows discovery now accepts the console executable only. A checksummed administrative extraction of official
+  LibreOffice 26.2.4.2 then passed the exact Neko value gate: fresh typed creation/readback plus three PNGs and
+  three LibreOffice PDFs (36,230 / 33,189 / 35,963 bytes) in 82.6 seconds. Rasterized page review found all three
+  outputs legible, unclipped, and visually consistent. The temporary MSI, suite, support pack, and evidence were
+  removed afterward; no system install or persistent PATH/profile change was made.
+- Research basis: LibreOffice's official command-line/profile and UNO API documentation, Office Comprehension
+  Benchmark, SpreadsheetBench 2, SpreadsheetAgent, PPT-Eval, PresentBench, SlidesGen-Bench, and OSWorld 2.0.
+  These support structural targeting plus independent saved-file visual evidence; they do not justify an external
+  benchmark parity claim.
+- Verification: **749/749 tests, 3,130 assertions, 81 files**; TypeScript, architecture, doctor, policy, and diff
+  checks clean; real LibreOffice three-format value gate PASS; production binary, UI probe, and real-PTY keyboard
+  probe PASS. Bun printed its known non-fatal post-build directory-mismatch diagnostic only after all build probes
+  succeeded.
+
 ## 2026-07-15 - One-step Office onboarding for natural requests
 - A normal Word, Excel, or PowerPoint request now checks the optional Office engine before spending a model
   call. If support is absent or broken, Neko offers **Install and continue** (the default) with source, size,

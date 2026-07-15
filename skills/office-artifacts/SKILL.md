@@ -5,13 +5,13 @@ description: Create/edit/verify Word, Excel, PowerPoint files (.docx/.xlsx/.pptx
 
 # Office artifacts
 
-Produce a saved Office file, not a prose approximation. Prefer Neko's typed Office tools over GUI clicks or shell strings: `mcp__neko_office__inspect` is read-only, while `apply` and `render` remain approval-gated. They use an optional OfficeCLI support pack without making OfficeCLI part of Neko Core.
+Produce a saved Office file, not a prose approximation. Prefer Neko's typed Office tools over GUI clicks or shell strings: `mcp__neko_office__inspect` is read-only, while `apply` and `render` remain approval-gated. Typed structure work uses the optional lightweight Office Support Pack; an existing LibreOffice is a separate independent PDF renderer. Neither engine enters Neko Core's domain layer.
 
 ## Non-negotiable contract
 
 1. Keep an existing source file unchanged unless the user explicitly asked to overwrite it. Work on a clearly named derivative such as `report-neko.docx`.
 2. Treat a successful command as execution evidence, not completion evidence. Completion requires a fresh on-disk reopen, targeted semantic readback, schema validation, and visual review when layout matters.
-3. Start with `mcp__neko_office__inspect {"operation":"status"}`. Never silently install a binary or run a remote pipe-to-shell command. If unavailable, offer the owner-aware `/support office` flow (or `neko support office install`) and wait for the user's explicit choice.
+3. Start with `mcp__neko_office__inspect {"operation":"status"}`. Read both the typed-engine and `libreoffice` states. Never silently install a binary or run a remote pipe-to-shell command. If typed support is unavailable, offer the owner-aware `/support office` flow (or `neko support office install`) and wait for the user's explicit choice. LibreOffice is discovered from an existing PATH/system install; Neko does not silently download the roughly 350 MiB desktop suite.
 4. Support only `.docx`, `.xlsx`, and `.pptx` through this workflow. Do not strip or rewrite macros in `.docm`, `.xlsm`, or `.pptm`; preserve those files and report the limitation.
 5. Do not invent property names or paths. Query `officecli help <format> <element>` and inspect the artifact before mutating it.
 
@@ -59,13 +59,14 @@ Format-specific gates:
 
 ### 6. Render and look
 
-When layout matters, generate PNG evidence with `mcp__neko_office__render` (use format-specific page/slide options discovered via `help`). Read every returned PNG through Neko's vision bridge.
+When layout matters, first generate PNG evidence with `mcp__neko_office__render` (use format-specific page/slide options discovered via `help`). Read every returned PNG through Neko's vision bridge. If LibreOffice is ready, also call `render` with `mode=pdf` and a `.pdf` output. PDF mode exports the complete artifact on a new private LibreOffice profile and is an independent cross-render, not a second semantic readback.
 
 - Review every slide for a short deck; use a contact sheet plus full-size inspection of dense or suspicious slides for a long deck.
 - Review every Word page affected by the edit, including page boundaries.
 - Review key Excel sheets/ranges and every generated chart or dashboard.
+- Open the LibreOffice PDF in a trusted local viewer (or rasterize its pages with an available PDF tool) and review every affected page/slide. Do not claim a PDF was visually reviewed merely because export succeeded.
 
-If the renderer is unavailable or times out, do not equate structural validation with visual success. Report the missing visual gate or use a trusted installed Office/LibreOffice export as the independent renderer.
+If either renderer is unavailable or times out, do not equate structural validation with visual success. Report exactly which visual gate is missing. LibreOffice PDF success proves that a second engine could open and lay out the package; it does not prove target semantics, accessibility, Microsoft Office parity, or current formula values.
 
 ### 7. Deliver evidence
 

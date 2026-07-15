@@ -19,7 +19,7 @@ import { deleteMemoryFile, listMemories, memoryEnabled, readMemoryFile, setMemor
 import { fmtBytes, relativeTime, trunc } from "./format.ts";
 import type { Overlay } from "./select-list.tsx";
 import type { Line, LineKind } from "./transcript.tsx";
-import { clearChatGptCredentials, hasChatGptCredentials } from "../adapters/chatgpt-auth.ts";
+import { clearChatGptCredentials, hasChatGptCredentials, openBrowser } from "../adapters/chatgpt-auth.ts";
 import { authChoices, profileDisplayName, providerChoices } from "../adapters/provider-choice.ts";
 import { getChatGptUsage, type ChatGptUsageReport, type ChatGptUsageWindow } from "../adapters/chatgpt-provider.ts";
 import { discoverCodexSupport } from "../adapters/codex-app-server.ts";
@@ -27,6 +27,7 @@ import { installCodexSupportPack, readCodexSupportPack, removeCodexSupportPack }
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials } from "../adapters/gemini-cli.ts";
 import { hasKimiCredentials } from "../adapters/kimi-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
+import { discoverLibreOffice } from "../adapters/libreoffice.ts";
 import { discoverOfficeCli, installOfficeSupportPack, readOfficeSupportPack, removeOfficeSupportPack } from "../adapters/office-support-pack.ts";
 import { getLastGeminiUsage } from "../adapters/gemini-provider.ts";
 import { getChatGptVoiceUsage } from "../adapters/chatgpt-voice.ts";
@@ -286,6 +287,7 @@ function openSupportCenter(ctx: CommandCtx): void {
   const geminiManaged = readGeminiSupportPack();
   const office = discoverOfficeCli();
   const officeManaged = readOfficeSupportPack();
+  const libreOffice = discoverLibreOffice();
   ctx.setOverlay({
     title: "Manage optional support components",
     items: [
@@ -302,7 +304,7 @@ function openSupportCenter(ctx: CommandCtx): void {
       {
         id: "office",
         label: "Office Artifact Support Pack",
-        detail: supportDetail("office", office.state, office.detail, office.executable?.source === "managed", officeManaged?.installedBytes),
+        detail: `${supportDetail("office", office.state, office.detail, office.executable?.source === "managed", officeManaged?.installedBytes)}; PDF verifier ${libreOffice.state === "ready" ? "ready" : "optional"}`,
       },
       { id: "close", label: "Close", detail: "No changes" },
     ],
@@ -323,24 +325,42 @@ function openSupportManager(ctx: CommandCtx, kind: SupportKind): void {
   const managed = kind === "chatgpt" ? readCodexSupportPack() : kind === "gemini" ? readGeminiSupportPack() : readOfficeSupportPack();
   const status = kind === "chatgpt" ? discoverCodexSupport() : kind === "gemini" ? discoverGeminiCli() : discoverOfficeCli();
   const title = kind === "chatgpt" ? "ChatGPT GPT-5.6 Support Pack" : kind === "gemini" ? "Gemini CLI Support Pack" : "Office Artifact Support Pack";
-  const items = managed ? [
+  const officeVerifier = kind === "office" ? discoverLibreOffice() : undefined;
+  const backDetail = kind === "office"
+    ? `LibreOffice PDF verifier: ${officeVerifier!.state} - ${officeVerifier!.detail}`
+    : "Return to all support components";
+  const items: { id: string; label: string; detail: string }[] = managed ? [
     { id: "update", label: "Update or repair", detail: `verify and replace the ${formatMiB(managed.installedBytes)} Neko-managed component` },
     { id: "remove", label: "Remove support pack", detail: kind === "chatgpt"
       ? `free ${formatMiB(managed.installedBytes)}; ChatGPT sign-in stays and GPT-5.5 still works`
       : kind === "gemini" ? `free ${formatMiB(managed.installedBytes)}; enterprise sign-in stays for a quick reinstall`
         : `free ${formatMiB(managed.installedBytes)}; your Office files and separate installs stay untouched` },
-    { id: "back", label: "Back", detail: "Return to all support components" },
+    { id: "back", label: "Back", detail: backDetail },
   ] : status.state === "ready" ? [
-    { id: "back", label: "Back", detail: `Using an existing ${kind === "chatgpt" ? "Codex" : kind === "gemini" ? "Gemini" : "OfficeCLI"}. Neko did not install it and will not remove it.` },
+    { id: "back", label: "Back", detail: kind === "office" ? `Using an existing OfficeCLI. ${backDetail}` : `Using an existing ${kind === "chatgpt" ? "Codex" : "Gemini"}. Neko did not install it and will not remove it.` },
   ] : [
     { id: "install", label: "Install support pack", detail: kind === "chatgpt" ? "about 95 MiB download / 270 MiB disk" : kind === "gemini" ? "about 55 MiB download / 200 MiB disk; no administrator access" : "about 35 MiB; verified official checksum; no Microsoft Office required" },
-    { id: "back", label: "Back", detail: "Download nothing" },
+    { id: "back", label: "Back", detail: kind === "office" ? `Download nothing. ${backDetail}` : "Download nothing" },
   ];
+  if (kind === "office" && officeVerifier?.state !== "ready") {
+    items.splice(items.length - 1, 0, {
+      id: "libreoffice",
+      label: officeVerifier?.state === "broken" ? "Repair LibreOffice PDF verifier (optional)" : "Get LibreOffice PDF verifier (optional)",
+      detail: "open the official download page; large desktop suite; does not replace typed editing",
+    });
+  }
   ctx.setOverlay({
     title: `Manage ${title}`,
     items,
     onSelect: (item) => {
       if (item.id === "back") return openSupportCenter(ctx);
+      if (item.id === "libreoffice") {
+        ctx.setOverlay(null);
+        const url = "https://www.libreoffice.org/download/download-libreoffice/";
+        openBrowser(url);
+        ctx.addLine("info", `Opened the official LibreOffice download page: ${url}\nAfter installation, reopen /support office; Neko will detect it automatically and use a private profile for PDF verification.`);
+        return;
+      }
       if (item.id === "remove") return openSupportRemoveConfirm(ctx, kind, managed!.installedBytes);
       ctx.setOverlay(null);
       ctx.setBusy(true);
@@ -552,9 +572,14 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
           : null;
       if (officeAction === "status") {
         const status = discoverOfficeCli();
+        const libreOffice = discoverLibreOffice();
         const managed = readOfficeSupportPack();
         const disk = managed ? `; ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
-        return addLine("info", `Office artifact support: ${status.state} (${status.detail})${disk}. Optional for typed .docx/.xlsx/.pptx work; no Microsoft Office installation is required.`);
+        return addLine("info", [
+          `Office typed engine: ${status.state} (${status.detail})${disk}.`,
+          `LibreOffice PDF verifier: ${libreOffice.state} (${libreOffice.detail}).`,
+          "The verifier uses a private per-job profile and never replaces typed structure inspection/editing.",
+        ].join("\n"));
       }
       if (officeAction === "remove" || officeAction === "uninstall") {
         const removed = removeOfficeSupportPack();
@@ -603,10 +628,12 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         const office = discoverOfficeCli();
         const officeManaged = readOfficeSupportPack();
         const officeDisk = officeManaged ? `; ${(officeManaged.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
+        const libreOffice = discoverLibreOffice();
         return addLine("info", [
           `ChatGPT GPT-5.6 support: ${codex.state} (${codex.detail})${codexDisk}`,
           `Gemini CLI support: ${gemini.state} (${gemini.detail})${geminiDisk}`,
           `Office artifact support: ${office.state} (${office.detail})${officeDisk}`,
+          `LibreOffice PDF verifier: ${libreOffice.state} (${libreOffice.detail})`,
           "GPT-5.5, Gemini API keys, other API providers, Ollama, and non-Office tasks do not require these components.",
         ].join("\n"));
       }

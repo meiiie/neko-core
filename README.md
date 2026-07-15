@@ -271,6 +271,12 @@ process lifecycle, and on-disk verification remain authoritative; the managed di
 the first Office tool execution in each Neko process. Existing PATH installs are reused but clearly labelled as
 user-owned and are never removed by Neko.
 
+If LibreOffice is already installed, Neko also discovers `soffice` and can cross-render DOCX/XLSX/PPTX to a
+whole-file PDF. Every export uses a new private LibreOffice profile and an on-disk snapshot, so it neither reads
+the user's LibreOffice profile nor joins a running desktop instance. This is independent evidence, not a
+replacement for typed editing and not an OS sandbox. Neko does not silently download the roughly 350 MiB suite;
+`/support office status` reports both engines and their distinct roles.
+
 The recommended `gemini-api` profile connects directly to Google's documented
 [OpenAI-compatible Gemini endpoint](https://ai.google.dev/gemini-api/docs/openai) with `GEMINI_API_KEY`.
 There is no local proxy, bundled third-party service, or OAuth token reuse. Neko's existing adapter gets

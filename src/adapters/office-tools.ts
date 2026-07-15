@@ -18,6 +18,12 @@ import { tmpdir } from "node:os";
 
 import type { McpTools } from "../core/ports.ts";
 import { composeMcpTools } from "./mcp-compose.ts";
+import {
+  discoverLibreOffice,
+  renderPdfWithLibreOffice,
+  type LibreOfficeExecutable,
+  type LibreOfficeRunner,
+} from "./libreoffice.ts";
 import { discoverOfficeCli, resolveOfficeExecutable, type OfficeExecutable } from "./office-support-pack.ts";
 
 const TOOL_PREFIX = "mcp__neko_office__";
@@ -61,12 +67,12 @@ const OFFICE_SCHEMAS = [
   },
   {
     name: "render",
-    description: "Render an Office artifact to PNG or standalone HTML for visual verification. This writes evidence inside the workspace and is gated.",
+    description: "Render an Office artifact to PNG or standalone HTML with the typed engine, or cross-render a whole-file PDF with an installed LibreOffice. This writes evidence inside the workspace and is gated.",
     properties: {
       file: { type: "string", description: "Workspace-relative Office artifact." },
-      mode: { type: "string", enum: ["screenshot", "html"] },
-      output: { type: "string", description: "Workspace-relative .png or .html evidence path." },
-      page: { type: "string", pattern: "^[0-9]+(?:-[0-9]+)?$", description: "Optional page/slide number or inclusive range." },
+      mode: { type: "string", enum: ["screenshot", "html", "pdf"] },
+      output: { type: "string", description: "Workspace-relative .png, .html, or .pdf evidence path." },
+      page: { type: "string", pattern: "^[0-9]+(?:-[0-9]+)?$", description: "Optional page/slide number or inclusive range for screenshot/html. PDF always exports the complete artifact." },
       overwrite: { type: "boolean" },
     },
     required: ["file", "mode", "output"],
@@ -90,10 +96,13 @@ export type OfficeRunner = (
 export interface OfficeToolsOptions {
   executable?: OfficeExecutable | null;
   runner?: OfficeRunner;
+  libreOffice?: LibreOfficeExecutable | null;
+  libreOfficeRunner?: LibreOfficeRunner;
 }
 
 class OfficeTools implements McpTools {
   private verifiedManaged?: { key: string; check: Promise<void> };
+  private resolvedLibreOffice?: LibreOfficeExecutable;
 
   constructor(
     private readonly root: string,
@@ -104,7 +113,7 @@ class OfficeTools implements McpTools {
   has(name: string): boolean { return OFFICE_SCHEMAS.some((schema) => schema.function.name === name); }
   permission(name: string): "safe" | "gated" { return name === `${TOOL_PREFIX}inspect` ? "safe" : "gated"; }
   indexBlock(): string {
-    return "Neko Office tools are local, workspace-bounded, and optional. Load the office-artifacts skill before Office work. Read/validate is safe; apply/render remains approval-gated.";
+    return "Neko Office tools are local, workspace-bounded, and optional. Load the office-artifacts skill before Office work. Read/validate is safe; apply/render remains approval-gated. PDF render uses an isolated installed LibreOffice as independent evidence.";
   }
 
   async call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
@@ -139,6 +148,27 @@ class OfficeTools implements McpTools {
     return executable;
   }
 
+  private libreOffice(): LibreOfficeExecutable {
+    const status = this.libreOfficeStatus();
+    if (status.state === "ready") return status.executable!;
+    if (status.state === "broken") throw new Error(`LibreOffice verifier is unavailable: ${status.detail}`);
+    throw new Error("LibreOffice is not installed. Install it from https://www.libreoffice.org/download/download-libreoffice/ to enable independent PDF cross-rendering; Neko does not silently install the full suite.");
+  }
+
+  private libreOfficeStatus() {
+    if (this.options.libreOffice !== undefined) return this.options.libreOffice
+      ? { state: "ready" as const, detail: `LibreOffice ${this.options.libreOffice.version ?? "test"} (${this.options.libreOffice.source})`, executable: this.options.libreOffice }
+      : { state: "missing" as const, detail: "LibreOffice PDF verifier is not installed" };
+    if (this.resolvedLibreOffice) return {
+      state: "ready" as const,
+      detail: `LibreOffice ${this.resolvedLibreOffice.version ?? "verified"} (${this.resolvedLibreOffice.source})`,
+      executable: this.resolvedLibreOffice,
+    };
+    const status = discoverLibreOffice();
+    if (status.state === "ready") this.resolvedLibreOffice = status.executable;
+    return status;
+  }
+
   private async inspect(args: Record<string, any>, signal?: AbortSignal): Promise<string> {
     const operation = String(args.operation ?? "");
     if (operation === "status") {
@@ -147,7 +177,17 @@ class OfficeTools implements McpTools {
         : this.options.executable
           ? { state: "ready", detail: `OfficeCLI ${this.options.executable.version ?? "test"} (${this.options.executable.source})`, executable: this.options.executable }
           : { state: "missing", detail: "optional Office engine is not installed" };
-      return JSON.stringify({ ...status, install: "neko support office install", tui: "/support office" }, null, 2);
+      const libreOffice = this.libreOfficeStatus();
+      return JSON.stringify({
+        ...status,
+        libreoffice: libreOffice,
+        roles: {
+          typed_engine: "OfficeCLI performs bounded structure inspection and mutation",
+          independent_renderer: "LibreOffice exports whole-file PDF evidence on a private per-job profile",
+        },
+        install: "neko support office install",
+        tui: "/support office",
+      }, null, 2);
     }
     const executable = await this.executable();
     if (operation === "help") {
@@ -248,17 +288,19 @@ class OfficeTools implements McpTools {
   }
 
   private async render(args: Record<string, any>, signal?: AbortSignal): Promise<string> {
-    const executable = await this.executable();
     const file = this.officeFile(String(args.file ?? ""), true);
     const mode = String(args.mode ?? "");
-    if (mode !== "screenshot" && mode !== "html") throw new Error("Office render mode must be screenshot or html");
+    if (mode !== "screenshot" && mode !== "html" && mode !== "pdf") throw new Error("Office render mode must be screenshot, html, or pdf");
+    const executable = mode === "pdf" ? undefined : await this.executable();
+    const libreOffice = mode === "pdf" ? this.libreOffice() : undefined;
     const output = resolveInRoot(this.root, String(args.output ?? ""));
-    const requiredExt = mode === "screenshot" ? ".png" : ".html";
+    const requiredExt = mode === "screenshot" ? ".png" : mode === "html" ? ".html" : ".pdf";
     if (extname(output).toLowerCase() !== requiredExt) throw new Error(`Office ${mode} output must end in ${requiredExt}`);
     const overwrite = args.overwrite === true;
     if (existsSync(output) && !overwrite) throw new Error(`Render output already exists: ${relative(this.root, output)}; set overwrite=true explicitly`);
     let page: string | undefined;
     if (args.page != null) {
+      if (mode === "pdf") throw new Error("LibreOffice PDF evidence exports the complete artifact; omit page");
       page = String(args.page);
       if (!/^\d+(?:-\d+)?$/.test(page)) throw new Error("Office render page must be N or N-M");
       const [first, last = first] = page.split("-").map(Number);
@@ -268,21 +310,37 @@ class OfficeTools implements McpTools {
     const suffix = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const stage = join(dirname(output), `.${basename(output, requiredExt)}.neko-render-${suffix}${requiredExt}`);
     const snapshot = copyOfficeSnapshot(file);
-    const command = ["view", snapshot.file, mode, "-o", stage];
-    if (page) command.push("--page", page);
     try {
-      const rendered = await this.run(executable, command, signal, 180_000);
+      let rendered: OfficeRunResult;
+      if (mode === "pdf") {
+        rendered = await renderPdfWithLibreOffice({
+          executable: libreOffice!,
+          input: snapshot.file,
+          destination: stage,
+          runner: this.options.libreOfficeRunner,
+          signal,
+        });
+      } else {
+        const command = ["view", snapshot.file, mode, "-o", stage];
+        if (page) command.push("--page", page);
+        rendered = await this.run(executable!, command, signal, 180_000);
+      }
       if (!existsSync(stage) || !statSync(stage).isFile() || statSync(stage).size === 0) {
         throw new Error(`Office ${mode} completed without producing non-empty evidence at ${relative(this.root, output)}`);
       }
       atomicReplace(stage, output, overwrite);
       return JSON.stringify({
         success: true,
-        backend: backendLabel(executable),
+        backend: mode === "pdf" ? libreOfficeLabel(libreOffice!) : backendLabel(executable!),
         source: relative(this.root, file),
         evidence: [relative(this.root, output)],
-        result: parseOutput(rendered.stdout.split(stage).join(output)),
-        next: mode === "screenshot" ? "Open every listed PNG with the vision tool; schema validation alone is not visual proof." : "Open the HTML preview and inspect layout, clipping, contrast, and overflow.",
+        result: mode === "pdf" ? { exported: true } : parseOutput(rendered.stdout.split(stage).join(output)),
+        ...(rendered.stderr.trim() ? { warnings: cap(rendered.stderr.trim()) } : {}),
+        next: mode === "screenshot"
+          ? "Open every listed PNG with the vision tool; schema validation alone is not visual proof."
+          : mode === "html"
+            ? "Open the HTML preview and inspect layout, clipping, contrast, and overflow."
+            : "Open the PDF and review every affected page/slide. This independent LibreOffice export proves cross-renderability, not semantic correctness.",
       }, null, 2);
     } finally {
       rmSync(stage, { force: true });
@@ -452,4 +510,8 @@ function cap(text: string): string {
 
 function backendLabel(executable: OfficeExecutable): string {
   return `OfficeCLI${executable.version ? ` ${executable.version}` : ""} (${executable.source})`;
+}
+
+function libreOfficeLabel(executable: LibreOfficeExecutable): string {
+  return `LibreOffice${executable.version ? ` ${executable.version}` : ""} (${executable.source}; isolated profile)`;
 }

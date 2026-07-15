@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createOfficeTools } from "../src/adapters/office-tools.ts";
+import { discoverLibreOffice } from "../src/adapters/libreoffice.ts";
 import { installOfficeSupportPack, readOfficeSupportPack } from "../src/adapters/office-support-pack.ts";
 
 const ownsHome = !process.env.NEKO_OFFICE_HOME;
@@ -16,8 +17,13 @@ const root = mkdtempSync(join(tmpdir(), "neko-office-eval-work-"));
 let ok = false;
 try {
   const installed = readOfficeSupportPack(home) ?? await installOfficeSupportPack({ home, notify: (message) => console.log(message) });
+  const libreOffice = discoverLibreOffice();
+  if (process.env.NEKO_OFFICE_REQUIRE_LIBREOFFICE === "1" && libreOffice.state !== "ready") {
+    throw new Error(`LibreOffice evidence gate is required but unavailable: ${libreOffice.detail}`);
+  }
   const tools = createOfficeTools(root, {
     executable: { path: installed.path, source: "managed", version: installed.officeVersion, digest: installed.assetDigest },
+    libreOffice: libreOffice.state === "ready" ? libreOffice.executable : null,
   });
 
   await tools.call("mcp__neko_office__apply", {
@@ -75,6 +81,19 @@ try {
     renders[file] = { file: png, bytes: statSync(png).size };
   }
   evidence.render = renders;
+  const crossRenders: Record<string, unknown> = {};
+  if (libreOffice.state === "ready") {
+    for (const file of ["neko-office.docx", "neko-office.xlsx", "neko-office.pptx"]) {
+      const stem = file.slice(0, file.lastIndexOf("."));
+      const pdf = join(root, "evidence", `${stem}-${file.slice(-4)}-libreoffice.pdf`);
+      const render = JSON.parse(await tools.call("mcp__neko_office__render", {
+        file, mode: "pdf", output: pdf, overwrite: true,
+      }));
+      if (!render.success || !existsSync(pdf) || statSync(pdf).size < 1000) throw new Error(`LibreOffice cross-render gate failed for ${file}`);
+      crossRenders[file] = { file: pdf, bytes: statSync(pdf).size };
+    }
+  }
+  evidence.libreoffice = { status: libreOffice, render: crossRenders };
   ok = true;
   console.log(JSON.stringify({ success: true, officeVersion: installed.officeVersion, home, root, evidence }, null, 2));
 } finally {

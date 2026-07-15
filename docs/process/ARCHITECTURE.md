@@ -80,8 +80,11 @@ network resource fetching, and arbitrary command strings stay outside the first-
 Mutations are transactional at the adapter boundary: source -> adjacent staging file -> stop-on-error batch ->
 close -> schema validate -> atomic replacement. Same-file edits add an optimistic SHA-256 precondition; managed
 binary integrity is checked before first execution. Safe reads and renders operate on a temporary disk snapshot,
-so an unrelated resident cannot replace on-disk evidence with unflushed memory. `/support office` owns the optional binary lifecycle and
-never confuses an existing PATH install with Neko-owned files. See `OFFICE.md` for the evidence model and limits.
+so an unrelated resident cannot replace on-disk evidence with unflushed memory. `libreoffice.ts` is a second
+edge adapter, not a domain dependency: an existing suite may cross-render the snapshot to PDF under a unique
+temporary user profile. It is discovered but never installed or owned by Neko. `/support office` owns only the
+lightweight typed binary lifecycle and never confuses existing PATH/system installs with Neko-owned files. See
+`OFFICE.md` for the evidence model and limits.
 
 ## Identity and persona boundary
 
