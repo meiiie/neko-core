@@ -3,6 +3,31 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-15 - Multilingual capability routing and Office onboarding recovery
+
+- Reproduced the owner's exact natural request (`tao moi ... file Word ...`) against the real router. It scored
+  only two lexical overlaps against a threshold of four, so `matchSkill` returned null and the TUI never called
+  the already-built Office setup overlay. A broader probe found the same gap for short Word, Excel, and
+  PowerPoint requests in Vietnamese and English. The existing tests passed because their phrases repeated four
+  or more words from the skill description.
+- Researched current primary guidance and routing results: MCP elicitation's accept/decline/cancel interaction
+  contract; Anthropic's progressive disclosure for Skills; OpenAI GPT-5.4 tool search; Semantic Tool Discovery;
+  Scaling Enterprise Agent Routing; and ToolACE-MCP. The practical boundary is a hybrid: deterministic setup
+  signals for high-confidence local capabilities, a bounded compositional shortlist for current skills, and a
+  semantic/history-aware router only after catalog-scale evals justify its model, index, and lifecycle cost.
+- Implemented Unicode NFKD/diacritic normalization including Vietnamese `đ`, per-skill matching independent of
+  competing routes, and up to three composable auto-loaded skills. Office activation metadata requires an
+  artifact action plus an Office product/extension, avoiding informational false positives such as "Word la
+  gi?" or "I excel at sports". The exact owner prompt now stops before any provider call and opens **Install
+  Office support and continue?**; cancel/decline/resume behavior remains unchanged.
+- Focused evidence: 41 routing/TUI tests pass with 267 assertions. The corpus includes 11 positive bilingual
+  Office forms, seven hard negatives, procurement + Excel composition, and an Ink end-to-end regression using the
+  owner's exact text. No runtime dependency, network request, or embedding/model call was added.
+- Full gates: TypeScript clean; 749 tests pass with 3,158 assertions; doctor healthy apart from the expected
+  non-TTY/offline-bridge diagnostics; policy PASS; production compile, UI probe, and real-PTY keyboard probe PASS.
+  Bun again emitted its known non-fatal post-build directory-mismatch diagnostic after every artifact/probe had
+  succeeded.
+
 ## 2026-07-15 - LibreOffice independent evidence backend
 - Kept the Office architecture capability-based instead of replacing the typed editor with a broad UNO bridge.
   OfficeCLI still owns bounded structural inspect/mutation; an existing LibreOffice now cross-renders a saved

@@ -83,6 +83,32 @@ neko support office update
 neko support office remove
 ```
 
+### Routing and consent contract
+
+Setup UX is not delegated to whichever model happens to be active. A high-confidence `match:` signal in the
+Office skill is evaluated locally after Unicode/diacritic normalization, so natural Vietnamese such as
+`tao ... file Word` takes the same path as English without an extra request, embedding model, network call, or
+prompt tokens. The UI checks the named Office capability independently of the single best domain route; a task
+that also needs procurement therefore cannot hide Office setup. Once work begins, Neko may load a bounded
+shortlist of up to three matching skills rather than forcing a mutually exclusive route.
+
+The overlay implements the three outcomes used by MCP elicitation: accept installs and resumes the saved
+request, decline continues once with an available local fallback, and cancel restores the untouched request to
+the input. The source and size are visible before consent, and no provider call occurs while the choice is open.
+This follows the [MCP elicitation interaction model](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation)
+while keeping the current local adapter independent of MCP protocol-version support.
+
+This layered router is deliberate. Anthropic recommends progressive disclosure of skill metadata and loading
+full instructions only when needed ([Agent Skills](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills));
+OpenAI's tool search similarly reports lower context cost from on-demand definitions
+([GPT-5.4 tool search](https://openai.com/index/introducing-gpt-5-4/)). At much larger catalogs, embedding
+shortlisting recovers routing accuracy on under-specified production traffic
+([Scaling Enterprise Agent Routing](https://arxiv.org/abs/2606.17519)) and can select 3-5 tools with sub-100ms
+retrieval in a smaller MCP study ([Semantic Tool Discovery](https://arxiv.org/abs/2603.20313)). Neko does not
+pay that dependency and lifecycle cost at its current catalog size. The upgrade gate is measured: add a local
+semantic shortlist behind the same `matchSkills` seam only when a representative routing corpus shows lexical
+recall loss or catalog-scale confusion; deterministic safety/setup signals remain authoritative afterward.
+
 For a Neko-managed install, the adapter:
 
 1. reads the latest stable release from the official `iOfficeAI/OfficeCLI` GitHub API;

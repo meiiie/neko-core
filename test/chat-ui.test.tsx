@@ -231,7 +231,7 @@ test("natural Office tasks offer one-time install and resume the saved request",
   let installed = false;
   let installs = 0;
   const provider = new MockProvider([{ content: "Office task started.", tool_calls: [] }]);
-  const request = "create a PowerPoint presentation and verify the pptx file";
+  const request = "tạo mới một file mới đi word mô tả đầy đủ về bài thơ Kiều";
   const { stdin, frames, unmount } = render(
     <ChatApp
       fullscreen={false}

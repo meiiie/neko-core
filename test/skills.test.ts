@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadSkill, matchSkill } from "../src/adapters/skills.ts";
+import { loadSkill, matchesSkill, matchSkill, matchSkills } from "../src/adapters/skills.ts";
 
 const ORIG = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
 afterEach(() => {
@@ -37,11 +37,37 @@ test("matchSkill returns null for unrelated work (no false trigger)", () => {
 
 test("office artifacts route in English and Vietnamese and require saved-result verification", () => {
   const prompts = [
+    "tạo mới một file mới đi word mô tả đầy đủ về bài thơ Kiều",
+    "làm cho tôi một file Word",
+    "tạo PowerPoint giới thiệu Neko Core",
+    "làm một bảng Excel chi tiêu",
+    "Chỉnh tài liệu Word và kiểm tra lại định dạng",
+    "đọc rồi tóm tắt báo-cáo.docx",
+    "create a Word document about Neko",
+    "make an Excel spreadsheet",
     "create a PowerPoint presentation and verify the pptx file",
     "tao tai lieu Word docx va kiem tra dinh dang",
     "sua file bao-cao.docx",
   ];
-  for (const prompt of prompts) expect(matchSkill(prompt)?.name).toBe("office-artifacts");
+  for (const prompt of prompts) {
+    expect(matchesSkill("office-artifacts", prompt)).toBe(true);
+    expect(matchSkills(prompt).map((skill) => skill.name)).toContain("office-artifacts");
+  }
+
+  const unrelated = [
+    "Microsoft Word là gì?",
+    "từ word này nghĩa là gì?",
+    "I excel at sports",
+    "PowerPoint có miễn phí không?",
+    "compare Word Excel PowerPoint files",
+    "mở Excel",
+    "fix the word spacing in markdown",
+  ];
+  for (const prompt of unrelated) expect(matchesSkill("office-artifacts", prompt)).toBe(false);
+
+  const compositional = matchSkills("Tìm mua laptop ở Việt Nam rồi tạo file Excel so sánh giá").map((skill) => skill.name);
+  expect(compositional).toContain("office-artifacts");
+  expect(compositional).toContain("procurement");
 
   const skill = loadSkill("office-artifacts");
   expect(skill?.body).toContain("fresh on-disk reopen");

@@ -1,6 +1,7 @@
 ---
 name: office-artifacts
 description: Create/edit/verify Word, Excel, PowerPoint files (.docx/.xlsx/.pptx); tao/sua/kiem tra tai lieu, bao cao, bang tinh.
+match: ^(?:(?=[\s\S]*\b(?:create|make|build|generate|write|edit|format|verify|inspect|read|open|summarize|convert|save|update|fix|tao|lam|soan|sua|chinh|kiem tra|doc|mo|tom tat|chuyen doi|luu)\b)(?=[\s\S]*\b(?:word|excel|powerpoint|docx|xlsx|pptx)\b)(?=[\s\S]*\b(?:file|document|doc|report|spreadsheet|workbook|presentation|deck|slide|tai lieu|van ban|bao cao|bang|bang tinh)\b)|(?=[\s\S]*\b(?:create|make|build|generate|tao|lam|soan)\b)(?=[\s\S]*\b(?:excel|powerpoint|docx|xlsx|pptx)\b)|(?=[\s\S]*\b(?:edit|format|verify|inspect|read|open|summarize|convert|save|update|fix|sua|chinh|kiem tra|doc|mo|tom tat|chuyen doi|luu)\b)(?=[\s\S]*\b(?:docx|xlsx|pptx)\b))
 ---
 
 # Office artifacts

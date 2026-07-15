@@ -103,34 +103,66 @@ const SKILL_STOP = new Set(
   ("the a an and or for to of in on at by with you your i it is are be do can will this that these those" +
    " cua cho voi cac mot nay tai khi ban toi lam gium giup hay duoc khong neu thi va la").split(/\s+/),
 );
+function normalizeSkillText(s: string): string {
+  return s.normalize("NFKD").toLowerCase().replace(/\p{Mark}/gu, "").replace(/đ/g, "d");
+}
 function skillTokens(s: string): Set<string> {
   return new Set(
-    s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9\s]/g, " ")
+    normalizeSkillText(s).replace(/[^a-z0-9\s]/g, " ")
       .split(/\s+/).filter((w) => w.length >= 3 && !SKILL_STOP.has(w)),
   );
 }
-/** Deterministic skill match: if the user's task shares enough SIGNIFICANT keywords with a skill's
- * name+description, return it — so a clearly-matching domain skill loads even when the model wouldn't
- * proactively pull it. Conservative (needs a strong multi-keyword overlap) to avoid false positives. */
-export function matchSkill(userText: string): Skill | null {
+
+function regexMatches(skill: Skill, userText: string): boolean {
+  if (!skill.match) return false;
+  try {
+    const pattern = new RegExp(skill.match, "i");
+    return pattern.test(userText) || pattern.test(normalizeSkillText(userText));
+  } catch {
+    return false; // a malformed user-authored pattern must not break the REPL
+  }
+}
+
+function overlapScore(skill: Skill, userTokens: Set<string>): number {
+  let hits = 0;
+  for (const word of skillTokens(`${skill.name} ${skill.description}`)) if (userTokens.has(word)) hits++;
+  return hits;
+}
+
+/** Test one named capability independently of competing skills. UX preflights must not disappear merely
+ * because a compositional request also matches procurement, browser work, or another stronger route. */
+export function matchesSkill(name: string, userText: string): boolean {
+  const skill = loadSkill(name);
+  if (!skill) return false;
+  if (skill.match) return regexMatches(skill, userText);
+  const userTokens = skillTokens(userText);
+  return userTokens.size >= 3 && overlapScore(skill, userTokens) >= 4;
+}
+
+/** Bounded skill shortlist: explicit activation metadata wins, then at most one strong lexical route is
+ * added. This preserves compositional tasks without injecting the full skill catalog into context. */
+export function matchSkills(userText: string, limit = 3): Skill[] {
   const skills = listSkills();
   // Deterministic trigger first: a skill's frontmatter `match` regex is an unambiguous signal (e.g. a
   // platform URL for web-reach) - load it directly, since description token-overlap is too coarse to catch
   // short or other-language asks (a Vietnamese "lay transcript youtube ..." shares only ~3 English tokens).
-  for (const s of skills) {
-    if (!s.match) continue;
-    try { if (new RegExp(s.match, "i").test(userText)) return s; } catch { /* a bad regex just doesn't trigger */ }
-  }
+  const routed = skills.filter((skill) => regexMatches(skill, userText));
   const ut = skillTokens(userText);
-  if (ut.size < 3) return null;
-  let best: Skill | null = null;
-  let bestScore = 0;
-  for (const s of skills) {
-    let hits = 0;
-    for (const w of skillTokens(`${s.name} ${s.description}`)) if (ut.has(w)) hits++;
-    if (hits > bestScore) { bestScore = hits; best = s; }
+  if (ut.size >= 3) {
+    let best: Skill | null = null;
+    let bestScore = 0;
+    for (const skill of skills) {
+      const score = overlapScore(skill, ut);
+      if (score > bestScore) { bestScore = score; best = skill; }
+    }
+    if (bestScore >= 4 && best && !routed.some((skill) => skill.name === best!.name)) routed.push(best);
   }
-  return bestScore >= 4 ? best : null;
+  return routed.slice(0, Math.max(0, Math.floor(limit)));
+}
+
+/** Backwards-compatible best route for callers that need one skill. */
+export function matchSkill(userText: string): Skill | null {
+  return matchSkills(userText, 1)[0] ?? null;
 }
 
 export function renderSkills(): string {

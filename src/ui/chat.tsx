@@ -71,7 +71,7 @@ import { latestSession, loadSession, newSessionId, renameSession, saveSession, t
 import { coreMemoryBlock, memoryIndexBlock } from "../core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
 import { playbookContextBlock } from "../core/playbook.ts";
-import { matchSkill, skillsContextBlock } from "../adapters/skills.ts";
+import { matchesSkill, matchSkills, skillsContextBlock } from "../adapters/skills.ts";
 import { ToolRegistry } from "../core/tool-runtime.ts";
 import { WEB_EXTRACT_PROMPT } from "../adapters/web.ts";
 import { configureToolRegistry, inheritToolRegistrySettings } from "../adapters/tool-registry.ts";
@@ -1826,7 +1826,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
     const officeBypass = officeRequestBypassRef.current?.text === text ? officeRequestBypassRef.current : null;
     if (officeBypass) officeRequestBypassRef.current = null;
-    else if (!voiceTurnRef.current && matchSkill(loopGoal ?? text)?.name === "office-artifacts") {
+    else if (!voiceTurnRef.current && matchesSkill("office-artifacts", loopGoal ?? text)) {
       const status = officeSupportStatus();
       if (status.state !== "ready") {
         offerOfficeSupport(text, status);
@@ -1886,8 +1886,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setStarted(true); // conversation begun -> drop the input placeholder hint
     registryRef.current!.clearCheckpoint(); // start a fresh file checkpoint for this turn (/rewind)
     // Deterministically load a clearly-matching domain skill (don't rely on the model to pull it).
-    const matched = matchSkill(toSend);
-    if (matched && !autoLoadedSkills.current.has(matched.name)) {
+    for (const matched of matchSkills(toSend)) {
+      if (autoLoadedSkills.current.has(matched.name)) continue;
       autoLoadedSkills.current.add(matched.name);
       agentRef.current!.appendSystem(`# Skill: ${matched.name}\n(skill files dir: ${matched.dir} - run bundled scripts from here)\n${matched.body}`);
       addLine("info", `skill: ${matched.name}`);
