@@ -10,7 +10,7 @@ import { effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts
 import { setModel } from "./project.ts";
 import { CHATGPT_CODEX_MODELS_URL, CHATGPT_CODEX_RESPONSES_URL, CHATGPT_CODEX_USAGE_URL, validChatGptCredentials } from "./chatgpt-auth.ts";
 
-const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+const RETRYABLE = new Set([429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
 
 // The models endpoint filters entries by Codex client compatibility, not by Neko's app version.
 // Bump this only after checking the current Codex Responses/model contract remains supported here.
@@ -586,7 +586,12 @@ function safeError(body: string): string {
     const detail = parsed?.error?.message ?? parsed?.message ?? parsed?.detail;
     return (typeof detail === "string" ? detail : JSON.stringify(detail ?? "request failed")).slice(0, 300);
   }
-  catch { return body.replace(/[\r\n]+/g, " ").slice(0, 300) || "request failed"; }
+  catch {
+    if (/<(?:!doctype|html|head|body|meta|style|script)\b/i.test(body)) {
+      return "upstream returned an HTML error page";
+    }
+    return body.replace(/[\r\n]+/g, " ").slice(0, 300) || "request failed";
+  }
 }
 
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error); }

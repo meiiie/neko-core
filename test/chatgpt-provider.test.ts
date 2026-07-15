@@ -219,6 +219,31 @@ test("a retryable SSE failure before output retries once without duplicating vis
   expect(calls).toBe(2);
 });
 
+test("an HTML HTTP 520 is retried and never leaks markup into the terminal error", async () => {
+  const cfg = setup();
+  cfg.data.max_retries = 1;
+  cfg.data.retry_base_delay_seconds = 0;
+  let calls = 0;
+  globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) => {
+    calls++;
+    return new Response(
+      "<!doctype html><html><head><meta name=viewport><style>body{color:red}</style></head><body>edge failure</body></html>",
+      { status: 520, headers: { "Content-Type": "text/html" } },
+    );
+  }) as typeof fetch;
+  let message = "";
+  try {
+    await getProvider(cfg).complete([{ role: "user", content: "hi" }]);
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  expect(calls).toBe(2);
+  expect(message).toContain("HTTP 520");
+  expect(message).toContain("HTML error page");
+  expect(message).not.toContain("<html>");
+  expect(message).not.toContain("<style>");
+});
+
 test("model-aware effort keeps supported tiers and clamps only to the nearest declared tier", () => {
   const sol = { defaultEffort: "medium", efforts: ["low", "medium", "high", "xhigh", "max", "ultra"].map((effort) => ({ effort, description: "" })) };
   const luna = { defaultEffort: "medium", efforts: ["low", "medium", "high", "xhigh", "max"].map((effort) => ({ effort, description: "" })) };

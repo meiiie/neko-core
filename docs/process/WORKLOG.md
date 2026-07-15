@@ -3,6 +3,20 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-15 - Transient ChatGPT gateway recovery and lossless table links
+- Reproduced the owner's two field failures with regression tests. ChatGPT's Codex backend returned an HTML
+  `HTTP 520`, which bypassed the retry set and was flattened directly into the transcript. Markdown table
+  fitting separately converted an over-wide URL into visible `...` text and discarded its OSC 8 destination.
+- Treat Cloudflare gateway statuses `520` through `524` as bounded retryable responses alongside the existing
+  `429`/`5xx` set. If retries are exhausted, recognize HTML at the provider boundary and emit one short error
+  instead of terminal-filling markup or CSS.
+- Table layout still truncates visible text to preserve alignment, but a bare or Markdown link now wraps that
+  shortened text in an OSC 8 hyperlink carrying the original complete URL. Ctrl+Click therefore reaches the
+  exact product while the table remains compact.
+- Verification: current + stable TypeScript clean; **712/712 tests, 2,928 assertions, 78 files**; policy,
+  production build, UI render and real-PTY input probes PASS. The real-ConPTY scroll/resize/slash-keyboard
+  bench stayed clean at 8 ms first response and 140 ms settle.
+
 ## 2026-07-14 - Governable memory hierarchy and loss-aware compaction
 - Reused the stores Neko already had instead of adding a vector/graph database: current turns are working
   memory, sessions are raw episodic history, `memory/*.md` is semantic memory, and workflows/playbook are

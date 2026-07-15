@@ -6,6 +6,12 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- ChatGPT gateway `520`-`524` responses are retried as transient failures, and an exhausted HTML error page
+  is reduced to a short upstream-error message instead of dumping markup and CSS into the transcript.
+- Markdown tables may shorten a long link's visible label to fit the terminal, but its OSC 8 target now keeps
+  the complete URL so Ctrl+Click opens the exact product page.
+
 ## [0.12.1] — 2026-07-14
 
 ### Added

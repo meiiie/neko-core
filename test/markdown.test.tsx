@@ -175,3 +175,13 @@ test("a linked table cell keeps column alignment (OSC 8 is zero display width)",
   const edges = rows.map((r) => r.lastIndexOf("│"));
   expect(new Set(edges).size).toBe(1); // every row's right border lands on the same column
 });
+
+test("a truncated table URL keeps the complete OSC 8 destination", () => {
+  const url = "https://cellphones.com.vn/iphone-16-256gb-chinh-hang.html?color=black";
+  const md = `| Shop | Link |\n|---|---|\n| CellphoneS | ${url} |`;
+  const frame = render(<Markdown text={md} width={44} />).lastFrame() ?? "";
+  expect(frame).toContain(`\x1b]8;;${url}\x07`);
+  const visible = strip(frame).replace(/\x1b\]8;;[^\x07]*\x07/g, "");
+  expect(visible).toContain("…");
+  expect(visible).not.toContain(url);
+});

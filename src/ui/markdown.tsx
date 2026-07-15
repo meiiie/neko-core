@@ -133,9 +133,12 @@ function renderTable(header: string[], rows: string[][], key: number, maxWidth: 
         const raw = cells[c] ?? "";
         const fits = plainLen(raw) <= width;
         const shown = fits ? raw : truncCell(plain(raw), width);
+        const target = fits ? undefined : firstLinkTarget(raw);
         const len = fits ? plainLen(raw) : [...shown].length;
         return (
-          <Text key={c}> {fits ? inline(raw) : shown}{" ".repeat(Math.max(0, width - len))} <Text color="gray">│</Text></Text>
+          <Text key={c}> {fits ? inline(raw) : target
+            ? <Text color="cyan" underline>{osc8(target, shown)}</Text>
+            : shown}{" ".repeat(Math.max(0, width - len))} <Text color="gray">│</Text></Text>
         );
       })}
     </Text>
@@ -149,6 +152,16 @@ function renderTable(header: string[], rows: string[][], key: number, maxWidth: 
       {rule("└", "┴", "┘")}
     </Box>
   );
+}
+
+/** A table may shorten what the user sees, but Ctrl+Click must still carry the complete destination. */
+function firstLinkTarget(raw: string): string | undefined {
+  const decoded = decodeEntities(raw);
+  const markdown = decoded.match(/\[[^\]]+\]\(([^)]+)\)/);
+  const candidate = markdown?.[1]?.trim();
+  if (candidate && (/^https?:\/\//i.test(candidate) || /^file:\/\//i.test(candidate))) return candidate;
+  const bare = linkSegments(decoded).find((segment) => typeof segment !== "string");
+  return typeof bare === "string" || !bare ? undefined : bare.uri;
 }
 
 function inline(raw: string): ReactNode[] {
