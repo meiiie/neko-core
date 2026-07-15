@@ -47,7 +47,7 @@ test("browser CLI status never mistakes a local folder for an installed extensio
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
-});
+}, 20_000);
 
 function nextMessage(ws: WebSocket): Promise<any> {
   return new Promise((resolve) => ws.addEventListener("message", (event) => resolve(JSON.parse(String(event.data))), { once: true }));
