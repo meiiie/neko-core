@@ -35,6 +35,22 @@ test("matchSkill returns null for unrelated work (no false trigger)", () => {
   expect(matchSkill("hello")).toBeNull(); // too short to match anything
 });
 
+test("office artifacts route in English and Vietnamese and require saved-result verification", () => {
+  const prompts = [
+    "create a PowerPoint presentation and verify the pptx file",
+    "tao tai lieu Word docx va kiem tra dinh dang",
+    "sua file bao-cao.docx",
+  ];
+  for (const prompt of prompts) expect(matchSkill(prompt)?.name).toBe("office-artifacts");
+
+  const skill = loadSkill("office-artifacts");
+  expect(skill?.body).toContain("fresh on-disk reopen");
+  expect(skill?.body).toContain("--stop-on-error");
+  expect(skill?.body).toContain("Never silently install");
+  expect(skill?.body).toContain("Do not claim calculated values are current");
+  expect(skill?.body).toContain("Read the PNGs through Neko's vision bridge");
+});
+
 test("the bundled computer-use skill includes its executable input helper", () => {
   const skill = loadSkill("computer-use");
   expect(skill?.body).toContain("computer type");

@@ -79,8 +79,10 @@ Neko is built to take on new roles, one skill and one tool at a time:
 
 - **Skills** — pluggable domain expertise with progressive disclosure. One is a *purchasing officer*
   (research, source, and plan a purchase across Vietnamese retailers — humans approve and buy); another
-  drives a browser and reads screenshots back with vision to verify a UI frame by frame. A skill is a
-  markdown file, not a fork; built-in skills and their helper scripts ship inside the single binary.
+  creates or edits Word, Excel, and PowerPoint artifacts through an optional structured backend, then reopens,
+  validates, reads back, and visually checks the saved file. Browser and computer-use skills likewise verify
+  real UI state frame by frame. A skill is a markdown file, not a fork; built-in skills and their helper
+  scripts ship inside the single binary.
 - **Governable memory** — raw episodes stay in local sessions; durable facts use JIT-recalled `memory`;
   verified procedures use `workflows`; and an evidence-grounded `playbook` captures operating lessons.
   Two bounded core profiles keep only recent `user.md` and `self.md` observations in active context.

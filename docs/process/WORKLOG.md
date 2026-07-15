@@ -3,6 +3,34 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-15 - Verified Office artifact capability, clean-room from OfficeCLI
+- Studied [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) v1.0.136 at a pinned source commit and release
+  without copying its implementation. The
+  transferable ideas are a layered structured command surface, schema/help discovery instead of guessed
+  properties, stable element paths, resident sessions, batched mutations, and render-based human review.
+  Neko keeps the dependency optional: no Office engine, binary, installer, or unaudited MCP authority entered
+  core; normal `bash` approval and artifact scope remain authoritative.
+- Added the bundled `office-artifacts` skill for `.docx`, `.xlsx`, and `.pptx`. It preserves source files by
+  default and requires inspect -> exact mutation plan -> stop-on-error batch -> close/flush -> fresh reopen ->
+  schema validation -> targeted semantic readback -> visual review. Macro-enabled formats, blind mutation
+  retries, silent installation, unverified formula caches, and raw OOXML-first editing are explicitly refused.
+- Ran a clean-room smoke against the official Windows release downloaded into the untracked reference tree,
+  pinned to v1.0.136 and matched against its published SHA-256 manifest. Word, Excel, and PowerPoint artifacts
+  created, persisted, reopened, validated, and rendered. The adversarially useful finding: a dark PowerPoint
+  slide returned zero schema errors and zero reported issues while its inherited black title was visibly
+  unreadable. That proves exit status and schema checks are necessary but insufficient; Neko's vision gate is
+  not optional when layout matters.
+- Research basis: [ECMA-376/ISO 29500](https://ecma-international.org/publications-and-standards/standards/ecma-376/)
+  packaging and markup, [Microsoft Open XML validation](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.validation.openxmlvalidator),
+  [SpreadsheetBench 2](https://arxiv.org/abs/2606.29955)'s workflow-level failure analysis, and
+  [PPTAgent](https://arxiv.org/abs/2501.03936)/[PreGenie](https://arxiv.org/abs/2505.21660)'s separate
+  content/design/coherence plus render-review loops. The implementation adopts their measurable verification
+  principles without claiming benchmark parity.
+- Verification: skill schema validation PASS; deterministic English/Vietnamese routing and safety-contract tests
+  PASS; TypeScript clean; full suite **723/723 tests, 3,022 assertions, 78 files**; doctor and policy PASS;
+  production binary compiled, passed UI/real-PTY input probes, and listed the embedded skill. Bun printed its
+  known non-fatal post-build directory-mismatch diagnostic after every build probe had succeeded.
+
 ## 2026-07-15 - Browser onboarding that preserves and resumes the task
 - Replaced the manual "attach, return to Neko, press Continue, retry status" loop with a two-stage guide.
   Neko now watches the verified local bridge state every 500 ms, advances from extension connection to tab

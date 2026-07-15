@@ -1,0 +1,4 @@
+interface:
+  display_name: "Office Artifacts"
+  short_description: "Create and verify Word, Excel, and PowerPoint files"
+  default_prompt: "Use $office-artifacts to create or edit this Office file and verify the saved result."

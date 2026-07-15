@@ -87,6 +87,20 @@ This is the template for any domain: deep expertise in a SKILL.md, optional bund
 mechanical parts, evals to keep it honest, general tools (or an MCP) for the hands, and human-in-the-loop
 for anything irreversible.
 
+## Worked example: `office-artifacts`
+
+`skills/office-artifacts/SKILL.md` adds professional `.docx`, `.xlsx`, and `.pptx` work without turning
+Neko's core into an Office implementation. The skill prefers an already-installed structured document
+backend such as OfficeCLI, but keeps it optional and behind the normal `bash` approval boundary. Neko never
+silently downloads a binary or treats a third-party resident process as trusted core code.
+
+Its completion contract is deliberately stronger than "the command succeeded": preserve the source, inspect
+stable targets, batch related mutations with stop-on-error, flush the resident session, reopen from disk,
+validate the OOXML package, read back every requested target, and render the affected pages/slides/ranges for
+vision review. Formula-heavy workbooks require independent recalculation before numerical claims. This is the
+same thin-core pattern as procurement, but it also demonstrates why structural and visual verification must
+remain separate evidence channels.
+
 ## Add a new domain capability
 1. **Write the skill.** `skills/<name>/SKILL.md` (bundled) or `~/.neko-core/skills/<name>.md` (personal).
    Frontmatter `name` + a concrete `description`; body = workflow + rules + tools + output format.
