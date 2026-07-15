@@ -594,16 +594,40 @@ async function cmdMcp(args: Args): Promise<number> {
 
 async function cmdBrowser(args: Args): Promise<number> {
   const {
+    browserBridgeStage,
     browserExtensionPath,
     ensureBrowserCapability,
+    readBrowserBridgeStatus,
+    readBrowserCapability,
     startManagedBrowserBridge,
     NEKO_BROWSER_EXTENSION_ID,
   } = await import("../src/adapters/browser-bridge.ts");
-  const { openBrowserExtensionSetup } =
+  const { browserExtensionSetupMessage, openBrowserExtensionSetup } =
     await import("../src/adapters/browser-extension-install.ts");
   const sub = args.positionals[0]?.toLowerCase() ?? "bridge";
   if (sub === "path") {
     console.log(browserExtensionPath());
+    return 0;
+  }
+  if (sub === "status") {
+    const capability = readBrowserCapability();
+    const status = capability ? readBrowserBridgeStatus() : undefined;
+    const stage = browserBridgeStage(capability, status);
+    if (stage === "not_configured") {
+      console.log("browser: not configured - run `neko browser install`");
+    } else if (stage === "offline") {
+      console.log("browser: configured, but no live Chrome connection is verified");
+      console.log("If Chrome does not list 'Neko Browser Bridge', run `neko browser install`.");
+    } else if (stage === "bridge_online") {
+      console.log("browser: local bridge online, but the Chrome extension is not connected");
+      console.log("Run `neko browser install`, then complete the one-time Chrome confirmation.");
+    } else if (stage === "extension_connected") {
+      console.log("browser: extension connected - open a target tab and choose 'Attach this tab to Neko'");
+    } else {
+      const host = (status?.attached as { host?: unknown } | undefined)?.host;
+      console.log(`browser: ready - one Chrome tab is attached${typeof host === "string" && host ? ` (${host})` : ""}`);
+    }
+    console.log(`extension files: ${browserExtensionPath()}`);
     return 0;
   }
   if (sub === "rotate") {
@@ -612,7 +636,7 @@ async function cmdBrowser(args: Args): Promise<number> {
     return 0;
   }
   if (sub !== "bridge" && sub !== "install") {
-    console.error("usage: neko browser [install [port]|bridge [port]|path|rotate]");
+    console.error("usage: neko browser [install [port]|bridge [port]|status|path|rotate]");
     return 2;
   }
   const rawPort = args.positionals[1];
@@ -628,23 +652,13 @@ async function cmdBrowser(args: Args): Promise<number> {
   const setup = sub === "install"
     ? await openBrowserExtensionSetup({ force: args.force, storeId: config.browserExtensionStoreId })
     : null;
-  const extensionPath = setup?.path ?? browserExtensionPath();
   const bridge = startManagedBrowserBridge({
     capability,
     extensionIds,
   });
-  if (sub === "install") {
-    if (setup?.mode === "store") {
-      console.log("Chrome Web Store opened. Choose 'Add to Chrome' once, then open a target tab and choose 'Attach this tab to Neko'.");
-      console.log("Chrome keeps the extension updated; Neko starts the local bridge automatically in future sessions.");
-    } else {
-      console.log("Neko Browser Extension is prepared locally.");
-      console.log(`  folder = ${extensionPath}`);
-      console.log("  1. Enable Developer mode, choose 'Load unpacked', and select the opened folder.");
-      console.log("  2. Open a target tab and choose 'Attach this tab to Neko'.");
-      if (!setup?.opened) console.log("  Open chrome://extensions in Chrome (no supported Chromium browser was detected automatically).");
-      console.log("After Web Store approval, this same command becomes Add-to-Chrome plus one required confirmation.");
-    }
+  if (setup) {
+    console.log(browserExtensionSetupMessage(setup));
+    console.log("After Web Store approval, this same command becomes Add-to-Chrome plus one required confirmation.");
   }
   if (!bridge) {
     console.log("Neko Browser Bridge is already running on this computer.");

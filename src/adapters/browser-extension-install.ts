@@ -38,6 +38,31 @@ export interface BrowserExtensionSetup {
   url?: string;
 }
 
+/** Honest setup copy: having the files is not the same as Chrome installing the extension. */
+export function browserExtensionSetupMessage(setup: BrowserExtensionSetup): string {
+  if (setup.mode === "store") {
+    return [
+      setup.opened
+        ? "Neko Browser Extension opened in the Chrome Web Store."
+        : "Neko could not open Chrome automatically.",
+      "Opening the listing does NOT prove the extension is installed. If needed, choose 'Add to Chrome' once.",
+      setup.url ? `listing: ${setup.url}` : "",
+      "Then open the extension on the target tab and choose 'Attach this tab to Neko'.",
+      "Neko reports ready only after the extension connects and a tab is attached.",
+    ].filter(Boolean).join("\n");
+  }
+  return [
+    "Neko Browser Extension files are ready locally. This does NOT mean Chrome installed the extension.",
+    `folder: ${setup.path}`,
+    "The search box on chrome://extensions only filters extensions already installed.",
+    "1. Turn on Developer mode.",
+    "2. Click 'Load unpacked' in the top left, then select the folder above.",
+    "3. Open the extension on the target tab and choose 'Attach this tab to Neko'.",
+    "Neko reports ready only after the extension connects and a tab is attached.",
+    setup.opened ? "" : "No supported Chromium browser was detected; open chrome://extensions manually.",
+  ].filter(Boolean).join("\n");
+}
+
 function extensionId(key: string): string {
   return [...createHash("sha256").update(Buffer.from(key, "base64")).digest().subarray(0, 16)]
     .flatMap((byte) => [byte >> 4, byte & 15])

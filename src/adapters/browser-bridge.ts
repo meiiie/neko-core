@@ -60,6 +60,20 @@ export function readBrowserBridgeStatus(): Record<string, unknown> | undefined {
   } catch { return undefined; }
 }
 
+export type BrowserBridgeStage = "not_configured" | "offline" | "bridge_online" | "extension_connected" | "tab_attached";
+
+/** Report only states Neko can verify; local extension files alone do not mean Chrome installed them. */
+export function browserBridgeStage(
+  capability: BrowserCapability | null = readBrowserCapability(),
+  status: Record<string, unknown> | undefined = readBrowserBridgeStatus(),
+): BrowserBridgeStage {
+  if (!capability) return "not_configured";
+  if (!status?.online) return "offline";
+  if (status.attached) return "tab_attached";
+  if (status.extensionConnected) return "extension_connected";
+  return "bridge_online";
+}
+
 const BRIDGE_SCHEMAS = [
   { name: "status", description: "Read the locally attached Neko Browser Bridge tab and permission state.", properties: {} },
   { name: "snapshot", description: "Read a compact visible accessibility snapshot from the explicitly attached tab.", properties: { maxItems: { type: "number", minimum: 1, maximum: 200 } } },

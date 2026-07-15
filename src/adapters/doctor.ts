@@ -11,7 +11,7 @@ import { hasChatGptCredentials } from "./chatgpt-auth.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 import { discoverGeminiCli, hasGeminiCredentials, type GeminiCliStatus } from "./gemini-cli.ts";
 import { hasKimiCredentials } from "./kimi-auth.ts";
-import { readBrowserCapability, readBrowserBridgeStatus } from "./browser-bridge.ts";
+import { browserBridgeStage, readBrowserCapability, readBrowserBridgeStatus } from "./browser-bridge.ts";
 
 export interface Check {
   status: "ok" | "warn";
@@ -75,9 +75,15 @@ export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportSta
           : { status: "warn", name: "browser", detail: "profile persistence is not explicit; run `neko setup browser persistent` or `neko setup browser attach`" };
   const browserBridge = readBrowserCapability();
   const browserBridgeStatus = browserBridge ? readBrowserBridgeStatus() : undefined;
-  const browserBridgeCheck: Check | null = !browserBridge ? null : browserBridgeStatus?.online
-    ? { status: "ok", name: "browser_bridge", detail: browserBridgeStatus.attached ? "online; one Chrome tab attached" : "online; waiting for an explicit tab attachment" }
-    : { status: "warn", name: "browser_bridge", detail: "configured but offline - start Neko (auto-managed) or run `neko browser bridge`" };
+  const browserStage = browserBridgeStage(browserBridge, browserBridgeStatus);
+  const browserBridgeCheck: Check | null = browserStage === "not_configured" ? null
+    : browserStage === "tab_attached"
+      ? { status: "ok", name: "browser_bridge", detail: "online; extension connected; one Chrome tab attached" }
+      : browserStage === "extension_connected"
+        ? { status: "ok", name: "browser_bridge", detail: "online; extension connected; waiting for an explicit tab attachment" }
+        : browserStage === "bridge_online"
+          ? { status: "warn", name: "browser_bridge", detail: "online, but the Chrome extension is not connected - run `/browser setup`" }
+          : { status: "warn", name: "browser_bridge", detail: "configured but offline - start Neko, then run `/browser status`" };
   return [
     { status: "ok", name: "version", detail: `neko-core ${VERSION}` },
     { status: "ok", name: "provider", detail: config.provider },

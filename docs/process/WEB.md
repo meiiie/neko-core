@@ -158,6 +158,7 @@ For a Claude/Codex-style one-click attachment with Neko's own permissions and au
 /browser                  # preferred: guided setup/status without leaving the interactive Neko session
 neko browser install      # non-TUI fallback + foreground live bridge (never requires Bun/source checkout)
 neko browser bridge       # foreground diagnostic; normal Neko sessions auto-start it after setup
+neko browser status       # verified stage: offline / bridge / extension / attached tab
 neko browser path         # folder to Load unpacked in chrome://extensions
 neko browser rotate       # revoke pairing for the next bridge start
 ```

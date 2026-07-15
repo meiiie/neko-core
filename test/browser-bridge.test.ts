@@ -1,12 +1,53 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startBrowserBridge, startManagedBrowserBridge, type BrowserCapability } from "../src/adapters/browser-bridge.ts";
-import { browserStoreUrl, prepareBrowserExtension } from "../src/adapters/browser-extension-install.ts";
+import { browserBridgeStage, startBrowserBridge, startManagedBrowserBridge, type BrowserCapability } from "../src/adapters/browser-bridge.ts";
+import { browserExtensionSetupMessage, browserStoreUrl, prepareBrowserExtension } from "../src/adapters/browser-extension-install.ts";
 
 const origin = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+test("browser onboarding distinguishes files, connection, and an attached tab", () => {
+  const capability: BrowserCapability = { version: 1, host: "127.0.0.1", port: 8766, session: "session-test", token: "token-test" };
+  expect(browserBridgeStage(null, undefined)).toBe("not_configured");
+  expect(browserBridgeStage(capability, { online: false })).toBe("offline");
+  expect(browserBridgeStage(capability, { online: true, extensionConnected: false, attached: null })).toBe("bridge_online");
+  expect(browserBridgeStage(capability, { online: true, extensionConnected: true, attached: null })).toBe("extension_connected");
+  expect(browserBridgeStage(capability, { online: true, extensionConnected: true, attached: { tabId: 7 } })).toBe("tab_attached");
+
+  const unpacked = browserExtensionSetupMessage({ mode: "unpacked", opened: true, path: "C:\\Neko\\browser-extension" });
+  expect(unpacked).toContain("does NOT mean Chrome installed");
+  expect(unpacked).toContain("only filters extensions already installed");
+  expect(unpacked).toContain("Load unpacked");
+  expect(unpacked).toContain("C:\\Neko\\browser-extension");
+});
+
+test("browser CLI status never mistakes a local folder for an installed extension", () => {
+  const home = mkdtempSync(join(tmpdir(), "neko-browser-status-"));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  const command = [process.execPath, join(import.meta.dir, "..", "bin", "neko.ts"), "browser", "status"];
+  try {
+    const initial = Bun.spawnSync(command, { cwd: join(import.meta.dir, ".."), env });
+    expect(initial.exitCode).toBe(0);
+    expect(initial.stdout.toString()).toContain("not configured");
+
+    const dir = join(home, ".neko-core");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "browser-bridge.json"), JSON.stringify({
+      version: 1, host: "127.0.0.1", port: 8766, session: "session-test", token: "token-test",
+    }));
+    writeFileSync(join(dir, "browser-bridge-status.json"), JSON.stringify({
+      online: true, extensionConnected: false, attached: null, updatedAt: Date.now(),
+    }));
+    const waiting = Bun.spawnSync(command, { cwd: join(import.meta.dir, ".."), env });
+    expect(waiting.exitCode).toBe(0);
+    expect(waiting.stdout.toString()).toContain("extension is not connected");
+    expect(waiting.stdout.toString()).not.toContain("ready -");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 function nextMessage(ws: WebSocket): Promise<any> {
   return new Promise((resolve) => ws.addEventListener("message", (event) => resolve(JSON.parse(String(event.data))), { once: true }));

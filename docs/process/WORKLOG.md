@@ -3,6 +3,17 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-15 - Honest Browser Extension onboarding states
+- Fixed the local fallback claiming too much after it merely prepared extension files. Chrome's extensions
+  search filters installed items and cannot install an unpacked folder; Neko now says this directly, points to
+  **Load unpacked**, and reports files-ready, bridge-online, extension-connected, and tab-attached separately.
+- Added `neko browser status` to the non-TUI command surface promised by help/docs. `/browser status` and doctor
+  use the same verified bridge state and no longer call a bridge with no extension connection ready.
+- Kept Chrome's required consumer consent intact: Neko does not automate internal Chrome pages, overwrite the
+  browser profile, or write enterprise force-install policy. The public Web Store route remains roadmap G14.
+- Verification: browser/doctor/UI target suite **50/50**; full suite **721/721 tests, 3,000 assertions, 78 files**;
+  TypeScript, doctor, policy, production compile, Ink UI probe, and real-PTY input probe PASS.
+
 ## 2026-07-15 - Low-latency Messenger watcher and lifecycle-safe waits
 - Turned the field report in `loi1.txt` into executable primitives instead of another prompt-only promise.
   Resident Windows UIA now has `computer watch`: it samples the warm accessibility tree locally, waits for a

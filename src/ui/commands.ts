@@ -30,7 +30,7 @@ import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPac
 import { getLastGeminiUsage } from "../adapters/gemini-provider.ts";
 import { getChatGptVoiceUsage } from "../adapters/chatgpt-voice.ts";
 import { clampEffort, effortSuggestions, isEffortName, resolveEffort } from "../adapters/effort.ts";
-import { readBrowserCapability, readBrowserBridgeStatus, withBrowserBridge } from "../adapters/browser-bridge.ts";
+import { browserBridgeStage, readBrowserCapability, readBrowserBridgeStatus, withBrowserBridge } from "../adapters/browser-bridge.ts";
 
 export const HELP = [
   "Commands:",
@@ -496,10 +496,15 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       const capability = readBrowserCapability();
       const status = capability ? readBrowserBridgeStatus() : undefined;
       if (action === "status" || (!action && capability)) {
-        if (!capability) return addLine("info", "browser control is not set up yet - type /browser to start guided setup");
-        const state = status?.online
-          ? status.attached ? "ready - one Chrome tab is attached" : "online - open the extension and attach a tab"
-          : "configured - this Neko session will start the local bridge automatically";
+        if (!capability) return addLine("info", "browser control is not set up yet - type /browser setup to start guided setup");
+        const stage = browserBridgeStage(capability, status);
+        const state = stage === "tab_attached"
+          ? "ready - one Chrome tab is attached"
+          : stage === "extension_connected"
+            ? "extension connected - open a target tab and attach it"
+            : stage === "bridge_online"
+              ? "bridge online, but the Chrome extension is not connected - type /browser setup"
+              : "configured, but no live Chrome connection is verified - type /browser setup";
         return addLine("info", `browser: ${state}\nBrowser access stays local and only the tab you explicitly attach is controllable.`);
       }
       if (!ctx.setupBrowser) return addLine("error", "browser setup is unavailable in this host; run `neko browser install`");

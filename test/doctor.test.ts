@@ -1,6 +1,6 @@
 /** `neko doctor` terminal/input diagnostics - the "renders but won't take keys" triage surface. */
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -86,6 +86,36 @@ test("doctor distinguishes durable, attached, and ephemeral browser sessions", (
   expect(check(["@playwright/mcp", "--extension"])).toMatchObject({ status: "ok", detail: expect.stringContaining("existing Chrome") });
   expect(check(["@playwright/mcp", "--isolated"])).toMatchObject({ status: "warn", detail: expect.stringContaining("logins are discarded") });
   expect(check()).toMatchObject({ status: "warn", detail: expect.stringContaining("not configured") });
+});
+
+test("doctor does not call the browser bridge ready before the extension connects", () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-doctor-browser-"));
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  try {
+    const dir = join(home, ".neko-core");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "browser-bridge.json"), JSON.stringify({
+      version: 1, host: "127.0.0.1", port: 8766, session: "session-test", token: "token-test",
+    }));
+    writeFileSync(join(dir, "browser-bridge-status.json"), JSON.stringify({
+      online: true, extensionConnected: false, attached: null, updatedAt: Date.now(),
+    }));
+    const config = new NekoConfig({}, null, {}, "");
+    expect(collectChecks(config).find((check) => check.name === "browser_bridge"))
+      .toMatchObject({ status: "warn", detail: expect.stringContaining("extension is not connected") });
+
+    writeFileSync(join(dir, "browser-bridge-status.json"), JSON.stringify({
+      online: true, extensionConnected: true, attached: null, updatedAt: Date.now(),
+    }));
+    expect(collectChecks(config).find((check) => check.name === "browser_bridge"))
+      .toMatchObject({ status: "ok", detail: expect.stringContaining("extension connected") });
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("doctor surfaces the resident UIA fast path and rollback state", () => {

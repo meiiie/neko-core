@@ -51,8 +51,10 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
   falls back to the next automatically. See
   [`docs/process/WEB.md`](docs/process/WEB.md).
 - **Explicit-tab browser bridge** — ask Neko to browse a signed-in site and it offers setup at the point of
-  need; `/browser` opens the same flow directly. Neko prepares the extension, opens the
-  supported Chrome install surface, and starts the authenticated loopback bridge. `neko browser install` remains
+  need; `/browser` opens the same flow directly. Neko prepares the extension files, opens the
+  supported Chrome install surface, and starts the authenticated loopback bridge. Until the public Store item
+  ships, Chrome still requires one explicit **Load unpacked** confirmation; local files alone are never reported
+  as installed or connected. `neko browser install` remains
   the non-TUI diagnostic/fallback; users never need a Bun or source-tree command after the one-line installer.
   After setup, normal `neko` sessions start the bridge automatically. Neko's Manifest V3 extension controls one
   user-selected Chrome tab. Read/click/type grants are separate, sensitive fields stay blocked, and

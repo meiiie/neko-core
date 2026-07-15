@@ -30,6 +30,8 @@ another `McpTools` source. The extension contains no model, planner, cloud clien
 2. `/browser` prepares the exact extension for this release, opens the Store listing when a public id is
    configured (otherwise the unpacked developer surface), and starts the loopback bridge without leaving Neko.
 3. Confirm Add-extension once in Chrome, or choose **Load unpacked** once while the Store item is pending.
+   The search field on `chrome://extensions` only filters extensions already installed; it does not install the
+   local Neko folder. Neko reports files-ready, extension-connected, and tab-attached as separate states.
 4. Open a target page, click the extension, and choose **Attach this tab to Neko**. Normal `neko` sessions now
    own the bridge lifecycle automatically; the foreground `neko browser bridge` command remains diagnostic.
 5. Reading is scoped to that attached tab. Click/scroll/navigation and typing are separate switches, off

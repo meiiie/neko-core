@@ -56,7 +56,7 @@ import {
   readBrowserCapability,
   startManagedBrowserBridge,
 } from "../adapters/browser-bridge.ts";
-import { openBrowserExtensionSetup } from "../adapters/browser-extension-install.ts";
+import { browserExtensionSetupMessage, openBrowserExtensionSetup } from "../adapters/browser-extension-install.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { VERSION } from "../shared/version.ts";
@@ -2460,20 +2460,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
       browserBridge = startManagedBrowserBridge({ capability, extensionIds: cfg.browserExtensionIds });
     }
     const setup = await openBrowserExtensionSetup({ storeId: cfg.browserExtensionStoreId });
-    if (setup.mode === "store") {
-      return [
-        "Neko Browser Extension opened in the Chrome Web Store.",
-        "Choose 'Add to Chrome', then open the extension on the tab you want and choose 'Attach this tab to Neko'.",
-        "Neko stays running, detects the connection, and starts this local bridge automatically next time.",
-      ].join("\n");
-    }
-    return [
-      "Neko Browser Extension is prepared locally while the public Store listing is pending.",
-      `folder: ${setup.path}`,
-      "In the opened extensions page: enable Developer mode, choose 'Load unpacked', and select that folder.",
-      "Then open the extension on the tab you want and choose 'Attach this tab to Neko'.",
-      setup.opened ? "" : "No supported Chromium browser was detected; open chrome://extensions manually.",
-    ].filter(Boolean).join("\n");
+    return browserExtensionSetupMessage(setup);
   };
   // Ink's own synchronized clear (app.clear) threaded in via a holder - the app instance doesn't exist
   // until render() returns, so ChatApp calls the holder, which we point at app.clear right after.
