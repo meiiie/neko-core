@@ -113,14 +113,25 @@ test("/browser runs guided setup inside Neko without a Bun/source command", asyn
     const setupBrowser = async () => {
       setups++;
       ensureBrowserCapability(false, 18766);
+      writeFileSync(join(home, ".neko-core", "browser-bridge-status.json"), JSON.stringify({
+        online: true,
+        updatedAt: Date.now(),
+        extensionConnected: false,
+        attached: null,
+      }));
       return "Browser setup opened. Add to Chrome, then attach this tab to Neko.";
     };
-    const { stdin, frames, unmount } = render(
+    const { stdin, lastFrame, frames, unmount } = render(
       <ChatApp fullscreen={false} yolo provider={provider} browserHint setupBrowser={setupBrowser} />,
     );
     expect(frames.join("\n")).toContain("no Bun or source command is required");
     stdin.write("/browser"); await tick(20); stdin.write("\r");
     expect(await until(() => frames.join("\n").includes("Browser setup opened"))).toBe(true);
+    expect(await until(() => frames.join("\n").includes("Connect Neko Browser - step 1 of 2"))).toBe(true);
+    expect(frames.join("\n")).toContain("no Enter or /browser status is needed");
+    expect(lastFrame() ?? "").not.toContain("search");
+    expect(lastFrame() ?? "").not.toContain("Space preview");
+    expect(lastFrame() ?? "").not.toContain("step 1 of 2 (1 of 2)");
     expect(setups).toBe(1);
     unmount();
   } finally {
@@ -130,7 +141,7 @@ test("/browser runs guided setup inside Neko without a Bun/source command", asyn
   }
 });
 
-test("natural browser tasks offer setup without requiring the user to know /browser", async () => {
+test("natural browser tasks auto-detect extension + tab and resume the saved request", async () => {
   expect(isInteractiveBrowserRequest("hãy duyệt web và đọc Facebook của tôi")).toBe(true);
   expect(isInteractiveBrowserRequest("search the web for Chrome extension docs")).toBe(false);
 
@@ -146,7 +157,8 @@ test("natural browser tasks offer setup without requiring the user to know /brow
       writeFileSync(join(home, ".neko-core", "browser-bridge-status.json"), JSON.stringify({
         online: true,
         updatedAt: Date.now(),
-        attached: { tabId: 7, host: "facebook.com", grants: { click: true, type: false } },
+        extensionConnected: false,
+        attached: null,
       }));
       return "Browser setup opened.";
     };
@@ -154,16 +166,57 @@ test("natural browser tasks offer setup without requiring the user to know /brow
       <ChatApp fullscreen={false} yolo provider={provider} setupBrowser={setupBrowser} />,
     );
     stdin.write("browse Facebook in Chrome"); await tick(20); stdin.write("\r");
-    expect(await until(() => frames.join("\n").includes("This task can use a signed-in browser tab"))).toBe(true);
+    expect(await until(() => frames.join("\n").includes("Use your signed-in Chrome tab for this task?"))).toBe(true);
     expect(provider.index).toBe(0);
 
     stdin.write("\r");
-    expect(await until(() => frames.join("\n").includes("Attach one Chrome tab, then continue"))).toBe(true);
+    expect(await until(() => frames.join("\n").includes("Connect Neko Browser - step 1 of 2"))).toBe(true);
     expect(setups).toBe(1);
+    expect(provider.index).toBe(0);
 
-    stdin.write("\r");
-    expect(await until(() => frames.join("\n").includes("Browser task started"))).toBe(true);
+    writeFileSync(join(home, ".neko-core", "browser-bridge-status.json"), JSON.stringify({
+      online: true,
+      updatedAt: Date.now(),
+      extensionConnected: true,
+      attached: null,
+    }));
+    expect(await until(() => frames.join("\n").includes("Connect Neko Browser - step 2 of 2"), 2_000)).toBe(true);
+    expect(provider.index).toBe(0);
+
+    writeFileSync(join(home, ".neko-core", "browser-bridge-status.json"), JSON.stringify({
+      online: true,
+      updatedAt: Date.now(),
+      extensionConnected: true,
+      attached: { tabId: 7, host: "facebook.com", grants: { click: true, type: false } },
+    }));
+    expect(await until(() => frames.join("\n").includes("Browser task started"), 2_000)).toBe(true);
     expect(provider.index).toBe(1);
+    expect(frames.join("\n")).toContain("Browser connected - continuing your saved request");
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("cancelling browser onboarding keeps the original request editable", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-browser-cancel-"));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  try {
+    const provider = new MockProvider([{ content: "should not run", tool_calls: [] }]);
+    const { stdin, lastFrame, frames, unmount } = render(
+      <ChatApp fullscreen={false} yolo provider={provider} setupBrowser={async () => "unused"} />,
+    );
+    const request = "browse my signed-in Facebook tab";
+    stdin.write(request); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("Use your signed-in Chrome tab for this task?"))).toBe(true);
+
+    stdin.write("\x1b");
+    expect(await until(() => (lastFrame() ?? "").includes(request))).toBe(true);
+    expect(frames.join("\n")).toContain("Your request is still in the input");
+    expect(provider.index).toBe(0);
     unmount();
   } finally {
     if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;

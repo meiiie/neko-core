@@ -3,6 +3,26 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-15 - Browser onboarding that preserves and resumes the task
+- Replaced the manual "attach, return to Neko, press Continue, retry status" loop with a two-stage guide.
+  Neko now watches the verified local bridge state every 500 ms, advances from extension connection to tab
+  attachment automatically, and resumes the exact saved request as soon as the chosen tab is ready.
+- Bare `/browser` is state-aware: it opens setup only when needed, waits directly when the extension is already
+  connected, and reports status when a tab is ready. No one has to know `/browser setup` or `/browser status`.
+- Cancellation is lossless: Esc keeps the original request editable. Users can reopen setup, continue without
+  browser control, or finish later. The setup turn temporarily clears the visible input so Enter cannot queue a
+  duplicate while the request remains safely held by the flow.
+- Polished the shared picker without inventing another UI system: browser guides hide irrelevant search, preview,
+  and item-count chrome; overlays gained concise descriptions and custom cancellation. Relay mirrors the same
+  description and honors the same cancel callback, so terminal and phone do not diverge.
+- Kept Chrome's official consent boundary. Before Web Store publication, Load unpacked remains one explicit user
+  gesture; after publication, Chrome still owns Add to Chrome. The professional improvement is one required
+  consent followed by automatic detection and continuation, not a misleading silent install claim.
+- Verification: isolated browser journey covers setup -> extension connected -> tab attached -> automatic task
+  resume plus lossless cancellation. Full suite **722/722 tests, 3,014 assertions, 78 files**; post-polish browser
+  UI suite **31/31**; TypeScript, doctor, policy, production compile, Ink UI probe, and real-PTY input probe PASS.
+  Bun again printed its known non-fatal post-build directory-mismatch diagnostic after all build probes passed.
+
 ## 2026-07-15 - Honest Browser Extension onboarding states
 - Fixed the local fallback claiming too much after it merely prepared extension files. Chrome's extensions
   search filters installed items and cannot install an unpacked folder; Neko now says this directly, points to

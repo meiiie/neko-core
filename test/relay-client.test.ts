@@ -64,6 +64,7 @@ test("relay client keeps terminal semantics and accessible control names", () =>
   expect(script).toContain('base() + "/control"');
   expect(script).toContain("sendApproval(decision, approval.id)");
   expect(script).toContain('sendOverlay("select"');
+  expect(script).toContain("overlay.description");
   expect(script).toContain('button.setAttribute("role", "option")');
   expect(script).toContain("mirrorSeqByHost[host]");
   expect(script).toContain("moveHistory(-1)");

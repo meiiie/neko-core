@@ -17,8 +17,12 @@ export interface SelectItem {
 /** A pending picker overlay (drives <SelectList>). */
 export interface Overlay {
   title: string;
+  description?: string;
   items: SelectItem[];
   onSelect: (item: SelectItem) => void;
+  onCancel?: () => void;
+  search?: boolean;
+  showCount?: boolean;
   onCtrlA?: () => void; // optional secondary action (e.g. /resume "all projects")
   ctrlAHint?: string;
   onRename?: (item: SelectItem, newName: string) => void; // Ctrl+R rename
@@ -28,17 +32,19 @@ export interface Overlay {
 
 export function SelectList(props: {
   title: string;
+  description?: string;
   items: SelectItem[];
   onSelect: (item: SelectItem) => void;
   onCancel: () => void;
   cols: number;
   search?: boolean; // type-to-filter (default on)
+  showCount?: boolean;
   onCtrlA?: () => void;
   ctrlAHint?: string;
   onRename?: (item: SelectItem, newName: string) => void;
   getPreview?: (item: SelectItem) => string;
 }) {
-  const { title, items, onSelect, onCancel, cols, search = true, onCtrlA, ctrlAHint, onRename, getPreview } = props;
+  const { title, description, items, onSelect, onCancel, cols, search = true, showCount = true, onCtrlA, ctrlAHint, onRename, getPreview } = props;
   const [index, setIndex] = useState(0);
   const [query, setQuery] = useState("");
   const [showPreview, setShowPreview] = useState(false);
@@ -114,7 +120,8 @@ export function SelectList(props: {
     // #60) and the header into 0 - and the viewH feedback then settles in that squashed state. Pinning
     // the list makes the flexible transcript box give up the rows instead.
     <Box flexDirection="column" marginTop={1} flexShrink={0}>
-      <Text color="cyan">{title} ({filtered.length ? idx + 1 : 0} of {filtered.length})</Text>
+      <Text color="cyan">{title}{showCount ? ` (${filtered.length ? idx + 1 : 0} of ${filtered.length})` : ""}</Text>
+      {description ? <Text dimColor>{description}</Text> : null}
       {renaming !== null ? (
         <Text>  rename: <Text color="cyan">{renaming}</Text><Text inverse> </Text></Text>
       ) : search ? (
@@ -150,7 +157,7 @@ export function SelectList(props: {
       <Text dimColor>
         {renaming !== null
           ? "Enter save · Esc cancel rename"
-          : `↑/↓ select · Enter confirm · Space preview${onCtrlA ? ` · Ctrl+A ${ctrlAHint ?? "more"}` : ""}${onRename ? " · Ctrl+R rename" : ""} · Esc cancel${search ? " · type to filter" : ""}`}
+          : `↑/↓ select · Enter confirm${getPreview ? " · Space preview" : ""}${onCtrlA ? ` · Ctrl+A ${ctrlAHint ?? "more"}` : ""}${onRename ? " · Ctrl+R rename" : ""} · Esc cancel${search ? " · type to filter" : ""}`}
       </Text>
     </Box>
   );

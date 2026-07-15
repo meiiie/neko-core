@@ -29,7 +29,7 @@ export interface RemoteUiState {
   inflight?: string[];
   compactingStartedAt?: number;
   approval?: { id: string; toolName: string; preview: string };
-  overlay?: { id: string; title: string; items: { id: string; label: string; detail?: string }[] };
+  overlay?: { id: string; title: string; description?: string; items: { id: string; label: string; detail?: string }[] };
 }
 export type RemoteAction =
   | { type: "approval"; id: string; decision: "approve" | "always" | "deny" }

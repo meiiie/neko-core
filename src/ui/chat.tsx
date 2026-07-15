@@ -51,10 +51,12 @@ import { authChoices, providerChoices } from "../adapters/provider-choice.ts";
 import { type RemoteAction, type RemoteHandlers, startRemoteControl, type RemoteControl, type RemoteUiState } from "../adapters/remote-control.ts";
 import { loadOrCreatePairing, loadOrCreateSessionPairing, relaySessionCode, revokeRemoteRelay, startRemoteRelay, type RemoteRelay } from "../adapters/remote-relay.ts";
 import {
+  browserBridgeStage,
   ensureBrowserCapability,
   readBrowserBridgeStatus,
   readBrowserCapability,
   startManagedBrowserBridge,
+  type BrowserBridgeStage,
 } from "../adapters/browser-bridge.ts";
 import { browserExtensionSetupMessage, openBrowserExtensionSetup } from "../adapters/browser-extension-install.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
@@ -133,6 +135,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const relayScopeRef = useRef<{ key: string; hub: boolean; url: string } | null>(null);
   const relayHostIdRef = useRef(newSessionId()); // one opaque remote-control slot per running TUI
   const browserRequestBypassRef = useRef<string | null>(null);
+  const browserSetupTaskRef = useRef<string | undefined>(undefined);
+  const browserAttachSeqRef = useRef(0);
+  const browserAttachFlowRef = useRef<{ id: number; stage?: BrowserBridgeStage; timer?: ReturnType<typeof setInterval> } | null>(null);
   const remoteSinkRef = useRef<((chunk: string) => void) | null>(null); // streams a turn's output to a remote SSE client
   const remoteActRef = useRef<((line: string) => void) | null>(null); // streams tool-activity lines (the phone's process ticker)
   const remoteLineRef = useRef<((kind: LineKind, text: string) => void) | null>(null); // collects info/error lines for a remote turn
@@ -327,6 +332,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       overlay: overlay && picker ? {
         id: picker.id,
         title: overlay.title,
+        description: overlay.description,
         items: overlay.items.slice(0, 100).map((item) => ({ id: item.id, label: item.label, detail: item.detail })),
       } : undefined,
     };
@@ -798,6 +804,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => () => {
     rcRef.current?.stop();
     relayRef.current?.stop();
+    if (browserAttachFlowRef.current?.timer) clearInterval(browserAttachFlowRef.current.timer);
+    browserAttachFlowRef.current = null;
     const voice = voiceRef.current;
     voiceRef.current = null;
     if (voice) void voice.stop("Neko exited");
@@ -1325,60 +1333,117 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     void handle(text).catch((error) => addLine("error", error instanceof Error ? error.message : String(error)));
   };
 
+  const stopBrowserAttachFlow = (id?: number): boolean => {
+    const flow = browserAttachFlowRef.current;
+    if (!flow || (id !== undefined && flow.id !== id)) return false;
+    if (flow.timer) clearInterval(flow.timer);
+    browserAttachFlowRef.current = null;
+    return true;
+  };
+
   const offerBrowserAttach = (text: string) => {
+    stopBrowserAttachFlow();
     setInput(text);
-    setOverlay({
-      title: "Attach one Chrome tab, then continue",
-      items: [
-        { id: "continue", label: "Continue with attached tab", detail: "Neko verifies the local bridge before running your request" },
-        { id: "setup", label: "Open browser setup again", detail: "use this if Neko Browser is not installed or needs repair" },
-        { id: "without", label: "Continue without browser control", detail: "use web search/fetch or other available tools" },
-      ],
-      onSelect: (choice) => {
-        if (choice.id === "continue") {
-          const status = readBrowserBridgeStatus();
-          if (!status?.online || !status.attached) {
-            addLine("info", "No attached tab detected yet. In Chrome, open Neko Browser on the target tab and choose 'Attach this tab to Neko'.");
+    const id = ++browserAttachSeqRef.current;
+    browserAttachFlowRef.current = { id };
+
+    const finish = () => {
+      if (!stopBrowserAttachFlow(id)) return;
+      setOverlay(null);
+      if (text) {
+        addLine("info", "Browser connected - continuing your saved request.");
+        runBrowserRequest(text);
+      } else {
+        addLine("info", "Browser ready - one Chrome tab is attached. Neko will use only that tab when you ask.");
+      }
+    };
+    const pause = () => {
+      if (!stopBrowserAttachFlow(id)) return;
+      setInput(text);
+      addLine("info", text
+        ? "Browser setup paused. Your request is still in the input; submit it whenever you are ready."
+        : "Browser setup paused. Type /browser whenever you want to continue.");
+    };
+    const showStage = (stage: BrowserBridgeStage) => {
+      const connected = stage === "extension_connected";
+      setOverlay({
+        title: connected ? "Connect Neko Browser - step 2 of 2" : "Connect Neko Browser - step 1 of 2",
+        description: connected
+          ? `Extension connected. On the target tab, open Neko Browser and choose 'Attach this tab to Neko'. Neko detects it and continues automatically.${text ? " Your request is saved." : ""}`
+          : `Complete the one-time Chrome install step described above. Neko detects the extension automatically; no Enter or /browser status is needed.${text ? " Your request is saved." : ""}`,
+        search: false,
+        showCount: false,
+        items: [
+          { id: "setup", label: "Open Chrome setup again", detail: "reopen the install surface and exact instructions" },
+          text
+            ? { id: "without", label: "Continue without browser control", detail: "use web search/fetch or other available tools" }
+            : { id: "later", label: "Finish later", detail: "close this guide; /browser resumes it at any time" },
+        ],
+        onCancel: pause,
+        onSelect: (choice) => {
+          if (choice.id === "setup") {
+            if (!stopBrowserAttachFlow(id)) return;
+            setOverlay(null);
+            setInput("");
+            browserSetupTaskRef.current = text;
+            void handle("/browser setup").catch((error) => {
+              browserSetupTaskRef.current = undefined;
+              setInput(text);
+              addLine("error", error instanceof Error ? error.message : String(error));
+            });
             return;
           }
+          if (!stopBrowserAttachFlow(id)) return;
           setOverlay(null);
-          runBrowserRequest(text);
-          return;
-        }
-        if (choice.id === "without") {
-          setOverlay(null);
-          runBrowserRequest(text);
-          return;
-        }
-        setOverlay(null);
-        void handle("/browser setup")
-          .then(() => offerBrowserAttach(text))
-          .catch((error) => {
-            setInput(text);
-            addLine("error", error instanceof Error ? error.message : String(error));
-          });
-      },
-    });
+          if (choice.id === "without" && text) runBrowserRequest(text);
+          else addLine("info", "Browser setup paused. Type /browser whenever you want to continue.");
+        },
+      });
+    };
+    const check = () => {
+      const flow = browserAttachFlowRef.current;
+      if (!flow || flow.id !== id) return;
+      const stage = browserBridgeStage();
+      if (stage === "tab_attached") return finish();
+      if (flow.stage === stage) return;
+      flow.stage = stage;
+      showStage(stage);
+    };
+
+    check();
+    const flow = browserAttachFlowRef.current;
+    if (flow?.id === id) flow.timer = setInterval(check, 500);
   };
 
   const offerBrowserSetup = (text: string) => {
-    if (readBrowserCapability()) return offerBrowserAttach(text);
+    const stage = browserBridgeStage();
+    if (stage === "extension_connected") return offerBrowserAttach(text);
+    if (stage === "tab_attached") return runBrowserRequest(text);
+    stopBrowserAttachFlow();
     setInput(text);
     setOverlay({
-      title: "This task can use a signed-in browser tab",
+      title: "Use your signed-in Chrome tab for this task?",
+      description: "You choose the one tab Neko may control. Other tabs, cookies, passwords, and the cloud relay stay outside this connection.",
+      search: false,
+      showCount: false,
       items: [
-        { id: "setup", label: "Set up Neko Browser", detail: "recommended - Chrome asks once; only the tab you attach is controllable" },
+        { id: "setup", label: "Connect Chrome", detail: "recommended - one-time setup, then Neko resumes this request automatically" },
         { id: "without", label: "Continue without browser control", detail: "use web search/fetch or other available tools" },
       ],
+      onCancel: () => {
+        setInput(text);
+        addLine("info", "Browser setup cancelled. Your request is still in the input.");
+      },
       onSelect: (choice) => {
         setOverlay(null);
         if (choice.id === "without") return runBrowserRequest(text);
-        void handle("/browser setup")
-          .then(() => offerBrowserAttach(text))
-          .catch((error) => {
-            setInput(text);
-            addLine("error", error instanceof Error ? error.message : String(error));
-          });
+        setInput("");
+        browserSetupTaskRef.current = text;
+        void handle("/browser setup").catch((error) => {
+          browserSetupTaskRef.current = undefined;
+          setInput(text);
+          addLine("error", error instanceof Error ? error.message : String(error));
+        });
       },
     });
   };
@@ -1647,7 +1712,22 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const loopGoal = /^\/auto\s+([\s\S]+)/.exec(text)?.[1]?.trim() || null;
     if (text.startsWith("/") && !loopGoal) {
       if (/^\/support(?:\s|$)/.test(text) && voiceRef.current) await stopVoice("support management", true);
-      await runSlashCommand(text, {
+      // Bare /browser is a state-aware entry point: ready means status, a connected extension means
+      // wait for the explicit tab attachment, and every earlier state opens the one-time setup. The user
+      // never has to learn the setup/status subcommands just to complete a browser task.
+      let slashText = text;
+      if (text === "/browser") {
+        const stage = browserBridgeStage();
+        if (stage === "extension_connected") {
+          offerBrowserAttach("");
+          return;
+        }
+        if (stage !== "tab_attached") slashText = "/browser setup";
+      }
+      const opensBrowserGuide = /^\/browser\s+(?:setup|install)$/.test(slashText);
+      const browserTask = opensBrowserGuide ? browserSetupTaskRef.current : undefined;
+      if (opensBrowserGuide) browserSetupTaskRef.current = undefined;
+      await runSlashCommand(slashText, {
         cfg,
         agent: agentRef.current!,
         registry: registryRef.current!,
@@ -1672,6 +1752,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setupBrowser,
         exit,
       });
+      if (opensBrowserGuide && readBrowserCapability()) offerBrowserAttach(browserTask ?? "");
       relayRef.current?.refresh();
       return;
     }
@@ -1909,7 +1990,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const waiting = remoteOverlayRef.current;
         if (!waiting || waiting.id !== action.id) return false;
         if (action.decision === "cancel") {
-          remoteOverlayRef.current = null; setOverlay(null); addLine("info", "(cancelled)"); return true;
+          remoteOverlayRef.current = null;
+          setOverlay(null);
+          if (waiting.overlay.onCancel) waiting.overlay.onCancel();
+          else addLine("info", "(cancelled)");
+          return true;
         }
         const item = waiting.overlay.items.find((candidate) => candidate.id === action.itemId);
         if (!item) return false;
@@ -2321,8 +2406,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         <SelectList
           key={overlay.title}
           title={overlay.title}
+          description={overlay.description}
           items={overlay.items}
           cols={contentCols}
+          search={overlay.search}
+          showCount={overlay.showCount}
           onSelect={overlay.onSelect}
           onCtrlA={overlay.onCtrlA}
           ctrlAHint={overlay.ctrlAHint}
@@ -2330,7 +2418,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           getPreview={overlay.getPreview}
           onCancel={() => {
             setOverlay(null);
-            addLine("info", "(cancelled)");
+            if (overlay.onCancel) overlay.onCancel();
+            else addLine("info", "(cancelled)");
           }}
         />
         ) : approval ? (

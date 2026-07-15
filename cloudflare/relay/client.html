@@ -449,6 +449,7 @@
       if (isNew) { lastOverlayId = overlay.id; overlaySel = 0; overlaySending = overlayNote = ""; }
       overlaySel = Math.max(0, Math.min(overlaySel, overlay.items.length - 1));
       const title = document.createElement("div"); title.className = "live-title"; title.textContent = String(overlay.title || "Choose an option");
+      const description = document.createElement("div"); description.className = "live-meta"; description.textContent = String(overlay.description || "");
       const list = document.createElement("div"); list.className = "overlay-list"; list.setAttribute("role", "listbox");
       for (let i = 0; i < overlay.items.length; i++) {
         const item = overlay.items[i], button = document.createElement("button"); button.type = "button"; button.setAttribute("role", "option");
@@ -457,7 +458,9 @@
         const detail = document.createElement("span"); detail.className = "overlay-detail"; detail.textContent = String(item.detail || "");
         button.append(label, detail); button.onclick = () => sendOverlay("select", overlay.id, item.id); list.appendChild(button);
       }
-      box.append(title, list);
+      box.append(title);
+      if (description.textContent) box.appendChild(description);
+      box.appendChild(list);
       const actions = document.createElement("div"); actions.className = "live-actions";
       const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "deny"; cancel.textContent = "[esc] cancel";
       cancel.disabled = !!overlaySending; cancel.onclick = () => sendOverlay("cancel", overlay.id); actions.appendChild(cancel); box.appendChild(actions);
