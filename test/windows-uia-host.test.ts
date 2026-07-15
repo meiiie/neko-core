@@ -9,7 +9,7 @@ import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 const script = join(import.meta.dir, "..", "skills", "computer-use", "scripts", "resident-uia.ps1");
 
-async function waitForUiaText(read: () => Promise<string>, needle: string, timeoutMs = 15_000): Promise<string> {
+async function waitForUiaText(read: () => Promise<string>, needle: string, timeoutMs = 25_000): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   let last = "";
   let lastError = "";
@@ -145,7 +145,7 @@ $w.Content=$p
     form.kill();
     await Promise.race([form.exited, Bun.sleep(1000)]);
   }
-}, 30_000);
+}, 45_000);
 
 test("resident UIA watch returns only after readable state changes and settles", async () => {
   if (process.platform !== "win32") return;
@@ -161,7 +161,9 @@ $button=New-Object System.Windows.Controls.Button
 $button.Content='Schedule inbound'
 $button.Add_Click({
   $script:timer=New-Object System.Windows.Threading.DispatcherTimer
-  $script:timer.Interval=[TimeSpan]::FromMilliseconds(700)
+  # Invoke performs its own post-action UIA snapshot. Keep the fixture's async update
+  # beyond that snapshot so watch, rather than invoke, observes the transition on slow CI.
+  $script:timer.Interval=[TimeSpan]::FromMilliseconds(2500)
   $script:timer.Add_Tick({
     $duplicate=New-Object System.Windows.Controls.TextBlock
     $duplicate.Text='Repeated message'
@@ -182,7 +184,7 @@ $w.Content=$script:panel
       return String(await tools.execute("computer", { action: "read", window: title }));
     }, "Repeated message");
     expect(String(await tools.execute("computer", { action: "invoke", window: title, name: "Schedule inbound" }))).toContain("invoked");
-    const watched = String(await tools.execute("computer", { action: "watch", window: title, duration_ms: 3_000, settle_ms: 200 }));
+    const watched = String(await tools.execute("computer", { action: "watch", window: title, duration_ms: 6_000, settle_ms: 200 }));
     expect(watched).toContain("WATCH changed");
     expect(watched).toContain("elapsed_ms=");
     expect(watched).toMatch(/detected_ms=\d+/);
@@ -193,7 +195,7 @@ $w.Content=$script:panel
     form.kill();
     await Promise.race([form.exited, Bun.sleep(1000)]);
   }
-}, 30_000);
+}, 45_000);
 
 test("computer tool dispatches UIA reads through the resident host", async () => {
   if (process.platform !== "win32") return;
@@ -219,4 +221,4 @@ $w.Content=$b
     form.kill();
     await Promise.race([form.exited, Bun.sleep(1000)]);
   }
-}, 30_000);
+}, 45_000);
