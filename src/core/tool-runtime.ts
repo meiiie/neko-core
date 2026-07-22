@@ -1103,8 +1103,10 @@ function* walkFiles(base: string): Generator<string> {
   }
 }
 
-/** Conservative catastrophic-command detector (clearest data/disk-destroying forms only). */
-function dangerousCommand(command: string): string | null {
+/** Conservative catastrophic-command detector (clearest data/disk-destroying forms only). Exported
+ * so the security audit can probe exactly what it does and does NOT catch (the OS sandbox, not this
+ * regex, is the real containment - this only stops the clearest accidents/injections even unsandboxed). */
+export function dangerousCommand(command: string): string | null {
   const c = String(command).replace(/\s+/g, " ").trim();
     // The dangerous token may be QUOTED (`rm -rf "$HOME"`, `rm -rf "/"`, `rm -rf '~'`) -- without
     // the optional quotes here the seatbelt is bypassed: the quoted target slips through as "allowed".
