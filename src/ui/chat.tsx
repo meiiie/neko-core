@@ -1398,8 +1398,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       setOverlay({
         title: connected ? "Connect Neko Browser - step 2 of 2" : "Connect Neko Browser - step 1 of 2",
         description: connected
-          ? `Extension connected. On the target tab, open Neko Browser and choose 'Attach this tab to Neko'. Neko detects it and continues automatically.${text ? " Your request is saved." : ""}`
-          : `Complete the one-time Chrome install step described above. Neko detects the extension automatically; no Enter or /browser status is needed.${text ? " Your request is saved." : ""}`,
+          ? `Extension detected. Now, on a NORMAL website tab (http/https), click the Neko Browser Bridge icon and choose 'Attach this tab to Neko' - THAT connects this tab. Neko then continues on its own.${text ? " Your request is saved." : ""}`
+          : `Finish the steps above in Chrome. The one that matters: on a NORMAL website tab (NOT chrome://), open the Neko Browser Bridge extension and choose 'Attach this tab to Neko'. Installing alone does not connect it - attaching does. Neko then continues automatically.${text ? " Your request is saved." : ""}`,
         search: false,
         showCount: false,
         // The DEFAULT (highlighted) item must be safe: the body says "no Enter is needed", and the
@@ -1462,6 +1462,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (stage === "tab_attached") return runBrowserRequest(text);
     stopBrowserAttachFlow();
     setInput(text);
+    // Lead-in BEFORE the modal so it doesn't appear out of nowhere (owner feedback: overlays pop
+    // abruptly). One conversational line frames what the choice is about.
+    addLine("info", "Sure - to do that I drive ONE Chrome tab you pick (nothing else). Chrome needs a quick one-time extension setup first; it won't let me install it for you. Your options:");
     setOverlay({
       title: "Use your signed-in Chrome tab for this task?",
       description: "You choose the one tab Neko may control. Other tabs, cookies, passwords, and the cloud relay stay outside this connection.",
@@ -1502,6 +1505,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       addLine("info", message);
     };
     setInput(text);
+    // Lead-in BEFORE the modal (owner feedback: overlays pop abruptly).
+    addLine("info", repair
+      ? "The typed Office editor needs a quick repair before I can build that file. One choice:"
+      : "To build a real Office file (.docx/.xlsx/.pptx) I use a small verified editor - a one-time ~35 MiB setup, no admin or MS Office needed. One choice:");
     setOverlay({
       title: repair ? "Repair Office support and continue?" : "Install Office support and continue?",
       description: repair
