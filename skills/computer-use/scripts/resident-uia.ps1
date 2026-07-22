@@ -535,8 +535,8 @@ function Invoke-Ocr($root) {
     $res = Await-Winrt ($script:ocrEngine.RecognizeAsync($sb)) ([Windows.Media.Ocr.OcrResult])
   } finally { $ms.Dispose() }
   $lines = New-Object 'System.Collections.Generic.List[string]'
-  $lines.Add("OCR window='$($root.Current.Name)' origin=$($rect.Left),$($rect.Top) size=${w}x${h} engine=$($script:ocrEngine.RecognizerLanguage.LanguageTag)")
-  $lines.Add("(each line has a mark [N]; act with: computer click mark=N - no coordinates needed)")
+  $lines.Add("OCR window='$($root.Current.Name)' size=${w}x${h} engine=$($script:ocrEngine.RecognizerLanguage.LanguageTag)")
+  $lines.Add("(act on a line by its mark: computer click mark=N - the coordinates are resolved for you)")
   $script:ocrMarks = @{}
   $n = 0
   foreach ($line in $res.Lines) {
@@ -550,7 +550,10 @@ function Invoke-Ocr($root) {
     $cy = [int]($rect.Top + ($minY + $maxY) / 2)
     $n++
     $script:ocrMarks[[string]$n] = @($cx, $cy)
-    $lines.Add("  [$n] '$($line.Text)' @ $cx,$cy")
+    # Set-of-Marks: show the LABEL only, NOT the coordinate. Showing pixels tempts a weak model to copy
+    # (and mis-copy) them - the exact failure OmniParser avoids by making the model pick a label. The
+    # host grounds mark N -> pixel, so accuracy no longer depends on the model reproducing coordinates.
+    $lines.Add("  [$n] '$($line.Text)'")
   }
   if ($n -eq 0) { $lines.Add('  (no text recognized - the window may be blank, an image, or mid-render)') }
   return $lines.ToArray()
@@ -579,7 +582,7 @@ function Invoke-UiaRequest($request) {
   $backend = if ([string]$request.inputBackend -eq 'sendinput') { 'sendinput' } else { 'inject' }
   $max = if ($request.max) { [Math]::Min([Math]::Max([int]$request.max, 1), 500) } else { 120 }
   $auditName = switch ($action) {
-    'click' { "$($request.x),$($request.y)" }
+    'click' { if ($null -ne $request.mark) { "mark $($request.mark)" } else { "$($request.x),$($request.y)" } }
     'stroke' { "$(@($request.points).Count / 2) points" }
     'key' { [string]$request.keys }
     'scroll' { "$($request.direction) x$($request.amount)" }
