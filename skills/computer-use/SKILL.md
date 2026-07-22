@@ -101,12 +101,16 @@ UIA.** The tell: `list`/`read` shows ONLY `Chrome Legacy Window` (`Chrome_Render
 `Intermediate D3D Window` — the real buttons/lists/inputs live inside the Chromium renderer and are NOT
 in the UIA tree. Handle it like this:
 - Use **`ocr`** — `computer({action:"ocr", window:"Zalo"})`. It runs the built-in Windows OCR engine on
-  the window and returns every on-screen text line with its screen-pixel centre: `'the text' @ x,y`.
-  Then `click` those coordinates, `type`/`key` to enter text. **No vision model needed** (a text-only
-  model works), no download, no network. This is the FIRST thing to try on an Electron app. Flow:
-  `activate` (if minimized) → `ocr` → `click x,y` → `ocr` again to verify. It runs in the warm resident
-  host, so after the first perception each `ocr` is ~0.5s/frame — perceive freely, re-`ocr` after every
-  action to verify instead of assuming.
+  the window and returns every on-screen text line as a NUMBERED MARK: `[N] 'the text' @ x,y`. **No
+  vision model needed** (a text-only model works), no download, no network. This is the FIRST thing to
+  try on an Electron app.
+- **Click by MARK, not coordinates.** `computer({action:"click", mark:N})` - pass the `[N]` of the line
+  you want; the resident host resolves it to the pixel for you. This is the Set-of-Marks method
+  (OmniParser/OSWorld SOTA): a weak/text-only model picks a NUMBER instead of reproducing pixels, which
+  removes the coordinate-grounding step where such models fail. Only fall back to `click x,y` if you
+  truly need a spot between marks. Flow: `activate` (if minimized) → `ocr` → `click mark:N` →
+  `type`/`key` → `ocr` again to verify. Each `ocr` is ~0.5s in the warm host - perceive freely and
+  re-`ocr` after every action instead of assuming it worked.
 - Do NOT loop on `--force-renderer-accessibility`, env vars, or a remote-debugging port. These apps are
   SINGLE-INSTANCE and hardened: relaunching with a flag just wakes the existing (unflagged) process, and
   packaged Electron apps (Zalo verified) strip the flag / block the debug port. flag→env→CDP in sequence

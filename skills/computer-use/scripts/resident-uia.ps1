@@ -491,6 +491,10 @@ function Invoke-Capture([string]$path, [int]$width = 768) {
 $script:ocrReady = $false
 $script:ocrEngine = $null
 $script:ocrAsTask = $null
+# Set-of-Marks: the LAST ocr's numbered marks -> screen coords. `click {mark:N}` looks up N here, so
+# a text-only model picks a NUMBER (the SOTA OmniParser affordance) instead of reproducing pixels -
+# removing the coordinate-grounding step where weak models fail. Persisted in this warm host.
+$script:ocrMarks = @{}
 function Initialize-Ocr {
   if ($script:ocrReady) { return }
   Add-Type -AssemblyName System.Drawing
@@ -532,6 +536,8 @@ function Invoke-Ocr($root) {
   } finally { $ms.Dispose() }
   $lines = New-Object 'System.Collections.Generic.List[string]'
   $lines.Add("OCR window='$($root.Current.Name)' origin=$($rect.Left),$($rect.Top) size=${w}x${h} engine=$($script:ocrEngine.RecognizerLanguage.LanguageTag)")
+  $lines.Add("(each line has a mark [N]; act with: computer click mark=N - no coordinates needed)")
+  $script:ocrMarks = @{}
   $n = 0
   foreach ($line in $res.Lines) {
     $words = $line.Words
@@ -542,8 +548,9 @@ function Invoke-Ocr($root) {
     $maxY = ($words | ForEach-Object { $_.BoundingRect.Y + $_.BoundingRect.Height } | Measure-Object -Maximum).Maximum
     $cx = [int]($rect.Left + ($minX + $maxX) / 2)
     $cy = [int]($rect.Top + ($minY + $maxY) / 2)
-    $lines.Add("  '$($line.Text)' @ $cx,$cy")
     $n++
+    $script:ocrMarks[[string]$n] = @($cx, $cy)
+    $lines.Add("  [$n] '$($line.Text)' @ $cx,$cy")
   }
   if ($n -eq 0) { $lines.Add('  (no text recognized - the window may be blank, an image, or mid-render)') }
   return $lines.ToArray()
@@ -743,7 +750,15 @@ function Invoke-UiaRequest($request) {
       return "sent key $sent; re-perceive to verify"
     }
     'click' {
-      $x = [int]$request.x; $y = [int]$request.y
+      # Set-of-Marks: `mark` (an [N] from the last ocr) resolves to that element's coords - the model
+      # never emits pixels. Falls back to explicit x,y when no mark is given.
+      if ($null -ne $request.mark) {
+        $key = [string][int]$request.mark
+        if (-not $script:ocrMarks.ContainsKey($key)) { throw "no OCR mark [$key]; run computer ocr first, then click the mark you see" }
+        $coord = $script:ocrMarks[$key]; $x = [int]$coord[0]; $y = [int]$coord[1]
+      } else {
+        $x = [int]$request.x; $y = [int]$request.y
+      }
       Assert-AgentPresence $request 'click' $x $y
       if ($request.window) { [void](Focus-InputTarget $root) }
       $before = Get-TreeSignature $root

@@ -17,6 +17,7 @@ export interface UiaRequest {
   settleMs?: number;
   x?: number;
   y?: number;
+  mark?: number; // Set-of-Marks: click target = an [N] from the last ocr (resolved in the resident host)
   points?: number[];
   presence?: boolean;
   inputBackend?: string;

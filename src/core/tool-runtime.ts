@@ -470,9 +470,13 @@ export class ToolRegistry {
         script = "uia.ps1"; sa = ["setvalue", atFile(nm), atFile(String(args.value ?? ""))]; break;
       }
       case "click": {
+        // Set-of-Marks: a `mark` (an [N] from the last ocr) is the preferred, grounding-free target -
+        // it resolves to coords in the resident host, so a text model never emits pixels. x,y still work.
+        const hasMark = args.mark !== undefined && Number.isInteger(Number(args.mark));
         const x = Number(args.x), y = Number(args.y);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) return "Error: computer click needs numeric 'x' and 'y'.";
-        script = "inject.ps1"; sa = ["tap", String(Math.round(x)), String(Math.round(y))]; break;
+        if (!hasMark && (!Number.isFinite(x) || !Number.isFinite(y))) return "Error: computer click needs a 'mark' number from a prior ocr, or numeric 'x' and 'y'.";
+        // One-shot fallback path only (resident is default): mark can't resolve without the warm host.
+        script = "inject.ps1"; sa = hasMark ? ["tap", "0", "0"] : ["tap", String(Math.round(x)), String(Math.round(y))]; break;
       }
       case "stroke": {
         const nums = Array.isArray(args.points) ? args.points.map((n: any) => Number(n)) : [];
@@ -547,6 +551,7 @@ export class ToolRegistry {
             settleMs: args.settle_ms === undefined ? undefined : Number(args.settle_ms),
             x: args.x === undefined ? undefined : Math.round(Number(args.x)),
             y: args.y === undefined ? undefined : Math.round(Number(args.y)),
+            mark: args.mark === undefined ? undefined : Math.round(Number(args.mark)),
             points: Array.isArray(args.points) ? args.points.map((n: any) => Math.round(Number(n))) : undefined,
             presence: this.presence,
             inputBackend: this.inputBackend,
@@ -565,6 +570,7 @@ export class ToolRegistry {
       let out = residentOutput ?? "", err = "";
       if (residentOutput === null) {
         if (action === "watch") return "Error: computer watch requires the resident Windows UIA host. Enable computer_use_resident, or use wait then read as the slower fallback.";
+        if (action === "click" && args.mark !== undefined) return "Error: click by mark needs the resident host (computer_use_resident). Re-run ocr and click with x,y from the mark line instead.";
         const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa], { encoding: "utf-8", cwd: this.root, env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
         // Surface failures instead of swallowing them into "(no output)" — the agent can only adapt to a
         // failure it can SEE (same contract as the rest of the loop). Timeout/spawn error -> r.error.
