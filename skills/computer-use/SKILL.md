@@ -104,7 +104,9 @@ in the UIA tree. Handle it like this:
   the window and returns every on-screen text line with its screen-pixel centre: `'the text' @ x,y`.
   Then `click` those coordinates, `type`/`key` to enter text. **No vision model needed** (a text-only
   model works), no download, no network. This is the FIRST thing to try on an Electron app. Flow:
-  `activate` (if minimized) → `ocr` → `click x,y` → `ocr` again to verify.
+  `activate` (if minimized) → `ocr` → `click x,y` → `ocr` again to verify. It runs in the warm resident
+  host, so after the first perception each `ocr` is ~0.5s/frame — perceive freely, re-`ocr` after every
+  action to verify instead of assuming.
 - Do NOT loop on `--force-renderer-accessibility`, env vars, or a remote-debugging port. These apps are
   SINGLE-INSTANCE and hardened: relaunching with a flag just wakes the existing (unflagged) process, and
   packaged Electron apps (Zalo verified) strip the flag / block the debug port. flag→env→CDP in sequence

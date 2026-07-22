@@ -32,14 +32,6 @@ if (-not [WinRect]::GetWindowRect($hwnd, [ref]$r)) { Write-Output "(could not re
 $w = $r.R - $r.L; $h = $r.B - $r.T
 if ($w -le 0 -or $h -le 0) { Write-Output "(window has no visible area - is it minimized? run activate first)"; exit 1 }
 
-# --- capture the window region to a temp PNG (SoftwareBitmap decodes cleanly from a file) ---
-$png = Join-Path $env:TEMP ("neko_ocr_{0}.png" -f ([Guid]::NewGuid().ToString("N")))
-$bmp = New-Object System.Drawing.Bitmap $w, $h
-$g = [System.Drawing.Graphics]::FromImage($bmp)
-try { $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size, [System.Drawing.CopyPixelOperation]::SourceCopy) } finally { $g.Dispose() }
-$bmp.Save($png, [System.Drawing.Imaging.ImageFormat]::Png)
-$bmp.Dispose()
-
 # --- WinRT async bridge (PowerShell 5.1 has no await) ---
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
@@ -50,16 +42,24 @@ function Await($op, $type) {
   $t.Result
 }
 # Load the WinRT projections we use.
-[void][Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
 [void][Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType = WindowsRuntime]
 [void][Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType = WindowsRuntime]
 [void][Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
 [void][Windows.Globalization.Language, Windows.Foundation, ContentType = WindowsRuntime]
 
+# --- capture the window region straight to an IN-MEMORY WinRT stream (no temp file, no disk I/O,
+# no file async round-trip - the SoftwareBitmap decodes from RAM, ~1s faster than the file path) ---
+$ms = New-Object System.IO.MemoryStream
+$bmp = New-Object System.Drawing.Bitmap $w, $h
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+try { $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size, [System.Drawing.CopyPixelOperation]::SourceCopy) } finally { $g.Dispose() }
+$bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Bmp) # BMP: no PNG compression cost, decoder reads it fine
+$bmp.Dispose()
+$ms.Position = 0
+
 try {
-  $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($png)) ([Windows.Storage.StorageFile])
-  $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
-  $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+  $ras = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($ms)
+  $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($ras)) ([Windows.Graphics.Imaging.BitmapDecoder])
   $softwareBitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
 
   # Prefer the user's profile languages (picks Vietnamese if its OCR pack is installed); fall back to
@@ -72,7 +72,6 @@ try {
   if (-not $engine) { Write-Output "(no Windows OCR recognizer installed; add a language OCR pack in Settings > Language)"; exit 1 }
 
   $result = Await ($engine.RecognizeAsync($softwareBitmap)) ([Windows.Media.Ocr.OcrResult])
-  $stream.Dispose()
 
   Write-Output ("OCR window='{0}'  origin={1},{2}  size={3}x{4}  engine={5}" -f $title, $r.L, $r.T, $w, $h, $engine.RecognizerLanguage.LanguageTag)
   $n = 0
@@ -91,5 +90,5 @@ try {
   }
   if ($n -eq 0) { Write-Output "  (no text recognized - the window may be blank, an image, or mid-render)" }
 } finally {
-  Remove-Item $png -Force -ErrorAction SilentlyContinue
+  $ms.Dispose()
 }

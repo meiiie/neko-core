@@ -532,7 +532,7 @@ export class ToolRegistry {
     }
     try {
       let residentOutput: string | null = null;
-      if (this.residentUia && ["list", "read", "get", "watch", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "screenshot"].includes(action)) {
+      if (this.residentUia && ["list", "read", "get", "ocr", "watch", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "screenshot"].includes(action)) {
         try {
           const response = await residentUiaHost(join(scriptsDir, "resident-uia.ps1")).request({
             action,

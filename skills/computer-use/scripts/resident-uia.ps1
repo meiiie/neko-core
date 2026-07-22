@@ -485,6 +485,70 @@ function Invoke-Capture([string]$path, [int]$width = 768) {
   }
 }
 
+# --- OCR (warm): read on-screen TEXT of Chromium/Electron windows UIA can't see. Loading the WinRT
+# projections + the recognizer costs ~1s ONCE; every subsequent ocr is ~400ms (capture + recognize),
+# matching/beating GPU screen-parsers - here CPU-only, no model, no download. ---
+$script:ocrReady = $false
+$script:ocrEngine = $null
+$script:ocrAsTask = $null
+function Initialize-Ocr {
+  if ($script:ocrReady) { return }
+  Add-Type -AssemblyName System.Drawing
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $script:ocrAsTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+  [void][Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType = WindowsRuntime]
+  [void][Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType = WindowsRuntime]
+  [void][Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
+  $script:ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+  if (-not $script:ocrEngine) {
+    $langs = [Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages
+    if ($langs.Count -gt 0) { $script:ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($langs[0]) }
+  }
+  $script:ocrReady = $true
+}
+function Await-Winrt($op, $type) {
+  $m = $script:ocrAsTask.MakeGenericMethod($type)
+  $t = $m.Invoke($null, @($op)); $t.Wait(-1) | Out-Null; $t.Result
+}
+function Invoke-Ocr($root) {
+  Initialize-Ocr
+  if (-not $script:ocrEngine) { throw 'no Windows OCR recognizer installed; add a language OCR pack in Settings > Language' }
+  $hwnd = [IntPtr]$root.Current.NativeWindowHandle
+  if ($hwnd -eq [IntPtr]::Zero) { throw 'target window has no native handle' }
+  $rect = New-Object NekoResidentInputNative+RECT
+  if (-not [NekoResidentInputNative]::GetWindowRect($hwnd, [ref]$rect)) { throw 'could not read window bounds' }
+  $w = $rect.Right - $rect.Left; $h = $rect.Bottom - $rect.Top
+  if ($w -le 0 -or $h -le 0) { throw 'window has no visible area - run activate first' }
+  $ms = New-Object System.IO.MemoryStream
+  $bmp = New-Object System.Drawing.Bitmap $w, $h
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  try { $g.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size, [System.Drawing.CopyPixelOperation]::SourceCopy) } finally { $g.Dispose() }
+  $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Bmp); $bmp.Dispose(); $ms.Position = 0
+  try {
+    $ras = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($ms)
+    $dec = Await-Winrt ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($ras)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $sb = Await-Winrt ($dec.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    $res = Await-Winrt ($script:ocrEngine.RecognizeAsync($sb)) ([Windows.Media.Ocr.OcrResult])
+  } finally { $ms.Dispose() }
+  $lines = New-Object 'System.Collections.Generic.List[string]'
+  $lines.Add("OCR window='$($root.Current.Name)' origin=$($rect.Left),$($rect.Top) size=${w}x${h} engine=$($script:ocrEngine.RecognizerLanguage.LanguageTag)")
+  $n = 0
+  foreach ($line in $res.Lines) {
+    $words = $line.Words
+    if ($words.Count -eq 0) { continue }
+    $minX = ($words | ForEach-Object { $_.BoundingRect.X } | Measure-Object -Minimum).Minimum
+    $minY = ($words | ForEach-Object { $_.BoundingRect.Y } | Measure-Object -Minimum).Minimum
+    $maxX = ($words | ForEach-Object { $_.BoundingRect.X + $_.BoundingRect.Width } | Measure-Object -Maximum).Maximum
+    $maxY = ($words | ForEach-Object { $_.BoundingRect.Y + $_.BoundingRect.Height } | Measure-Object -Maximum).Maximum
+    $cx = [int]($rect.Left + ($minX + $maxX) / 2)
+    $cy = [int]($rect.Top + ($minY + $maxY) / 2)
+    $lines.Add("  '$($line.Text)' @ $cx,$cy")
+    $n++
+  }
+  if ($n -eq 0) { $lines.Add('  (no text recognized - the window may be blank, an image, or mid-render)') }
+  return $lines.ToArray()
+}
+
 function Invoke-UiaRequest($request) {
   $action = [string]$request.action
   Trace-Host "request action=$action"
@@ -548,6 +612,9 @@ function Invoke-UiaRequest($request) {
     }
     'read' {
       return @(Get-ReadableSnapshot $root $max)
+    }
+    'ocr' {
+      return Invoke-Ocr $root
     }
     'watch' {
       $duration = if ($null -ne $request.durationMs) { [int]$request.durationMs } else { 10000 }
