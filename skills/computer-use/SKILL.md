@@ -95,6 +95,14 @@ without model-side polling.
 elements"), the app is almost certainly minimized or hidden — call `activate` with that `window` FIRST
 (it restores + foregrounds it via the native handle), then `list`. Never hand-roll ShowWindow/
 SetForegroundWindow P/Invoke through bash: use `computer({action:"activate", window})`.
+
+**Windows shell trap — do NOT `powershell -Command "<complex script>"` through the `bash` tool.** On
+Windows the `bash` tool is git-bash: it re-parses the string and mangles PowerShell quoting, so
+`Add-Type`, `param(...)`, here-strings, and nested quotes fail (`Missing ')'`, `... is not recognized`).
+Reach for the first-class `computer` actions above instead — they cover perceive/act/activate without
+any raw PowerShell. If you GENUINELY need PowerShell (rare), `write_file` a `.ps1` and run
+`powershell -NoProfile -ExecutionPolicy Bypass -File script.ps1` — never inline `-Command`. Retrying the
+same mangled `-Command` is the top wasted-turn pattern; switch strategy on the FIRST failure.
 It dispatches to the scripts below (Unicode names handled via a temp UTF-8 `@file` automatically), gated like
 bash, and honours the presence/input config. Bash + the raw scripts is the fallback / for anything the tool
 doesn't expose. The underlying `uia.ps1` lets a text model perceive + act + verify with no vision and (for
