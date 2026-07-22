@@ -122,6 +122,38 @@ export function wrapInput(cps: string[], cur: number, width: number): WrapResult
 /** Max visual lines the input box shows before scrolling within it (keeps the caret visible). */
 export const MAX_INPUT_LINES = 5;
 
+/** Modified-Enter encodings that mean "newline, not submit": CSI-u (kitty keyboard protocol,
+ * Windows Terminal/VS Code sendInput bindings) and xterm modifyOtherKeys, any modifier 2-8
+ * (Shift/Alt/Ctrl combos). Ink does not parse these, so they arrive as a raw sequence; Ink may
+ * also strip the leading ESC, hence the optional prefix. */
+const MODIFIED_ENTER = /^\x1b?\[(?:13;[2-8]u|27;[2-8];13~)$/;
+
+/** Map a mouse click to a caret index. dRow/dCol are the click's offset from the CURRENT caret's
+ * screen cell (the FrameDiffer knows where the hardware cursor sits; the layout math lives here,
+ * the only module that knows the wrap geometry). Geometry comes from the same wrapInput the
+ * renderer uses, so wrap-path clicks are exact; the multiline (\n) path lets Ink wrap naturally,
+ * so a click on an overlong logical line lands approximately (clamped). The scan is O(n^2) in
+ * the input length - inputs stay short because big pastes collapse to placeholders. */
+export function caretIndexForClick(value: string, caretIndex: number, width: number, dRow: number, dCol: number): number {
+  const cps = [...value];
+  const i = Math.min(Math.max(0, caretIndex), cps.length);
+  const w = Math.max(1, Math.floor(width) - 1);
+  const colOf = (res: WrapResult, c: number) =>
+    res.lines[res.caretLine].cells.reduce((s, cell) => (cell.index < c ? s + cell.w : s), 0);
+  const base = wrapInput(cps, i, w);
+  const targetLine = Math.min(base.lines.length - 1, Math.max(0, base.caretLine + dRow));
+  const targetCol = Math.max(0, colOf(base, i) + dCol);
+  let best = i;
+  let bestD = Infinity;
+  for (let c = 0; c <= cps.length; c++) {
+    const r = wrapInput(cps, c, w);
+    if (r.caretLine !== targetLine) continue;
+    const d = Math.abs(colOf(r, c) - targetCol);
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return best;
+}
+
 export function TextInput(props: {
   value: string;
   onChange: (v: string) => void;
@@ -141,6 +173,9 @@ export function TextInput(props: {
     onPasteImage?: () => string | null;
     /** Legacy caret glyph override. Kept for config/API compatibility; overlay caret ignores it. */
     caretGlyph?: CaretStyle;
+    /** Click-to-caret hook: ChatApp registers the handler it calls with the click's (dRow, dCol)
+     * delta from the hardware caret's screen cell. TextInput owns the geometry -> index math. */
+    registerCaretClick?: (fn: ((dRow: number, dCol: number) => void) | null) => void;
   }) {
     const { value, onChange, onSubmit, placeholder, mask, width = 9999, pastedContents, nextPasteId, onCommitPastes, onPasteImage, caretGlyph = "thin-block" } = props;
   const ref = useRef(value);
@@ -162,11 +197,33 @@ export function TextInput(props: {
   // (DECSCUSR bar + show). This is the only way to sit BETWEEN two cells with zero width - any drawn
   // glyph occupies a full cell and reads as a gap ("chà▏o"). The terminal blinks the cursor natively,
   // so there is no glyph-toggle (which used to add/remove a visible space on each blink).
+  // Insert text at the caret (shared by typing, newline keys, and Alt+V).
+  const insertAtCaret = (text: string) => {
+    const chars = [...ref.current];
+    const ins = [...text];
+    chars.splice(cur.current, 0, ...ins);
+    cur.current += ins.length;
+    ref.current = chars.join("");
+    onChange(ref.current);
+  };
+
   useInput((input, key) => {
     // Ink delivers a paste as one call with the whole string; if it carries a line break, treat it
     // as a paste (insert, don't submit) rather than an Enter.
     const isPaste = input.length > 1 && /[\r\n]/.test(input);
+    // Newline WITHOUT submit (Claude Code parity), three routes because terminals differ:
+    // Ink parses kitty-CSI-u Shift+Enter to return+shift and \x1b\r bindings to return+meta;
+    // xterm modifyOtherKeys arrives as a raw sequence (MODIFIED_ENTER); and "\" then plain
+    // Enter works in EVERY terminal with zero setup (the trailing backslash becomes the break).
+    if (MODIFIED_ENTER.test(input)) return insertAtCaret("\n");
+    if (key.return && (key.meta || key.shift) && !isPaste) return insertAtCaret("\n");
         if (key.return && !isPaste) {
+          if (cur.current > 0 && [...ref.current][cur.current - 1] === "\\") {
+            const chars = [...ref.current];
+            chars.splice(cur.current - 1, 1, "\n"); // 1-for-1 swap: the caret index is unchanged
+            ref.current = chars.join("");
+            return onChange(ref.current);
+          }
           const expanded = expandPlaceholders(ref.current, pastedContents);
           onCommitPastes?.(); // a submit consumes all staged pastes (ChatApp clears map + counter)
           return onSubmit(expanded);
@@ -229,6 +286,16 @@ export function TextInput(props: {
 
       const cps = [...value];
       const visibleCols = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 9999;
+      // Click-to-caret: ChatApp forwards a pointer press in the input area as a (dRow, dCol) delta
+      // from the hardware caret's screen cell; the wrap geometry turns it into a codepoint index.
+      // No dep array: re-registering each render keeps the handler on the current width/value refs.
+      useEffect(() => {
+        props.registerCaretClick?.((dRow, dCol) => {
+          cur.current = caretIndexForClick(ref.current, cur.current, visibleCols, dRow, dCol);
+          rerender();
+        });
+        return () => props.registerCaretClick?.(null);
+      });
       const i = Math.min(cur.current, cps.length);
       const bullet = "\u2022";
       // shownChar maps a printable char to a bullet when mask is set, but PRESERVES a "\n" so a masked

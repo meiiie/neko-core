@@ -8,17 +8,22 @@ Neko has layered safety for the gated tools:
 3. **Catastrophic-command seatbelt** — `bash` refuses `rm -rf /`, `mkfs`, fork bombs, `format c:`,
    `> /dev/sd*`, etc. (unless `allow_dangerous_bash: true`).
 4. **Adversarial check** (opt-in) — a model pass vets auto-approved mutating actions.
-5. **OS sandbox for bash** (opt-in) — described below.
+5. **OS sandbox for bash** (ON by default) — described below.
 
-## Bash OS sandbox (opt-in)
+## Bash OS sandbox (ON by default)
 
-Like Claude Code / Codex CLI, when enabled Neko runs `bash` under an OS sandbox: the filesystem is
+Like Claude Code / Codex CLI, Neko runs `bash` under an OS sandbox: the filesystem is
 **read-only except the workspace** (+ `/tmp`), and network egress is blocked by default.
+Default ON since 2026-07-22 (owner decision): machines with a primitive confine bash out of the
+box; machines without one fall back to the seatbelt + gate unchanged (doctor shows which).
 
 ```json
-// ~/.neko-core/config.json (or ./neko.json)
-{ "sandbox": true, "sandbox_network": false }
+// ~/.neko-core/config.json (or ./neko.json) - to opt OUT or open egress:
+{ "sandbox": false }
+{ "sandbox": true, "sandbox_network": true, "sandbox_domains": ["github.com", "*.npmjs.org"] }
 ```
+
+(Env rollback: `NEKO_SANDBOX=0`.)
 
 | OS | Primitive | Status |
 |----|-----------|--------|

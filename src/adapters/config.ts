@@ -66,6 +66,12 @@ export const DEFAULTS: Record<string, any> = {
   offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
   codex_keepalive: 15, // GPT-5.6 App Server idle minutes; 0 keeps it alive until logout/exit
   approval: "prompt", // prompt | auto (--yolo flips gated tools to auto)
+  // Bash OS sandbox ON by default (owner decision, 2026-07-22): machines with a primitive
+  // (bwrap / Seatbelt / srt) confine bash out of the box; "none" machines fall back to the
+  // seatbelt + gate unchanged. Opt out: "sandbox": false or NEKO_SANDBOX=0.
+  sandbox: true,
+  sandbox_network: false, // egress blocked inside the sandbox by default
+  sandbox_domains: [], // srt (Windows) allowlist used when sandbox_network is true (no allow-all in srt)
   effort_ceiling: "high", // highest reasoning_effort the endpoint accepts (OpenAI standard caps at high); a profile can raise it
   adaptive_effort: false, // experimental lagged proxy; keep full effort unless a workload-specific eval proves it safe
   image_long_edge: 1568, // conservative cross-provider vision input; high-resolution profiles may raise it

@@ -52,6 +52,68 @@ test("a multi-line paste inserts without submitting early", async () => {
   c.unmount();
 });
 
+test("modified Enter inserts a newline instead of submitting (CSI-u shift, modifyOtherKeys, \\x1b\\r meta)", async () => {
+  let submitted: string | null = null;
+  let last = "";
+  function H() {
+    const [v, setV] = useState("");
+    last = v;
+    return <TextInput value={v} onChange={setV} onSubmit={(x) => (submitted = x)} {...usePasteProps()} />;
+  }
+  const c = render(<H />);
+  c.stdin.write("a");
+  await tick();
+  c.stdin.write("\x1b[13;2u"); // Shift+Enter, kitty CSI-u (Ink parses it to return+shift)
+  await tick();
+  c.stdin.write("\x1b[27;5;13~"); // Ctrl+Enter, xterm modifyOtherKeys (raw sequence route)
+  await tick();
+  c.stdin.write("\x1b\r"); // \x1b\r terminal-setup-style binding (return+meta)
+  await tick();
+  c.stdin.write("b");
+  await tick();
+  expect(submitted).toBeNull();
+  expect(last).toBe("a\n\n\nb");
+  c.unmount();
+});
+
+test("backslash + Enter continues the line in ANY terminal (no special sequence needed)", async () => {
+  let submitted: string | null = null;
+  let last = "";
+  function H() {
+    const [v, setV] = useState("");
+    last = v;
+    return <TextInput value={v} onChange={setV} onSubmit={(x) => (submitted = x)} {...usePasteProps()} />;
+  }
+  const c = render(<H />);
+  c.stdin.write("line1\\");
+  await tick();
+  c.stdin.write("\r"); // trailing backslash -> newline, no submit
+  await tick();
+  c.stdin.write("line2");
+  await tick();
+  expect(submitted).toBeNull();
+  expect(last).toBe("line1\nline2");
+  c.stdin.write("\r"); // plain Enter still submits
+  await tick();
+  expect(String(submitted)).toBe("line1\nline2");
+  c.unmount();
+});
+
+test("caretIndexForClick maps screen deltas to codepoint indexes on the wrap geometry", async () => {
+  const { caretIndexForClick } = await import("../src/ui/text-input.tsx");
+  // Single line, caret at end of "hello" (index 5): click 3 cells left -> index 2.
+  expect(caretIndexForClick("hello", 5, 80, 0, -3)).toBe(2);
+  // Click far left clamps to the line start; far right clamps to the end.
+  expect(caretIndexForClick("hello", 3, 80, 0, -99)).toBe(0);
+  expect(caretIndexForClick("hello", 3, 80, 0, 99)).toBe(5);
+  // Multiline: caret at end of "bb" (index 5, line 1); click one row up, same column -> "aa" line.
+  expect(caretIndexForClick("aa\nbb", 5, 80, -1, 0)).toBe(2);
+  // ...and one row down from line 0 lands on line 1.
+  expect(caretIndexForClick("aa\nbb", 0, 80, 1, 0)).toBe(3);
+  // Row deltas clamp to the first/last line.
+  expect(caretIndexForClick("aa\nbb", 0, 80, 99, 99)).toBe(5);
+});
+
 test("isEscapeResidue: single sequences AND concatenated bursts; never real text", async () => {
   const { isEscapeResidue } = await import("../src/ui/text-input.tsx");
   expect(isEscapeResidue("[<64;97;33M")).toBe(true);                       // one mouse report, ESC stripped

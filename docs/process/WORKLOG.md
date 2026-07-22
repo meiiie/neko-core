@@ -3,6 +3,25 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-22 - Sandbox on by default + multi-line Enter + click-to-caret
+
+- **Sandbox default flipped ON** (owner decision): `DEFAULTS.sandbox = true`, network still off,
+  new `sandbox_domains: []`. Machines without a primitive keep the seatbelt + gate unchanged
+  (doctor names the state); rollback is `"sandbox": false` / `NEKO_SANDBOX=0`. SANDBOX.md updated.
+- **Newline without submit** (Claude Code parity), three terminal-dependent routes in TextInput:
+  Ink 7 parses kitty-CSI-u Shift+Enter to `return+shift` and `\x1b\r` bindings to `return+meta`
+  (verified with an Ink keypress probe - the CSI-u parse was a finding, not an assumption); raw
+  xterm modifyOtherKeys sequences match MODIFIED_ENTER before the escape-residue guard eats them;
+  and trailing `\` + plain Enter swaps the backslash for the break with zero terminal setup.
+- **Click-to-caret** in the input box: the FrameDiffer already knows the hardware cursor's screen
+  cell (it places it from CARET_SENTINEL), so the pointer handler forwards only the click's
+  (dRow, dCol) delta and TextInput owns the geometry -> index math (`caretIndexForClick`, built on
+  the same wrapInput the renderer uses - exact on the wrap path, clamped-approximate on Ink-wrapped
+  overlong \n lines). A MAX_INPUT_LINES window keeps chrome-row clicks from teleporting the caret.
+  Clicks below the transcript no longer arm a selection anchor.
+- Gates: typecheck clean, 768/768 tests (newline routes, caretIndexForClick geometry, sandbox
+  defaults), policy PASS, binary build + UI/input probes OK, doctor shows `bash_sandbox: on (srt)`.
+
 ## 2026-07-22 - Windows bash sandbox via Anthropic sandbox-runtime (srt)
 
 - Closed the Windows gap in the bash OS-sandbox ladder. Prior state: `detectSandbox()` returned

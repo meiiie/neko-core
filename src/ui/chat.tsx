@@ -18,7 +18,7 @@ import { clampFps, detectRefreshRate, resolveUiFps } from "../adapters/display.t
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TranscriptViewer } from "./transcript-viewer.tsx";
-import { isEscapeResidue, TextInput } from "./text-input.tsx";
+import { isEscapeResidue, MAX_INPUT_LINES, TextInput } from "./text-input.tsx";
 import { openExternalEditor } from "./external-editor.ts";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { probeSyncOutput, syncOutputDecision, wrapStdoutForSync } from "./sync-stdout.ts";
@@ -212,6 +212,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // paste by writing into this map + bumping the counter; submit consumes the map. See
     // shared/paste-collapse.ts for the pure helpers.
     const pastedContentsRef = useRef(new Map<number, string>());
+    // Click-to-caret bridge: TextInput registers its handler here; the fullscreen pointer handler
+    // calls it with the click's delta from the hardware caret cell (see the press branch).
+    const caretClickRef = useRef<((dRow: number, dCol: number) => void) | null>(null);
     const pastedImagesRef = useRef(new Map<number, string>()); // [Image #N] id -> data: URL (shares the paste id counter)
     const nextPasteIdRef = useRef(1);
     // Reset the shared id counter only when NOTHING is staged - a still-staged image (its turn is
@@ -2262,6 +2265,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (!search && ptr.kind === "press" && ptr.left) {
           clearSelection();                                                       // a fresh drag drops any old selection
           if (pillHit(ptr.x, ptr.y)) return rowScroll.toBottom();                 // the pill is a click target
+          if (ptr.y > viewH) {
+            // Click in the input area: move the caret to the clicked cell (Claude Code parity).
+            // The differ knows the hardware cursor's screen cell; TextInput owns the layout math,
+            // so only the (dRow, dCol) delta crosses the boundary. The MAX_INPUT_LINES window
+            // keeps stray clicks on the chrome rows from teleporting the caret.
+            const cp = frameDiffer?.caretScreenPos();
+            if (cp && caretClickRef.current && Math.abs(ptr.y - cp.row) < MAX_INPUT_LINES) {
+              caretClickRef.current(ptr.y - cp.row, ptr.x - cp.col);
+            }
+            selAnchor.current = null; // clicks below the transcript never start a selection
+            return;
+          }
           selAnchor.current = ptr.y >= 1 && ptr.y <= viewH ? { x: ptr.x, row: contentRowAt(ptr.y) } : null; // begin in the band only
           return;
         }
@@ -2539,6 +2554,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                   nextPasteId={nextPasteIdRef}
                   onCommitPastes={commitPastes}
                   onPasteImage={pasteImage}
+                  registerCaretClick={(fn) => { caretClickRef.current = fn; }}
                   caretGlyph={cfg.caretGlyph}
                   placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
                 />

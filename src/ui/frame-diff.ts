@@ -219,6 +219,12 @@ export class FrameDiffer {
     this.caretActive = found;
     if (!found) this.cursorPos = null;
   }
+  /** Screen cell (1-based row/col) of the hardware caret, if one is on screen. Click-to-caret uses
+   * this as the anchor: the pointer handler passes TextInput the click's DELTA from this cell and
+   * the layout math stays inside TextInput (the only code that knows the wrap geometry). */
+  caretScreenPos(): { row: number; col: number } | null {
+    return this.caretActive ? this.cursorPos : null;
+  }
   /** Trailing bytes that place (and show) the real cursor at the caret, or hide it when inactive. Appended
    * after every frame the differ writes so the cursor lands on the input no matter what else repainted. */
   private cursorSuffix(): string {
