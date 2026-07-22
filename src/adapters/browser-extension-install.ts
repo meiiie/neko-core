@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -38,29 +38,58 @@ export interface BrowserExtensionSetup {
   url?: string;
 }
 
-/** Honest setup copy: having the files is not the same as Chrome installing the extension. */
-export function browserExtensionSetupMessage(setup: BrowserExtensionSetup): string {
+/** Honest setup copy: having the files is not the same as Chrome installing the extension.
+ * `opts.pathOnClipboard` = the caller put the unpacked folder path on the clipboard (paste it into
+ * the Load-unpacked dialog). `opts.profilePicker` = Chrome has multiple profiles, so a "Who's using
+ * Chrome?" picker is likely - tell the user to pick their profile FIRST and do the steps there. */
+export function browserExtensionSetupMessage(
+  setup: BrowserExtensionSetup,
+  opts: { pathOnClipboard?: boolean; profilePicker?: boolean } = {},
+): string {
   if (setup.mode === "store") {
     return [
       setup.opened
         ? "Neko Browser Extension opened in the Chrome Web Store."
         : "Neko could not open Chrome automatically.",
-      "Opening the listing does NOT prove the extension is installed. If needed, choose 'Add to Chrome' once.",
+      "Opening the listing does NOT prove the extension is installed. Choose 'Add to Chrome' once.",
       setup.url ? `listing: ${setup.url}` : "",
       "Then open the extension on the target tab and choose 'Attach this tab to Neko'.",
-      "Neko reports ready only after the extension connects and a tab is attached.",
+      "Neko continues automatically once the extension connects and a tab is attached.",
     ].filter(Boolean).join("\n");
   }
   return [
-    "Neko Browser Extension files are ready locally. This does NOT mean Chrome installed the extension.",
-    `folder: ${setup.path}`,
-    "The search box on chrome://extensions only filters extensions already installed.",
-    "1. Turn on Developer mode.",
-    "2. Click 'Load unpacked' in the top left, then select the folder above.",
-    "3. Open the extension on the target tab and choose 'Attach this tab to Neko'.",
-    "Neko reports ready only after the extension connects and a tab is attached.",
+    "Neko Browser needs a ONE-TIME manual install in Chrome. Chrome does not let any app install an",
+    "extension for you - the steps below are yours to do, and choosing a profile alone does nothing.",
+    opts.profilePicker
+      ? "If Chrome shows \"Who's using Chrome?\", pick the profile you want Neko to control, then do ALL of this IN THAT profile:"
+      : "In Chrome:",
+    "  1. Open  chrome://extensions",
+    `  2. Turn ON 'Developer mode' (top-right toggle).`,
+    `  3. Click 'Load unpacked' (top-left) and select this folder:`,
+    `       ${setup.path}${opts.pathOnClipboard ? "   (already on your clipboard - paste it in the folder dialog)" : ""}`,
+    "  4. Open the Neko extension on the tab you want, and choose 'Attach this tab to Neko'.",
+    "Neko is watching in the background and continues automatically once the extension connects and a",
+    "tab is attached. (The chrome://extensions search box only FILTERS already-installed extensions.)",
     setup.opened ? "" : "No supported Chromium browser was detected; open chrome://extensions manually.",
   ].filter(Boolean).join("\n");
+}
+
+/** Best-effort: does the user's Chrome have more than one profile? Then launching Chrome likely
+ * shows the "Who's using Chrome?" picker, so the setup copy tells the user to choose a profile
+ * FIRST and do the manual steps in it. Reads Chrome's Local State; false when it can't tell. */
+export function chromeHasMultipleProfiles(): boolean {
+  try {
+    const path = process.platform === "win32"
+      ? join(process.env.LOCALAPPDATA ?? "", "Google", "Chrome", "User Data", "Local State")
+      : process.platform === "darwin"
+        ? join(homeDir(), "Library", "Application Support", "Google", "Chrome", "Local State")
+        : join(homeDir(), ".config", "google-chrome", "Local State");
+    if (!existsSync(path)) return false;
+    const info = JSON.parse(readFileSync(path, "utf8"))?.profile?.info_cache;
+    return !!info && typeof info === "object" && Object.keys(info).length > 1;
+  } catch {
+    return false;
+  }
 }
 
 function extensionId(key: string): string {

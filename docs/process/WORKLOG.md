@@ -3,6 +3,28 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-22 - Browser-connect UX pass (caret, Enter footgun, manual-install clarity)
+
+Three fixes to the "Connect Neko Browser" flow, found while the owner tested it by hand on a
+multi-profile Chrome:
+- **Stray `|` caret over the picker** (image #2/#3): the FrameDiffer owns cursor visibility once it
+  has shown the caret, but cursorSuffix() returned "" (not a hide) on a no-caret frame, so the bar
+  lingered over any overlay. Now emits `?25l` when no caret is active.
+- **Enter looped setup**: the overlay says "no Enter needed - auto-detects", but its default item was
+  "Open Chrome setup again", so the Enter its own footer advertises relaunched Chrome + reprinted the
+  guide. Default is now a safe "Keep waiting" that dismisses the modal but keeps the background poll
+  running (advances to step 2 / runs the saved request on attach).
+- **"Chose a profile, nothing happened"**: the real cause is that Chrome forbids programmatic
+  extension install - Load-unpacked is inherently manual, and a multi-profile Chrome shows a "Who's
+  using Chrome?" picker first. The setup copy is rewritten as a clear numbered manual-install guide
+  that (a) names the profile picker and says to do the steps IN the chosen profile,
+  (b) puts the unpacked folder path on the clipboard (OSC 52) to paste into the Load-unpacked dialog,
+  (c) sets the expectation that picking a profile alone does nothing. New `chromeHasMultipleProfiles()`
+  reads Chrome Local State to decide whether to show the picker note. Field-checked on the owner's
+  8-profile Chrome (picker note shown, path copied).
+
+780/780 tests, typecheck clean.
+
 ## 2026-07-22 - Close the auto-approve destruction gap + wren.wtf audit
 
 - Audited neko against the wren.wtf "Stop Using OpenCode" critique. Everything it raises is either

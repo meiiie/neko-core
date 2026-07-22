@@ -17,10 +17,21 @@ test("browser onboarding distinguishes files, connection, and an attached tab", 
   expect(browserBridgeStage(capability, { online: true, extensionConnected: true, attached: { tabId: 7 } })).toBe("tab_attached");
 
   const unpacked = browserExtensionSetupMessage({ mode: "unpacked", opened: true, path: "C:\\Neko\\browser-extension" });
-  expect(unpacked).toContain("does NOT mean Chrome installed");
-  expect(unpacked).toContain("only filters extensions already installed");
+  expect(unpacked).toContain("Chrome does not let any app install"); // sets the expectation: manual
+  expect(unpacked).toContain("Developer mode");
   expect(unpacked).toContain("Load unpacked");
   expect(unpacked).toContain("C:\\Neko\\browser-extension");
+  expect(unpacked).not.toContain("Who's using Chrome?"); // no picker note unless asked
+  expect(unpacked).not.toContain("clipboard");
+
+  // Multi-profile + clipboard: warn about the picker and point at the pasted path.
+  const guided = browserExtensionSetupMessage(
+    { mode: "unpacked", opened: true, path: "C:\\Neko\\x" },
+    { pathOnClipboard: true, profilePicker: true },
+  );
+  expect(guided).toContain("Who's using Chrome?");
+  expect(guided).toContain("IN THAT profile");
+  expect(guided).toContain("already on your clipboard");
 });
 
 test("browser CLI status never mistakes a local folder for an installed extension", () => {

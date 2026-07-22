@@ -60,7 +60,7 @@ import {
   startManagedBrowserBridge,
   type BrowserBridgeStage,
 } from "../adapters/browser-bridge.ts";
-import { browserExtensionSetupMessage, openBrowserExtensionSetup } from "../adapters/browser-extension-install.ts";
+import { browserExtensionSetupMessage, chromeHasMultipleProfiles, openBrowserExtensionSetup } from "../adapters/browser-extension-install.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { VERSION } from "../shared/version.ts";
@@ -2665,7 +2665,11 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
       browserBridge = startManagedBrowserBridge({ capability, extensionIds: cfg.browserExtensionIds });
     }
     const setup = await openBrowserExtensionSetup({ storeId: cfg.browserExtensionStoreId });
-    return browserExtensionSetupMessage(setup);
+    // Put the unpacked folder path on the clipboard so the user can paste it into Chrome's
+    // Load-unpacked folder dialog, and warn about the profile picker when Chrome is multi-profile.
+    // (OSC 52 via process.stdout - the differ passes OSC writes through untouched.)
+    const pathOnClipboard = setup.mode === "unpacked" && !!setup.path && copyToClipboard(setup.path);
+    return browserExtensionSetupMessage(setup, { pathOnClipboard, profilePicker: chromeHasMultipleProfiles() });
   };
   // Ink's own synchronized clear (app.clear) threaded in via a holder - the app instance doesn't exist
   // until render() returns, so ChatApp calls the holder, which we point at app.clear right after.
