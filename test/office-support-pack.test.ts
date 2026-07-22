@@ -52,6 +52,31 @@ describe("Office Support Pack", () => {
     expect(removeOfficeSupportPack(home)).toBe(false);
   });
 
+  test("a null version probe does NOT fail the install (checksum already proves identity)", async () => {
+    const home = mkdtempSync(join(tmpdir(), "neko-office-support-"));
+    homes.push(home);
+    const binary = Buffer.from("synthetic office binary");
+    const digest = createHash("sha256").update(binary).digest("hex");
+    // The binary exposes no parseable --version (probe returns null) - the real "version unknown" case.
+    const installed = await installOfficeSupportPack({
+      home, platform: "win32", arch: "x64", fetchImpl: fixtureFetch(binary, digest),
+      verifyBinary: () => {}, versionOf: () => null, verifyProtocol: () => {},
+    });
+    expect(installed.officeVersion).toBe("1.0.136"); // recorded from the checksum-verified release tag
+    expect(existsSync(installed.path)).toBe(true);
+  });
+
+  test("a NON-null version that disagrees with the release still fails", async () => {
+    const home = mkdtempSync(join(tmpdir(), "neko-office-support-"));
+    homes.push(home);
+    const binary = Buffer.from("synthetic office binary");
+    const digest = createHash("sha256").update(binary).digest("hex");
+    await expect(installOfficeSupportPack({
+      home, platform: "win32", arch: "x64", fetchImpl: fixtureFetch(binary, digest),
+      verifyBinary: () => {}, versionOf: () => "9.9.9", verifyProtocol: () => {},
+    })).rejects.toThrow("does not match release");
+  });
+
   test("checksum failure preserves the previous working pack", async () => {
     const home = mkdtempSync(join(tmpdir(), "neko-office-support-"));
     homes.push(home);

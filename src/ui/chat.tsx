@@ -140,6 +140,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const relayHostIdRef = useRef(newSessionId()); // one opaque remote-control slot per running TUI
   const browserRequestBypassRef = useRef<string | null>(null);
   const officeRequestBypassRef = useRef<{ text: string; withoutInstall: boolean } | null>(null);
+  // Once the Office pack install has FAILED this session, stop re-offering it on every matching
+  // prompt (the download+fail loop the owner hit). Matching prompts then proceed WITHOUT the pack;
+  // an explicit /support office install clears this and retries.
+  const officeInstallFailedRef = useRef(false);
   const browserSetupTaskRef = useRef<string | undefined>(undefined);
   const browserAttachSeqRef = useRef(0);
   const browserAttachFlowRef = useRef<{ id: number; stage?: BrowserBridgeStage; timer?: ReturnType<typeof setInterval> } | null>(null);
@@ -1523,13 +1527,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           .then(() => {
             busyRef.current = false;
             setBusy(false);
+            officeInstallFailedRef.current = false; // a good install clears the "don't re-offer" latch
             addLine("info", "Office support is ready - continuing your saved request.");
             runOfficeRequest(text);
           })
           .catch((error) => {
             busyRef.current = false;
             setBusy(false);
-            keepRequest(`Office Support Pack failed: ${error instanceof Error ? error.message : error}. Your request is still in the input.`);
+            officeInstallFailedRef.current = true; // don't re-offer on the next matching prompt (no loop)
+            keepRequest(`Office Support Pack failed: ${error instanceof Error ? error.message : error}. Continuing without it - submit again to proceed, or retry with /support office install.`);
             const next = queueRef.current.shift();
             setQueued(queueRef.current.length);
             if (next !== undefined) void handle(next).catch((nextError) => addLine("error", nextError instanceof Error ? nextError.message : String(nextError)));
@@ -1862,6 +1868,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     else if (!voiceTurnRef.current && matchesSkill("office-artifacts", loopGoal ?? text)) {
       const status = officeSupportStatus();
       if (status.state !== "ready") {
+        // After a failed install this session, don't nag - proceed WITHOUT the pack (the model uses
+        // a local fallback or reports the exact limitation). /support office install retries.
+        if (officeInstallFailedRef.current) return runOfficeRequest(text, true);
         offerOfficeSupport(text, status);
         return;
       }
