@@ -247,9 +247,13 @@ export class FrameDiffer {
   /** Trailing bytes that place (and show) the real cursor at the caret, or hide it when inactive. Appended
    * after every frame the differ writes so the cursor lands on the input no matter what else repainted. */
   private cursorSuffix(): string {
-    // Only when a caret is actually on screen AND we're in fullscreen (absolute addressing). No caret ->
-    // "" (Ink already keeps the cursor hidden); inline -> "" (relative frame, absolute CUP would be wrong).
-    if (!this.band || !this.caretActive || !this.cursorPos) return "";
+    // Fullscreen (band) only - inline uses relative frames where an absolute CUP would be wrong.
+    if (!this.band) return "";
+    // No active caret (an overlay / picker / approval box owns the screen): HIDE the hardware
+    // cursor. The differ OWNS cursor visibility once it has shown the caret at an input frame, so
+    // Ink does not re-hide it on the next frame - we must, or the blinking bar lingers in the
+    // corner over the menu (the stray `|` under the browser-setup picker). Idempotent.
+    if (!this.caretActive || !this.cursorPos) return `${ESC}?25l`;
     return `${ESC}?25h` + caretShape() + `${ESC}${this.cursorPos.row};${this.cursorPos.col}H`;
   }
 

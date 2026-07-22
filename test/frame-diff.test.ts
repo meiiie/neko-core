@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { detectShift, FrameDiffer, parseInkPayload } from "../src/ui/frame-diff.ts";
+import { CARET_SENTINEL, detectShift, FrameDiffer, parseInkPayload } from "../src/ui/frame-diff.ts";
 
 // The hardware-scroll MECHANISM stays exercised here even though its default is platform-gated
 // (off on Windows - ConPTY displaces region scrolls at live cadence; see chat.tsx differ note).
@@ -16,6 +16,9 @@ class Screen {
   write(s: string): void {
     let i = 0;
     while (i < s.length) {
+      // Private-mode set/reset (cursor show/hide `?25h`/`?25l`, etc.): no effect on grid content.
+      const priv = /^\x1b\[\?[0-9;]*[a-zA-Z]/.exec(s.slice(i));
+      if (priv) { i += priv[0].length; continue; }
       const csi = /^\x1b\[([0-9;]*)([A-Za-z])/.exec(s.slice(i));
       if (csi) {
         const [seq, params, fin] = [csi[0], csi[1], csi[2]];
@@ -74,6 +77,24 @@ test("fullscreen full repaint erases a stale trailing spare row", () => {
   screen.write("STALE STATUS"); // terminal resize/reflow can leave content in the reserved last row
   screen.write(d.process(frame.join("\n"))!);
   expect(screen.lines(20)[19]).toBe("");
+});
+
+test("caret hides when an overlay owns the screen (no lingering bar cursor over a picker)", () => {
+  const d = new FrameDiffer();
+  // Accumulate BOTH the writer path (seed/imperative) and the returned diff bytes.
+  const all: string[] = [];
+  d.setWriter((s) => all.push(s));
+  d.setBand({ top: 1, height: 6 });
+  // Input frame: the caret sentinel is present -> the hardware cursor is SHOWN + positioned.
+  const r1 = d.process([`> hi${CARET_SENTINEL}`, "", "", "", "", ""].join("\n"));
+  if (r1) all.push(r1);
+  expect(all.join("")).toContain("\x1b[?25h"); // show cursor
+  // Overlay frame: no sentinel (a picker replaced the input row) -> the cursor must be HIDDEN,
+  // not left blinking in the corner (the stray `|` under the browser-setup picker).
+  const r2 = d.process(payload(6, ["  Connect Neko Browser", "> Open Chrome setup again", "  Continue", "", "", ""]));
+  const overlayBytes = (r2 ?? "") + all.slice(all.length).join("");
+  expect(overlayBytes).toContain("\x1b[?25l");        // hide cursor
+  expect(overlayBytes).not.toContain("\x1b[?25h");    // ...and NOT re-show it
 });
 
 test("resize wipe composes the new frame and never replays the stale pre-wipe frame", () => {
