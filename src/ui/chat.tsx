@@ -1398,14 +1398,26 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           : `Complete the one-time Chrome install step described above. Neko detects the extension automatically; no Enter or /browser status is needed.${text ? " Your request is saved." : ""}`,
         search: false,
         showCount: false,
+        // The DEFAULT (highlighted) item must be safe: the body says "no Enter is needed", and the
+        // SelectList footer says "Enter confirm" - so Enter has to be the passive keep-waiting choice,
+        // NOT "reopen setup" (which used to relaunch Chrome + reprint instructions on every Enter, a
+        // loop that read as "confirm completion" but did the opposite). "Keep waiting" closes the
+        // guide but LEAVES the background poll running, so the flow still auto-advances / finishes.
         items: [
+          { id: "wait", label: "Keep waiting - Neko attaches automatically", detail: connected ? "close this guide; it re-appears when the tab attaches" : "close this guide; Neko keeps detecting the extension in the background" },
           { id: "setup", label: "Open Chrome setup again", detail: "reopen the install surface and exact instructions" },
           text
             ? { id: "without", label: "Continue without browser control", detail: "use web search/fetch or other available tools" }
-            : { id: "later", label: "Finish later", detail: "close this guide; /browser resumes it at any time" },
+            : { id: "later", label: "Finish later", detail: "stop detecting; /browser resumes it at any time" },
         ],
         onCancel: pause,
         onSelect: (choice) => {
+          if (choice.id === "wait") {
+            // Dismiss the modal but KEEP the flow polling - the user can type meanwhile, and the
+            // guide re-appears at the next stage (step 2) or runs the saved request on attach.
+            setOverlay(null);
+            return;
+          }
           if (choice.id === "setup") {
             if (!stopBrowserAttachFlow(id)) return;
             setOverlay(null);
