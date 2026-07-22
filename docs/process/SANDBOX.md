@@ -25,6 +25,16 @@ box; machines without one fall back to the seatbelt + gate unchanged (doctor sho
 
 (Env rollback: `NEKO_SANDBOX=0`.)
 
+### Sandboxed bash runs without a prompt
+
+When the sandbox is **live** (a primitive is present and, for srt, provisioned), gated `bash`
+auto-approves in `default` and `accept-edits` mode — the OS sandbox is the containment, so a
+per-command prompt adds no safety (this is Claude Code's sandbox rationale). This is a *named*
+state, surfaced by `neko doctor` (`bash auto-approved…`) and `neko policy`; it is NOT `--yolo`
+(writes still prompt, `plan` still denies everything, and the catastrophic-command seatbelt still
+applies). Keying is on LIVE confinement, never config intent: `"sandbox": true` on a machine with
+no primitive still prompts. Opt back into prompting with `"sandbox_auto_approve": false`.
+
 | OS | Primitive | Status |
 |----|-----------|--------|
 | Linux | **bubblewrap** (`bwrap`) — unprivileged namespaces | full fs + network confinement |

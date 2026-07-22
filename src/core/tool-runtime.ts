@@ -17,7 +17,7 @@ import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
 import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
-import { wrapBash } from "./sandbox.ts";
+import { sandboxActive, wrapBash } from "./sandbox.ts";
 import { effectivePermission, GATED, resolveTool, toolSchemas } from "./tools.ts";
 import { residentUiaHost } from "./windows-uia-host.ts";
 import { debug, messageOf } from "../shared/debug.ts";
@@ -81,6 +81,9 @@ export class ToolRegistry {
   sandboxAllowNetwork = false;
   /** srt (Windows) only: domain allowlist used when sandboxAllowNetwork is true. */
   sandboxDomains: string[] = [];
+  /** When true (default) AND the sandbox is actually live, bash runs without an approval prompt
+   * in default/accept-edits mode - the sandbox is the containment (Claude Code's rationale). */
+  sandboxAutoApprove = true;
   /** When true, read_file returns image files as vision content (needs a vision-capable model). */
   vision = false;
   /** When true, expose NO tools to the model — for a pure perception/vision pass (image Q&A), since
@@ -380,7 +383,10 @@ export class ToolRegistry {
       return `Error: ${(error as Error).message}`;
     }
 
-    const decision = decide(this.mode, spec, args);
+    // Sandboxed-bash auto-approval keys off LIVE confinement (primitive present + provisioned),
+    // never off config intent alone - see decide() for the policy rationale.
+    const sandboxedBash = spec.name === "bash" && this.sandboxBash && this.sandboxAutoApprove && sandboxActive();
+    const decision = decide(this.mode, spec, args, { sandboxedBash });
     if (decision === "deny") {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
     }

@@ -3,6 +3,35 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-22 - Mouse parity (approval + picker), sandboxed-bash auto-approve, kitty protocol, setup terminal
+
+- **Sandboxed bash auto-approves** (Claude Code's sandbox rationale - the containment replaces the
+  prompt). `decide()` gains a `sandboxedBash` opt: bash allowed in default/accept-edits; plan still
+  denies, writes still prompt, the catastrophic seatbelt still runs. Keyed on LIVE confinement via
+  new `sandboxActive()` (primitive present AND, for srt, provisioned) - never on config intent, so
+  "sandbox": true on a none-machine still prompts. New `sandbox_auto_approve` config (default true);
+  doctor + policy name the "gated-but-sandboxed" state. Two approval-UI tests now pin NEKO_SANDBOX=0
+  so they stay deterministic across machines with/without a primitive.
+- **Mouse parity for the approval box and every picker.** Generalized the jump pill's hover+hit-box
+  into a frame-level registry: components mark clickable zones with a zero-width HIT_SENTINEL, the
+  FrameDiffer strips the markers from each composed frame and records their screen cells into
+  ui/hit-targets.ts, and pointer handlers hit-test against the LAST PAINTED frame (exact regardless
+  of layout - coordinates come from what's on screen, not re-derived geometry). ApprovalBox options
+  (y/a/n, or y/n for plans) light on hover and settle on click; SelectList rows hover-highlight,
+  click-to-select, and wheel-scroll. Stale zones can't linger: setHitTargets runs every frame.
+- **Kitty keyboard protocol** pushed on entering the alt screen (`CSI > 1u`), popped on every leave
+  path (probe-verified that Ink 7 parses the resulting CSI-u forms: Esc->escape, Alt+C->meta c,
+  Ctrl+A->ctrl a, Shift+Tab->shift+tab, Shift+Enter->return+shift). Supporting terminals (kitty,
+  WezTerm, foot, recent VS Code) now deliver Shift+Enter distinct from Enter with zero setup;
+  non-supporting terminals ignore both sequences and an empty-stack pop is a no-op.
+- **`neko setup terminal`** writes a Shift+Enter -> ESC+CR sendInput keybinding into Windows
+  Terminal's settings.json (the terminal Claude Code's /terminal-setup never covers). Parse-or-
+  refuse: string-aware JSONC strip, JSON.parse gate, .neko-bak backup before every write,
+  idempotent, comment-loss warned. Field-verified: WptTerm accepted and normalized the binding to
+  its id-based form, input bytes ESC+CR (27 13), valid JSON, shift+enter live.
+- Gates: typecheck clean, 778/778 tests (hit-targets, sandboxed-bash policy, kitty push/pop, JSONC
+  strip + patch idempotency/refusal), policy PASS, doctor shows the auto-approve state.
+
 ## 2026-07-22 - Sandbox on by default + multi-line Enter + click-to-caret
 
 - **Sandbox default flipped ON** (owner decision): `DEFAULTS.sandbox = true`, network still off,

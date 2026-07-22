@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { canFullscreen, CLEAR_HOME, ENTER_ALT, HIDE_CURSOR, installAltScreenGuard, LEAVE_ALT, SHOW_CURSOR, enterAltScreen, leaveAltScreen } from "../src/ui/altscreen.ts";
+import { canFullscreen, CLEAR_HOME, ENTER_ALT, HIDE_CURSOR, installAltScreenGuard, KITTY_POP, KITTY_PUSH, LEAVE_ALT, SHOW_CURSOR, enterAltScreen, leaveAltScreen } from "../src/ui/altscreen.ts";
 
 test("canFullscreen: TTY with room only", () => {
   expect(canFullscreen({ isTTY: true, rows: 40, columns: 120 } as any)).toBe(true);
@@ -13,13 +13,18 @@ function fakeOut() {
   return { out: { write: (s: any) => { writes.push(String(s)); return true; } } as any, writes };
 }
 
-test("enter/leave alt-screen write the right sequences", () => {
+test("enter/leave alt-screen write the right sequences, incl. kitty keyboard push/pop", () => {
   const a = fakeOut();
   enterAltScreen(a.out);
-  expect(a.writes.join("")).toBe(ENTER_ALT + CLEAR_HOME + HIDE_CURSOR);
+  expect(a.writes.join("")).toBe(ENTER_ALT + CLEAR_HOME + HIDE_CURSOR + KITTY_PUSH);
   const b = fakeOut();
   leaveAltScreen(b.out);
-  expect(b.writes.join("")).toBe(SHOW_CURSOR + LEAVE_ALT);
+  expect(b.writes.join("")).toBe(KITTY_POP + SHOW_CURSOR + LEAVE_ALT);
+});
+
+test("kitty push asks for the disambiguate flag; pop restores - push before pop is balanced", () => {
+  expect(KITTY_PUSH).toBe("\x1b[>1u");
+  expect(KITTY_POP).toBe("\x1b[<u");
 });
 
 test("installAltScreenGuard enters and its disposer leaves exactly once (idempotent)", () => {
@@ -28,7 +33,7 @@ test("installAltScreenGuard enters and its disposer leaves exactly once (idempot
   expect(writes.join("")).toContain(ENTER_ALT);
   writes.length = 0;
   dispose();
-  expect(writes.join("")).toBe(SHOW_CURSOR + LEAVE_ALT);
+  expect(writes.join("")).toBe(KITTY_POP + SHOW_CURSOR + LEAVE_ALT);
   dispose(); // second call is a no-op
-  expect(writes.join("")).toBe(SHOW_CURSOR + LEAVE_ALT);
+  expect(writes.join("")).toBe(KITTY_POP + SHOW_CURSOR + LEAVE_ALT);
 });

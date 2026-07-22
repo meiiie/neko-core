@@ -10,7 +10,8 @@ import { Box, measureElement, render, Static, Text, useApp, useInput, useStdout 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readFileSync, rmSync } from "node:fs";
 
-import { ApprovalBox, type Approval, type ApprovalFlash } from "./approval-box.tsx";
+import { ApprovalBox, approvalOptions, type Approval, type ApprovalFlash } from "./approval-box.tsx";
+import { hitIndexAt } from "./hit-targets.ts";
 import { isInteractiveBrowserRequest, runSlashCommand, SLASH } from "./commands.ts";
 import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { loadPrefs, savePrefs } from "../adapters/prefs.ts";
@@ -223,6 +224,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [approvalFlash, setApprovalFlash] = useState<ApprovalFlash | null>(null);
+  // Pointer-hovered option zone in the approval box (index into approvalOptions; null = none).
+  const [approvalHover, setApprovalHover] = useState<number | null>(null);
+  useEffect(() => { setApprovalHover(null); }, [approval]);
   const approvalFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const approvalFlashRef = useRef<ApprovalFlash | null>(null);
   const approvalSeqRef = useRef(0);
@@ -1038,6 +1042,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // the moment the box is visible.
     if (approval) {
       if (approvalFlashRef.current || approvalFlash) return;
+      // Pointer path: the option row's hit zones come from the LAST PAINTED frame (the differ
+      // records each HIT_SENTINEL cell), so hover lights exactly what a click settles - the
+      // pill's contract, generalized. Zone order matches approvalOptions(): 0 approves, the
+      // last denies, the middle (tool box only) is "always". No differ (inline/tests) -> -1.
+      const ptr = parseLastPointer(char);
+      if (ptr) {
+        const zone = hitIndexAt(ptr.x, ptr.y);
+        setApprovalHover(zone >= 0 ? zone : null);
+        if (ptr.kind === "press" && ptr.left && zone >= 0) {
+          const opts = approvalOptions(approval.toolName);
+          settleApproval(zone === 0 ? "ok" : zone === opts.length - 1 ? "no" : "always");
+        }
+        return;
+      }
       const c = char.toLowerCase();
       let kind: ApprovalFlash["kind"] | null = null;
       if (c === "y") {
@@ -2508,7 +2526,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           }}
         />
         ) : approval ? (
-          <ApprovalBox approval={approval} flash={approvalFlash} width={contentCols} />
+          <ApprovalBox approval={approval} flash={approvalFlash} width={contentCols} hover={approvalHover} />
       ) : fullscreen && search ? (
         <Box flexDirection="column" flexShrink={0}>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>

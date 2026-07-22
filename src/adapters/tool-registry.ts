@@ -18,6 +18,7 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
   registry.sandboxBash = cfg.sandbox;
   registry.sandboxAllowNetwork = cfg.sandboxNetwork;
   registry.sandboxDomains = cfg.sandboxDomains;
+  registry.sandboxAutoApprove = cfg.sandboxAutoApprove;
   registry.searxngUrl = cfg.searxngUrl;
   registry.searchBackend = cfg.searchBackend;
   registry.searxngKeepalive = cfg.searxngKeepalive;
@@ -50,6 +51,7 @@ export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRe
   target.sandboxBash = source.sandboxBash;
   target.sandboxAllowNetwork = source.sandboxAllowNetwork;
   target.sandboxDomains = source.sandboxDomains;
+  target.sandboxAutoApprove = source.sandboxAutoApprove;
   target.vision = source.vision;
   target.noTools = source.noTools;
   target.presence = source.presence;

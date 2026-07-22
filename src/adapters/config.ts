@@ -72,6 +72,7 @@ export const DEFAULTS: Record<string, any> = {
   sandbox: true,
   sandbox_network: false, // egress blocked inside the sandbox by default
   sandbox_domains: [], // srt (Windows) allowlist used when sandbox_network is true (no allow-all in srt)
+  sandbox_auto_approve: true, // sandboxed bash skips the approval prompt (the sandbox IS the containment)
   effort_ceiling: "high", // highest reasoning_effort the endpoint accepts (OpenAI standard caps at high); a profile can raise it
   adaptive_effort: false, // experimental lagged proxy; keep full effort unless a workload-specific eval proves it safe
   image_long_edge: 1568, // conservative cross-provider vision input; high-resolution profiles may raise it
@@ -271,6 +272,7 @@ const BOOLEAN_ENV_KEYS = new Set([
   "mcp_lazy",
   "prompt_cache",
   "sandbox",
+  "sandbox_auto_approve",
   "sandbox_network",
   "verify_before_exit",
   "vision",
@@ -460,6 +462,9 @@ export class NekoConfig {
     const v = this.data.sandbox_domains;
     return Array.isArray(v) ? v.map(String) : [];
   }
+  /** When true (default) AND the sandbox is live, bash skips the approval prompt in
+   * default/accept-edits mode - the OS sandbox is the containment. `neko policy` surfaces it. */
+  get sandboxAutoApprove(): boolean { return this.data.sandbox_auto_approve !== false; }
 
   /** Self-hosted SearXNG base URL for web_search metasearch ("" = off). */
   get searxngUrl(): string { return String(this.data.searxng_url ?? ""); }

@@ -257,6 +257,7 @@ test("todo flow shows the current plan once while the next step is running", asy
 }, 30000);
 
 test("approval decision keys never leak into the prompt", async () => {
+  process.env.NEKO_SANDBOX = "0"; // bash must PROMPT here; live-sandbox auto-approve is unit-tested
   const vt = new VirtualTerminal(80, 24);
   const out = new FakeTtyOut(80, 24, vt);
   const stdin = new FakeStdin();
@@ -281,6 +282,7 @@ test("approval decision keys never leak into the prompt", async () => {
   expect(vt.text()).toContain("denied safely");
   expect(vt.lines().some((line) => /^\s*>\s*n\s*$/.test(line))).toBe(false);
   app.unmount();
+  delete process.env.NEKO_SANDBOX;
   await tick(50);
 }, 30000);
 

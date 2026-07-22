@@ -100,14 +100,27 @@ export function findSrt(): string | null {
   return (srtCached = null);
 }
 
+let srtProvisionedCached: boolean | undefined;
+
 /** Whether the one-time `srt windows-install` provisioning (the srt-sandbox account) has run.
- * Without it srt refuses to launch, so bash under sandbox fails closed with srt's own message. */
+ * Without it srt refuses to launch, so bash under sandbox fails closed with srt's own message.
+ * Cached per process (an account appearing mid-session is a re-run-doctor event, not a hot path). */
 export function srtProvisioned(): boolean {
+  if (srtProvisionedCached !== undefined) return srtProvisionedCached;
   try {
-    return spawnSync("net", ["user", "srt-sandbox"], { encoding: "utf-8", timeout: 3000 }).status === 0;
+    return (srtProvisionedCached = spawnSync("net", ["user", "srt-sandbox"], { encoding: "utf-8", timeout: 3000 }).status === 0);
   } catch {
-    return false;
+    return (srtProvisionedCached = false);
   }
+}
+
+/** True when bash would actually run CONFINED right now: a primitive exists and (for srt) the
+ * one-time provisioning is live. Sandboxed-bash auto-approval keys off this, never off the config
+ * intent alone - "sandbox": true on a machine with no primitive must still prompt. */
+export function sandboxActive(): boolean {
+  const kind = detectSandbox();
+  if (kind === "none") return false;
+  return kind !== "srt" || srtProvisioned();
 }
 
 /** srt settings JSON: writes confined to the workspace; reads stay default-allowed like the

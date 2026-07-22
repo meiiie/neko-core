@@ -245,7 +245,8 @@ Commands:
   meeting       consented local meeting capture, transcription, status, list, show, or delete
   setup [web]   one command to stand up the SOTA web stack (SearXNG + browser MCP, wired);
                 'setup browser [persistent|attach|isolated]' controls browser identity;
-                'setup tavily <key>' wires hosted search; 'setup codex' / 'setup gemini' add optional bridges
+                'setup tavily <key>' wires hosted search; 'setup codex' / 'setup gemini' add optional bridges;
+                'setup terminal' writes a Shift+Enter newline keybinding into Windows Terminal
   chat          interactive session (default - same as bare 'neko' / 'neko core')
   run <task>    one-shot: run a single instruction
   bench         run a tiny agentic-coding benchmark against the configured model (pass@1)
@@ -1103,6 +1104,11 @@ async function main(): Promise<number> {
       case "setup": {
         if (args.positionals[0]?.toLowerCase() === "codex") return await cmdCodexSupport("install");
         if (args.positionals[0]?.toLowerCase() === "gemini") return await cmdGeminiSupport("install");
+        if (args.positionals[0]?.toLowerCase() === "terminal") {
+          const { setupTerminal } = await import("../src/adapters/terminal-setup.ts");
+          setupTerminal((m) => console.log(m));
+          return 0;
+        }
         const { setupWeb } = await import("../src/adapters/setup.ts");
         return await setupWeb(args.positionals[0] ?? "web", (m) => console.log(m), args.positionals[1] ?? "");
       }

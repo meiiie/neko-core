@@ -3,6 +3,7 @@
  * agents / commands / capabilities registries + a policy audit of the safe/gated boundary.
  */
 import type { NekoConfig } from "./config.ts";
+import { sandboxActive } from "../core/sandbox.ts";
 import { GATED, listTools, SAFE } from "../core/tools.ts";
 
 export const READ_ONLY = "read-only";
@@ -137,7 +138,16 @@ export function collectCapabilities(config: NekoConfig): Capability[] {
     { name: "model_completion", klass: "agent", status: "enabled", detail: `${config.provider}: ${config.model || "(model unset)"}` },
     { name: "file_read", klass: "tool", status: "enabled", detail: "read_file + search + glob + ls (safe, no approval)" },
     { name: "file_write", klass: "tool", status: "enabled", detail: "write_file + edit (gated: needs approval)" },
-    { name: "shell", klass: "tool", status: "enabled", detail: "bash (gated: needs approval)" },
+    {
+      name: "shell",
+      klass: "tool",
+      status: "enabled",
+      // "Gated-but-sandboxed" is a NAMED state like mode=auto: the gate stays in the contract,
+      // the prompt is skipped only while confinement is LIVE (primitive + provisioning).
+      detail: config.sandbox && config.sandboxAutoApprove && sandboxActive()
+        ? `bash (gated; auto-approved while OS-sandboxed: fs confined to workspace, egress ${config.sandboxNetwork ? "allowlisted" : "blocked"}; sandbox_auto_approve=false to prompt)`
+        : "bash (gated: needs approval)",
+    },
     { name: "permission_modes", klass: "agent", status: "enabled", detail: "default / accept-edits / plan / auto (Shift+Tab to cycle in chat)" },
     { name: "approval_gate", klass: "agent", status: "enabled", detail: `mode=${config.mode}` },
     { name: "bounded_autopilot", klass: "agent", status: auto ? "enabled" : "disabled", detail: "mode=auto (--yolo): gated tools run without prompting; a named state, not hidden" },

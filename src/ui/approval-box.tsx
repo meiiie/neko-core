@@ -1,9 +1,37 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 
+import { HIT_SENTINEL } from "./frame-diff.ts";
 import { trunc } from "./format.ts";
 import { highlightLine } from "./highlight.tsx";
 import { Markdown } from "./markdown.tsx";
+
+/** The clickable option row: each option is a hit zone (HIT_SENTINEL anchor) with a REAL hover
+ * state, same contract as the jump pill - what lights up is exactly what a click settles. The
+ * caller maps zone index -> approval kind (plan box: y/n; tool box: y/a/n). */
+function OptionRow({ options, hover }: { options: string[]; hover?: number | null }): ReactNode {
+  return (
+    <Text color="gray">
+      {options.map((label, i) => (
+        <Text
+          key={i}
+          color={hover === i ? "black" : "gray"}
+          backgroundColor={hover === i ? "#4d9fff" : undefined}
+          bold={hover === i}
+        >
+          {HIT_SENTINEL}{label}{i < options.length - 1 ? "   " : ""}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
+/** Zone labels for a pending approval, in hit-zone order (chat's pointer handler uses the same
+ * order to settle: index 0 approves, last denies, middle - when present - is "always"). */
+export function approvalOptions(toolName: string): string[] {
+  if (toolName === "exit_plan_mode") return ["[y] proceed (accept-edits)", "[n] keep planning / Esc"];
+  return ["[y]es", `[a]lways allow ${toolName}`, "[n]o / Esc"];
+}
 
 export interface Approval {
   toolName: string;
@@ -19,8 +47,9 @@ const flashText = (flash: ApprovalFlash) => {
   return "✓ approved";
 };
 
-/** Inline consent box for a gated tool, with a preview (command / write / diff / plan). */
-export function ApprovalBox({ approval, flash, width }: { approval: Approval; flash?: ApprovalFlash | null; width?: number }): ReactNode {
+/** Inline consent box for a gated tool, with a preview (command / write / diff / plan).
+ * `hover` = index of the pointer-hovered option zone (null/undefined = none). */
+export function ApprovalBox({ approval, flash, width, hover }: { approval: Approval; flash?: ApprovalFlash | null; width?: number; hover?: number | null }): ReactNode {
   const { toolName, args } = approval;
   const color = flash?.kind === "no" ? "red" : flash ? "green" : undefined;
   const status = flash ? flashText(flash) : null;
@@ -34,7 +63,7 @@ export function ApprovalBox({ approval, flash, width }: { approval: Approval; fl
       <Box borderStyle="round" borderColor={color ?? "blue"} paddingX={1} flexDirection="column" flexShrink={0}>
         <Text bold color={color ?? "blue"}>{status ?? "Ready to code?"}</Text>
         <Markdown text={String(args.plan ?? "")} width={mdWidth} minWidth={10} />
-        {status ? null : <Text color="gray">[y] proceed (accept-edits)   [n] keep planning / Esc</Text>}
+        {status ? null : <OptionRow options={approvalOptions(toolName)} hover={hover} />}
       </Box>
     );
   }
@@ -62,7 +91,7 @@ export function ApprovalBox({ approval, flash, width }: { approval: Approval; fl
     <Box borderStyle="round" borderColor={color ?? "yellow"} paddingX={1} flexDirection="column" flexShrink={0}>
       <Text bold color={color ?? "yellow"}>{status ?? `Approve ${toolName}?`}</Text>
       {preview}
-      {status ? null : <Text color="gray">{`[y]es   [a]lways allow ${toolName}   [n]o / Esc`}</Text>}
+      {status ? null : <OptionRow options={approvalOptions(toolName)} hover={hover} />}
     </Box>
   );
 }

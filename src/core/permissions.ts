@@ -27,7 +27,12 @@ export function isMode(value: string): value is PermissionMode {
   return MODE_ORDER.includes(value as PermissionMode);
 }
 
-export function decide(mode: PermissionMode, spec: ToolSpec, args: Record<string, any> = {}): Decision {
+export function decide(
+  mode: PermissionMode,
+  spec: ToolSpec,
+  args: Record<string, any> = {},
+  opts: { sandboxedBash?: boolean } = {},
+): Decision {
   if (effectivePermission(spec, args) !== GATED) return "allow";
   switch (mode) {
     case "auto":
@@ -35,8 +40,15 @@ export function decide(mode: PermissionMode, spec: ToolSpec, args: Record<string
     case "plan":
       return "deny";
     case "accept-edits":
+      if (opts.sandboxedBash && spec.name === "bash") return "allow";
       return EDIT_TOOLS.has(spec.name) ? "allow" : "prompt";
     default:
+      // Sandboxed bash runs without a prompt (Claude Code's sandbox rationale): the OS sandbox
+      // already confines writes to the workspace and blocks egress, so per-command consent adds
+      // no containment. The caller only sets sandboxedBash when confinement is LIVE (primitive
+      // present + provisioned) and sandbox_auto_approve is on; plan mode still denies above,
+      // and the catastrophic-command seatbelt still applies in the run path.
+      if (opts.sandboxedBash && spec.name === "bash") return "allow";
       return "prompt";
   }
 }

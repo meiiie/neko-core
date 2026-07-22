@@ -328,6 +328,9 @@ test("auto mode: a safe tool call + markdown answer render end-to-end", async ()
 });
 
 test("default mode: gated bash shows the approval box, 'y' approves", async () => {
+  // Pin the sandbox OFF so bash PROMPTS regardless of this machine's primitive: with a live
+  // sandbox bash auto-approves (the feature), which is exercised by the permissions unit tests.
+  process.env.NEKO_SANDBOX = "0";
   const provider = new MockProvider([
     { content: null, tool_calls: [{ id: "c1", name: "bash", arguments: { command: "echo hi" } }] },
     { content: "Finished.", tool_calls: [] },
@@ -344,6 +347,7 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
   expect(await until(() => seen("Finished"))).toBe(true); // final answer
   expect(lastFrame() ?? "").not.toMatch(/^\s*>\s*y\s*$/m); // approval key must not leak into the prompt
   unmount();
+  delete process.env.NEKO_SANDBOX;
 }, 40000);
 
 test("plan mode: exit_plan_mode shows the plan, 'y' proceeds", async () => {
