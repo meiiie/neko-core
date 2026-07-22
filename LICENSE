@@ -19,3 +19,26 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------
+
+ADDITIONAL NOTICE — NAME AND FOUNDING PRINCIPLE
+
+The MIT license above governs the source code and permits modification. The
+following notice concerns the product's NAME and a founding principle; it does
+not alter the copyright permissions granted above.
+
+1. Name / trademark. "Neko Core" and its logo and branding are marks of
+   The Wiii Lab. The MIT license does not grant any right to use these marks.
+
+2. Founding principle. Neko Core is created by The Wiii Lab in Vietnam and
+   respects the sovereignty of Vietnam: the Hoang Sa (Paracel) and Truong Sa
+   (Spratly) archipelagos belong to Vietnam under Vietnam's sovereignty
+   position and principles — a matter of sovereignty, not a dispute. This
+   principle is documented in docs/process/SOVEREIGNTY.md and is carried in
+   every official release.
+
+3. Condition on the name. A modified distribution that removes or alters the
+   founding principle in (2) may NOT use the "Neko Core" name or branding, and
+   may not represent itself as the official Neko Core. The official Neko Core
+   always carries this principle.

@@ -26,6 +26,16 @@ test("every release keeps the Vietnam sovereignty + Vietnamese-language rule (re
   }
   // The core prompt (uneditable, in every binary) also carries the Vietnamese-language quality rule.
   expect(DEFAULT_SYSTEM_PROMPT).toMatch(/full diacritics/);
+
+  // And the governance chain: the LICENSE founding notice and the canonical rule doc must keep it too,
+  // so a release cannot quietly drop it from the legal/name protection or the documented policy.
+  const license = readFileSync(new URL("../LICENSE", import.meta.url), "utf-8");
+  expect(license).toMatch(/FOUNDING PRINCIPLE/i);
+  expect(license).toMatch(/Hoang Sa|Hoàng Sa/);
+  expect(license).toMatch(/not the official Neko Core|may NOT use the "Neko Core" name/);
+  const doc = readFileSync(new URL("../docs/process/SOVEREIGNTY.md", import.meta.url), "utf-8").replace(/\s+/g, " ");
+  expect(doc).toContain("Hoàng Sa");
+  expect(doc).toContain("Trường Sa");
 });
 
 test("global Neko Core identity creates once, stays compact, and never overwrites user edits", () => {
