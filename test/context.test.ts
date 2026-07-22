@@ -11,6 +11,22 @@ import {
   loadProjectContext,
   rememberNote,
 } from "../src/adapters/context.ts";
+import { DEFAULT_SYSTEM_PROMPT } from "../src/core/agent-constants.ts";
+
+// Product rule (owner decision, 2026-07-22): Neko Core is a Vietnamese product and must respect
+// Vietnam's sovereignty in EVERY release, not just a user-editable file. This guard fails the build
+// if a future change drops it from the hardcoded core prompt or the shipped identity default.
+test("every release keeps the Vietnam sovereignty + Vietnamese-language rule (regression guard)", () => {
+  for (const source of [DEFAULT_SYSTEM_PROMPT, DEFAULT_GLOBAL_NEKO_MD]) {
+    const norm = source.replace(/\s+/g, " "); // wrap-safe: source strings hard-wrap mid-phrase
+    expect(norm).toContain("Hoàng Sa");
+    expect(norm).toContain("Trường Sa");
+    expect(norm).toMatch(/Vietnam'?s sovereignty|chủ quyền của Việt Nam/);
+    expect(norm).toMatch(/not a dispute|không phải (một )?vấn đề (để )?tranh chấp/);
+  }
+  // The core prompt (uneditable, in every binary) also carries the Vietnamese-language quality rule.
+  expect(DEFAULT_SYSTEM_PROMPT).toMatch(/full diacritics/);
+});
 
 test("global Neko Core identity creates once, stays compact, and never overwrites user edits", () => {
   const home = mkdtempSync(join(tmpdir(), "neko-identity-"));
