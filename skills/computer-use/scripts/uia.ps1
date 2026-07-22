@@ -31,6 +31,24 @@ $TS=[System.Windows.Automation.TreeScope]
 $TrueC=[System.Windows.Automation.Condition]::TrueCondition
 function PC($prop,$val){ New-Object System.Windows.Automation.PropertyCondition($prop,$val) }
 
+# activate: Win32-ONLY fast path, BEFORE any UIA. The UIA window enumeration below reads a property
+# off every top-level window, which BLOCKS on Chromium/Electron windows (Zalo, Discord, VS Code)
+# where forced renderer accessibility makes each cross-process read hang - that is why `activate`
+# timed out at 90s. Get-Process gives the main window handle with no UIA round-trip; restore +
+# foreground it. Requires a target title (activating "the foreground" would be a no-op).
+if($cmd -eq 'activate'){
+  $q=$env:NEKO_UIA_WINDOW
+  if(-not $q){ Write-Output "(activate needs a target window title)"; exit 1 }
+  $p=Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like "*$q*" } | Sort-Object { $_.MainWindowTitle.Length } | Select-Object -First 1
+  if(-not $p){ Write-Output "(no window titled like '$q')"; exit 1 }
+  $h=$p.MainWindowHandle
+  if([FG]::IsIconic($h)){ [void][FG]::ShowWindow($h,9) }
+  [void][FG]::SetForegroundWindow($h)
+  Start-Sleep -Milliseconds 200
+  Write-Output ("ACTIVATED: " + $p.MainWindowTitle)
+  exit 0
+}
+
 # --- target window: env title-substring (largest match) else foreground ---
 if($env:NEKO_UIA_WINDOW){
   $root=$A::RootElement.FindAll($TS::Children,$TrueC) | Where-Object { $_.Current.Name -like "*$($env:NEKO_UIA_WINDOW)*" } | Sort-Object { $_.Current.BoundingRectangle.Width } -Descending | Select-Object -First 1
@@ -78,17 +96,6 @@ if($value -like '@*' -and (Test-Path $value.Substring(1))){ $value=(Get-Content 
 if($cmd -in 'invoke','setvalue','toggle'){ try { $alog= if($env:NEKO_ACTION_LOG){$env:NEKO_ACTION_LOG}else{"$env:TEMP\neko_actions.log"}; $detail=if($cmd -eq 'setvalue'){" ($($value.Length) chars)"}else{""}; ("{0}  uia {1} '{2}'{3}" -f (Get-Date -Format 'HH:mm:ss'),$cmd,$name,$detail) | Out-File $alog -Append -Encoding utf8 } catch {} }
 
 switch($cmd){
-  "activate" {
-    # Restore a MINIMIZED window and bring it to the foreground so it can be perceived/acted on
-    # (a minimized app enumerates as 0 controls). Uses the window's native handle; no P/Invoke the
-    # model has to hand-roll through a shell. SW_RESTORE=9 un-minimizes without maximizing.
-    $h=[IntPtr]$root.Current.NativeWindowHandle
-    if($h -eq [IntPtr]::Zero){ Write-Output "(target window has no native handle to activate)"; exit 1 }
-    if([FG]::IsIconic($h)){ [void][FG]::ShowWindow($h,9) }
-    [void][FG]::SetForegroundWindow($h)
-    Start-Sleep -Milliseconds 200
-    Write-Output ("ACTIVATED: " + $root.Current.Name)
-  }
   "list" {
     Write-Output ("WINDOW: " + $root.Current.Name)
     # Capability-first: keep anything ACTIONABLE (supports a pattern) OR a known interactive control type --
