@@ -246,7 +246,8 @@ Commands:
   setup [web]   one command to stand up the SOTA web stack (SearXNG + browser MCP, wired);
                 'setup browser [persistent|attach|isolated]' controls browser identity;
                 'setup tavily <key>' wires hosted search; 'setup codex' / 'setup gemini' add optional bridges;
-                'setup terminal' writes a Shift+Enter newline keybinding into Windows Terminal
+                'setup terminal' writes a Shift+Enter newline keybinding into Windows Terminal;
+                'setup ocr' installs the Vietnamese OCR pack so 'computer ocr' reads accented text
   chat          interactive session (default - same as bare 'neko' / 'neko core')
   run <task>    one-shot: run a single instruction
   bench         run a tiny agentic-coding benchmark against the configured model (pass@1)
@@ -1108,6 +1109,10 @@ async function main(): Promise<number> {
           const { setupTerminal } = await import("../src/adapters/terminal-setup.ts");
           setupTerminal((m) => console.log(m));
           return 0;
+        }
+        if (args.positionals[0]?.toLowerCase() === "ocr") {
+          const { setupOcr } = await import("../src/adapters/ocr-setup.ts");
+          return setupOcr((m) => console.log(m));
         }
         const { setupWeb } = await import("../src/adapters/setup.ts");
         return await setupWeb(args.positionals[0] ?? "web", (m) => console.log(m), args.positionals[1] ?? "");
