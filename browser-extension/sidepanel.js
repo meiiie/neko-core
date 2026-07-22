@@ -57,10 +57,16 @@ function onEvent(event) {
   }
 }
 
+let offlineNoticeShown = false;
 function setConnected(on) {
   dot.classList.toggle("on", on);
-  sub.textContent = on ? "connected" : "waiting for Neko…";
+  sub.textContent = on ? "connected" : "Neko not running";
   send.disabled = !on;
+  if (on) { offlineNoticeShown = false; }
+  else if (!offlineNoticeShown) {
+    offlineNoticeShown = true;
+    addMsg("info", "Neko isn't running. Start it in a terminal (run `neko`), and this panel connects automatically - then chat here.");
+  }
 }
 
 // Long-lived port to the service worker; it forwards bridge events here and our prompts there.

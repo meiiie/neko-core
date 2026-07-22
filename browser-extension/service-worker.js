@@ -24,6 +24,7 @@ let readyPromise = null;
 let pingTimer = null;
 let sensitiveRefs = new Set();
 let panelPort = null; // the open Neko side panel (chrome.runtime port), or null
+let panelRetry = null; // gentle reconnect while the panel is open and Neko is offline
 
 async function restore() {
   const saved = await chrome.storage.local.get(Object.keys(state));
@@ -520,6 +521,12 @@ chrome.runtime.onConnect.addListener((port) => {
   connectForPresence();
   void connect(true).catch(() => {}); // ensure a bridge connection exists to carry transcript
   port.postMessage({ type: "connected", online: state.connection === "ready" });
+  // Gentle keep-connecting while the panel is open: retry every 5s when offline (neko may not be
+  // running yet), so the panel links up on its own the moment the user starts neko - no console spam.
+  if (!panelRetry) panelRetry = setInterval(() => {
+    if (!panelPort) { clearInterval(panelRetry); panelRetry = null; return; }
+    if (state.connection !== "ready") void connect(true).catch(() => {});
+  }, 5000);
   port.onMessage.addListener((msg) => {
     if (!msg) return;
     if (msg.type === "prompt" && typeof msg.prompt === "string") {
@@ -529,7 +536,10 @@ chrome.runtime.onConnect.addListener((port) => {
       port.postMessage({ type: "connected", online: state.connection === "ready" });
     }
   });
-  port.onDisconnect.addListener(() => { if (panelPort === port) panelPort = null; });
+  port.onDisconnect.addListener(() => {
+    if (panelPort === port) panelPort = null;
+    if (panelRetry) { clearInterval(panelRetry); panelRetry = null; }
+  });
 });
 // Clicking the toolbar icon opens the side panel on the current tab (in addition to the popup menu).
 try { chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }); } catch {}
