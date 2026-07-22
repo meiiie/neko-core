@@ -447,6 +447,13 @@ export class NekoConfig {
   get sandbox(): boolean { return Boolean(this.data.sandbox); }
   /** Allow network inside the sandbox (default false = block egress). */
   get sandboxNetwork(): boolean { return Boolean(this.data.sandbox_network); }
+  /** Domain allowlist for the srt (Windows) sandbox when sandbox_network is true - srt has no
+   * allow-all: egress is always an allowlist (e.g. ["github.com", "*.npmjs.org"]). Ignored by
+   * the bwrap/Seatbelt rungs, which allow all egress when sandbox_network is true. */
+  get sandboxDomains(): string[] {
+    const v = this.data.sandbox_domains;
+    return Array.isArray(v) ? v.map(String) : [];
+  }
 
   /** Self-hosted SearXNG base URL for web_search metasearch ("" = off). */
   get searxngUrl(): string { return String(this.data.searxng_url ?? ""); }

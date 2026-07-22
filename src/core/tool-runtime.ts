@@ -79,6 +79,8 @@ export class ToolRegistry {
   /** Opt-in OS sandbox for bash (fs read-only except cwd). Set from config by the host. */
   sandboxBash = false;
   sandboxAllowNetwork = false;
+  /** srt (Windows) only: domain allowlist used when sandboxAllowNetwork is true. */
+  sandboxDomains: string[] = [];
   /** When true, read_file returns image files as vision content (needs a vision-capable model). */
   vision = false;
   /** When true, expose NO tools to the model — for a pure perception/vision pass (image Q&A), since
@@ -173,7 +175,7 @@ export class ToolRegistry {
       Math.max(Math.floor(Number(args.timeout) || BASH_TIMEOUT_MS), 1000),
       Math.min(600_000, Math.max(1_000, this.bashTimeoutCapMs)),
     );
-    const sb = wrapBash(command, this.root, { enabled: this.sandboxBash, allowNetwork: this.sandboxAllowNetwork });
+    const sb = wrapBash(command, this.root, { enabled: this.sandboxBash, allowNetwork: this.sandboxAllowNetwork, domains: this.sandboxDomains });
     // Agent-presence opt-in: desktop helpers read NEKO_PRESENCE to show the independent cursor + honour takeover.
     // Desktop input backend opt-in: NEKO_INPUT picks the non-hijacking (inject) vs legacy (sendinput) path.
     const env: NodeJS.ProcessEnv = { ...process.env };

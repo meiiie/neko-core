@@ -3,6 +3,45 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-22 - Windows bash sandbox via Anthropic sandbox-runtime (srt)
+
+- Closed the Windows gap in the bash OS-sandbox ladder. Prior state: `detectSandbox()` returned
+  "none" on win32, so `auto` mode leaned entirely on the textual catastrophic-command seatbelt -
+  the exact pattern the ecosystem (wren.wtf "Stop Using OpenCode") demonstrates is bypassable.
+- Surveyed the July-2026 SOTA first: Codex CLI's May-2026 Windows sandbox (dedicated
+  CodexSandboxOffline/Online users, restricted tokens via an elevated broker, ACE stamping,
+  per-user firewall rules) and Anthropic's open-source sandbox-runtime, which ships the same
+  user-identity model (dedicated `srt-sandbox` account, restricted token in a job object, NTFS
+  ACLs, WFP egress fence) as the `srt` CLI. Chose to ride `srt` rather than reimplement
+  (ponytail rung 5); a `"srt"` rung now slots into the existing detect/build seam in
+  `core/sandbox.ts` with zero new binaries.
+- Only a real `srt.exe` is trusted (bun-global shim); npm's `.cmd` shims are ignored because
+  cmd.exe argument re-quoting is escapable by hostile command text - it would defeat the sandbox
+  it launches. Same reasoning drives the launch shape: command bytes go into a content-addressed
+  script file under `%TEMP%\neko-srt\` (one additive read ACE for `srt-sandbox`; TEMP is
+  otherwise unreadable across local users) and the srt `-c` line carries only two quoted paths
+  into git-bash, so no command text ever rides a cmd-parsed command line. A `cd` preamble
+  restores the workspace cwd across the two-hop user switch.
+- srt has no allow-all egress (proxy denies unmatched hosts, and the schema only accepts a bare
+  "*" in deniedDomains), so `sandbox_network: true` now reads the new `sandbox_domains` config
+  allowlist (`strictAllowlist: true`; empty list = still offline); false writes
+  `deniedDomains: ["*"]` - the bwrap `--unshare-net` posture. Settings are generated
+  content-addressed in TEMP against the real 0.0.66 schema (denyRead/allowWrite/denyWrite and
+  network are all required keys - the public README understates this).
+- `neko doctor` now warns when srt is on PATH but `srt windows-install` provisioning has not run
+  (bash fails closed with srt's own actionable error in that state) and prints the install hint
+  when Windows has no sandbox primitive at all.
+- Field-verified end to end on Windows 11 Home: echo, workspace write allowed, outside-workspace
+  write denied by NTFS, curl blocked offline (000), curl 200 through an example.com allowlist.
+  Root-caused two real-world provisioning traps and documented them in SANDBOX.md: bun-global
+  installs leave `vendor/srt-win/x64/srt-win.exe` inside the caller's profile where `srt-sandbox`
+  cannot read it (CreateProcessWithLogonW "Access is denied"; one-time icacls read grant fixes
+  it - upstream should stamp this at install), and seclogon must be running. Diagnosis was
+  narrowed with direct LogonUser/CreateProcessWithLogonW probes after ruling out logon rights,
+  job-object UI restrictions, and caller context.
+- Gates: TS 7 + TS 5.9 typecheck clean, 764/764 tests (3249 assertions, srt target/settings/
+  script units added), policy PASS, binary build + UI/input probes OK.
+
 ## 2026-07-16 - v0.14 local meeting companion
 
 - Studied Meetily clean-room at pinned commit `0281737d87d26352fb0adc78c8c0975f691b23d1`: retained the useful

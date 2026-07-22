@@ -17,6 +17,7 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
   registry.bashTimeoutCapMs = cfg.bashTimeoutCapMs;
   registry.sandboxBash = cfg.sandbox;
   registry.sandboxAllowNetwork = cfg.sandboxNetwork;
+  registry.sandboxDomains = cfg.sandboxDomains;
   registry.searxngUrl = cfg.searxngUrl;
   registry.searchBackend = cfg.searchBackend;
   registry.searxngKeepalive = cfg.searxngKeepalive;
@@ -48,6 +49,7 @@ export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRe
   target.bashTimeoutCapMs = source.bashTimeoutCapMs;
   target.sandboxBash = source.sandboxBash;
   target.sandboxAllowNetwork = source.sandboxAllowNetwork;
+  target.sandboxDomains = source.sandboxDomains;
   target.vision = source.vision;
   target.noTools = source.noTools;
   target.presence = source.presence;

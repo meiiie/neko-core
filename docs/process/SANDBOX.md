@@ -24,16 +24,47 @@ Like Claude Code / Codex CLI, when enabled Neko runs `bash` under an OS sandbox:
 |----|-----------|--------|
 | Linux | **bubblewrap** (`bwrap`) — unprivileged namespaces | full fs + network confinement |
 | macOS | **sandbox-exec** (Seatbelt) — SBPL profile | full fs + network confinement (Apple deprecates the binary but it works) |
-| Windows | — | **no lightweight primitive**: bash runs unconfined, but layers 1–4 still apply |
+| Windows | **Anthropic sandbox-runtime** (`srt`) — dedicated `srt-sandbox` user, restricted token in a job object, NTFS ACLs, WFP egress fence | full fs + network confinement (one-time provisioning) |
 
 `neko doctor` shows the resolved state, e.g. `bash_sandbox: on (bwrap)` or
 `off (available: none)`.
 
 ### Windows
-There's no equivalent of bwrap/Seatbelt as a simple primitive. For real isolation on Windows, run
-Neko **inside WSL** (bwrap works there) or in a container/dev-container. Without that, rely on the
-seatbelt + permission gate + `adversarial_check`. (This matches the ecosystem: Claude Code/Codex
-sandboxes are macOS/Linux-only; Windows users use WSL or a VM.)
+Windows has no bwrap/Seatbelt-style namespace primitive; the ecosystem answer (Codex CLI's
+May-2026 sandbox, Anthropic's sandbox-runtime) is user-identity isolation: run the command as a
+dedicated low-privilege local account, confine writes with NTFS ACLs, and fence network egress
+per-account with the Windows Filtering Platform. Neko rides Anthropic's open-source
+[sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime) for this rather than
+reimplementing it:
+
+```powershell
+bun add -g @anthropic-ai/sandbox-runtime   # installs the srt.exe shim (the .exe is required;
+                                           # npm's .cmd shims are ignored - cmd.exe quoting is escapable)
+srt windows-install                        # one-time: provisions srt-sandbox + WFP filters (one UAC prompt)
+```
+
+With `"sandbox": true`, bash then runs as `srt` -> git-bash -> the command: filesystem read-only
+except the workspace, network hard-blocked unless `"sandbox_network": true`. If `srt` is on PATH
+but provisioning hasn't run, bash fails closed with srt's own actionable error (and `neko doctor`
+warns). Alternatives remain: run Neko inside WSL (bwrap) or a container/dev-container.
+
+Mechanics worth knowing (verified on Windows 11 Home, srt 0.0.66):
+
+- **Network is always an allowlist.** srt has no allow-all egress (its proxy denies unmatched
+  hosts), so `"sandbox_network": true` exposes only `"sandbox_domains": ["github.com",
+  "*.npmjs.org", ...]`. False = hard deny-all (`deniedDomains: ["*"]`).
+- **Command bytes never ride a shell command line.** srt's CLI re-parses its command through the
+  sandbox account's cmd.exe, whose quoting hostile text can escape. Neko writes each bash command
+  to a content-addressed script under `%TEMP%\neko-srt\` (that subdir gets a one-time additive
+  read ACE for `srt-sandbox` - TEMP itself is unreadable across local users) and the srt command
+  line carries only `"<git-bash>" "<script>"`.
+- **Known srt gotcha:** with a bun-global install the `srt-win.exe` vendor binary sits inside
+  your user profile, which the `srt-sandbox` account cannot read -> every run fails with
+  `CreateProcessWithLogonW ... Access is denied`. One-time fix until upstream grants it at
+  install:
+  `icacls "%USERPROFILE%\.bun\install\global\node_modules\@anthropic-ai\sandbox-runtime" /grant "srt-sandbox:(OI)(CI)(RX)"`
+- The Secondary Logon service (`seclogon`) must be running (it is by default; srt's error names
+  it if not).
 
 ### Notes
 - This sandbox is OS-process level — it does **not** defend against kernel exploits (same caveat as
