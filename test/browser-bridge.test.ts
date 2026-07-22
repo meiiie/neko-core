@@ -72,7 +72,8 @@ test("browser bridge pairs one extension origin and routes a capability-scoped c
 
   ws.send(JSON.stringify({ type: "pair" }));
   expect(await nextMessage(ws)).toEqual({ type: "paired", session: "session-test", token: "token-test" });
-  expect(await nextMessage(ws)).toEqual({ type: "ready", session: "session-test" });
+  // A fresh pair signals autoAttach:true so the extension attaches the first http/s tab on its own.
+  expect(await nextMessage(ws)).toEqual({ type: "ready", session: "session-test", autoAttach: true });
   ws.send(JSON.stringify({ type: "attached", tab: { id: 7, url: "https://example.com/private?q=not-audited" }, grants: { click: false, type: false } }));
   await Bun.sleep(10);
   expect(bridge.status().attached).toEqual({ tabId: 7, host: "example.com", grants: { click: false, type: false } });
@@ -84,6 +85,18 @@ test("browser bridge pairs one extension origin and routes a capability-scoped c
   expect(await request).toEqual({ items: 2 });
   expect(JSON.stringify(bridge.status())).not.toContain("private?q");
 
+  ws.close();
+  bridge.close();
+});
+
+test("a RESUMED session (hello with a saved token) does NOT auto-attach", async () => {
+  const capability: BrowserCapability = { version: 1, host: "127.0.0.1", port: 0, session: "session-test", token: "token-test" };
+  const bridge = startBrowserBridge({ capability, extensionOrigin: origin, pairingMs: 10_000, persistStatus: false });
+  const ws = new WebSocket(`ws://127.0.0.1:${bridge.port}/bridge`, { headers: { origin } } as any);
+  await new Promise<void>((resolve, reject) => { ws.addEventListener("open", () => resolve(), { once: true }); ws.addEventListener("error", reject, { once: true }); });
+  ws.send(JSON.stringify({ type: "hello", session: "session-test", token: "token-test" }));
+  // Later sessions require the explicit Attach gesture - autoAttach is false, not present as true.
+  expect(await nextMessage(ws)).toEqual({ type: "ready", session: "session-test", autoAttach: false });
   ws.close();
   bridge.close();
 });
@@ -151,9 +164,13 @@ test("browser install chooses Store when configured and prepares a pinned local 
   }
 });
 
-test("browser extension stays active-tab scoped", () => {
+test("browser extension is http/https-scoped for auto-attach, and never broader", () => {
   const manifest = JSON.parse(readFileSync(new URL("../browser-extension/manifest.json", import.meta.url), "utf8"));
-  expect(manifest.permissions).toContain("activeTab");
+  // Zero-click auto-attach (Claude/Codex-style) needs to script the chosen tab without a per-tab
+  // user gesture, which Chrome only allows with host access. Kept as NARROW as possible: http/https
+  // pages only - NOT <all_urls> (so no file://, ftp://, chrome://), and NEVER the debugger permission
+  // Claude's extension uses. The service worker still CONTROLS only the one attached tab (state.tabId).
+  expect(manifest.host_permissions).toEqual(["http://*/*", "https://*/*"]);
   expect(manifest.permissions).toContain("tabGroups");
   expect(manifest.permissions).toContain("alarms");
   expect(manifest.permissions).not.toContain("debugger");

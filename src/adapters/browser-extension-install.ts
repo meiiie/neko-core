@@ -67,10 +67,9 @@ export function browserExtensionSetupMessage(
     `  2. Turn ON 'Developer mode' (top-right toggle).`,
     `  3. Click 'Load unpacked' (top-left) and select this folder:`,
     `       ${setup.path}${opts.pathOnClipboard ? "   (already on your clipboard - paste it in the folder dialog)" : ""}`,
-    "  4. Go to a NORMAL website tab - an http/https page, NOT chrome://extensions itself.",
-    "  5. Click the Neko Browser Bridge icon (jigsaw/puzzle menu) and choose 'Attach this tab to Neko'.",
-    "Installing is NOT enough on its own: step 5 (Attach) is what actually CONNECTS the extension to",
-    "Neko. Attach only works on an http/https tab. Once you attach, Neko continues automatically.",
+    "  4. Open a NORMAL website tab - any http/https page (NOT chrome://extensions itself).",
+    "That's it - Neko attaches that tab automatically and continues. (If you ever want to pick the tab",
+    "yourself, click the Neko Browser Bridge icon and choose 'Attach this tab to Neko'.)",
     setup.opened ? "" : "No supported Chromium browser was detected; open chrome://extensions manually.",
   ].filter(Boolean).join("\n");
 }

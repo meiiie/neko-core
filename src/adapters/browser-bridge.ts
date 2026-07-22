@@ -264,7 +264,12 @@ export function startBrowserBridge(options: {
           client?.close(1000, "replaced by a newer Neko browser connection");
           client = ws;
           if (paired) ws.send(JSON.stringify({ type: "paired", session: capability.session, token: capability.token }));
-          ws.send(JSON.stringify({ type: "ready", session: capability.session }));
+          // autoAttach only on a FRESH pair (the user just ran /browser setup -> a clear connect
+          // intent within the pairing window). A resumed session (hello with a saved token) does
+          // NOT auto-attach: later sessions require the explicit Attach gesture. The extension then
+          // attaches the first http/s tab it sees - the Claude/Codex-style "just works" feel, kept
+          // safe by the pairing-window gate + the extension's single-tab banner.
+          ws.send(JSON.stringify({ type: "ready", session: capability.session, autoAttach: paired }));
           record("connect", paired ? "paired" : "resumed");
           persistStatus();
           return;

@@ -130,7 +130,7 @@ test("/browser runs guided setup inside Neko without a Bun/source command", asyn
     stdin.write("/browser"); await tick(20); stdin.write("\r");
     expect(await until(() => frames.join("\n").includes("Browser setup opened"))).toBe(true);
     expect(await until(() => frames.join("\n").includes("Connect Neko Browser - step 1 of 2"))).toBe(true);
-    expect(frames.join("\n")).toContain("does not connect it - attaching does"); // the corrected guidance (may wrap earlier)
+    expect(frames.join("\n")).toContain("Installing alone connects nothing"); // the corrected guidance (may wrap)
     expect(lastFrame() ?? "").not.toContain("search");
     expect(lastFrame() ?? "").not.toContain("Space preview");
     expect(lastFrame() ?? "").not.toContain("step 1 of 2 (1 of 2)");

@@ -1398,8 +1398,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       setOverlay({
         title: connected ? "Connect Neko Browser - step 2 of 2" : "Connect Neko Browser - step 1 of 2",
         description: connected
-          ? `Extension detected. Now, on a NORMAL website tab (http/https), click the Neko Browser Bridge icon and choose 'Attach this tab to Neko' - THAT connects this tab. Neko then continues on its own.${text ? " Your request is saved." : ""}`
-          : `Finish the steps above in Chrome. The one that matters: on a NORMAL website tab (NOT chrome://), open the Neko Browser Bridge extension and choose 'Attach this tab to Neko'. Installing alone does not connect it - attaching does. Neko then continues automatically.${text ? " Your request is saved." : ""}`,
+          ? `Extension detected. Just open a NORMAL website tab (any http/https page) - Neko attaches it automatically and continues, no click needed.${text ? " Your request is saved." : ""}`
+          : `Finish the install above, then open a NORMAL website tab (http/https, NOT chrome://) - Neko attaches it automatically and continues. Installing alone connects nothing; opening a real tab is what does it.${text ? " Your request is saved." : ""}`,
         search: false,
         showCount: false,
         // The DEFAULT (highlighted) item must be safe: the body says "no Enter is needed", and the
