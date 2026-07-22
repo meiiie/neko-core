@@ -459,6 +459,7 @@ export class ToolRegistry {
     switch (action) {
       case "list": case "read": script = "uia.ps1"; sa = [action]; break;
       case "activate": script = "uia.ps1"; sa = ["activate"]; break; // restore + foreground a (possibly minimized) window
+      case "ocr": script = "ocr.ps1"; sa = []; break; // read on-screen TEXT via Windows OCR (no vision model; for Chromium/Electron apps)
       case "display": script = "display.ps1"; sa = []; break;
       case "get": case "invoke": case "toggle": {
         const nm = String(args.name ?? ""); if (!nm) return `Error: computer ${action} needs 'name'.`;
@@ -527,7 +528,7 @@ export class ToolRegistry {
         sa = [capturePath];
         break;
       }
-      default: return `Unknown computer action '${action}'. Use: list | read | get | display | activate | watch | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
+      default: return `Unknown computer action '${action}'. Use: list | read | get | display | activate | ocr | watch | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
     }
     try {
       let residentOutput: string | null = null;

@@ -99,14 +99,20 @@ SetForegroundWindow P/Invoke through bash: use `computer({action:"activate", win
 **CHROMIUM / ELECTRON apps (Zalo, Discord, Slack, Spotify, VS Code, WhatsApp...) hide their UI from
 UIA.** The tell: `list`/`read` shows ONLY `Chrome Legacy Window` (`Chrome_RenderWidgetHostHWND`) and an
 `Intermediate D3D Window` — the real buttons/lists/inputs live inside the Chromium renderer and are NOT
-in the UIA tree. This is a HARD WALL, not a transient state:
-- Do NOT loop on `--force-renderer-accessibility`, env vars, or a remote-debugging port. Most of these
-  apps are SINGLE-INSTANCE: relaunching with a flag just wakes the existing (unflagged) process, so the
-  flag never applies. Trying flag→env→CDP in sequence is the classic wasted-turn spiral.
-- The ONLY reliable path is **`screenshot` + a vision model**: `computer({action:"screenshot"})`, SEE the
-  pixels, then `click`/`type`/`key` by coordinate. This REQUIRES `vision: true` on the model/profile.
-  If vision is OFF (`neko doctor` shows it), you fundamentally CANNOT read these apps — say so plainly
-  and stop, rather than thrashing. Tell the user to switch to a vision-capable profile.
+in the UIA tree. Handle it like this:
+- Use **`ocr`** — `computer({action:"ocr", window:"Zalo"})`. It runs the built-in Windows OCR engine on
+  the window and returns every on-screen text line with its screen-pixel centre: `'the text' @ x,y`.
+  Then `click` those coordinates, `type`/`key` to enter text. **No vision model needed** (a text-only
+  model works), no download, no network. This is the FIRST thing to try on an Electron app. Flow:
+  `activate` (if minimized) → `ocr` → `click x,y` → `ocr` again to verify.
+- Do NOT loop on `--force-renderer-accessibility`, env vars, or a remote-debugging port. These apps are
+  SINGLE-INSTANCE and hardened: relaunching with a flag just wakes the existing (unflagged) process, and
+  packaged Electron apps (Zalo verified) strip the flag / block the debug port. flag→env→CDP in sequence
+  is the classic wasted-turn spiral — go straight to `ocr`.
+- `ocr` reads TEXT only (not icons/avatars) and, for accented scripts, needs the matching Windows OCR
+  language pack (Settings > Language) — without the Vietnamese pack, en-US still reads Vietnamese as
+  unaccented Latin, which is usually enough to locate a name/label and click it. If a target is a
+  non-text icon, `screenshot` + a vision model is the fallback (only when `vision: true`).
 - A regular web page in Chrome/Edge is different: launching the browser itself with
   `--force-renderer-accessibility` DOES expose the DOM to `uia.ps1 read` (verified). That trick is for
   the browser, not for a packaged Electron app you cannot relaunch with the flag.
