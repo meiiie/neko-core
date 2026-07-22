@@ -17,6 +17,8 @@ const ASSETS = [
   "popup.html",
   "popup.css",
   "popup.js",
+  "sidepanel.html",
+  "sidepanel.js",
   "icons/icon-16.png",
   "icons/icon-32.png",
   "icons/icon-48.png",

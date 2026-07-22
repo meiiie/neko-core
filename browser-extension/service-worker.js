@@ -23,6 +23,7 @@ let socket = null;
 let readyPromise = null;
 let pingTimer = null;
 let sensitiveRefs = new Set();
+let panelPort = null; // the open Neko side panel (chrome.runtime port), or null
 
 async function restore() {
   const saved = await chrome.storage.local.get(Object.keys(state));
@@ -168,6 +169,7 @@ async function connect(allowPair) {
       } else if (message.type === "ready") {
         clearTimeout(timeout);
         state.connection = "ready";
+        try { panelPort?.postMessage({ type: "connected", online: true }); } catch {}
         badge(state.tabId == null ? "" : "AI", "#22c55e");
         if (state.tabId != null) void showIndicator().catch(() => {});
         clearInterval(pingTimer);
@@ -183,6 +185,9 @@ async function connect(allowPair) {
         resolve();
       } else if (message.type === "command") {
         void execute(message);
+      } else if (message.type === "panel") {
+        // Neko-side transcript event -> forward to the open side panel (if any).
+        try { panelPort?.postMessage({ type: "panel", event: message.event }); } catch {}
       }
     };
     ws.onerror = () => reject(new Error("Neko bridge is offline"));
@@ -193,6 +198,7 @@ async function connect(allowPair) {
       socket = null;
       readyPromise = null;
       state.connection = "offline";
+      try { panelPort?.postMessage({ type: "connected", online: false }); } catch {}
       badge(state.tabId == null ? "" : "!", "#ef4444");
       if (state.tabId != null) armReconnect();
       reject(new Error(event.reason || `Neko bridge closed (${event.code})`));
@@ -505,6 +511,28 @@ function connectForPresence() {
 }
 chrome.runtime.onInstalled.addListener(connectForPresence);
 chrome.runtime.onStartup.addListener(connectForPresence);
+
+// Side panel: a long-lived port from sidepanel.js. Forward its prompts to the neko bridge and keep
+// it posted on connection state; connect to the bridge so the panel works even before a tab attach.
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "neko-panel") return;
+  panelPort = port;
+  connectForPresence();
+  void connect(true).catch(() => {}); // ensure a bridge connection exists to carry transcript
+  port.postMessage({ type: "connected", online: state.connection === "ready" });
+  port.onMessage.addListener((msg) => {
+    if (!msg) return;
+    if (msg.type === "prompt" && typeof msg.prompt === "string") {
+      try { send({ type: "panel-in", prompt: msg.prompt }); }
+      catch { try { port.postMessage({ type: "panel", event: { type: "line", line: { kind: "error", text: "Neko is offline - start neko in a terminal, then try again." } } }); } catch {} }
+    } else if (msg.type === "hello") {
+      port.postMessage({ type: "connected", online: state.connection === "ready" });
+    }
+  });
+  port.onDisconnect.addListener(() => { if (panelPort === port) panelPort = null; });
+});
+// Clicking the toolbar icon opens the side panel on the current tab (in addition to the popup menu).
+try { chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }); } catch {}
 // While an auto-attach window is open, attach the first http/s tab the user switches to or loads.
 chrome.tabs.onActivated.addListener(() => { if (autoAttachActive()) void connect(true).then(tryAutoAttach).catch(() => {}); });
 chrome.tabs.onUpdated.addListener((_tabId, change) => {

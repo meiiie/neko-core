@@ -58,6 +58,7 @@ import {
   readBrowserBridgeStatus,
   readBrowserCapability,
   startManagedBrowserBridge,
+  type BrowserBridge,
   type BrowserBridgeStage,
 } from "../adapters/browser-bridge.ts";
 import { browserExtensionSetupMessage, chromeHasMultipleProfiles, openBrowserExtensionSetup } from "../adapters/browser-extension-install.ts";
@@ -120,9 +121,13 @@ interface ChatProps {
   setupBrowser?: () => Promise<string>;
   officeSupportStatus?: () => OfficeSupportStatus;
   installOfficeSupport?: (options: { force?: boolean; notify: (message: string) => void }) => Promise<unknown>;
+  /** Mutable bridge holder so the side panel can mirror Neko's transcript and drive turns. runChat
+   * owns the bridge (it may be created lazily by setupBrowser) and updates `current`; `onPrompt` is
+   * set by ChatApp so a panel prompt feeds the turn loop. */
+  bridgeHolder?: { current: BrowserBridge | null; onPrompt: ((prompt: string) => void) | null };
 }
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, bridgeHolder }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -361,7 +366,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (fullscreenRef.current && (kind === "assistant" || kind === "user")) primeAnsiCache(line, contentColsRef.current, cfg);
     remoteLineRef.current?.(kind, text); // a remote turn collects info/error output (slash commands answer THERE)
     setLines((prev) => [...prev, line]);
-    if (mirror) relayRef.current?.publish({ type: "line", line: { ...line, text: text.slice(0, 200_000) } }, { durable: true });
+    if (mirror) {
+      relayRef.current?.publish({ type: "line", line: { ...line, text: text.slice(0, 200_000) } }, { durable: true });
+      bridgeHolder?.current?.pushPanel({ type: "line", line: { kind, text: text.slice(0, 200_000) } }); // mirror to the side panel
+    }
   };
 
   // Pairing instructions belong to the local terminal. Mirroring them back into the paired browser
@@ -413,7 +421,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     setStream(streamRef.current);
     setReasoning(reasoningRef.current);
-    relayRef.current?.publish({ type: "stream", text: streamRef.current.slice(-200_000) });
+    const streamText = streamRef.current.slice(-200_000);
+    relayRef.current?.publish({ type: "stream", text: streamText });
+    bridgeHolder?.current?.pushPanel({ type: "stream", text: streamText });
   };
 
   const flushStream = () => {
@@ -421,6 +431,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     streamRef.current = "";
     setStream("");
     relayRef.current?.publish({ type: "stream", text: "" });
+    bridgeHolder?.current?.pushPanel({ type: "stream", text: "" }); // end the panel's live bubble
     reasoningRef.current = ""; // thinking is transient: it vanishes once the step produces output
     toolStreamRef.current = "";
     setReasoning("");
@@ -2030,6 +2041,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   };
 
+  // Side panel: a prompt typed in the extension's chat panel drives a real turn here. The transcript
+  // streams back to the panel via pushPanel (addLine/stream). Wait out a busy turn (bounded), then
+  // submit - same discipline as the relay path. Reassigned each render so it sees the latest closures.
+  if (bridgeHolder) bridgeHolder.onPrompt = (prompt: string) => {
+    void (async () => {
+      const w0 = Date.now();
+      while (busyRef.current && Date.now() - w0 < 15 * 60_000) await new Promise((r) => setTimeout(r, 300));
+      try { await handle(prompt); } catch (e) { addLine("error", e instanceof Error ? e.message : String(e)); }
+    })();
+  };
+
   // Shared remote handlers for /rc (HTTP) and /relay (outbound poll): run one turn (streaming to a
   // remote sink if given), report status, interrupt.
   const makeRemoteHandlers = (): RemoteHandlers => ({
@@ -2675,10 +2697,17 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const showBrowserHint = !readBrowserCapability() && !loadPrefs().browserHintSeen;
   if (showBrowserHint) savePrefs({ browserHintSeen: true });
   let browserBridge = startManagedBrowserBridge({ extensionIds: cfg.browserExtensionIds });
+  // Side-panel bridge: a stable holder so ChatApp can mirror its transcript + take panel prompts even
+  // though the bridge may be (re)created later by setupBrowser. Wiring onPanelPrompt on each bridge
+  // routes a panel prompt to ChatApp's handler (set on the holder).
+  const bridgeHolder: { current: BrowserBridge | null; onPrompt: ((prompt: string) => void) | null } = { current: browserBridge, onPrompt: null };
+  const wireBridge = (b: BrowserBridge | null) => { bridgeHolder.current = b; b?.onPanelPrompt((p) => bridgeHolder.onPrompt?.(p)); };
+  wireBridge(browserBridge);
   const setupBrowser = async (): Promise<string> => {
     const capability = ensureBrowserCapability(false);
     if (!browserBridge) {
       browserBridge = startManagedBrowserBridge({ capability, extensionIds: cfg.browserExtensionIds });
+      wireBridge(browserBridge);
     }
     const setup = await openBrowserExtensionSetup({ storeId: cfg.browserExtensionStoreId });
     // Put the unpacked folder path on the clipboard so the user can paste it into Chrome's
@@ -2736,7 +2765,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const startFullscreen = cfg.fullscreen && canFullscreen(process.stdout);
   const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
   const app = render(
-    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} />,
+    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} bridgeHolder={bridgeHolder} />,
     // Bracket each (already-minimized) write in BSU/ESU on terminals that support DEC 2026
     // (synchronized output) so redraws are atomic - no flicker, no Windows scrollback yank.
     {

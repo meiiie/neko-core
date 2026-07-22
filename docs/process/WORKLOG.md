@@ -3,6 +3,31 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-22 - Browser side-panel chat (chat with Neko from a Chrome sidebar)
+
+Made the Neko extension a Claude/ChatGPT-style right sidebar - but the BRAIN stays in the neko CLI
+(file/bash/computer-use), not embedded in the page. The panel is a thin chat client; the same neko
+that answers also controls the attached tab.
+
+- Bridge (`browser-bridge.ts`): new `pushPanel(event)` (Neko -> panel: transcript line/stream/
+  snapshot as `{type:"panel",event}`) and `onPanelPrompt(handler)` (panel -> Neko: a `{type:"panel-in",
+  prompt}` message drives a turn). Bounded (100k), blank-ignored. Unit-tested both directions.
+- Extension: manifest gains `sidePanel` + `side_panel.default_path`; service worker forwards bridge
+  `panel` events to a long-lived side-panel port and relays panel prompts back over the WS; new
+  `sidepanel.html` + `sidepanel.js` chat UI (CSP-safe external script, theme-aware, Enter to send).
+  The panel has NO model and NO external network - its only wire is the loopback bridge (test pins
+  this: no http(s) URL in sidepanel.js).
+- chat.tsx: `addLine` and the stream publishes now mirror to the panel via a stable `bridgeHolder`
+  (the bridge may be created lazily by setupBrowser); a panel prompt is routed into the turn loop
+  with the same busy-wait discipline as the relay path. The panel dedups Neko's echo of the user's
+  own prompt.
+- Reuses neko's existing loopback bridge + relay patterns, so ~80% was already there.
+
+Gates: typecheck clean, 784/784 tests (pushPanel/onPanelPrompt round-trip, sidepanel.js parse +
+no-external-host, asset count), binary rebuilt. LIVE Chrome verification (reload the unpacked
+extension, open the side panel, chat) is the owner's - the bridge protocol is deterministically
+tested but the in-Chrome round-trip can't be automated here.
+
 ## 2026-07-22 - Browser-connect UX pass (caret, Enter footgun, manual-install clarity)
 
 Three fixes to the "Connect Neko Browser" flow, found while the owner tested it by hand on a
