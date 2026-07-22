@@ -458,6 +458,7 @@ export class ToolRegistry {
     let capturePath = "";
     switch (action) {
       case "list": case "read": script = "uia.ps1"; sa = [action]; break;
+      case "activate": script = "uia.ps1"; sa = ["activate"]; break; // restore + foreground a (possibly minimized) window
       case "display": script = "display.ps1"; sa = []; break;
       case "get": case "invoke": case "toggle": {
         const nm = String(args.name ?? ""); if (!nm) return `Error: computer ${action} needs 'name'.`;
@@ -526,7 +527,7 @@ export class ToolRegistry {
         sa = [capturePath];
         break;
       }
-      default: return `Unknown computer action '${action}'. Use: list | read | get | display | watch | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
+      default: return `Unknown computer action '${action}'. Use: list | read | get | display | activate | watch | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
     }
     try {
       let residentOutput: string | null = null;

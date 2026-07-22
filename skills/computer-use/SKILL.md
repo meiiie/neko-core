@@ -86,10 +86,15 @@ Native apps have no DOM, but Windows UI Automation (UIA) IS the desktop's access
 DOM. **This is the primary path; use it first.**
 
 **Prefer the first-class `computer` tool** over bash-ing the scripts: `computer({action, window, ...})` —
-`action` is `list | read | get | display | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait |
-watch | open | screenshot`. `watch` waits inside the resident UIA process until readable state changes and
-stays stable, then returns `elapsed_ms`, `detected_ms`, a compact state id, and the fresh text without
-model-side polling.
+`action` is `list | read | get | display | activate | invoke | setvalue | toggle | click | stroke | type | key |
+scroll | wait | watch | open | screenshot`. `watch` waits inside the resident UIA process until readable state
+changes and stays stable, then returns `elapsed_ms`, `detected_ms`, a compact state id, and the fresh text
+without model-side polling.
+
+**A MINIMIZED window enumerates as 0 elements.** If `list`/`read` on a `window` returns nothing (or "0
+elements"), the app is almost certainly minimized or hidden — call `activate` with that `window` FIRST
+(it restores + foregrounds it via the native handle), then `list`. Never hand-roll ShowWindow/
+SetForegroundWindow P/Invoke through bash: use `computer({action:"activate", window})`.
 It dispatches to the scripts below (Unicode names handled via a temp UTF-8 `@file` automatically), gated like
 bash, and honours the presence/input config. Bash + the raw scripts is the fallback / for anything the tool
 doesn't expose. The underlying `uia.ps1` lets a text model perceive + act + verify with no vision and (for

@@ -25,7 +25,7 @@ param([string]$cmd="list", [string]$name="", [string]$value="", [int]$max=120)
 # scripts (uia/inject/mouse/overlay/screenshot) MUST set this identically so reads and actions share one space.
 try { Add-Type 'using System;using System.Runtime.InteropServices;public class Dpi{[DllImport("user32.dll")]public static extern bool SetProcessDpiAwarenessContext(IntPtr v);}'; [void][Dpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch {}
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
-Add-Type 'using System;using System.Runtime.InteropServices;public class FG{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern bool SetCursorPos(int x,int y);[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);}'
+Add-Type 'using System;using System.Runtime.InteropServices;public class FG{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern bool SetCursorPos(int x,int y);[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);[DllImport("user32.dll")]public static extern bool ShowWindow(IntPtr h,int c);[DllImport("user32.dll")]public static extern bool SetForegroundWindow(IntPtr h);[DllImport("user32.dll")]public static extern bool IsIconic(IntPtr h);}'
 $A=[System.Windows.Automation.AutomationElement]
 $TS=[System.Windows.Automation.TreeScope]
 $TrueC=[System.Windows.Automation.Condition]::TrueCondition
@@ -78,6 +78,17 @@ if($value -like '@*' -and (Test-Path $value.Substring(1))){ $value=(Get-Content 
 if($cmd -in 'invoke','setvalue','toggle'){ try { $alog= if($env:NEKO_ACTION_LOG){$env:NEKO_ACTION_LOG}else{"$env:TEMP\neko_actions.log"}; $detail=if($cmd -eq 'setvalue'){" ($($value.Length) chars)"}else{""}; ("{0}  uia {1} '{2}'{3}" -f (Get-Date -Format 'HH:mm:ss'),$cmd,$name,$detail) | Out-File $alog -Append -Encoding utf8 } catch {} }
 
 switch($cmd){
+  "activate" {
+    # Restore a MINIMIZED window and bring it to the foreground so it can be perceived/acted on
+    # (a minimized app enumerates as 0 controls). Uses the window's native handle; no P/Invoke the
+    # model has to hand-roll through a shell. SW_RESTORE=9 un-minimizes without maximizing.
+    $h=[IntPtr]$root.Current.NativeWindowHandle
+    if($h -eq [IntPtr]::Zero){ Write-Output "(target window has no native handle to activate)"; exit 1 }
+    if([FG]::IsIconic($h)){ [void][FG]::ShowWindow($h,9) }
+    [void][FG]::SetForegroundWindow($h)
+    Start-Sleep -Milliseconds 200
+    Write-Output ("ACTIVATED: " + $root.Current.Name)
+  }
   "list" {
     Write-Output ("WINDOW: " + $root.Current.Name)
     # Capability-first: keep anything ACTIONABLE (supports a pattern) OR a known interactive control type --
