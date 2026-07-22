@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 
+import { destructiveInWorkspace } from "../core/sandbox.ts";
 import { HIT_SENTINEL } from "./frame-diff.ts";
 import { trunc } from "./format.ts";
 import { highlightLine } from "./highlight.tsx";
@@ -71,6 +72,10 @@ export function ApprovalBox({ approval, flash, width, hover }: { approval: Appro
   const preview: any[] = [];
   if (toolName === "bash") {
     preview.push(<Text key="c" color="white">{"$ "}{trunc(args.command, 200)}</Text>);
+    // When the ONLY reason bash is prompting is that it destroys workspace data (otherwise a live
+    // sandbox would auto-approve it), say so - the user is confirming an irreversible delete.
+    const why = destructiveInWorkspace(String(args.command ?? ""));
+    if (why) preview.push(<Text key="warn" color="red">{"⚠ "}{why} - confirm before it runs</Text>);
   } else if (toolName === "write_file") {
     const content = String(args.content ?? "");
     const lines = content.split("\n");

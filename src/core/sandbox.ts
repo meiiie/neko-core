@@ -123,6 +123,29 @@ export function sandboxActive(): boolean {
   return kind !== "srt" || srtProvisioned();
 }
 
+/** Detect a command that IRREVERSIBLY destroys data INSIDE the workspace. The OS sandbox already
+ * contains the blast radius to the workspace, but the workspace itself (the user's code + .git) is
+ * writable - so sandboxed-bash auto-approval still asks a one-time confirmation for these. Unlike
+ * dangerousCommand (a safety seatbelt that runs even unsandboxed), this is only a "should we still
+ * prompt?" heuristic: a miss just means a contained command ran, not a system-level disaster, and a
+ * false positive costs one extra prompt. Returns a human reason, or null. Pure + testable.
+ *
+ * Deliberately does NOT fire on a plain single-file delete (`rm file.txt`) - that keeps ordinary
+ * cleanup convenient; it fires on the mass/irreversible forms (recursive/force/glob rm, git history
+ * or worktree wipers, find -delete, script-driven deletion, shred/truncate). Users who want zero
+ * prompts still have "always allow bash" and mode=auto (yolo). */
+export function destructiveInWorkspace(command: string): string | null {
+  const c = String(command).replace(/\s+/g, " ").trim();
+  if (/\brm\b/.test(c) && (/\s-[a-z]*r/i.test(c) || /\s-[a-z]*f/i.test(c) || /[*?]/.test(c))) return "recursive/force/wildcard delete (rm)";
+  if (/\bgit\s+clean\b/.test(c) && /\s-[a-z]*f/i.test(c)) return "git clean -f (removes untracked files)";
+  if (/\bgit\s+reset\b[^|;]*--hard/.test(c)) return "git reset --hard (discards uncommitted work)";
+  if (/\bgit\s+checkout\b[^|;]*(--\s*\.|\s\.\s*$)/.test(c)) return "git checkout -- . (discards changes)";
+  if (/\bfind\b[^|;]*-(delete|exec\s+rm)\b/.test(c)) return "find -delete / -exec rm";
+  if (/\b(python3?|node|ruby|perl|deno|bun)\b[^|;]*\b(rmtree|removedirs|shutil|os\.remove|os\.unlink|fs\.rm|unlink\(|rimraf)/i.test(c)) return "script-driven deletion";
+  if (/\b(shred|truncate)\b/.test(c)) return "shred/truncate (irrecoverable)";
+  return null;
+}
+
 /** srt settings JSON: writes confined to the workspace; reads stay default-allowed like the
  * bwrap/Seatbelt rungs. srt has NO allow-all egress -- network is always an allowlist (its
  * design, same as Claude Code/Codex) -- so allowNetwork=true exposes only the configured

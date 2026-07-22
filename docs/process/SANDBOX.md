@@ -35,6 +35,17 @@ state, surfaced by `neko doctor` (`bash auto-approved…`) and `neko policy`; it
 applies). Keying is on LIVE confinement, never config intent: `"sandbox": true` on a machine with
 no primitive still prompts. Opt back into prompting with `"sandbox_auto_approve": false`.
 
+**Exception — workspace-destructive commands still confirm.** The sandbox contains the blast radius
+to the workspace, but the workspace itself (your code + `.git`) is writable, so a command that
+*irreversibly destroys data there* — recursive/force/wildcard `rm`, `git clean -f`, `git reset
+--hard`, `git checkout -- .`, `find -delete`, script-driven deletion, `shred`/`truncate` — is
+**withheld from auto-approve and asks once** (the approval box shows a `⚠` reason). A plain
+single-file `rm file.txt` does not, so everyday cleanup stays convenient. This is a "should we still
+ask?" heuristic, not a containment (the sandbox already is that): a miss just means a contained
+command ran, a false positive costs one prompt. Want zero prompts anyway? `always allow bash` in the
+box, or `--yolo`. See `destructiveInWorkspace()` and `bun scripts/wren-audit.ts` (a hands-on probe
+of the whole posture, framed by the wren.wtf "Stop Using OpenCode" critique).
+
 | OS | Primitive | Status |
 |----|-----------|--------|
 | Linux | **bubblewrap** (`bwrap`) — unprivileged namespaces | full fs + network confinement |

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { buildSandbox, findWindowsBash, plainTarget, srtScript, srtSettings, wrapBash } from "../src/core/sandbox.ts";
+import { buildSandbox, destructiveInWorkspace, findWindowsBash, plainTarget, srtScript, srtSettings, wrapBash } from "../src/core/sandbox.ts";
 
 test("bwrap confines fs to the workspace + blocks network by default", () => {
   const t = buildSandbox("bwrap", "echo hi", "/work", false);
@@ -49,6 +49,26 @@ test("srt network allow = the sandbox_domains allowlist (no allow-all in srt) + 
 
 test("srtScript restores the workspace cwd and single-quote-escapes the root path", () => {
   expect(srtScript("C:\\wo'rk", "echo hi")).toBe("cd 'C:\\wo'\\''rk' || exit 1\necho hi\n");
+});
+
+test("destructiveInWorkspace fires on irreversible mass-deletion, not on ordinary commands", () => {
+  // FIRES: the forms that irreversibly lose workspace data.
+  for (const cmd of [
+    "rm -rf src", "rm -r build", "rm -f keep.txt", "rm *.log", "rm -rf .git",
+    "git clean -fdx", "git reset --hard HEAD~1", "git checkout -- .", "git checkout .",
+    "find . -name '*.ts' -delete", "find . -type f -exec rm {} +",
+    "python3 -c 'import shutil; shutil.rmtree(\"x\")'", "node -e 'fs.rmSync(\".\", {recursive:true})'",
+    "shred -u secret", "truncate -s 0 db.sqlite",
+  ]) {
+    expect(destructiveInWorkspace(cmd)).not.toBeNull();
+  }
+  // DOES NOT fire: convenient everyday commands (incl. a plain single-file delete).
+  for (const cmd of [
+    "rm keep.txt", "ls -la", "cat README.md", "git status", "git commit -m x",
+    "npm install", "bun test", "echo hello > out.txt", "grep -rf pattern .", "mkdir -p a/b",
+  ]) {
+    expect(destructiveInWorkspace(cmd)).toBeNull();
+  }
 });
 
 test("plainTarget: git-bash runs `bash -c cmd`, else the raw command via the platform shell", () => {

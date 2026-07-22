@@ -121,7 +121,7 @@ export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportSta
           ? "requested but unavailable on this OS - seatbelt + gate still apply"
           : detectSandbox() === "srt" && !srtProvisioned()
             ? "on (srt) but not provisioned - run once: srt windows-install (one UAC prompt)"
-            : `on (${detectSandbox()})${config.sandboxAutoApprove ? " - bash auto-approved (the sandbox is the containment; sandbox_auto_approve=false to prompt)" : ""}`
+            : `on (${detectSandbox()})${config.sandboxAutoApprove ? " - bash auto-approved except workspace-destructive commands, which still confirm (sandbox_auto_approve=false to always prompt)" : ""}`
         : `off (available: ${detectSandbox()}${
             detectSandbox() === "none" && process.platform === "win32"
               ? "; for Windows: bun add -g @anthropic-ai/sandbox-runtime, then: srt windows-install"

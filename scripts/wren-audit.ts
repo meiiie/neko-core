@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { dangerousCommand } from "../src/core/tool-runtime.ts";
-import { detectSandbox, sandboxActive, wrapBash } from "../src/core/sandbox.ts";
+import { destructiveInWorkspace, detectSandbox, sandboxActive, wrapBash } from "../src/core/sandbox.ts";
 
 const B = "\x1b[1m", R = "\x1b[31m", G = "\x1b[32m", Y = "\x1b[33m", C = "\x1b[36m", D = "\x1b[2m", X = "\x1b[0m";
 const tag = (t: string) =>
@@ -87,26 +87,24 @@ if (live) {
 }
 console.log("");
 
-// ---- 3. The residual gap our auto-approve introduced: in-workspace destruction is unguarded. ----
-// Demonstrated with an EXPLICIT target (rm -rf <dir>) - not `rm -rf .` (GNU rm refuses cwd) nor
-// `rm -rf *` (misses dotfiles) - so the outcome is unambiguous: the user's code dir is gone.
-console.log(`${B}3. Auto-approve gap: is destruction INSIDE the workspace guarded?${X}`);
-const destructive = "rm -rf src .git";
-const blocked = dangerousCommand(destructive);
-if (blocked) {
-  report("HELD", `seatbelt blocks "${destructive}"`, `blocked: ${blocked}`);
-} else if (!live) {
-  report("N/A", `"${destructive}" - sandbox not live`, "can't demonstrate the sandboxed run here");
-} else {
-  // Recreate the victim files, then run the destructive command sandboxed (as auto-approve would).
-  runSandboxed("mkdir -p src .git && echo '// user code' > src/important.ts && echo 'ref: refs/heads/main' > .git/HEAD");
-  const before = existsSync(join(root, "src", "important.ts")) && existsSync(join(root, ".git", "HEAD"));
-  console.log(`        ${D}$ ${destructive}   (seatbelt returned null; under auto-approve this runs with NO prompt)${X}`);
-  runSandboxed(destructive);
-  const gone = !existsSync(join(root, "src", "important.ts")) && !existsSync(join(root, ".git", "HEAD"));
-  if (before && gone) report("RISK", `"${destructive}" wiped the workspace with NO prompt`, "seatbelt=null + sandbox allows in-workspace writes + auto-approve skips the gate -> src/ and .git/ gone");
-  else if (!before) report("N/A", "couldn't set up the victim files", "skipping (sandbox mkdir/echo did not create them)");
-  else report("HELD", `"${destructive}" did not remove the files`, "unexpected - the workspace survived");
+// ---- 3. In-workspace destruction: the sandbox allows it BY DESIGN, so the approval layer guards it. ----
+// Two layers to check separately: the sandbox contains the blast radius but keeps the workspace
+// WRITABLE (so in-workspace deletion runs there - expected); the auto-approve guard then withholds
+// the no-prompt fast path for exactly these commands, so the user gets one confirmation.
+console.log(`${B}3. In-workspace destruction: sandbox allows it (by design) - does the guard still confirm?${X}`);
+const destructives = ["rm -rf src .git", "git clean -fdx", "git reset --hard HEAD~1", `python3 -c 'import shutil; shutil.rmtree("src")'`];
+for (const cmd of destructives) {
+  const withheld = destructiveInWorkspace(cmd);       // non-null -> auto-approve WITHHELD -> prompts
+  const seatbelt = dangerousCommand(cmd);             // the shallow last-resort (mostly null here)
+  if (withheld) report("HELD", `"${cmd}" still asks for confirmation`, `auto-approve withheld (${withheld}); seatbelt=${seatbelt ?? "null"} - the OS sandbox would contain it either way`);
+  else report("RISK", `"${cmd}" would auto-run with NO prompt`, "neither the destructive-command guard nor the seatbelt flagged it (sandbox still contains the blast radius to the workspace)");
+}
+// Prove the sandbox itself does NOT block in-workspace deletion (that's why the guard is needed).
+if (live) {
+  runSandboxed("mkdir -p victim && echo x > victim/f.txt");
+  runSandboxed("rm -rf victim");
+  const gone = !existsSync(join(root, "victim"));
+  console.log(`        ${D}(sandbox-layer check: a sandboxed "rm -rf victim" ${gone ? "DID delete in-workspace - expected; the guard above is what asks first" : "did not delete - unexpected"})${X}`);
 }
 
 // ---- Verdict ----
@@ -117,8 +115,9 @@ console.log(`  ${R}RISK${X}   unguarded gaps to decide on:       ${risk}`);
 if (na) console.log(`  ${C}N/A${X}    not testable honestly here:        ${na}`);
 console.log(`\n${D}Takeaway: the textual seatbelt is bypassable exactly as the article says - so it is NOT`);
 console.log(`the containment. The OS sandbox IS, and it holds for out-of-workspace writes + egress.`);
-console.log(`The open question is IN-workspace destruction under auto-approve: the blast radius is`);
-console.log(`contained to the workspace, but your code + .git inside it can be wiped without a prompt.${X}`);
+console.log(`In-workspace destruction stays possible inside the sandbox by design, so the approval`);
+console.log(`layer withholds the no-prompt fast path for those commands - you get one confirmation,`);
+console.log(`while every other bash command still auto-runs. Zero prompts? "always allow bash" / yolo.${X}`);
 
 rmSync(root, { recursive: true, force: true });
 rmSync(outsideDir, { recursive: true, force: true });

@@ -17,7 +17,7 @@ import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
 import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
-import { sandboxActive, wrapBash } from "./sandbox.ts";
+import { destructiveInWorkspace, sandboxActive, wrapBash } from "./sandbox.ts";
 import { effectivePermission, GATED, resolveTool, toolSchemas } from "./tools.ts";
 import { residentUiaHost } from "./windows-uia-host.ts";
 import { debug, messageOf } from "../shared/debug.ts";
@@ -384,8 +384,12 @@ export class ToolRegistry {
     }
 
     // Sandboxed-bash auto-approval keys off LIVE confinement (primitive present + provisioned),
-    // never off config intent alone - see decide() for the policy rationale.
-    const sandboxedBash = spec.name === "bash" && this.sandboxBash && this.sandboxAutoApprove && sandboxActive();
+    // never off config intent alone - see decide() for the policy rationale. It is WITHHELD for
+    // commands that irreversibly destroy data inside the workspace: the sandbox contains the blast
+    // radius, but the user's own code + .git are writable, so those still get one confirmation.
+    // (mode=auto/yolo still allows everything - that's the point of yolo; always-allow-bash too.)
+    const sandboxedBash = spec.name === "bash" && this.sandboxBash && this.sandboxAutoApprove
+      && sandboxActive() && !destructiveInWorkspace(String(args.command ?? ""));
     const decision = decide(this.mode, spec, args, { sandboxedBash });
     if (decision === "deny") {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;

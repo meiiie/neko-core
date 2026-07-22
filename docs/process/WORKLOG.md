@@ -3,6 +3,30 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-22 - Close the auto-approve destruction gap + wren.wtf audit
+
+- Audited neko against the wren.wtf "Stop Using OpenCode" critique. Everything it raises is either
+  handled by design (OS sandbox not textual filtering, no CWD exception, no FILES-list approach,
+  SHA-256-verified self-update vs curl|bash, and every local server - browser bridge / meeting /
+  relay - is loopback + Bearer-token + Origin-allowlisted with no permissive CORS, the opposite of
+  the CVE) or was the one residual gap below.
+- **Gap (introduced by our own sandboxed-bash auto-approve): in-workspace destruction ran without a
+  prompt.** The sandbox contains the blast radius but keeps the workspace writable, so `rm -rf src`,
+  `git reset --hard`, `rmtree(cwd)` etc. could wipe the user's code + .git silently. Closed by
+  withholding the no-prompt fast path for exactly those commands: new pure `destructiveInWorkspace()`
+  (recursive/force/wildcard rm, git clean -f / reset --hard / checkout -- ., find -delete,
+  script-driven deletion, shred/truncate) gates `sandboxedBash`. A plain single-file `rm file.txt`
+  is intentionally NOT flagged (everyday cleanup stays convenient); mode=auto and always-allow-bash
+  still bypass, per the owner's "prioritize convenience, the user opted into the mode" call. The
+  approval box shows a red `⚠ <reason>` when this is why bash is asking.
+- `bun scripts/wren-audit.ts` - a hands-on, honest probe anyone can run on their own machine:
+  proves the seatbelt IS bypassable (THESIS), the OS sandbox contains the consequence (HELD:
+  out-of-workspace redirect denied by NTFS, egress blocked), and the destructive guard now confirms
+  in-workspace deletion (HELD). Honesty rule: a tool-missing exit 127 is never scored as "blocked".
+  Verdict on this machine: THESIS 2, HELD 8, RISK 0.
+- Gates: typecheck clean, 779/779 tests (destructiveInWorkspace fires/does-not-fire matrix), policy
+  PASS, binary build + probes OK, doctor names the destructive-still-confirms behavior.
+
 ## 2026-07-22 - Mouse parity (approval + picker), sandboxed-bash auto-approve, kitty protocol, setup terminal
 
 - **Sandboxed bash auto-approves** (Claude Code's sandbox rationale - the containment replaces the
