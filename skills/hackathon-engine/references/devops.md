@@ -9,7 +9,8 @@ that stays working.** Right-sized: the discipline of a top team, the scope of a 
 - Use a **zero-friction host** for the stack (see `golden-stacks.md`): Vercel/Netlify (web), Fly/Railway/
   Render (containers/APIs), a managed DB. Don't hand-roll infra you'll babysit.
 - **Containerize if the runtime is non-trivial** (Docker) so "works on my machine" == "works on the
-  judge's". A pinned base image + a lockfile removes a whole class of surprises.
+  judge's". A pinned base image + a lockfile removes a whole class of surprises. Use the `docker` skill
+  for image/compose/GPU/registry work (and the neko sandbox gotcha - docker needs daemon access).
 
 ## A small, honest pipeline
 - Modular stages, each doing one job: **build → test → deploy**. Even a single GitHub Actions file that
