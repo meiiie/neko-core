@@ -132,6 +132,8 @@ the pitch + slides with the `clean-writing` skill - no hollow superlatives, no "
 - `references/devops.md` - ship early, stay shippable, rollback + recording.
 - `references/mobile.md` - responsive-first (or Expo), phone demo-proofing + QR.
 - `references/data.md` - honest sourcing/analysis, one hero insight (+ `dataviz`).
+- `references/testing-strategy.md` - enough tests to trust the demo path, not a coverage trophy.
+- `references/security.md` - the few controls that actually sink a project.
 - `references/seo.md` - findability basics (only if scored, or a real launch).
 - `clean-writing` skill (separate) - kill AI-slop tells in all copy.
 - `research-method` skill (separate) - chase/beat SOTA, doubt, keep a research ledger.
