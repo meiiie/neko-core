@@ -622,7 +622,7 @@ test("/voice defaults to conversational browser voice and keeps official/lab rou
   mkdirSync(codexRoot, { recursive: true });
   writeFileSync(join(codexRoot, "codex-app-server.exe"), "codex");
   writeFileSync(join(codexRoot, "support-pack.json"), JSON.stringify({
-    protocolVersion: "0.144.1", executable: "codex-app-server.exe", installedBytes: 283_537_712,
+    protocolVersion: "0.145.0", executable: "codex-app-server.exe", installedBytes: 283_537_712,
   }));
   saveChatGptCredentials({
     accessToken: "header.payload.signature", refreshToken: "refresh", expiresAt: Date.now() + 3_600_000, accountId: "acct-ui",
@@ -688,10 +688,11 @@ test("/voice defaults to conversational browser voice and keeps official/lab rou
     expect(await until(() => frames.join("\n").includes("Voice page opened in your browser"))).toBe(true);
     expect(lastFrame() ?? "").toContain("microphone off - press Start voice in the browser");
 
-    snapshot = { state: "live", muted: false, startedAt: Date.now() };
+    snapshot = { state: "live", muted: false, startedAt: Date.now(), protocol: "v3" };
     options.onEvent?.({ type: "state", snapshot });
     options.onEvent?.({ type: "transcript-delta", role: "user", delta: "xin chao Neko" });
     expect(await until(() => (lastFrame() ?? "").includes("● LIVE"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("V3");
     expect(lastFrame() ?? "").toContain("> xin chao Neko");
     options.onEvent?.({ type: "transcript-done", role: "user", text: "xin chao Neko" });
     expect(await until(() => frames.join("\n").includes("xin chao Neko"))).toBe(true);

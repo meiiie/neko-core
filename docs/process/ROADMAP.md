@@ -10,6 +10,11 @@ intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibil
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
 
+- **Realtime V3 integration (2026-07-22):** the optional ChatGPT subscription bridge now requires official
+  Codex App Server 0.145.0, requests Frameless Bidi V3 explicitly, verifies the negotiated version before
+  accepting WebRTC, seeds a bounded recent conversation tail, and preserves Neko's existing approval boundary
+  for delegated tools. There is no silent V2 downgrade or paid Realtime API fallback.
+
 - **Branch:** `main`. **Current release: v0.14.0 (2026-07-16)** - Neko now has a consent-first local meeting
   companion: browser/OS-selected system audio plus a separate microphone channel streams to bounded local WAV,
   a verified optional whisper.cpp pack transcribes Vietnamese, and timestamped evidence is paged into context for

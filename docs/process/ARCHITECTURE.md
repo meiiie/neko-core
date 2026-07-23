@@ -286,6 +286,11 @@ served only on `127.0.0.1`, uses a URL-fragment capability that is removed from 
 both signaling HTTP and the exact-origin WebSocket, and stops on tab close/heartbeat loss. Subscription-only
 spawns remove API-key environment variables, so the adapter cannot silently create API charges.
 
+The subscription adapter requires Codex App Server 0.145.0 and requests realtime `v3` explicitly. It does not
+silently downgrade: the WebRTC answer is accepted only after `thread/realtime/started` confirms V3. A bounded
+text-only tail of the current Neko conversation seeds V3 `initialItems`; system, tool, image, and oversized
+payloads stay out of the realtime bootstrap. Dynamic tool audio is forwarded only as a bounded inline data URL.
+
 Voice background tool calls enter core only through `Agent.executeExternalTool`, which wraps the same
 `ToolRegistry`, approval gate, events, path containment, and sandbox used by a normal text turn. The TUI owns
 visible LIVE/mute/transcript state and all lifecycle exits (`/voice stop`, `/logout`, support management,

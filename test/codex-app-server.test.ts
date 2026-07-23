@@ -118,6 +118,20 @@ test("JSON-RPC surfaces protocol errors instead of hanging", async () => {
   client.close();
 });
 
+test("closeAndWait does not resolve before the App Server transport exits", async () => {
+  const { transport } = fakeTransport();
+  let release!: () => void;
+  transport.closed = new Promise<void>((resolve) => { release = resolve; });
+  const client = new CodexAppServerClient(transport);
+  let settled = false;
+  const closing = client.closeAndWait().then(() => { settled = true; });
+  await Bun.sleep(1);
+  expect(settled).toBe(false);
+  release();
+  await closing;
+  expect(settled).toBe(true);
+});
+
 test("a binary removed after discovery is a provider error, not a process crash", async () => {
   const home = mkdtempSync(join(tmpdir(), "neko-missing-codex-"));
   const client = startCodexAppServer(

@@ -247,6 +247,7 @@ export interface RpcTransport {
   input: Writable;
   output: Readable;
   close: () => void;
+  closed?: Promise<void>;
   stderrTail?: () => string;
 }
 
@@ -306,6 +307,18 @@ export class CodexAppServerClient {
     this.reader.close();
     this.transport.close();
     this.failAll(reason);
+  }
+
+  async closeAndWait(reason = new Error("Codex App Server stopped"), timeoutMs = 5_000): Promise<void> {
+    this.close(reason);
+    if (!this.transport.closed) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      this.transport.closed!.then(
+        () => { clearTimeout(timer); resolve(); },
+        () => { clearTimeout(timer); resolve(); },
+      );
+    });
   }
 
   private write(message: RpcMessage): void {
@@ -407,6 +420,10 @@ export function startCodexAppServer(
     shell: launch.shell,
     env,
   });
+  const closed = new Promise<void>((resolve) => {
+    child.once("close", () => resolve());
+    child.once("error", () => resolve());
+  });
   let stderr = "";
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-4000); });
@@ -435,6 +452,7 @@ export function startCodexAppServer(
       process.removeListener("exit", exitCleanup);
       stop();
     },
+    closed,
     stderrTail: () => stderr,
   };
   client = new CodexAppServerClient(transport, handlers);

@@ -1265,7 +1265,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
 
-    voiceModeRef.current = "Neko subscription bridge";
+    voiceModeRef.current = "Neko realtime V3 bridge";
     voiceErrorShownRef.current = false;
     setVoiceTranscript(null);
     // A GPT-5.6 text provider may already own an idle App Server. Recreate it lazily after voice so
@@ -1276,6 +1276,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     voice = makeVoice({
       model: /^gpt-/i.test(cfg.model) ? cfg.model : "gpt-5.5",
       tools: agentRef.current!.externalToolSchemas(),
+      history: agentRef.current!.messages,
       executeTool: (call) => agentRef.current!.executeExternalTool(call),
       onEvent: (event) => {
         if (event.type === "state") {
@@ -1327,7 +1328,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         items: [
           { id: "browser", label: "Neko Conversational Voice", detail: "works now in Chrome/Edge; backchannels + interruption; browser data policy applies" },
           { id: "official", label: "Open ChatGPT", detail: "Voice appears only when available to your account/browser; runs outside Neko" },
-          { id: "chatgpt", label: "Neko Subscription Bridge - Lab", detail: "experimental Codex WebRTC; availability varies; never API billing" },
+          { id: "chatgpt", label: "Neko Realtime V3 - Lab", detail: "Codex 0.145+ WebRTC; verified V3; availability varies; never API billing" },
           { id: "dictation", label: "OS Dictation", detail: process.platform === "win32" ? "press Win+H; speech-to-text only, OS data policy applies" : "use the operating system dictation shortcut" },
           { id: "cancel", label: "Cancel", detail: "microphone stays off" },
         ],
@@ -1684,7 +1685,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const snap = voiceRef.current?.snapshot();
         if (!snap) return addLine("info", "voice: stopped - use /voice to choose Neko conversational voice, ChatGPT, or dictation");
         const seconds = snap.startedAt ? Math.floor((Date.now() - snap.startedAt) / 1000) : 0;
-        return addLine("info", `voice: ${snap.state} - ${Math.floor(seconds / 60)}m ${seconds % 60}s\nremaining voice quota is not exposed; API billing fallback is disabled`);
+        return addLine("info", `voice: ${snap.state}${snap.protocol ? ` ${snap.protocol.toUpperCase()}` : ""} - ${Math.floor(seconds / 60)}m ${seconds % 60}s\nremaining voice quota is not exposed; API billing fallback is disabled`);
       }
       return addLine("info", "usage: /voice [start|stop|mute|unmute|status]");
     }
@@ -2558,6 +2559,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             </Text>
             <Text dimColor>{"  ·  "}</Text>
             <Text>{voiceSnapshot.state === "muted" ? "muted" : voiceSnapshot.state === "waiting" ? "microphone off - press Start voice in the browser" : voiceSnapshot.state}</Text>
+            {voiceSnapshot.protocol ? <Text color="cyan">{`  ·  ${voiceSnapshot.protocol.toUpperCase()}`}</Text> : null}
             {voiceSnapshot.startedAt ? <Text dimColor>{`  ·  ${fmtDuration(Math.floor((voiceNow - voiceSnapshot.startedAt) / 1000))}`}</Text> : null}
             <Text dimColor>{"  ·  /voice mute  ·  /voice stop"}</Text>
           </Text>

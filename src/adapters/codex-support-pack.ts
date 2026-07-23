@@ -28,6 +28,7 @@ import {
 const RELEASE_API = "https://api.github.com/repos/openai/codex/releases/latest";
 const RELEASE_PAGE = "https://github.com/openai/codex/releases";
 const MAX_ARCHIVE_BYTES = 160 * 1024 * 1024;
+const TRANSIENT_IO_RETRY_DELAYS_MS = [100, 200, 400, 800, 1_600];
 
 interface GitHubAsset {
   name?: string;
@@ -78,6 +79,7 @@ export interface InstallCodexSupportOptions {
   verifyBinary?: (path: string, platform: NodeJS.Platform) => void;
   versionOf?: (path: string) => string | null;
   verifyProtocol?: (path: string, version: string, probeHome: string) => Promise<void>;
+  renamePath?: (from: string, to: string) => void;
 }
 
 export function codexSupportTarget(
@@ -119,6 +121,7 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
   const home = options.home ?? homeDir();
   const fetchImpl = options.fetchImpl ?? fetch;
   const notify = options.notify ?? (() => {});
+  const renamePath = options.renamePath ?? renameSync;
   const target = codexSupportTarget(platform, arch);
 
   notify("Checking the official OpenAI Codex release...");
@@ -144,6 +147,7 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
   mkdirSync(parent, { recursive: true, mode: 0o700 });
   mkdirSync(staging, { recursive: false, mode: 0o700 });
   let movedOld = false;
+  let installError: unknown;
   try {
     notify(`Downloading ${formatMiB(resolved.size)} optional support component...`);
     const downloaded = await downloadAsset(fetchImpl, resolved.url, archive, resolved.size, notify);
@@ -165,7 +169,7 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
     notify("Checking Codex App Server protocol compatibility...");
     const probeHome = join(staging, ".protocol-probe");
     await (options.verifyProtocol ?? verifyProtocolCompatibility)(extracted, version, probeHome);
-    rmSync(probeHome, { recursive: true, force: true });
+    await removeTemporaryTree(probeHome);
 
     const installedName = platform === "win32" ? "codex-app-server.exe" : "codex-app-server";
     const installedPath = join(staging, installedName);
@@ -185,19 +189,33 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
     writeFileSync(join(staging, "support-pack.json"), `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 
     rmSync(backup, { recursive: true, force: true });
-    if (existsSync(root)) { renameSync(root, backup); movedOld = true; }
+    if (existsSync(root)) {
+      await renameWithTransientRetry(root, backup, renamePath);
+      movedOld = true;
+    }
     try {
-      renameSync(staging, root);
+      await renameWithTransientRetry(staging, root, renamePath);
     } catch (error) {
-      if (movedOld && !existsSync(root)) renameSync(backup, root);
+      if (movedOld && !existsSync(root)) {
+        try { await renameWithTransientRetry(backup, root, renamePath); }
+        catch (rollbackError) {
+          if (error instanceof Error && error.cause === undefined) error.cause = rollbackError;
+        }
+      }
       throw error;
     }
     rmSync(backup, { recursive: true, force: true });
     clearCodexSupportCache();
     notify(`GPT-5.6 Support Pack ${version} is ready (${formatMiB(manifest.installedBytes)} on disk).`);
     return { ...manifest, path: join(root, installedName) };
+  } catch (error) {
+    installError = error;
+    throw error;
   } finally {
-    rmSync(staging, { recursive: true, force: true });
+    try { await removeTemporaryTree(staging); }
+    catch (cleanupError) {
+      if (installError === undefined) throw cleanupError;
+    }
   }
 }
 
@@ -312,7 +330,39 @@ async function verifyProtocolCompatibility(path: string, version: string, probeH
   );
   try { await client.initialize(20_000); }
   catch (error) { throw new Error(`Codex App Server protocol check failed: ${error instanceof Error ? error.message : error}`); }
-  finally { client.close(); }
+  finally { await client.closeAndWait(); }
+}
+
+async function removeTemporaryTree(path: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      const delay = TRANSIENT_IO_RETRY_DELAYS_MS[attempt];
+      if ((code !== "EBUSY" && code !== "EPERM") || delay === undefined) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+async function renameWithTransientRetry(
+  from: string,
+  to: string,
+  renamePath: (from: string, to: string) => void,
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      renamePath(from, to);
+      return;
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      const delay = TRANSIENT_IO_RETRY_DELAYS_MS[attempt];
+      if ((code !== "EBUSY" && code !== "EPERM") || delay === undefined) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
 }
 
 function formatMiB(bytes: number): string {

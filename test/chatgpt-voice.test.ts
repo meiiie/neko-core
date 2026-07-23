@@ -61,7 +61,10 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
         if (method === "thread/start") return { thread: { id: "voice-thread" } };
         if (method === "thread/realtime/listVoices") return { voices: { v1: ["cove"] } };
         if (method === "thread/realtime/start") {
-          setTimeout(() => handlers.onNotification?.("thread/realtime/sdp", { threadId: "voice-thread", sdp: "v=0\r\nanswer" }), 0);
+          setTimeout(() => {
+            handlers.onNotification?.("thread/realtime/started", { threadId: "voice-thread", version: "v3" });
+            handlers.onNotification?.("thread/realtime/sdp", { threadId: "voice-thread", sdp: "v=0\r\nanswer" });
+          }, 0);
           return {};
         }
         return {};
@@ -74,12 +77,20 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
     tools: [
       { function: { name: "read_file", description: "Read", parameters: { type: "object" } } },
       { function: { name: "write_file", description: "Write", parameters: { type: "object" } } },
+      { function: { name: "audio_tool", description: "Audio", parameters: { type: "object" } } },
       { function: { name: "mcp__neko_browser__status", description: "Browser status", parameters: { type: "object" } } },
+    ],
+    history: [
+      { role: "system", content: "private system context" },
+      { role: "user", content: "Chúng ta đang sửa voice." },
+      { role: "assistant", content: "Mình đã hiểu." },
+      { role: "tool", content: "large tool output must not seed realtime" },
     ],
     executeTool: async (call) => {
       routedTool = call.name;
       if (call.name === "write_file") return "Denied by user: write_file (write blocked.txt)";
       if (call.name === "mcp__neko_browser__status") return "browser:ready";
+      if (call.name === "audio_tool") return [{ type: "audio", data: "QUJD", mimeType: "audio/wav" }];
       readToolCalls++;
       return `read:${call.arguments.path}`;
     },
@@ -135,8 +146,13 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
   expect(offer.status).toBe(200);
   expect(await offer.json()).toEqual({ sdp: "v=0\r\nanswer" });
   expect(requests.find((request) => request.method === "thread/realtime/start")?.params).toMatchObject({
-    threadId: "voice-thread", outputModality: "audio", transport: { type: "webrtc", sdp: "v=0\r\nvalid test offer" },
+    threadId: "voice-thread", version: "v3", outputModality: "audio", transport: { type: "webrtc", sdp: "v=0\r\nvalid test offer" },
+    initialItems: [
+      { role: "user", text: "Chúng ta đang sửa voice." },
+      { role: "assistant", text: "Mình đã hiểu." },
+    ],
   });
+  expect(active.snapshot().protocol).toBe("v3");
 
   const toolRequest = {
     threadId: "voice-thread", callId: "voice-call", tool: "read_file", arguments: { path: "README.md" },
@@ -152,6 +168,9 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
     threadId: "voice-thread", callId: "voice-denied", tool: "write_file", arguments: { path: "blocked.txt" },
   })).toEqual({ contentItems: [{ type: "inputText", text: "Denied by user: write_file (write blocked.txt)" }], success: false });
   expect(await handlers.onRequest?.("item/tool/call", {
+    threadId: "voice-thread", callId: "voice-audio", tool: "audio_tool", arguments: {},
+  })).toEqual({ contentItems: [{ type: "inputAudio", audioUrl: "data:audio/wav;base64,QUJD" }], success: true });
+  expect(await handlers.onRequest?.("item/tool/call", {
     threadId: "voice-thread", callId: "voice-mcp", tool: browserTool.name, arguments: {},
   })).toEqual({ contentItems: [{ type: "inputText", text: "browser:ready" }], success: true });
   expect(routedTool).toBe("mcp__neko_browser__status");
@@ -166,6 +185,37 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
   expect(requests.some((request) => request.method === "thread/unsubscribe")).toBe(true);
   expect(closed).toBe(1);
   ws.close();
+});
+
+test("subscription voice rejects a realtime downgrade instead of claiming V3", async () => {
+  setupAuth();
+  let handlers!: CodexAppServerHandlers;
+  const factory: VoiceCodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}), close: () => {},
+      request: async (method) => {
+        if (method === "thread/start") return { thread: { id: "voice-thread" } };
+        if (method === "thread/realtime/start") {
+          setTimeout(() => {
+            handlers.onNotification?.("thread/realtime/started", { threadId: "voice-thread", version: "v2" });
+            handlers.onNotification?.("thread/realtime/sdp", { threadId: "voice-thread", sdp: "v=0\r\nanswer" });
+          }, 0);
+        }
+        return {};
+      },
+    };
+  };
+  active = new ChatGptVoiceSession({ model: "gpt-5.5", clientFactory: factory, openUrl: () => {} });
+  const { url } = await active.start();
+  const parsed = new URL(url);
+  const response = await fetch(`${parsed.origin}/offer`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${parsed.hash.slice(1)}`, "content-type": "application/json" },
+    body: JSON.stringify({ sdp: "v=0\r\nvalid test offer" }),
+  });
+  expect(response.status).toBe(409);
+  expect(await response.text()).toContain("expected realtime V3 but Codex started v2");
 });
 
 test("voice bridge rejects an SDP offer without its one-session capability", async () => {
