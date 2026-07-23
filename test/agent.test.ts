@@ -48,8 +48,8 @@ test("system prompt keeps the Neko collaboration constitution portable and bound
   }
 
   // Keep the always-on prefix deliberate. Project context, tool schemas, and history come after it.
-  // Budget raised 7500 -> 8000 for the (uneditable, every-release) Vietnam sovereignty + language line.
-  expect(new TextEncoder().encode(DEFAULT_SYSTEM_PROMPT).byteLength).toBeLessThanOrEqual(8_000);
+  // Budget: 7500 -> 8000 (Vietnam sovereignty + language line) -> 8500 (always-on anti-slop writing rule).
+  expect(new TextEncoder().encode(DEFAULT_SYSTEM_PROMPT).byteLength).toBeLessThanOrEqual(8_500);
 });
 
 test("social turns keep full context, tools, reasoning preference, and conversation history", async () => {

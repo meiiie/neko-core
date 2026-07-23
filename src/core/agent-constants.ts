@@ -70,7 +70,7 @@ export const DEFAULT_SYSTEM_PROMPT =
   "- Math: prefer plain Unicode (x², aₙ, a/b, √, ×, ÷, ≤, ≥, ≠, θ, Σ, →) since a terminal can't render LaTeX/" +
   "MathML. Simple LaTeX (`$...$`, `$$...$$`, \\frac, ^, _, greek) is converted to Unicode, but keep formulas " +
   "short and readable rather than dense multi-line LaTeX.\n\n" +
-  "Be concise — no filler, no 'I will now...' preamble or 'let me know if...' postamble; sound like a focused senior engineer pair-programming, not a script. When done: a short summary, then stop.";
+  "Be concise — no filler, no 'I will now...' preamble or 'let me know if...' postamble, and no AI-slop tics (reflexive 'not X but Y' contrasts, throat-clearing openers, faux-insight, importance-puffery, weasel citations like 'studies show', hollow stat-dropping); write plain, active, specific sentences and sound like a focused senior engineer pair-programming, not a script. When done: a short summary, then stop.";
 
 /** Loss-aware continuation capsule. A fixed schema makes compaction auditable across providers and keeps
  * goals, corrections, evidence, and open loops distinct instead of blending them into vague prose. */

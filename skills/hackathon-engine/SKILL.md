@@ -83,14 +83,22 @@ When design is heavily weighted, aim for the ELITE tier in `design-engine.md` (r
 craft typography + purposeful scroll motion + restraint), not just "not slop".
 Present `DESIGN.md` (ideally 2-3 direction options for the user to pick). Wait for approval.
 
-### Stage 3 - Scaffold the golden stack
+### Stage 3 - Scaffold the golden stack + ship a skeleton
 From `references/golden-stacks.md`, scaffold the approved stack. IMMEDIATELY apply the anti-slop
 defaults (swap the default font, install the color tokens, set the type + spacing scale) BEFORE writing
-any page - otherwise the framework's defaults reintroduce slop on every new file.
+any page - otherwise the framework's defaults reintroduce slop on every new file. **Deploy the empty
+skeleton to a real URL now** (see `references/devops.md`) - discovering a build/deploy failure at hour 45
+is the classic loss.
 
 ### Stage 4 - Build the spine (single agent, vertical-slice first)
 Implement the demo path end-to-end first (even stubbed), then widen. One strong agent, slice by slice.
 Real artifacts on disk, `edit` over rewrite, commit at milestones. No swarm.
+- **Server logic** (an API, auth, data): read `references/backend.md` - contract-first, the security +
+  error + idempotency essentials, and demo-proofing (seed data, timeouts, `/health`).
+- **Shipping**: `references/devops.md` - a small build->test->deploy path, re-deploy at milestones, keep
+  a rollback + a recorded fallback.
+- **All human-facing copy**: run the `clean-writing` skill so headings, buttons, and page text read
+  like a person, not a chatbot (the verbal half of anti-slop; `design-engine.md` is the visual half).
 
 ### Stage 5 - Grounded verify loop (the skeptical engine)
 After EACH slice, run the loop - do not advance on assumption:
@@ -110,7 +118,18 @@ back into the spec/design. This is the only stage where breadth-first parallelis
 ### Stage 7 - Demo & narrative
 Assemble the pitch the judges actually score: **~30% problem / ~70% solution**, opening on the wow
 moment, each talking point mapped to a rubric criterion, and a rehearsed **working-demo script** (exact
-click path, with a fallback recording if live is risky). Polish the first screen the judges see.
+click path, with a fallback recording if live is risky). Polish the first screen the judges see. Write
+the pitch + slides with the `clean-writing` skill - no hollow superlatives, no "revolutionary".
+
+## Reference index (load what the task needs)
+- `references/design-engine.md` - visual system, elite tier, component anatomy, anti-slop.
+- `references/motion.md` - animation + the micro-interaction catalog.
+- `references/tracks.md` - competition archetypes (sub-branches).
+- `references/golden-stacks.md` - pinned, anti-slop-ready stacks.
+- `references/backend.md` - API/data/auth, right-sized + demo-proof.
+- `references/devops.md` - ship early, stay shippable, rollback + recording.
+- `references/seo.md` - findability basics (only if scored, or a real launch).
+- `clean-writing` skill (separate) - kill AI-slop tells in all copy.
 
 ## The skeptic's checklist (run before claiming the product is ready)
 - Does every acceptance criterion have a *witnessed* pass (run/test/screenshot), not an assumed one?
