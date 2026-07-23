@@ -549,6 +549,7 @@ export class Agent {
         stateVerificationEvidence = true;
       }
     };
+    let budgetNudges = 0; // SOTA "completion predicate": remind the model to LAND the deliverable near the budget edge
     for (let step = 0; step < this.maxSteps; step++) {
       this.emit("step", step + 1);
       if (signal?.aborted) return "[interrupted]";
@@ -768,6 +769,25 @@ export class Agent {
         && toolCalls.every((call) => this.isMechanicalReadCall(call))
         ? "low"
         : undefined;
+
+      // Budget-aware COMPLETION nudge (2026 SOTA: agents fail not from inability but because "nobody told
+      // it when the work is over" - a completion signal near the budget edge is what changes behavior).
+      // On a long task, glm/GLM-class models over-research and get cut off at max_steps with the artifact
+      // never written. This fires at ~2/3 then ~6/7 of the budget, once each: it does NOT stifle earlier
+      // exploration (that stays free) - it just stops the model running out with nothing produced.
+      if (this.maxSteps >= 10) {
+        const frac = (step + 1) / this.maxSteps;
+        const threshold = budgetNudges === 0 ? 0.66 : budgetNudges === 1 ? 0.85 : 2;
+        if (frac >= threshold) {
+          budgetNudges++;
+          const left = this.maxSteps - (step + 1);
+          this.messages.push({ role: "user", content:
+            `[budget] ~${left} of ${this.maxSteps} steps left (${Math.round(frac * 100)}% used). If this task ` +
+            "has a concrete deliverable - a file to write, code, a config, a plan - PRODUCE and finish it NOW; " +
+            "don't spend the remaining budget exploring. A delivered result with its open risks named honestly " +
+            "beats a perfect one you never wrote. If you are already done, give your final answer." });
+        }
+      }
     }
 
     // Step limit reached: instead of an abrupt stop, ask for one tool-less wrap-up so the user gets
