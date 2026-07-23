@@ -14,8 +14,8 @@
  * otherwise write anywhere. Pure + node-only (no adapter imports) so it stays in core.
  */
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -24,6 +24,8 @@ export interface SpawnTarget {
   file: string;
   args: string[];
   shell: boolean;
+  /** Remove per-launch material after the child closes. Must be safe to call more than once. */
+  cleanup?: () => void;
 }
 
 let cached: SandboxKind | undefined;
@@ -181,6 +183,22 @@ export function srtScript(root: string, command: string): string {
 
 let srtScriptDirCached: string | null | undefined;
 
+/** Remove scripts left by the old persistent implementation and crash-orphaned ephemeral scripts. */
+export function purgeStaleSrtScripts(dir: string, now = Date.now()): void {
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!/^cmd-.*\.sh$/.test(name)) continue;
+      const path = join(dir, name);
+      const legacy = /^cmd-[0-9a-f]{12}\.sh$/.test(name);
+      let stale = legacy;
+      try { stale ||= now - statSync(path).mtimeMs > 24 * 60 * 60_000; } catch { stale = true; }
+      if (stale) {
+        try { rmSync(path, { force: true }); } catch { /* another process may still have it open */ }
+      }
+    }
+  } catch { /* best-effort hygiene; launch still has per-process cleanup */ }
+}
+
 /** Temp dir holding the per-command scripts, readable by the sandbox account. TEMP lives in
  * the caller's profile, which other local users cannot read -- one additive read+execute ACE
  * for `srt-sandbox` on this subdir (owner-set, no elevation) makes just the scripts visible. */
@@ -189,6 +207,7 @@ function srtScriptDir(): string | null {
   try {
     const dir = join(tmpdir(), "neko-srt");
     mkdirSync(dir, { recursive: true });
+    purgeStaleSrtScripts(dir);
     const r = spawnSync("icacls", [dir, "/grant", "srt-sandbox:(OI)(CI)(RX)"], { timeout: 10000 });
     return (srtScriptDirCached = r.status === 0 ? dir : null);
   } catch {
@@ -196,15 +215,27 @@ function srtScriptDir(): string | null {
   }
 }
 
-/** Write the command script (content-addressed like the settings file). null -> no readable
- * script dir; the caller falls back to srt's own -c (the platform shell, idioms degraded). */
-function writeSrtScript(root: string, command: string): string | null {
+/** Create a unique, short-lived command script. Commands can contain credentials, so scripts are
+ * never content-addressed/reused and their cleanup is tied to the spawned child's lifecycle. */
+export function writeEphemeralSrtScript(dir: string, root: string, command: string): { path: string; cleanup: () => void } {
+  const path = join(dir, `cmd-${process.pid}-${randomUUID()}.sh`);
+  writeFileSync(path, srtScript(root, command), { encoding: "utf8", mode: 0o600 });
+  let removed = false;
+  return {
+    path,
+    cleanup: () => {
+      if (removed) return;
+      removed = true;
+      rmSync(path, { force: true });
+    },
+  };
+}
+
+/** null -> no readable script dir; caller falls back to srt's own -c (idioms degraded). */
+function writeSrtScript(root: string, command: string): { path: string; cleanup: () => void } | null {
   const dir = srtScriptDir();
   if (!dir) return null;
-  const body = srtScript(root, command);
-  const path = join(dir, `cmd-${createHash("sha256").update(body).digest("hex").slice(0, 12)}.sh`);
-  if (!existsSync(path)) writeFileSync(path, body);
-  return path;
+  return writeEphemeralSrtScript(dir, root, command);
 }
 
 /** Unsandboxed spawn target. On Windows, run through real git-bash if available (so Unix idioms
@@ -235,6 +266,7 @@ export interface SrtLaunch {
   settingsPath: string;
   bash: string | null;
   scriptPath: string | null;
+  cleanup?: () => void;
 }
 
 /** Build the spawn target for running `command` under the given sandbox kind. Pure (testable). */
@@ -269,7 +301,12 @@ export function buildSandbox(kind: SandboxKind, command: string, root: string, a
     // command line (they live in the script file). Without git-bash, degrade to the raw
     // command via srt's own -c, same posture as the unsandboxed Windows fallback.
     const inner = srt.bash && srt.scriptPath ? `"${srt.bash}" "${srt.scriptPath}"` : command;
-    return { file: srt.exe, args: ["--settings", srt.settingsPath, "-c", inner], shell: false };
+    return {
+      file: srt.exe,
+      args: ["--settings", srt.settingsPath, "-c", inner],
+      shell: false,
+      ...(srt.cleanup ? { cleanup: srt.cleanup } : {}),
+    };
   }
   return noneTarget(command); // none: git-bash on Windows, else the platform shell (seatbelt + gate still apply)
 }
@@ -280,13 +317,15 @@ export function wrapBash(command: string, root: string, opts: { enabled: boolean
   const kind = detectSandbox();
   const exe = kind === "srt" ? findSrt() : null;
   const bash = exe ? findWindowsBash() : null;
+  const script = bash ? writeSrtScript(root, command) : null;
   return buildSandbox(kind, command, root, opts.allowNetwork,
     exe
       ? {
           exe,
           settingsPath: writeSrtSettings(root, opts.allowNetwork, opts.domains ?? []),
           bash,
-          scriptPath: bash ? writeSrtScript(root, command) : null,
+          scriptPath: script?.path ?? null,
+          cleanup: script?.cleanup,
         }
       : undefined);
 }

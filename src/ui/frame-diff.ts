@@ -187,10 +187,11 @@ export class FrameDiffer {
     // Never replay that stale raw frame; only repaint when a current parsed model still exists.
     if (!this.writer || !this.lastRaw || !this.band || !this.prev) { this.prev = null; return; }
     const lines = this.compose(this.lastRaw.slice()); // recompose the LATEST Ink frame at the CURRENT band geometry
-    this.extractCursor(lines);
+    const hits = this.extractCursor(lines);
     this.prev = lines;
     this.markPainted();
     this.writer(this.paintAll() + this.cursorSuffix());
+    setHitTargets(hits);
   }
   private sameGeometry(): boolean {
     return !!this.band && !!this.paintedBand &&
@@ -219,7 +220,7 @@ export class FrameDiffer {
   private caretActive = false;
   /** Find the caret sentinel in the composed lines, record its (row, col), and STRIP every sentinel so
    * it neither displays nor shifts a column. Called on each real frame (process). */
-  private extractCursor(lines: string[]): void {
+  private extractCursor(lines: string[]): { row: number; col: number }[] {
     let found = false;
     const hits: { row: number; col: number }[] = [];
     for (let r = 0; r < lines.length; r++) {
@@ -234,9 +235,9 @@ export class FrameDiffer {
       if (!found) { this.cursorPos = { row: r + 1, col: sentinelCol(lines[r]) }; found = true; }
       lines[r] = lines[r].split(CARET_SENTINEL).join(""); // strip (may be >1 if pasted; harmless)
     }
-    setHitTargets(hits); // every frame - stale zones from a dismissed surface must not stay clickable
     this.caretActive = found;
     if (!found) this.cursorPos = null;
+    return hits;
   }
   /** Screen cell (1-based row/col) of the hardware caret, if one is on screen. Click-to-caret uses
    * this as the anchor: the pointer handler passes TextInput the click's DELTA from this cell and
@@ -261,14 +262,15 @@ export class FrameDiffer {
   private refreshCompose(): void {
     if (!this.writer || !this.prev || !this.lastRaw) return;
     const lines = this.compose(this.lastRaw.slice());
-    this.extractCursor(lines); // lastRaw still carries the sentinel - strip it + refresh the caret position
     if (lines.length !== this.prev.length) { trace({ ev: "refreshCompose-skip", raw: lines.length, prev: this.prev.length }); return; } // dimensions changed too - the next real frame reseeds
+    const hits = this.extractCursor(lines); // only update hit/caret state for an accepted frame
     let out = "";
     for (let i = 0; i < lines.length; i++) {
       if (lines[i] !== this.prev[i]) { out += `${ESC}${i + 1};1H` + lines[i] + EL; this.prev[i] = lines[i]; }
     }
     trace({ ev: "refreshCompose", rows: rowsOf(out) });
     if (out) { this.writer(out + `${ESC}${this.prev.length};1H` + this.cursorSuffix()); this.armTrailingResync(); }
+    setHitTargets(hits); // publish only after the dimension check and optional paint succeeded
     this.markPainted(); // model is now consistent with the CURRENT geometry
   }
 
@@ -447,9 +449,10 @@ export class FrameDiffer {
       if (afterWipe && afterWipe.eraseCount === 0) {
         this.lastRaw = afterWipe.frame.split("\n");
         const lines = this.compose(this.lastRaw.slice());
-        this.extractCursor(lines);
+        const hits = this.extractCursor(lines);
         this.prev = lines;
         this.markPainted();
+        setHitTargets(hits);
         trace({ ev: "wipe-seed", n: lines.length });
         return wiped[1] + this.paintAll();
       }
@@ -460,11 +463,12 @@ export class FrameDiffer {
     // both the baseline and the diff operate on what the SCREEN should actually show.
     this.lastRaw = parsed.frame.split("\n"); // kept for setBand's geometry refresh (Ink skips identical frames)
     const lines = this.compose(this.lastRaw.slice());
-    this.extractCursor(lines); // pull the caret sentinel out of the model BEFORE diffing (position + strip)
+    const hits = this.extractCursor(lines); // pull sentinels out BEFORE diffing; publish after acceptance
     const prev = this.prev;
     const geomOk = this.sameGeometry(); // BEFORE the mark: was `prev` painted under this geometry?
     this.prev = lines;
     this.markPainted(); // every path below leaves the model consistent with the CURRENT geometry
+    setHitTargets(hits); // every accepted frame clears/replaces stale zones from dismissed surfaces
     if (!prev) { trace({ ev: "seed", n: lines.length }); return this.fullRepaintOr(parsed, lines); } // seed: raw passthrough would show a blank band
     if (parsed.eraseCount !== prev.length) { trace({ ev: "resync-erase", erase: parsed.eraseCount, prev: prev.length, n: lines.length }); return this.fullRepaintOr(parsed, lines); } // Ink's idea of prev differs -> resync
     if (lines.length !== prev.length) { trace({ ev: "resync-height", prev: prev.length, n: lines.length }); return this.fullRepaintOr(parsed, lines); }      // height changed -> full rewrite

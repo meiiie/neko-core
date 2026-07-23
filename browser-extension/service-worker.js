@@ -12,11 +12,6 @@ const state = {
   grants: { click: false, type: false },
   connection: "offline",
   audit: [],
-  // Auto-attach: when Neko signals it (a fresh pair within its /browser-setup window), attach the
-  // first http/s tab automatically - no "Attach" click - until this timestamp. Bounded so it never
-  // silently grabs a tab long after setup; cleared on attach/detach. Persisted so it survives the
-  // MV3 service-worker sleeping between install and the user opening a normal tab.
-  autoAttachUntil: 0,
 };
 
 let socket = null;
@@ -33,30 +28,7 @@ async function restore() {
   if (state.token && state.tabId != null) {
     armReconnect();
     void connect(false).catch(() => {});
-  } else if (autoAttachActive()) {
-    // An install-time auto-attach is still pending (SW woke on a tab event): reconnect so we're
-    // ready, then attach the current tab if it's already an http/s page.
-    void connect(true).then(tryAutoAttach).catch(() => {});
   }
-}
-
-/** Whether an auto-attach intent is still within its bounded window. */
-function autoAttachActive() {
-  return state.tabId == null && state.autoAttachUntil > Date.now();
-}
-
-/** Attach the ACTIVE tab automatically when Neko armed auto-attach and the tab is an http/s page.
- * Called on the ready handshake and on every tab switch/load while the window is open. Safe no-op
- * unless armed + not already attached + the active tab is attachable. */
-async function tryAutoAttach() {
-  if (!autoAttachActive()) return;
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id && /^https?:/.test(tab.url || "")) {
-      state.autoAttachUntil = 0; // consume the intent BEFORE attaching so events don't double-fire
-      await attachActiveTab(); // records its own "attach" audit entry
-    }
-  } catch { /* no attachable tab yet; a later tab switch retries while the window is open */ }
 }
 
 function armReconnect() {
@@ -80,7 +52,6 @@ async function persist() {
     grants: state.grants,
     marked: state.tabId != null,
     audit: state.audit,
-    autoAttachUntil: state.autoAttachUntil,
   });
 }
 
@@ -176,13 +147,7 @@ async function connect(allowPair) {
         clearInterval(pingTimer);
         pingTimer = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "ping" })), 20_000);
         armReconnect();
-        // Neko armed auto-attach (a fresh pair inside its setup window): open a bounded window during
-        // which the first http/s tab attaches on its own, and try the current tab immediately.
-        if (message.autoAttach && state.tabId == null) {
-          state.autoAttachUntil = Date.now() + 600_000;
-          void persist();
-          void tryAutoAttach();
-        }
+        if (panelPort && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "panel-ready" }));
         resolve();
       } else if (message.type === "command") {
         void execute(message);
@@ -275,7 +240,6 @@ async function detach(reason = "user") {
   state.tabTitle = "";
   state.createdGroupId = null;
   state.grants = { click: false, type: false };
-  state.autoAttachUntil = 0; // a deliberate detach also cancels any pending auto-attach
   sensitiveRefs.clear();
   disarmReconnect();
   await persist();
@@ -504,11 +468,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   void connect(false).catch(() => {});
 });
 
-// Auto-attach: connect right after install / browser start so Neko detects the extension without a
-// click, and pick up the auto-attach signal if Neko is waiting (paired inside its setup window).
+// Connect for presence only. Pairing identifies this extension; it never grants a tab. The user must
+// click Attach in the toolbar popup, which supplies Chrome's short-lived activeTab capability.
 function connectForPresence() {
   if (state.tabId != null) return; // an attached session manages its own connection
-  void connect(true).then(tryAutoAttach).catch(() => {});
+  void connect(true).catch(() => {});
 }
 chrome.runtime.onInstalled.addListener(connectForPresence);
 chrome.runtime.onStartup.addListener(connectForPresence);
@@ -534,6 +498,7 @@ chrome.runtime.onConnect.addListener((port) => {
       catch { try { port.postMessage({ type: "panel", event: { type: "line", line: { kind: "error", text: "Neko is offline - start neko in a terminal, then try again." } } }); } catch {} }
     } else if (msg.type === "hello") {
       port.postMessage({ type: "connected", online: state.connection === "ready" });
+      if (socket?.readyState === WebSocket.OPEN) send({ type: "panel-ready" });
     }
   });
   port.onDisconnect.addListener(() => {
@@ -543,10 +508,5 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 // Clicking the toolbar icon opens the side panel on the current tab (in addition to the popup menu).
 try { chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }); } catch {}
-// While an auto-attach window is open, attach the first http/s tab the user switches to or loads.
-chrome.tabs.onActivated.addListener(() => { if (autoAttachActive()) void connect(true).then(tryAutoAttach).catch(() => {}); });
-chrome.tabs.onUpdated.addListener((_tabId, change) => {
-  if (autoAttachActive() && (change.status === "complete" || change.url)) void connect(true).then(tryAutoAttach).catch(() => {});
-});
 
 void restore();

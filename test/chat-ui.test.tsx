@@ -63,6 +63,20 @@ class MockProvider implements Provider {
   }
 }
 
+class SerialProbeProvider implements Provider {
+  active = 0;
+  maxActive = 0;
+  prompts: string[] = [];
+  async complete(messages: any[]): Promise<ProviderResponse> {
+    this.active++;
+    this.maxActive = Math.max(this.maxActive, this.active);
+    this.prompts.push(String([...messages].reverse().find((message) => message.role === "user")?.content ?? ""));
+    await tick(80);
+    this.active--;
+    return { content: "done", tool_calls: [] };
+  }
+}
+
 test("resume re-renders the prior conversation", () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
   const resumed = {
@@ -85,6 +99,31 @@ test("header + input + status bar render on start", () => {
   expect(out).toContain("shift+tab"); // status bar hint
   unmount();
 });
+
+test("browser side-panel prompts share the terminal FIFO and snapshot existing history", async () => {
+  const provider = new SerialProbeProvider();
+  const panelEvents: unknown[] = [];
+  const holder: any = {
+    current: { pushPanel: (event: unknown) => panelEvents.push(event) },
+    onPrompt: null,
+    onSnapshot: null,
+  };
+  const resumed = {
+    id: "panel-session", createdAt: "", updatedAt: "", cwd: process.cwd(), model: "m",
+    messages: [{ role: "user", content: "old question" }, { role: "assistant", content: "old answer" }],
+  };
+  const { unmount } = render(
+    <ChatApp fullscreen={false} yolo provider={provider} resumedSession={resumed as any} sessionId="panel-session" bridgeHolder={holder} />,
+  );
+  holder.onSnapshot();
+  expect(JSON.stringify(panelEvents)).toContain("old answer");
+  holder.onPrompt("first panel turn");
+  holder.onPrompt("second panel turn");
+  expect(await until(() => provider.prompts.length >= 2)).toBe(true);
+  expect(provider.maxActive).toBe(1);
+  expect(provider.prompts.slice(-2)).toEqual(["first panel turn", "second panel turn"]);
+  unmount();
+}, 10_000);
 
 test("slash menu: Down navigates suggestions instead of rewinding the prompt; Tab completes", async () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
@@ -330,24 +369,29 @@ test("auto mode: a safe tool call + markdown answer render end-to-end", async ()
 test("default mode: gated bash shows the approval box, 'y' approves", async () => {
   // Pin the sandbox OFF so bash PROMPTS regardless of this machine's primitive: with a live
   // sandbox bash auto-approves (the feature), which is exercised by the permissions unit tests.
+  const oldSandbox = process.env.NEKO_SANDBOX;
   process.env.NEKO_SANDBOX = "0";
-  const provider = new MockProvider([
-    { content: null, tool_calls: [{ id: "c1", name: "bash", arguments: { command: "echo hi" } }] },
-    { content: "Finished.", tool_calls: [] },
-  ]);
-  const { stdin, lastFrame, frames, unmount } = render(<ChatApp fullscreen={false} yolo={false} provider={provider} />);
-  const seen = (s: string) => frames.join("\n").replace(/\x1b\[[0-9;]*m/g, "").includes(s);
-  stdin.write("run echo");
-  await tick(20);
-  stdin.write("\r"); // Enter
-  expect(await until(() => (lastFrame() ?? "").includes("Approve bash?"))).toBe(true); // approval box appeared
-  expect(lastFrame() ?? "").toContain("$ echo hi"); // command preview
-  stdin.write("y"); // approve
-  expect(await until(() => seen("(exit 0)"))).toBe(true); // tool ran after approval (git-bash spawn can be slow)
-  expect(await until(() => seen("Finished"))).toBe(true); // final answer
-  expect(lastFrame() ?? "").not.toMatch(/^\s*>\s*y\s*$/m); // approval key must not leak into the prompt
-  unmount();
-  delete process.env.NEKO_SANDBOX;
+  try {
+    const provider = new MockProvider([
+      { content: null, tool_calls: [{ id: "c1", name: "bash", arguments: { command: "echo hi" } }] },
+      { content: "Finished.", tool_calls: [] },
+    ]);
+    const { stdin, lastFrame, frames, unmount } = render(<ChatApp fullscreen={false} yolo={false} provider={provider} />);
+    const seen = (s: string) => frames.join("\n").replace(/\x1b\[[0-9;]*m/g, "").includes(s);
+    stdin.write("run echo");
+    await tick(20);
+    stdin.write("\r"); // Enter
+    expect(await until(() => (lastFrame() ?? "").includes("Approve bash?"))).toBe(true); // approval box appeared
+    expect(lastFrame() ?? "").toContain("$ echo hi"); // command preview
+    stdin.write("y"); // approve
+    expect(await until(() => seen("(exit 0)"))).toBe(true); // tool ran after approval (git-bash spawn can be slow)
+    expect(await until(() => seen("Finished"))).toBe(true); // final answer
+    expect(lastFrame() ?? "").not.toMatch(/^\s*>\s*y\s*$/m); // approval key must not leak into the prompt
+    unmount();
+  } finally {
+    if (oldSandbox === undefined) delete process.env.NEKO_SANDBOX;
+    else process.env.NEKO_SANDBOX = oldSandbox;
+  }
 }, 40000);
 
 test("plan mode: exit_plan_mode shows the plan, 'y' proceeds", async () => {

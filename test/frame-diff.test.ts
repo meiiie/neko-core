@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { CARET_SENTINEL, detectShift, FrameDiffer, parseInkPayload } from "../src/ui/frame-diff.ts";
+import { CARET_SENTINEL, detectShift, FrameDiffer, HIT_SENTINEL, parseInkPayload } from "../src/ui/frame-diff.ts";
+import { hitIndexAt, setHitTargets } from "../src/ui/hit-targets.ts";
 
 // The hardware-scroll MECHANISM stays exercised here even though its default is platform-gated
 // (off on Windows - ConPTY displaces region scrolls at live cadence; see chat.tsx differ note).
@@ -116,6 +117,17 @@ test("resize wipe composes the new frame and never replays the stale pre-wipe fr
   d.forceFullRepaint();
   expect(writes.join("")).toContain("new-0");
   expect(writes.join("")).not.toContain("OLD PROMPT");
+});
+
+test("a skipped geometry refresh cannot publish hit targets from an unpainted frame", () => {
+  const d = new FrameDiffer() as any;
+  d.setWriter(() => {});
+  d.prev = ["painted"];
+  d.lastRaw = [`unpainted ${HIT_SENTINEL}action`, "extra row"];
+  setHitTargets([{ row: 7, col: 3 }]);
+  d.refreshCompose(); // dimensions differ: must return before extracting/publishing the new marker
+  expect(hitIndexAt(3, 7)).toBe(0);
+  expect(hitIndexAt(20, 1)).toBe(-1);
 });
 
 test("line-diff: only the changed line is rewritten, and the screen matches a full rewrite", () => {

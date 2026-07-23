@@ -6,8 +6,7 @@
   "minimum_chrome_version": "120",
   "homepage_url": "https://github.com/meiiie/neko-core",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlxZuFnQ0v+ISFowQsIBKorQnRHlTVf68kUlQ6uH3E5BXVoBCNV+M6DZGJFZlgPY91uya4VfcJEVisJ9Nm3Wx/PxPbajorzeJt2oL661jPj2lIBb0PeOiuHOjjY7RieS0h7PGvyLrkJ3nd9KJSaK3C5+A1mxWVWojq7vDmPxbehrKrMKPYeTBgk3YarnkiSiyMUBsIJk9zhuhDAWx1bNUEBC0F/R86iJQFBkcLgD45NmlTYVU23M4wJ7U5MWkW/NX9WY+7w68Z09LydufSvERt1CDobfZWBtFMoS7uPfqfRSoUO2Cn4KR9KipQ4LYOIK+7kTTNWtKWPLkVYIoMJidLwIDAQAB",
-  "permissions": ["scripting", "storage", "tabGroups", "alarms", "sidePanel"],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "permissions": ["activeTab", "scripting", "storage", "tabGroups", "alarms", "sidePanel"],
   "side_panel": { "default_path": "sidepanel.html" },
   "icons": {
     "16": "icons/icon-16.png",

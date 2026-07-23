@@ -184,7 +184,17 @@ export class ToolRegistry {
     const env: NodeJS.ProcessEnv = { ...process.env };
     if (this.presence) env.NEKO_PRESENCE = "1";
     if (this.inputBackend && this.inputBackend !== "auto") env.NEKO_INPUT = this.inputBackend;
-    const child = spawn(sb.file, sb.args, { shell: sb.shell, cwd: this.root, env });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(sb.file, sb.args, { shell: sb.shell, cwd: this.root, env });
+    } catch (error) {
+      sb.cleanup?.();
+      throw error;
+    }
+    // A script can contain credentials. Keep it only while the process may still read it; cleanup
+    // covers foreground, background, detach, timeout, abort and spawn errors.
+    child.once("close", () => sb.cleanup?.());
+    child.once("error", () => sb.cleanup?.());
     // Cap LIVE accumulation so a runaway command (`yes`, an infinite echo loop) can't grow the buffer
     // to gigabytes and OOM the process before the timeout fires.
     const MAX_BASH_OUTPUT = 200_000;
@@ -570,7 +580,7 @@ export class ToolRegistry {
       let out = residentOutput ?? "", err = "";
       if (residentOutput === null) {
         if (action === "watch") return "Error: computer watch requires the resident Windows UIA host. Enable computer_use_resident, or use wait then read as the slower fallback.";
-        if (action === "click" && args.mark !== undefined) return "Error: click by mark needs the resident host (computer_use_resident). Re-run ocr and click with x,y from the mark line instead.";
+        if (action === "click" && args.mark !== undefined) return "Error: click by mark needs the resident host (computer_use_resident). Enable it and re-run ocr, or use a freshly verified screenshot with explicit x,y.";
         const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa], { encoding: "utf-8", cwd: this.root, env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
         // Surface failures instead of swallowing them into "(no output)" — the agent can only adapt to a
         // failure it can SEE (same contract as the rest of the loop). Timeout/spawn error -> r.error.

@@ -121,10 +121,12 @@ interface ChatProps {
   setupBrowser?: () => Promise<string>;
   officeSupportStatus?: () => OfficeSupportStatus;
   installOfficeSupport?: (options: { force?: boolean; notify: (message: string) => void }) => Promise<unknown>;
-  /** Mutable bridge holder so the side panel can mirror Neko's transcript and drive turns. runChat
-   * owns the bridge (it may be created lazily by setupBrowser) and updates `current`; `onPrompt` is
-   * set by ChatApp so a panel prompt feeds the turn loop. */
-  bridgeHolder?: { current: BrowserBridge | null; onPrompt: ((prompt: string) => void) | null };
+  /** Mutable bridge holder so the side panel can mirror Neko's transcript and drive turns. */
+  bridgeHolder?: {
+    current: BrowserBridge | null;
+    onPrompt: ((prompt: string) => void) | null;
+    onSnapshot: (() => void) | null;
+  };
 }
 
 export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, bridgeHolder }: ChatProps) {
@@ -2041,15 +2043,25 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   };
 
-  // Side panel: a prompt typed in the extension's chat panel drives a real turn here. The transcript
-  // streams back to the panel via pushPanel (addLine/stream). Wait out a busy turn (bounded), then
-  // submit - same discipline as the relay path. Reassigned each render so it sees the latest closures.
+  // Side panel input shares the terminal's one FIFO. Never poll and start a second handle(): the
+  // agent message list, tools, approvals and stream all belong to exactly one turn at a time.
   if (bridgeHolder) bridgeHolder.onPrompt = (prompt: string) => {
-    void (async () => {
-      const w0 = Date.now();
-      while (busyRef.current && Date.now() - w0 < 15 * 60_000) await new Promise((r) => setTimeout(r, 300));
-      try { await handle(prompt); } catch (e) { addLine("error", e instanceof Error ? e.message : String(e)); }
-    })();
+    const text = prompt.trim();
+    if (!text) return;
+    if (busyRef.current || compactingRef.current) {
+      queueRef.current.push(text);
+      setQueued(queueRef.current.length);
+      addLine("info", `queued: ${trunc(text, 60)}`);
+      return;
+    }
+    void handle(text).catch((e) => addLine("error", e instanceof Error ? e.message : String(e)));
+  };
+  if (bridgeHolder) bridgeHolder.onSnapshot = () => {
+    bridgeHolder.current?.pushPanel({
+      type: "snapshot",
+      lines: lines.slice(-500).map(({ kind, text }) => ({ kind, text: text.slice(0, 200_000) })),
+    });
+    if (streamRef.current) bridgeHolder.current?.pushPanel({ type: "stream", text: streamRef.current.slice(-200_000) });
   };
 
   // Shared remote handlers for /rc (HTTP) and /relay (outbound poll): run one turn (streaming to a
@@ -2699,9 +2711,17 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   let browserBridge = startManagedBrowserBridge({ extensionIds: cfg.browserExtensionIds });
   // Side-panel bridge: a stable holder so ChatApp can mirror its transcript + take panel prompts even
   // though the bridge may be (re)created later by setupBrowser. Wiring onPanelPrompt on each bridge
-  // routes a panel prompt to ChatApp's handler (set on the holder).
-  const bridgeHolder: { current: BrowserBridge | null; onPrompt: ((prompt: string) => void) | null } = { current: browserBridge, onPrompt: null };
-  const wireBridge = (b: BrowserBridge | null) => { bridgeHolder.current = b; b?.onPanelPrompt((p) => bridgeHolder.onPrompt?.(p)); };
+  // routes panel prompts and snapshot requests to ChatApp's current handlers.
+  const bridgeHolder: {
+    current: BrowserBridge | null;
+    onPrompt: ((prompt: string) => void) | null;
+    onSnapshot: (() => void) | null;
+  } = { current: browserBridge, onPrompt: null, onSnapshot: null };
+  const wireBridge = (b: BrowserBridge | null) => {
+    bridgeHolder.current = b;
+    b?.onPanelPrompt((p) => bridgeHolder.onPrompt?.(p));
+    b?.onPanelSnapshot(() => bridgeHolder.onSnapshot?.());
+  };
   wireBridge(browserBridge);
   const setupBrowser = async (): Promise<string> => {
     const capability = ensureBrowserCapability(false);

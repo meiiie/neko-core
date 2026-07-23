@@ -109,7 +109,8 @@ in the UIA tree. Handle it like this:
   Set-of-Marks method (OmniParser/OSWorld SOTA): picking a NUMBER removes the coordinate-grounding step
   where weak/text-only models fail. Flow: `activate` (if minimized) → `ocr` → `click mark:N` →
   `type`/`key` → `ocr` again to verify. Each `ocr` is ~0.5s in the warm host - perceive freely and
-  re-`ocr` after every action instead of assuming it worked. (If the resident host is off, `ocr` falls
+  re-`ocr` after every action instead of assuming it worked. A mark is a one-use, short-lived capability:
+  it is rejected if its captured window moved, resized, or lost foreground. (If the resident host is off, `ocr` falls
   back to a one-shot form that shows `'text' @ x,y`; then click x,y.)
 - Do NOT loop on `--force-renderer-accessibility`, env vars, or a remote-debugging port. These apps are
   SINGLE-INSTANCE and hardened: relaunching with a flag just wakes the existing (unflagged) process, and

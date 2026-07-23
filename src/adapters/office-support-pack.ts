@@ -198,7 +198,9 @@ export async function installOfficeSupportPack(options: InstallOfficeSupportOpti
     // than hard-failing on "version unknown". A NON-null version that disagrees is still a real
     // mismatch and must fail. This was the false "binary version unknown does not match" loop.
     const probed = (options.versionOf ?? binaryVersion)(downloadedPath);
-    if (probed && probed !== resolved.version) throw new Error(`OfficeCLI binary version ${probed} does not match release ${resolved.version}`);
+    if (probed !== null && probed !== undefined && probed !== resolved.version) {
+      throw new Error(`OfficeCLI binary version ${probed} does not match release ${resolved.version}`);
+    }
     const version = resolved.version;
     notify("Checksum verified; checking document protocol compatibility...");
     (options.verifyProtocol ?? verifyOfficeProtocol)(downloadedPath, staging);

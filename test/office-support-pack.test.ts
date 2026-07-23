@@ -77,6 +77,17 @@ describe("Office Support Pack", () => {
     })).rejects.toThrow("does not match release");
   });
 
+  test("an empty but non-null version probe fails instead of bypassing validation", async () => {
+    const home = mkdtempSync(join(tmpdir(), "neko-office-support-"));
+    homes.push(home);
+    const binary = Buffer.from("synthetic office binary");
+    const digest = createHash("sha256").update(binary).digest("hex");
+    await expect(installOfficeSupportPack({
+      home, platform: "win32", arch: "x64", fetchImpl: fixtureFetch(binary, digest),
+      verifyBinary: () => {}, versionOf: () => "", verifyProtocol: () => {},
+    })).rejects.toThrow("does not match release");
+  });
+
   test("checksum failure preserves the previous working pack", async () => {
     const home = mkdtempSync(join(tmpdir(), "neko-office-support-"));
     homes.push(home);

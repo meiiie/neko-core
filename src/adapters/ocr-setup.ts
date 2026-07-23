@@ -6,6 +6,11 @@
  */
 import { spawnSync } from "node:child_process";
 
+/** PowerShell's -EncodedCommand contract is UTF-16LE. This keeps `$` expressions literal across UAC. */
+export function encodePowerShellCommand(command: string): string {
+  return Buffer.from(command, "utf16le").toString("base64");
+}
+
 /** OCR recognizer language tags currently available (no elevation needed). Empty on failure. */
 function ocrLanguages(): string[] {
   const ps = [
@@ -43,7 +48,8 @@ export function setupOcr(log: (m: string) => void): number {
     "Add-WindowsCapability -Online -Name $c.Name | Out-Null; Write-Host 'installed'",
   ].join(" ");
   // Start-Process -Verb RunAs triggers the UAC prompt; -Wait blocks until the install finishes.
-  const runner = `Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',${JSON.stringify(elevated)}`;
+  const encoded = encodePowerShellCommand(elevated);
+  const runner = `Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}'`;
   const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", runner], { encoding: "utf-8", timeout: 300_000, windowsHide: true });
   if (r.status !== 0) {
     log(`The elevated install did not complete (${(r.stderr || r.stdout || "cancelled or failed").trim().slice(0, 200)}).`);

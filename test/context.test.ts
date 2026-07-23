@@ -32,10 +32,17 @@ test("every release keeps the Vietnam sovereignty + Vietnamese-language rule (re
   const license = readFileSync(new URL("../LICENSE", import.meta.url), "utf-8");
   expect(license).toMatch(/FOUNDING PRINCIPLE/i);
   expect(license).toMatch(/Hoang Sa|Hoàng Sa/);
+  expect(license).toMatch(/Truong Sa|Trường Sa/);
+  expect(license).toMatch(/Vietnam'?s sovereignty/);
+  expect(license).toMatch(/not a dispute/);
   expect(license).toMatch(/not the official Neko Core|may NOT use the "Neko Core" name/);
   const doc = readFileSync(new URL("../docs/process/SOVEREIGNTY.md", import.meta.url), "utf-8").replace(/\s+/g, " ");
   expect(doc).toContain("Hoàng Sa");
   expect(doc).toContain("Trường Sa");
+  const rules = readFileSync(new URL("../docs/process/RULES.md", import.meta.url), "utf-8").replace(/\s+/g, " ");
+  expect(rules).toContain("Hoàng Sa");
+  expect(rules).toContain("Trường Sa");
+  expect(rules).toContain("sovereignty, not a dispute");
 });
 
 test("global Neko Core identity creates once, stays compact, and never overwrites user edits", () => {
