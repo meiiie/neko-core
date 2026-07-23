@@ -3,9 +3,26 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Agent, clampObservation, estimateTokens, MAX_OBS_CHARS } from "../src/core/agent.ts";
+import { Agent, clampObservation, estimateTokens, MAX_OBS_CHARS, unwrapToolArgs } from "../src/core/agent.ts";
 import { COMPACTION_PROMPT, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent-constants.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
+
+test("unwrapToolArgs tolerates _raw / wrapper / JSON-string arg shapes (GLM quirk) without breaking normal calls", () => {
+  const want = { path: "a.md", content: "hi" };
+  // normal object passes through unchanged
+  expect(unwrapToolArgs(want)).toEqual(want);
+  // single wrapper key -> unwrapped (object OR JSON string inside)
+  expect(unwrapToolArgs({ _raw: want })).toEqual(want);
+  expect(unwrapToolArgs({ arguments: want })).toEqual(want);
+  expect(unwrapToolArgs({ _raw: JSON.stringify(want) })).toEqual(want);
+  // whole arg blob handed back as a JSON string
+  expect(unwrapToolArgs(JSON.stringify(want))).toEqual(want);
+  // a real call that legitimately has other keys is NOT mangled
+  expect(unwrapToolArgs({ path: "a", input: "b" })).toEqual({ path: "a", input: "b" });
+  // junk fails closed to {}
+  expect(unwrapToolArgs(null)).toEqual({});
+  expect(unwrapToolArgs("not json")).toEqual({});
+});
 
 class ScriptedProvider {
   index = 0;

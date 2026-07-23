@@ -359,13 +359,14 @@ export class Agent {
      * rejecting the whole turn. The loop is built on "feed errors back so the model adapts" — this enforces it
      * for every tool, not just the ones already wrapped inside execute(). */
     private async safeExecute(call: { name: string; arguments: Record<string, any> }, signal?: AbortSignal): Promise<string | any[]> {
+      const args = unwrapToolArgs(call.arguments); // tolerate _raw / JSON-string arg wrappers from some models
       // Pre-flight argument validation (Gecko, arXiv 2602.19218): a call missing a REQUIRED key
       // would execute, throw, and burn the round-trip on a vague error - catch it BEFORE execution
       // and feed back the schema hint so the model self-repairs in one step. Presence-only (null/
       // undefined), never type pedantry: nothing that executes today is rejected, and an unknown
       // schema (e.g. an unloaded MCP tool) fails open to the executor's own checks.
       const spec = this.tools.schemas().find((s: any) => s.function?.name === call.name)?.function?.parameters;
-      const missing = (spec?.required ?? []).filter((k: string) => call.arguments?.[k] == null);
+      const missing = (spec?.required ?? []).filter((k: string) => args?.[k] == null);
       if (missing.length) {
         const hint = missing
           .map((k: string) => `'${k}' (${spec.properties?.[k]?.type ?? "value"}${spec.properties?.[k]?.description ? ` - ${String(spec.properties[k].description).slice(0, 80)}` : ""})`)
@@ -373,7 +374,7 @@ export class Agent {
         return `Error: argument validation failed for ${call.name} - missing required ${hint}. Re-emit the call with the missing argument(s) filled in.`;
       }
       try {
-        return await this.tools.execute(call.name, call.arguments, signal);
+        return await this.tools.execute(call.name, args, signal);
       } catch (error) {
         return `Error running ${call.name}: ${error instanceof Error ? error.message : String(error)}`;
       }
@@ -807,4 +808,21 @@ function assistantToolMessage(content: string | null, toolCalls: ToolCall[], con
     })),
     ...(continuation?.length ? { provider_data: continuation } : {}),
   };
+}
+
+/** Tolerate malformed tool-argument shapes some providers emit (observed with GLM over an OpenAI-compat
+ * endpoint): a single `_raw`/`arguments`/`input`/`parameters`/`args` wrapper key, or the raw JSON string.
+ * Left unfixed these fail required-arg validation and wedge the turn in a re-emit loop. A legitimate call
+ * never has exactly one of those wrapper keys, so unwrapping is safe. */
+export function unwrapToolArgs(raw: any): Record<string, any> {
+  let a: any = raw;
+  if (typeof a === "string") { try { a = JSON.parse(a); } catch { return {}; } }
+  if (!a || typeof a !== "object" || Array.isArray(a)) return {};
+  const keys = Object.keys(a);
+  if (keys.length === 1 && ["_raw", "arguments", "input", "parameters", "args"].includes(keys[0])) {
+    let inner: any = a[keys[0]];
+    if (typeof inner === "string") { try { inner = JSON.parse(inner); } catch { /* keep original object */ } }
+    if (inner && typeof inner === "object" && !Array.isArray(inner)) return inner;
+  }
+  return a;
 }
