@@ -25,11 +25,29 @@ param([string]$cmd="list", [string]$name="", [string]$value="", [int]$max=120)
 # scripts (uia/inject/mouse/overlay/screenshot) MUST set this identically so reads and actions share one space.
 try { Add-Type 'using System;using System.Runtime.InteropServices;public class Dpi{[DllImport("user32.dll")]public static extern bool SetProcessDpiAwarenessContext(IntPtr v);}'; [void][Dpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch {}
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
-Add-Type 'using System;using System.Runtime.InteropServices;public class FG{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern bool SetCursorPos(int x,int y);[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);}'
+Add-Type 'using System;using System.Runtime.InteropServices;public class FG{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern bool SetCursorPos(int x,int y);[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);[DllImport("user32.dll")]public static extern bool ShowWindow(IntPtr h,int c);[DllImport("user32.dll")]public static extern bool SetForegroundWindow(IntPtr h);[DllImport("user32.dll")]public static extern bool IsIconic(IntPtr h);}'
 $A=[System.Windows.Automation.AutomationElement]
 $TS=[System.Windows.Automation.TreeScope]
 $TrueC=[System.Windows.Automation.Condition]::TrueCondition
 function PC($prop,$val){ New-Object System.Windows.Automation.PropertyCondition($prop,$val) }
+
+# activate: Win32-ONLY fast path, BEFORE any UIA. The UIA window enumeration below reads a property
+# off every top-level window, which BLOCKS on Chromium/Electron windows (Zalo, Discord, VS Code)
+# where forced renderer accessibility makes each cross-process read hang - that is why `activate`
+# timed out at 90s. Get-Process gives the main window handle with no UIA round-trip; restore +
+# foreground it. Requires a target title (activating "the foreground" would be a no-op).
+if($cmd -eq 'activate'){
+  $q=$env:NEKO_UIA_WINDOW
+  if(-not $q){ Write-Output "(activate needs a target window title)"; exit 1 }
+  $p=Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like "*$q*" } | Sort-Object { $_.MainWindowTitle.Length } | Select-Object -First 1
+  if(-not $p){ Write-Output "(no window titled like '$q')"; exit 1 }
+  $h=$p.MainWindowHandle
+  if([FG]::IsIconic($h)){ [void][FG]::ShowWindow($h,9) }
+  [void][FG]::SetForegroundWindow($h)
+  Start-Sleep -Milliseconds 200
+  Write-Output ("ACTIVATED: " + $p.MainWindowTitle)
+  exit 0
+}
 
 # --- target window: env title-substring (largest match) else foreground ---
 if($env:NEKO_UIA_WINDOW){

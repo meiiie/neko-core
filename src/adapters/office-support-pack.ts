@@ -192,8 +192,16 @@ export async function installOfficeSupportPack(options: InstallOfficeSupportOpti
     }
     try { chmodSync(downloadedPath, 0o755); } catch { /* Windows uses executable ACLs. */ }
     (options.verifyBinary ?? verifyExecutableFormat)(downloadedPath, platform);
-    const version = (options.versionOf ?? binaryVersion)(downloadedPath);
-    if (version !== resolved.version) throw new Error(`OfficeCLI binary version ${version ?? "unknown"} does not match release ${resolved.version}`);
+    // The SHA-256 digest above already cryptographically proves this IS the exact published asset
+    // for resolved.version, so the --version string is only a smoke test. Some builds don't expose a
+    // parseable --version (probe returns null); trust the checksum + the protocol probe below rather
+    // than hard-failing on "version unknown". A NON-null version that disagrees is still a real
+    // mismatch and must fail. This was the false "binary version unknown does not match" loop.
+    const probed = (options.versionOf ?? binaryVersion)(downloadedPath);
+    if (probed !== null && probed !== undefined && probed !== resolved.version) {
+      throw new Error(`OfficeCLI binary version ${probed} does not match release ${resolved.version}`);
+    }
+    const version = resolved.version;
     notify("Checksum verified; checking document protocol compatibility...");
     (options.verifyProtocol ?? verifyOfficeProtocol)(downloadedPath, staging);
 

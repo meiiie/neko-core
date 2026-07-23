@@ -11,6 +11,39 @@ import {
   loadProjectContext,
   rememberNote,
 } from "../src/adapters/context.ts";
+import { DEFAULT_SYSTEM_PROMPT } from "../src/core/agent-constants.ts";
+
+// Product rule (owner decision, 2026-07-22): Neko Core is a Vietnamese product and must respect
+// Vietnam's sovereignty in EVERY release, not just a user-editable file. This guard fails the build
+// if a future change drops it from the hardcoded core prompt or the shipped identity default.
+test("every release keeps the Vietnam sovereignty + Vietnamese-language rule (regression guard)", () => {
+  for (const source of [DEFAULT_SYSTEM_PROMPT, DEFAULT_GLOBAL_NEKO_MD]) {
+    const norm = source.replace(/\s+/g, " "); // wrap-safe: source strings hard-wrap mid-phrase
+    expect(norm).toContain("Hoàng Sa");
+    expect(norm).toContain("Trường Sa");
+    expect(norm).toMatch(/Vietnam'?s sovereignty|chủ quyền của Việt Nam/);
+    expect(norm).toMatch(/not a dispute|không phải (một )?vấn đề (để )?tranh chấp/);
+  }
+  // The core prompt (uneditable, in every binary) also carries the Vietnamese-language quality rule.
+  expect(DEFAULT_SYSTEM_PROMPT).toMatch(/full diacritics/);
+
+  // And the governance chain: the LICENSE founding notice and the canonical rule doc must keep it too,
+  // so a release cannot quietly drop it from the legal/name protection or the documented policy.
+  const license = readFileSync(new URL("../LICENSE", import.meta.url), "utf-8");
+  expect(license).toMatch(/FOUNDING PRINCIPLE/i);
+  expect(license).toMatch(/Hoang Sa|Hoàng Sa/);
+  expect(license).toMatch(/Truong Sa|Trường Sa/);
+  expect(license).toMatch(/Vietnam'?s sovereignty/);
+  expect(license).toMatch(/not a dispute/);
+  expect(license).toMatch(/not the official Neko Core|may NOT use the "Neko Core" name/);
+  const doc = readFileSync(new URL("../docs/process/SOVEREIGNTY.md", import.meta.url), "utf-8").replace(/\s+/g, " ");
+  expect(doc).toContain("Hoàng Sa");
+  expect(doc).toContain("Trường Sa");
+  const rules = readFileSync(new URL("../docs/process/RULES.md", import.meta.url), "utf-8").replace(/\s+/g, " ");
+  expect(rules).toContain("Hoàng Sa");
+  expect(rules).toContain("Trường Sa");
+  expect(rules).toContain("sovereignty, not a dispute");
+});
 
 test("global Neko Core identity creates once, stays compact, and never overwrites user edits", () => {
   const home = mkdtempSync(join(tmpdir(), "neko-identity-"));

@@ -3,6 +3,164 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-22 - Browser side-panel chat (chat with Neko from a Chrome sidebar)
+
+Made the Neko extension a Claude/ChatGPT-style right sidebar - but the BRAIN stays in the neko CLI
+(file/bash/computer-use), not embedded in the page. The panel is a thin chat client; the same neko
+that answers also controls the attached tab.
+
+- Bridge (`browser-bridge.ts`): new `pushPanel(event)` (Neko -> panel: transcript line/stream/
+  snapshot as `{type:"panel",event}`) and `onPanelPrompt(handler)` (panel -> Neko: a `{type:"panel-in",
+  prompt}` message drives a turn). Bounded (100k), blank-ignored. Unit-tested both directions.
+- Extension: manifest gains `sidePanel` + `side_panel.default_path`; service worker forwards bridge
+  `panel` events to a long-lived side-panel port and relays panel prompts back over the WS; new
+  `sidepanel.html` + `sidepanel.js` chat UI (CSP-safe external script, theme-aware, Enter to send).
+  The panel has NO model and NO external network - its only wire is the loopback bridge (test pins
+  this: no http(s) URL in sidepanel.js).
+- chat.tsx: `addLine` and the stream publishes now mirror to the panel via a stable `bridgeHolder`
+  (the bridge may be created lazily by setupBrowser); a panel prompt is routed into the turn loop
+  with the same busy-wait discipline as the relay path. The panel dedups Neko's echo of the user's
+  own prompt.
+- Reuses neko's existing loopback bridge + relay patterns, so ~80% was already there.
+
+Gates: typecheck clean, 784/784 tests (pushPanel/onPanelPrompt round-trip, sidepanel.js parse +
+no-external-host, asset count), binary rebuilt. LIVE Chrome verification (reload the unpacked
+extension, open the side panel, chat) is the owner's - the bridge protocol is deterministically
+tested but the in-Chrome round-trip can't be automated here.
+
+## 2026-07-22 - Browser-connect UX pass (caret, Enter footgun, manual-install clarity)
+
+Three fixes to the "Connect Neko Browser" flow, found while the owner tested it by hand on a
+multi-profile Chrome:
+- **Stray `|` caret over the picker** (image #2/#3): the FrameDiffer owns cursor visibility once it
+  has shown the caret, but cursorSuffix() returned "" (not a hide) on a no-caret frame, so the bar
+  lingered over any overlay. Now emits `?25l` when no caret is active.
+- **Enter looped setup**: the overlay says "no Enter needed - auto-detects", but its default item was
+  "Open Chrome setup again", so the Enter its own footer advertises relaunched Chrome + reprinted the
+  guide. Default is now a safe "Keep waiting" that dismisses the modal but keeps the background poll
+  running (advances to step 2 / runs the saved request on attach).
+- **"Chose a profile, nothing happened"**: the real cause is that Chrome forbids programmatic
+  extension install - Load-unpacked is inherently manual, and a multi-profile Chrome shows a "Who's
+  using Chrome?" picker first. The setup copy is rewritten as a clear numbered manual-install guide
+  that (a) names the profile picker and says to do the steps IN the chosen profile,
+  (b) puts the unpacked folder path on the clipboard (OSC 52) to paste into the Load-unpacked dialog,
+  (c) sets the expectation that picking a profile alone does nothing. New `chromeHasMultipleProfiles()`
+  reads Chrome Local State to decide whether to show the picker note. Field-checked on the owner's
+  8-profile Chrome (picker note shown, path copied).
+
+780/780 tests, typecheck clean.
+
+## 2026-07-22 - Close the auto-approve destruction gap + wren.wtf audit
+
+- Audited neko against the wren.wtf "Stop Using OpenCode" critique. Everything it raises is either
+  handled by design (OS sandbox not textual filtering, no CWD exception, no FILES-list approach,
+  SHA-256-verified self-update vs curl|bash, and every local server - browser bridge / meeting /
+  relay - is loopback + Bearer-token + Origin-allowlisted with no permissive CORS, the opposite of
+  the CVE) or was the one residual gap below.
+- **Gap (introduced by our own sandboxed-bash auto-approve): in-workspace destruction ran without a
+  prompt.** The sandbox contains the blast radius but keeps the workspace writable, so `rm -rf src`,
+  `git reset --hard`, `rmtree(cwd)` etc. could wipe the user's code + .git silently. Closed by
+  withholding the no-prompt fast path for exactly those commands: new pure `destructiveInWorkspace()`
+  (recursive/force/wildcard rm, git clean -f / reset --hard / checkout -- ., find -delete,
+  script-driven deletion, shred/truncate) gates `sandboxedBash`. A plain single-file `rm file.txt`
+  is intentionally NOT flagged (everyday cleanup stays convenient); mode=auto and always-allow-bash
+  still bypass, per the owner's "prioritize convenience, the user opted into the mode" call. The
+  approval box shows a red `⚠ <reason>` when this is why bash is asking.
+- `bun scripts/wren-audit.ts` - a hands-on, honest probe anyone can run on their own machine:
+  proves the seatbelt IS bypassable (THESIS), the OS sandbox contains the consequence (HELD:
+  out-of-workspace redirect denied by NTFS, egress blocked), and the destructive guard now confirms
+  in-workspace deletion (HELD). Honesty rule: a tool-missing exit 127 is never scored as "blocked".
+  Verdict on this machine: THESIS 2, HELD 8, RISK 0.
+- Gates: typecheck clean, 779/779 tests (destructiveInWorkspace fires/does-not-fire matrix), policy
+  PASS, binary build + probes OK, doctor names the destructive-still-confirms behavior.
+
+## 2026-07-22 - Mouse parity (approval + picker), sandboxed-bash auto-approve, kitty protocol, setup terminal
+
+- **Sandboxed bash auto-approves** (Claude Code's sandbox rationale - the containment replaces the
+  prompt). `decide()` gains a `sandboxedBash` opt: bash allowed in default/accept-edits; plan still
+  denies, writes still prompt, the catastrophic seatbelt still runs. Keyed on LIVE confinement via
+  new `sandboxActive()` (primitive present AND, for srt, provisioned) - never on config intent, so
+  "sandbox": true on a none-machine still prompts. New `sandbox_auto_approve` config (default true);
+  doctor + policy name the "gated-but-sandboxed" state. Two approval-UI tests now pin NEKO_SANDBOX=0
+  so they stay deterministic across machines with/without a primitive.
+- **Mouse parity for the approval box and every picker.** Generalized the jump pill's hover+hit-box
+  into a frame-level registry: components mark clickable zones with a zero-width HIT_SENTINEL, the
+  FrameDiffer strips the markers from each composed frame and records their screen cells into
+  ui/hit-targets.ts, and pointer handlers hit-test against the LAST PAINTED frame (exact regardless
+  of layout - coordinates come from what's on screen, not re-derived geometry). ApprovalBox options
+  (y/a/n, or y/n for plans) light on hover and settle on click; SelectList rows hover-highlight,
+  click-to-select, and wheel-scroll. Stale zones can't linger: setHitTargets runs every frame.
+- **Kitty keyboard protocol** pushed on entering the alt screen (`CSI > 1u`), popped on every leave
+  path (probe-verified that Ink 7 parses the resulting CSI-u forms: Esc->escape, Alt+C->meta c,
+  Ctrl+A->ctrl a, Shift+Tab->shift+tab, Shift+Enter->return+shift). Supporting terminals (kitty,
+  WezTerm, foot, recent VS Code) now deliver Shift+Enter distinct from Enter with zero setup;
+  non-supporting terminals ignore both sequences and an empty-stack pop is a no-op.
+- **`neko setup terminal`** writes a Shift+Enter -> ESC+CR sendInput keybinding into Windows
+  Terminal's settings.json (the terminal Claude Code's /terminal-setup never covers). Parse-or-
+  refuse: string-aware JSONC strip, JSON.parse gate, .neko-bak backup before every write,
+  idempotent, comment-loss warned. Field-verified: WptTerm accepted and normalized the binding to
+  its id-based form, input bytes ESC+CR (27 13), valid JSON, shift+enter live.
+- Gates: typecheck clean, 778/778 tests (hit-targets, sandboxed-bash policy, kitty push/pop, JSONC
+  strip + patch idempotency/refusal), policy PASS, doctor shows the auto-approve state.
+
+## 2026-07-22 - Sandbox on by default + multi-line Enter + click-to-caret
+
+- **Sandbox default flipped ON** (owner decision): `DEFAULTS.sandbox = true`, network still off,
+  new `sandbox_domains: []`. Machines without a primitive keep the seatbelt + gate unchanged
+  (doctor names the state); rollback is `"sandbox": false` / `NEKO_SANDBOX=0`. SANDBOX.md updated.
+- **Newline without submit** (Claude Code parity), three terminal-dependent routes in TextInput:
+  Ink 7 parses kitty-CSI-u Shift+Enter to `return+shift` and `\x1b\r` bindings to `return+meta`
+  (verified with an Ink keypress probe - the CSI-u parse was a finding, not an assumption); raw
+  xterm modifyOtherKeys sequences match MODIFIED_ENTER before the escape-residue guard eats them;
+  and trailing `\` + plain Enter swaps the backslash for the break with zero terminal setup.
+- **Click-to-caret** in the input box: the FrameDiffer already knows the hardware cursor's screen
+  cell (it places it from CARET_SENTINEL), so the pointer handler forwards only the click's
+  (dRow, dCol) delta and TextInput owns the geometry -> index math (`caretIndexForClick`, built on
+  the same wrapInput the renderer uses - exact on the wrap path, clamped-approximate on Ink-wrapped
+  overlong \n lines). A MAX_INPUT_LINES window keeps chrome-row clicks from teleporting the caret.
+  Clicks below the transcript no longer arm a selection anchor.
+- Gates: typecheck clean, 768/768 tests (newline routes, caretIndexForClick geometry, sandbox
+  defaults), policy PASS, binary build + UI/input probes OK, doctor shows `bash_sandbox: on (srt)`.
+
+## 2026-07-22 - Windows bash sandbox via Anthropic sandbox-runtime (srt)
+
+- Closed the Windows gap in the bash OS-sandbox ladder. Prior state: `detectSandbox()` returned
+  "none" on win32, so `auto` mode leaned entirely on the textual catastrophic-command seatbelt -
+  the exact pattern the ecosystem (wren.wtf "Stop Using OpenCode") demonstrates is bypassable.
+- Surveyed the July-2026 SOTA first: Codex CLI's May-2026 Windows sandbox (dedicated
+  CodexSandboxOffline/Online users, restricted tokens via an elevated broker, ACE stamping,
+  per-user firewall rules) and Anthropic's open-source sandbox-runtime, which ships the same
+  user-identity model (dedicated `srt-sandbox` account, restricted token in a job object, NTFS
+  ACLs, WFP egress fence) as the `srt` CLI. Chose to ride `srt` rather than reimplement
+  (ponytail rung 5); a `"srt"` rung now slots into the existing detect/build seam in
+  `core/sandbox.ts` with zero new binaries.
+- Only a real `srt.exe` is trusted (bun-global shim); npm's `.cmd` shims are ignored because
+  cmd.exe argument re-quoting is escapable by hostile command text - it would defeat the sandbox
+  it launches. Same reasoning drives the launch shape: command bytes go into a content-addressed
+  script file under `%TEMP%\neko-srt\` (one additive read ACE for `srt-sandbox`; TEMP is
+  otherwise unreadable across local users) and the srt `-c` line carries only two quoted paths
+  into git-bash, so no command text ever rides a cmd-parsed command line. A `cd` preamble
+  restores the workspace cwd across the two-hop user switch.
+- srt has no allow-all egress (proxy denies unmatched hosts, and the schema only accepts a bare
+  "*" in deniedDomains), so `sandbox_network: true` now reads the new `sandbox_domains` config
+  allowlist (`strictAllowlist: true`; empty list = still offline); false writes
+  `deniedDomains: ["*"]` - the bwrap `--unshare-net` posture. Settings are generated
+  content-addressed in TEMP against the real 0.0.66 schema (denyRead/allowWrite/denyWrite and
+  network are all required keys - the public README understates this).
+- `neko doctor` now warns when srt is on PATH but `srt windows-install` provisioning has not run
+  (bash fails closed with srt's own actionable error in that state) and prints the install hint
+  when Windows has no sandbox primitive at all.
+- Field-verified end to end on Windows 11 Home: echo, workspace write allowed, outside-workspace
+  write denied by NTFS, curl blocked offline (000), curl 200 through an example.com allowlist.
+  Root-caused two real-world provisioning traps and documented them in SANDBOX.md: bun-global
+  installs leave `vendor/srt-win/x64/srt-win.exe` inside the caller's profile where `srt-sandbox`
+  cannot read it (CreateProcessWithLogonW "Access is denied"; one-time icacls read grant fixes
+  it - upstream should stamp this at install), and seclogon must be running. Diagnosis was
+  narrowed with direct LogonUser/CreateProcessWithLogonW probes after ruling out logon rights,
+  job-object UI restrictions, and caller context.
+- Gates: TS 7 + TS 5.9 typecheck clean, 764/764 tests (3249 assertions, srt target/settings/
+  script units added), policy PASS, binary build + UI/input probes OK.
+
 ## 2026-07-16 - v0.14 local meeting companion
 
 - Studied Meetily clean-room at pinned commit `0281737d87d26352fb0adc78c8c0975f691b23d1`: retained the useful

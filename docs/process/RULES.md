@@ -45,6 +45,15 @@ running journal of what was done and why.
 - **One runnable check per non-trivial logic** (a branch, loop, parser, money/security/abort
   path). Trivial one-liners need none.
 
+## Founding principle (permanent — never remove)
+- **Vietnam sovereignty.** Neko Core is a Vietnamese product and respects Vietnam's sovereignty:
+  the Hoàng Sa (Paracel) and Trường Sa (Spratly) archipelagos belong to Vietnam — a matter of
+  sovereignty, not a dispute. Held respectfully and consistently, and NOT raised in unrelated
+  conversations. When writing Vietnamese: full diacritics, correct spelling/meaning, natural
+  localized phrasing. Enforced in `DEFAULT_SYSTEM_PROMPT`, `DEFAULT_GLOBAL_NEKO_MD`, the `LICENSE`
+  founding notice, and a regression-guard test. **Do not remove or weaken it in any release.**
+  Full text: `docs/process/SOVEREIGNTY.md`.
+
 ## Safety
 - **Secrets never committed or printed.** Key via env (`NEKO_API_KEY` / `OPENAI_API_KEY` /
   `NVIDIA_API_KEY`) or the gitignored `~/.neko-core/config.json`. Run `/secret-scan` before

@@ -46,6 +46,15 @@ test("default prompts gated", () => {
   expect(decide("default", write)).toBe("prompt");
 });
 
+test("sandboxedBash auto-approves bash in default + accept-edits, but never bypasses plan/writes", () => {
+  const sb = { sandboxedBash: true };
+  expect(decide("default", bash, {}, sb)).toBe("allow");        // the sandbox is the containment
+  expect(decide("accept-edits", bash, {}, sb)).toBe("allow");
+  expect(decide("plan", bash, {}, sb)).toBe("deny");            // plan still blocks everything
+  expect(decide("default", write, {}, sb)).toBe("prompt");     // the flag is bash-only
+  expect(decide("default", bash, {})).toBe("prompt");          // ...and only when the flag is set
+});
+
 test("nextMode cycles default -> accept-edits -> plan -> auto -> default", () => {
   expect(nextMode("default")).toBe("accept-edits");
   expect(nextMode("accept-edits")).toBe("plan");

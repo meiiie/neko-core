@@ -17,10 +17,21 @@ test("browser onboarding distinguishes files, connection, and an attached tab", 
   expect(browserBridgeStage(capability, { online: true, extensionConnected: true, attached: { tabId: 7 } })).toBe("tab_attached");
 
   const unpacked = browserExtensionSetupMessage({ mode: "unpacked", opened: true, path: "C:\\Neko\\browser-extension" });
-  expect(unpacked).toContain("does NOT mean Chrome installed");
-  expect(unpacked).toContain("only filters extensions already installed");
+  expect(unpacked).toContain("Chrome does not let any app install"); // sets the expectation: manual
+  expect(unpacked).toContain("Developer mode");
   expect(unpacked).toContain("Load unpacked");
   expect(unpacked).toContain("C:\\Neko\\browser-extension");
+  expect(unpacked).not.toContain("Who's using Chrome?"); // no picker note unless asked
+  expect(unpacked).not.toContain("clipboard");
+
+  // Multi-profile + clipboard: warn about the picker and point at the pasted path.
+  const guided = browserExtensionSetupMessage(
+    { mode: "unpacked", opened: true, path: "C:\\Neko\\x" },
+    { pathOnClipboard: true, profilePicker: true },
+  );
+  expect(guided).toContain("Who's using Chrome?");
+  expect(guided).toContain("IN THAT profile");
+  expect(guided).toContain("already on your clipboard");
 });
 
 test("browser CLI status never mistakes a local folder for an installed extension", () => {
@@ -61,6 +72,7 @@ test("browser bridge pairs one extension origin and routes a capability-scoped c
 
   ws.send(JSON.stringify({ type: "pair" }));
   expect(await nextMessage(ws)).toEqual({ type: "paired", session: "session-test", token: "token-test" });
+  // Pairing authenticates the extension; tab access still requires the toolbar Attach gesture.
   expect(await nextMessage(ws)).toEqual({ type: "ready", session: "session-test" });
   ws.send(JSON.stringify({ type: "attached", tab: { id: 7, url: "https://example.com/private?q=not-audited" }, grants: { click: false, type: false } }));
   await Bun.sleep(10);
@@ -73,6 +85,50 @@ test("browser bridge pairs one extension origin and routes a capability-scoped c
   expect(await request).toEqual({ items: 2 });
   expect(JSON.stringify(bridge.status())).not.toContain("private?q");
 
+  ws.close();
+  bridge.close();
+});
+
+test("side panel: pushPanel reaches the client and a panel-in prompt fires the handler", async () => {
+  const capability: BrowserCapability = { version: 1, host: "127.0.0.1", port: 0, session: "session-test", token: "token-test" };
+  const bridge = startBrowserBridge({ capability, extensionOrigin: origin, pairingMs: 10_000, persistStatus: false });
+  const prompts: string[] = [];
+  let snapshots = 0;
+  bridge.onPanelPrompt((p) => prompts.push(p));
+  const ws = new WebSocket(`ws://127.0.0.1:${bridge.port}/bridge`, { headers: { origin } } as any);
+  await new Promise<void>((resolve, reject) => { ws.addEventListener("open", () => resolve(), { once: true }); ws.addEventListener("error", reject, { once: true }); });
+  ws.send(JSON.stringify({ type: "pair" }));
+  await nextMessage(ws); // paired
+  await nextMessage(ws); // ready
+
+  // Neko -> panel: a transcript event is delivered as {type:"panel", event}.
+  bridge.pushPanel({ type: "line", line: { kind: "assistant", text: "hi from neko" } });
+  expect(await nextMessage(ws)).toEqual({ type: "panel", event: { type: "line", line: { kind: "assistant", text: "hi from neko" } } });
+
+  // panel -> Neko: a panel-in prompt fires the registered handler (and is trimmed/bounded).
+  ws.send(JSON.stringify({ type: "panel-in", prompt: "  do the thing  " }));
+  await Bun.sleep(20);
+  expect(prompts).toEqual(["  do the thing  "]);
+  ws.send(JSON.stringify({ type: "panel-in", prompt: "   " })); // blank ignored
+  await Bun.sleep(20);
+  expect(prompts).toHaveLength(1);
+  // A panel may connect before Ink mounts; the bridge remembers the request until the handler exists.
+  ws.send(JSON.stringify({ type: "panel-ready" }));
+  await Bun.sleep(20);
+  bridge.onPanelSnapshot(() => { snapshots++; });
+  expect(snapshots).toBe(1);
+
+  ws.close();
+  bridge.close();
+});
+
+test("a resumed session is ready but never auto-attaches a tab", async () => {
+  const capability: BrowserCapability = { version: 1, host: "127.0.0.1", port: 0, session: "session-test", token: "token-test" };
+  const bridge = startBrowserBridge({ capability, extensionOrigin: origin, pairingMs: 10_000, persistStatus: false });
+  const ws = new WebSocket(`ws://127.0.0.1:${bridge.port}/bridge`, { headers: { origin } } as any);
+  await new Promise<void>((resolve, reject) => { ws.addEventListener("open", () => resolve(), { once: true }); ws.addEventListener("error", reject, { once: true }); });
+  ws.send(JSON.stringify({ type: "hello", session: "session-test", token: "token-test" }));
+  expect(await nextMessage(ws)).toEqual({ type: "ready", session: "session-test" });
   ws.close();
   bridge.close();
 });
@@ -131,7 +187,7 @@ test("browser install chooses Store when configured and prepares a pinned local 
       }) as typeof fetch,
     });
     expect(path).toBe(destination);
-    expect(requests).toBe(10);
+    expect(requests).toBe(12); // 10 core assets + sidepanel.html + sidepanel.js
     expect(JSON.parse(readFileSync(join(path, "manifest.json"), "utf8")).manifest_version).toBe(3);
     expect(readFileSync(join(path, ".neko-version"), "utf8").trim()).toBe("0.11.5");
     await prepareBrowserExtension({ sourceRoot: temp, destination, version: "0.11.5", fetchImpl: (() => { throw new Error("cache missed"); }) as unknown as typeof fetch });
@@ -140,14 +196,23 @@ test("browser install chooses Store when configured and prepares a pinned local 
   }
 });
 
-test("browser extension stays active-tab scoped", () => {
+test("browser extension uses explicit active-tab consent and no standing host access", () => {
   const manifest = JSON.parse(readFileSync(new URL("../browser-extension/manifest.json", import.meta.url), "utf8"));
   expect(manifest.permissions).toContain("activeTab");
+  expect(manifest.host_permissions ?? []).toEqual([]);
   expect(manifest.permissions).toContain("tabGroups");
   expect(manifest.permissions).toContain("alarms");
+  expect(manifest.permissions).toContain("sidePanel"); // the chat side panel (no extra host scope)
+  expect(manifest.side_panel?.default_path).toBe("sidepanel.html");
   expect(manifest.permissions).not.toContain("debugger");
   expect(manifest.permissions).not.toContain("tabs");
   expect(manifest.host_permissions ?? []).not.toContain("<all_urls>");
+  // The side panel is a chat CLIENT only - the brain stays in the neko CLI. It must not embed a model
+  // or reach any external host; its only network is the loopback bridge via the service worker.
+  const panelJs = readFileSync(new URL("../browser-extension/sidepanel.js", import.meta.url), "utf8");
+  expect(() => new Function(panelJs)).not.toThrow();
+  expect(panelJs).toContain("chrome.runtime.connect");
+  expect(panelJs).not.toMatch(/https?:\/\//); // no external endpoints baked in
   const id = [...createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest().subarray(0, 16)]
     .flatMap((byte) => [byte >> 4, byte & 15]).map((nibble) => String.fromCharCode(97 + nibble)).join("");
   expect(id).toBe("koalaflndbcddboachbdfmppdeblldje");
@@ -166,6 +231,9 @@ test("browser extension stays active-tab scoped", () => {
   expect(worker).toContain("chrome.alarms.onAlarm");
   expect(worker).toContain("authentication failed");
   expect(worker).toContain('detach("switch-tab")');
+  expect(worker).toContain('type: "panel-ready"');
+  expect(worker).not.toContain("autoAttachUntil");
+  expect(worker).not.toContain("tryAutoAttach");
   expect(worker).not.toContain("document.cookie");
   const popup = readFileSync(new URL("../browser-extension/popup.js", import.meta.url), "utf8");
   expect(() => new Function(popup)).not.toThrow();

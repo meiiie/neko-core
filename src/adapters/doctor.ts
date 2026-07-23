@@ -3,7 +3,7 @@
  * (provider, model, endpoint, key presence) WITHOUT calling the model.
  */
 import type { NekoConfig } from "./config.ts";
-import { detectSandbox } from "../core/sandbox.ts";
+import { detectSandbox, srtProvisioned } from "../core/sandbox.ts";
 import { cachedRefreshRate, resolveUiFps } from "./display.ts";
 import { SearxngSidecar } from "./sidecar.ts";
 import { VERSION } from "../shared/version.ts";
@@ -114,13 +114,19 @@ export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportSta
         : "one-shot PowerShell fallback (resident UIA/input/capture disabled)",
     },
     {
-      status: config.sandbox && detectSandbox() === "none" ? "warn" : "ok",
+      status: config.sandbox && (detectSandbox() === "none" || (detectSandbox() === "srt" && !srtProvisioned())) ? "warn" : "ok",
       name: "bash_sandbox",
       detail: config.sandbox
         ? detectSandbox() === "none"
           ? "requested but unavailable on this OS - seatbelt + gate still apply"
-          : `on (${detectSandbox()})`
-        : `off (available: ${detectSandbox()})`,
+          : detectSandbox() === "srt" && !srtProvisioned()
+            ? "on (srt) but not provisioned - run once: srt windows-install (one UAC prompt)"
+            : `on (${detectSandbox()})${config.sandboxAutoApprove ? " - bash auto-approved except workspace-destructive commands, which still confirm (sandbox_auto_approve=false to always prompt)" : ""}`
+        : `off (available: ${detectSandbox()}${
+            detectSandbox() === "none" && process.platform === "win32"
+              ? "; for Windows: bun add -g @anthropic-ai/sandbox-runtime, then: srt windows-install"
+              : ""
+          })`,
     },
     {
       status: "ok",

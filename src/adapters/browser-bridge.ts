@@ -143,6 +143,14 @@ export interface BrowserBridge {
   readonly session: string;
   status(): Record<string, unknown>;
   command(action: string, args?: Record<string, unknown>): Promise<unknown>;
+  /** Push a Neko-side event (a transcript line, a stream delta, a snapshot) to the extension so the
+   * side panel can render Neko's conversation. Sent as {type:"panel", event}; a no-op if no client. */
+  pushPanel(event: unknown): void;
+  /** Register the handler for a prompt the user typed in the side panel (arrives as {type:"panel-in"}).
+   * The host wires this to its turn loop so the panel can DRIVE Neko, not just watch it. */
+  onPanelPrompt(handler: (prompt: string) => void): void;
+  /** Register a handler for a newly opened/reconnected panel requesting the current transcript. */
+  onPanelSnapshot(handler: () => void): void;
   close(): void;
 }
 
@@ -187,6 +195,9 @@ export function startBrowserBridge(options: {
   const audit: { at: string; action: string; status: string }[] = [];
   let client: Bun.ServerWebSocket<SocketData> | null = null;
   let attached: { tabId: number; host: string; grants: Record<string, boolean> } | null = null;
+  let panelHandler: ((prompt: string) => void) | null = null;
+  let panelSnapshotHandler: (() => void) | null = null;
+  let panelSnapshotPending = false;
 
   const record = (action: string, status: string) => {
     audit.push({ at: new Date().toISOString(), action, status });
@@ -264,9 +275,23 @@ export function startBrowserBridge(options: {
           client?.close(1000, "replaced by a newer Neko browser connection");
           client = ws;
           if (paired) ws.send(JSON.stringify({ type: "paired", session: capability.session, token: capability.token }));
+          // Pairing authenticates the extension, but never grants access to a browser tab. Chrome's
+          // toolbar Attach gesture creates that separate, explicit active-tab capability.
           ws.send(JSON.stringify({ type: "ready", session: capability.session }));
           record("connect", paired ? "paired" : "resumed");
           persistStatus();
+          return;
+        }
+        // Side-panel prompt: the user typed in the panel; the service worker forwarded it. Route it
+        // to the host's turn loop. Bounded like every other input; ignored if no handler is wired.
+        if (message?.type === "panel-in" && typeof message.prompt === "string") {
+          const prompt = message.prompt.slice(0, 100_000);
+          if (prompt.trim()) panelHandler?.(prompt);
+          return;
+        }
+        if (message?.type === "panel-ready") {
+          if (panelSnapshotHandler) panelSnapshotHandler();
+          else panelSnapshotPending = true; // bridge can connect before Ink mounts ChatApp
           return;
         }
         if (message?.type === "attached" && Number.isInteger(message.tab?.id)) {
@@ -307,6 +332,17 @@ export function startBrowserBridge(options: {
     session: capability.session,
     status: publicStatus,
     command,
+    pushPanel(event: unknown) {
+      if (client?.readyState === 1) { try { client.send(JSON.stringify({ type: "panel", event })); } catch { /* client dropped mid-send */ } }
+    },
+    onPanelPrompt(handler: (prompt: string) => void) { panelHandler = handler; },
+    onPanelSnapshot(handler: () => void) {
+      panelSnapshotHandler = handler;
+      if (panelSnapshotPending) {
+        panelSnapshotPending = false;
+        handler();
+      }
+    },
     close() {
       client?.close(1001, "Neko bridge stopped");
       for (const call of pending.values()) { clearTimeout(call.timer); call.reject(new Error("browser bridge stopped")); }

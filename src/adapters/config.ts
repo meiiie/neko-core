@@ -66,6 +66,13 @@ export const DEFAULTS: Record<string, any> = {
   offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
   codex_keepalive: 15, // GPT-5.6 App Server idle minutes; 0 keeps it alive until logout/exit
   approval: "prompt", // prompt | auto (--yolo flips gated tools to auto)
+  // Bash OS sandbox ON by default (owner decision, 2026-07-22): machines with a primitive
+  // (bwrap / Seatbelt / srt) confine bash out of the box; "none" machines fall back to the
+  // seatbelt + gate unchanged. Opt out: "sandbox": false or NEKO_SANDBOX=0.
+  sandbox: true,
+  sandbox_network: false, // egress blocked inside the sandbox by default
+  sandbox_domains: [], // srt (Windows) allowlist used when sandbox_network is true (no allow-all in srt)
+  sandbox_auto_approve: true, // sandboxed bash skips the approval prompt (the sandbox IS the containment)
   effort_ceiling: "high", // highest reasoning_effort the endpoint accepts (OpenAI standard caps at high); a profile can raise it
   adaptive_effort: false, // experimental lagged proxy; keep full effort unless a workload-specific eval proves it safe
   image_long_edge: 1568, // conservative cross-provider vision input; high-resolution profiles may raise it
@@ -265,6 +272,7 @@ const BOOLEAN_ENV_KEYS = new Set([
   "mcp_lazy",
   "prompt_cache",
   "sandbox",
+  "sandbox_auto_approve",
   "sandbox_network",
   "verify_before_exit",
   "vision",
@@ -447,6 +455,16 @@ export class NekoConfig {
   get sandbox(): boolean { return Boolean(this.data.sandbox); }
   /** Allow network inside the sandbox (default false = block egress). */
   get sandboxNetwork(): boolean { return Boolean(this.data.sandbox_network); }
+  /** Domain allowlist for the srt (Windows) sandbox when sandbox_network is true - srt has no
+   * allow-all: egress is always an allowlist (e.g. ["github.com", "*.npmjs.org"]). Ignored by
+   * the bwrap/Seatbelt rungs, which allow all egress when sandbox_network is true. */
+  get sandboxDomains(): string[] {
+    const v = this.data.sandbox_domains;
+    return Array.isArray(v) ? v.map(String) : [];
+  }
+  /** When true (default) AND the sandbox is live, bash skips the approval prompt in
+   * default/accept-edits mode - the OS sandbox is the containment. `neko policy` surfaces it. */
+  get sandboxAutoApprove(): boolean { return this.data.sandbox_auto_approve !== false; }
 
   /** Self-hosted SearXNG base URL for web_search metasearch ("" = off). */
   get searxngUrl(): string { return String(this.data.searxng_url ?? ""); }

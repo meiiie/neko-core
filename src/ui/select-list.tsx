@@ -5,6 +5,9 @@
 import { Box, Text, useInput } from "ink";
 import { useEffect, useState } from "react";
 
+import { HIT_SENTINEL } from "./frame-diff.ts";
+import { hitIndexAt } from "./hit-targets.ts";
+import { parseLastPointer, parseWheelAll } from "./mouse.ts";
 import { isEscapeResidue } from "./text-input.tsx";
 
 export interface SelectItem {
@@ -64,8 +67,34 @@ export function SelectList(props: {
     ? items.filter((it) => (it.label + " " + (it.detail ?? "")).toLowerCase().includes(query.toLowerCase()))
     : items;
   const idx = Math.min(index, Math.max(0, filtered.length - 1));
+  // Visible window (computed BEFORE useInput so the pointer handler maps hit zones to items).
+  const N = 8;
+  const start = Math.max(0, Math.min(idx - 3, Math.max(0, filtered.length - N)));
 
   useInput((input, key) => {
+    // Mouse: each visible item row is a hit zone (HIT_SENTINEL anchor recorded by the differ from
+    // the LAST PAINTED frame). Hover follows the pointer, a left click selects + confirms, and the
+    // wheel moves the cursor. Zones are indexed in visible order, so item = filtered[start + zone].
+    // No differ (inline mode / tests) -> no zones -> pointer input is consumed harmlessly.
+    const ptr = parseLastPointer(input);
+    if (ptr) {
+      if (renaming !== null) return;
+      const zone = hitIndexAt(ptr.x, ptr.y);
+      if (ptr.kind === "move") {
+        if (zone >= 0 && start + zone < filtered.length) setIndex(start + zone);
+        return;
+      }
+      if (ptr.kind === "press" && ptr.left && zone >= 0) {
+        const it = filtered[start + zone];
+        if (it) { setIndex(start + zone); onSelect(it); }
+      }
+      return; // release / other buttons: consumed, never type-to-filter residue
+    }
+    const wheel = parseWheelAll(input);
+    if (wheel) {
+      if (renaming === null) setIndex(Math.max(0, Math.min(filtered.length - 1, idx + (wheel.dir === "up" ? -1 : 1) * wheel.count)));
+      return;
+    }
     // Rename mode owns the keyboard until Enter/Esc.
     if (renaming !== null) {
       if (key.return) {
@@ -109,8 +138,6 @@ export function SelectList(props: {
     }
   });
 
-  const N = 8;
-  const start = Math.max(0, Math.min(idx - 3, Math.max(0, filtered.length - N)));
   const rule = "─".repeat(Math.max(10, cols - 1));
 
   return (
@@ -133,7 +160,7 @@ export function SelectList(props: {
         return (
           <Box key={it.id} flexDirection="column">
             <Text color={i === idx ? "cyan" : undefined} bold={i === idx}>
-              {i === idx ? "> " : "  "}
+              {HIT_SENTINEL}{i === idx ? "> " : "  "}
               {it.label}
             </Text>
             {it.detail ? <Text dimColor>    {it.detail}</Text> : null}

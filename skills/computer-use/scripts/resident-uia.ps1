@@ -485,6 +485,108 @@ function Invoke-Capture([string]$path, [int]$width = 768) {
   }
 }
 
+# --- OCR (warm): read on-screen TEXT of Chromium/Electron windows UIA can't see. Loading the WinRT
+# projections + the recognizer costs ~1s ONCE; every subsequent ocr is ~400ms (capture + recognize),
+# matching/beating GPU screen-parsers - here CPU-only, no model, no download. ---
+$script:ocrReady = $false
+$script:ocrEngine = $null
+$script:ocrAsTask = $null
+# Set-of-Marks: the LAST ocr's numbered marks -> screen coords. `click {mark:N}` looks up N here, so
+# a text-only model picks a NUMBER (the SOTA OmniParser affordance) instead of reproducing pixels -
+# removing the coordinate-grounding step where weak models fail. Persisted in this warm host.
+$script:ocrMarks = @{}
+$script:ocrMarkContext = $null
+$script:ocrMarkMaxAgeMs = 30000
+function Initialize-Ocr {
+  if ($script:ocrReady) { return }
+  Add-Type -AssemblyName System.Drawing
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $script:ocrAsTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+  [void][Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType = WindowsRuntime]
+  [void][Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType = WindowsRuntime]
+  [void][Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
+  $script:ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+  if (-not $script:ocrEngine) {
+    $langs = [Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages
+    if ($langs.Count -gt 0) { $script:ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($langs[0]) }
+  }
+  $script:ocrReady = $true
+}
+function Wait-Winrt($op, $type, [int]$timeoutMs = 15000) {
+  $m = $script:ocrAsTask.MakeGenericMethod($type)
+  $t = $m.Invoke($null, @($op))
+  try {
+    if (-not $t.Wait($timeoutMs)) {
+      try { $op.Cancel() } catch {}
+      throw "Windows OCR timed out after ${timeoutMs}ms"
+    }
+    return $t.Result
+  } finally {
+    try { $t.Dispose() } catch {}
+    try { $op.Close() } catch {}
+  }
+}
+function Invoke-Ocr($root) {
+  Initialize-Ocr
+  if (-not $script:ocrEngine) { throw 'no Windows OCR recognizer installed; add a language OCR pack in Settings > Language' }
+  # CopyFromScreen reads the composed desktop, so foreground the chosen window first. Marks are invalid
+  # until this succeeds; a covered/background window must never produce coordinates for another app.
+  $script:ocrMarks = @{}
+  $script:ocrMarkContext = $null
+  $hwnd = [IntPtr](Focus-InputTarget $root)
+  $rect = New-Object NekoResidentInputNative+RECT
+  if (-not [NekoResidentInputNative]::GetWindowRect($hwnd, [ref]$rect)) { throw 'could not read window bounds' }
+  $w = $rect.Right - $rect.Left; $h = $rect.Bottom - $rect.Top
+  if ($w -le 0 -or $h -le 0) { throw 'window has no visible area - run activate first' }
+  $ms = New-Object System.IO.MemoryStream
+  $bmp = New-Object System.Drawing.Bitmap $w, $h
+  $ras = $null
+  $sb = $null
+  try {
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    try { $g.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size, [System.Drawing.CopyPixelOperation]::SourceCopy) }
+    finally { $g.Dispose() }
+    $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Bmp)
+    $ms.Position = 0
+    $ras = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($ms)
+    $dec = Wait-Winrt ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($ras)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $sb = Wait-Winrt ($dec.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    $res = Wait-Winrt ($script:ocrEngine.RecognizeAsync($sb)) ([Windows.Media.Ocr.OcrResult])
+  } finally {
+    if ($sb) { $sb.Dispose() }
+    if ($ras) { $ras.Dispose() }
+    $bmp.Dispose()
+    $ms.Dispose()
+  }
+  $lines = New-Object 'System.Collections.Generic.List[string]'
+  $lines.Add("OCR window='$($root.Current.Name)' size=${w}x${h} engine=$($script:ocrEngine.RecognizerLanguage.LanguageTag)")
+  $lines.Add("(act on a line by its mark: computer click mark=N - the coordinates are resolved for you)")
+  $script:ocrMarkContext = [PSCustomObject]@{
+    Hwnd = $hwnd.ToInt64()
+    Rect = @($rect.Left, $rect.Top, $rect.Right, $rect.Bottom)
+    CapturedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  }
+  $n = 0
+  foreach ($line in $res.Lines) {
+    $words = $line.Words
+    if ($words.Count -eq 0) { continue }
+    $minX = ($words | ForEach-Object { $_.BoundingRect.X } | Measure-Object -Minimum).Minimum
+    $minY = ($words | ForEach-Object { $_.BoundingRect.Y } | Measure-Object -Minimum).Minimum
+    $maxX = ($words | ForEach-Object { $_.BoundingRect.X + $_.BoundingRect.Width } | Measure-Object -Maximum).Maximum
+    $maxY = ($words | ForEach-Object { $_.BoundingRect.Y + $_.BoundingRect.Height } | Measure-Object -Maximum).Maximum
+    $cx = [int]($rect.Left + ($minX + $maxX) / 2)
+    $cy = [int]($rect.Top + ($minY + $maxY) / 2)
+    $n++
+    $script:ocrMarks[[string]$n] = [PSCustomObject]@{ X = $cx; Y = $cy; Text = [string]$line.Text }
+    # Set-of-Marks: show the LABEL only, NOT the coordinate. Showing pixels tempts a weak model to copy
+    # (and mis-copy) them - the exact failure OmniParser avoids by making the model pick a label. The
+    # host grounds mark N -> pixel, so accuracy no longer depends on the model reproducing coordinates.
+    $lines.Add("  [$n] '$($line.Text)'")
+  }
+  if ($n -eq 0) { $lines.Add('  (no text recognized - the window may be blank, an image, or mid-render)') }
+  return $lines.ToArray()
+}
+
 function Invoke-UiaRequest($request) {
   $action = [string]$request.action
   Trace-Host "request action=$action"
@@ -508,7 +610,7 @@ function Invoke-UiaRequest($request) {
   $backend = if ([string]$request.inputBackend -eq 'sendinput') { 'sendinput' } else { 'inject' }
   $max = if ($request.max) { [Math]::Min([Math]::Max([int]$request.max, 1), 500) } else { 120 }
   $auditName = switch ($action) {
-    'click' { "$($request.x),$($request.y)" }
+    'click' { if ($null -ne $request.mark) { "mark $($request.mark)" } else { "$($request.x),$($request.y)" } }
     'stroke' { "$(@($request.points).Count / 2) points" }
     'key' { [string]$request.keys }
     'scroll' { "$($request.direction) x$($request.amount)" }
@@ -548,6 +650,9 @@ function Invoke-UiaRequest($request) {
     }
     'read' {
       return @(Get-ReadableSnapshot $root $max)
+    }
+    'ocr' {
+      return Invoke-Ocr $root
     }
     'watch' {
       $duration = if ($null -ne $request.durationMs) { [int]$request.durationMs } else { 10000 }
@@ -676,7 +781,68 @@ function Invoke-UiaRequest($request) {
       return "sent key $sent; re-perceive to verify"
     }
     'click' {
-      $x = [int]$request.x; $y = [int]$request.y
+      # Set-of-Marks: `mark` (an [N] from the last ocr) resolves to that element's coords - the model
+      # never emits pixels. Falls back to explicit x,y when no mark is given.
+      if ($null -ne $request.mark) {
+        $key = [string][int]$request.mark
+        if (-not $script:ocrMarks.ContainsKey($key)) { throw "no OCR mark [$key]; run computer ocr first, then click the mark you see" }
+        if (-not $script:ocrMarkContext) { throw "OCR mark [$key] has no capture context; run computer ocr again" }
+        $age = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$script:ocrMarkContext.CapturedAt
+        if ($age -lt 0 -or $age -gt $script:ocrMarkMaxAgeMs) { throw "OCR mark [$key] expired; run computer ocr again before clicking" }
+        $markHwnd = [IntPtr][long]$script:ocrMarkContext.Hwnd
+        $rootHwnd = [IntPtr]$root.Current.NativeWindowHandle
+        if ([NekoResidentInputNative]::GetAncestor($rootHwnd, 2) -ne [NekoResidentInputNative]::GetAncestor($markHwnd, 2)) {
+          throw "OCR mark [$key] belongs to another window; run computer ocr on the current target"
+        }
+        [void](Focus-InputTarget $root)
+        $foreground = [NekoResidentInputNative]::GetForegroundWindow()
+        if ([NekoResidentInputNative]::GetAncestor($foreground, 2) -ne [NekoResidentInputNative]::GetAncestor($markHwnd, 2)) {
+          throw "OCR target is no longer foreground; refusing a stale mark click"
+        }
+        $currentRect = New-Object NekoResidentInputNative+RECT
+        if (-not [NekoResidentInputNative]::GetWindowRect($markHwnd, [ref]$currentRect)) { throw 'could not re-read OCR target bounds' }
+        $expected = @($script:ocrMarkContext.Rect)
+        $actual = @($currentRect.Left, $currentRect.Top, $currentRect.Right, $currentRect.Bottom)
+        for ($i = 0; $i -lt 4; $i++) {
+          if ([Math]::Abs([int]$actual[$i] - [int]$expected[$i]) -gt 2) {
+            throw "OCR target moved or resized; run computer ocr again before clicking mark [$key]"
+          }
+        }
+        $oldMark = $script:ocrMarks[$key]
+        # The window can repaint without moving (dialogs, feeds, sensitive overlays). Re-perceive now
+        # and resolve the label to a FRESH coordinate; never click the old pixel merely because the
+        # HWND and rectangle still match.
+        [void](Invoke-Ocr $root)
+        $near = @($script:ocrMarks.Values | Where-Object {
+          $_.Text -eq $oldMark.Text -and
+          [Math]::Abs([int]$_.X - [int]$oldMark.X) -le 24 -and
+          [Math]::Abs([int]$_.Y - [int]$oldMark.Y) -le 24
+        })
+        if ($near.Count -ne 1) {
+          $script:ocrMarks = @{}
+          $script:ocrMarkContext = $null
+          throw "OCR content changed or became ambiguous; run computer ocr again and choose a fresh mark"
+        }
+        $coord = $near[0]; $x = [int]$coord.X; $y = [int]$coord.Y
+        $markHwnd = [IntPtr][long]$script:ocrMarkContext.Hwnd
+        $currentRect = New-Object NekoResidentInputNative+RECT
+        if (-not [NekoResidentInputNative]::GetWindowRect($markHwnd, [ref]$currentRect)) { throw 'could not verify refreshed OCR target bounds' }
+        $freshRect = @($script:ocrMarkContext.Rect)
+        $nowRect = @($currentRect.Left, $currentRect.Top, $currentRect.Right, $currentRect.Bottom)
+        for ($i = 0; $i -lt 4; $i++) {
+          if ([Math]::Abs([int]$nowRect[$i] - [int]$freshRect[$i]) -gt 2) {
+            throw "OCR target moved during verification; run computer ocr again before clicking mark [$key]"
+          }
+        }
+        if ($x -lt $currentRect.Left -or $x -ge $currentRect.Right -or $y -lt $currentRect.Top -or $y -ge $currentRect.Bottom) {
+          throw "OCR mark [$key] is outside the current target; refusing the click"
+        }
+        # Marks are one-use capabilities. A second action must re-perceive the current UI.
+        $script:ocrMarks = @{}
+        $script:ocrMarkContext = $null
+      } else {
+        $x = [int]$request.x; $y = [int]$request.y
+      }
       Assert-AgentPresence $request 'click' $x $y
       if ($request.window) { [void](Focus-InputTarget $root) }
       $before = Get-TreeSignature $root

@@ -42,6 +42,16 @@ async function act(message) {
   catch (error) { $("#error").textContent = error.message; }
 }
 
+// Open the Neko chat side panel. sidePanel.open needs a user gesture (this click) + a window id.
+$("#chat").addEventListener("click", async () => {
+  try {
+    const win = await chrome.windows.getCurrent();
+    await chrome.sidePanel.open({ windowId: win.id });
+    window.close(); // close the popup so the panel is unobstructed
+  } catch (e) {
+    $("#error").textContent = "Could not open the chat panel: " + (e && e.message ? e.message : e);
+  }
+});
 $("#attach").addEventListener("click", () => act({ type: "attach" }));
 $("#detach").addEventListener("click", () => act({ type: "detach" }));
 $("#stop").addEventListener("click", () => act({ type: "stop" }));

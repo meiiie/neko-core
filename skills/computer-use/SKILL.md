@@ -86,10 +86,51 @@ Native apps have no DOM, but Windows UI Automation (UIA) IS the desktop's access
 DOM. **This is the primary path; use it first.**
 
 **Prefer the first-class `computer` tool** over bash-ing the scripts: `computer({action, window, ...})` —
-`action` is `list | read | get | display | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait |
-watch | open | screenshot`. `watch` waits inside the resident UIA process until readable state changes and
-stays stable, then returns `elapsed_ms`, `detected_ms`, a compact state id, and the fresh text without
-model-side polling.
+`action` is `list | read | get | display | activate | invoke | setvalue | toggle | click | stroke | type | key |
+scroll | wait | watch | open | ocr | screenshot`. `watch` waits inside the resident UIA process until readable state
+changes and stays stable, then returns `elapsed_ms`, `detected_ms`, a compact state id, and the fresh text
+without model-side polling.
+
+**A MINIMIZED window enumerates as 0 elements.** If `list`/`read` on a `window` returns nothing (or "0
+elements"), the app is almost certainly minimized or hidden — call `activate` with that `window` FIRST
+(it restores + foregrounds it via the native handle), then `list`. Never hand-roll ShowWindow/
+SetForegroundWindow P/Invoke through bash: use `computer({action:"activate", window})`.
+
+**CHROMIUM / ELECTRON apps (Zalo, Discord, Slack, Spotify, VS Code, WhatsApp...) hide their UI from
+UIA.** The tell: `list`/`read` shows ONLY `Chrome Legacy Window` (`Chrome_RenderWidgetHostHWND`) and an
+`Intermediate D3D Window` — the real buttons/lists/inputs live inside the Chromium renderer and are NOT
+in the UIA tree. Handle it like this:
+- Use **`ocr`** — `computer({action:"ocr", window:"Zalo"})`. It runs the built-in Windows OCR engine on
+  the window and returns every on-screen text line as a NUMBERED MARK: `[N] 'the text'` (no coordinates -
+  that is deliberate). **No vision model needed** (a text-only model works), no download, no network.
+  This is the FIRST thing to try on an Electron app.
+- **Click by MARK.** `computer({action:"click", mark:N})` - pass the `[N]` of the line you want; the
+  resident host resolves it to the pixel for you, so you NEVER emit coordinates. This is the
+  Set-of-Marks method (OmniParser/OSWorld SOTA): picking a NUMBER removes the coordinate-grounding step
+  where weak/text-only models fail. Flow: `activate` (if minimized) → `ocr` → `click mark:N` →
+  `type`/`key` → `ocr` again to verify. Each `ocr` is ~0.5s in the warm host - perceive freely and
+  re-`ocr` after every action instead of assuming it worked. A mark is a one-use, short-lived capability:
+  it is rejected if its captured window moved, resized, or lost foreground. (If the resident host is off, `ocr` falls
+  back to a one-shot form that shows `'text' @ x,y`; then click x,y.)
+- Do NOT loop on `--force-renderer-accessibility`, env vars, or a remote-debugging port. These apps are
+  SINGLE-INSTANCE and hardened: relaunching with a flag just wakes the existing (unflagged) process, and
+  packaged Electron apps (Zalo verified) strip the flag / block the debug port. flag→env→CDP in sequence
+  is the classic wasted-turn spiral — go straight to `ocr`.
+- `ocr` reads TEXT only (not icons/avatars) and, for accented scripts, needs the matching Windows OCR
+  language pack (Settings > Language) — without the Vietnamese pack, en-US still reads Vietnamese as
+  unaccented Latin, which is usually enough to locate a name/label and click it. If a target is a
+  non-text icon, `screenshot` + a vision model is the fallback (only when `vision: true`).
+- A regular web page in Chrome/Edge is different: launching the browser itself with
+  `--force-renderer-accessibility` DOES expose the DOM to `uia.ps1 read` (verified). That trick is for
+  the browser, not for a packaged Electron app you cannot relaunch with the flag.
+
+**Windows shell trap — do NOT `powershell -Command "<complex script>"` through the `bash` tool.** On
+Windows the `bash` tool is git-bash: it re-parses the string and mangles PowerShell quoting, so
+`Add-Type`, `param(...)`, here-strings, and nested quotes fail (`Missing ')'`, `... is not recognized`).
+Reach for the first-class `computer` actions above instead — they cover perceive/act/activate without
+any raw PowerShell. If you GENUINELY need PowerShell (rare), `write_file` a `.ps1` and run
+`powershell -NoProfile -ExecutionPolicy Bypass -File script.ps1` — never inline `-Command`. Retrying the
+same mangled `-Command` is the top wasted-turn pattern; switch strategy on the FIRST failure.
 It dispatches to the scripts below (Unicode names handled via a temp UTF-8 `@file` automatically), gated like
 bash, and honours the presence/input config. Bash + the raw scripts is the fallback / for anything the tool
 doesn't expose. The underlying `uia.ps1` lets a text model perceive + act + verify with no vision and (for

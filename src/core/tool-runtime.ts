@@ -17,7 +17,7 @@ import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
 import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
-import { wrapBash } from "./sandbox.ts";
+import { destructiveInWorkspace, sandboxActive, wrapBash } from "./sandbox.ts";
 import { effectivePermission, GATED, resolveTool, toolSchemas } from "./tools.ts";
 import { residentUiaHost } from "./windows-uia-host.ts";
 import { debug, messageOf } from "../shared/debug.ts";
@@ -79,6 +79,11 @@ export class ToolRegistry {
   /** Opt-in OS sandbox for bash (fs read-only except cwd). Set from config by the host. */
   sandboxBash = false;
   sandboxAllowNetwork = false;
+  /** srt (Windows) only: domain allowlist used when sandboxAllowNetwork is true. */
+  sandboxDomains: string[] = [];
+  /** When true (default) AND the sandbox is actually live, bash runs without an approval prompt
+   * in default/accept-edits mode - the sandbox is the containment (Claude Code's rationale). */
+  sandboxAutoApprove = true;
   /** When true, read_file returns image files as vision content (needs a vision-capable model). */
   vision = false;
   /** When true, expose NO tools to the model — for a pure perception/vision pass (image Q&A), since
@@ -173,13 +178,23 @@ export class ToolRegistry {
       Math.max(Math.floor(Number(args.timeout) || BASH_TIMEOUT_MS), 1000),
       Math.min(600_000, Math.max(1_000, this.bashTimeoutCapMs)),
     );
-    const sb = wrapBash(command, this.root, { enabled: this.sandboxBash, allowNetwork: this.sandboxAllowNetwork });
+    const sb = wrapBash(command, this.root, { enabled: this.sandboxBash, allowNetwork: this.sandboxAllowNetwork, domains: this.sandboxDomains });
     // Agent-presence opt-in: desktop helpers read NEKO_PRESENCE to show the independent cursor + honour takeover.
     // Desktop input backend opt-in: NEKO_INPUT picks the non-hijacking (inject) vs legacy (sendinput) path.
     const env: NodeJS.ProcessEnv = { ...process.env };
     if (this.presence) env.NEKO_PRESENCE = "1";
     if (this.inputBackend && this.inputBackend !== "auto") env.NEKO_INPUT = this.inputBackend;
-    const child = spawn(sb.file, sb.args, { shell: sb.shell, cwd: this.root, env });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(sb.file, sb.args, { shell: sb.shell, cwd: this.root, env });
+    } catch (error) {
+      sb.cleanup?.();
+      throw error;
+    }
+    // A script can contain credentials. Keep it only while the process may still read it; cleanup
+    // covers foreground, background, detach, timeout, abort and spawn errors.
+    child.once("close", () => sb.cleanup?.());
+    child.once("error", () => sb.cleanup?.());
     // Cap LIVE accumulation so a runaway command (`yes`, an infinite echo loop) can't grow the buffer
     // to gigabytes and OOM the process before the timeout fires.
     const MAX_BASH_OUTPUT = 200_000;
@@ -378,7 +393,14 @@ export class ToolRegistry {
       return `Error: ${(error as Error).message}`;
     }
 
-    const decision = decide(this.mode, spec, args);
+    // Sandboxed-bash auto-approval keys off LIVE confinement (primitive present + provisioned),
+    // never off config intent alone - see decide() for the policy rationale. It is WITHHELD for
+    // commands that irreversibly destroy data inside the workspace: the sandbox contains the blast
+    // radius, but the user's own code + .git are writable, so those still get one confirmation.
+    // (mode=auto/yolo still allows everything - that's the point of yolo; always-allow-bash too.)
+    const sandboxedBash = spec.name === "bash" && this.sandboxBash && this.sandboxAutoApprove
+      && sandboxActive() && !destructiveInWorkspace(String(args.command ?? ""));
+    const decision = decide(this.mode, spec, args, { sandboxedBash });
     if (decision === "deny") {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
     }
@@ -446,6 +468,8 @@ export class ToolRegistry {
     let capturePath = "";
     switch (action) {
       case "list": case "read": script = "uia.ps1"; sa = [action]; break;
+      case "activate": script = "uia.ps1"; sa = ["activate"]; break; // restore + foreground a (possibly minimized) window
+      case "ocr": script = "ocr.ps1"; sa = []; break; // read on-screen TEXT via Windows OCR (no vision model; for Chromium/Electron apps)
       case "display": script = "display.ps1"; sa = []; break;
       case "get": case "invoke": case "toggle": {
         const nm = String(args.name ?? ""); if (!nm) return `Error: computer ${action} needs 'name'.`;
@@ -456,9 +480,13 @@ export class ToolRegistry {
         script = "uia.ps1"; sa = ["setvalue", atFile(nm), atFile(String(args.value ?? ""))]; break;
       }
       case "click": {
+        // Set-of-Marks: a `mark` (an [N] from the last ocr) is the preferred, grounding-free target -
+        // it resolves to coords in the resident host, so a text model never emits pixels. x,y still work.
+        const hasMark = args.mark !== undefined && Number.isInteger(Number(args.mark));
         const x = Number(args.x), y = Number(args.y);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) return "Error: computer click needs numeric 'x' and 'y'.";
-        script = "inject.ps1"; sa = ["tap", String(Math.round(x)), String(Math.round(y))]; break;
+        if (!hasMark && (!Number.isFinite(x) || !Number.isFinite(y))) return "Error: computer click needs a 'mark' number from a prior ocr, or numeric 'x' and 'y'.";
+        // One-shot fallback path only (resident is default): mark can't resolve without the warm host.
+        script = "inject.ps1"; sa = hasMark ? ["tap", "0", "0"] : ["tap", String(Math.round(x)), String(Math.round(y))]; break;
       }
       case "stroke": {
         const nums = Array.isArray(args.points) ? args.points.map((n: any) => Number(n)) : [];
@@ -514,11 +542,11 @@ export class ToolRegistry {
         sa = [capturePath];
         break;
       }
-      default: return `Unknown computer action '${action}'. Use: list | read | get | display | watch | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
+      default: return `Unknown computer action '${action}'. Use: list | read | get | display | activate | ocr | watch | invoke | setvalue | toggle | click | stroke | type | key | scroll | wait | open | screenshot.`;
     }
     try {
       let residentOutput: string | null = null;
-      if (this.residentUia && ["list", "read", "get", "watch", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "screenshot"].includes(action)) {
+      if (this.residentUia && ["list", "read", "get", "ocr", "watch", "invoke", "setvalue", "toggle", "click", "stroke", "type", "key", "scroll", "wait", "screenshot"].includes(action)) {
         try {
           const response = await residentUiaHost(join(scriptsDir, "resident-uia.ps1")).request({
             action,
@@ -533,6 +561,7 @@ export class ToolRegistry {
             settleMs: args.settle_ms === undefined ? undefined : Number(args.settle_ms),
             x: args.x === undefined ? undefined : Math.round(Number(args.x)),
             y: args.y === undefined ? undefined : Math.round(Number(args.y)),
+            mark: args.mark === undefined ? undefined : Math.round(Number(args.mark)),
             points: Array.isArray(args.points) ? args.points.map((n: any) => Math.round(Number(n))) : undefined,
             presence: this.presence,
             inputBackend: this.inputBackend,
@@ -551,6 +580,7 @@ export class ToolRegistry {
       let out = residentOutput ?? "", err = "";
       if (residentOutput === null) {
         if (action === "watch") return "Error: computer watch requires the resident Windows UIA host. Enable computer_use_resident, or use wait then read as the slower fallback.";
+        if (action === "click" && args.mark !== undefined) return "Error: click by mark needs the resident host (computer_use_resident). Enable it and re-run ocr, or use a freshly verified screenshot with explicit x,y.";
         const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa], { encoding: "utf-8", cwd: this.root, env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
         // Surface failures instead of swallowing them into "(no output)" — the agent can only adapt to a
         // failure it can SEE (same contract as the rest of the loop). Timeout/spawn error -> r.error.
@@ -1095,8 +1125,10 @@ function* walkFiles(base: string): Generator<string> {
   }
 }
 
-/** Conservative catastrophic-command detector (clearest data/disk-destroying forms only). */
-function dangerousCommand(command: string): string | null {
+/** Conservative catastrophic-command detector (clearest data/disk-destroying forms only). Exported
+ * so the security audit can probe exactly what it does and does NOT catch (the OS sandbox, not this
+ * regex, is the real containment - this only stops the clearest accidents/injections even unsandboxed). */
+export function dangerousCommand(command: string): string | null {
   const c = String(command).replace(/\s+/g, " ").trim();
     // The dangerous token may be QUOTED (`rm -rf "$HOME"`, `rm -rf "/"`, `rm -rf '~'`) -- without
     // the optional quotes here the seatbelt is bypassed: the quoted target slips through as "allowed".

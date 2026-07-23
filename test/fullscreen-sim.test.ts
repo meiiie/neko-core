@@ -257,31 +257,38 @@ test("todo flow shows the current plan once while the next step is running", asy
 }, 30000);
 
 test("approval decision keys never leak into the prompt", async () => {
-  const vt = new VirtualTerminal(80, 24);
-  const out = new FakeTtyOut(80, 24, vt);
-  const stdin = new FakeStdin();
-  const differ = new FrameDiffer();
-  let call = 0;
-  const provider: any = {
-    complete: async () => ++call === 1
-      ? { content: null, tool_calls: [{ id: "deny", name: "bash", arguments: { command: "echo should-not-run" } }] }
-      : { content: "denied safely", tool_calls: [] },
-  };
-  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
-  const app = renderFS(
-    React.createElement(ChatApp as any, { yolo: false, provider, sessionId: "approval-key", frameDiffer: differ, preAltDispose }),
-    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
-  );
-  await tick(300);
-  stdin.push("request approval"); await tick(30); stdin.push("\r");
-  for (let waited = 0; waited < 2000 && !vt.text().includes("Approve bash?"); waited += 25) await tick(25);
-  expect(vt.text()).toContain("Approve bash?");
-  stdin.push("n");
-  await tick(500);
-  expect(vt.text()).toContain("denied safely");
-  expect(vt.lines().some((line) => /^\s*>\s*n\s*$/.test(line))).toBe(false);
-  app.unmount();
-  await tick(50);
+  const oldSandbox = process.env.NEKO_SANDBOX;
+  process.env.NEKO_SANDBOX = "0"; // bash must PROMPT here; live-sandbox auto-approve is unit-tested
+  try {
+    const vt = new VirtualTerminal(80, 24);
+    const out = new FakeTtyOut(80, 24, vt);
+    const stdin = new FakeStdin();
+    const differ = new FrameDiffer();
+    let call = 0;
+    const provider: any = {
+      complete: async () => ++call === 1
+        ? { content: null, tool_calls: [{ id: "deny", name: "bash", arguments: { command: "echo should-not-run" } }] }
+        : { content: "denied safely", tool_calls: [] },
+    };
+    const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+    const app = renderFS(
+      React.createElement(ChatApp as any, { yolo: false, provider, sessionId: "approval-key", frameDiffer: differ, preAltDispose }),
+      { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+    );
+    await tick(300);
+    stdin.push("request approval"); await tick(30); stdin.push("\r");
+    for (let waited = 0; waited < 2000 && !vt.text().includes("Approve bash?"); waited += 25) await tick(25);
+    expect(vt.text()).toContain("Approve bash?");
+    stdin.push("n");
+    await tick(500);
+    expect(vt.text()).toContain("denied safely");
+    expect(vt.lines().some((line) => /^\s*>\s*n\s*$/.test(line))).toBe(false);
+    app.unmount();
+    await tick(50);
+  } finally {
+    if (oldSandbox === undefined) delete process.env.NEKO_SANDBOX;
+    else process.env.NEKO_SANDBOX = oldSandbox;
+  }
 }, 30000);
 
 test("slash menu on a SHORT window keeps the input row + first items (chrome never flex-squashed)", async () => {

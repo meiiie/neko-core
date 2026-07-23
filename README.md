@@ -79,9 +79,12 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
 - **Fullscreen terminal UI** — an app-owned, flicker-free viewport (alt-screen, like vim/htop):
   markdown renders live *as it streams*, scrolling is hardware-smooth at your display's refresh rate
   (auto-detected; `/fps`), the mouse wheel scrolls, drag selects + copies (or `Ctrl+C` / `/copy`),
-  `Alt+C` copies the current draft without clearing it, `Ctrl+F` finds in the transcript, and the tab
-  title tracks your session (a pulsing dot while it works). Exit leaves your shell exactly as it was —
-  plus a one-line resume hint.
+  clicking in the input moves the caret, clicking an option in an approval box or picker selects it,
+  `Alt+C` copies the current draft without clearing it, `Ctrl+F` finds in the transcript, and the
+  tab title tracks your session (a pulsing dot while it works). Multi-line prompts: `Shift+Enter` /
+  `Ctrl+Enter` on terminals with the kitty keyboard protocol (auto-negotiated), `\` + `Enter`
+  everywhere else, or run `neko setup terminal` to add a Windows Terminal keybinding — plain Enter
+  submits. Exit leaves your shell exactly as it was — plus a one-line resume hint.
 - **Sessions** — conversations persist; resume with `neko --resume`.
 - **MCP** — connect Model Context Protocol servers (stdio / http / sse + OAuth) and use their tools;
   lazy schema loading keeps a big MCP surface out of context until needed.

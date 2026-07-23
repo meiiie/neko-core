@@ -10,7 +10,8 @@ import { Box, measureElement, render, Static, Text, useApp, useInput, useStdout 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readFileSync, rmSync } from "node:fs";
 
-import { ApprovalBox, type Approval, type ApprovalFlash } from "./approval-box.tsx";
+import { ApprovalBox, approvalOptions, type Approval, type ApprovalFlash } from "./approval-box.tsx";
+import { hitIndexAt } from "./hit-targets.ts";
 import { isInteractiveBrowserRequest, runSlashCommand, SLASH } from "./commands.ts";
 import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { loadPrefs, savePrefs } from "../adapters/prefs.ts";
@@ -18,7 +19,7 @@ import { clampFps, detectRefreshRate, resolveUiFps } from "../adapters/display.t
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
 import { TranscriptViewer } from "./transcript-viewer.tsx";
-import { isEscapeResidue, TextInput } from "./text-input.tsx";
+import { isEscapeResidue, MAX_INPUT_LINES, TextInput } from "./text-input.tsx";
 import { openExternalEditor } from "./external-editor.ts";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { probeSyncOutput, syncOutputDecision, wrapStdoutForSync } from "./sync-stdout.ts";
@@ -57,9 +58,10 @@ import {
   readBrowserBridgeStatus,
   readBrowserCapability,
   startManagedBrowserBridge,
+  type BrowserBridge,
   type BrowserBridgeStage,
 } from "../adapters/browser-bridge.ts";
-import { browserExtensionSetupMessage, openBrowserExtensionSetup } from "../adapters/browser-extension-install.ts";
+import { browserExtensionSetupMessage, chromeHasMultipleProfiles, openBrowserExtensionSetup } from "../adapters/browser-extension-install.ts";
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { VERSION } from "../shared/version.ts";
@@ -119,9 +121,15 @@ interface ChatProps {
   setupBrowser?: () => Promise<string>;
   officeSupportStatus?: () => OfficeSupportStatus;
   installOfficeSupport?: (options: { force?: boolean; notify: (message: string) => void }) => Promise<unknown>;
+  /** Mutable bridge holder so the side panel can mirror Neko's transcript and drive turns. */
+  bridgeHolder?: {
+    current: BrowserBridge | null;
+    onPrompt: ((prompt: string) => void) | null;
+    onSnapshot: (() => void) | null;
+  };
 }
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, bridgeHolder }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -139,6 +147,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const relayHostIdRef = useRef(newSessionId()); // one opaque remote-control slot per running TUI
   const browserRequestBypassRef = useRef<string | null>(null);
   const officeRequestBypassRef = useRef<{ text: string; withoutInstall: boolean } | null>(null);
+  // Once the Office pack install has FAILED this session, stop re-offering it on every matching
+  // prompt (the download+fail loop the owner hit). Matching prompts then proceed WITHOUT the pack;
+  // an explicit /support office install clears this and retries.
+  const officeInstallFailedRef = useRef(false);
   const browserSetupTaskRef = useRef<string | undefined>(undefined);
   const browserAttachSeqRef = useRef(0);
   const browserAttachFlowRef = useRef<{ id: number; stage?: BrowserBridgeStage; timer?: ReturnType<typeof setInterval> } | null>(null);
@@ -212,6 +224,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // paste by writing into this map + bumping the counter; submit consumes the map. See
     // shared/paste-collapse.ts for the pure helpers.
     const pastedContentsRef = useRef(new Map<number, string>());
+    // Click-to-caret bridge: TextInput registers its handler here; the fullscreen pointer handler
+    // calls it with the click's delta from the hardware caret cell (see the press branch).
+    const caretClickRef = useRef<((dRow: number, dCol: number) => void) | null>(null);
     const pastedImagesRef = useRef(new Map<number, string>()); // [Image #N] id -> data: URL (shares the paste id counter)
     const nextPasteIdRef = useRef(1);
     // Reset the shared id counter only when NOTHING is staged - a still-staged image (its turn is
@@ -220,6 +235,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [approvalFlash, setApprovalFlash] = useState<ApprovalFlash | null>(null);
+  // Pointer-hovered option zone in the approval box (index into approvalOptions; null = none).
+  const [approvalHover, setApprovalHover] = useState<number | null>(null);
+  useEffect(() => { setApprovalHover(null); }, [approval]);
   const approvalFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const approvalFlashRef = useRef<ApprovalFlash | null>(null);
   const approvalSeqRef = useRef(0);
@@ -350,7 +368,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (fullscreenRef.current && (kind === "assistant" || kind === "user")) primeAnsiCache(line, contentColsRef.current, cfg);
     remoteLineRef.current?.(kind, text); // a remote turn collects info/error output (slash commands answer THERE)
     setLines((prev) => [...prev, line]);
-    if (mirror) relayRef.current?.publish({ type: "line", line: { ...line, text: text.slice(0, 200_000) } }, { durable: true });
+    if (mirror) {
+      relayRef.current?.publish({ type: "line", line: { ...line, text: text.slice(0, 200_000) } }, { durable: true });
+      bridgeHolder?.current?.pushPanel({ type: "line", line: { kind, text: text.slice(0, 200_000) } }); // mirror to the side panel
+    }
   };
 
   // Pairing instructions belong to the local terminal. Mirroring them back into the paired browser
@@ -402,7 +423,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     setStream(streamRef.current);
     setReasoning(reasoningRef.current);
-    relayRef.current?.publish({ type: "stream", text: streamRef.current.slice(-200_000) });
+    const streamText = streamRef.current.slice(-200_000);
+    relayRef.current?.publish({ type: "stream", text: streamText });
+    bridgeHolder?.current?.pushPanel({ type: "stream", text: streamText });
   };
 
   const flushStream = () => {
@@ -410,6 +433,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     streamRef.current = "";
     setStream("");
     relayRef.current?.publish({ type: "stream", text: "" });
+    bridgeHolder?.current?.pushPanel({ type: "stream", text: "" }); // end the panel's live bubble
     reasoningRef.current = ""; // thinking is transient: it vanishes once the step produces output
     toolStreamRef.current = "";
     setReasoning("");
@@ -1035,6 +1059,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // the moment the box is visible.
     if (approval) {
       if (approvalFlashRef.current || approvalFlash) return;
+      // Pointer path: the option row's hit zones come from the LAST PAINTED frame (the differ
+      // records each HIT_SENTINEL cell), so hover lights exactly what a click settles - the
+      // pill's contract, generalized. Zone order matches approvalOptions(): 0 approves, the
+      // last denies, the middle (tool box only) is "always". No differ (inline/tests) -> -1.
+      const ptr = parseLastPointer(char);
+      if (ptr) {
+        const zone = hitIndexAt(ptr.x, ptr.y);
+        setApprovalHover(zone >= 0 ? zone : null);
+        if (ptr.kind === "press" && ptr.left && zone >= 0) {
+          const opts = approvalOptions(approval.toolName);
+          settleApproval(zone === 0 ? "ok" : zone === opts.length - 1 ? "no" : "always");
+        }
+        return;
+      }
       const c = char.toLowerCase();
       let kind: ApprovalFlash["kind"] | null = null;
       if (c === "y") {
@@ -1373,18 +1411,30 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       setOverlay({
         title: connected ? "Connect Neko Browser - step 2 of 2" : "Connect Neko Browser - step 1 of 2",
         description: connected
-          ? `Extension connected. On the target tab, open Neko Browser and choose 'Attach this tab to Neko'. Neko detects it and continues automatically.${text ? " Your request is saved." : ""}`
-          : `Complete the one-time Chrome install step described above. Neko detects the extension automatically; no Enter or /browser status is needed.${text ? " Your request is saved." : ""}`,
+          ? `Extension detected. Just open a NORMAL website tab (any http/https page) - Neko attaches it automatically and continues, no click needed.${text ? " Your request is saved." : ""}`
+          : `Finish the install above, then open a NORMAL website tab (http/https, NOT chrome://) - Neko attaches it automatically and continues. Installing alone connects nothing; opening a real tab is what does it.${text ? " Your request is saved." : ""}`,
         search: false,
         showCount: false,
+        // The DEFAULT (highlighted) item must be safe: the body says "no Enter is needed", and the
+        // SelectList footer says "Enter confirm" - so Enter has to be the passive keep-waiting choice,
+        // NOT "reopen setup" (which used to relaunch Chrome + reprint instructions on every Enter, a
+        // loop that read as "confirm completion" but did the opposite). "Keep waiting" closes the
+        // guide but LEAVES the background poll running, so the flow still auto-advances / finishes.
         items: [
+          { id: "wait", label: "Keep waiting - Neko attaches automatically", detail: connected ? "close this guide; it re-appears when the tab attaches" : "close this guide; Neko keeps detecting the extension in the background" },
           { id: "setup", label: "Open Chrome setup again", detail: "reopen the install surface and exact instructions" },
           text
             ? { id: "without", label: "Continue without browser control", detail: "use web search/fetch or other available tools" }
-            : { id: "later", label: "Finish later", detail: "close this guide; /browser resumes it at any time" },
+            : { id: "later", label: "Finish later", detail: "stop detecting; /browser resumes it at any time" },
         ],
         onCancel: pause,
         onSelect: (choice) => {
+          if (choice.id === "wait") {
+            // Dismiss the modal but KEEP the flow polling - the user can type meanwhile, and the
+            // guide re-appears at the next stage (step 2) or runs the saved request on attach.
+            setOverlay(null);
+            return;
+          }
           if (choice.id === "setup") {
             if (!stopBrowserAttachFlow(id)) return;
             setOverlay(null);
@@ -1425,6 +1475,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (stage === "tab_attached") return runBrowserRequest(text);
     stopBrowserAttachFlow();
     setInput(text);
+    // Lead-in BEFORE the modal so it doesn't appear out of nowhere (owner feedback: overlays pop
+    // abruptly). One conversational line frames what the choice is about.
+    addLine("info", "Sure - to do that I drive ONE Chrome tab you pick (nothing else). Chrome needs a quick one-time extension setup first; it won't let me install it for you. Your options:");
     setOverlay({
       title: "Use your signed-in Chrome tab for this task?",
       description: "You choose the one tab Neko may control. Other tabs, cookies, passwords, and the cloud relay stay outside this connection.",
@@ -1465,6 +1518,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       addLine("info", message);
     };
     setInput(text);
+    // Lead-in BEFORE the modal (owner feedback: overlays pop abruptly).
+    addLine("info", repair
+      ? "The typed Office editor needs a quick repair before I can build that file. One choice:"
+      : "To build a real Office file (.docx/.xlsx/.pptx) I use a small verified editor - a one-time ~35 MiB setup, no admin or MS Office needed. One choice:");
     setOverlay({
       title: repair ? "Repair Office support and continue?" : "Install Office support and continue?",
       description: repair
@@ -1490,13 +1547,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           .then(() => {
             busyRef.current = false;
             setBusy(false);
+            officeInstallFailedRef.current = false; // a good install clears the "don't re-offer" latch
             addLine("info", "Office support is ready - continuing your saved request.");
             runOfficeRequest(text);
           })
           .catch((error) => {
             busyRef.current = false;
             setBusy(false);
-            keepRequest(`Office Support Pack failed: ${error instanceof Error ? error.message : error}. Your request is still in the input.`);
+            officeInstallFailedRef.current = true; // don't re-offer on the next matching prompt (no loop)
+            keepRequest(`Office Support Pack failed: ${error instanceof Error ? error.message : error}. Continuing without it - submit again to proceed, or retry with /support office install.`);
             const next = queueRef.current.shift();
             setQueued(queueRef.current.length);
             if (next !== undefined) void handle(next).catch((nextError) => addLine("error", nextError instanceof Error ? nextError.message : String(nextError)));
@@ -1829,6 +1888,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     else if (!voiceTurnRef.current && matchesSkill("office-artifacts", loopGoal ?? text)) {
       const status = officeSupportStatus();
       if (status.state !== "ready") {
+        // After a failed install this session, don't nag - proceed WITHOUT the pack (the model uses
+        // a local fallback or reports the exact limitation). /support office install retries.
+        if (officeInstallFailedRef.current) return runOfficeRequest(text, true);
         offerOfficeSupport(text, status);
         return;
       }
@@ -1979,6 +2041,27 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } finally {
       voiceTurnRef.current = false;
     }
+  };
+
+  // Side panel input shares the terminal's one FIFO. Never poll and start a second handle(): the
+  // agent message list, tools, approvals and stream all belong to exactly one turn at a time.
+  if (bridgeHolder) bridgeHolder.onPrompt = (prompt: string) => {
+    const text = prompt.trim();
+    if (!text) return;
+    if (busyRef.current || compactingRef.current) {
+      queueRef.current.push(text);
+      setQueued(queueRef.current.length);
+      addLine("info", `queued: ${trunc(text, 60)}`);
+      return;
+    }
+    void handle(text).catch((e) => addLine("error", e instanceof Error ? e.message : String(e)));
+  };
+  if (bridgeHolder) bridgeHolder.onSnapshot = () => {
+    bridgeHolder.current?.pushPanel({
+      type: "snapshot",
+      lines: lines.slice(-500).map(({ kind, text }) => ({ kind, text: text.slice(0, 200_000) })),
+    });
+    if (streamRef.current) bridgeHolder.current?.pushPanel({ type: "stream", text: streamRef.current.slice(-200_000) });
   };
 
   // Shared remote handlers for /rc (HTTP) and /relay (outbound poll): run one turn (streaming to a
@@ -2262,6 +2345,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (!search && ptr.kind === "press" && ptr.left) {
           clearSelection();                                                       // a fresh drag drops any old selection
           if (pillHit(ptr.x, ptr.y)) return rowScroll.toBottom();                 // the pill is a click target
+          if (ptr.y > viewH) {
+            // Click in the input area: move the caret to the clicked cell (Claude Code parity).
+            // The differ knows the hardware cursor's screen cell; TextInput owns the layout math,
+            // so only the (dRow, dCol) delta crosses the boundary. The MAX_INPUT_LINES window
+            // keeps stray clicks on the chrome rows from teleporting the caret.
+            const cp = frameDiffer?.caretScreenPos();
+            if (cp && caretClickRef.current && Math.abs(ptr.y - cp.row) < MAX_INPUT_LINES) {
+              caretClickRef.current(ptr.y - cp.row, ptr.x - cp.col);
+            }
+            selAnchor.current = null; // clicks below the transcript never start a selection
+            return;
+          }
           selAnchor.current = ptr.y >= 1 && ptr.y <= viewH ? { x: ptr.x, row: contentRowAt(ptr.y) } : null; // begin in the band only
           return;
         }
@@ -2493,7 +2588,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           }}
         />
         ) : approval ? (
-          <ApprovalBox approval={approval} flash={approvalFlash} width={contentCols} />
+          <ApprovalBox approval={approval} flash={approvalFlash} width={contentCols} hover={approvalHover} />
       ) : fullscreen && search ? (
         <Box flexDirection="column" flexShrink={0}>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
@@ -2539,6 +2634,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                   nextPasteId={nextPasteIdRef}
                   onCommitPastes={commitPastes}
                   onPasteImage={pasteImage}
+                  registerCaretClick={(fn) => { caretClickRef.current = fn; }}
                   caretGlyph={cfg.caretGlyph}
                   placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
                 />
@@ -2613,13 +2709,32 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const showBrowserHint = !readBrowserCapability() && !loadPrefs().browserHintSeen;
   if (showBrowserHint) savePrefs({ browserHintSeen: true });
   let browserBridge = startManagedBrowserBridge({ extensionIds: cfg.browserExtensionIds });
+  // Side-panel bridge: a stable holder so ChatApp can mirror its transcript + take panel prompts even
+  // though the bridge may be (re)created later by setupBrowser. Wiring onPanelPrompt on each bridge
+  // routes panel prompts and snapshot requests to ChatApp's current handlers.
+  const bridgeHolder: {
+    current: BrowserBridge | null;
+    onPrompt: ((prompt: string) => void) | null;
+    onSnapshot: (() => void) | null;
+  } = { current: browserBridge, onPrompt: null, onSnapshot: null };
+  const wireBridge = (b: BrowserBridge | null) => {
+    bridgeHolder.current = b;
+    b?.onPanelPrompt((p) => bridgeHolder.onPrompt?.(p));
+    b?.onPanelSnapshot(() => bridgeHolder.onSnapshot?.());
+  };
+  wireBridge(browserBridge);
   const setupBrowser = async (): Promise<string> => {
     const capability = ensureBrowserCapability(false);
     if (!browserBridge) {
       browserBridge = startManagedBrowserBridge({ capability, extensionIds: cfg.browserExtensionIds });
+      wireBridge(browserBridge);
     }
     const setup = await openBrowserExtensionSetup({ storeId: cfg.browserExtensionStoreId });
-    return browserExtensionSetupMessage(setup);
+    // Put the unpacked folder path on the clipboard so the user can paste it into Chrome's
+    // Load-unpacked folder dialog, and warn about the profile picker when Chrome is multi-profile.
+    // (OSC 52 via process.stdout - the differ passes OSC writes through untouched.)
+    const pathOnClipboard = setup.mode === "unpacked" && !!setup.path && copyToClipboard(setup.path);
+    return browserExtensionSetupMessage(setup, { pathOnClipboard, profilePicker: chromeHasMultipleProfiles() });
   };
   // Ink's own synchronized clear (app.clear) threaded in via a holder - the app instance doesn't exist
   // until render() returns, so ChatApp calls the holder, which we point at app.clear right after.
@@ -2670,7 +2785,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const startFullscreen = cfg.fullscreen && canFullscreen(process.stdout);
   const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
   const app = render(
-    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} />,
+    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} bridgeHolder={bridgeHolder} />,
     // Bracket each (already-minimized) write in BSU/ESU on terminals that support DEC 2026
     // (synchronized output) so redraws are atomic - no flicker, no Windows scrollback yank.
     {

@@ -21,6 +21,8 @@
 
 import { appendFileSync } from "node:fs";
 
+import { setHitTargets } from "./hit-targets.ts";
+
 export interface ScrollBand { top: number; height: number } // 1-based absolute top row of the scrollable band
 
 const ESC = "\x1b[";
@@ -32,6 +34,10 @@ const EL = `${ESC}K`; // erase to end of line
  * and effectively never appears in a typed prompt. Defined HERE (a React-free leaf) so both TextInput
  * and the differ share it without a UI dependency cycle. */
 export const CARET_SENTINEL = "⁠";
+/** Zero-width marker for the START of a clickable zone (U+2063 INVISIBLE SEPARATOR - never typed,
+ * width 0 for both string-width and cellW below). Components prefix clickable text with it; the
+ * differ strips it and records its screen cell into ui/hit-targets.ts for pointer hit-testing. */
+export const HIT_SENTINEL = "⁣";
 const SGR_RE = /\x1b\[[0-9;]*m/g;
 /** DECSCUSR shape for the hardware caret: NEKO_CARET picks it, default a BLINKING BAR (like Claude Code). */
 function caretShape(): string {
@@ -44,14 +50,14 @@ function caretShape(): string {
 /** Display column (1-based) of the FIRST caret sentinel in a row, or 0 if absent. Counts visible cell
  * width BEFORE the sentinel, skipping SGR colour codes (so a coloured prompt doesn't offset the column). */
 function cellW(cp: number): number {
-  if ((cp >= 0x0300 && cp <= 0x036f) || (cp >= 0x200b && cp <= 0x200f) || cp === 0x2060 || (cp >= 0xfe00 && cp <= 0xfe0f)) return 0; // combining / zero-width
+  if ((cp >= 0x0300 && cp <= 0x036f) || (cp >= 0x200b && cp <= 0x200f) || (cp >= 0x2060 && cp <= 0x2064) || (cp >= 0xfe00 && cp <= 0xfe0f)) return 0; // combining / zero-width (incl. both sentinels)
   if (cp >= 0x1f000 || (cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0xa4cf) || (cp >= 0xac00 && cp <= 0xd7a3) ||
       (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe30 && cp <= 0xfe4f) || (cp >= 0xff00 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6)) return 2; // CJK / emoji
   return 1;
 }
-function sentinelCol(row: string): number {
-  const idx = row.indexOf(CARET_SENTINEL);
-  if (idx < 0) return 0;
+/** Display column (1-based) of the character AT string index `idx`: visible cell width before it,
+ * skipping SGR/OSC escape bytes (a coloured row must not offset the column). */
+function colAt(row: string, idx: number): number {
   let col = 0, i = 0;
   while (i < idx) {
     if (row.charCodeAt(i) === 27 && row[i + 1] === "[") { const m = /^\[[0-9;]*[A-Za-z]/.exec(row.slice(i)); if (m) { i += m[0].length; continue; } }
@@ -60,7 +66,11 @@ function sentinelCol(row: string): number {
     col += cellW(cp);
     i += cp > 0xffff ? 2 : 1;
   }
-  return col + 1; // the cursor sits just before the char that follows the sentinel
+  return col + 1; // the cell just after everything before `idx`
+}
+function sentinelCol(row: string): number {
+  const idx = row.indexOf(CARET_SENTINEL);
+  return idx < 0 ? 0 : colAt(row, idx); // the cursor sits just before the char that follows the sentinel
 }
 
 // Diagnostic tap (NEKO_TRACE_FRAMES=<file>): NDJSON of every differ decision - what the model believed
@@ -177,10 +187,11 @@ export class FrameDiffer {
     // Never replay that stale raw frame; only repaint when a current parsed model still exists.
     if (!this.writer || !this.lastRaw || !this.band || !this.prev) { this.prev = null; return; }
     const lines = this.compose(this.lastRaw.slice()); // recompose the LATEST Ink frame at the CURRENT band geometry
-    this.extractCursor(lines);
+    const hits = this.extractCursor(lines);
     this.prev = lines;
     this.markPainted();
     this.writer(this.paintAll() + this.cursorSuffix());
+    setHitTargets(hits);
   }
   private sameGeometry(): boolean {
     return !!this.band && !!this.paintedBand &&
@@ -209,22 +220,41 @@ export class FrameDiffer {
   private caretActive = false;
   /** Find the caret sentinel in the composed lines, record its (row, col), and STRIP every sentinel so
    * it neither displays nor shifts a column. Called on each real frame (process). */
-  private extractCursor(lines: string[]): void {
+  private extractCursor(lines: string[]): { row: number; col: number }[] {
     let found = false;
+    const hits: { row: number; col: number }[] = [];
     for (let r = 0; r < lines.length; r++) {
+      // Click-zone anchors first (both sentinels are zero-width to cellW, so order is cosmetic).
+      if (lines[r].indexOf(HIT_SENTINEL) >= 0) {
+        for (let idx = lines[r].indexOf(HIT_SENTINEL); idx >= 0; idx = lines[r].indexOf(HIT_SENTINEL, idx + 1)) {
+          hits.push({ row: r + 1, col: colAt(lines[r], idx) });
+        }
+        lines[r] = lines[r].split(HIT_SENTINEL).join("");
+      }
       if (lines[r].indexOf(CARET_SENTINEL) < 0) continue;
       if (!found) { this.cursorPos = { row: r + 1, col: sentinelCol(lines[r]) }; found = true; }
       lines[r] = lines[r].split(CARET_SENTINEL).join(""); // strip (may be >1 if pasted; harmless)
     }
     this.caretActive = found;
     if (!found) this.cursorPos = null;
+    return hits;
+  }
+  /** Screen cell (1-based row/col) of the hardware caret, if one is on screen. Click-to-caret uses
+   * this as the anchor: the pointer handler passes TextInput the click's DELTA from this cell and
+   * the layout math stays inside TextInput (the only code that knows the wrap geometry). */
+  caretScreenPos(): { row: number; col: number } | null {
+    return this.caretActive ? this.cursorPos : null;
   }
   /** Trailing bytes that place (and show) the real cursor at the caret, or hide it when inactive. Appended
    * after every frame the differ writes so the cursor lands on the input no matter what else repainted. */
   private cursorSuffix(): string {
-    // Only when a caret is actually on screen AND we're in fullscreen (absolute addressing). No caret ->
-    // "" (Ink already keeps the cursor hidden); inline -> "" (relative frame, absolute CUP would be wrong).
-    if (!this.band || !this.caretActive || !this.cursorPos) return "";
+    // Fullscreen (band) only - inline uses relative frames where an absolute CUP would be wrong.
+    if (!this.band) return "";
+    // No active caret (an overlay / picker / approval box owns the screen): HIDE the hardware
+    // cursor. The differ OWNS cursor visibility once it has shown the caret at an input frame, so
+    // Ink does not re-hide it on the next frame - we must, or the blinking bar lingers in the
+    // corner over the menu (the stray `|` under the browser-setup picker). Idempotent.
+    if (!this.caretActive || !this.cursorPos) return `${ESC}?25l`;
     return `${ESC}?25h` + caretShape() + `${ESC}${this.cursorPos.row};${this.cursorPos.col}H`;
   }
 
@@ -232,14 +262,15 @@ export class FrameDiffer {
   private refreshCompose(): void {
     if (!this.writer || !this.prev || !this.lastRaw) return;
     const lines = this.compose(this.lastRaw.slice());
-    this.extractCursor(lines); // lastRaw still carries the sentinel - strip it + refresh the caret position
     if (lines.length !== this.prev.length) { trace({ ev: "refreshCompose-skip", raw: lines.length, prev: this.prev.length }); return; } // dimensions changed too - the next real frame reseeds
+    const hits = this.extractCursor(lines); // only update hit/caret state for an accepted frame
     let out = "";
     for (let i = 0; i < lines.length; i++) {
       if (lines[i] !== this.prev[i]) { out += `${ESC}${i + 1};1H` + lines[i] + EL; this.prev[i] = lines[i]; }
     }
     trace({ ev: "refreshCompose", rows: rowsOf(out) });
     if (out) { this.writer(out + `${ESC}${this.prev.length};1H` + this.cursorSuffix()); this.armTrailingResync(); }
+    setHitTargets(hits); // publish only after the dimension check and optional paint succeeded
     this.markPainted(); // model is now consistent with the CURRENT geometry
   }
 
@@ -418,9 +449,10 @@ export class FrameDiffer {
       if (afterWipe && afterWipe.eraseCount === 0) {
         this.lastRaw = afterWipe.frame.split("\n");
         const lines = this.compose(this.lastRaw.slice());
-        this.extractCursor(lines);
+        const hits = this.extractCursor(lines);
         this.prev = lines;
         this.markPainted();
+        setHitTargets(hits);
         trace({ ev: "wipe-seed", n: lines.length });
         return wiped[1] + this.paintAll();
       }
@@ -431,11 +463,12 @@ export class FrameDiffer {
     // both the baseline and the diff operate on what the SCREEN should actually show.
     this.lastRaw = parsed.frame.split("\n"); // kept for setBand's geometry refresh (Ink skips identical frames)
     const lines = this.compose(this.lastRaw.slice());
-    this.extractCursor(lines); // pull the caret sentinel out of the model BEFORE diffing (position + strip)
+    const hits = this.extractCursor(lines); // pull sentinels out BEFORE diffing; publish after acceptance
     const prev = this.prev;
     const geomOk = this.sameGeometry(); // BEFORE the mark: was `prev` painted under this geometry?
     this.prev = lines;
     this.markPainted(); // every path below leaves the model consistent with the CURRENT geometry
+    setHitTargets(hits); // every accepted frame clears/replaces stale zones from dismissed surfaces
     if (!prev) { trace({ ev: "seed", n: lines.length }); return this.fullRepaintOr(parsed, lines); } // seed: raw passthrough would show a blank band
     if (parsed.eraseCount !== prev.length) { trace({ ev: "resync-erase", erase: parsed.eraseCount, prev: prev.length, n: lines.length }); return this.fullRepaintOr(parsed, lines); } // Ink's idea of prev differs -> resync
     if (lines.length !== prev.length) { trace({ ev: "resync-height", prev: prev.length, n: lines.length }); return this.fullRepaintOr(parsed, lines); }      // height changed -> full rewrite

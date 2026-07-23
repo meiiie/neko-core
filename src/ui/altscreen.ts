@@ -17,6 +17,15 @@ export const ENTER_ALT = "\x1b[?1049h";
 export const LEAVE_ALT = "\x1b[?1049l";
 export const HIDE_CURSOR = "\x1b[?25l";
 export const SHOW_CURSOR = "\x1b[?25h";
+// Kitty keyboard protocol, "disambiguate" tier (flag 1): a supporting terminal starts reporting
+// modified keys as CSI-u (Shift+Enter arrives distinct from Enter - multi-line input with zero
+// keybinding setup) and Esc/Alt as their CSI-u forms, ALL of which Ink 7 parses (probe-verified:
+// Esc -> escape, Alt+C -> meta c, Ctrl+A -> ctrl a, Shift+Tab -> shift+tab). Terminals without the
+// protocol ignore both sequences, and popping an empty stack is a no-op - safe everywhere. Pushed
+// on entering the alt screen, popped on EVERY leave path (incl. the external-editor suspend, which
+// rides leaveAltScreen - the editor gets the user's normal keyboard back).
+export const KITTY_PUSH = "\x1b[>1u";
+export const KITTY_POP = "\x1b[<u";
 
 /** Unconditional terminal restore for ANY exit path - including crashes that get CAUGHT (a caught
  * render error never reaches the guard's uncaughtException handler, and that exact path once left the
@@ -28,7 +37,7 @@ export function emergencyRestore(out: Writable = process.stdout): void {
     // No title pop on Windows: we never pushed there (WT's title stack reverts the tab mid-session; see
     // title.ts). Elsewhere, pop to restore the user's shell title on exit.
     const titlePop = process.platform === "win32" ? "" : "\x1b[23;0t";
-    out.write(SHOW_CURSOR + DISABLE_MOUSE + LEAVE_ALT + titlePop); // cursor, mouse off, main screen, (title)
+    out.write(KITTY_POP + SHOW_CURSOR + DISABLE_MOUSE + LEAVE_ALT + titlePop); // keyboard, cursor, mouse off, main screen, (title)
   } catch { /* stream gone - nothing left to protect */ }
 }
 
@@ -46,14 +55,16 @@ export function canFullscreen(out: Writable = process.stdout): boolean {
 // position is unspecified - without homing, the first frame can paint mid-screen until the next redraw.
 export const CLEAR_HOME = "\x1b[2J\x1b[H";
 
-/** Enter the alternate screen (clear + home, and hide the cursor - the app draws its own). */
+/** Enter the alternate screen (clear + home, hide the cursor - the app draws its own - and ask the
+ * terminal for kitty-protocol key disambiguation where supported). */
 export function enterAltScreen(out: Writable = process.stdout): void {
-  out.write(ENTER_ALT + CLEAR_HOME + HIDE_CURSOR);
+  out.write(ENTER_ALT + CLEAR_HOME + HIDE_CURSOR + KITTY_PUSH);
 }
 
-/** Leave the alternate screen (restoring the primary screen + scrollback) and show the cursor. */
+/** Leave the alternate screen (restoring the primary screen + scrollback), restoring the keyboard
+ * encoding first and showing the cursor. */
 export function leaveAltScreen(out: Writable = process.stdout): void {
-  out.write(SHOW_CURSOR + LEAVE_ALT);
+  out.write(KITTY_POP + SHOW_CURSOR + LEAVE_ALT);
 }
 
 /**

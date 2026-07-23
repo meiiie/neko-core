@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,6 +8,21 @@ import { ResidentUiaHost, residentUiaHost } from "../src/core/windows-uia-host.t
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 const script = join(import.meta.dir, "..", "skills", "computer-use", "scripts", "resident-uia.ps1");
+
+test("resident OCR bounds async waits, disposes captures, and refuses stale marks", () => {
+  const source = readFileSync(script, "utf8");
+  expect(source).toContain("function Wait-Winrt");
+  expect(source).toContain("$t.Wait($timeoutMs)");
+  expect(source).toContain("$t.Dispose()");
+  expect(source).toContain("$sb.Dispose()");
+  expect(source).toContain("$ras.Dispose()");
+  expect(source).toContain("CapturedAt");
+  expect(source).toContain("GetForegroundWindow");
+  expect(source).toContain("OCR target moved or resized");
+  expect(source).toContain("OCR content changed or became ambiguous");
+  expect(source).toContain("[void](Invoke-Ocr $root)");
+  expect(source).toContain("# Marks are one-use capabilities.");
+});
 
 async function waitForUiaText(read: () => Promise<string>, needle: string, timeoutMs = 25_000): Promise<string> {
   const deadline = Date.now() + timeoutMs;

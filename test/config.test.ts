@@ -278,6 +278,15 @@ test("boolean NEKO_* overrides parse false/true instead of using string truthine
   expect(cfg.data.sandbox).toBe(false);
 });
 
+test("bash sandbox is ON by default, network off, with config/env rollback switches", () => {
+  const cfg = loadConfig({ path: tmpConfig({}) });
+  expect(cfg.sandbox).toBe(true);
+  expect(cfg.sandboxNetwork).toBe(false);
+  expect(cfg.sandboxDomains).toEqual([]);
+  expect(loadConfig({ path: tmpConfig({ sandbox: false }) }).sandbox).toBe(false);
+  expect(loadConfig({ path: tmpConfig({ sandbox_domains: ["github.com"] }) }).sandboxDomains).toEqual(["github.com"]);
+});
+
 test("resident UIA is on by default and has config/env rollback switches", () => {
   expect(loadConfig({ path: tmpConfig({}) }).computerUseResident).toBe(true);
   expect(loadConfig({ path: tmpConfig({ computer_use_resident: false }) }).computerUseResident).toBe(false);
