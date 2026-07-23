@@ -1,5 +1,7 @@
 const DEFAULT_PORT = 8766;
 const RECONNECT_ALARM = "neko-browser-reconnect";
+const AUTO_ATTACH_ALARM = "neko-browser-auto-attach";
+const AUTO_ATTACH_WINDOW_MS = 10 * 60 * 1000;
 const state = {
   port: DEFAULT_PORT,
   session: "",
@@ -12,6 +14,8 @@ const state = {
   grants: { click: false, type: false },
   connection: "offline",
   audit: [],
+  autoAttach: true,
+  autoAttachUntil: 0,
 };
 
 let socket = null;
@@ -20,6 +24,8 @@ let pingTimer = null;
 let sensitiveRefs = new Set();
 let panelPort = null; // the open Neko side panel (chrome.runtime port), or null
 let panelRetry = null; // gentle reconnect while the panel is open and Neko is offline
+let autoAttachInFlight = null;
+let autoAttachGeneration = 0;
 
 async function restore() {
   const saved = await chrome.storage.local.get(Object.keys(state));
@@ -28,7 +34,43 @@ async function restore() {
   if (state.token && state.tabId != null) {
     armReconnect();
     void connect(false).catch(() => {});
+  } else if (state.token || state.autoAttach) {
+    void connect(!state.token).catch(() => {});
   }
+}
+
+function autoAttachActive() {
+  return state.autoAttach && state.tabId == null && state.autoAttachUntil > Date.now();
+}
+
+function armAutoAttachRetry() {
+  if (autoAttachActive()) chrome.alarms.create(AUTO_ATTACH_ALARM, { delayInMinutes: 0.5 });
+}
+
+function disarmAutoAttachRetry() {
+  void chrome.alarms.clear(AUTO_ATTACH_ALARM);
+}
+
+function tryAutoAttach() {
+  if (!autoAttachActive()) return Promise.resolve();
+  if (autoAttachInFlight) return autoAttachInFlight;
+  const generation = autoAttachGeneration;
+  autoAttachInFlight = (async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !/^https?:/.test(tab.url || "")) {
+      armAutoAttachRetry();
+      return;
+    }
+    await attachActiveTab(tab, () => generation === autoAttachGeneration && autoAttachActive());
+    state.autoAttachUntil = 0;
+    disarmAutoAttachRetry();
+    await persist();
+    record("auto-attach", "ok");
+  })().catch(() => {
+    // Keep the intent after temporary bridge/tab/script failures. A tab event or alarm retries it.
+    armAutoAttachRetry();
+  }).finally(() => { autoAttachInFlight = null; });
+  return autoAttachInFlight;
 }
 
 function armReconnect() {
@@ -52,6 +94,8 @@ async function persist() {
     grants: state.grants,
     marked: state.tabId != null,
     audit: state.audit,
+    autoAttach: state.autoAttach,
+    autoAttachUntil: state.autoAttachUntil,
   });
 }
 
@@ -69,6 +113,7 @@ function publicState() {
     tabHost: state.tabHost,
     tabTitle: state.tabTitle,
     grants: state.grants,
+    autoAttach: state.autoAttach,
     audit: state.audit.slice(-8).reverse(),
   };
 }
@@ -94,7 +139,7 @@ async function removeIndicator(tabId) {
       target: { tabId },
       func: () => document.getElementById("__neko_browser_control__")?.remove(),
     });
-  } catch { /* The tab may already be closed or activeTab may have expired. */ }
+  } catch { /* The tab may already be closed or no longer scriptable. */ }
 }
 
 async function markAttachedTab(tab) {
@@ -148,6 +193,11 @@ async function connect(allowPair) {
         pingTimer = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "ping" })), 20_000);
         armReconnect();
         if (panelPort && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "panel-ready" }));
+        if (message.autoAttach && state.autoAttach && state.tabId == null) {
+          state.autoAttachUntil = Date.now() + AUTO_ATTACH_WINDOW_MS;
+          void persist();
+          void tryAutoAttach();
+        }
         resolve();
       } else if (message.type === "command") {
         void execute(message);
@@ -178,8 +228,9 @@ function send(message) {
   socket.send(JSON.stringify(message));
 }
 
-async function attachActiveTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+async function attachActiveTab(selectedTab = null, shouldContinue = () => true) {
+  const [activeTab] = selectedTab ? [selectedTab] : await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = activeTab;
   if (!tab?.id || !/^https?:/.test(tab.url || "")) throw new Error("Open an http(s) tab before attaching");
   const sameTab = state.tabId === tab.id;
   if (!sameTab && state.tabId != null) await detach("switch-tab");
@@ -195,6 +246,7 @@ async function attachActiveTab() {
     await connect(true);
     record("pair", "rotated");
   }
+  if (!shouldContinue()) throw new Error("auto-attach cancelled");
   const url = new URL(tab.url);
   if (sameTab) {
     state.tabHost = url.host;
@@ -214,6 +266,7 @@ async function attachActiveTab() {
   armReconnect();
   try {
     await markAttachedTab(tab);
+    if (!shouldContinue()) throw new Error("auto-attach cancelled");
   } catch (error) {
     await unmarkAttachedTab(tab.id, state.createdGroupId);
     state.tabId = null;
@@ -230,6 +283,7 @@ async function attachActiveTab() {
 }
 
 async function detach(reason = "user") {
+  autoAttachGeneration++;
   const tabId = state.tabId;
   const createdGroupId = state.createdGroupId;
   if (socket?.readyState === WebSocket.OPEN) send({ type: "detached", reason });
@@ -240,6 +294,8 @@ async function detach(reason = "user") {
   state.tabTitle = "";
   state.createdGroupId = null;
   state.grants = { click: false, type: false };
+  state.autoAttachUntil = 0;
+  disarmAutoAttachRetry();
   sensitiveRefs.clear();
   disarmReconnect();
   await persist();
@@ -442,6 +498,20 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     if (message.type === "attach") { await attachActiveTab(); return publicState(); }
     if (message.type === "detach") { await detach("user"); return publicState(); }
     if (message.type === "stop") { await emergencyStop(); return publicState(); }
+    if (message.type === "auto-attach") {
+      state.autoAttach = !!message.enabled;
+      if (!state.autoAttach) {
+        autoAttachGeneration++;
+        state.autoAttachUntil = 0;
+        disarmAutoAttachRetry();
+      } else if (state.connection === "ready" && state.tabId == null) {
+        state.autoAttachUntil = Date.now() + AUTO_ATTACH_WINDOW_MS;
+        void tryAutoAttach();
+      }
+      await persist();
+      record("auto-attach", state.autoAttach ? "enabled" : "disabled");
+      return publicState();
+    }
     if (message.type === "grants") {
       state.grants = { click: !!message.click, type: !!message.typePermission };
       await persist();
@@ -464,15 +534,18 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== RECONNECT_ALARM || state.tabId == null || !state.token || state.connection !== "offline") return;
-  void connect(false).catch(() => {});
+  if (alarm.name === AUTO_ATTACH_ALARM) {
+    void connect(!state.token).then(tryAutoAttach).catch(() => armAutoAttachRetry());
+  } else if (alarm.name === RECONNECT_ALARM && state.tabId != null && state.token && state.connection === "offline") {
+    void connect(false).catch(() => {});
+  }
 });
 
-// Connect for presence only. Pairing identifies this extension; it never grants a tab. The user must
-// click Attach in the toolbar popup, which supplies Chrome's short-lived activeTab capability.
+// Connect for presence and let an authenticated local Neko session request the active web tab.
+// Auto-attach is visible, single-tab, independently switchable, and never grants click/type by itself.
 function connectForPresence() {
   if (state.tabId != null) return; // an attached session manages its own connection
-  void connect(true).catch(() => {});
+  void connect(true).then(tryAutoAttach).catch(() => armAutoAttachRetry());
 }
 chrome.runtime.onInstalled.addListener(connectForPresence);
 chrome.runtime.onStartup.addListener(connectForPresence);
@@ -508,5 +581,9 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 // Clicking the toolbar icon opens the side panel on the current tab (in addition to the popup menu).
 try { chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }); } catch {}
+chrome.tabs.onActivated.addListener(() => { if (autoAttachActive()) void tryAutoAttach(); });
+chrome.tabs.onUpdated.addListener((_tabId, change) => {
+  if (autoAttachActive() && (change.status === "complete" || change.url)) void tryAutoAttach();
+});
 
 void restore();

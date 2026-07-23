@@ -3,6 +3,22 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-24 - Realtime V3 port + autonomous browser attach
+
+- Ported the completed Codex App Server Realtime V3 subscription bridge onto the merged Windows/browser
+  hardening base. Neko requires Support Pack 0.145.0, requests `v3`, rejects a V2/unknown negotiation,
+  seeds only a bounded user/assistant text tail, and routes dynamic tools through the existing Agent policy.
+- Restored autonomous browser attachment as a deliberate product default. Every authenticated local bridge
+  session may ask the extension to attach the active http(s) tab; the extension persists an independently
+  switchable preference, controls only one visible tab, and never enables click/type as a side effect.
+- Auto-attach is single-flight, consumes its ten-minute intent only after success, retries transient failures
+  from tab events plus an MV3 alarm, and uses a generation guard so Disable, Detach, and Emergency Stop win
+  against an attachment already in flight. Browser-internal/file pages remain out of scope; no `debugger`,
+  `tabs`, cookie, relay, or broad `<all_urls>` access was added.
+- Evidence: TypeScript 7 and 5.9 clean; **796/796 tests, 3,422 assertions, 85 files**; policy PASS; doctor healthy
+  apart from expected sandbox/offline-bridge/non-TTY warnings; production binary, UI probe, and PTY input probe
+  PASS; changed-line secret scan and diff check PASS.
+
 ## 2026-07-22 - Browser side-panel chat (chat with Neko from a Chrome sidebar)
 
 Made the Neko extension a Claude/ChatGPT-style right sidebar - but the BRAIN stays in the neko CLI

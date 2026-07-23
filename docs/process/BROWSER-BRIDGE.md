@@ -1,6 +1,6 @@
 # Neko Browser Bridge
 
-Status: public-release candidate (2026-07-12). This is the Neko-owned, explicit-tab path for controlling an
+Status: public-release candidate (2026-07-24). This is the Neko-owned, single-tab path for controlling an
 already signed-in Chrome without copying its profile, cookies, or credential stores.
 
 ## Shape
@@ -13,7 +13,7 @@ Neko Core / ToolRegistry
         |  exact extension Origin + per-session capability
         v
 Neko Browser Extension (Manifest V3)
-        |  activeTab user gesture + read/click/type grants
+        |  switchable http(s) auto-attach + separate read/click/type grants
         v
 one selected Chrome tab
 ```
@@ -32,8 +32,9 @@ another `McpTools` source. The extension contains no model, planner, cloud clien
 3. Confirm Add-extension once in Chrome, or choose **Load unpacked** once while the Store item is pending.
    The search field on `chrome://extensions` only filters extensions already installed; it does not install the
    local Neko folder. Neko reports files-ready, extension-connected, and tab-attached as separate states.
-4. Open a target page, click the extension, and choose **Attach this tab to Neko**. Normal `neko` sessions now
-   own the bridge lifecycle automatically; the foreground `neko browser bridge` command remains diagnostic.
+4. Open a target page. Autonomous attach is on by default, so the authenticated local Neko session can attach
+   the active http(s) tab. Disable it in the popup whenever manual **Attach this tab to Neko** is preferred.
+   Normal `neko` sessions own the bridge lifecycle automatically; the foreground diagnostic remains optional.
 5. Reading is scoped to that attached tab. Click/scroll/navigation and typing are separate switches, off
    by default. Password, OTP, passcode and payment fields remain blocked even when typing is enabled.
 6. **Emergency stop** immediately detaches the tab and clears action grants.
@@ -56,15 +57,16 @@ Chrome Enterprise policy; that is an administrator contract, not a consumer-inst
   32-character ids are in config-first `browser_extension_ids`. The deterministic unpacked id is the default;
   the Chrome Web Store item id is added after the Dashboard creates it, with the public install route recorded
   separately as `browser_extension_store_id`. Arbitrary extensions are never accepted.
-- Initial pairing is available for ten minutes after bridge start and requires the extension's attach
-  user gesture. Reconnect uses the per-session 256-bit capability.
+- Initial pairing is available for ten minutes after bridge start. Reconnect uses the per-session 256-bit
+  capability. The extension stores its autonomous-attach preference separately from that authentication.
 - Local HTTP commands require the same bearer capability, cap request/message sizes at 64 KiB, validate
   action names, and time out after 30 seconds.
 - Audit rows contain timestamp/action/status only. They deliberately omit command arguments, typed text,
   page content, full URLs and cookies.
-- Cross-origin navigation revokes the tab attachment. The user must attach the new origin explicitly.
-- Production uses `activeTab`, not `<all_urls>` or `debugger`. This is intentionally less powerful than a
-  CDP extension; Playwright MCP remains the high-capability browser adapter when full automation is needed.
+- Cross-origin navigation revokes the tab attachment. A later authenticated session may attach the newly active
+  origin while Autonomous attach remains enabled.
+- Production host access is limited to `http://*/*` and `https://*/*`, never `<all_urls>` or `debugger`.
+  Browser-internal pages and local files remain outside the adapter.
 
 ## Relay boundary
 
@@ -74,11 +76,12 @@ booleans. The TUI includes that object inside the existing E2E-sealed relay pres
 
 ## Reconnect and ownership
 
-The extension stores `{session, token, tab id, tab origin, grants, Neko-created group id}` in its own Chrome
+The extension stores `{session, token, tab id, tab origin, grants, auto-attach preference, Neko-created group id}` in its own Chrome
 storage and resumes the same local session while the capability remains valid. A low-frequency Chrome alarm
 wakes the Manifest V3 worker while attached, so suspend/restart does not silently strand the tab. A deliberate
-Attach gesture self-repairs only an authentication failure caused by `neko browser rotate`; an ordinary offline
-bridge never erases the saved capability. Only one extension connection owns a bridge session; a newer
+Auto-attach uses one in-flight operation and keeps a bounded retry intent after transient bridge/tab/script
+failures; it is consumed only after attachment succeeds. An ordinary offline bridge never erases the saved
+capability. Only one extension connection owns a bridge session; a newer
 authenticated connection replaces the older one. Closing the tab or crossing origins detaches it.
 
 ## Verification
@@ -86,9 +89,9 @@ authenticated connection replaces the older one. Closing the tab or crossing ori
 - Unit E2E: exact-Origin pairing, token-authenticated command round trip, redacted audit, unauthorized HTTP
   rejection.
 - Popup Playwright test at 360x640: status, grants, detach and emergency-stop affordances.
-- Real Manifest V3 harness: pair -> attach -> snapshot -> deny ungranted click -> grant -> click/type ->
-  block password -> emergency stop. The harness adds localhost host permission only to a temporary copy;
-  a repo test locks the production manifest to `activeTab` without `<all_urls>` or `debugger`.
+- Real Manifest V3 harness: pair -> autonomous attach -> snapshot -> deny ungranted click -> grant -> click/type ->
+  block password -> emergency stop. A repo test locks the production manifest to http(s) host access without
+  `<all_urls>` or `debugger`, plus the single-tab and visible-stop implementation.
 - Public-release harness: the in-page indicator is present, its Stop button detaches and removes a Neko-created
   group, while a pre-existing user group retains its original title and remains grouped after detach.
 

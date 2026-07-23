@@ -17,6 +17,7 @@ function render(state) {
   $("#read-grant").checked = attached;
   $("#click-grant").checked = !!state.grants.click;
   $("#type-grant").checked = !!state.grants.type;
+  $("#auto-attach").checked = state.autoAttach !== false;
   $("#attach").textContent = attached ? ready ? "Attached to Neko" : state.connection === "connecting" ? "Connecting..." : "Reconnect this tab" : "Attach this tab to Neko";
   $("#attach").disabled = attached && state.connection !== "offline";
   $("#detach").disabled = !attached;
@@ -55,6 +56,7 @@ $("#chat").addEventListener("click", async () => {
 $("#attach").addEventListener("click", () => act({ type: "attach" }));
 $("#detach").addEventListener("click", () => act({ type: "detach" }));
 $("#stop").addEventListener("click", () => act({ type: "stop" }));
+$("#auto-attach").addEventListener("change", () => act({ type: "auto-attach", enabled: $("#auto-attach").checked }));
 for (const input of [$("#click-grant"), $("#type-grant")]) {
   input.addEventListener("change", () => act({ type: "grants", click: $("#click-grant").checked, typePermission: $("#type-grant").checked }));
 }
