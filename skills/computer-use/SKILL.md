@@ -87,7 +87,7 @@ DOM. **This is the primary path; use it first.**
 
 **Prefer the first-class `computer` tool** over bash-ing the scripts: `computer({action, window, ...})` —
 `action` is `list | read | get | display | activate | invoke | setvalue | toggle | click | stroke | type | key |
-scroll | wait | watch | open | screenshot`. `watch` waits inside the resident UIA process until readable state
+scroll | wait | watch | open | ocr | screenshot`. `watch` waits inside the resident UIA process until readable state
 changes and stays stable, then returns `elapsed_ms`, `detected_ms`, a compact state id, and the fresh text
 without model-side polling.
 

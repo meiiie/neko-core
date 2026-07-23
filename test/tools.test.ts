@@ -104,6 +104,7 @@ test("schema shape", () => {
 
   const computer = toOpenAISchema(resolveTool("computer"));
   expect(computer.function.parameters.properties.action.enum).toContain("watch");
+  expect(computer.function.parameters.properties.mark.type).toBe("integer");
   expect(computer.function.parameters.properties.settle_ms.type).toBe("number");
 });
 

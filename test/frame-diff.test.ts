@@ -120,14 +120,18 @@ test("resize wipe composes the new frame and never replays the stale pre-wipe fr
 });
 
 test("a skipped geometry refresh cannot publish hit targets from an unpainted frame", () => {
-  const d = new FrameDiffer() as any;
-  d.setWriter(() => {});
-  d.prev = ["painted"];
-  d.lastRaw = [`unpainted ${HIT_SENTINEL}action`, "extra row"];
   setHitTargets([{ row: 7, col: 3 }]);
-  d.refreshCompose(); // dimensions differ: must return before extracting/publishing the new marker
-  expect(hitIndexAt(3, 7)).toBe(0);
-  expect(hitIndexAt(20, 1)).toBe(-1);
+  try {
+    const d = new FrameDiffer() as any;
+    d.setWriter(() => {});
+    d.prev = ["painted"];
+    d.lastRaw = [`unpainted ${HIT_SENTINEL}action`, "extra row"];
+    d.refreshCompose(); // dimensions differ: must return before extracting/publishing the new marker
+    expect(hitIndexAt(3, 7)).toBe(0);
+    expect(hitIndexAt(20, 1)).toBe(-1);
+  } finally {
+    setHitTargets([]);
+  }
 });
 
 test("line-diff: only the changed line is rewritten, and the screen matches a full rewrite", () => {

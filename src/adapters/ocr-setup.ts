@@ -11,6 +11,11 @@ export function encodePowerShellCommand(command: string): string {
   return Buffer.from(command, "utf16le").toString("base64");
 }
 
+/** Run one encoded elevated command and propagate the elevated process' exit status to this process. */
+export function elevatedPowerShellRunner(encoded: string): string {
+  return `$ErrorActionPreference='Stop'; try { $p = Start-Process powershell -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}'; exit $p.ExitCode } catch { Write-Error $_; exit 1 }`;
+}
+
 /** OCR recognizer language tags currently available (no elevation needed). Empty on failure. */
 function ocrLanguages(): string[] {
   const ps = [
@@ -42,14 +47,16 @@ export function setupOcr(log: (m: string) => void): number {
   log("Installing the Vietnamese OCR pack - Windows will show ONE administrator (UAC) prompt. Approve it.");
   // Elevated step: find the exact vi OCR capability (version suffix differs by build) and install it.
   const elevated = [
+    "$ErrorActionPreference = 'Stop';",
     "$c = Get-WindowsCapability -Online | Where-Object { $_.Name -like 'Language.OCR~~~vi*' } | Select-Object -First 1;",
     "if (-not $c) { Write-Host 'no-vi-capability'; exit 3 }",
     "if ($c.State -eq 'Installed') { Write-Host 'already'; exit 0 }",
-    "Add-WindowsCapability -Online -Name $c.Name | Out-Null; Write-Host 'installed'",
+    "try { Add-WindowsCapability -Online -Name $c.Name -ErrorAction Stop | Out-Null; Write-Host 'installed'; exit 0 }",
+    "catch { Write-Error $_; exit 4 }",
   ].join(" ");
-  // Start-Process -Verb RunAs triggers the UAC prompt; -Wait blocks until the install finishes.
+  // Start-Process -Verb RunAs triggers UAC; -PassThru lets the outer process propagate its exit code.
   const encoded = encodePowerShellCommand(elevated);
-  const runner = `Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}'`;
+  const runner = elevatedPowerShellRunner(encoded);
   const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", runner], { encoding: "utf-8", timeout: 300_000, windowsHide: true });
   if (r.status !== 0) {
     log(`The elevated install did not complete (${(r.stderr || r.stdout || "cancelled or failed").trim().slice(0, 200)}).`);

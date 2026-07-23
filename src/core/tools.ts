@@ -133,7 +133,7 @@ export const TOOL_SPECS: ToolSpec[] = [
       window: { type: "string", description: "Distinctive target window title substring (e.g. 'Paint'). Omit = foreground window; type/key refuse ambiguous matches." },
       name: { type: "string", description: "Element NAME for get/invoke/setvalue/toggle, or an optional exact focus target for type/key (copy it from `list`/`read`)." },
       value: { type: "string", description: "Text to set, for setvalue." },
-      mark: { type: "number", description: "One-use Set-of-Marks target for click: a [N] number from the most recent `ocr`. It expires quickly and is rejected if its window moved, resized or lost foreground; re-run ocr before another action." },
+      mark: { type: "integer", description: "One-use Set-of-Marks target for click: a [N] number from the most recent `ocr`. It expires quickly and is rejected if its window moved, resized or lost foreground; re-run ocr before another action." },
       x: { type: "number", description: "X pixel, for click (when not using a mark)." },
       y: { type: "number", description: "Y pixel, for click (when not using a mark)." },
       points: { type: "array", description: "Flat [x1,y1,x2,y2,...] screen pixels for stroke (drag/draw).", items: { type: "number" } },
