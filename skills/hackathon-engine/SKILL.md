@@ -72,11 +72,15 @@ Write `SPEC.md` using Specify -> Plan -> Tasks:
 Present `SPEC.md`. Wait for approval.
 
 ### Stage 2 - Design brief (taste)  ->  GATE 3
-Read `references/design-engine.md` in full. Produce a short `DESIGN.md`:
+Read `references/design-engine.md` in full (and `references/motion.md` if the site's design is scored or
+motion is part of the wow). Produce a short `DESIGN.md`:
 - The chosen **aesthetic direction** (one of the named directions - NOT "clean and modern").
-- The concrete tokens: font pairing (NOT Inter/Roboto as the only font), color ramp + semantic tokens,
-  spacing scale, one signature interaction.
+- The concrete tokens: font pairing by CONTRAST (NOT Inter/Roboto as the only font), a deep gray ramp +
+  brand hue + semantic tokens, spacing + type scales, one radius.
+- The **one signature motion moment** (see `motion.md`) - purposeful, not decoration everywhere.
 - The brand-vs-product split (landing page vs app get opposite treatments).
+When design is heavily weighted, aim for the ELITE tier in `design-engine.md` (reference-grade tokens +
+craft typography + purposeful scroll motion + restraint), not just "not slop".
 Present `DESIGN.md` (ideally 2-3 direction options for the user to pick). Wait for approval.
 
 ### Stage 3 - Scaffold the golden stack

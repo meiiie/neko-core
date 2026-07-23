@@ -127,8 +127,46 @@ ramp + brand hue, the spacing scale, radius, and the one signature interaction.
 If a screen fails any line, it is not done — fix and re-review. Ship screens that pass, not screens that
 "basically look fine".
 
+## Elite tier — how the top 1% (Awwwards-caliber) go beyond "not slop"
+
+"Not slop" gets you a clean, professional page. Award-winning work adds three things. Reach for these
+when design is heavily scored or the wow moment is the site itself.
+
+**1. Motion with purpose (the biggest differentiator).** Elite sites feel like "every pixel moves with
+intent" — scroll-driven storytelling, cinematic reveals, purposeful micro-interactions. This is a whole
+discipline: **read `motion.md`** before adding any animation. Motion done wrong reads worse than none.
+
+**2. Reference-grade systems (concrete tokens to imitate, not copy).**
+- **Vercel Geist** (developer/technical): body `#fafafa`, ink `#171717`, a *deep* gray ramp where every
+  border/divider/disabled state is its own deliberate step (they run ~9-12 grays, not 3). Geist Sans is
+  geometric but warm with **tighter letter-spacing than Inter** — that tracking is what makes text look
+  "designed". Mono for code/labels. Radii from 0 to full; ~12 spacing steps. Aggressive reduction:
+  near-pure black/white + restraint.
+- **Apple HIG**: three laws — **Clarity** (legible, precise), **Deference** (the UI serves the content,
+  never competes with it — decoration is subordinate), **Depth** (layers + motion convey hierarchy).
+  17pt body floor, 8pt spacing, 44px minimum tap target.
+- **Stripe / Linear / Raycast**: study their vertical rhythm, restraint, and how one confident accent +
+  a lot of neutral space reads premium. Imitate the *structure and restraint*, apply YOUR tokens.
+
+**3. Typography as craft (research-backed numbers).**
+- Body **16-18px** desktop (17px is the Apple legibility floor). Line-height **~1.5** — raising line
+  spacing 100%→120% improved reading accuracy up to **20%** and cut eye strain **~30%** (measured).
+- **Contrast ≥ 4.5:1** for body text (WCAG 2.2 AA) — check it, don't eyeball it.
+- **Pair fonts by CONTRAST**: a serif/display headline + a humanist or geometric sans body scores high
+  on *both* authority and readability (the 2026 elite default). Not two similar sans.
+- Prefer **variable fonts** (one file, all weights) — fewer requests, faster, more control. Tighten
+  tracking on large headings; open it slightly on all-caps labels.
+- Set a real **measure**: `max-width: 60-75ch` on text columns.
+
+The elite formula: a reference-grade system (Geist-level tokens) + craft typography + purposeful motion
+(`motion.md`) + ruthless restraint (Deference). Distinctiveness comes from ONE bold move (a signature
+type treatment, one saturated color, one memorable interaction) on a disciplined, restrained base — not
+from decorating everything.
+
 ## Go deeper (sources worth reading if time allows)
 - *Refactoring UI* (Wathan & Schoger) — the canonical systems approach this file distills.
+- **Vercel Geist** (`vercel.com/geist`) and **Apple HIG** — reference-grade token systems to study.
+- **Codrops / tympanus.net** — the elite front-end technique blog (scroll-driven layouts, mask reveals).
+- **Awwwards / Godly / Land-book** — curated top sites; study structure + motion, then apply your tokens.
 - A modular type-scale tool (e.g. type-scale.com) for generating the scale.
-- Real references to imitate structurally (not copy): Linear, Vercel, Stripe, Raycast — study their
-  spacing rhythm, type hierarchy, and restraint, then apply YOUR direction's tokens.
+- For motion specifically: `motion.md` in this folder, then GreenSock GSAP docs.
