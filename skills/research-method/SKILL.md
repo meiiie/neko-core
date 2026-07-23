@@ -28,6 +28,17 @@ After mapping what's known, ask the three questions that find an edge:
 - **What assumption does everyone share** — and what if it's wrong? Question the premise the whole field takes for granted.
 State honestly whether you're reporting SOTA or proposing beyond it, and on what evidence.
 
+## 2b. Timebox — know when to STOP researching and act
+Research serves a deliverable; it is not the deliverable. Endless searching is its own failure mode
+(you run out of budget mid-fan-out and never produce the artifact). Discipline:
+- Decide up front what evidence is ENOUGH to act, then stop when you have it. Perfect certainty is not on
+  offer; "enough to make the decision, with the open risks named" is.
+- If the task has a concrete deliverable (write a file, a plan, code), reserve budget to PRODUCE it -
+  don't spend every step on searches and fetches. Do the highest-value few queries, then write.
+- Diminishing returns: when new sources stop changing the conclusion, stop. Note remaining unknowns in
+  the ledger as `[open]` rather than chasing them forever.
+- A grounded plan delivered beats a perfect plan never written.
+
 ## 3. The skeptical discipline (never trust dead knowledge)
 - Treat every conclusion as **provisional** — including your own, the user's, and a memory's. Attach a
   **confidence** (low/med/high), a **source**, and a **date**.
