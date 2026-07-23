@@ -113,7 +113,9 @@ Never report "done" or "looks good" without the evidence from this loop.
 ### Stage 6 - Breadth research (the one place to parallelize)
 When you need open-ended exploration (competitor scan, API/library options, sharpening the idea, data
 sourcing), fan out **parallel `web_search`/`web_fetch` in this session** (no subagents). Feed findings
-back into the spec/design. This is the only stage where breadth-first parallelism pays off.
+back into the spec/design. This is the only stage where breadth-first parallelism pays off. Follow the
+`research-method` skill: primary sources, cross-verify, doubt the conclusion, and to beat the field ask
+what gap / untried combination / shared assumption the other teams will miss.
 
 ### Stage 7 - Demo & narrative
 Assemble the pitch the judges actually score: **~30% problem / ~70% solution**, opening on the wow
@@ -128,8 +130,11 @@ the pitch + slides with the `clean-writing` skill - no hollow superlatives, no "
 - `references/golden-stacks.md` - pinned, anti-slop-ready stacks.
 - `references/backend.md` - API/data/auth, right-sized + demo-proof.
 - `references/devops.md` - ship early, stay shippable, rollback + recording.
+- `references/mobile.md` - responsive-first (or Expo), phone demo-proofing + QR.
+- `references/data.md` - honest sourcing/analysis, one hero insight (+ `dataviz`).
 - `references/seo.md` - findability basics (only if scored, or a real launch).
 - `clean-writing` skill (separate) - kill AI-slop tells in all copy.
+- `research-method` skill (separate) - chase/beat SOTA, doubt, keep a research ledger.
 
 ## The skeptic's checklist (run before claiming the product is ready)
 - Does every acceptance criterion have a *witnessed* pass (run/test/screenshot), not an assumed one?
