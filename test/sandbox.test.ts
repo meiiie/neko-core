@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { buildSandbox, destructiveInWorkspace, findWindowsBash, plainTarget, purgeStaleSrtScripts, srtScript, srtSettings, wrapBash, writeEphemeralSrtScript } from "../src/core/sandbox.ts";
+import { buildSandbox, destructiveInWorkspace, findWindowsBash, isDockerCommand, plainTarget, purgeStaleSrtScripts, srtScript, srtSettings, wrapBash, writeEphemeralSrtScript } from "../src/core/sandbox.ts";
 
 test("bwrap confines fs to the workspace + blocks network by default", () => {
   const t = buildSandbox("bwrap", "echo hi", "/work", false);
@@ -119,6 +119,26 @@ test("plainTarget: git-bash runs `bash -c cmd`, else the raw command via the pla
   });
   // No bash (POSIX, or Windows without git-bash) -> hand the command to the platform shell as-is.
   expect(plainTarget("echo hi", null)).toEqual({ file: "echo hi", args: [], shell: true });
+});
+
+test("isDockerCommand detects docker/compose/podman (incl. sudo + env prefix), not lookalikes", () => {
+  for (const cmd of ["docker build -t x .", "docker compose up", "docker-compose up -d", "podman run x",
+                     "sudo docker ps", "DOCKER_BUILDKIT=1 docker build .", "  docker   run  x"]) {
+    expect(isDockerCommand(cmd)).toBe(true);
+  }
+  for (const cmd of ["dockerize x", "echo docker", "ls && docker ps", "mydocker run", "git commit -m docker"]) {
+    expect(isDockerCommand(cmd)).toBe(false);
+  }
+});
+
+test("wrapBash never sandboxes a docker command, even when the sandbox is enabled", () => {
+  // docker must reach the host daemon; sandboxing it just breaks it, so it runs unconfined.
+  const t = wrapBash("docker build -t x .", "/w", { enabled: true, allowNetwork: false });
+  if (process.platform === "win32" && findWindowsBash()) {
+    expect(t.args).toEqual(["-c", "docker build -t x ."]);
+  } else {
+    expect(t).toEqual({ file: "docker build -t x .", args: [], shell: true });
+  }
 });
 
 test("none / disabled run the command unconfined (git-bash on Windows, platform shell elsewhere)", () => {

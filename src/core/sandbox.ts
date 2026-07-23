@@ -312,8 +312,17 @@ export function buildSandbox(kind: SandboxKind, command: string, root: string, a
 }
 
 /** Spawn target for a bash command, sandboxed if enabled + available. */
+/** Docker/podman talk to a local daemon over a socket/pipe the srt sandbox user can't reach, and a
+ * container has host-level power anyway - so sandboxing the CLI just breaks it (the "cannot connect to
+ * the Docker daemon" failure). Detect it so it runs unsandboxed (still approval-gated in default mode;
+ * smooth in auto/yolo, like Claude Code / Codex). Tolerates leading env assignments and `sudo`. */
+export function isDockerCommand(command: string): boolean {
+  return /^(?:[A-Za-z_]\w*=\S*\s+)*(?:sudo\s+)?(?:docker-compose|docker|podman)(?:\s|$)/.test(command.trim());
+}
+
 export function wrapBash(command: string, root: string, opts: { enabled: boolean; allowNetwork: boolean; domains?: string[] }): SpawnTarget {
   if (!opts.enabled) return noneTarget(command);
+  if (isDockerCommand(command)) return noneTarget(command); // docker needs the host daemon; never sandbox it
   const kind = detectSandbox();
   const exe = kind === "srt" ? findSrt() : null;
   const bash = exe ? findWindowsBash() : null;
