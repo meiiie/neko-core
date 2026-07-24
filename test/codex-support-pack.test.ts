@@ -73,6 +73,33 @@ describe("Codex Support Pack", () => {
     expect(existsSync(codexSupportRoot(home))).toBe(false);
   });
 
+  test("a feature-specific minimum rejects an older latest release before download", async () => {
+    const home = mkdtempSync(join(tmpdir(), "neko-support-test-"));
+    homes.push(home);
+    let assetDownloads = 0;
+    const fetchImpl = (async (input: string | URL | Request) => {
+      if (String(input).includes("api.github.com")) return Response.json({
+        tag_name: "rust-v0.144.1",
+        assets: [{
+          name: "codex-app-server-x86_64-pc-windows-msvc.exe.tar.gz",
+          size: 1,
+          digest: `sha256:${"0".repeat(64)}`,
+          browser_download_url: "https://github.com/openai/codex/releases/download/rust-v0.144.1/codex-app-server-x86_64-pc-windows-msvc.exe.tar.gz",
+        }],
+      });
+      assetDownloads++;
+      return new Response("x");
+    }) as typeof fetch;
+    await expect(installCodexSupportPack({
+      home,
+      platform: "win32",
+      arch: "x64",
+      fetchImpl,
+      minimumVersion: "0.145.0",
+    })).rejects.toThrow("required App Server >= 0.145.0");
+    expect(assetDownloads).toBe(0);
+  });
+
   test("a checksum failure preserves the previous working pack", async () => {
     const home = mkdtempSync(join(tmpdir(), "neko-support-test-"));
     homes.push(home);

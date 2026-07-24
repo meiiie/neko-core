@@ -16,7 +16,7 @@
 - Agent loop: complete -> tool calls -> observe; có streaming, todo, sessions, memory/workflows.
 - Công cụ gồm đọc/tìm file, edit, bash, web, MCP, skills, browser và computer-use trên Windows.
 - Read-only tools thuộc SAFE; write/edit/bash/computer mutations thuộc GATED hoặc permission policy.
-- Có persistent browser profile và explicit-tab Browser Bridge; extension chỉ điều khiển tab người dùng attach.
+- Có persistent browser profile và Browser Bridge; extension chỉ điều khiển một tab hiển thị do người dùng chọn hoặc tab HTTP(S) đang active được tự động attach sau pairing.
 - `/relay` cho phép điều khiển phiên từ thiết bị khác qua relay E2E; không đưa cookie hay browser capability lên relay.
 - Mở rộng model/provider chủ yếu bằng profile; protocol mới bằng adapter; vai trò mới bằng skill Markdown.
 - Không được tuyên bố Neko đã đạt SOTA, hoàn toàn tự trị, không bao giờ lỗi hoặc thay thế con người.

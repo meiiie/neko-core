@@ -6,6 +6,30 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-07-24
+
+### Security
+
+- Autonomous browser attachment now requires a capability created by an explicit first **Attach** action.
+  Extension restore, startup, alarms, side-panel presence, and retry paths cannot initiate pairing.
+- Auto-attach revalidates the active tab after asynchronous bridge and page setup. Switching tabs while an
+  attachment is in flight cancels the stale candidate and immediately retries the new active tab.
+- Browser privacy and Store disclosures now conservatively cover authentication-related, financial, and
+  location information that a site may render as ordinary visible content, while distinguishing this from
+  cookies/storage and blocked sensitive field values.
+
+### Fixed
+
+- Voice setup passes its feature-specific Codex App Server `0.145.0` minimum into the Support Pack installer,
+  so an older latest release is rejected before download instead of causing an install/retry loop.
+- Realtime `initialItems` use Neko's UTF-8-aware token estimator and never exceed the 8,192-token bootstrap
+  budget, including dense CJK history.
+- Support Pack cleanup no longer throws from `finally` or masks the installation result. Failed installs keep
+  their original error and cleanup context; a successfully published pack reports leftover staging cleanup as
+  a warning.
+- Browser source regression checks now prove the attach-before-intent ordering instead of passing on `-1`
+  indexes, and architecture/marketing documentation matches the shipped behavior.
+
 ## [0.15.0] — 2026-07-24
 
 ### Added

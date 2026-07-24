@@ -34,13 +34,13 @@ async function restore() {
   if (state.token && state.tabId != null) {
     armReconnect();
     void connect(false).catch(() => {});
-  } else if (state.token || state.autoAttach) {
-    void connect(!state.token).catch(() => {});
+  } else if (state.token) {
+    void connect(false).catch(() => {});
   }
 }
 
 function autoAttachActive() {
-  return state.autoAttach && state.tabId == null && state.autoAttachUntil > Date.now();
+  return Boolean(state.token) && state.autoAttach && state.tabId == null && state.autoAttachUntil > Date.now();
 }
 
 function armAutoAttachRetry() {
@@ -55,21 +55,33 @@ function tryAutoAttach() {
   if (!autoAttachActive()) return Promise.resolve();
   if (autoAttachInFlight) return autoAttachInFlight;
   const generation = autoAttachGeneration;
+  let retryImmediately = false;
   autoAttachInFlight = (async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !/^https?:/.test(tab.url || "")) {
       armAutoAttachRetry();
       return;
     }
-    await attachActiveTab(tab, () => generation === autoAttachGeneration && autoAttachActive());
+    const candidateId = tab.id;
+    const stillCurrent = async () => {
+      if (generation !== autoAttachGeneration || !autoAttachActive()) return false;
+      const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const currentMatches = current?.id === candidateId;
+      if (!currentMatches) retryImmediately = true;
+      return currentMatches;
+    };
+    await attachActiveTab(tab, stillCurrent);
     state.autoAttachUntil = 0;
     disarmAutoAttachRetry();
     await persist();
     record("auto-attach", "ok");
   })().catch(() => {
     // Keep the intent after temporary bridge/tab/script failures. A tab event or alarm retries it.
-    armAutoAttachRetry();
-  }).finally(() => { autoAttachInFlight = null; });
+    if (!retryImmediately) armAutoAttachRetry();
+  }).finally(() => {
+    autoAttachInFlight = null;
+    if (retryImmediately && autoAttachActive()) queueMicrotask(() => void tryAutoAttach());
+  });
   return autoAttachInFlight;
 }
 
@@ -246,13 +258,14 @@ async function attachActiveTab(selectedTab = null, shouldContinue = () => true) 
     await connect(true);
     record("pair", "rotated");
   }
-  if (!shouldContinue()) throw new Error("auto-attach cancelled");
+  if (!(await shouldContinue())) throw new Error("auto-attach cancelled");
   const url = new URL(tab.url);
   if (sameTab) {
     state.tabHost = url.host;
     state.tabOrigin = url.origin;
     state.tabTitle = tab.title || url.host;
     await showIndicator();
+    if (!(await shouldContinue())) throw new Error("auto-attach cancelled");
     await persist();
     send({ type: "attached", tab: { id: tab.id, url: tab.url, title: state.tabTitle }, grants: state.grants });
     badge("AI", "#22c55e");
@@ -266,7 +279,7 @@ async function attachActiveTab(selectedTab = null, shouldContinue = () => true) 
   armReconnect();
   try {
     await markAttachedTab(tab);
-    if (!shouldContinue()) throw new Error("auto-attach cancelled");
+    if (!(await shouldContinue())) throw new Error("auto-attach cancelled");
   } catch (error) {
     await unmarkAttachedTab(tab.id, state.createdGroupId);
     state.tabId = null;
@@ -535,7 +548,7 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTO_ATTACH_ALARM) {
-    void connect(!state.token).then(tryAutoAttach).catch(() => armAutoAttachRetry());
+    if (state.token) void connect(false).then(tryAutoAttach).catch(() => armAutoAttachRetry());
   } else if (alarm.name === RECONNECT_ALARM && state.tabId != null && state.token && state.connection === "offline") {
     void connect(false).catch(() => {});
   }
@@ -545,7 +558,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // Auto-attach is visible, single-tab, independently switchable, and never grants click/type by itself.
 function connectForPresence() {
   if (state.tabId != null) return; // an attached session manages its own connection
-  void connect(true).then(tryAutoAttach).catch(() => armAutoAttachRetry());
+  if (!state.token) return; // Initial pairing stays behind the explicit Attach action.
+  void connect(false).then(tryAutoAttach).catch(() => armAutoAttachRetry());
 }
 chrome.runtime.onInstalled.addListener(connectForPresence);
 chrome.runtime.onStartup.addListener(connectForPresence);
@@ -556,13 +570,13 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "neko-panel") return;
   panelPort = port;
   connectForPresence();
-  void connect(true).catch(() => {}); // ensure a bridge connection exists to carry transcript
+  if (state.token) void connect(false).catch(() => {}); // a prior explicit pairing may carry transcript
   port.postMessage({ type: "connected", online: state.connection === "ready" });
   // Gentle keep-connecting while the panel is open: retry every 5s when offline (neko may not be
   // running yet), so the panel links up on its own the moment the user starts neko - no console spam.
   if (!panelRetry) panelRetry = setInterval(() => {
     if (!panelPort) { clearInterval(panelRetry); panelRetry = null; return; }
-    if (state.connection !== "ready") void connect(true).catch(() => {});
+    if (state.token && state.connection !== "ready") void connect(false).catch(() => {});
   }, 5000);
   port.onMessage.addListener((msg) => {
     if (!msg) return;

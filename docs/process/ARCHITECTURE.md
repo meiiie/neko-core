@@ -288,8 +288,9 @@ spawns remove API-key environment variables, so the adapter cannot silently crea
 
 The subscription adapter requires Codex App Server 0.145.0 and requests realtime `v3` explicitly. It does not
 silently downgrade: the WebRTC answer is accepted only after `thread/realtime/started` confirms V3. A bounded
-text-only tail of the current Neko conversation seeds V3 `initialItems`; system, tool, image, and oversized
-payloads stay out of the realtime bootstrap. Dynamic tool audio is forwarded only as a bounded inline data URL.
+text-only tail of the current Neko conversation seeds V3 `initialItems`; oversized user/assistant text is
+retained only with bounded truncation under the token budget, while system, tool, image, and other unsupported
+content stays out of the realtime bootstrap. Dynamic tool audio is forwarded only as a bounded inline data URL.
 
 Voice background tool calls enter core only through `Agent.executeExternalTool`, which wraps the same
 `ToolRegistry`, approval gate, events, path containment, and sandbox used by a normal text turn. The TUI owns

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Neko Browser Bridge",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Let a local Neko Core session attach and operate one visible Chrome tab, with a side-panel chat.",
   "minimum_chrome_version": "120",
   "homepage_url": "https://github.com/meiiie/neko-core",

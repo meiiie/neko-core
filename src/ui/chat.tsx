@@ -1256,7 +1256,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           if (choice.id === "dictation") return addLine("info", voiceFallback());
           if (choice.id !== "install") return addLine("info", "Voice setup cancelled; microphone stayed off.");
           setBusy(true);
-          void installCodexSupportPack({ notify: (message) => addLine("info", message) })
+          void installCodexSupportPack({
+            minimumVersion: CODEX_VOICE_MIN_VERSION,
+            notify: (message) => addLine("info", message),
+          })
             .then(async () => { addLine("info", "Codex Support Pack is ready. Opening the voice consent page..."); await beginVoice(); })
             .catch((error) => addLine("error", `Voice Support Pack failed: ${error instanceof Error ? error.message : error}`))
             .finally(() => setBusy(false));

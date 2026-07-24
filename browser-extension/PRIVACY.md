@@ -9,22 +9,25 @@ direct cloud/relay connection.
 
 ## Data the extension handles
 
-While a tab is attached, the extension can read its URL origin/path, title, and a compact snapshot of
-visible text and interactive elements. At Neko's request it can wait locally for visible text to change,
+After the user explicitly pairs the extension with a local Neko session, an authenticated session may
+attach a tab. While a tab is attached, the extension can read its URL origin/path, title, and a compact
+snapshot of visible text and interactive elements. At Neko's request it can wait locally for visible text to change,
 then return a fresh snapshot; the wait does not retain page contents. It can click, scroll, navigate, or type non-sensitive text only when the
 corresponding permission is enabled in the extension. Password, one-time-code, and payment fields are
 always blocked.
 
-If Neko attaches a mail, chat, or social-network tab, the visible snapshot can include personal
-communications shown in that tab. The extension does not scan other tabs or
+If Neko attaches a mail, chat, social-network, account, finance, or map tab, the visible snapshot can
+include personal communications, account or authentication-related information, financial information,
+or location information shown in that tab. The extension does not scan other tabs or
 store those communications in its audit, but Neko Core may send the task-specific snapshot to the configured
 model provider as described below.
 
 The extension sends this data only to Neko Core over an authenticated loopback connection on the same
 computer (`127.0.0.1`). Neko Core may then send the specific page snapshot required for a task to the
-language-model provider configured by the user. That provider's privacy terms apply. Browser cookies,
-authentication storage, passwords, one-time codes, and payment details are not read or sent by this
-extension. Nothing is sent through Neko Relay.
+language-model provider configured by the user. That provider's privacy terms apply. The extension does
+not directly read browser cookies or authentication storage, and it blocks password, one-time-code, and
+payment-field values. Sensitive information that the site itself renders as ordinary visible page content
+can still be present in a compact snapshot. Nothing is sent through Neko Relay.
 
 ## Local storage and retention
 

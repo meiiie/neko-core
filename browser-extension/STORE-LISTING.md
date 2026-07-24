@@ -47,10 +47,12 @@ It executes no remote-hosted code. The loopback protocol accepts only a fixed, r
 
 ## Data-use disclosure
 
-Disclose **Website content**, **Web browsing activity**, **User activity**, and **Personal communications**:
-an attached mail/chat/social tab can contain communications even though Neko only reads a compact
-visible snapshot. State that authentication information, financial information, and location are not
-collected, and link the published `PRIVACY.md`. Keep the Dashboard answers exactly consistent with the policy.
+Disclose **Website content**, **Web browsing activity**, **User activity**, **Personal communications**,
+**Authentication information**, **Financial and payment information**, and **Location**. A compact visible
+snapshot can contain any of those categories when the attached site renders them as ordinary page content.
+Clarify that the extension does not directly read cookies/authentication storage and blocks password, OTP,
+and payment-field values; those controls do not filter sensitive text visibly rendered elsewhere on a page.
+Link the published `PRIVACY.md` and keep the Dashboard answers exactly consistent with this policy.
 
 ## Required listing media
 
@@ -67,5 +69,6 @@ Do not include private sites, account names, cookies, tokens, or personal conten
 1. Install the current Neko Core release.
 2. Run `neko browser bridge` and leave it open.
 3. Open `https://example.com`, open the extension, and select **Attach this tab to Neko**.
-4. Confirm the toolbar badge, in-page marker, Neko-created tab group, permission switches, and Emergency
+4. This explicit first attach creates the local pairing capability. Confirm the toolbar badge, in-page marker,
+   Neko-created tab group, permission switches, and Emergency
    stop. Existing Chrome tab groups can be verified to remain unchanged.

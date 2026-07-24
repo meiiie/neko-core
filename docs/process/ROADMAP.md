@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-24) — v0.15.0 release
+## Current status (2026-07-24) — v0.15.1 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -15,7 +15,9 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   accepting WebRTC, seeds a bounded recent conversation tail, and preserves Neko's existing approval boundary
   for delegated tools. There is no silent V2 downgrade or paid Realtime API fallback.
 
-- **Branch:** `main`. **Current release: v0.15.0 (2026-07-24)** - Neko adds a Lab-grade ChatGPT
+- **Branch:** `main`. **Current release: v0.15.1 (2026-07-24)** - The v0.15.1 review hotfix requires an
+  explicit first browser pairing before autonomous attach, closes the active-tab race, token-budgets CJK
+  realtime history, and enforces the Voice App Server minimum during installation. Neko adds a Lab-grade ChatGPT
   Realtime V3 subscription bridge with explicit protocol negotiation and no paid API fallback, plus an
   autonomous single-tab browser attach path with a persistent user switch, bounded retry, cancellation-safe
   emergency detach, and separately governed interaction capabilities. Voice availability still depends on the
