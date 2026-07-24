@@ -11,7 +11,8 @@ import {
   type CodexAppServerHandlers,
 } from "./codex-app-server.ts";
 
-export const CODEX_VOICE_MIN_VERSION = "0.144.1";
+export const CODEX_VOICE_MIN_VERSION = "0.145.0";
+const REALTIME_VERSION = "v3" as const;
 
 interface RpcClient {
   initialize(timeoutMs?: number): Promise<unknown>;
@@ -27,6 +28,7 @@ export interface VoiceSnapshot {
   state: VoiceState;
   startedAt?: number;
   muted: boolean;
+  protocol?: typeof REALTIME_VERSION;
   error?: string;
 }
 
@@ -44,6 +46,7 @@ export interface VoiceUsage {
 export interface ChatGptVoiceOptions {
   model: string;
   tools?: any[];
+  history?: any[];
   executeTool?: (call: { id: string; name: string; arguments: Record<string, any> }) => Promise<string | any[]>;
   onEvent?: (event: VoiceEvent) => void;
   clientFactory?: VoiceCodexClientFactory;
@@ -102,8 +105,9 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
   private origin = "";
   private startedAt = 0;
   private muted = false;
+  private negotiatedVersion = "";
   private state: VoiceState = "starting";
-  private sdpWaiter: { resolve: (sdp: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+  private sdpWaiter: { sdp?: string; version?: string; resolve: (sdp: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private lastHeartbeat = 0;
   private readonly toolResults = new Map<string, Promise<{ contentItems: any[]; success: boolean }>>();
@@ -116,6 +120,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
       state: this.state,
       startedAt: this.startedAt || undefined,
       muted: this.muted,
+      protocol: this.negotiatedVersion === REALTIME_VERSION ? REALTIME_VERSION : undefined,
       error: this.state === "error" ? lastUsage?.lastError : undefined,
     };
   }
@@ -196,6 +201,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
     this.server?.stop(true);
     this.server = null;
     this.realtimeStarted = false;
+    this.negotiatedVersion = "";
     const durationMs = this.startedAt ? Math.max(0, (this.options.now ?? Date.now)() - this.startedAt) : 0;
     lastUsage = { active: false, durationMs, lastError: lastUsage?.lastError };
     this.emitState("stopped");
@@ -315,11 +321,14 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
     void answer.catch(() => {}); // stop/close may reject while the start request is still in flight
     this.realtimeStarted = true;
     try {
+      const initialItems = realtimeInitialItems(this.options.history ?? []);
       await this.client.request("thread/realtime/start", {
         threadId: this.threadId,
+        version: REALTIME_VERSION,
         outputModality: "audio",
         includeStartupContext: true,
         flushTranscriptTailOnSessionEnd: true,
+        ...(initialItems.length ? { initialItems } : {}),
         prompt: VOICE_REALTIME_PROMPT,
         transport: { type: "webrtc", sdp },
       }, 30_000);
@@ -359,12 +368,26 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
 
   private onNotification(method: string, params: any): void {
     if (params?.threadId && params.threadId !== this.threadId) return;
-    if (method === "thread/realtime/sdp") {
+    if (method === "thread/realtime/started") {
+      const version = String(params?.version ?? "");
       const waiter = this.sdpWaiter;
-      this.sdpWaiter = null;
+      if (version !== REALTIME_VERSION) {
+        this.sdpWaiter = null;
+        if (waiter) clearTimeout(waiter.timer);
+        const error = new Error(`expected realtime V3 but Codex started ${version || "an unknown version"}`);
+        waiter?.reject(error);
+        if (!waiter) this.recordError(error.message);
+        return;
+      }
+      this.negotiatedVersion = version;
+      if (waiter) waiter.version = version;
+      this.emitState(this.state);
+      this.completeRealtimeHandshake();
+    } else if (method === "thread/realtime/sdp") {
+      const waiter = this.sdpWaiter;
       if (!waiter) return;
-      clearTimeout(waiter.timer);
-      waiter.resolve(String(params?.sdp ?? ""));
+      waiter.sdp = String(params?.sdp ?? "");
+      this.completeRealtimeHandshake();
     } else if (method === "thread/realtime/transcript/delta") {
       this.options.onEvent?.({ type: "transcript-delta", role: String(params?.role ?? "assistant"), delta: String(params?.delta ?? "") });
     } else if (method === "thread/realtime/transcript/done") {
@@ -384,6 +407,14 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
     } else if (method === "thread/realtime/closed" && !this.stopping) {
       void this.stop(String(params?.reason ?? "backend closed"));
     }
+  }
+
+  private completeRealtimeHandshake(): void {
+    const waiter = this.sdpWaiter;
+    if (!waiter?.sdp || waiter.version !== REALTIME_VERSION) return;
+    this.sdpWaiter = null;
+    clearTimeout(waiter.timer);
+    waiter.resolve(waiter.sdp);
   }
 
   private recordError(message: string): void {
@@ -412,8 +443,42 @@ function toolResultContent(observation: string | any[]): { contentItems: any[]; 
   for (const part of observation) {
     if (part?.type === "text") contentItems.push({ type: "inputText", text: String(part.text ?? "") });
     else if (part?.type === "image_url" && part.image_url?.url) contentItems.push({ type: "inputImage", imageUrl: String(part.image_url.url) });
+    else {
+      const audioUrl = dynamicToolAudioUrl(part);
+      if (audioUrl) contentItems.push({ type: "inputAudio", audioUrl });
+    }
   }
   return { contentItems: contentItems.length ? contentItems : [{ type: "inputText", text: "(no output)" }], success: true };
+}
+
+function realtimeInitialItems(messages: any[]): Array<{ role: "user" | "assistant"; text: string }> {
+  const items: Array<{ role: "user" | "assistant"; text: string }> = [];
+  let remaining = 12_000; // headroom for UTF-8 text under App Server's 8,192 estimated-token ceiling
+  for (let index = messages.length - 1; index >= 0 && items.length < 64 && remaining > 0; index--) {
+    const role = messages[index]?.role;
+    if (role !== "user" && role !== "assistant") continue;
+    const content = messages[index]?.content;
+    const text = (typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content.filter((part: any) => part?.type === "text").map((part: any) => String(part.text ?? "")).join("\n")
+        : "").trim();
+    if (!text) continue;
+    const bounded = text.length <= 4_000 ? text : `${text.slice(0, 3_000)}\n... [trimmed for realtime] ...\n${text.slice(-900)}`;
+    const fitted = bounded.slice(0, remaining);
+    items.unshift({ role, text: fitted });
+    remaining -= fitted.length;
+  }
+  return items;
+}
+
+function dynamicToolAudioUrl(part: any): string | null {
+  let value = part?.type === "audio_url" ? String(part.audio_url?.url ?? "") : "";
+  if (!value && part?.type === "audio" && typeof part.data === "string" && typeof part.mimeType === "string") {
+    value = `data:${part.mimeType};base64,${part.data}`;
+  }
+  if (value.length > 70_000_000) return null;
+  return /^data:audio\/(?:wav|mpeg|mp3|mp4|x-m4a|webm|ogg);base64,[a-z0-9+/]+={0,2}$/i.test(value) ? value : null;
 }
 
 function isObject(value: unknown): value is Record<string, any> {
@@ -462,7 +527,7 @@ const VOICE_PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Neko Core Voice</title><style>
 :root{color-scheme:dark;font-family:ui-sans-serif,system-ui,sans-serif;background:#0e1116;color:#e8edf5}body{margin:0;min-height:100vh;display:grid;place-items:center}.card{width:min(560px,calc(100vw - 40px));background:#171c24;border:1px solid #2c3440;border-radius:20px;padding:28px;box-shadow:0 24px 80px #0008}.brand{color:#67e8d4;font-weight:700}.live{display:flex;align-items:center;gap:10px;margin:24px 0;font-size:22px}.dot{width:12px;height:12px;border-radius:50%;background:#6b7280}.dot.on{background:#ff4d5e;box-shadow:0 0 0 7px #ff4d5e22}button{border:0;border-radius:12px;padding:12px 18px;font:inherit;font-weight:650;cursor:pointer;background:#67e8d4;color:#07110f;margin-right:8px}button.secondary{background:#2b3441;color:#e8edf5}button:disabled{opacity:.45;cursor:not-allowed}.hint{color:#9ba8b8;line-height:1.55}.error{color:#ff8c98;white-space:pre-wrap}.hidden{display:none}</style></head>
-<body><main class="card"><div class="brand">NEKO CORE</div><h1>ChatGPT Subscription Voice</h1><p class="hint">Experimental. Your microphone stays off until you press Start voice. Neko never falls back to paid API billing.</p>
+<body><main class="card"><div class="brand">NEKO CORE</div><h1>Realtime V3 Voice</h1><p class="hint">Experimental ChatGPT subscription bridge. Your microphone stays off until you press Start voice. Neko verifies V3 and never falls back to paid API billing.</p>
 <div class="live"><span id="dot" class="dot"></span><strong id="status">Ready - microphone off</strong></div>
 <button id="start">Start voice</button><button id="mute" class="secondary hidden">Mute</button><button id="stop" class="secondary hidden">Stop</button><p id="error" class="error"></p><p class="hint">Closing this tab stops the voice session. Return to the terminal for the live transcript and tool approvals.</p><audio id="audio" autoplay></audio></main>
 <script>

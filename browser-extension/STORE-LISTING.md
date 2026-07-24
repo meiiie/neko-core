@@ -3,7 +3,7 @@
 ## Product details
 
 - Name: `Neko Browser Bridge`
-- Summary (132 characters max): `Safely attach one chosen Chrome tab to a local Neko Core session.`
+- Summary (132 characters max): `Let a local Neko Core session attach and operate one visible Chrome tab.`
 - Category: Developer Tools
 - Language: English
 
@@ -13,7 +13,7 @@ Connect one Chrome tab you choose to Neko Core, the local-first terminal coding 
 
 Neko Browser Bridge makes browser control visible and reversible:
 
-- one-click attachment for the active tab;
+- autonomous or one-click attachment for the active tab;
 - a clear `Neko is using this tab` marker and an `AI` toolbar badge;
 - a dedicated `Neko - AI active` group when the tab was not already grouped;
 - separate switches for click/navigation and non-sensitive typing;
@@ -23,31 +23,32 @@ Neko Browser Bridge makes browser control visible and reversible:
 - no cookie access and no connection to Neko Relay.
 
 The extension requires Neko Core running on the same computer. Start `neko`, ask it to browse a signed-in
-site (or type `/browser`), then open the extension on the tab you want and choose **Attach this tab to Neko**.
+site (or type `/browser`), and open that site. Autonomous attach is enabled by default; it can be disabled
+in the popup for manual **Attach this tab to Neko** operation.
 
 ## Single purpose
 
-Attach one user-selected Chrome tab to a locally running Neko Core session with visible, revocable,
-least-privilege browser controls.
+Attach one active Chrome tab to a locally running Neko Core session with visible, revocable controls.
 
 ## Permission justifications
 
-- `activeTab`: grants temporary access only after the user opens the extension on the current tab.
+- `host access` (`http://*/*`, `https://*/*`): permits the user-switchable autonomous attach flow on ordinary
+  web pages without requiring a fresh toolbar gesture; it excludes browser-internal and local-file pages;
 - `scripting`: reads a compact visible-text/element snapshot, waits for visible text changes when requested,
   performs explicitly approved actions, and shows the in-page control indicator on that selected tab.
 - `storage`: preserves the local pairing capability, permission switches, and a redacted 20-entry audit.
 - `tabGroups`: marks an otherwise ungrouped attached tab as `Neko - AI active`. Existing user groups are
   never renamed or rearranged, and a Neko-created group is removed on detach.
-- `alarms`: wakes the Manifest V3 background worker every 30 seconds only while a tab remains attached, so
-  the authenticated loopback connection can recover after Chrome suspends the worker or Neko restarts.
+- `alarms`: wakes the Manifest V3 background worker every 30 seconds while a tab remains attached, or while
+  a bounded autonomous-attach retry is pending, so temporary suspension or bridge startup does not strand it.
 
-The extension requests no host permissions, `cookies`, `debugger`, `downloads`, or `<all_urls>` access.
+The extension requests no `cookies`, `debugger`, `downloads`, or `<all_urls>` access.
 It executes no remote-hosted code. The loopback protocol accepts only a fixed, reviewable command set.
 
 ## Data-use disclosure
 
 Disclose **Website content**, **Web browsing activity**, **User activity**, and **Personal communications**:
-an explicitly attached mail/chat/social tab can contain communications even though Neko only reads a compact
+an attached mail/chat/social tab can contain communications even though Neko only reads a compact
 visible snapshot. State that authentication information, financial information, and location are not
 collected, and link the published `PRIVACY.md`. Keep the Dashboard answers exactly consistent with the policy.
 

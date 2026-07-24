@@ -56,8 +56,9 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
   ships, Chrome still requires one explicit **Load unpacked** confirmation; local files alone are never reported
   as installed or connected. `neko browser install` remains
   the non-TUI diagnostic/fallback; users never need a Bun or source-tree command after the one-line installer.
-  After setup, normal `neko` sessions start the bridge automatically. Neko's Manifest V3 extension controls one
-  user-selected Chrome tab. Read/click/type grants are separate, sensitive fields stay blocked, and
+  After setup, normal `neko` sessions start the bridge automatically. Its autonomous-attach switch lets the
+  authenticated local Neko session select the active http(s) tab without another click; users can disable it
+  and attach manually. Read/click/type grants are separate, sensitive fields stay blocked, and
   emergency stop detaches immediately; an `AI` badge, page marker, and non-destructive tab group make control
   visible. No cookie or capability is sent through `/relay`. The public-release bundle, privacy policy, and
   Chrome Web Store submission checklist live in [`browser-extension/`](browser-extension/).
@@ -135,7 +136,7 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > Fallback if the domain is unreachable: swap the URL for
 > `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
-**Current release: [v0.14.0](https://github.com/meiiie/neko-core/releases/tag/v0.14.0).**
+**Current release: [v0.15.0](https://github.com/meiiie/neko-core/releases/tag/v0.15.0).**
 Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
 real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). **Pin or roll back any time**
 (the pin holds — auto-update won't undo it): `neko update 0.9.0`, or at install time
@@ -157,8 +158,8 @@ neko
 
 Browser control and meeting capture are optional and progressively disclosed. The first Neko session mentions browser control, and a natural
 request such as "browse Facebook in Chrome" opens a setup choice while keeping the request intact; `/browser`
-opens the same flow directly. Use it only when you want Neko to control one explicitly attached, already
-signed-in Chrome tab. Chrome still shows
+opens the same flow directly. Use it only when you want Neko to control one visible, already signed-in Chrome
+tab. Autonomous attach is enabled by default and independently switchable in the extension. Chrome still shows
 its required extension-permission confirmation. There is no second `bun bin/neko.ts ...` install step.
 
 For a meeting, use `/meeting` inside Neko. Its guided surface can install local Vietnamese transcription and

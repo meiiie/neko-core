@@ -77,7 +77,7 @@ export function browserBridgeStage(
 
 const BRIDGE_SCHEMAS = [
   { name: "status", description: "Read the locally attached Neko Browser Bridge tab and permission state.", properties: {} },
-  { name: "snapshot", description: "Read a compact visible accessibility snapshot from the explicitly attached tab.", properties: { maxItems: { type: "number", minimum: 1, maximum: 200 } } },
+  { name: "snapshot", description: "Read a compact visible accessibility snapshot from the currently attached tab.", properties: { maxItems: { type: "number", minimum: 1, maximum: 200 } } },
   { name: "watch", description: "Wait inside the attached tab until visible text changes and settles, then return the fresh compact snapshot plus elapsed time. Avoids model-side polling for chat and other live pages.", properties: { durationMs: { type: "number", minimum: 250, maximum: 30000 }, settleMs: { type: "number", minimum: 100, maximum: 2000 }, maxItems: { type: "number", minimum: 1, maximum: 200 } } },
   { name: "click", description: "Click an element reference from the latest Neko browser snapshot.", properties: { ref: { type: "string" }, reason: { type: "string" } }, required: ["ref"] },
   { name: "type", description: "Type text into a non-sensitive element reference. Password, payment, and one-time-code fields are always blocked.", properties: { ref: { type: "string" }, text: { type: "string" }, reason: { type: "string" } }, required: ["ref", "text"] },
@@ -105,7 +105,7 @@ class BrowserBridgeTools implements McpTools {
     ]).has(name) ? "safe" : "gated";
   }
   temporal(name: string): boolean { return name === "mcp__neko_browser__watch"; }
-  indexBlock(): string { return "Neko Browser Bridge tools are local-only and control only the tab explicitly attached in the extension."; }
+  indexBlock(): string { return "Neko Browser Bridge tools are local-only and control only the single visible tab attached by the extension."; }
   async call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
     const action = name.replace("mcp__neko_browser__", "");
     const requestedDuration = Number(args.durationMs);
@@ -275,9 +275,10 @@ export function startBrowserBridge(options: {
           client?.close(1000, "replaced by a newer Neko browser connection");
           client = ws;
           if (paired) ws.send(JSON.stringify({ type: "paired", session: capability.session, token: capability.token }));
-          // Pairing authenticates the extension, but never grants access to a browser tab. Chrome's
-          // toolbar Attach gesture creates that separate, explicit active-tab capability.
-          ws.send(JSON.stringify({ type: "ready", session: capability.session }));
+          // The extension owns the user's persisted autonomous-attach preference. Neko only signals
+          // that this authenticated local session is ready to use a browser; the extension remains
+          // single-tab, visible, independently stoppable, and keeps click/type as separate grants.
+          ws.send(JSON.stringify({ type: "ready", session: capability.session, autoAttach: true }));
           record("connect", paired ? "paired" : "resumed");
           persistStatus();
           return;

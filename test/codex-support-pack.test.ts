@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -135,6 +135,88 @@ describe("Codex Support Pack", () => {
       versionOf: () => "0.144.1",
       verifyProtocol: async () => { throw new Error("incompatible protocol"); },
     })).rejects.toThrow("incompatible protocol");
+    expect(readFileSync(join(codexSupportRoot(home), "codex-app-server.exe"), "utf8")).toBe(previous);
+    expect(readCodexSupportPack(home)?.protocolVersion).toBe("0.144.0");
+  });
+
+  test("retries a transient Windows lock while publishing the verified pack", async () => {
+    const home = mkdtempSync(join(tmpdir(), "neko-support-test-"));
+    homes.push(home);
+    const archive = Buffer.from("valid synthetic archive");
+    const digest = createHash("sha256").update(archive).digest("hex");
+    const fetchImpl = (async (input: string | URL | Request) => {
+      if (String(input).includes("api.github.com")) return Response.json({
+        tag_name: "rust-v0.144.1",
+        assets: [{
+          name: "codex-app-server-x86_64-pc-windows-msvc.exe.tar.gz",
+          size: archive.length,
+          digest: `sha256:${digest}`,
+          browser_download_url: "https://github.com/openai/codex/releases/download/rust-v0.144.1/codex-app-server-x86_64-pc-windows-msvc.exe.tar.gz",
+        }],
+      });
+      return new Response(archive, { headers: { "content-length": String(archive.length) } });
+    }) as typeof fetch;
+    let publishAttempts = 0;
+    const installed = await installCodexSupportPack({
+      home,
+      platform: "win32",
+      arch: "x64",
+      fetchImpl,
+      extractArchive: (_path, staging, entry) => writeFileSync(join(staging, entry), "new binary"),
+      verifyBinary: () => {},
+      versionOf: () => "0.144.1",
+      verifyProtocol: async () => {},
+      renamePath: (from, to) => {
+        if (to === codexSupportRoot(home) && publishAttempts++ === 0) {
+          throw Object.assign(new Error("temporarily locked"), { code: "EPERM" });
+        }
+        renameSync(from, to);
+      },
+    });
+    expect(publishAttempts).toBe(2);
+    expect(existsSync(installed.path)).toBe(true);
+    expect(readCodexSupportPack(home)?.protocolVersion).toBe("0.144.1");
+  });
+
+  test("retries rollback without masking the original publish error", async () => {
+    const home = mkdtempSync(join(tmpdir(), "neko-support-test-"));
+    homes.push(home);
+    const previous = await installFixture(home, "0.144.0");
+    const archive = Buffer.from("valid synthetic archive");
+    const digest = createHash("sha256").update(archive).digest("hex");
+    const fetchImpl = (async (input: string | URL | Request) => {
+      if (String(input).includes("api.github.com")) return Response.json({
+        tag_name: "rust-v0.144.1",
+        assets: [{
+          name: "codex-app-server-x86_64-pc-windows-msvc.exe.tar.gz",
+          size: archive.length,
+          digest: `sha256:${digest}`,
+          browser_download_url: "https://github.com/openai/codex/releases/download/rust-v0.144.1/codex-app-server-x86_64-pc-windows-msvc.exe.tar.gz",
+        }],
+      });
+      return new Response(archive, { headers: { "content-length": String(archive.length) } });
+    }) as typeof fetch;
+    let rollbackAttempts = 0;
+    await expect(installCodexSupportPack({
+      home,
+      platform: "win32",
+      arch: "x64",
+      fetchImpl,
+      extractArchive: (_path, staging, entry) => writeFileSync(join(staging, entry), "new binary"),
+      verifyBinary: () => {},
+      versionOf: () => "0.144.1",
+      verifyProtocol: async () => {},
+      renamePath: (from, to) => {
+        if (from.includes(".codex-support-install-") && to === codexSupportRoot(home)) {
+          throw Object.assign(new Error("publish failed"), { code: "EACCES" });
+        }
+        if (from.includes(".codex-support-backup-") && to === codexSupportRoot(home) && rollbackAttempts++ === 0) {
+          throw Object.assign(new Error("rollback temporarily locked"), { code: "EPERM" });
+        }
+        renameSync(from, to);
+      },
+    })).rejects.toThrow("publish failed");
+    expect(rollbackAttempts).toBe(2);
     expect(readFileSync(join(codexSupportRoot(home), "codex-app-server.exe"), "utf8")).toBe(previous);
     expect(readCodexSupportPack(home)?.protocolVersion).toBe("0.144.0");
   });

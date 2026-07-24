@@ -3,6 +3,22 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-24 - Realtime V3 port + autonomous browser attach
+
+- Ported the completed Codex App Server Realtime V3 subscription bridge onto the merged Windows/browser
+  hardening base. Neko requires Support Pack 0.145.0, requests `v3`, rejects a V2/unknown negotiation,
+  seeds only a bounded user/assistant text tail, and routes dynamic tools through the existing Agent policy.
+- Restored autonomous browser attachment as a deliberate product default. Every authenticated local bridge
+  session may ask the extension to attach the active http(s) tab; the extension persists an independently
+  switchable preference, controls only one visible tab, and never enables click/type as a side effect.
+- Auto-attach is single-flight, consumes its ten-minute intent only after success, retries transient failures
+  from tab events plus an MV3 alarm, and uses a generation guard so Disable, Detach, and Emergency Stop win
+  against an attachment already in flight. Browser-internal/file pages remain out of scope; no `debugger`,
+  `tabs`, cookie, relay, or broad `<all_urls>` access was added.
+- Evidence: TypeScript 7 and 5.9 clean; **796/796 tests, 3,422 assertions, 85 files**; policy PASS; doctor healthy
+  apart from expected sandbox/offline-bridge/non-TTY warnings; production binary, UI probe, and PTY input probe
+  PASS; changed-line secret scan and diff check PASS.
+
 ## 2026-07-22 - Browser side-panel chat (chat with Neko from a Chrome sidebar)
 
 Made the Neko extension a Claude/ChatGPT-style right sidebar - but the BRAIN stays in the neko CLI
@@ -160,6 +176,23 @@ multi-profile Chrome:
   job-object UI restrictions, and caller context.
 - Gates: TS 7 + TS 5.9 typecheck clean, 764/764 tests (3249 assertions, srt target/settings/
   script units added), policy PASS, binary build + UI/input probes OK.
+
+## 2026-07-22 - Codex Realtime V3 subscription bridge
+
+- Verified the official Codex 0.145.0 release and its tagged source. Realtime V3 is the Frameless Bidi protocol,
+  exposed through the existing experimental App Server `thread/realtime/*` surface over WebRTC or WebSocket;
+  Codex still defaults omitted versions to V2.
+- Kept the existing app-owned voice adapter instead of adding a second realtime framework. Neko now requires
+  Support Pack 0.145.0, sends `version: v3`, and accepts the SDP answer only after the typed started notification
+  confirms V3. A V2/unknown downgrade fails visibly.
+- Seeded only a bounded user/assistant text tail through V3 `initialItems`; system instructions, tool payloads,
+  and multimodal blobs are excluded. Dynamic tool audio can cross the App Server boundary only as a bounded
+  inline supported data URL. Delegated tools still execute through `Agent.executeExternalTool` and its normal
+  approval, sandbox, path, and event boundary.
+- Added adapter and Ink regressions for explicit V3 negotiation, downgrade rejection, history filtering, audio
+  tool output, and visible V3 state. No paid Realtime API fallback or new dependency was added.
+- Evidence: TypeScript clean; **762/762 tests, 3,252 assertions, 82 files**; doctor healthy apart from expected
+  non-TTY/offline bridge warnings; policy PASS; production binary, UI probe, and real-PTY input probe PASS.
 
 ## 2026-07-16 - v0.14 local meeting companion
 

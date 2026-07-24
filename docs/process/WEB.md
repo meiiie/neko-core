@@ -150,7 +150,7 @@ therefore removes Neko's artificial re-login cycle; it cannot promise that a thi
 verified headlessly, and would break the standalone single binary. MCP is the clean seam (Goose,
 Claude Code, and others all do browser this way). Built-in `web_*` covers the simple 90%.
 
-### Neko-owned explicit-tab bridge (developer preview)
+### Neko-owned single-tab bridge (developer preview)
 
 For a Claude/Codex-style one-click attachment with Neko's own permissions and audit surface:
 
@@ -163,8 +163,9 @@ neko browser path         # folder to Load unpacked in chrome://extensions
 neko browser rotate       # revoke pairing for the next bridge start
 ```
 
-The extension uses `activeTab`, separate click/type grants, sensitive-field blocking, cross-origin detach,
-a visible `Neko is using this tab` marker, conservative tab grouping, and emergency stop. Public Store and
+The extension uses switchable autonomous attach scoped to ordinary http(s) pages, separate click/type grants,
+sensitive-field blocking, cross-origin detach, a visible `Neko is using this tab` marker, conservative tab
+grouping, and emergency stop. Public Store and
 unpacked extension ids are exact config values under `browser_extension_ids`; the bridge never accepts a
 wildcard extension Origin. Its redacted attached/offline status may travel inside `/relay`'s E2E-encrypted presence;
 cookies, page content and the bridge capability never do. Full design: `BROWSER-BRIDGE.md`.

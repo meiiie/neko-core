@@ -72,8 +72,7 @@ test("browser bridge pairs one extension origin and routes a capability-scoped c
 
   ws.send(JSON.stringify({ type: "pair" }));
   expect(await nextMessage(ws)).toEqual({ type: "paired", session: "session-test", token: "token-test" });
-  // Pairing authenticates the extension; tab access still requires the toolbar Attach gesture.
-  expect(await nextMessage(ws)).toEqual({ type: "ready", session: "session-test" });
+  expect(await nextMessage(ws)).toEqual({ type: "ready", session: "session-test", autoAttach: true });
   ws.send(JSON.stringify({ type: "attached", tab: { id: 7, url: "https://example.com/private?q=not-audited" }, grants: { click: false, type: false } }));
   await Bun.sleep(10);
   expect(bridge.status().attached).toEqual({ tabId: 7, host: "example.com", grants: { click: false, type: false } });
@@ -122,13 +121,13 @@ test("side panel: pushPanel reaches the client and a panel-in prompt fires the h
   bridge.close();
 });
 
-test("a resumed session is ready but never auto-attaches a tab", async () => {
+test("a resumed authenticated session may request autonomous attach again", async () => {
   const capability: BrowserCapability = { version: 1, host: "127.0.0.1", port: 0, session: "session-test", token: "token-test" };
   const bridge = startBrowserBridge({ capability, extensionOrigin: origin, pairingMs: 10_000, persistStatus: false });
   const ws = new WebSocket(`ws://127.0.0.1:${bridge.port}/bridge`, { headers: { origin } } as any);
   await new Promise<void>((resolve, reject) => { ws.addEventListener("open", () => resolve(), { once: true }); ws.addEventListener("error", reject, { once: true }); });
   ws.send(JSON.stringify({ type: "hello", session: "session-test", token: "token-test" }));
-  expect(await nextMessage(ws)).toEqual({ type: "ready", session: "session-test" });
+  expect(await nextMessage(ws)).toEqual({ type: "ready", session: "session-test", autoAttach: true });
   ws.close();
   bridge.close();
 });
@@ -196,17 +195,17 @@ test("browser install chooses Store when configured and prepares a pinned local 
   }
 });
 
-test("browser extension uses explicit active-tab consent and no standing host access", () => {
+test("browser extension keeps autonomous attach http(s)-scoped and independently stoppable", () => {
   const manifest = JSON.parse(readFileSync(new URL("../browser-extension/manifest.json", import.meta.url), "utf8"));
-  expect(manifest.permissions).toContain("activeTab");
-  expect(manifest.host_permissions ?? []).toEqual([]);
+  expect(manifest.permissions).not.toContain("activeTab");
+  expect(manifest.host_permissions).toEqual(["http://*/*", "https://*/*"]);
   expect(manifest.permissions).toContain("tabGroups");
   expect(manifest.permissions).toContain("alarms");
   expect(manifest.permissions).toContain("sidePanel"); // the chat side panel (no extra host scope)
   expect(manifest.side_panel?.default_path).toBe("sidepanel.html");
   expect(manifest.permissions).not.toContain("debugger");
   expect(manifest.permissions).not.toContain("tabs");
-  expect(manifest.host_permissions ?? []).not.toContain("<all_urls>");
+  expect(manifest.host_permissions).not.toContain("<all_urls>");
   // The side panel is a chat CLIENT only - the brain stays in the neko CLI. It must not embed a model
   // or reach any external host; its only network is the loopback bridge via the service worker.
   const panelJs = readFileSync(new URL("../browser-extension/sidepanel.js", import.meta.url), "utf8");
@@ -232,12 +231,18 @@ test("browser extension uses explicit active-tab consent and no standing host ac
   expect(worker).toContain("authentication failed");
   expect(worker).toContain('detach("switch-tab")');
   expect(worker).toContain('type: "panel-ready"');
-  expect(worker).not.toContain("autoAttachUntil");
-  expect(worker).not.toContain("tryAutoAttach");
+  expect(worker).toContain("autoAttachUntil");
+  expect(worker).toContain("autoAttachInFlight");
+  expect(worker).toContain("autoAttachGeneration");
+  expect(worker).toContain('throw new Error("auto-attach cancelled")');
+  expect(worker).toContain("tryAutoAttach");
+  expect(worker).toContain("armAutoAttachRetry");
+  expect(worker.indexOf("await attachActiveTab(tab)")).toBeLessThan(worker.indexOf("state.autoAttachUntil = 0"));
   expect(worker).not.toContain("document.cookie");
   const popup = readFileSync(new URL("../browser-extension/popup.js", import.meta.url), "utf8");
   expect(() => new Function(popup)).not.toThrow();
   expect(popup).not.toContain("innerHTML");
+  expect(popup).toContain('type: "auto-attach"');
   const indicator = readFileSync(new URL("../browser-extension/control-indicator.js", import.meta.url), "utf8");
   expect(() => new Function(indicator)).not.toThrow();
   expect(indicator).toContain("Neko is using this tab");
