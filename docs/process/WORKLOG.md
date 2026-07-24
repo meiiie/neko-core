@@ -3,6 +3,20 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-24 - v0.15.1 post-release review hotfix
+
+- Addressed all nine unresolved PR #2 review threads after validating them against the merged source. The
+  browser now requires an explicitly paired capability for autonomous flows and revalidates the selected tab
+  across asynchronous work. A follow-up PR #3 P1 also closes stale-capability autonomous re-pairing: only a
+  manual Attach may repair pairing. Privacy disclosures match the actual visible-snapshot boundary.
+- Voice setup enforces Codex App Server 0.145.0 at install time, while realtime bootstrap history uses the
+  shared UTF-8-aware estimator under the 8,192-token limit. Support Pack cleanup no longer throws from
+  `finally`, masks the primary error, or turns a published pack into an opaque failure.
+- Added dense-CJK, feature-minimum, no-implicit-pairing, active-tab, and non-vacuous ordering regression
+  coverage. Evidence: **798/798 tests, 3,438 assertions, 85 files**; both TypeScript tracks clean; policy
+  PASS; doctor identifies v0.15.1 with expected environment warnings; production build, UI probe, real-PTY
+  input, and ConPTY ghost/typing x3 PASS; changed-line secret scan and diff check PASS.
+
 ## 2026-07-24 - Realtime V3 port + autonomous browser attach
 
 - Ported the completed Codex App Server Realtime V3 subscription bridge onto the merged Windows/browser

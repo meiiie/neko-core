@@ -237,7 +237,19 @@ test("browser extension keeps autonomous attach http(s)-scoped and independently
   expect(worker).toContain('throw new Error("auto-attach cancelled")');
   expect(worker).toContain("tryAutoAttach");
   expect(worker).toContain("armAutoAttachRetry");
-  expect(worker.indexOf("await attachActiveTab(tab)")).toBeLessThan(worker.indexOf("state.autoAttachUntil = 0"));
+  expect(worker).toContain("Boolean(state.token) && state.autoAttach");
+  expect(worker).toContain("current?.id === candidateId");
+  expect(worker).toContain("await attachActiveTab(tab, stillCurrent, false)");
+  expect(worker).toContain("if (!allowPairRepair)");
+  expect(worker).toContain("Browser pairing expired - use Attach this tab to Neko again.");
+  expect(worker).toContain("if (!state.token) return; // Initial pairing stays behind the explicit Attach action.");
+  expect(worker).not.toContain("connect(!state.token)");
+  expect(worker.match(/await connect\(true\)/g)).toHaveLength(2); // both are inside explicit attach/re-pair
+  const attach = worker.indexOf("await attachActiveTab(tab,");
+  const consume = worker.indexOf("state.autoAttachUntil = 0");
+  expect(attach).toBeGreaterThanOrEqual(0);
+  expect(consume).toBeGreaterThanOrEqual(0);
+  expect(attach).toBeLessThan(consume);
   expect(worker).not.toContain("document.cookie");
   const popup = readFileSync(new URL("../browser-extension/popup.js", import.meta.url), "utf8");
   expect(() => new Function(popup)).not.toThrow();

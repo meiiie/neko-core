@@ -74,6 +74,7 @@ export interface InstallCodexSupportOptions {
   arch?: NodeJS.Architecture;
   fetchImpl?: typeof fetch;
   force?: boolean;
+  minimumVersion?: string;
   notify?: (message: string) => void;
   extractArchive?: (archive: string, staging: string, entry: string) => void;
   verifyBinary?: (path: string, platform: NodeJS.Platform) => void;
@@ -123,6 +124,7 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
   const notify = options.notify ?? (() => {});
   const renamePath = options.renamePath ?? renameSync;
   const target = codexSupportTarget(platform, arch);
+  const minimumVersion = options.minimumVersion ?? CODEX_APP_SERVER_MIN_VERSION;
 
   notify("Checking the official OpenAI Codex release...");
   const releaseResponse = await fetchImpl(RELEASE_API, {
@@ -131,7 +133,7 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
   });
   if (!releaseResponse.ok) throw new Error(`Could not read the official Codex release (HTTP ${releaseResponse.status})`);
   const release = await releaseResponse.json() as GitHubRelease;
-  const resolved = resolveRelease(release, target);
+  const resolved = resolveRelease(release, target, minimumVersion);
 
   const current = readCodexSupportPack(home);
   if (!options.force && current?.protocolVersion === resolved.version && current.assetDigest === resolved.digest) {
@@ -148,6 +150,7 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
   mkdirSync(staging, { recursive: false, mode: 0o700 });
   let movedOld = false;
   let installError: unknown;
+  let installed: CodexSupportPackInfo | undefined;
   try {
     notify(`Downloading ${formatMiB(resolved.size)} optional support component...`);
     const downloaded = await downloadAsset(fetchImpl, resolved.url, archive, resolved.size, notify);
@@ -207,16 +210,23 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
     rmSync(backup, { recursive: true, force: true });
     clearCodexSupportCache();
     notify(`GPT-5.6 Support Pack ${version} is ready (${formatMiB(manifest.installedBytes)} on disk).`);
-    return { ...manifest, path: join(root, installedName) };
+    installed = { ...manifest, path: join(root, installedName) };
   } catch (error) {
     installError = error;
-    throw error;
-  } finally {
-    try { await removeTemporaryTree(staging); }
-    catch (cleanupError) {
-      if (installError === undefined) throw cleanupError;
-    }
   }
+  let cleanupError: unknown;
+  try { await removeTemporaryTree(staging); }
+  catch (error) { cleanupError = error; }
+  if (installError !== undefined) {
+    if (cleanupError !== undefined && installError instanceof Error && installError.cause === undefined) {
+      installError.cause = cleanupError;
+    }
+    throw installError;
+  }
+  if (cleanupError !== undefined) {
+    notify("Support Pack is ready, but its temporary staging directory could not be removed.");
+  }
+  return installed!;
 }
 
 export function removeCodexSupportPack(home = homeDir()): boolean {
@@ -227,7 +237,7 @@ export function removeCodexSupportPack(home = homeDir()): boolean {
   return true;
 }
 
-function resolveRelease(release: GitHubRelease, target: CodexSupportTarget): {
+function resolveRelease(release: GitHubRelease, target: CodexSupportTarget, minimumVersion: string): {
   version: string;
   tag: string;
   digest: string;
@@ -238,8 +248,8 @@ function resolveRelease(release: GitHubRelease, target: CodexSupportTarget): {
   if (release.draft || release.prerelease) throw new Error("The latest Codex release is not a stable release");
   const tag = String(release.tag_name ?? "");
   const version = tag.match(/^rust-v(\d+\.\d+\.\d+)$/)?.[1];
-  if (!version || compareCodexVersions(version, CODEX_APP_SERVER_MIN_VERSION) < 0) {
-    throw new Error(`The latest official Codex release (${tag || "unknown"}) is not compatible with GPT-5.6`);
+  if (!version || compareCodexVersions(version, minimumVersion) < 0) {
+    throw new Error(`The latest official Codex release (${tag || "unknown"}) does not meet required App Server >= ${minimumVersion}`);
   }
   const asset = release.assets?.find((candidate) => candidate.name === target.archiveName);
   const size = Number(asset?.size ?? 0);

@@ -2,6 +2,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 
+import { estimateTokens } from "../core/agent-constants.ts";
 import { validChatGptCredentials } from "./chatgpt-auth.ts";
 import {
   discoverCodexSupport,
@@ -451,10 +452,11 @@ function toolResultContent(observation: string | any[]): { contentItems: any[]; 
   return { contentItems: contentItems.length ? contentItems : [{ type: "inputText", text: "(no output)" }], success: true };
 }
 
-function realtimeInitialItems(messages: any[]): Array<{ role: "user" | "assistant"; text: string }> {
+const MAX_REALTIME_INITIAL_TOKENS = 8_192;
+
+export function realtimeInitialItems(messages: any[]): Array<{ role: "user" | "assistant"; text: string }> {
   const items: Array<{ role: "user" | "assistant"; text: string }> = [];
-  let remaining = 12_000; // headroom for UTF-8 text under App Server's 8,192 estimated-token ceiling
-  for (let index = messages.length - 1; index >= 0 && items.length < 64 && remaining > 0; index--) {
+  for (let index = messages.length - 1; index >= 0 && items.length < 64; index--) {
     const role = messages[index]?.role;
     if (role !== "user" && role !== "assistant") continue;
     const content = messages[index]?.content;
@@ -465,11 +467,32 @@ function realtimeInitialItems(messages: any[]): Array<{ role: "user" | "assistan
         : "").trim();
     if (!text) continue;
     const bounded = text.length <= 4_000 ? text : `${text.slice(0, 3_000)}\n... [trimmed for realtime] ...\n${text.slice(-900)}`;
-    const fitted = bounded.slice(0, remaining);
+    const fitted = fitRealtimeText(role, bounded, items);
+    if (!fitted) break;
     items.unshift({ role, text: fitted });
-    remaining -= fitted.length;
   }
   return items;
+}
+
+function fitRealtimeText(
+  role: "user" | "assistant",
+  text: string,
+  newerItems: Array<{ role: "user" | "assistant"; text: string }>,
+): string {
+  const fits = (candidate: string) => estimateTokens([
+    { role, content: candidate },
+    ...newerItems.map((item) => ({ role: item.role, content: item.text })),
+  ]) <= MAX_REALTIME_INITIAL_TOKENS;
+  if (fits(text)) return text;
+  const points = Array.from(text);
+  let low = 0;
+  let high = points.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (fits(points.slice(0, mid).join(""))) low = mid;
+    else high = mid - 1;
+  }
+  return points.slice(0, low).join("");
 }
 
 function dynamicToolAudioUrl(part: any): string | null {

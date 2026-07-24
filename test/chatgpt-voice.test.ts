@@ -6,11 +6,13 @@ import { join } from "node:path";
 import {
   ChatGptVoiceSession,
   friendlyVoiceError,
+  realtimeInitialItems,
   type VoiceCodexClientFactory,
   type VoiceEvent,
 } from "../src/adapters/chatgpt-voice.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import type { CodexAppServerHandlers } from "../src/adapters/codex-app-server.ts";
+import { estimateTokens } from "../src/core/agent-constants.ts";
 
 const oldHome = process.env.HOME;
 const oldProfile = process.env.USERPROFILE;
@@ -41,6 +43,23 @@ afterEach(async () => {
 function nextMessage(ws: WebSocket): Promise<any> {
   return new Promise((resolve) => ws.addEventListener("message", (event) => resolve(JSON.parse(String(event.data))), { once: true }));
 }
+
+test("realtime history stays inside the token budget for dense non-ASCII text", () => {
+  const cjk = "\u754c".repeat(4_000);
+  const items = realtimeInitialItems([
+    { role: "system", content: cjk },
+    ...Array.from({ length: 12 }, (_, index) => ({
+      role: index % 2 ? "assistant" : "user",
+      content: cjk,
+    })),
+    { role: "tool", content: cjk },
+  ]);
+  const estimated = estimateTokens(items.map((item) => ({ role: item.role, content: item.text })));
+  expect(estimated).toBeLessThanOrEqual(8_192);
+  expect(items.length).toBeGreaterThan(0);
+  expect(items.length).toBeLessThanOrEqual(64);
+  expect(items.every((item) => item.role === "user" || item.role === "assistant")).toBe(true);
+});
 
 test("subscription voice keeps consent in the browser and negotiates WebRTC through App Server", async () => {
   setupAuth();
