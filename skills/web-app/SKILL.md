@@ -1,7 +1,7 @@
 ---
 name: web-app
-description: Build a real production full-stack app (dashboard, auth, CRUD, data): spec, architecture, UI, API, DB, tests, ship.
-match: (build|create|make|develop).{0,40}(web ?app|full[ -]?stack|dashboard|admin panel|saas|crud app|web platform|internal tool)|app with (a )?(login|auth|dashboard|database)|production app|full stack (app|application)
+description: Build any real web frontend right - a website, landing/marketing page, portfolio, OR a full-stack app (dashboard/auth/CRUD/DB) - with a committed design system + full SEO.
+match: (build|create|make|develop).{0,40}(web ?app|full[ -]?stack|dashboard|admin panel|saas|crud app|web platform|internal tool|web ?site|landing[ -]?page|marketing site|home ?page|portfolio site)|app with (a )?(login|auth|dashboard|database)|production app|full stack (app|application)
 ---
 
 # Web-app engine — build a production full-stack app, done properly
@@ -10,6 +10,13 @@ Use when the user wants a REAL application to keep and run - "build an app with 
 a SaaS, an admin panel, an internal tool - not a timed hackathon demo. Same disciplines as
 `hackathon-engine`, opposite optimization: here the goal is **correct, complete, maintainable, and
 secure**, not "polished in 48h and cut everything unscored". Nothing ships on assumption.
+
+## Scale to the actual deliverable
+This skill spans a spectrum. A **static/marketing page** (a landing, a lab/org site, a portfolio — no data,
+no auth) runs ONLY the design + copy + SEO + responsive steps (3, the frontend of 4, and 7) — do NOT
+fabricate a database, backend, or auth it doesn't need. A **full data app** (dashboard, login, CRUD) runs
+the whole flow. Either way: **commit to an aesthetic direction first** (`design-engine.md` Law 0 — honor the
+user's house style if they have one) and **ship a complete SEO `<head>`** on any public page (`seo.md`).
 
 ## The mindset shift (vs hackathon-engine)
 - **Completeness over a demo path.** Real auth, real data, edge cases, empty/error/loading states, input
@@ -28,9 +35,12 @@ secure**, not "polished in 48h and cut everything unscored". Nothing ships on as
 2. **Architecture.** Choose the stack (a golden stack from `hackathon-engine/references/golden-stacks.md`
    tuned for production), the data store, the auth approach, the deploy target. Design the **data model
    first** with the `sql` skill (schema, keys, constraints, indexes, migrations).
-3. **Design system.** Read `hackathon-engine/references/design-engine.md` (+ `motion.md`) - a real token
-   system, accessible, both themes, no AI-slop. A dashboard is information design (scan + operate), a
-   marketing page is persuasion - treat them differently. GATE: approve the visual direction.
+3. **Design system.** Read `hackathon-engine/references/design-engine.md` (+ `motion.md`). **Commit to ONE
+   aesthetic direction first (Law 0)** — if the user named a house style or reference ("like x.ai", "stoic /
+   khắc kỷ đen lạnh"), that IS the direction, honor it exactly; else pick one deliberately and avoid the
+   2026 AI-slop clusters. Then a real token system, accessible, both themes, derived on EVERY region incl.
+   nav + footer. A dashboard is information design (scan + operate), a marketing page is persuasion - treat
+   them differently. GATE: approve the visual direction.
 4. **Build, vertical slice by slice.** One flow end to end (UI -> API -> DB -> back) before widening.
    - API/server: `hackathon-engine/references/backend.md` - contract-first, auth (JWT/session), validate
      every input, consistent errors, idempotency, rate-limit.
@@ -45,7 +55,8 @@ secure**, not "polished in 48h and cut everything unscored". Nothing ships on as
    private endpoint, validated inputs, least privilege, safe errors. Verify a control by trying to break it.
 7. **Ship & observe.** `docker` skill + `hackathon-engine/references/devops.md` - containerize,
    build->test->deploy, migrations in the pipeline, rollback, structured logs + an error signal.
-   `references/seo.md` if it's a public marketing surface.
+   For ANY public page, ship the complete SEO `<head>` from `references/seo.md` (title/description, canonical,
+   robots, full Open Graph + Twitter, JSON-LD, favicon) — not optional, it's part of a real page.
 
 ## Research & staying current
 For anything where the best approach or a library choice is uncertain or fast-moving, use the

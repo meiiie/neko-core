@@ -20,6 +20,42 @@ you're invisible in both.
 - **Descriptive, stable URLs** (`/pricing`, not `/p?id=3`). **Canonical tag** to avoid duplicate URLs.
 - **Alt text** on meaningful images (accessibility + image search).
 
+## Copy-paste: the complete `<head>` (then fill the REAL values)
+A real page ships this whole block, not just `<title>` + description. Replace every placeholder; pick the
+JSON-LD `@type` that fits (Organization / SoftwareApplication / Product / EducationalOrganization / Event…).
+```html
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Primary value + Brand — ≤ 60 chars</title>
+<meta name="description" content="~150 chars a human would click.">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0b0d">
+<link rel="canonical" href="https://example.com/">
+<!-- Open Graph (og:image = a real 1200x630) -->
+<meta property="og:type" content="website">
+<meta property="og:locale" content="vi_VN">
+<meta property="og:site_name" content="Brand">
+<meta property="og:title" content="Primary value + Brand">
+<meta property="og:description" content="Share-preview sentence.">
+<meta property="og:url" content="https://example.com/">
+<meta property="og:image" content="https://example.com/og-cover.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Primary value + Brand">
+<meta name="twitter:description" content="Share-preview sentence.">
+<meta name="twitter:image" content="https://example.com/og-cover.png">
+<!-- Inline SVG favicon (no extra request) -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a0b0d'/%3E%3C/svg%3E">
+<script type="application/ld+json">
+{ "@context": "https://schema.org", "@type": "Organization",
+  "name": "Brand", "url": "https://example.com/", "description": "One honest sentence." }
+</script>
+```
+When you can't host a real `og:image`/domain yet (a local file), still emit the tags with a plausible
+placeholder URL and say so — the tag STRUCTURE is the deliverable; the real asset is filled at deploy.
+
 ## Structured data (helps both search + AI parse you)
 - Add JSON-LD `schema.org` for the page type: `SoftwareApplication`/`Product`, `Organization`,
   `FAQPage`, `BreadcrumbList` as relevant. This is the machine-readable feed answer-engines read.

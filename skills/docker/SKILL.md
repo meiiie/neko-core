@@ -1,6 +1,6 @@
 ---
 name: docker
-description: Build, run, ship, and debug containers well - small secure images, compose, GPU passthrough, registry push. Includes the neko sandbox gotcha.
+description: Build, run, ship, and debug containers - small images, compose, GPU, registry push; incl. neko's sandbox daemon gotcha.
 match: (docker|dockerfile|docker-?compose|container(ize|ise)?|buildx|image.{0,20}(build|push|pull)|docker hub|registry|\.dockerignore|nvidia-?container)
 ---
 

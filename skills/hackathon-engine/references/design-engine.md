@@ -6,7 +6,44 @@ purple→blue gradient, centered hero, four rounded cards. Great UI is a **syste
 applied consistently. This file turns "good taste" into rules you can apply mechanically. Follow them
 literally; do not improvise off-scale values.
 
+> **Before you build:** a polished page is a LARGE file. Ship it in chunks — skeleton + tokens first, then
+> one section per `edit` — never in a single giant `write_file`. See **"Shipping the file"** at the bottom.
+> A one-shot write of the whole page truncates or times out on real endpoints; small sequential writes don't.
+
 ## The 7 laws (apply in this order)
+
+### Law 0 — Commit to ONE aesthetic direction FIRST (before any token)
+A clean token system with no committed *direction* still defaults into the statistical median — which
+reads as "AI slop" even when the spacing and type are correct. **Pick ONE direction and state it out loud
+before choosing tokens.** Each direction implies its own tokens:
+
+- **Stoic / cold** (x.ai, Linear-dark): near-black ground (`#0a0b0d`), **hairline borders not shadows**, ONE
+  cold restrained accent (or pure monochrome), tight grotesk + mono labels, pill-outline buttons, huge
+  negative space, weight 400–500. Austere, confident, technical.
+- **Brutalist / structural**: stark black-on-white, heavy grotesk, visible grid, radius 0, oversized type,
+  one loud accent. Raw, editorial-tech.
+- **Editorial serif (warm)**: cream/paper ground, display serif + humanist sans, generous measure, one warm
+  accent. ⚠️ cream + serif + terracotta is the **#1 AI-design cluster** — choose it only deliberately and
+  push it somewhere genuinely distinctive, never as the default.
+- **Warm humanist**: soft off-white, rounded humanist sans, gentle accent, friendly radius. Consumer/approachable.
+- **Technical / instrument**: mono-forward, data/coordinate labels, hairline rules, a single signal color.
+  Fits tools, dashboards, engineering/scientific subjects.
+- **Maximal / expressive**: a saturated brand world, bold type mixing, motion-forward — needs elaborate
+  execution or it reads chaotic.
+
+Rules: **(1) The user's own words win.** If they name a house style or a reference — "like x.ai", "khắc kỷ
+đen lạnh / stoic", "brutalist" — that IS the direction; honor it exactly, don't substitute your own taste.
+**(2) Pick ONE**, don't blend three. **(3) State the direction + its tokens before building**, and derive
+EVERY region from it — hero, nav, AND footer. The footer is where AI pages drift back to a generic dark bar;
+instead anchor it with a **signature oversized wordmark/logotype** (an outlined or low-contrast brand mark
+spanning the width, x.ai / Grok / Linear-style) above a hairline row of links + a mono coordinate/legal line.
+**(4) Distinctiveness = ONE bold move on a restrained base**, not decoration everywhere.
+
+> **Avoid the 2026 AI-design clusters** (a clean page that lands in one still reads as slop): warm cream +
+> serif display + terracotta accent · near-black with a lone acid-green/vermilion pop · Inter (or Space
+> Grotesk) as the "safe" face · purple→blue gradient hero on white · four identical rounded cards, centered
+> everything, `rounded-lg` + accent-rail on every card · emoji as section markers. Where nothing is
+> specified, don't spend that freedom landing on one of these.
 
 ### Law 1 — Design in grayscale first, add color last
 Build the whole layout in black / white / grays. This forces hierarchy to come from **spacing, size,
@@ -162,6 +199,29 @@ The elite formula: a reference-grade system (Geist-level tokens) + craft typogra
 (`motion.md`) + ruthless restraint (Deference). Distinctiveness comes from ONE bold move (a signature
 type treatment, one saturated color, one memorable interaction) on a disciplined, restrained base — not
 from decorating everything.
+
+## Shipping the file — build it in CHUNKS, never one giant write (READ THIS)
+
+A polished single-file page is large — often 800–1500 lines, 20–40k output tokens. **Do NOT emit the whole
+file in a single `write_file` call.** A large tool-call argument is fragile on real model endpoints: some
+buffer the entire argument and compose it silently, so one huge write either **truncates at the output-token
+limit** (the file never lands) or **stalls the stream past the idle timeout** (the run dies mid-write). This
+is not a model-quality problem — it is a delivery problem, and the fix is mechanical:
+
+1. **Skeleton first (one write).** `write_file` a **complete production `<head>`** (this is part of shipping a
+   real page, not optional — see `seo.md` for the copy-paste block: `<title>` + description, canonical, robots,
+   theme-color, full Open Graph + Twitter, a JSON-LD block, a favicon), then the `@font-face`/font `<link>`, the
+   FULL `:root` design tokens for BOTH themes, the reset, and base typography — and a `<body>` whose sections are
+   present but EMPTY — `<section id="hero"></section>`, `<section id="about"></section>`, … This single write
+   locks in the design system, the SEO head, and the document skeleton.
+2. **One section per edit.** Fill each `<section>` with its own `edit` call — hero, then about, then the
+   research areas, and so on. Each call generates only a few hundred lines → it streams fast, never truncates,
+   never times out.
+3. **Verify as you go.** After the skeleton, and every couple of sections, read the file back to confirm it is
+   still valid and self-contained.
+
+Rule of thumb: **if a single write would exceed ~300 lines, split it.** Small, sequential writes are not a
+compromise on quality — they are how you reliably ship a big, polished file on ANY model or endpoint.
 
 ## Go deeper (sources worth reading if time allows)
 - *Refactoring UI* (Wathan & Schoger) — the canonical systems approach this file distills.
