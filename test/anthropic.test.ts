@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { addCacheBreakpoints, anthropicThinkingPolicy, AnthropicProvider, extractJsonLoose, parseMessage, stripCacheBreakpoints, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
+import { addCacheBreakpoints, ANTHROPIC_DEFAULT_MAX_TOKENS, anthropicMaxTokensLimit, anthropicThinkingPolicy, AnthropicProvider, extractJsonLoose, isRetryableStreamStall, parseMessage, stripCacheBreakpoints, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
 import { SESSION_CONTEXT_MARK } from "../src/core/agent-constants.ts";
 
@@ -13,6 +13,48 @@ test("thinkingBudget maps the effort ladder; off/unset => 0 (no extended thinkin
   expect(thinkingBudget("high")).toBeGreaterThan(thinkingBudget("medium"));
   expect(thinkingBudget("xhigh")).toBeGreaterThan(thinkingBudget("high"));
   expect(thinkingBudget("max")).toBeGreaterThan(thinkingBudget("xhigh"));
+});
+
+test("anthropicMaxTokensLimit reads a model's real output cap out of the 400 body (else null)", () => {
+  expect(anthropicMaxTokensLimit("max_tokens: 40192 > 8192, which is the maximum allowed number of output tokens for claude-x")).toBe(8192);
+  expect(anthropicMaxTokensLimit('{"error":{"message":"max_tokens: 32768 > 16384"}}')).toBe(16384);
+  expect(anthropicMaxTokensLimit("the maximum allowed number of output tokens is 4096")).toBe(4096);
+  expect(anthropicMaxTokensLimit("HTTP 500: upstream overloaded")).toBeNull();
+});
+
+test("AnthropicProvider: unset max_tokens => generous default, and a smaller model cap self-heals via the 400", async () => {
+  const orig = globalThis.fetch;
+  const sent: any[] = [];
+  let call = 0;
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    sent.push(JSON.parse(String(init?.body ?? "{}")));
+    if (++call === 1) {
+      // A model whose real cap is 8192 rejects our generous default and NAMES the limit.
+      return new Response(JSON.stringify({ type: "error", error: { type: "invalid_request_error",
+        message: "max_tokens: 32768 > 8192, which is the maximum allowed number of output tokens for glm-mini" } }), { status: 400 });
+    }
+    return Response.json({ type: "message", role: "assistant", content: [{ type: "text", text: "ok" }], usage: { input_tokens: 5, output_tokens: 2 } });
+  }) as typeof fetch;
+  try {
+    const cfg = new NekoConfig(
+      { provider: "anthropic", base_url: "https://api.z.ai/api/anthropic", model: "glm-mini", max_retries: 0 },
+      "zai", { zai: { key_env: "ZAI_API_KEY" } }, "secret",
+    );
+    const out = await new AnthropicProvider(cfg).complete([{ role: "user", content: "hi" }]);
+    expect(sent[0].max_tokens).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS); // no per-provider config needed
+    expect(sent[1].max_tokens).toBe(8192);                          // clamped to the cap the model advertised
+    expect(out.content).toBe("ok");
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("isRetryableStreamStall: an idle/timeout abort retries; a clean disconnect or plain error does not", () => {
+  expect(isRetryableStreamStall(new DOMException("Idle timeout", "TimeoutError"))).toBe(true);
+  expect(isRetryableStreamStall(new DOMException("aborted", "AbortError"))).toBe(true);
+  expect(isRetryableStreamStall(new Error("anthropic stream disconnected before message_stop"))).toBe(false);
+  expect(isRetryableStreamStall(new Error("HTTP 400: bad request"))).toBe(false);
+  expect(isRetryableStreamStall(null)).toBe(false);
 });
 
 test("current Claude models use adaptive thinking while compatible endpoints keep manual budgets", () => {

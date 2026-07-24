@@ -57,8 +57,17 @@ export const DEFAULTS: Record<string, any> = {
   base_url: "https://integrate.api.nvidia.com/v1",
   max_steps: 40,
   temperature: 0,
-  max_tokens: 8192, // headroom so a large file write isn't truncated mid-tool-call (was 2048)
-  timeout_seconds: 120,
+  // 0 = AUTO (the correct default). On OpenAI-compat + responses APIs the field is then OMITTED, so the
+  // model uses its FULL native output budget -> a large single-shot file write is never truncated mid-tool-call.
+  // The anthropic provider (where max_tokens is REQUIRED) substitutes ANTHROPIC_DEFAULT_MAX_TOKENS and self-heals
+  // downward if a model's real cap is smaller. A hardcoded default (was 8192) silently capped EVERY provider and
+  // defeated the intended "omit -> full budget" path; set a positive value in a profile/config to cap output.
+  max_tokens: 0,
+  // IDLE timeout (resets on every streamed byte), NOT a total request cap. It only fires on genuine silence,
+  // so it must tolerate a provider that BUFFERS a large tool_use argument (e.g. z.ai/GLM composes a big
+  // write_file JSON server-side, streaming nothing for a while) — 120s killed those legitimate large writes.
+  // A real network drop is caught separately (fetch error -> offline retry), so a generous idle window is safe.
+  timeout_seconds: 300,
   bash_timeout_cap_ms: 600_000, // per-command ceiling; eval/sandbox profiles may fail fast with a lower cap
   max_retries: 4,
   retry_base_delay_seconds: 1.5,
@@ -159,6 +168,10 @@ export const DEFAULTS: Record<string, any> = {
       image_long_edge: 2576,
       image_max_bytes: 4_500_000,
     },
+    // NOTE: vision is intentionally OFF. The z.ai GLM Coding Plan endpoint is TEXT-ONLY — sending image
+    // content returns HTTP 400 ("messages.content.type ... allowed values: ['text']"). vision:true here would
+    // make read_file hand images to a model that rejects them. For document/image OCR with GLM, neko must fall
+    // back to on-screen OCR; for true image understanding, use a vision endpoint (claude/gemini/kimi profiles).
     zai: { provider: "anthropic", base_url: "https://api.z.ai/api/anthropic", model: "glm-4.6", key_env: "ZAI_API_KEY" },         // GLM Coding Plan quota
     "zai-openai": { provider: "openai_compat", base_url: "https://api.z.ai/api/paas/v4", model: "glm-4.6", key_env: "ZAI_API_KEY" }, // Z.ai pay-as-you-go
     // Most hosted providers are OpenAI-compatible -> a profile, not new code. Set your model with /model.
@@ -366,7 +379,7 @@ export class NekoConfig {
   }
   get maxSteps(): number { return Math.max(1, Number(this.data.max_steps ?? 40)); }
   get temperature(): number { return Number(this.data.temperature ?? 0); }
-  get maxTokens(): number { return Number(this.data.max_tokens ?? 8192); }
+  get maxTokens(): number { return Number(this.data.max_tokens ?? 0); } // 0 = auto: omit where allowed, see DEFAULTS.max_tokens
   /** Context window for the ACTIVE model: per-model `model_context[<id>]` wins, else the global
    * `context_window`, else a safe default. Per-model so `/model` switching stays accurate. */
   get contextWindow(): number {
@@ -548,7 +561,7 @@ export class NekoConfig {
     if (!h || typeof h !== "object") return {};
     return { preToolUse: h.pre_tool_use, postToolUse: h.post_tool_use };
   }
-  get timeoutSeconds(): number { return Number(this.data.timeout_seconds ?? 120); }
+  get timeoutSeconds(): number { return Number(this.data.timeout_seconds ?? 300); } // idle window; see DEFAULTS.timeout_seconds
   get bashTimeoutCapMs(): number {
     const value = Number(this.data.bash_timeout_cap_ms ?? 600_000);
     return Number.isFinite(value) ? Math.min(600_000, Math.max(1_000, value)) : 600_000;
