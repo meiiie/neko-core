@@ -47,6 +47,10 @@ test("voice launches App Server with the gated realtime feature enabled", () => 
   )).toEqual(["app-server", "--enable", "realtime_conversation", "--listen", "stdio://"]);
   expect(codexAppServerArguments(
     { path: "codex-app-server.exe", kind: "app-server", source: "managed", version: "0.144.1" },
+    { enableRealtimeConversation: true },
+  )).toEqual(["-c", "features.realtime_conversation=true", "--listen", "stdio://"]);
+  expect(codexAppServerArguments(
+    { path: "codex-app-server.exe", kind: "app-server", source: "managed", version: "0.144.1" },
     {},
   )).toEqual(["--listen", "stdio://"]);
 });

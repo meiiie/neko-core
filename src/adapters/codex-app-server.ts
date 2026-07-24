@@ -383,7 +383,7 @@ export interface StartCodexAppServerOptions {
   codexHome?: string;
   /** Subscription-only callers remove API credentials so no upstream fallback can create API charges. */
   forbidApiBilling?: boolean;
-  /** Voice is an App Server feature flag in Codex 0.144; experimentalApi alone does not enable it. */
+  /** Voice is an App Server feature flag; experimentalApi alone does not enable it. */
   enableRealtimeConversation?: boolean;
 }
 
@@ -392,7 +392,10 @@ export function codexAppServerArguments(
   options: StartCodexAppServerOptions,
 ): string[] {
   const args = executable.kind === "cli" ? ["app-server"] : [];
-  if (options.enableRealtimeConversation) args.push("--enable", "realtime_conversation");
+  if (options.enableRealtimeConversation) {
+    if (executable.kind === "cli") args.push("--enable", "realtime_conversation");
+    else args.push("-c", "features.realtime_conversation=true");
+  }
   args.push("--listen", "stdio://");
   return args;
 }

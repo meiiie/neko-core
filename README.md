@@ -136,7 +136,7 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > Fallback if the domain is unreachable: swap the URL for
 > `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
-**Current release: [v0.15.1](https://github.com/meiiie/neko-core/releases/tag/v0.15.1).**
+**Current release: [v0.15.2](https://github.com/meiiie/neko-core/releases/tag/v0.15.2).**
 Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
 real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). **Pin or roll back any time**
 (the pin holds — auto-update won't undo it): `neko update 0.9.0`, or at install time
@@ -245,8 +245,9 @@ the operating system's data policy applies) and reports the backend error honest
 expose remaining Voice quota through this
 experimental Codex surface, so `/usage` shows session duration and the last limit/error instead of inventing
 a remaining percentage. The existing GPT-5.6 Support Pack already contains this protocol; voice adds no second
-download. The current owner's real WebRTC test reaches ChatGPT but receives HTTP 404 from the experimental
-subscription endpoint, so this Lab path must not be presented as equivalent to the official ChatGPT Voice UI.
+download. On 2026-07-24, the owner's real ChatGPT account completed the WebRTC handshake and reached `LIVE`
+on negotiated Realtime V3 with Codex App Server 0.145.0. This remains a Lab integration over an experimental
+App Server surface: account rollout and workspace settings still apply, and it is not the public Realtime API.
 
 When `/model` needs the component, Neko asks before downloading anything. You can also manage it directly:
 

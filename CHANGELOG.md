@@ -6,6 +6,17 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.2] — 2026-07-24
+
+### Fixed
+
+- GPT-Live now starts correctly with the managed standalone Codex App Server Support Pack. Neko passes the
+  realtime feature gate as a config override to the standalone binary while retaining the native `--enable`
+  flag for a full Codex CLI installation.
+- The `/voice` flow and consent page now name the live-tested path accurately as **GPT-Live via Codex
+  Realtime V3 (Lab)**. A real ChatGPT account completed `starting -> waiting -> connecting -> LIVE (v3) ->
+  stopped` with Codex App Server 0.145.0, no browser console errors, and no paid API-key fallback.
+
 ## [0.15.1] — 2026-07-24
 
 ### Security

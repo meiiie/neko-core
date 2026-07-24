@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-24) — v0.15.1 release
+## Current status (2026-07-24) — v0.15.2 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -15,13 +15,16 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   accepting WebRTC, seeds a bounded recent conversation tail, and preserves Neko's existing approval boundary
   for delegated tools. There is no silent V2 downgrade or paid Realtime API fallback.
 
-- **Branch:** `main`. **Current release: v0.15.1 (2026-07-24)** - The v0.15.1 review hotfix requires an
+- **Branch:** `main`. **Current release: v0.15.2 (2026-07-24)** - GPT-Live now completes a real-account
+  WebRTC handshake through Codex App Server 0.145.0 and negotiates Realtime V3. The standalone Support Pack
+  receives its feature gate through the supported config override, while CLI-based App Server launches retain
+  their native flag. The v0.15.1 review hotfix requires an
   explicit first browser pairing before autonomous attach, closes the active-tab race, token-budgets CJK
   realtime history, and enforces the Voice App Server minimum during installation. Neko adds a Lab-grade ChatGPT
   Realtime V3 subscription bridge with explicit protocol negotiation and no paid API fallback, plus an
   autonomous single-tab browser attach path with a persistent user switch, bounded retry, cancellation-safe
   emergency detach, and separately governed interaction capabilities. Voice availability still depends on the
-  user's ChatGPT rollout and is not presented as universally live-verified. The v0.14 meeting release remains
+  user's ChatGPT rollout and workspace policy and is not presented as a public Realtime API. The v0.14 meeting release remains
   the consent-first local meeting
   companion: browser/OS-selected system audio plus a separate microphone channel streams to bounded local WAV,
   a verified optional whisper.cpp pack transcribes Vietnamese, and timestamped evidence is paged into context for
@@ -408,7 +411,7 @@ cost/token tracking · MCP client · single-binary distribution.
   close-tab, stop, logout, support management, and exit all tear down media and App Server. Dynamic tool
   calls return through Neko's existing approval boundary, duplicate call ids are idempotent, API-key env is
   removed from the subscription-only child, and no paid API fallback exists. `/usage` reports measured voice
-  duration/last limit while naming the upstream quota-visibility gap. Stable Codex 0.144.1 + the owner's real
-  OAuth account passed thread/voice discovery; a genuine WebRTC offer then reached ChatGPT's experimental
-  subscription endpoint and received HTTP 404. Keep the Lab path for rollout detection, not as a promise of
-  GPT-Live parity.
+  duration/last limit while naming the upstream quota-visibility gap. Codex App Server 0.145.0 + the owner's
+  real OAuth account completed a genuine WebRTC handshake and negotiated Realtime V3 on 2026-07-24. Keep the
+  path labeled Lab because the App Server surface remains experimental and availability is account/workspace
+  dependent.
