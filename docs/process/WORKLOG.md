@@ -3,6 +3,25 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-24 - v0.16.0 terminal-native GPT-Live
+
+- Verified against the exact official `rust-v0.145.0` protocol that Realtime V3 supports socket transport,
+  PCM `thread/realtime/appendAudio`, streamed `thread/realtime/outputAudio/delta`, and BEM Codex response
+  handoff. The existing Support Pack is sufficient; no version spoofing or paid API fallback is involved.
+- Added a bounded Windows audio adapter using available `ffmpeg`/`ffplay`, physical-input preference, explicit
+  user start, mute, playback interruption, and complete process cleanup. `/voice` now prefers this no-tab path
+  when ready and retains the existing WebRTC page as compatibility fallback.
+- Realtime tools still enter `Agent.executeExternalTool`, preserving the normal tool renderer, approval gate,
+  sandbox, path containment, and audit. Final transcript parts are persisted for typed/resumed continuity;
+  deltas and audio are not.
+- Promoted the Ink status card into a real control surface. Mute/Unmute and Stop use FrameDiffer's painted-frame
+  hit targets, show hover feedback, never steal clicks from approvals/pickers/viewers/find, and retain Alt+M,
+  Alt+X, and slash-command keyboard equivalents. A full virtual-terminal test clicks both controls and verifies
+  the prompt caret is untouched.
+- Release evidence: **803/803 tests, 3,478 assertions, 86 files**; TypeScript 7 and 5.9 clean; policy PASS;
+  production build, UI probe, real-PTY input, and ConPTY ghost/typing x3 PASS; scroll bench 13 ms first response /
+  154 ms settle; physical Realtek microphone null-sink capture PASS; changed-file secret scan and diff check PASS.
+
 ## 2026-07-24 - GPT-Live Realtime V3 live verification
 
 - Confirmed from the official ChatGPT/Codex documentation and the Codex 0.145.0 protocol that ChatGPT Voice is

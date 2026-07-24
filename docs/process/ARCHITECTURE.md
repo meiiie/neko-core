@@ -278,13 +278,18 @@ The separate Open ChatGPT route opens the official ChatGPT Voice web surface as 
 not integrate that consumer tab into Neko: no cookie/session extraction, DOM automation, private endpoints, or
 claims that GPT-Live is available as a developer API. The App Server route below is explicitly a Lab option.
 
-`adapters/chatgpt-voice.ts` owns the experimental subscription voice session, the official Codex App Server
-WebRTC signaling, and a one-session-capability loopback page. The browser owns microphone consent and the
-`RTCPeerConnection`; it never receives ChatGPT credentials. App Server owns SIWC authentication and the
-realtime sideband. Audio therefore does not pass through or get transcoded by the Neko process. The page is
-served only on `127.0.0.1`, uses a URL-fragment capability that is removed from browser history, authenticates
-both signaling HTTP and the exact-origin WebSocket, and stops on tab close/heartbeat loss. Subscription-only
-spawns remove API-key environment variables, so the adapter cannot silently create API charges.
+`adapters/chatgpt-voice.ts` owns the experimental subscription voice session and both official Codex App Server
+V3 transports. The preferred Windows path delegates bounded PCM16 capture/playback to
+`adapters/native-voice-audio.ts`: `ffmpeg` captures one selected DirectShow input, App Server receives
+`thread/realtime/appendAudio`, and `ffplay` consumes `thread/realtime/outputAudio/delta`. Capture starts only
+after the user selects the terminal mode, no audio is persisted, queues are bounded, transcript-level barge-in
+clears queued playback, and stop/error paths release both processes.
+
+The compatibility path retains WebRTC signaling and a one-session-capability loopback page. The browser owns
+microphone consent and `RTCPeerConnection`; it never receives ChatGPT credentials. The page is served only on
+`127.0.0.1`, removes its URL-fragment capability from browser history, authenticates both signaling HTTP and
+the exact-origin WebSocket, and stops on tab close/heartbeat loss. Subscription-only App Server spawns remove
+API-key environment variables, so neither transport can silently create API charges.
 
 The subscription adapter requires Codex App Server 0.145.0 and requests realtime `v3` explicitly. It does not
 silently downgrade: the WebRTC answer is accepted only after `thread/realtime/started` confirms V3. A bounded
@@ -295,8 +300,11 @@ content stays out of the realtime bootstrap. Dynamic tool audio is forwarded onl
 Voice background tool calls enter core only through `Agent.executeExternalTool`, which wraps the same
 `ToolRegistry`, approval gate, events, path containment, and sandbox used by a normal text turn. The TUI owns
 visible LIVE/mute/transcript state and all lifecycle exits (`/voice stop`, `/logout`, support management,
-unmount). Voice transcript notifications remain an ephemeral presentation stream rather than being inserted
-as incomplete text-only turns into the persisted Agent history.
+unmount). Transcript deltas remain ephemeral presentation state; only finalized user/assistant transcripts are
+mirrored into persisted Agent history, so later text turns and resumed sessions preserve conversational
+continuity without saving partial speech or audio. The LIVE panel reuses FrameDiffer's painted-frame hit targets
+for mouse Mute/Unmute and Stop; approval, picker, viewer, and find surfaces take focus and suppress those targets.
+Alt+M and Alt+X remain keyboard-equivalent controls.
 
 ## Verify loop (the harness)
 

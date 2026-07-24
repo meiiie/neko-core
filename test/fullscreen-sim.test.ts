@@ -291,6 +291,82 @@ test("approval decision keys never leak into the prompt", async () => {
   }
 }, 30000);
 
+test("voice panel mouse controls mute and stop the active session", async () => {
+  const vt = new VirtualTerminal(100, 30);
+  const out = new FakeTtyOut(100, 30, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  const provider: any = { complete: async () => ({ content: "ok", tool_calls: [] }) };
+  let options: any;
+  let snapshot: any = { state: "starting", muted: false };
+  let muteCalls = 0, stopCalls = 0;
+  const control: any = {
+    snapshot: () => snapshot,
+    start: async () => {
+      snapshot = { state: "live", muted: false, startedAt: Date.now(), protocol: "v3", transport: "browser" };
+      options.onEvent?.({ type: "state", snapshot });
+      return { transport: "browser" };
+    },
+    setMuted: (muted: boolean) => {
+      muteCalls++;
+      snapshot = { ...snapshot, state: muted ? "muted" : "live", muted };
+      options.onEvent?.({ type: "state", snapshot });
+    },
+    stop: async () => {
+      stopCalls++;
+      snapshot = { ...snapshot, state: "stopped" };
+      options.onEvent?.({ type: "state", snapshot });
+    },
+  };
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = renderFS(
+    React.createElement(ChatApp as any, {
+      yolo: true,
+      provider,
+      sessionId: "voice-mouse",
+      frameDiffer: differ,
+      preAltDispose,
+      browserVoiceFactory: (next: any) => { options = next; return control; },
+    }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(350);
+  stdin.push("/voice"); await tick(30); stdin.push("\r");
+  for (let waited = 0; waited < 2000 && !vt.text().includes("Voice - choose a mode"); waited += 25) await tick(25);
+  // Native GPT-Live is first only on machines whose local audio probe is ready. The browser
+  // conversational route is otherwise already selected, so at most one Down is needed.
+  if (vt.lines().some((line) => />\s*Start GPT-Live in terminal/.test(line))) {
+    stdin.push("\x1b[B");
+    await tick(50);
+  }
+  stdin.push("\r");
+  for (let waited = 0; waited < 2000 && !vt.text().includes("speak naturally to interrupt"); waited += 25) await tick(25);
+
+  let rows = vt.lines();
+  let row = rows.findIndex((line) => line.includes("Mute") && line.includes("Stop"));
+  expect(row).toBeGreaterThanOrEqual(0);
+  let col = rows[row].indexOf("Mute") + 2; // 1-based, one cell inside the visible control
+  stdin.push(`\x1b[<0;${col};${row + 1}M`);
+  await tick(150);
+  expect(muteCalls).toBe(1);
+  expect(vt.text()).toContain("Unmute");
+
+  stdin.push("\x1bm"); // Alt+M is the keyboard-equivalent control
+  await tick(150);
+  expect(muteCalls).toBe(2);
+  expect(vt.text()).toContain("[ Mute ]");
+
+  rows = vt.lines();
+  row = rows.findIndex((line) => line.includes("Mute") && line.includes("Stop"));
+  col = rows[row].indexOf("Stop") + 2;
+  stdin.push(`\x1b[<0;${col};${row + 1}M`);
+  await tick(200);
+  expect(stopCalls).toBe(1);
+  expect(vt.text()).not.toContain("speak naturally to interrupt");
+  app.unmount();
+  await tick(50);
+}, 30000);
+
 test("slash menu on a SHORT window keeps the input row + first items (chrome never flex-squashed)", async () => {
   // Image #61: typing "/" on a short window opened the slash menu, and Yoga squashed the input chrome -
   // the "> /" input row vanished and the first menu entries (incl. the selected /help) were cut. The

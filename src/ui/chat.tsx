@@ -23,7 +23,7 @@ import { isEscapeResidue, MAX_INPUT_LINES, TextInput } from "./text-input.tsx";
 import { openExternalEditor } from "./external-editor.ts";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
 import { probeSyncOutput, syncOutputDecision, wrapStdoutForSync } from "./sync-stdout.ts";
-import { FrameDiffer } from "./frame-diff.ts";
+import { FrameDiffer, HIT_SENTINEL } from "./frame-diff.ts";
 import { canFullscreen, emergencyRestore, installAltScreenGuard } from "./altscreen.ts";
 import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
@@ -48,6 +48,7 @@ import { compareCodexVersions, discoverCodexSupport } from "../adapters/codex-ap
 import { installCodexSupportPack } from "../adapters/codex-support-pack.ts";
 import { discoverOfficeCli, installOfficeSupportPack, type OfficeSupportStatus } from "../adapters/office-support-pack.ts";
 import { ChatGptVoiceSession, CODEX_VOICE_MIN_VERSION, type ChatGptVoiceControl, type ChatGptVoiceOptions, type VoiceSnapshot } from "../adapters/chatgpt-voice.ts";
+import { discoverNativeVoiceAudio } from "../adapters/native-voice-audio.ts";
 import { BrowserVoiceSession, type BrowserVoiceOptions } from "../adapters/browser-voice.ts";
 import { authChoices, providerChoices } from "../adapters/provider-choice.ts";
 import { type RemoteAction, type RemoteHandlers, startRemoteControl, type RemoteControl, type RemoteUiState } from "../adapters/remote-control.ts";
@@ -258,6 +259,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [reasoning, setReasoning] = useState(""); // live model thinking (shown while busy, then cleared)
   const [voiceSnapshot, setVoiceSnapshot] = useState<VoiceSnapshot | null>(null);
   const [voiceTranscript, setVoiceTranscript] = useState<{ role: string; text: string } | null>(null);
+  const [voiceControlHover, setVoiceControlHover] = useState<"mute" | "stop" | null>(null);
   const [voiceNow, setVoiceNow] = useState(Date.now());
   const reasoningRef = useRef("");
   const toolStreamRef = useRef(""); // streamed tool-call args this turn (counted, not displayed)
@@ -845,6 +847,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const timer = setInterval(() => setVoiceNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [voiceSnapshot?.state, voiceSnapshot?.startedAt]);
+  useEffect(() => {
+    if (!voiceSnapshot || overlay || viewer || approval || search) setVoiceControlHover(null);
+  }, [voiceSnapshot, overlay, viewer, approval, search]);
   // Startup update check (daily-cached, non-blocking). With auto_update ON (the default, claude-code
   // style) a newer release is INSTALLED in the background - selfUpdate stages the download and swaps the
   // binary (Windows: rename-out-of-the-way trick), so it simply takes effect on the next launch; the
@@ -1086,6 +1091,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     if (overlay || viewer || search) return; // let the overlay / viewer / find bar own the rest of the keys (Ctrl+C above still works)
+    if (voiceRef.current && key.meta && char.toLowerCase() === "m") {
+      const voice = voiceRef.current;
+      try { voice.setMuted(!voice.snapshot().muted); }
+      catch (error) { addLine("error", error instanceof Error ? error.message : String(error)); }
+      return;
+    }
+    if (voiceRef.current && key.meta && char.toLowerCase() === "x") {
+      void stopVoice("shortcut");
+      return;
+    }
     if (key.meta && char === "c") {
       if (awaitingKey) { flashCopyNote("draft copy disabled while entering a secret"); return; }
       if (!input) { flashCopyNote("nothing to copy"); return; }
@@ -1232,7 +1247,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   };
 
-  const beginVoice = async () => {
+  const beginVoice = async (transport: "native" | "browser" = "native") => {
     if (voiceRef.current) return addLine("info", "voice is already active - use /voice status, /voice mute, or /voice stop");
     if (!hasChatGptCredentials()) {
       addLine("error", "ChatGPT is not signed in. Run /login > OpenAI > ChatGPT Plus/Pro before using subscription voice.");
@@ -1260,7 +1275,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             minimumVersion: CODEX_VOICE_MIN_VERSION,
             notify: (message) => addLine("info", message),
           })
-            .then(async () => { addLine("info", "Codex Support Pack is ready. Opening the voice consent page..."); await beginVoice(); })
+            .then(async () => {
+              addLine("info", transport === "native"
+                ? "Codex Support Pack is ready. Starting terminal audio..."
+                : "Codex Support Pack is ready. Opening the voice consent page...");
+              await beginVoice(transport);
+            })
             .catch((error) => addLine("error", `Voice Support Pack failed: ${error instanceof Error ? error.message : error}`))
             .finally(() => setBusy(false));
         },
@@ -1278,6 +1298,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     let voice!: ChatGptVoiceControl;
     voice = makeVoice({
       model: /^gpt-/i.test(cfg.model) ? cfg.model : "gpt-5.5",
+      transport,
       tools: agentRef.current!.externalToolSchemas(),
       history: agentRef.current!.messages,
       executeTool: (call) => agentRef.current!.executeExternalTool(call),
@@ -1292,7 +1313,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             voiceRef.current = null;
             setVoiceSnapshot(null);
             setVoiceTranscript(null);
-            addLine("info", voiceErrorShownRef.current ? "Voice session closed; microphone released." : "Voice stopped from the browser; microphone released.");
+            addLine("info", voiceErrorShownRef.current ? "Voice session closed; microphone released." : "Voice stopped; microphone released.");
           }
           return;
         }
@@ -1304,14 +1325,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         }
         const text = event.text.trim();
         setVoiceTranscript(null);
-        if (text) addLine(event.role === "user" ? "user" : "assistant", text);
+        if (text) {
+          const role = event.role === "user" ? "user" : "assistant";
+          addLine(role, text);
+          // Voice owns a separate App Server thread while it is live. Mirror finalized transcripts
+          // into Neko's session so a later text turn or resumed session keeps the conversation.
+          agentRef.current!.messages.push({ role, content: text });
+          persistRef.current();
+        }
       },
     });
     voiceRef.current = voice;
     setVoiceSnapshot({ state: "starting", muted: false });
     try {
-      await voice.start();
-      addLine("info", "Voice page opened in your browser. Microphone is OFF until you press Start voice. Close the tab or use /voice stop to end it.");
+      const started = await voice.start();
+      addLine("info", started.transport === "native"
+        ? "GPT-Live is running inside Neko. Microphone is ON; speak naturally, interrupt at any time, or use /voice mute and /voice stop."
+        : "Voice compatibility page opened. Microphone is OFF until you press Start voice. Close the tab or use /voice stop to end it.");
     } catch (error) {
       if (voiceRef.current === voice) voiceRef.current = null;
       voiceStoppingRef.current = true;
@@ -1326,18 +1356,34 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const openVoicePicker = () => {
     const active = voiceRef.current;
     if (!active) {
+      const nativeAudio = discoverNativeVoiceAudio();
       setOverlay({
         title: "Voice - choose a mode",
         items: [
+          ...(nativeAudio.state === "ready" ? [{
+            id: "chatgpt-native",
+            label: "Start GPT-Live in terminal",
+            detail: `microphone turns on after Enter; duplex V3 + Neko tools; ${nativeAudio.inputDevices.length} input(s)`,
+          }] : []),
           { id: "browser", label: "Neko Conversational Voice", detail: "works now in Chrome/Edge; backchannels + interruption; browser data policy applies" },
           { id: "official", label: "Open ChatGPT", detail: "Voice appears only when available to your account/browser; runs outside Neko" },
-          { id: "chatgpt", label: "GPT-Live via Codex - Lab", detail: "ChatGPT subscription; live-tested Realtime V3; availability varies; never API billing" },
+          {
+            id: "chatgpt-browser",
+            label: "GPT-Live browser compatibility",
+            detail: nativeAudio.state === "ready"
+              ? "same ChatGPT V3/tool harness; browser owns WebRTC and microphone consent"
+              : `same ChatGPT V3/tool harness; ${nativeAudio.detail}`,
+          },
           { id: "dictation", label: "OS Dictation", detail: process.platform === "win32" ? "press Win+H; speech-to-text only, OS data policy applies" : "use the operating system dictation shortcut" },
           { id: "cancel", label: "Cancel", detail: "microphone stays off" },
         ],
         onSelect: (choice) => {
           setOverlay(null);
-          if (choice.id === "browser") void beginBrowserVoice();
+          if (choice.id === "chatgpt-native") {
+            if (nativeAudio.state === "ready") void beginVoice("native");
+            else addLine("error", `${nativeAudio.detail}. Choose GPT-Live browser compatibility instead.`);
+          } else if (choice.id === "chatgpt-browser") void beginVoice("browser");
+          else if (choice.id === "browser") void beginBrowserVoice();
           else if (choice.id === "official") {
             try {
               (openUrl ?? openBrowser)("https://chatgpt.com/");
@@ -1345,8 +1391,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             } catch (error) {
               addLine("error", `Could not open ChatGPT: ${error instanceof Error ? error.message : error}. Open https://chatgpt.com/ manually.`);
             }
-          } else if (choice.id === "chatgpt") void beginVoice();
-          else if (choice.id === "dictation") addLine("info", voiceFallback());
+          } else if (choice.id === "dictation") addLine("info", voiceFallback());
         },
       });
       return;
@@ -1355,7 +1400,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setOverlay({
       title: `${voiceModeRef.current} - ${active.snapshot().state}`,
       items: [
-        { id: "mute", label: muted ? "Unmute microphone" : "Mute microphone", detail: "the browser remains connected" },
+        { id: "mute", label: muted ? "Unmute microphone" : "Mute microphone", detail: "the realtime session remains connected" },
         { id: "status", label: "Show status", detail: "duration and quota visibility" },
         { id: "stop", label: "Stop voice", detail: "release microphone and close the realtime session" },
         { id: "cancel", label: "Back", detail: "keep voice running" },
@@ -1675,7 +1720,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (text === "/voice" || text.startsWith("/voice ")) {
       const action = text.slice("/voice".length).trim().toLowerCase();
       if (!action) { openVoicePicker(); return; }
-      if (action === "start") { await beginBrowserVoice(); return; }
+      if (action === "start") {
+        if (discoverNativeVoiceAudio().state === "ready") await beginVoice("native");
+        else await beginBrowserVoice();
+        return;
+      }
       if (action === "stop" || action === "off") { await stopVoice(); return; }
       if (action === "mute" || action === "unmute") {
         const voice = voiceRef.current;
@@ -2345,6 +2394,33 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       // are consumed here; clicks/wheels fall through to their handlers below.
       const ptr = parseLastPointer(input);
       if (ptr) {
+        // Voice controls use the last PAINTED frame's hit targets, so terminal padding, wrapping,
+        // resize, and Windows display scaling cannot desync the visible button from its click.
+        const voiceControls = Boolean(voiceSnapshot
+          && voiceSnapshot.state !== "stopped"
+          && voiceSnapshot.state !== "error"
+          && !overlay && !viewer && !approval && !search);
+        const voiceZone = voiceControls ? hitIndexAt(ptr.x, ptr.y) : -1;
+        const canMute = voiceSnapshot?.state === "live" || voiceSnapshot?.state === "muted";
+        const voiceAction = voiceZone < 0
+          ? null
+          : canMute
+            ? (voiceZone === 0 ? "mute" : voiceZone === 1 ? "stop" : null)
+            : (voiceZone === 0 ? "stop" : null);
+        if (voiceControls && voiceZone >= 0) {
+          setVoiceControlHover(voiceAction);
+          if (ptr.kind === "press" && ptr.left && voiceAction === "mute") {
+            const voice = voiceRef.current;
+            if (voice) {
+              try { voice.setMuted(!voice.snapshot().muted); }
+              catch (error) { addLine("error", error instanceof Error ? error.message : String(error)); }
+            }
+          } else if (ptr.kind === "press" && ptr.left && voiceAction === "stop") {
+            void stopVoice("pointer");
+          }
+          return; // press/move/release over the panel never moves the prompt caret
+        }
+        if (ptr.kind === "move") setVoiceControlHover(null);
         setPillHover(pillHit(ptr.x, ptr.y));
         if (!search && ptr.kind === "press" && ptr.left) {
           clearSelection();                                                       // a fresh drag drops any old selection
@@ -2555,18 +2631,54 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       ) : null}
 
       {voiceSnapshot && voiceSnapshot.state !== "stopped" && voiceSnapshot.state !== "error" ? (
-        <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor={voiceSnapshot.state === "live" || voiceSnapshot.state === "muted" ? "red" : "cyan"} paddingX={1}>
+        <Box
+          flexDirection="column"
+          marginTop={1}
+          borderStyle="round"
+          borderColor={voiceSnapshot.state === "muted" ? "yellow" : voiceSnapshot.state === "live" ? "green" : "cyan"}
+          paddingX={1}
+        >
           <Text>
-            <Text color={voiceSnapshot.state === "live" || voiceSnapshot.state === "muted" ? "red" : "cyan"} bold>
+            <Text color={voiceSnapshot.state === "muted" ? "yellow" : voiceSnapshot.state === "live" ? "green" : "cyan"} bold>
               {voiceSnapshot.state === "live" || voiceSnapshot.state === "muted" ? "● LIVE" : "VOICE"}
             </Text>
             <Text dimColor>{"  ·  "}</Text>
-            <Text>{voiceSnapshot.state === "muted" ? "muted" : voiceSnapshot.state === "waiting" ? "microphone off - press Start voice in the browser" : voiceSnapshot.state}</Text>
+            <Text>{voiceSnapshot.state === "muted"
+              ? "muted"
+              : voiceSnapshot.state === "waiting"
+                ? "microphone off - press Start voice in the browser"
+                : voiceSnapshot.state}</Text>
             {voiceSnapshot.protocol ? <Text color="cyan">{`  ·  ${voiceSnapshot.protocol.toUpperCase()}`}</Text> : null}
+            {voiceSnapshot.transport ? <Text dimColor>{`  ·  ${voiceSnapshot.transport}`}</Text> : null}
             {voiceSnapshot.startedAt ? <Text dimColor>{`  ·  ${fmtDuration(Math.floor((voiceNow - voiceSnapshot.startedAt) / 1000))}`}</Text> : null}
-            <Text dimColor>{"  ·  /voice mute  ·  /voice stop"}</Text>
           </Text>
           {voiceTranscript?.text ? <Text color="gray" italic>{`${voiceTranscript.role === "user" ? ">" : "Neko:"} ${trunc(voiceTranscript.text, Math.max(20, contentCols - 10))}`}</Text> : null}
+          <Box>
+            {voiceSnapshot.state === "live" || voiceSnapshot.state === "muted" ? (
+              <>
+                <Text
+                  inverse={voiceControlHover === "mute"}
+                  color={voiceControlHover === "mute" ? "black" : "cyan"}
+                  backgroundColor={voiceControlHover === "mute" ? "cyan" : undefined}
+                  bold
+                >
+                  {(fullscreen && !overlay && !viewer && !approval && !search ? HIT_SENTINEL : "")}{`[ ${voiceSnapshot.muted ? "Unmute" : "Mute"} ]   `}
+                </Text>
+              </>
+            ) : null}
+            <Text
+              inverse={voiceControlHover === "stop"}
+              color={voiceControlHover === "stop" ? "white" : "red"}
+              backgroundColor={voiceControlHover === "stop" ? "red" : undefined}
+              bold
+            >
+              {(fullscreen && !overlay && !viewer && !approval && !search ? HIT_SENTINEL : "")}{"[ Stop ] "}
+            </Text>
+            {fullscreen && !overlay && !viewer && !approval && !search ? <Text>{HIT_SENTINEL}</Text> : null}
+          </Box>
+          <Text dimColor>{contentCols < 72
+            ? "speak to interrupt  ·  /voice for controls"
+            : "speak naturally to interrupt  ·  click, Alt+M mute, Alt+X stop"}</Text>
         </Box>
       ) : null}
 

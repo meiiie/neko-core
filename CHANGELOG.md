@@ -6,6 +6,23 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-07-24
+
+### Added
+
+- GPT-Live can run directly inside the Neko terminal on Windows without opening a browser tab. Native
+  microphone PCM streams through Codex App Server Realtime V3, response audio plays locally, and user speech
+  interrupts queued playback.
+- `/voice` keeps browser WebRTC as an explicit compatibility path. Final voice transcripts persist into the
+  Neko session, while delegated tools retain the normal ToolRegistry, approval, sandbox, and audit boundary.
+- The live Ink panel is now a mouse and keyboard control surface: click Mute/Unmute or Stop, or use Alt+M and
+  Alt+X. Hover feedback follows the exact painted frame, and controls yield to approval/picker focus.
+
+### Changed
+
+- The voice picker prefers terminal GPT-Live only when local audio dependencies and a microphone are detected;
+  otherwise it explains the limitation and keeps the tested browser/OS fallbacks available.
+
 ## [0.15.2] — 2026-07-24
 
 ### Fixed

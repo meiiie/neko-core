@@ -50,7 +50,7 @@ export class BrowserVoiceSession implements ChatGptVoiceControl {
     return { state: this.state, startedAt: this.startedAt || undefined, muted: this.muted };
   }
 
-  async start(): Promise<{ url: string }> {
+  async start(): Promise<{ transport: "browser"; url: string }> {
     if (this.server) throw new Error("browser voice session is already started");
     this.emitState("starting");
     this.token = randomBytes(32).toString("base64url");
@@ -79,7 +79,7 @@ export class BrowserVoiceSession implements ChatGptVoiceControl {
     const url = `${this.origin}/#${this.token}`;
     this.emitState("waiting");
     (this.options.openUrl ?? defaultOpenUrl)(url);
-    return { url };
+    return { transport: "browser", url };
   }
 
   setMuted(muted: boolean): void {
