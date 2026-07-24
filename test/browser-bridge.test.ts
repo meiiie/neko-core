@@ -239,6 +239,9 @@ test("browser extension keeps autonomous attach http(s)-scoped and independently
   expect(worker).toContain("armAutoAttachRetry");
   expect(worker).toContain("Boolean(state.token) && state.autoAttach");
   expect(worker).toContain("current?.id === candidateId");
+  expect(worker).toContain("await attachActiveTab(tab, stillCurrent, false)");
+  expect(worker).toContain("if (!allowPairRepair)");
+  expect(worker).toContain("Browser pairing expired - use Attach this tab to Neko again.");
   expect(worker).toContain("if (!state.token) return; // Initial pairing stays behind the explicit Attach action.");
   expect(worker).not.toContain("connect(!state.token)");
   expect(worker.match(/await connect\(true\)/g)).toHaveLength(2); // both are inside explicit attach/re-pair

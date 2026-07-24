@@ -70,7 +70,7 @@ function tryAutoAttach() {
       if (!currentMatches) retryImmediately = true;
       return currentMatches;
     };
-    await attachActiveTab(tab, stillCurrent);
+    await attachActiveTab(tab, stillCurrent, false);
     state.autoAttachUntil = 0;
     disarmAutoAttachRetry();
     await persist();
@@ -240,7 +240,7 @@ function send(message) {
   socket.send(JSON.stringify(message));
 }
 
-async function attachActiveTab(selectedTab = null, shouldContinue = () => true) {
+async function attachActiveTab(selectedTab = null, shouldContinue = () => true, allowPairRepair = true) {
   const [activeTab] = selectedTab ? [selectedTab] : await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = activeTab;
   if (!tab?.id || !/^https?:/.test(tab.url || "")) throw new Error("Open an http(s) tab before attaching");
@@ -252,6 +252,13 @@ async function attachActiveTab(selectedTab = null, shouldContinue = () => true) 
     // A deliberate attach gesture may repair a capability rotated with `neko browser rotate`.
     // Never discard a valid saved capability merely because the bridge is temporarily offline.
     if (!state.token || !/authentication failed/i.test(error?.message || String(error))) throw error;
+    if (!allowPairRepair) {
+      state.session = "";
+      state.token = "";
+      state.autoAttachUntil = 0;
+      await persist();
+      throw new Error("Browser pairing expired - use Attach this tab to Neko again.");
+    }
     state.session = "";
     state.token = "";
     await persist();

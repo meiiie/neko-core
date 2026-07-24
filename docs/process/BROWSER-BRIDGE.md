@@ -63,7 +63,8 @@ Chrome Enterprise policy; that is an administrator contract, not a consumer-inst
 - Initial pairing is available for ten minutes after bridge start and requires the explicit extension
   **Attach** action. Reconnect and autonomous attachment require the saved per-session 256-bit capability;
   restore, startup, alarms, and presence detection never emit an unauthenticated pairing request. The
-  extension stores its autonomous-attach preference separately from that authentication.
+  extension stores its autonomous-attach preference separately from that authentication. If that capability
+  expires or is rotated, an autonomous retry clears it and waits for another explicit **Attach** action.
 - Local HTTP commands require the same bearer capability, cap request/message sizes at 64 KiB, validate
   action names, and time out after 30 seconds.
 - Audit rows contain timestamp/action/status only. They deliberately omit command arguments, typed text,

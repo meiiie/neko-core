@@ -12,6 +12,8 @@ All notable changes to Neko Core are documented here. The format follows
 
 - Autonomous browser attachment now requires a capability created by an explicit first **Attach** action.
   Extension restore, startup, alarms, side-panel presence, and retry paths cannot initiate pairing.
+- An autonomous retry with a rotated or expired capability clears the stale intent and requires another
+  explicit **Attach** action; only a manual attach may enter capability-repair pairing.
 - Auto-attach revalidates the active tab after asynchronous bridge and page setup. Switching tabs while an
   attachment is in flight cancels the stale candidate and immediately retries the new active tab.
 - Browser privacy and Store disclosures now conservatively cover authentication-related, financial, and
