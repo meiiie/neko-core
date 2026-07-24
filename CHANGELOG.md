@@ -6,6 +6,40 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-07-24
+
+### Added
+
+- **Experimental ChatGPT Realtime V3 voice.** The optional Voice Support Pack now uses the official Codex App
+  Server 0.145.0 subscription bridge, explicitly requests protocol V3, rejects silent V2/unknown negotiation,
+  and keeps recent text plus inline audio tool results bounded. Delegated tools still cross Neko's normal
+  permission and audit boundary. This is a Lab feature whose availability depends on the user's ChatGPT
+  account rollout; it is not the public paid Realtime API and Neko does not silently fall back to API billing.
+- **Autonomous browser attachment.** Once the local authenticated bridge is ready, the Neko Browser extension
+  can attach the active visible `http(s)` tab without an extra toolbar click. A persistent popup switch controls
+  this behavior, attachment remains limited to one tab, and read/click/type capabilities stay separately
+  visible and governed. Detach and Emergency Stop always cancel an in-flight attachment.
+- **Browser side-panel continuity.** A newly opened side panel receives a bounded transcript snapshot, and panel
+  prompts enter one FIFO turn queue so two agent turns cannot run concurrently.
+
+### Changed
+
+- Browser auto-attach retries bounded transient failures through tab lifecycle events and a Manifest V3 alarm.
+  The extension requests explicit `http://*/*` and `https://*/*` host access, without cookie, `debugger`,
+  `tabs`, relay, file-page, or `<all_urls>` permission. Existing unpacked installations may require one
+  permission confirmation or reload after upgrading.
+- OCR and Windows computer-use observations now expire when the foreground window, display geometry, or scale
+  changes, preventing stale Set-of-Marks coordinates from being reused against another surface.
+
+### Fixed
+
+- Voice Support Pack installation waits for the App Server compatibility probe to exit and retries transient
+  Windows file-lock cleanup, avoiding the `EBUSY` staging-directory failure.
+- OCR installation no longer breaks on PowerShell quoting; WinRT OCR operations have bounded waits and release
+  native resources on timeout or completion.
+- Sensitive shell payloads are no longer persisted as plaintext command files in `%TEMP%`, and extension
+  reconnect keeps retrying after a temporary attach failure.
+
 ## [0.14.0] — 2026-07-16
 
 ### Added
