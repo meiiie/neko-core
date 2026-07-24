@@ -1276,7 +1276,7 @@ function formatVoiceUsage(): string {
   const seconds = Math.floor(usage.durationMs / 1000);
   const duration = `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
   return [
-    "ChatGPT subscription voice (experimental)",
+    "GPT-Live via Codex Realtime V3 (Lab)",
     `session: ${usage.active ? "LIVE" : "stopped"} - ${duration}`,
     "remaining voice quota: not exposed by the Codex realtime integration",
     usage.lastError ? `last limit/error: ${usage.lastError}` : "",

@@ -668,6 +668,7 @@ test("/voice defaults to conversational browser voice and keeps official/lab rou
     stdin.write("/voice"); await tick(20); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Voice - choose a mode"))).toBe(true);
     expect(lastFrame() ?? "").toContain("Neko Conversational Voice");
+    expect(lastFrame() ?? "").toContain("GPT-Live via Codex - Lab");
     stdin.write("\r");
     const browserStarted = await until(() => /services\s+may\s+process\s+audio\s+online/.test(frames.join("\n")));
     if (!browserStarted) throw new Error(`browser voice did not start:\n${frames.slice(-8).join("\n---\n")}`);

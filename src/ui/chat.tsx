@@ -1245,7 +1245,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       : false;
     if (!voiceReady) {
       setOverlay({
-        title: `ChatGPT subscription voice needs Codex Support Pack >= ${CODEX_VOICE_MIN_VERSION}.`,
+        title: `GPT-Live needs Codex Support Pack >= ${CODEX_VOICE_MIN_VERSION}.`,
         items: [
           { id: "install", label: "Install and continue", detail: "official OpenAI App Server; about 95 MiB download / 270 MiB disk" },
           { id: "dictation", label: "Use OS Dictation", detail: process.platform === "win32" ? "press Win+H; no Neko download and no live voice reply" : "use the operating system dictation shortcut" },
@@ -1268,7 +1268,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
 
-    voiceModeRef.current = "Neko realtime V3 bridge";
+    voiceModeRef.current = "GPT-Live via Codex Realtime V3";
     voiceErrorShownRef.current = false;
     setVoiceTranscript(null);
     // A GPT-5.6 text provider may already own an idle App Server. Recreate it lazily after voice so
@@ -1331,7 +1331,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         items: [
           { id: "browser", label: "Neko Conversational Voice", detail: "works now in Chrome/Edge; backchannels + interruption; browser data policy applies" },
           { id: "official", label: "Open ChatGPT", detail: "Voice appears only when available to your account/browser; runs outside Neko" },
-          { id: "chatgpt", label: "Neko Realtime V3 - Lab", detail: "Codex 0.145+ WebRTC; verified V3; availability varies; never API billing" },
+          { id: "chatgpt", label: "GPT-Live via Codex - Lab", detail: "ChatGPT subscription; live-tested Realtime V3; availability varies; never API billing" },
           { id: "dictation", label: "OS Dictation", detail: process.platform === "win32" ? "press Win+H; speech-to-text only, OS data policy applies" : "use the operating system dictation shortcut" },
           { id: "cancel", label: "Cancel", detail: "microphone stays off" },
         ],

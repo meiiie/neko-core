@@ -3,6 +3,20 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-24 - GPT-Live Realtime V3 live verification
+
+- Confirmed from the official ChatGPT/Codex documentation and the Codex 0.145.0 protocol that ChatGPT Voice is
+  powered by GPT-Live and that the App Server Realtime V3 surface matches Neko's existing WebRTC adapter.
+- A real-account smoke test exposed a launch mismatch: the `codex` CLI accepts
+  `--enable realtime_conversation`, while the standalone `codex-app-server` Support Pack accepts the equivalent
+  config override only. Neko now selects the correct form for each executable and regression-tests both.
+- Verified the complete local consent flow with a fake microphone device: `starting -> waiting -> connecting ->
+  LIVE (v3) -> stopped`, no browser console errors, no API-key fallback, and normal teardown. The UI now names
+  this accurately as `GPT-Live via Codex - Lab` while preserving rollout and experimental-surface disclosures.
+- Evidence: **798/798 tests, 3,440 assertions, 85 files**; TypeScript 7 and 5.9 clean; policy PASS; production
+  build, UI probe, real-PTY input, and ConPTY ghost/typing x3 PASS; scroll bench 12 ms first response / 121 ms
+  settle; changed-line secret scan and diff check PASS.
+
 ## 2026-07-24 - v0.15.1 post-release review hotfix
 
 - Addressed all nine unresolved PR #2 review threads after validating them against the merged source. The
