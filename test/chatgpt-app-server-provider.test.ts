@@ -107,6 +107,61 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
   provider.dispose();
 });
 
+test("prior conversation is injected as Codex-valid response items with an explicit type", async () => {
+  const cfg = setup();
+  const requests: Array<{ method: string; params: any }> = [];
+  let handlers!: CodexAppServerHandlers;
+  const factory: CodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}), close: () => {},
+      request: async (method, params: any) => {
+        requests.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" } };
+        if (method === "turn/start") {
+          setTimeout(() => {
+            handlers.onNotification?.("item/agentMessage/delta", { threadId: "thread-1", delta: "ok" });
+            handlers.onNotification?.("turn/completed", { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } });
+          }, 0);
+          return { turn: { id: "turn-1" } };
+        }
+        return {};
+      },
+    };
+  };
+  const provider = new ChatGptAppServerProvider(cfg, factory);
+  // A conversation carried over from GPT-5.5: user, assistant (with a tool call), tool result, then
+  // the live user turn. Everything before the last message is injected into the fresh thread.
+  await provider.complete(
+    [
+      { role: "system", content: "Be precise." },
+      { role: "user", content: "Improve the DB plan." },
+      { role: "assistant", content: "On it.", tool_calls: [{ id: "call-1", function: { name: "read_file", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "call-1", content: "plan.md contents" },
+      { role: "user", content: "Continue on 5.6." },
+    ],
+    [],
+    undefined,
+    undefined,
+    {},
+  );
+
+  const inject = requests.find((request) => request.method === "thread/inject_items");
+  expect(inject).toBeDefined();
+  const items = inject!.params.items as any[];
+  // The exact failure the user hit: items[0] reached Codex with no `type`.
+  expect(items.every((item) => typeof item.type === "string" && item.type.length > 0)).toBe(true);
+  expect(items[0]).toEqual({ type: "message", role: "user", content: [{ type: "input_text", text: "Improve the DB plan." }] });
+  expect(items).toContainEqual({ type: "message", role: "assistant", content: [{ type: "output_text", text: "On it." }] });
+  expect(items).toContainEqual({ type: "function_call", call_id: "call-1", name: "read_file", arguments: "{}" });
+  expect(items).toContainEqual({ type: "function_call_output", call_id: "call-1", output: "plan.md contents" });
+  // The live turn is the last message and is sent via turn/start, not injected.
+  expect(requests.find((request) => request.method === "turn/start")?.params.input).toEqual([
+    { type: "text", text: "Continue on 5.6.", text_elements: [] },
+  ]);
+  provider.dispose();
+});
+
 test("dynamic tool call ids are idempotent inside one App Server turn", async () => {
   const cfg = setup();
   let handlers!: CodexAppServerHandlers;

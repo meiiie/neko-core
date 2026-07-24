@@ -67,6 +67,50 @@ test("browser voice keeps consent in the page and routes transcript through Neko
   ws.close();
 });
 
+test("browser voice survives a control-socket drop and accepts a reconnect", async () => {
+  let now = 1_000;
+  active = new BrowserVoiceSession({ onUtterance: async (text) => `ok: ${text}`, openUrl: () => {}, now: () => now });
+  const { url } = await active.start();
+  const parsed = new URL(url);
+  const token = parsed.hash.slice(1);
+  const open = async () => {
+    const ws = new WebSocket(`${parsed.origin.replace("http:", "ws:")}/bridge`, { headers: { origin: parsed.origin } } as any);
+    await new Promise<void>((resolve, reject) => {
+      ws.addEventListener("open", () => resolve(), { once: true });
+      ws.addEventListener("error", reject, { once: true });
+    });
+    return ws;
+  };
+
+  const first = await open();
+  const firstMessages = messageQueue(first);
+  first.send(JSON.stringify({ type: "hello", token }));
+  expect(await firstMessages()).toEqual({ type: "ready" });
+  first.send(JSON.stringify({ type: "live" }));
+  await Bun.sleep(10);
+  expect(active.snapshot().state).toBe("live");
+
+  // A throttled/blipped control socket must not end the session (this used to stop immediately).
+  first.close();
+  await Bun.sleep(20);
+  expect(active.snapshot().state).toBe("live");
+
+  const second = await open();
+  const secondMessages = messageQueue(second);
+  second.send(JSON.stringify({ type: "hello", token }));
+  expect(await secondMessages()).toEqual({ type: "ready" });
+  second.send(JSON.stringify({ type: "live" }));
+  second.send(JSON.stringify({ type: "utterance", text: "vẫn nghe" }));
+  expect(await secondMessages()).toEqual({ type: "thinking" });
+  expect(await secondMessages()).toEqual({ type: "response", text: "ok: vẫn nghe" });
+
+  // An explicit page Stop still ends the session at once - consent is unchanged.
+  second.send(JSON.stringify({ type: "stop" }));
+  await Bun.sleep(20);
+  expect(active.snapshot().state).toBe("stopped");
+  second.close();
+});
+
 test("browser voice rejects a websocket without the fragment capability", async () => {
   active = new BrowserVoiceSession({ onUtterance: async () => "ok", openUrl: () => {} });
   const { url } = await active.start();

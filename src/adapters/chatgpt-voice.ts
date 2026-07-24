@@ -20,6 +20,10 @@ import {
 
 export const CODEX_VOICE_MIN_VERSION = "0.145.0";
 const REALTIME_VERSION = "v3" as const;
+// Hidden-tab intensive throttling wakes page timers as rarely as once per minute, so a healthy
+// backgrounded consent page may only heartbeat at ~60s. Reclaim after several missed wakeups,
+// never after one - the WebRTC audio flows browser<->OpenAI and outlives control-socket blips.
+export const BRIDGE_LIVENESS_TIMEOUT_MS = 90_000;
 
 interface RpcClient {
   initialize(timeoutMs?: number): Promise<unknown>;
@@ -311,19 +315,19 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
       websocket: {
         message: (ws, raw) => this.onSocketMessage(ws, raw),
         close: (ws) => {
-          if (this.socket !== ws) return;
-          this.socket = null;
-          if (!this.stopping) void this.stop("browser closed");
+          // A dropped control socket is not a user Stop: background throttling and transient
+          // network blips must not end a live call whose audio never crossed this socket. The
+          // page reconnects with the same token; the liveness watchdog reclaims real deaths.
+          if (this.socket === ws) this.socket = null;
         },
       },
     });
     this.server = server;
     this.origin = `http://127.0.0.1:${server.port}`;
     this.heartbeat = setInterval(() => {
-      if (!this.socket) return;
       const now = (this.options.now ?? Date.now)();
-      if (now - this.lastHeartbeat > 20_000) { void this.stop("browser heartbeat lost"); return; }
-      this.socket.send(JSON.stringify({ type: "ping" }));
+      if (now - this.lastHeartbeat > BRIDGE_LIVENESS_TIMEOUT_MS) { void this.stop("browser heartbeat lost"); return; }
+      this.socket?.send(JSON.stringify({ type: "ping" }));
     }, 5_000);
     (this.heartbeat as any).unref?.();
     return `${this.origin}/#${this.token}`;
@@ -379,8 +383,10 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
       return;
     }
     if (this.socket !== ws) return;
+    // Any authenticated traffic proves the page is alive; heartbeats are just the quiet-time floor.
+    this.lastHeartbeat = (this.options.now ?? Date.now)();
     if (message?.type === "heartbeat" || message?.type === "pong") {
-      this.lastHeartbeat = (this.options.now ?? Date.now)();
+      // liveness already refreshed above
     } else if (message?.type === "connecting") {
       this.emitState("connecting");
     } else if (message?.type === "live") {
@@ -638,9 +644,13 @@ export function friendlyVoiceError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   if (/ffmpeg|ffplay|microphone input|audio device/i.test(raw)) return `${raw}. Choose browser compatibility from /voice if native audio is unavailable.`;
   if (/microphone|permission|notallowederror|denied/i.test(raw)) return "Microphone access was denied or unavailable. Check Windows microphone privacy settings, then run /voice again.";
+  // Codex 0.145 gates WebSocket realtime behind API-key auth; only the WebRTC path accepts
+  // ChatGPT subscription tokens. Surfacing the raw text reads as "add an API key", which is
+  // exactly the billing path Neko promises never to take.
+  if (/realtime conversation requires api key auth/i.test(raw)) return "Codex tried a WebSocket realtime session, which needs API-key auth; ChatGPT subscription voice only works over WebRTC. Neko did not switch to paid API billing. Update with /support chatgpt install, then run /voice again.";
   if (/401|unauthori|credential|sign.?in|account id/i.test(raw)) return "ChatGPT sign-in expired or is unavailable. Run /login > OpenAI > ChatGPT Plus/Pro, then retry /voice.";
   if (/403|not eligible|entitlement|workspace/i.test(raw)) return "This ChatGPT account is not currently eligible for Codex subscription voice.";
-  if (/429|rate.?limit|quota|usage limit/i.test(raw)) return "ChatGPT voice limit was reached. Neko did not switch to paid API billing.";
+  if (/429|rate.?limit|quota|usage limit/i.test(raw)) return "ChatGPT limit was reached (voice minutes or your subscription's usage limit), so the realtime session ended. Neko did not switch to paid API billing. Try again after the limit resets, or use /voice > Neko Conversational Voice (browser speech, no ChatGPT voice quota).";
   if (/404|model not found|not available/i.test(raw)) return "Codex's experimental ChatGPT subscription voice endpoint is not enabled for this client or account. Neko did not switch to paid API billing; use OS Dictation or an explicitly configured Realtime API instead.";
   if (/Support Pack|0\.144/i.test(raw)) return `${raw}. Install or update it with /support chatgpt install.`;
   return raw;
@@ -676,9 +686,9 @@ const VOICE_PAGE = `<!doctype html>
 <div class="live"><span id="dot" class="dot"></span><strong id="status">Ready - microphone off</strong></div>
 <button id="start">Start voice</button><button id="mute" class="secondary hidden">Mute</button><button id="stop" class="secondary hidden">Stop</button><p id="error" class="error"></p><p class="hint">Closing this tab stops the voice session. Return to the terminal for the live transcript and tool approvals.</p><audio id="audio" autoplay></audio></main>
 <script>
-const token=location.hash.slice(1),statusEl=document.getElementById('status'),dot=document.getElementById('dot'),start=document.getElementById('start'),mute=document.getElementById('mute'),stop=document.getElementById('stop'),errorEl=document.getElementById('error'),audio=document.getElementById('audio');history.replaceState(null,'',location.pathname);let ws,pc,stream,muted=false,ended=false;
+const token=location.hash.slice(1),statusEl=document.getElementById('status'),dot=document.getElementById('dot'),start=document.getElementById('start'),mute=document.getElementById('mute'),stop=document.getElementById('stop'),errorEl=document.getElementById('error'),audio=document.getElementById('audio');history.replaceState(null,'',location.pathname);let ws,pc,stream,muted=false,ended=false,retries=0;
 const send=(m)=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify(m))};const setStatus=(s,on=false)=>{statusEl.textContent=s;dot.classList.toggle('on',on)};
-function connect(){ws=new WebSocket('ws://'+location.host+'/bridge');ws.onopen=()=>send({type:'hello',token});ws.onmessage=(e)=>{const m=JSON.parse(e.data);if(m.type==='ping')send({type:'pong'});if(m.type==='set-muted')applyMute(!!m.muted);if(m.type==='stop')cleanup(false)};ws.onclose=()=>{if(!ended)cleanup(false)}}connect();setInterval(()=>send({type:'heartbeat'}),5000);
+function connect(){ws=new WebSocket('ws://'+location.host+'/bridge');ws.onopen=()=>{retries=0;send({type:'hello',token});if(pc&&pc.connectionState==='connected'){send({type:'live'});send({type:'muted',muted})}};ws.onmessage=(e)=>{const m=JSON.parse(e.data);if(m.type==='ping')send({type:'pong'});if(m.type==='set-muted')applyMute(!!m.muted);if(m.type==='stop')cleanup(false)};ws.onclose=()=>{if(ended)return;if(retries++<40)setTimeout(connect,1500);else cleanup(false)}}connect();setInterval(()=>send({type:'heartbeat'}),5000);
 function applyMute(value){muted=value;if(stream)for(const t of stream.getAudioTracks())t.enabled=!muted;mute.textContent=muted?'Unmute':'Mute';setStatus(muted?'LIVE - muted':'LIVE',true);send({type:'muted',muted})}
 async function begin(){start.disabled=true;errorEl.textContent='';setStatus('Requesting microphone...');try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});send({type:'connecting'});setStatus('Connecting...');pc=new RTCPeerConnection();pc.ontrack=(e)=>{audio.srcObject=e.streams[0];audio.play().catch(()=>{})};pc.addTrack(stream.getAudioTracks()[0],stream);pc.createDataChannel('oai-events');pc.onconnectionstatechange=()=>{if(pc.connectionState==='connected'){setStatus('LIVE',true);start.classList.add('hidden');mute.classList.remove('hidden');stop.classList.remove('hidden');send({type:'live'})}else if(['failed','disconnected'].includes(pc.connectionState)){fail('Voice connection '+pc.connectionState)}};const offer=await pc.createOffer();await pc.setLocalDescription(offer);const res=await fetch('/offer',{method:'POST',headers:{'authorization':'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({sdp:offer.sdp})});if(!res.ok)throw new Error(await res.text());const answer=await res.json();await pc.setRemoteDescription({type:'answer',sdp:answer.sdp})}catch(e){fail(e&&e.message?e.message:String(e))}}
 function fail(message){errorEl.textContent=message;setStatus('Voice unavailable');send({type:'error',message});cleanup(false);start.disabled=true}

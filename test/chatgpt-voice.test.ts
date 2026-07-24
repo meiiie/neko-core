@@ -371,9 +371,70 @@ test("a backend rollout error survives realtime teardown and reaches the consent
   expect(await response.text()).toContain("experimental ChatGPT subscription voice endpoint is not enabled");
 });
 
+test("subscription voice survives a control-socket drop mid-call and accepts a reconnect", async () => {
+  setupAuth();
+  const factory: VoiceCodexClientFactory = () => ({
+    initialize: async () => ({}), close: () => {},
+    request: async (method) => method === "thread/start" ? { thread: { id: "voice-thread" } } : {},
+  });
+  active = new ChatGptVoiceSession({ model: "gpt-5.5", transport: "browser", clientFactory: factory, openUrl: () => {} });
+  const { url } = await active.start();
+  if (!url) throw new Error("browser voice did not return a URL");
+  const parsed = new URL(url);
+  const token = parsed.hash.slice(1);
+  const origin = parsed.origin;
+  const open = async () => {
+    const ws = new WebSocket(`${origin.replace("http:", "ws:")}/bridge`, { headers: { origin } } as any);
+    await new Promise<void>((resolve, reject) => {
+      ws.addEventListener("open", () => resolve(), { once: true });
+      ws.addEventListener("error", reject, { once: true });
+    });
+    return ws;
+  };
+
+  const first = await open();
+  first.send(JSON.stringify({ type: "hello", token }));
+  expect(await nextMessage(first)).toEqual({ type: "ready" });
+  first.send(JSON.stringify({ type: "live" }));
+  await Bun.sleep(10);
+  expect(active.snapshot().state).toBe("live");
+
+  // The WebRTC audio flows browser<->OpenAI directly; a dropped control socket must not kill
+  // the healthy call (this used to stop the session immediately with "browser closed").
+  first.close();
+  await Bun.sleep(20);
+  expect(active.snapshot().state).toBe("live");
+
+  const second = await open();
+  second.send(JSON.stringify({ type: "hello", token }));
+  expect(await nextMessage(second)).toEqual({ type: "ready" });
+  second.send(JSON.stringify({ type: "live" }));
+  second.send(JSON.stringify({ type: "muted", muted: true }));
+  await Bun.sleep(10);
+  expect(active.snapshot()).toMatchObject({ state: "muted", muted: true });
+
+  // An explicit page Stop still ends the session at once - consent is unchanged.
+  second.send(JSON.stringify({ type: "stop" }));
+  await Bun.sleep(20);
+  expect(active.snapshot().state).toBe("stopped");
+  second.close();
+});
+
 test("voice errors distinguish account rollout, limits, and microphone consent", () => {
   expect(friendlyVoiceError(new Error("HTTP 403 entitlement"))).toContain("not currently eligible");
   expect(friendlyVoiceError(new Error("429 quota reached"))).toContain("did not switch to paid API billing");
   expect(friendlyVoiceError(new Error("NotAllowedError: microphone permission denied"))).toContain("Microphone access was denied");
   expect(friendlyVoiceError(new Error("404 /backend-api/codex/realtime/calls"))).toContain("did not switch to paid API billing");
+});
+
+test("voice errors route dead-end failures to the quota-free fallback", () => {
+  // Codex 0.145/0.146 realtime_api_key gate: WebSocket realtime is API-key-only, so the raw
+  // message must never read as advice to configure API billing.
+  const gate = friendlyVoiceError(new Error("Codex App Server: realtime conversation requires API key auth"));
+  expect(gate).toContain("only works over WebRTC");
+  expect(gate).toContain("did not switch to paid API billing");
+  expect(gate).not.toContain("requires API key auth");
+  const limit = friendlyVoiceError(new Error("usage limit reached for realtime"));
+  expect(limit).toContain("did not switch to paid API billing");
+  expect(limit).toContain("Neko Conversational Voice");
 });

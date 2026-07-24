@@ -3,6 +3,36 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-25 - v0.16.1 voice-resilience + GPT-5.6 history hotfix
+
+Three field failures, all root-caused against tagged Codex source (`rust-v0.145.0`, cross-checked
+against `0.146.0-alpha.6`) rather than guessed.
+
+- **Voice cut out mid-call.** Both voice bridges treated any control-WebSocket close as a user Stop
+  and the 20s heartbeat watchdog was shorter than hidden-tab intensive throttling (browsers wake
+  background-page timers as rarely as once per minute). The V3 call's audio flows browser<->OpenAI
+  over WebRTC and never crosses that socket, so a healthy call died on a control blip. Fix: a dropped
+  socket only clears the connection; the consent page reconnects with the same token (bounded
+  retries) and resyncs live/mute; the watchdog is 90s and any authenticated message refreshes it.
+  Explicit Stop / `/voice stop` / pagehide still end the session at once.
+- **Dead-end errors read like billing advice.** Codex 0.145/0.146 gate WebSocket realtime behind
+  `realtime_api_key` (upstream TODO); subscription voice is WebRTC-only. `friendlyVoiceError` now
+  maps that gate to a WebRTC-only explanation and maps limit/429 to a message naming both causes and
+  the quota-free `/voice > Neko Conversational Voice` fallback. Verified the installed 0.145.0 binary
+  matches Neko's `thread/realtime/*` method and notification names exactly.
+- **GPT-5.6 broke on carried-over conversations** with `items[0] is not a valid response item:
+  missing field type`. `thread/inject_items` deserializes into `codex_protocol::models::ResponseItem`,
+  a strict `#[serde(tag = "type")]` enum, so every injected item needs an explicit `type`. Neko
+  reused `toResponsesInput` (OpenAI Responses REST, where `type: "message"` is implicit), so
+  role-bearing messages arrived untagged. Inject-path-only `toInjectItems` adds `type: "message"`;
+  the shared REST converter and the direct GPT-5.5/HTTP path are untouched.
+
+Cut from the v0.16.0 release line (the fixes were prototyped on the parallel `voice-v3-port` branch;
+that branch does not contain v0.16.0, so each fix was re-ported onto the shipped terminal-native
+GPT-Live code and re-verified). Evidence: TypeScript clean; full suite green including new
+drop-then-reconnect regressions for both bridges, the inject-type regression, and the dead-end error
+mappings; policy PASS; build + render/input smokes PASS.
+
 ## 2026-07-24 - v0.16.0 terminal-native GPT-Live
 
 - Verified against the exact official `rust-v0.145.0` protocol that Realtime V3 supports socket transport,

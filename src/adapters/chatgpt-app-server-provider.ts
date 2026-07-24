@@ -94,7 +94,7 @@ export class ChatGptAppServerProvider implements Provider {
 
       // Preserve a conversation that began on GPT-5.5 or another provider. The app-server thread is
       // new, so inject only the prior structured items; the final user message starts the live turn.
-      const previous = toResponsesInput(messages.slice(0, -1)).input;
+      const previous = toInjectItems(toResponsesInput(messages.slice(0, -1)).input);
       if (previous.length) await client.request("thread/inject_items", { threadId: id, items: previous });
     }
 
@@ -241,6 +241,22 @@ function makeActiveTurn(threadId: string, onDelta?: DeltaHook, executeTool?: Com
   let reject!: (error: Error) => void;
   const done = new Promise<void>((ok, fail) => { resolve = ok; reject = fail; });
   return { threadId, answer: "", onDelta, executeTool, toolResults: new Map(), resolve, reject, done };
+}
+
+/**
+ * Codex's `thread/inject_items` deserializes into a strict `#[serde(tag = "type")]` ResponseItem
+ * enum, so every item needs an explicit `type`. `toResponsesInput` targets the OpenAI Responses
+ * REST API, which leaves `type: "message"` implicit on role-bearing items; function_call and
+ * function_call_output already carry their tag. Add the missing message tag for the inject path
+ * only, without changing the shared REST converter.
+ */
+function toInjectItems(items: any[]): any[] {
+  return items.map((item) => {
+    if (isObject(item) && !("type" in item) && typeof item.role === "string") {
+      return { type: "message", role: item.role, content: Array.isArray(item.content) ? item.content : [] };
+    }
+    return item;
+  });
 }
 
 function toUserInput(content: any): any[] {

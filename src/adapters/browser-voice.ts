@@ -2,7 +2,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 
-import type { ChatGptVoiceControl, VoiceEvent, VoiceSnapshot, VoiceState } from "./chatgpt-voice.ts";
+import { BRIDGE_LIVENESS_TIMEOUT_MS, type ChatGptVoiceControl, type VoiceEvent, type VoiceSnapshot, type VoiceState } from "./chatgpt-voice.ts";
 import { VoiceInteractionPolicy } from "./voice-interaction.ts";
 
 export interface BrowserVoiceOptions {
@@ -62,18 +62,17 @@ export class BrowserVoiceSession implements ChatGptVoiceControl {
       websocket: {
         message: (ws, raw) => this.onSocketMessage(ws, raw),
         close: (ws) => {
-          if (this.socket !== ws) return;
-          this.socket = null;
-          if (!this.stopping) void this.stop("browser closed");
+          // Background throttling or a transient blip, not a user Stop: keep the session and let
+          // the page reconnect with the same token; the liveness watchdog reclaims real deaths.
+          if (this.socket === ws) this.socket = null;
         },
       },
     });
     this.server = server;
     this.origin = `http://127.0.0.1:${server.port}`;
     this.heartbeat = setInterval(() => {
-      if (!this.socket) return;
-      if (this.now() - this.lastHeartbeat > 20_000) { void this.stop("browser heartbeat lost"); return; }
-      this.socket.send(JSON.stringify({ type: "ping" }));
+      if (this.now() - this.lastHeartbeat > BRIDGE_LIVENESS_TIMEOUT_MS) { void this.stop("browser heartbeat lost"); return; }
+      this.socket?.send(JSON.stringify({ type: "ping" }));
     }, 5_000);
     (this.heartbeat as any).unref?.();
     const url = `${this.origin}/#${this.token}`;
@@ -126,8 +125,10 @@ export class BrowserVoiceSession implements ChatGptVoiceControl {
       return;
     }
     if (this.socket !== ws) return;
+    // Any authenticated traffic proves the page is alive; heartbeats are just the quiet-time floor.
+    this.lastHeartbeat = this.now();
     if (message?.type === "heartbeat" || message?.type === "pong") {
-      this.lastHeartbeat = this.now();
+      // liveness already refreshed above
     } else if (message?.type === "live") {
       if (!this.startedAt) this.startedAt = this.now();
       this.emitState(this.muted ? "muted" : "live");
@@ -218,9 +219,9 @@ const BROWSER_VOICE_PAGE = `<!doctype html>
 <div class="live"><span id="dot" class="dot"></span><strong id="status">Ready - microphone off</strong></div><p id="transcript" class="transcript"></p>
 <button id="start">Start</button><button id="mute" class="secondary hidden">Mute</button><button id="stop" class="secondary hidden">Stop</button><p id="error" class="error"></p><p class="hint">Speak Vietnamese or English. Closing this tab, /voice stop, /logout, or exiting Neko releases the session.</p></main>
 <script>
-const token=location.hash.slice(1),statusEl=document.getElementById('status'),transcriptEl=document.getElementById('transcript'),dot=document.getElementById('dot'),start=document.getElementById('start'),mute=document.getElementById('mute'),stop=document.getElementById('stop'),errorEl=document.getElementById('error');history.replaceState(null,'',location.pathname);let ws,recognition,active=false,muted=false,ended=false,restarting=false,speechKind='';
+const token=location.hash.slice(1),statusEl=document.getElementById('status'),transcriptEl=document.getElementById('transcript'),dot=document.getElementById('dot'),start=document.getElementById('start'),mute=document.getElementById('mute'),stop=document.getElementById('stop'),errorEl=document.getElementById('error');history.replaceState(null,'',location.pathname);let ws,recognition,active=false,muted=false,ended=false,restarting=false,speechKind='',retries=0;
 const send=(m)=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify(m))};const setStatus=(s,on=false)=>{statusEl.textContent=s;dot.classList.toggle('on',on)};
-function connect(){ws=new WebSocket('ws://'+location.host+'/bridge');ws.onopen=()=>send({type:'hello',token});ws.onmessage=(e)=>{const m=JSON.parse(e.data);if(m.type==='ping')send({type:'pong'});else if(m.type==='set-muted')applyMute(!!m.muted);else if(m.type==='backchannel')speak(m.text,true);else if(m.type==='thinking')setStatus('Thinking...',true);else if(m.type==='response')speak(m.text,false);else if(m.type==='cancel-speech')speechSynthesis.cancel();else if(m.type==='turn-error'){errorEl.textContent=m.message;setStatus('Listening',true)}else if(m.type==='stop')cleanup(false)};ws.onclose=()=>{if(!ended)cleanup(false)}}connect();setInterval(()=>send({type:'heartbeat'}),5000);
+function connect(){ws=new WebSocket('ws://'+location.host+'/bridge');ws.onopen=()=>{retries=0;send({type:'hello',token});if(active){send({type:'live'});send({type:'muted',muted})}};ws.onmessage=(e)=>{const m=JSON.parse(e.data);if(m.type==='ping')send({type:'pong'});else if(m.type==='set-muted')applyMute(!!m.muted);else if(m.type==='backchannel')speak(m.text,true);else if(m.type==='thinking')setStatus('Thinking...',true);else if(m.type==='response')speak(m.text,false);else if(m.type==='cancel-speech')speechSynthesis.cancel();else if(m.type==='turn-error'){errorEl.textContent=m.message;setStatus('Listening',true)}else if(m.type==='stop')cleanup(false)};ws.onclose=()=>{if(ended)return;if(retries++<40)setTimeout(connect,1500);else cleanup(false)}}connect();setInterval(()=>send({type:'heartbeat'}),5000);
 function voiceFor(lang){const voices=speechSynthesis.getVoices();return voices.find(v=>v.lang.toLowerCase().startsWith(lang))||voices.find(v=>v.lang.toLowerCase().startsWith('vi'))||null}
 function spoken(text){return text.replace(/\\x60{3}[\\s\\S]*?\\x60{3}/g,' đoạn mã ').replace(/https?:\\/\\/\\S+/g,' đường dẫn ').replace(/[*_#>\\x60~|]/g,' ').replace(/\\s+/g,' ').trim().slice(0,12000)}
 function speak(text,backchannel){const clean=spoken(text);if(!clean||ended)return;if(!backchannel)speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(clean);u.lang='vi-VN';u.voice=voiceFor('vi');u.volume=backchannel ? 0.72 : 1;u.rate=backchannel ? 1.08 : 1.02;speechKind=backchannel?'backchannel':'response';if(!backchannel)setStatus('Speaking - you can interrupt',true);u.onend=()=>{if(speechKind==='response'){send({type:'speaking-done'});setStatus('Listening',true)}speechKind=''};u.onerror=()=>{speechKind='';if(!backchannel)setStatus('Listening',true)};speechSynthesis.speak(u)}

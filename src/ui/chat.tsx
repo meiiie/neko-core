@@ -1183,8 +1183,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   );
 
   const voiceFallback = () => process.platform === "win32"
-    ? "Fallback: press Win+H for Windows voice typing (separate from Neko; the OS data policy applies). API Realtime is never selected automatically."
-    : "Fallback: use your operating system's dictation service. API Realtime is never selected automatically.";
+    ? "Fallback: /voice > Neko Conversational Voice (browser speech, no ChatGPT voice quota), or press Win+H for Windows voice typing (separate from Neko; the OS data policy applies). API Realtime is never selected automatically."
+    : "Fallback: /voice > Neko Conversational Voice (browser speech, no ChatGPT voice quota), or your operating system's dictation service. API Realtime is never selected automatically.";
 
   const stopVoice = async (reason = "user", announce = true) => {
     const voice = voiceRef.current;

@@ -6,6 +6,23 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-07-25
+
+### Fixed
+
+- Voice sessions no longer end when the browser control socket briefly drops. Backgrounding the
+  consent tab (which throttles its heartbeat to roughly once a minute) or a transient network blip
+  used to stop a live call within 20 seconds; the loopback watchdog now waits 90 seconds and any
+  page message resets it, and the page reconnects with its token while the WebRTC audio keeps
+  flowing. Pressing Stop, closing the tab, or `/voice stop` still ends the session at once.
+- Dead-end voice errors are now honest. When Codex reports that WebSocket realtime needs API-key
+  auth (ChatGPT-subscription voice runs only over WebRTC), Neko explains that instead of surfacing
+  the raw text that read like advice to enable API billing. A voice-limit error now names both
+  causes (voice minutes or subscription usage) and points to the quota-free browser voice fallback.
+- GPT-5.6 no longer fails a carried-over conversation with `items[0] is not a valid response item:
+  missing field type`. History injected into a fresh Codex App Server thread now tags message items
+  as `type: "message"`, which the strict App Server item schema requires.
+
 ## [0.16.0] — 2026-07-24
 
 ### Added

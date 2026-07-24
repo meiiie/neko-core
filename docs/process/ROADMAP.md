@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-24) — v0.16.0 release
+## Current status (2026-07-25) — v0.16.1 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -20,7 +20,17 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   finalized transcripts, and invoke the same governed tool harness without opening a tab. Browser WebRTC
   remains the compatibility path. The Ink LIVE panel exposes mouse and keyboard mute/stop controls.
 
-- **Branch:** `main`. **Current release: v0.16.0 (2026-07-24)** - GPT-Live now runs directly inside
+- **Voice resilience + GPT-5.6 history hotfix (2026-07-25):** voice sessions survive a brief control-socket
+  drop (background-tab throttling or a network blip) instead of ending within 20s — the page reconnects
+  with its token while WebRTC audio keeps flowing and the loopback watchdog waits 90s; explicit Stop still
+  ends at once. Dead-end voice errors are honest (the Codex WebSocket API-key gate and voice-limit both map
+  to WebRTC-only / quota-free-fallback messages, never billing advice). GPT-5.6 carried-over conversations
+  no longer fail `items[0] ... missing field type`: injected history is tagged `type: "message"` for the
+  strict App Server item schema.
+
+- **Branch:** `main`. **Current release: v0.16.1 (2026-07-25)** - a field hotfix over v0.16.0: voice
+  survives control-socket blips, dead-end voice errors read honestly, and GPT-5.6 history injection is
+  App-Server-valid. **v0.16.0 (2026-07-24)** - GPT-Live now runs directly inside
   the Windows terminal with native PCM input/output, transcript-level interruption, persistent finalized
   transcripts, and clickable Ink controls. Voice tools retain Neko's governed Agent boundary; browser WebRTC
   remains an explicit compatibility path. The previous v0.15.2 release completed a real-account
