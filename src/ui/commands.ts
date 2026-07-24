@@ -54,7 +54,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
   { name: "/cost", desc: "session cumulative tokens vs the last model request" },
   { name: "/usage", desc: "subscription/session quota and token usage for the active account" },
-  { name: "/voice", desc: "conversational browser voice, ChatGPT, lab bridge, or dictation" },
+  { name: "/voice", desc: "terminal GPT-Live, browser compatibility, ChatGPT, or dictation" },
   { name: "/model", desc: "show / list / switch model (/model list · /model <id>)" },
   { name: "/provider", desc: "switch provider (account) then pick its model - picker or /provider <name>" },
   { name: "/support", desc: "manage optional model and Office components" },

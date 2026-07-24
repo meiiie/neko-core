@@ -13,6 +13,7 @@ import {
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import type { CodexAppServerHandlers } from "../src/adapters/codex-app-server.ts";
 import { estimateTokens } from "../src/core/agent-constants.ts";
+import type { NativeVoiceAudioOptions, RealtimePcmChunk } from "../src/adapters/native-voice-audio.ts";
 
 const oldHome = process.env.HOME;
 const oldProfile = process.env.USERPROFILE;
@@ -93,6 +94,7 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
   let opened = "";
   active = new ChatGptVoiceSession({
     model: "gpt-5.6-terra",
+    transport: "browser",
     tools: [
       { function: { name: "read_file", description: "Read", parameters: { type: "object" } } },
       { function: { name: "write_file", description: "Write", parameters: { type: "object" } } },
@@ -131,6 +133,7 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
     .find((tool: any) => tool.description === "Browser status");
   expect(String(browserTool.name).startsWith("mcp__")).toBe(false);
 
+  if (!url) throw new Error("browser voice did not return a URL");
   const parsed = new URL(url);
   const token = parsed.hash.slice(1);
   const origin = parsed.origin;
@@ -166,6 +169,7 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
   expect(await offer.json()).toEqual({ sdp: "v=0\r\nanswer" });
   expect(requests.find((request) => request.method === "thread/realtime/start")?.params).toMatchObject({
     threadId: "voice-thread", version: "v3", outputModality: "audio", transport: { type: "webrtc", sdp: "v=0\r\nvalid test offer" },
+    codexResponseHandoffMode: "bemTags",
     initialItems: [
       { role: "user", text: "Chúng ta đang sửa voice." },
       { role: "assistant", text: "Mình đã hiểu." },
@@ -206,6 +210,90 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
   ws.close();
 });
 
+test("terminal-native voice streams PCM over App Server and keeps Neko tool routing", async () => {
+  setupAuth();
+  const requests: Array<{ method: string; params: any }> = [];
+  let handlers!: CodexAppServerHandlers;
+  let audioOptions!: NativeVoiceAudioOptions;
+  const played: RealtimePcmChunk[] = [];
+  let interrupted = 0;
+  let muted = false;
+  let stopped = 0;
+  const factory: VoiceCodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}),
+      close: () => {},
+      request: async (method, params: any) => {
+        requests.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "voice-thread" } };
+        if (method === "thread/realtime/start") {
+          queueMicrotask(() => handlers.onNotification?.("thread/realtime/started", {
+            threadId: "voice-thread", version: "v3",
+          }));
+        }
+        return {};
+      },
+    };
+  };
+  let toolName = "";
+  active = new ChatGptVoiceSession({
+    model: "gpt-5.5",
+    transport: "native",
+    tools: [{ function: { name: "web_search", description: "Search", parameters: { type: "object" } } }],
+    executeTool: async (call) => {
+      toolName = call.name;
+      return "fresh result";
+    },
+    clientFactory: factory,
+    audioFactory: (options) => {
+      audioOptions = options;
+      return {
+        start: async () => {},
+        play: (chunk) => played.push(chunk),
+        interruptOutput: () => { interrupted++; },
+        setMuted: (value) => { muted = value; },
+        stop: async () => { stopped++; },
+      };
+    },
+  });
+
+  expect(await active.start()).toEqual({ transport: "native" });
+  expect(active.snapshot()).toMatchObject({ state: "live", protocol: "v3", transport: "native" });
+  const start = requests.find((request) => request.method === "thread/realtime/start");
+  expect(start?.params.transport).toBeUndefined();
+  expect(start?.params.outputModality).toBe("audio");
+  expect(start?.params.codexResponseHandoffMode).toBe("bemTags");
+
+  const input = { data: "AQIDBA==", sampleRate: 24_000, numChannels: 1, samplesPerChannel: 2 };
+  await audioOptions.onInput(input);
+  expect(requests.find((request) => request.method === "thread/realtime/appendAudio")?.params).toEqual({
+    threadId: "voice-thread", audio: input,
+  });
+
+  handlers.onNotification?.("thread/realtime/outputAudio/delta", {
+    threadId: "voice-thread", audio: input,
+  });
+  expect(played).toEqual([input]);
+  handlers.onNotification?.("thread/realtime/transcript/delta", {
+    threadId: "voice-thread", role: "user", delta: "dung lai",
+  });
+  expect(interrupted).toBe(1);
+
+  active.setMuted(true);
+  expect(muted).toBe(true);
+  expect(active.snapshot().state).toBe("muted");
+
+  expect(await handlers.onRequest?.("item/tool/call", {
+    threadId: "voice-thread", callId: "search-1", tool: "web_search", arguments: { query: "Neko" },
+  })).toEqual({ contentItems: [{ type: "inputText", text: "fresh result" }], success: true });
+  expect(toolName).toBe("web_search");
+
+  await active.stop();
+  active = null;
+  expect(stopped).toBe(1);
+});
+
 test("subscription voice rejects a realtime downgrade instead of claiming V3", async () => {
   setupAuth();
   let handlers!: CodexAppServerHandlers;
@@ -227,6 +315,7 @@ test("subscription voice rejects a realtime downgrade instead of claiming V3", a
   };
   active = new ChatGptVoiceSession({ model: "gpt-5.5", clientFactory: factory, openUrl: () => {} });
   const { url } = await active.start();
+  if (!url) throw new Error("browser voice did not return a URL");
   const parsed = new URL(url);
   const response = await fetch(`${parsed.origin}/offer`, {
     method: "POST",
@@ -245,6 +334,7 @@ test("voice bridge rejects an SDP offer without its one-session capability", asy
   });
   active = new ChatGptVoiceSession({ model: "gpt-5.5", clientFactory: factory, openUrl: () => {} });
   const { url } = await active.start();
+  if (!url) throw new Error("browser voice did not return a URL");
   const response = await fetch(`${new URL(url).origin}/offer`, { method: "POST", body: "{}" });
   expect(response.status).toBe(401);
 });
@@ -270,6 +360,7 @@ test("a backend rollout error survives realtime teardown and reaches the consent
   };
   active = new ChatGptVoiceSession({ model: "gpt-5.5", clientFactory: factory, openUrl: () => {} });
   const { url } = await active.start();
+  if (!url) throw new Error("browser voice did not return a URL");
   const parsed = new URL(url);
   const response = await fetch(`${parsed.origin}/offer`, {
     method: "POST",
@@ -283,6 +374,6 @@ test("a backend rollout error survives realtime teardown and reaches the consent
 test("voice errors distinguish account rollout, limits, and microphone consent", () => {
   expect(friendlyVoiceError(new Error("HTTP 403 entitlement"))).toContain("not currently eligible");
   expect(friendlyVoiceError(new Error("429 quota reached"))).toContain("did not switch to paid API billing");
-  expect(friendlyVoiceError(new Error("NotAllowedError: microphone permission denied"))).toContain("Microphone permission was denied");
+  expect(friendlyVoiceError(new Error("NotAllowedError: microphone permission denied"))).toContain("Microphone access was denied");
   expect(friendlyVoiceError(new Error("404 /backend-api/codex/realtime/calls"))).toContain("did not switch to paid API billing");
 });

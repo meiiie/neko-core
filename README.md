@@ -136,7 +136,7 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > Fallback if the domain is unreachable: swap the URL for
 > `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
-**Current release: [v0.15.2](https://github.com/meiiie/neko-core/releases/tag/v0.15.2).**
+**Current release: [v0.16.0](https://github.com/meiiie/neko-core/releases/tag/v0.16.0).**
 Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
 real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). **Pin or roll back any time**
 (the pin holds — auto-update won't undo it): `neko update 0.9.0`, or at install time
@@ -216,14 +216,32 @@ tiers. `/usage` reads the subscription's short/weekly quota windows, reset times
 credits without making a model request. `/logout` signs out only the active route, so ChatGPT OAuth and
 OpenAI API keys do not erase each other.
 
-`/voice` first offers **Neko Conversational Voice - Browser Preview**. It opens a capability-authenticated
-`127.0.0.1` page and keeps the microphone off until **Start** is pressed. Browser speech recognition produces
-interim/final text; final text runs through the normal Neko Agent, provider, tools, and approval boundary, and
-the reply returns through browser speech synthesis. A local interaction policy can give a restrained `ừm` or
-`mình đang nghe`, enforces one response per turn plus an eight-second cooldown, and stays silent around
-passwords, tokens, URLs, long numbers, and questions. Speaking over a reply cancels both playback and the
-active Agent turn before the next utterance is queued. This is an interruptible cascaded voice experience,
-not a claim of native GPT-Live full duplex.
+`/voice` first offers **Start GPT-Live in terminal** when Windows has `ffmpeg`, `ffplay`, and an input device.
+After the user confirms that choice, Neko starts microphone capture and streams bounded PCM16 frames directly
+to the official Codex App Server Realtime V3 socket. Output audio is played locally, speaking interrupts queued
+playback, and live/final transcripts render in the TUI. No browser tab, loopback page, WebRTC adapter, or paid
+Realtime API key is involved. The Ink LIVE panel exposes clickable Mute/Unmute and Stop controls with hover
+feedback; Alt+M, Alt+X, `/voice mute`, `/voice status`, and `/voice stop` provide keyboard equivalents. All
+exit/error paths release both capture and playback.
+
+The native route uses ChatGPT subscription authentication and keeps App Server as the realtime planner, but
+every delegated tool returns through Neko's existing `Agent.executeExternalTool` boundary. Web search, MCP,
+files, browser, computer-use, and other enabled tools therefore retain the same visible tool events, approvals,
+sandbox, path containment, and audit behavior as text turns. Finalized voice transcripts are also mirrored into
+the Neko session so a later typed turn or resumed session can continue the conversation.
+
+**GPT-Live browser compatibility** remains available when native audio dependencies or a Windows microphone are
+unavailable. It uses the same V3 session and tool boundary but lets a capability-authenticated `127.0.0.1` page
+own microphone consent and WebRTC. The microphone stays off until **Start voice** is pressed; the OAuth token
+never enters the page. Closing the tab, `/voice stop`, logout, support management, or exiting Neko closes the
+session. Neko never silently falls back to paid Realtime API billing.
+
+`/voice` also retains **Neko Conversational Voice - Browser Preview** as a provider-agnostic fallback. Browser
+speech recognition produces interim/final text; final text runs through the normal Neko Agent, provider, tools,
+and approval boundary, and the reply returns through browser speech synthesis. A local interaction policy can
+give a restrained backchannel, enforces one response per turn plus a cooldown, and stays silent around
+passwords, tokens, URLs, long numbers, and questions. This is an interruptible cascaded voice experience, not
+native GPT-Live full duplex.
 
 The preview adds no model download, but the browser may use its own online recognition/synthesis service.
 That warning is shown before consent; Neko receives transcript text rather than microphone audio, and it
@@ -231,23 +249,17 @@ never silently selects a paid Realtime API. Chrome or Edge currently provide the
 surface; unsupported browsers fail visibly and can use OS Dictation instead.
 
 **Open ChatGPT** opens `chatgpt.com`; Voice appears only when the user's account/browser rollout provides it.
-That tab runs separately and Neko never reads its cookies, microphone, transcript, or session. The third
-**Neko Subscription Bridge - Lab** option uses the official Codex App Server experimental surface.
-Neko opens a small `127.0.0.1` page in the default browser because a terminal has no native WebRTC or
-microphone permission UI. The microphone remains off until the user presses **Start voice** in that page;
-the OAuth token never enters the page, and subscription-only App Server processes have API-key environment
-variables removed. While connected, the TUI shows `● LIVE`, elapsed time, mute state, and the live transcript.
-Use `/voice mute`, `/voice unmute`, `/voice status`, or `/voice stop`; closing the tab, logging out, managing
-the support component, or exiting Neko also releases the microphone and closes realtime. Voice tool calls
-return through the same Neko approval/sandbox boundary as text turns. Neko never silently falls back to the
-paid Realtime API. If account/region rollout is unavailable it suggests OS dictation (Windows: `Win+H`;
+That tab runs separately and Neko never reads its cookies, microphone, transcript, or session. If the
+subscription/App Server rollout is unavailable Neko suggests OS dictation (Windows: `Win+H`;
 the operating system's data policy applies) and reports the backend error honestly. OpenAI does not currently
 expose remaining Voice quota through this
 experimental Codex surface, so `/usage` shows session duration and the last limit/error instead of inventing
 a remaining percentage. The existing GPT-5.6 Support Pack already contains this protocol; voice adds no second
 download. On 2026-07-24, the owner's real ChatGPT account completed the WebRTC handshake and reached `LIVE`
-on negotiated Realtime V3 with Codex App Server 0.145.0. This remains a Lab integration over an experimental
-App Server surface: account rollout and workspace settings still apply, and it is not the public Realtime API.
+on negotiated Realtime V3 with Codex App Server 0.145.0; the terminal-native socket path is covered by protocol,
+audio-lifecycle, TUI, and tool-routing tests pending an owner microphone smoke test. This remains a Lab
+integration over an experimental App Server surface: account rollout and workspace settings still apply, and
+it is not the public Realtime API.
 
 When `/model` needs the component, Neko asks before downloading anything. You can also manage it directly:
 

@@ -1,4 +1,4 @@
-/** Experimental ChatGPT-subscription realtime voice over Codex App Server WebRTC. */
+/** Experimental ChatGPT-subscription realtime voice over Codex App Server V3. */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 
@@ -11,6 +11,12 @@ import {
   startCodexAppServer,
   type CodexAppServerHandlers,
 } from "./codex-app-server.ts";
+import {
+  createNativeVoiceAudio,
+  type NativeVoiceAudio,
+  type NativeVoiceAudioOptions,
+  type RealtimePcmChunk,
+} from "./native-voice-audio.ts";
 
 export const CODEX_VOICE_MIN_VERSION = "0.145.0";
 const REALTIME_VERSION = "v3" as const;
@@ -30,6 +36,7 @@ export interface VoiceSnapshot {
   startedAt?: number;
   muted: boolean;
   protocol?: typeof REALTIME_VERSION;
+  transport?: "native" | "browser";
   error?: string;
 }
 
@@ -46,18 +53,21 @@ export interface VoiceUsage {
 
 export interface ChatGptVoiceOptions {
   model: string;
+  transport?: "native" | "browser";
+  inputDevice?: string;
   tools?: any[];
   history?: any[];
   executeTool?: (call: { id: string; name: string; arguments: Record<string, any> }) => Promise<string | any[]>;
   onEvent?: (event: VoiceEvent) => void;
   clientFactory?: VoiceCodexClientFactory;
+  audioFactory?: (options: NativeVoiceAudioOptions) => NativeVoiceAudio;
   openUrl?: (url: string) => void;
   now?: () => number;
 }
 
 export interface ChatGptVoiceControl {
   snapshot(): VoiceSnapshot;
-  start(): Promise<{ url: string }>;
+  start(): Promise<{ transport: "native" | "browser"; url?: string }>;
   setMuted(muted: boolean): void;
   stop(reason?: string): Promise<void>;
 }
@@ -99,6 +109,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
   private client: RpcClient | null = null;
   private server: Bun.Server<VoiceSocketData> | null = null;
   private socket: Bun.ServerWebSocket<VoiceSocketData> | null = null;
+  private audio: NativeVoiceAudio | null = null;
   private threadId = "";
   private realtimeStarted = false;
   private stopping = false;
@@ -107,14 +118,18 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
   private startedAt = 0;
   private muted = false;
   private negotiatedVersion = "";
+  private transport: "native" | "browser";
   private state: VoiceState = "starting";
   private sdpWaiter: { sdp?: string; version?: string; resolve: (sdp: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+  private readyWaiter: { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private lastHeartbeat = 0;
   private readonly toolResults = new Map<string, Promise<{ contentItems: any[]; success: boolean }>>();
   private dynamicToolNames = new Map<string, string>();
 
-  constructor(private readonly options: ChatGptVoiceOptions) {}
+  constructor(private readonly options: ChatGptVoiceOptions) {
+    this.transport = options.transport ?? "browser";
+  }
 
   snapshot(): VoiceSnapshot {
     return {
@@ -122,11 +137,12 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
       startedAt: this.startedAt || undefined,
       muted: this.muted,
       protocol: this.negotiatedVersion === REALTIME_VERSION ? REALTIME_VERSION : undefined,
+      transport: this.transport,
       error: this.state === "error" ? lastUsage?.lastError : undefined,
     };
   }
 
-  async start(): Promise<{ url: string }> {
+  async start(): Promise<{ transport: "native" | "browser"; url?: string }> {
     if (this.client || this.server) throw new Error("voice session is already started");
     this.emitState("starting");
     const clientFactory = this.options.clientFactory ?? defaultClientFactory;
@@ -161,11 +177,17 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
       this.threadId = String(started?.thread?.id ?? "");
       if (!this.threadId) throw new Error("Codex App Server did not return a voice thread id");
       await client.request("thread/realtime/listVoices", {}, 10_000);
+      if (this.transport === "native") {
+        await this.startNativeAudio();
+        return { transport: "native" };
+      }
       const url = this.startBridge();
       this.emitState("waiting");
       (this.options.openUrl ?? defaultOpenUrl)(url);
-      return { url };
+      return { transport: "browser", url };
     } catch (error) {
+      await this.audio?.stop().catch(() => {});
+      this.audio = null;
       client?.close();
       this.client = null;
       this.closeBridge();
@@ -176,8 +198,14 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
   }
 
   setMuted(muted: boolean): void {
-    if (!this.socket || (this.state !== "live" && this.state !== "muted")) throw new Error("voice is not live yet");
-    this.socket.send(JSON.stringify({ type: "set-muted", muted }));
+    if (this.state !== "live" && this.state !== "muted") throw new Error("voice is not live yet");
+    if (this.transport === "native") this.audio?.setMuted(muted);
+    else {
+      if (!this.socket) throw new Error("voice browser is not connected");
+      this.socket.send(JSON.stringify({ type: "set-muted", muted }));
+    }
+    this.muted = muted;
+    this.emitState(muted ? "muted" : "live");
   }
 
   async stop(reason = "user"): Promise<void> {
@@ -189,6 +217,12 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
     this.sdpWaiter?.reject(new Error("voice session stopped"));
     if (this.sdpWaiter) clearTimeout(this.sdpWaiter.timer);
     this.sdpWaiter = null;
+    this.readyWaiter?.reject(new Error("voice session stopped"));
+    if (this.readyWaiter) clearTimeout(this.readyWaiter.timer);
+    this.readyWaiter = null;
+    const audio = this.audio;
+    this.audio = null;
+    await audio?.stop().catch(() => {});
     try { this.socket?.send(JSON.stringify({ type: "stop", reason })); } catch { /* already closed */ }
     this.socket?.close(1000, reason);
     this.socket = null;
@@ -206,6 +240,65 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
     const durationMs = this.startedAt ? Math.max(0, (this.options.now ?? Date.now)() - this.startedAt) : 0;
     lastUsage = { active: false, durationMs, lastError: lastUsage?.lastError };
     this.emitState("stopped");
+  }
+
+  private async startNativeAudio(): Promise<void> {
+    if (!this.client || !this.threadId) throw new Error("voice preflight is not ready");
+    const makeAudio = this.options.audioFactory ?? createNativeVoiceAudio;
+    const audio = makeAudio({
+      inputDevice: this.options.inputDevice,
+      onInput: async (chunk) => {
+        if (!this.client || !this.threadId || this.stopping) return;
+        await this.client.request("thread/realtime/appendAudio", {
+          threadId: this.threadId,
+          audio: chunk,
+        }, 5_000);
+      },
+      onError: (error) => {
+        if (this.stopping) return;
+        const friendly = friendlyVoiceError(error);
+        this.recordError(friendly);
+        queueMicrotask(() => { void this.stop("native audio error"); });
+      },
+    });
+    this.audio = audio;
+    this.emitState("connecting");
+    const ready = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.readyWaiter = null;
+        reject(new Error("realtime V3 startup timed out"));
+      }, 30_000);
+      this.readyWaiter = { resolve, reject, timer };
+    });
+    void ready.catch(() => {});
+    this.realtimeStarted = true;
+    try {
+      const initialItems = realtimeInitialItems(this.options.history ?? []);
+      await this.client.request("thread/realtime/start", {
+        threadId: this.threadId,
+        version: REALTIME_VERSION,
+        outputModality: "audio",
+        includeStartupContext: true,
+        flushTranscriptTailOnSessionEnd: true,
+        codexResponseHandoffMode: "bemTags",
+        ...(initialItems.length ? { initialItems } : {}),
+        prompt: VOICE_REALTIME_PROMPT,
+      }, 30_000);
+      await ready;
+      await audio.start();
+      if (!this.startedAt) {
+        this.startedAt = (this.options.now ?? Date.now)();
+        voiceStartedAt = this.startedAt;
+        lastUsage = { active: true, durationMs: 0 };
+      }
+      this.emitState(this.muted ? "muted" : "live");
+    } catch (error) {
+      this.realtimeStarted = false;
+      const waiter = this.readyWaiter;
+      if (waiter) clearTimeout(waiter.timer);
+      this.readyWaiter = null;
+      throw error;
+    }
   }
 
   private startBridge(): string {
@@ -329,6 +422,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
         outputModality: "audio",
         includeStartupContext: true,
         flushTranscriptTailOnSessionEnd: true,
+        codexResponseHandoffMode: "bemTags",
         ...(initialItems.length ? { initialItems } : {}),
         prompt: VOICE_REALTIME_PROMPT,
         transport: { type: "webrtc", sdp },
@@ -372,16 +466,25 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
     if (method === "thread/realtime/started") {
       const version = String(params?.version ?? "");
       const waiter = this.sdpWaiter;
+      const readyWaiter = this.readyWaiter;
       if (version !== REALTIME_VERSION) {
         this.sdpWaiter = null;
+        this.readyWaiter = null;
         if (waiter) clearTimeout(waiter.timer);
+        if (readyWaiter) clearTimeout(readyWaiter.timer);
         const error = new Error(`expected realtime V3 but Codex started ${version || "an unknown version"}`);
         waiter?.reject(error);
-        if (!waiter) this.recordError(error.message);
+        readyWaiter?.reject(error);
+        if (!waiter && !readyWaiter) this.recordError(error.message);
         return;
       }
       this.negotiatedVersion = version;
       if (waiter) waiter.version = version;
+      if (readyWaiter) {
+        this.readyWaiter = null;
+        clearTimeout(readyWaiter.timer);
+        readyWaiter.resolve();
+      }
       this.emitState(this.state);
       this.completeRealtimeHandshake();
     } else if (method === "thread/realtime/sdp") {
@@ -390,21 +493,31 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
       waiter.sdp = String(params?.sdp ?? "");
       this.completeRealtimeHandshake();
     } else if (method === "thread/realtime/transcript/delta") {
-      this.options.onEvent?.({ type: "transcript-delta", role: String(params?.role ?? "assistant"), delta: String(params?.delta ?? "") });
+      const role = String(params?.role ?? "assistant");
+      if (role === "user") this.audio?.interruptOutput();
+      this.options.onEvent?.({ type: "transcript-delta", role, delta: String(params?.delta ?? "") });
     } else if (method === "thread/realtime/transcript/done") {
       this.options.onEvent?.({ type: "transcript-done", role: String(params?.role ?? "assistant"), text: String(params?.text ?? "") });
+    } else if (method === "thread/realtime/outputAudio/delta") {
+      if (isRealtimeAudioChunk(params?.audio)) this.audio?.play(params.audio);
     } else if (method === "thread/realtime/error") {
       const friendly = friendlyVoiceError(new Error(String(params?.message ?? "ChatGPT realtime voice failed")));
       const waiter = this.sdpWaiter;
+      const readyWaiter = this.readyWaiter;
       this.sdpWaiter = null;
+      this.readyWaiter = null;
       if (waiter) {
         clearTimeout(waiter.timer);
         waiter.reject(new Error(friendly));
       }
+      if (readyWaiter) {
+        clearTimeout(readyWaiter.timer);
+        readyWaiter.reject(new Error(friendly));
+      }
       this.recordError(friendly);
       // The HTTP /offer handler owns teardown while it is awaiting SDP; let it return the backend
       // reason to the consent page before closing the loopback server.
-      if (!waiter) queueMicrotask(() => { void this.stop("backend error"); });
+      if (!waiter && !readyWaiter) queueMicrotask(() => { void this.stop("backend error"); });
     } else if (method === "thread/realtime/closed" && !this.stopping) {
       void this.stop(String(params?.reason ?? "backend closed"));
     }
@@ -508,6 +621,13 @@ function isObject(value: unknown): value is Record<string, any> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function isRealtimeAudioChunk(value: unknown): value is RealtimePcmChunk {
+  if (!isObject(value)) return false;
+  return typeof value.data === "string"
+    && Number.isInteger(value.sampleRate)
+    && Number.isInteger(value.numChannels);
+}
+
 function safeEqual(left: string, right: string): boolean {
   const a = Buffer.from(left);
   const b = Buffer.from(right);
@@ -516,7 +636,8 @@ function safeEqual(left: string, right: string): boolean {
 
 export function friendlyVoiceError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  if (/microphone|permission|notallowederror|denied/i.test(raw)) return "Microphone permission was denied. Allow microphone access in the voice tab, then run /voice again.";
+  if (/ffmpeg|ffplay|microphone input|audio device/i.test(raw)) return `${raw}. Choose browser compatibility from /voice if native audio is unavailable.`;
+  if (/microphone|permission|notallowederror|denied/i.test(raw)) return "Microphone access was denied or unavailable. Check Windows microphone privacy settings, then run /voice again.";
   if (/401|unauthori|credential|sign.?in|account id/i.test(raw)) return "ChatGPT sign-in expired or is unavailable. Run /login > OpenAI > ChatGPT Plus/Pro, then retry /voice.";
   if (/403|not eligible|entitlement|workspace/i.test(raw)) return "This ChatGPT account is not currently eligible for Codex subscription voice.";
   if (/429|rate.?limit|quota|usage limit/i.test(raw)) return "ChatGPT voice limit was reached. Neko did not switch to paid API billing.";
@@ -535,7 +656,8 @@ const VOICE_AGENT_INSTRUCTIONS = [
 const VOICE_REALTIME_PROMPT = [
   "You are Neko Core's realtime voice interface.",
   "Speak naturally, allow interruption, and use Vietnamese when the user speaks Vietnamese.",
-  "Delegate coding and tool work to the background Codex agent; summarize tool results clearly.",
+  "For a longer tool task, acknowledge it briefly, then let the Codex agent work without narrating every low-level step.",
+  "Speak concise progress only when useful, and summarize verified tool results clearly.",
 ].join(" ");
 
 const PAGE_HEADERS = {

@@ -614,7 +614,7 @@ test("/meeting opens a consent-first guided surface without starting capture", a
   }
 }, 15000);
 
-test("/voice defaults to conversational browser voice and keeps official/lab routes explicit", async () => {
+test("/voice prefers native GPT-Live when available and keeps browser/official fallbacks explicit", async () => {
   const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldPath = process.env.PATH;
   const home = mkdtempSync(join(tmpdir(), "neko-voice-ui-"));
   process.env.HOME = home; process.env.USERPROFILE = home; process.env.PATH = "";
@@ -639,7 +639,7 @@ test("/voice defaults to conversational browser voice and keeps official/lab rou
         if (failStart) throw new Error("dynamic tool name is reserved");
         snapshot = { state: "waiting", muted: false };
         options.onEvent?.({ type: "state", snapshot });
-        return { url: "http://127.0.0.1:1/#hidden" };
+        return { transport: "browser", url: "http://127.0.0.1:1/#hidden" };
       },
       setMuted: (muted) => {
         muteCalls++;
@@ -668,7 +668,7 @@ test("/voice defaults to conversational browser voice and keeps official/lab rou
     stdin.write("/voice"); await tick(20); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Voice - choose a mode"))).toBe(true);
     expect(lastFrame() ?? "").toContain("Neko Conversational Voice");
-    expect(lastFrame() ?? "").toContain("GPT-Live via Codex - Lab");
+    expect(lastFrame() ?? "").toContain("GPT-Live browser compatibility");
     stdin.write("\r");
     const browserStarted = await until(() => /services\s+may\s+process\s+audio\s+online/.test(frames.join("\n")));
     if (!browserStarted) throw new Error(`browser voice did not start:\n${frames.slice(-8).join("\n---\n")}`);
@@ -686,7 +686,7 @@ test("/voice defaults to conversational browser voice and keeps official/lab rou
     stdin.write("/voice"); await tick(20); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Voice - choose a mode"))).toBe(true);
     stdin.write("\x1b[B"); await tick(20); stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
-    expect(await until(() => frames.join("\n").includes("Voice page opened in your browser"))).toBe(true);
+    expect(await until(() => frames.join("\n").includes("Voice compatibility page opened"))).toBe(true);
     expect(lastFrame() ?? "").toContain("microphone off - press Start voice in the browser");
 
     snapshot = { state: "live", muted: false, startedAt: Date.now(), protocol: "v3" };
@@ -695,6 +695,9 @@ test("/voice defaults to conversational browser voice and keeps official/lab rou
     expect(await until(() => (lastFrame() ?? "").includes("● LIVE"))).toBe(true);
     expect(lastFrame() ?? "").toContain("V3");
     expect(lastFrame() ?? "").toContain("> xin chao Neko");
+    expect(lastFrame() ?? "").toContain("Mute");
+    expect(lastFrame() ?? "").toContain("Stop");
+    expect(lastFrame() ?? "").toContain("speak naturally to interrupt");
     options.onEvent?.({ type: "transcript-done", role: "user", text: "xin chao Neko" });
     expect(await until(() => frames.join("\n").includes("xin chao Neko"))).toBe(true);
 
@@ -704,6 +707,8 @@ test("/voice defaults to conversational browser voice and keeps official/lab rou
     stdin.write("/voice stop"); await tick(20); stdin.write("\r");
     expect(await until(() => frames.join("\n").includes("microphone released"))).toBe(true);
     expect(stops).toBe(2);
+    stdin.write("tiep tuc bang text"); await tick(20); stdin.write("\r");
+    expect(await until(() => provider.messages.some((message) => message.role === "user" && message.content === "xin chao Neko"))).toBe(true);
     failStart = true;
     stdin.write("/voice start"); await tick(20); stdin.write("\r");
     expect(await until(() => frames.join("\n").includes("dynamic tool name is reserved"))).toBe(true);

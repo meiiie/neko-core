@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-24) — v0.15.2 release
+## Current status (2026-07-24) — v0.16.0 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -15,7 +15,15 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   accepting WebRTC, seeds a bounded recent conversation tail, and preserves Neko's existing approval boundary
   for delegated tools. There is no silent V2 downgrade or paid Realtime API fallback.
 
-- **Branch:** `main`. **Current release: v0.15.2 (2026-07-24)** - GPT-Live now completes a real-account
+- **Terminal-native voice (2026-07-24):** the same V3 bridge now streams bounded PCM directly
+  through Neko on Windows, plays response audio locally, interrupts playback when the user speaks, persists only
+  finalized transcripts, and invoke the same governed tool harness without opening a tab. Browser WebRTC
+  remains the compatibility path. The Ink LIVE panel exposes mouse and keyboard mute/stop controls.
+
+- **Branch:** `main`. **Current release: v0.16.0 (2026-07-24)** - GPT-Live now runs directly inside
+  the Windows terminal with native PCM input/output, transcript-level interruption, persistent finalized
+  transcripts, and clickable Ink controls. Voice tools retain Neko's governed Agent boundary; browser WebRTC
+  remains an explicit compatibility path. The previous v0.15.2 release completed a real-account
   WebRTC handshake through Codex App Server 0.145.0 and negotiates Realtime V3. The standalone Support Pack
   receives its feature gate through the supported config override, while CLI-based App Server launches retain
   their native flag. The v0.15.1 review hotfix requires an
