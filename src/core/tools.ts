@@ -69,10 +69,10 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "write_file",
     permission: GATED,
-    summary: "Create or overwrite a file with new contents (approval-gated).",
+    summary: "Create or overwrite a file (approval-gated). For a LARGE file, write a skeleton first, then extend it with `edit` — one very large write can be truncated or stall the model stream on some providers.",
     parameters: {
       path: { type: "string", description: "File path to write, relative to the project root." },
-      content: { type: "string", description: "The full new file contents." },
+      content: { type: "string", description: "The full new file contents. Keep a single write to roughly ~300 lines: for anything larger, write the structure/skeleton here and fill it in with follow-up `edit` calls. A single huge write can exceed the model's output-token limit (truncating the file mid-write) or make a buffering provider go silent long enough to hit the idle timeout." },
     },
     required: ["path", "content"],
   },

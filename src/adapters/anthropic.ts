@@ -13,6 +13,13 @@ import { clampEffort, effortLevelsFromError, requestEffort, resolveEffort } from
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic's documented overloaded_error
 
+// Anthropic REQUIRES max_tokens, so unlike the compat/responses providers it can't omit the field on "auto"
+// (config max_tokens 0). This is the substitute: large enough that a full-page single-file write is never
+// truncated mid-tool-call, and safe for every current Claude/GLM-class model (Sonnet 5 = 64k, Opus 4.8 /
+// Fable 5 / GLM-4.6+ = 128k). A model with a SMALLER cap self-heals — the 400 it returns names its real limit
+// and we clamp + retry once (anthropicMaxTokensLimit) — so there is no per-model output-cap table to maintain.
+export const ANTHROPIC_DEFAULT_MAX_TOKENS = 32_768;
+
 export class AnthropicProvider implements Provider {
   constructor(private readonly cfg: NekoConfig) {}
 
@@ -28,7 +35,7 @@ export class AnthropicProvider implements Provider {
     const { system, msgs } = toAnthropicMessages(messages, continuationScope);
     const payload: Record<string, any> = {
       model: this.cfg.model,
-      max_tokens: this.cfg.maxTokens > 0 ? this.cfg.maxTokens : 8192, // Anthropic REQUIRES max_tokens
+      max_tokens: this.cfg.maxTokens > 0 ? this.cfg.maxTokens : ANTHROPIC_DEFAULT_MAX_TOKENS, // Anthropic REQUIRES max_tokens (0 = auto -> generous default, self-heals on the 400 below)
       messages: msgs,
       stream,
     };
@@ -86,7 +93,7 @@ export class AnthropicProvider implements Provider {
     }
 
     const offlineDeadline = Date.now() + this.cfg.offlineRetrySeconds * 1000;
-    let httpAttempt = 0, netAttempt = 0, effortHealTried = false;
+    let httpAttempt = 0, netAttempt = 0, effortHealTried = false, maxTokensHealTried = false;
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
       // IDLE timeout (reset on every streamed chunk), NOT a total request cap: a long-but-healthy
@@ -125,6 +132,18 @@ export class AnthropicProvider implements Provider {
           return call
             ? { ...out, content: JSON.stringify(call.arguments ?? {}), tool_calls: [] }
             : { ...out, content: extractJsonLoose(out.content ?? "") };
+        } catch (streamErr) {
+          // An IDLE-timeout stall AFTER a 200 (z.ai/GLM occasionally goes silent on TTFT, aborting the stream
+          // with a TimeoutError) is a transient hiccup: retry the whole request like a network drop instead of
+          // killing the run. A user abort is real; a clean "disconnected before message_stop" stays fatal.
+          if (signal?.aborted) throw streamErr;
+          if (isRetryableStreamStall(streamErr) && httpAttempt < this.cfg.maxRetries) {
+            httpAttempt++;
+            onDelta?.(`(stream stalled - retrying in a moment, ${httpAttempt}/${this.cfg.maxRetries})`, "reasoning");
+            await sleep(this.retryDelayMs(httpAttempt - 1), signal);
+            continue;
+          }
+          throw streamErr;
         } finally {
           if (idleTimer) clearTimeout(idleTimer);
         }
@@ -170,6 +189,18 @@ export class AnthropicProvider implements Provider {
         if (Array.isArray(payload.system)) payload.system.push({ type: "text", text: extra });
         else payload.system = `${payload.system ?? ""}${extra}`;
         continue;
+      }
+      // Self-heal: a model whose output cap is below our max_tokens 400s with its real limit named in the body
+      // ("max_tokens: 40192 > 8192, which is the maximum allowed number of output tokens for ..."). Clamp to it
+      // and retry once, so a new/custom Claude- or GLM-class model with a smaller cap just works, no table needed.
+      if (!maxTokensHealTried && res.status >= 400 && res.status < 500 && /max_tokens/i.test(body)) {
+        const limit = anthropicMaxTokensLimit(body);
+        if (limit && limit > 0 && limit < payload.max_tokens) {
+          maxTokensHealTried = true;
+          payload.max_tokens = limit;
+          onDelta?.(`(max_tokens -> ${limit}; this model's output cap)`, "reasoning");
+          continue;
+        }
       }
       if (RETRYABLE_STATUS.has(res.status) && httpAttempt < this.cfg.maxRetries) {
         httpAttempt++;
@@ -297,6 +328,24 @@ export function extractJsonLoose(s: string): string {
   const body = fence ? fence[1] : s;
   const a = body.indexOf("{"), b = body.lastIndexOf("}");
   return a >= 0 && b > a ? body.slice(a, b + 1).trim() : body.trim();
+}
+
+/** A stall AFTER a 200 that's worth retrying: the idle timeout aborts the stream with a TimeoutError (z.ai/GLM
+ *  sometimes goes silent on TTFT); non-user AbortErrors count too. A clean "disconnected before message_stop"
+ *  does NOT (it's surfaced, not masked). The caller MUST rule out a user abort (signal.aborted) first. */
+export function isRetryableStreamStall(err: unknown): boolean {
+  return err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError");
+}
+
+/** Parse a model's true output cap out of an Anthropic "max_tokens too large" 400 body, e.g.
+ *  "max_tokens: 40192 > 8192, which is the maximum allowed number of output tokens for claude-...". Returns the
+ *  advertised maximum, or null when the body isn't that error (so the caller leaves max_tokens untouched). */
+export function anthropicMaxTokensLimit(body: string): number | null {
+  const gt = body.match(/max_tokens["'\s:]*\d+\s*>\s*(\d+)/i); // "max_tokens: 40192 > 8192"
+  if (gt) return Number(gt[1]);
+  const max = body.match(/maximum\s+(?:allowed\s+)?(?:number\s+of\s+)?(?:output\s+)?tokens[^\d]*(\d+)/i);
+  if (max) return Number(max[1]);
+  return null;
 }
 
 /** Undo addCacheBreakpoints (the self-heal path for endpoints that reject cache_control). */

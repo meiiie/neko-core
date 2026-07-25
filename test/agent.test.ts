@@ -3,9 +3,26 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Agent, clampObservation, estimateTokens, MAX_OBS_CHARS } from "../src/core/agent.ts";
+import { Agent, clampObservation, estimateTokens, MAX_OBS_CHARS, unwrapToolArgs } from "../src/core/agent.ts";
 import { COMPACTION_PROMPT, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent-constants.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
+
+test("unwrapToolArgs tolerates _raw / wrapper / JSON-string arg shapes (GLM quirk) without breaking normal calls", () => {
+  const want = { path: "a.md", content: "hi" };
+  // normal object passes through unchanged
+  expect(unwrapToolArgs(want)).toEqual(want);
+  // single wrapper key -> unwrapped (object OR JSON string inside)
+  expect(unwrapToolArgs({ _raw: want })).toEqual(want);
+  expect(unwrapToolArgs({ arguments: want })).toEqual(want);
+  expect(unwrapToolArgs({ _raw: JSON.stringify(want) })).toEqual(want);
+  // whole arg blob handed back as a JSON string
+  expect(unwrapToolArgs(JSON.stringify(want))).toEqual(want);
+  // a real call that legitimately has other keys is NOT mangled
+  expect(unwrapToolArgs({ path: "a", input: "b" })).toEqual({ path: "a", input: "b" });
+  // junk fails closed to {}
+  expect(unwrapToolArgs(null)).toEqual({});
+  expect(unwrapToolArgs("not json")).toEqual({});
+});
 
 class ScriptedProvider {
   index = 0;
@@ -48,8 +65,10 @@ test("system prompt keeps the Neko collaboration constitution portable and bound
   }
 
   // Keep the always-on prefix deliberate. Project context, tool schemas, and history come after it.
-  // Budget raised 7500 -> 8000 for the (uneditable, every-release) Vietnam sovereignty + language line.
-  expect(new TextEncoder().encode(DEFAULT_SYSTEM_PROMPT).byteLength).toBeLessThanOrEqual(8_000);
+  // Budget: 7500 -> 8000 (Vietnam sovereignty + language line) -> 8500 (always-on anti-slop writing rule)
+  // -> 9000 (always-on Web & HTML rule: SEO head + committed direction + anti-slop, since headless runs don't
+  //  reliably invoke the design/seo skills). Keep the always-on prefix deliberate; grow it only for real leverage.
+  expect(new TextEncoder().encode(DEFAULT_SYSTEM_PROMPT).byteLength).toBeLessThanOrEqual(9_000);
 });
 
 test("social turns keep full context, tools, reasoning preference, and conversation history", async () => {
@@ -102,6 +121,20 @@ test("loop runs tools then finishes", async () => {
   expect(agent.messages.map((m: any) => m.role)).toEqual([
     "system", "user", "assistant", "tool", "assistant", "tool", "assistant",
   ]);
+});
+
+test("budget nudge: near the step limit the model is reminded to PRODUCE the deliverable", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-budget-"));
+  writeFileSync(join(root, "a.txt"), "x");
+  // A model that keeps calling a (read-only) tool forever - the over-research failure mode. It should
+  // get a [budget] completion nudge as the step budget runs low, not silently hit the wall.
+  const script: any[] = [];
+  for (let i = 0; i < 10; i++) script.push({ content: null, tool_calls: [{ id: "c" + i, name: "read_file", arguments: { path: "a.txt" } }] });
+  script.push({ content: "summary", tool_calls: [] }); // the max_steps wrap-up call
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: new ToolRegistry(root, "auto", () => true), maxSteps: 10 });
+  await agent.run("a long task with a deliverable");
+  const budget = agent.messages.filter((m: any) => m.role === "user" && typeof m.content === "string" && m.content.startsWith("[budget]"));
+  expect(budget.length).toBeGreaterThanOrEqual(1); // fired at ~66% and ~85%
 });
 
 test("a bidirectional provider executes tools through the same safe Agent boundary", async () => {

@@ -17,7 +17,7 @@ import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
 import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
-import { destructiveInWorkspace, sandboxActive, wrapBash } from "./sandbox.ts";
+import { destructiveInWorkspace, isDockerCommand, sandboxActive, wrapBash } from "./sandbox.ts";
 import { effectivePermission, GATED, resolveTool, toolSchemas } from "./tools.ts";
 import { residentUiaHost } from "./windows-uia-host.ts";
 import { debug, messageOf } from "../shared/debug.ts";
@@ -399,7 +399,8 @@ export class ToolRegistry {
     // radius, but the user's own code + .git are writable, so those still get one confirmation.
     // (mode=auto/yolo still allows everything - that's the point of yolo; always-allow-bash too.)
     const sandboxedBash = spec.name === "bash" && this.sandboxBash && this.sandboxAutoApprove
-      && sandboxActive() && !destructiveInWorkspace(String(args.command ?? ""));
+      && sandboxActive() && !destructiveInWorkspace(String(args.command ?? ""))
+      && !isDockerCommand(String(args.command ?? "")); // docker runs unsandboxed -> don't sandbox-auto-approve it
     const decision = decide(this.mode, spec, args, { sandboxedBash });
     if (decision === "deny") {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;

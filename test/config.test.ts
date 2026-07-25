@@ -103,6 +103,17 @@ test("Kimi and DeepSeek profiles use their current official first-party routes",
   expect(deepseek.thinkingWire).toBe("toggle");
 });
 
+test("a profile with no explicit max_tokens resolves to 0 (auto), not a hardcoded cap that truncates large writes", () => {
+  // The old default (8192) silently capped EVERY provider that didn't set max_tokens, truncating large
+  // single-shot file writes. 0 = auto: compat/responses omit the field (full model budget); anthropic
+  // substitutes its own generous default. This is the systemic fix, not a per-profile patch.
+  const zai = loadConfig({ path: tmpConfig({}), profile: "zai" });
+  expect(zai.provider).toBe("anthropic");
+  expect(zai.maxTokens).toBe(0);
+  const groq = loadConfig({ path: tmpConfig({}), profile: "groq" });
+  expect(groq.maxTokens).toBe(0);
+});
+
 test("ChatGPT subscription defaults to a completion-usable vision model", () => {
   const cfg = loadConfig({ path: tmpConfig({}), profile: "chatgpt" });
   expect(cfg.provider).toBe("chatgpt");

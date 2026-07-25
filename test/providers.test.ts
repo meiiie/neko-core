@@ -570,6 +570,27 @@ test("DeepSeek V4 sends current thinking controls and replays tool-turn reasonin
   }
 });
 
+test("OpenAI-compat omits the token cap when max_tokens is unset (0 = auto -> the model's full output budget)", async () => {
+  const orig = globalThis.fetch;
+  let body: any;
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body ?? "{}"));
+    return Response.json({ choices: [{ message: { role: "assistant", content: "ok" } }] });
+  }) as typeof fetch;
+  try {
+    const config = new NekoConfig(
+      { provider: "openai_compat", base_url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+      "groq", { groq: { key_env: "GROQ_API_KEY" } }, "secret",
+    );
+    expect(config.maxTokens).toBe(0);
+    await new OpenAICompatProvider(config).complete([{ role: "user", content: "hi" }]);
+    expect(body.max_tokens).toBeUndefined();
+    expect(body.max_completion_tokens).toBeUndefined();
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 test("Kimi API route uses the official completion budget and thinking wire without a proxy", async () => {
   const orig = globalThis.fetch;
   let body: any;
