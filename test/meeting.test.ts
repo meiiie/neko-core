@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { activeBrowserMeeting, BrowserMeetingSession, startBrowserMeeting } from "../src/adapters/browser-meeting.ts";
+import { LiveMeetingTranscriber } from "../src/adapters/meeting-live.ts";
 import { createMeetingTools } from "../src/adapters/meeting-tools.ts";
 import {
   createMeeting,
@@ -92,6 +93,95 @@ test("browser capture requires consent, accepts bounded stereo PCM, and never st
   expect(result?.capture?.durationMs).toBe(100);
   const wav = readFileSync(join(meetingDir(result!.id, home), "audio.wav"));
   expect(wav.readUInt16LE(22)).toBe(2);
+});
+
+test("live transcript runs during capture and the agent can read it mid-meeting", async () => {
+  const home = tempHome();
+  const decoded: number[] = [];
+  let opened = "";
+  // Go through startBrowserMeeting so the session registers as the active one the tools inspect.
+  const session = await startBrowserMeeting({
+    home,
+    title: "Live test",
+    openUrl: (value) => { opened = value; },
+    liveIntervalMs: 10,
+    liveTranscriberFactory: (context) => new LiveMeetingTranscriber({
+      ...context,
+      windowMs: 4_000,
+      overlapMs: 0,
+      minWindowMs: 1_000,
+      transcribeWindow: async (window) => {
+        decoded.push(window.offsetMs);
+        return [{ id: "w", startMs: 0, endMs: 800, speaker: "Meeting audio", source: "system", text: "chốt thứ sáu" }];
+      },
+    }),
+  });
+  const url = new URL(opened);
+
+  const recording = new Promise<void>((resolve, reject) => {
+    const socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
+    const timer = setTimeout(() => reject(new Error("meeting websocket timeout")), 5_000);
+    socket.onopen = () => socket.send(JSON.stringify({ type: "hello", token: url.hash.slice(1) }));
+    socket.onerror = () => reject(new Error("meeting websocket failed"));
+    socket.onmessage = (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.type === "ready") socket.send(JSON.stringify({ type: "begin", consent: true, sampleRate: 16_000, sources: ["system"] }));
+      if (message.type === "recording") {
+        socket.send(Buffer.alloc(16_000 * 2 * 2 * 2)); // 2 seconds, enough for one window
+        clearTimeout(timer);
+        resolve();
+      }
+    };
+  });
+  await recording;
+
+  // The loop is interval-driven; wait for it to pick the new audio up.
+  for (let waited = 0; waited < 2_000 && !session.liveSegments().length; waited += 25) await Bun.sleep(25);
+  expect(decoded.length).toBeGreaterThan(0);
+  expect(session.liveSegments().map((s) => s.text)).toContain("chốt thứ sáu");
+
+  // Mid-meeting the agent reads provisional text without stopping the recording.
+  const tools = createMeetingTools(home);
+  const live = JSON.parse(await tools.call("mcp__neko_meeting__inspect", { operation: "live" }));
+  expect(live.state).toBe("recording");
+  expect(live.segments.map((s: any) => s.text)).toContain("chốt thứ sáu");
+  expect(live.live.note).toContain("Provisional");
+
+  const result = await session.stop("test complete");
+  expect(result?.state).toBe("recorded");
+  // Live text is provisional; the finalized WAV is still the canonical evidence.
+  expect(existsSync(join(meetingDir(result!.id, home), "audio.wav"))).toBe(true);
+});
+
+test("capture still records when no live engine is available", async () => {
+  const home = tempHome();
+  const session = new BrowserMeetingSession({
+    home,
+    openUrl: () => {},
+    liveTranscriberFactory: () => null, // pack not installed
+  });
+  const started = await session.start();
+  const url = new URL(started.url);
+  const done = new Promise<void>((resolve, reject) => {
+    const socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
+    const timer = setTimeout(() => reject(new Error("meeting websocket timeout")), 5_000);
+    socket.onopen = () => socket.send(JSON.stringify({ type: "hello", token: url.hash.slice(1) }));
+    socket.onerror = () => reject(new Error("meeting websocket failed"));
+    socket.onmessage = (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.type === "ready") socket.send(JSON.stringify({ type: "begin", consent: true, sampleRate: 16_000, sources: ["system"] }));
+      if (message.type === "recording") {
+        socket.send(Buffer.alloc(16_000 * 2 * 2 / 10));
+        socket.send(JSON.stringify({ type: "stop" }));
+      }
+      if (message.type === "stop") { clearTimeout(timer); resolve(); }
+    };
+  });
+  const result = await session.waitUntilStopped();
+  await done;
+  expect(result?.state).toBe("recorded");
+  expect(session.liveSegments()).toEqual([]);
+  expect(session.liveSnapshot()).toBe(null);
 });
 
 test("a consent-page launch failure tears down the loopback owner and incomplete manifest", async () => {

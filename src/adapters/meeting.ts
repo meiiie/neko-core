@@ -225,7 +225,9 @@ function normalizeMeetingTitle(value: string, now: Date): string {
   return clean || `Meeting ${now.toISOString().slice(0, 16).replace("T", " ")}`;
 }
 
-function wavHeader(dataBytes: number, sampleRate: number, channels: number): Buffer {
+/** RIFF/WAVE header for PCM16. Exported so the live window transcriber can wrap a slice of the same
+ * growing capture stream without duplicating the format contract. */
+export function wavHeader(dataBytes: number, sampleRate: number, channels: number): Buffer {
   if (!Number.isInteger(sampleRate) || sampleRate < 8_000 || sampleRate > 192_000) throw new Error("invalid audio sample rate");
   const header = Buffer.alloc(44);
   header.write("RIFF", 0, "ascii");

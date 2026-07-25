@@ -24,6 +24,20 @@ Use Neko's first-class meeting tools for consented local capture and timestamp-g
 - Do not repeatedly poll while a recording is active. Continue only when the user asks, the capture ends, or a bounded status check is useful.
 - On any uncertainty about privacy, wrong source, or unexpected participant, stop first and clarify second.
 
+### While the meeting is running
+
+- The user asking you to "listen and take notes" does **not** mean joining a room. Neko has no vendor
+  room-join: say plainly that you will capture the audio playing on this computer, and let the user pick
+  the meeting tab/window in the browser's own picker.
+- When the Meeting Support Pack is installed, `start` also runs a provisional live transcript. Read it
+  with `mcp__neko_meeting__inspect {"operation":"live"}` when the user asks what has been said, wants
+  notes so far, or asks a question mid-meeting. It returns the newest segments by default.
+- Treat live text as provisional and say so once: a window can clip a word, and audio may be skipped
+  under load (`skippedMs` reports it). The canonical record is the finalized transcription after stop.
+- Do not poll the live transcript on a timer. Read it when the user asks, or once before summarizing.
+- If `live.note` says no engine is attached, recording is still fine - offer `/support meeting` and
+  transcribe after the meeting instead of pretending live notes exist.
+
 ### Transcribe
 
 - Stop/finalize before transcription. Use language `vi` for a Vietnamese meeting, `en` for English, and `auto` only when genuinely mixed or unknown.

@@ -11,16 +11,21 @@ import {
   readMeetingTranscript,
   type MeetingManifest,
 } from "./meeting.ts";
-import { discoverMeetingSupport } from "./meeting-support-pack.ts";
+import {
+  discoverMeetingSupport,
+  verifyMeetingSupportIntegrity,
+  type MeetingTranscriber,
+} from "./meeting-support-pack.ts";
+import { LiveMeetingTranscriber, whisperWindowTranscriber } from "./meeting-live.ts";
 import { transcribeMeeting } from "./meeting-transcription.ts";
 
 const PREFIX = "mcp__neko_meeting__";
 const SCHEMAS = [
   {
     name: "inspect",
-    description: "Inspect local meeting capture/support status, list recent meetings, or read a bounded page of timestamped transcript segments. Read-only.",
+    description: "Inspect local meeting capture/support status, list recent meetings, read a bounded page of timestamped transcript segments, or read the provisional live transcript of the meeting happening right now. Read-only.",
     properties: {
-      operation: { type: "string", enum: ["status", "list", "read"] },
+      operation: { type: "string", enum: ["status", "list", "read", "live"] },
       meeting_id: { type: "string", description: "Meeting id; omit or use 'latest' for the newest meeting." },
       offset: { type: "integer", minimum: 0, description: "First transcript segment for read." },
       limit: { type: "integer", minimum: 1, maximum: 200, description: "At most 200 segments; defaults to 50." },
@@ -29,8 +34,11 @@ const SCHEMAS = [
   },
   {
     name: "start",
-    description: "Open Neko's local consent page and the browser's native screen/tab audio picker. Recording starts only after the user confirms consent and Share audio. Video is never stored. Gated.",
-    properties: { title: { type: "string", description: "Optional meeting title." } },
+    description: "Open Neko's local consent page and the browser's native screen/tab audio picker. Recording starts only after the user confirms consent and Share audio. When the Meeting Support Pack is installed, a provisional live transcript also runs so you can answer questions and take notes mid-meeting. Video is never stored. Gated.",
+    properties: {
+      title: { type: "string", description: "Optional meeting title." },
+      language: { type: "string", description: "Spoken language for the live transcript, such as vi or en; defaults to vi." },
+    },
     required: [],
   },
   {
@@ -81,7 +89,11 @@ class MeetingTools implements McpTools {
     if (action === "inspect") return this.inspect(args);
     if (action === "start") {
       if (signal?.aborted) throw new DOMException("Meeting start aborted", "AbortError");
-      const session = await startBrowserMeeting({ home: this.home, title: String(args.title ?? "") });
+      const session = await startBrowserMeeting({
+        home: this.home,
+        title: String(args.title ?? ""),
+        liveTranscriberFactory: await resolveLiveFactory(this.home, String(args.language ?? "vi")),
+      });
       return JSON.stringify({
         success: true,
         meeting: summarize(session.meeting),
@@ -135,6 +147,28 @@ class MeetingTools implements McpTools {
         install: { tui: "/support meeting", cli: "neko support meeting install" },
       }, null, 2);
     }
+    if (operation === "live") {
+      const session = activeBrowserMeeting();
+      if (!session) return JSON.stringify({ state: "idle", detail: "No meeting capture is active.", segments: [] }, null, 2);
+      const active = session.snapshot();
+      const live = session.liveSnapshot();
+      const all = session.liveSegments();
+      const limit = boundedInt(args.limit, 1, 200, 50);
+      const offset = boundedInt(args.offset, 0, Number.MAX_SAFE_INTEGER, Math.max(0, all.length - limit));
+      return JSON.stringify({
+        state: active.state,
+        meeting: summarize(active.meeting),
+        durationMs: active.durationMs,
+        live: live
+          ? { ...live, note: "Provisional: windows can clip a word and audio may be skipped under load. The finalized transcription after stop is canonical." }
+          : { note: "No live transcript engine is attached; install the Meeting Support Pack to hear the meeting as it happens." },
+        totalSegments: all.length,
+        offset,
+        limit,
+        segments: all.slice(offset, offset + limit),
+        hasMore: offset + limit < all.length,
+      }, null, 2);
+    }
     if (operation === "list") {
       const offset = boundedInt(args.offset, 0, Number.MAX_SAFE_INTEGER, 0);
       const limit = boundedInt(args.limit, 1, 200, 50);
@@ -158,7 +192,7 @@ class MeetingTools implements McpTools {
         hasMore: offset + limit < transcript.segments.length,
       }, null, 2);
     }
-    throw new Error("meeting inspect operation must be status, list, or read");
+    throw new Error("meeting inspect operation must be status, list, read, or live");
   }
 
   private resolveMeeting(value: unknown): MeetingManifest {
@@ -172,6 +206,20 @@ class MeetingTools implements McpTools {
 export function createMeetingTools(home = homeDir()): McpTools { return new MeetingTools(home); }
 export function withMeetingTools(source?: McpTools, home = homeDir()): McpTools {
   return composeMcpTools(source, createMeetingTools(home))!;
+}
+
+/**
+ * Verify the pack ONCE before capture starts, then hand the concrete engine to the capture session.
+ * Verification is async and integrity-checked, so it must not happen on the synchronous consent path.
+ * Returning undefined keeps recording exactly as before: live transcription is never a reason to fail.
+ */
+async function resolveLiveFactory(home: string, language: string) {
+  if (discoverMeetingSupport(home).state !== "ready") return undefined;
+  let transcriber: MeetingTranscriber;
+  try { transcriber = await verifyMeetingSupportIntegrity(home); } catch { return undefined; }
+  const transcribeWindow = whisperWindowTranscriber(transcriber, { language });
+  return (context: { rawPath: string; sampleRate: number; channels: 2 }) =>
+    new LiveMeetingTranscriber({ ...context, transcribeWindow });
 }
 
 function summarize(meeting: MeetingManifest): Record<string, unknown> {

@@ -127,6 +127,29 @@ The bundled `meeting-notes` skill requires every decision/action item to cite tr
 owners or due dates remain `not stated`; contradictions remain visible. A successful ASR process is evidence
 that transcription ran, not proof that every word, name, number, negation, or speaker is correct.
 
+## Provisional live transcript
+
+When the Meeting Support Pack is installed, capture also runs a live loop so the agent can answer
+"what has been said so far" without stopping the meeting. It reads windows out of the same growing PCM
+file the capture already writes, wraps each window in a WAV header, and decodes it with the same
+verified `whisper-cli` binary — no second engine, no second supply chain, no upload.
+
+```
+growing .capture.pcm ──► window (default 15 s, 2 s overlap) ──► verified whisper-cli ──► provisional segments
+                                                                                          │
+                            mcp__neko_meeting__inspect {"operation":"live"} ◄──────────────┘
+```
+
+The design is windowed rather than streaming for a measured reason: as of 2026-07 no open streaming ASR
+model covers Vietnamese, while every model that does Vietnamese well is batch. See
+`MEETINGS-RESEARCH-2026-07.md`.
+
+Live output is **provisional by contract**: a window boundary can clip a word, and when decoding falls
+behind the meeting the loop skips forward and reports `skippedMs` rather than drifting minutes late. One
+unreadable window is recorded in `lastError` and stepped over instead of wedging the session. The
+finalized WAV plus the existing single-pass transcription remains the canonical record, and the live
+loop is strictly additive — a missing or failing engine never affects the recording.
+
 ## Context and performance
 
 Transcript reads are paginated at most 200 segments in the tool and 50 in the TUI. Long audio therefore does

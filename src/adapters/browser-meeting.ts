@@ -13,7 +13,9 @@ import {
   readMeeting,
   saveMeeting,
   type MeetingManifest,
+  type MeetingTranscriptSegment,
 } from "./meeting.ts";
+import type { LiveMeetingTranscriber } from "./meeting-live.ts";
 import { homeDir } from "../shared/home.ts";
 
 export type BrowserMeetingState = "starting" | "waiting" | "recording" | "finalizing" | "stopped" | "failed";
@@ -33,6 +35,11 @@ export interface BrowserMeetingOptions {
   openUrl?: (url: string) => void;
   onEvent?: (event: BrowserMeetingEvent) => void;
   now?: () => number;
+  /** Builds the provisional live-transcript loop once consent starts the capture. Absent (the default
+   * when the Meeting Support Pack is not installed) simply means no live text; recording is unaffected. */
+  liveTranscriberFactory?: (context: { rawPath: string; sampleRate: number; channels: 2 }) => LiveMeetingTranscriber | null;
+  /** How often the live loop looks for new audio. */
+  liveIntervalMs?: number;
 }
 
 interface MeetingSocketData { authenticated: boolean }
@@ -62,6 +69,8 @@ export class BrowserMeetingSession {
   private rawPath = "";
   private audioBytes = 0;
   private startedAtMs = 0;
+  private live: LiveMeetingTranscriber | null = null;
+  private liveTimer: ReturnType<typeof setInterval> | null = null;
   private readonly home: string;
   private resolveStopped!: (meeting: MeetingManifest | null) => void;
   private readonly stoppedPromise: Promise<MeetingManifest | null>;
@@ -138,6 +147,8 @@ export class BrowserMeetingSession {
         await finished(this.rawStream);
         this.rawStream = null;
       }
+      // After the flush so the closing words are decoded, before finalizeMeetingWav removes the raw file.
+      await this.stopLive();
       const meeting = readMeeting(this.meeting.id, this.home);
       if (!meeting || !meeting.capture || !this.rawPath || !existsSync(this.rawPath) || this.audioBytes === 0) {
         if (meeting && meeting.state !== "failed") {
@@ -224,6 +235,37 @@ export class BrowserMeetingSession {
     if (message?.type === "stop") void this.stop("browser stop");
   }
 
+  /** Provisional live transcript so the agent can answer "what has been said so far" mid-meeting. It is
+   * strictly additive: a missing engine, or any live failure, never touches the recording. */
+  private startLive(sampleRate: number): void {
+    const factory = this.options.liveTranscriberFactory;
+    if (!factory) return;
+    try {
+      this.live = factory({ rawPath: this.rawPath, sampleRate, channels: 2 });
+    } catch {
+      this.live = null; // an unavailable engine is not a capture failure
+      return;
+    }
+    if (!this.live) return;
+    this.live.start();
+    this.liveTimer = setInterval(() => { void this.live?.drain(); }, this.options.liveIntervalMs ?? 5_000);
+    (this.liveTimer as any).unref?.();
+  }
+
+  /** Provisional segments heard so far. Empty when no live engine is attached. */
+  liveSegments(): MeetingTranscriptSegment[] { return this.live?.segments() ?? []; }
+
+  liveSnapshot(): ReturnType<LiveMeetingTranscriber["snapshot"]> | null { return this.live?.snapshot() ?? null; }
+
+  private async stopLive(): Promise<void> {
+    if (this.liveTimer) { clearInterval(this.liveTimer); this.liveTimer = null; }
+    const live = this.live;
+    this.live = null;
+    if (!live) return;
+    try { await live.drain(); } catch { /* provisional text only */ }
+    try { await live.stop(); } catch { /* best effort */ }
+  }
+
   private beginCapture(message: any): void {
     if (this.state !== "waiting") throw new Error("capture is not waiting to start");
     if (message?.consent !== true) throw new Error("recording consent was not confirmed");
@@ -247,6 +289,7 @@ export class BrowserMeetingSession {
       videoStored: false,
     };
     saveMeeting(meeting, this.home);
+    this.startLive(sampleRate);
     this.emitState("recording", `capturing ${meeting.capture.sources.join(" + ")}`);
   }
 
