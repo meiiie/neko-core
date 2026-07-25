@@ -285,8 +285,9 @@ test("a loud but wordless room is reported as quiet, because the transcript deci
   const quiet = session.quietMs()!;
   expect(quiet).toBeGreaterThan(2_000);
   expect(quiet).toBe(live.snapshot().decodedMs - 900);
-  // The committed point froze the instant the words stopped - the exact reason it cannot time silence.
-  expect(live.snapshot().processedMs).toBe(900);
+  // The committed point only moves when a whole window turns out empty, so it lags and jumps - which is
+  // why silence is timed against what the decoder examined, not against what it committed.
+  expect(live.snapshot().processedMs).toBeLessThanOrEqual(live.snapshot().decodedMs);
   // A few seconds of quiet is not a finished meeting: nothing is proposed below the threshold.
   expect(notices.filter((n) => n.includes("may have ended"))).toEqual([]);
   socket.close();
@@ -356,6 +357,30 @@ test("engine words become segments at the model's own boundaries, and the locale
   expect(transcript.segments[2].uncertain).toEqual(["hai"]);
   expect(JSON.stringify(transcript)).not.toContain("vi-VN>");
   expect(() => parseMeetingTranscript("m", "{}", { language: "vi-VN", model: "f" })).toThrow("missing words");
+});
+
+test("a Vietnamese meeting does not get CJK hallucinations, but a confident foreign name survives", () => {
+  // From a real recording: over the near-silent opening the model emitted CJK characters at confidence
+  // 0.14 and 0.20. The --lang flag is inert, so requested-script is the only handle we have - and it is
+  // a fact we hold, not a guess.
+  const transcript = parseMeetingTranscript("m", JSON.stringify({
+    words: [
+      { w: "啊,", start: 5.8, end: 6.0, conf: 0.141 },
+      { w: "洛", start: 8.3, end: 8.5, conf: 0.204 },
+      { w: "hôm", start: 15.4, end: 15.6, conf: 0.798 },
+      { w: "nay", start: 15.6, end: 15.8, conf: 1 },
+      { w: "小米", start: 16.0, end: 16.4, conf: 0.97 }, // said clearly: kept
+    ],
+  }), { language: "vi-VN", model: "fixture", source: "microphone" });
+  expect(transcript.segments.map((s) => s.text)).toEqual(["hôm nay 小米"]);
+  expect(transcript.droppedOutOfScript).toEqual(["啊,", "洛"]);
+
+  // Ask for a CJK language and nothing is dropped: the check is about the language requested.
+  const japanese = parseMeetingTranscript("m", JSON.stringify({
+    words: [{ w: "啊,", start: 0, end: 0.2, conf: 0.141 }],
+  }), { language: "ja-JP", model: "fixture", source: "microphone" });
+  expect(japanese.segments.map((s) => s.text)).toEqual(["啊,"]);
+  expect(japanese.droppedOutOfScript).toBeUndefined();
 });
 
 test("channel plan and language normalization match what the engine actually accepts", () => {

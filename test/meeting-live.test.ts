@@ -122,7 +122,10 @@ test("sustained lag skips forward and reports it rather than drifting behind the
   expect(offsets[0]).toBe(290_000); // jumped to availableMs - windowMs
   const snapshot = live.snapshot();
   expect(snapshot.skippedMs).toBe(290_000);
-  expect(snapshot.processedMs).toBe(290_000); // the buffer restarts at the skip point
+  // The skipped-to window was decoded and held no words, so it is finished - a full empty buffer must
+  // move on, or the loop re-decodes the same ten seconds for the rest of the meeting.
+  expect(snapshot.processedMs).toBe(300_000);
+  expect(snapshot.decodedMs).toBe(300_000);
   await live.stop();
 });
 
@@ -425,4 +428,39 @@ test("a live log never jumps backwards in time when one channel runs ahead", asy
   expect(emitted.map(([source]) => source)).toEqual(["system", "microphone"]);
   expect(emitted.map(([, startMs]) => startMs)).toEqual([5_000, 6_000]);
   expect(live.segments().map((s) => s.id)).toEqual(["live_00001", "live_00002"]);
+});
+
+test("a silent channel never holds the talking channel's text hostage", async () => {
+  // Found in a real meeting: recording a Google Meet alone, the microphone had speech and the system
+  // channel had nothing. Nothing appeared for the whole session. A channel where nobody speaks commits
+  // nothing, so its committed point stays at 0, and the release watermark is the MINIMUM across
+  // channels - so the silent channel pinned the watermark at 0 and every confirmed line waited forever.
+  const { raw, dir } = setup();
+  const emitted: string[] = [];
+  const live = new LiveMeetingTranscriber({
+    rawPath: raw,
+    sampleRate: SAMPLE_RATE,
+    channels: CHANNELS,
+    sources: ["microphone", "system"],
+    workDir: dir,
+    windowMs: 10_000,
+    minWindowMs: 6_000,
+    onSegments: (segments) => emitted.push(...segments.map((s) => s.text)),
+    transcribeWindow: async (window) => {
+      if (window.source === "system") return []; // an empty room: the decoder hears no words at all
+      const startMs = 1_000;
+      if (window.offsetMs > startMs || window.offsetMs + window.durationMs < 3_000) return [];
+      return [{ id: "m", startMs, endMs: 3_000, speaker: "You", source: "microphone", text: "mình đang nói" }];
+    },
+  });
+  live.start();
+
+  record(raw, 10_000);
+  await live.drain();
+  record(raw, 10_000);
+  await live.drain();
+
+  // The microphone confirmed a line twice over. It must reach the user.
+  expect(emitted).toEqual(["mình đang nói"]);
+  expect(live.segments().map((s) => s.speaker)).toEqual(["You"]);
 });

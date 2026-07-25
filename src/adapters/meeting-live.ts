@@ -325,7 +325,13 @@ export class LiveMeetingTranscriber {
     const agreed = forceAll ? current.length : agreedPrefix(track.previous, current);
     if (agreed <= 0) {
       track.previous = current;
-      return; // nothing is confirmed yet; the same audio is re-decoded next pass
+      // A FULL buffer holding no words is still finished. Without this a channel where nobody speaks
+      // never advances its committed point, and since the release watermark is the minimum across
+      // channels, one silent channel pinned it at zero and every confirmed line on the other channel
+      // waited forever. Found recording a real meeting alone: the microphone had speech, the system
+      // channel was empty, and nothing appeared at all.
+      if (forceAll) { track.processedMs = Math.max(track.processedMs, bufferEndMs); track.previous = []; }
+      return; // otherwise nothing is confirmed yet; the same audio is re-decoded next pass
     }
     // Word timings come from the decoder's SEGMENT, so committing half a segment would advance the
     // buffer past words that were never emitted - real audio lost "Nam will own the database

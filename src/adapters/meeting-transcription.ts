@@ -84,6 +84,20 @@ const SEGMENT_MAX_WORDS = 40;
  * locale tag also means "new segment starts here". */
 const ENGINE_TAG = /<[^\s<>]*>/g;
 const LOCALE_TAG = /^<[a-z]{2,3}(?:-[a-z0-9]{2,8})?>$/i;
+/**
+ * Out-of-script hallucination guard.
+ *
+ * parakeet-cli's `--lang` flag is inert (see MEETINGS-RESEARCH-2026-07.md 2.8), so the model runs its
+ * own language ID and can drift. On a real Vietnamese recording it emitted CJK characters over
+ * near-silence at the start of the meeting - which is not a mis-heard word, it is a different writing
+ * system than the one asked for. Requested-script is a fact we hold, so this is a check, not a guess.
+ *
+ * Dropped only when the model is ALSO unsure: a confidently transcribed foreign name survives, and the
+ * number dropped is reported rather than silently swallowed.
+ */
+const CJK = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/;
+const LATIN_SCRIPT_LANGUAGES = /^(?:vi|en|fr|de|es|pt|it|nl|pl|id|ms|tr|cs|ro|hu|sv|da|fi|nb|hr|sk|sl|et|lv|lt)(?:[-_]|$)/i;
+const OUT_OF_SCRIPT_KEPT_ABOVE = 0.9;
 
 export async function transcribeMeeting(id: string, options: TranscribeMeetingOptions = {}): Promise<MeetingTranscript> {
   const home = options.home ?? homeDir();
@@ -129,6 +143,7 @@ async function transcribeMeetingLocked(id: string, options: TranscribeMeetingOpt
     // manifest records which channels actually carry audio, so a system-only meeting costs one pass.
     const channels = meetingChannels(meeting.capture.channels, meeting.capture.sources);
     const segments: MeetingTranscriptSegment[] = [];
+    const dropped: string[] = [];
     let voices = 0;
     for (const channel of channels) {
       const mono = join(staging, `${channel.source}.wav`);
@@ -143,13 +158,16 @@ async function transcribeMeetingLocked(id: string, options: TranscribeMeetingOpt
         signal: options.signal,
         notify,
       });
-      let decoded = parseMeetingTranscript(id, json, {
+      const parsed = parseMeetingTranscript(id, json, {
         language,
         engineVersion: transcriber.engineVersion,
         model: transcriber.modelId,
         modelSha256: transcriber.modelSha256,
         source: channel.source,
-      }).segments;
+      });
+      // Carry the discard list up: a dropped token must be recorded somewhere, or it is silently gone.
+      if (parsed.droppedOutOfScript?.length) dropped.push(...parsed.droppedOutOfScript);
+      let decoded = parsed.segments;
       // Only the system channel. The microphone is already known to be the user, and a clustering guess
       // must never overwrite something Neko actually knows.
       if (options.diarize && channel.source === "system") {
@@ -183,6 +201,7 @@ async function transcribeMeetingLocked(id: string, options: TranscribeMeetingOpt
       },
       segments: renumber(segments.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs)),
       ...(voices > 0 ? { voices } : {}),
+      ...(dropped.length ? { droppedOutOfScript: dropped } : {}),
     };
     writeMeetingTranscript(transcript, home);
     meeting.state = "ready";
@@ -196,6 +215,7 @@ async function transcribeMeetingLocked(id: string, options: TranscribeMeetingOpt
     };
     saveMeeting(meeting, home);
     notify(`Transcript ready: ${transcript.segments.length} timestamped segment${transcript.segments.length === 1 ? "" : "s"}.`);
+    if (dropped.length) notify(`Discarded ${dropped.length} token${dropped.length === 1 ? "" : "s"} written in another script than ${language}; they are listed in transcript.json.`);
     return transcript;
   } catch (error) {
     meeting.state = "recorded";
@@ -293,6 +313,8 @@ export function parseMeetingTranscript(
   const source = provenance.source ?? "unknown";
   const speaker = speakerFor(source);
   const segments: MeetingTranscriptSegment[] = [];
+  const dropped: string[] = [];
+  const latinScript = LATIN_SCRIPT_LANGUAGES.test(provenance.language);
   let words: Array<{ text: string; startMs: number; endMs: number; conf?: number }> = [];
 
   const emit = () => {
@@ -319,6 +341,7 @@ export function parseMeetingTranscript(
     // Real audio glued the tag ONTO a word ("hai<unk>"), so a whole-token check is not enough.
     const text = token.replace(ENGINE_TAG, "").trim();
     if (!text) continue;
+    if (latinScript && CJK.test(text) && (raw.conf ?? 0) < OUT_OF_SCRIPT_KEPT_ABOVE) { dropped.push(text); continue; }
     const startMs = seconds(raw.start);
     const endMs = seconds(raw.end);
     if (startMs == null || endMs == null || endMs < startMs) continue;
@@ -344,6 +367,7 @@ export function parseMeetingTranscript(
       model: provenance.model,
       modelSha256: provenance.modelSha256,
     },
+    ...(dropped.length ? { droppedOutOfScript: dropped } : {}),
     segments,
   };
 }
@@ -489,7 +513,7 @@ function seconds(value: unknown): number | null {
 }
 
 function cleanEngineError(value: string): string {
-  return value.replace(/[ --]/g, " ").replace(/\s+/g, " ").trim().slice(-1_000) || "no diagnostic output";
+  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(-1_000) || "no diagnostic output";
 }
 
 function boundedError(error: unknown): string {

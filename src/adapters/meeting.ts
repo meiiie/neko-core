@@ -79,6 +79,9 @@ export interface MeetingTranscript {
   /** Distinct voices found on the meeting channel, when speaker separation ran. A count is far safer
    * than per-line identity - see meeting-diarize.ts for the measured accuracy. */
   voices?: number;
+  /** Tokens discarded for being in a different writing system than the language asked for, and
+   * low-confidence with it. Recorded so a dropped word is never silently gone. */
+  droppedOutOfScript?: string[];
   segments: MeetingTranscriptSegment[];
 }
 
