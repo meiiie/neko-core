@@ -48,9 +48,21 @@ The streaming subset is much smaller, and this is where the Vietnamese problem a
 | Meta Omnilingual ASR | no (batch) | 1,600+ | yes |
 | Whisper large-v3 / whisper.cpp | no (batch) | 99 | yes |
 
-**Finding 1 — the binding constraint.** As of 2026-07-25 there is no open streaming ASR model with
-confirmed strong Vietnamese. Every model that does Vietnamese well is batch; every low-latency streaming
-model omits Vietnamese. A Vietnamese live-notes feature therefore cannot be bought off the shelf.
+**Finding 1 — CORRECTED on 2026-07-25 after measurement. The original claim was wrong.**
+
+> ~~As of 2026-07-25 there is no open streaming ASR model with confirmed strong Vietnamese.~~
+
+That conclusion came from surveying the models that appear on English-centric leaderboards. It missed
+**NVIDIA Nemotron-3.5-ASR-streaming-0.6B** (released June 2026): a single 0.6B checkpoint covering 40+
+locales **including `vi-VN`**, natively streaming with cache-aware chunking — it keeps a rolling cache of
+past activations, so chunks never re-read overlapping audio and there is no stutter at chunk edges
+([model card](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b)). It runs on CPU through
+[mudler/parakeet.cpp](https://github.com/mudler/parakeet.cpp), which publishes GGUF conversions and a
+1.4 MB Windows binary.
+
+See §2.6 for the head-to-head measurement on real Vietnamese speech. The corrected finding is that a
+Vietnamese live-notes feature **can** be built on a streaming model today, and the windowed-Whisper path
+is a fallback rather than the destination.
 
 **Finding 2 — the available local path.** whisper.cpp ships a `stream` example and, more usefully,
 `whisper-cli --vad` with a Silero VAD model, which extracts detected speech segments before decoding.
@@ -62,6 +74,47 @@ supply chain, is the only Vietnamese-capable local live path that does not add a
 heavily; dedicated work exists on Vietnamese–English code-switching ASR
 ([TSPC](https://arxiv.org/pdf/2509.05983)). A Vietnamese WER number measured on read speech will
 overstate real meeting quality.
+
+### 2.6 Measured: Nemotron 3.5 ASR vs Whisper on real Vietnamese speech (2026-07-25)
+
+Run on this repository's Windows dev machine, CPU only. Audio was synthesized with Microsoft Vietnamese
+neural voices (`vi-VN-HoaiMyNeural`, `vi-VN-NamMinhNeural`) and resampled to 16 kHz mono — clean speech,
+so these numbers are a ceiling, not meeting-room conditions.
+
+**Test 1 — plain Vietnamese meeting speech, 21 s, 60 words.**
+
+| | Nemotron 3.5 ASR q5_k (748 MiB) | Whisper `base-q5_1` (57 MiB) |
+|---|---|---|
+| Word errors | **0** | ~11 (~18% WER) |
+| Owner's name "Nam" | correct | "nằm" — the person is lost |
+| Deadline "thứ tư" | correct | "thứ" — the deadline is lost |
+| Other damage | — | họp→học, tuần→tường, dữ liệu→giữ liệu, rủi ro→rũi rò, thanh toán→thành toán, xác nhận→sát nhận |
+| Real-time factor | **0.41x** | 0.51x |
+
+Whisper `base` did not merely score worse: it destroyed **exactly the two facts a meeting summary must
+carry** — who owns the action and when it is due. That is a correctness failure, not a fluency one, and
+no amount of downstream summarization can recover it.
+
+Nemotron's `--stream` mode produced identical text with `<vi-VN>` locale tags, confirming the
+cache-aware streaming path works rather than only batch decoding.
+
+**Test 2 — Vietnamese/English code-switched engineering speech, 17 s.** This is the realistic case for a
+Vietnamese tech meeting, and it defeated **both** engines:
+
+> Reference: "Team backend deploy lên staging chiều nay nhé. Nhớ chạy migration trước khi merge pull
+> request. Nếu build fail thì rollback về commit cũ, đừng force push lên main."
+>
+> Nemotron (`vi-VN`): "Tim Bắc Ken Deploi lên Saging chiều nay nhé. Nhớ chạy migraine trước khi mét pung
+> rít. Nếu Bill thì run bắt về con mích cũ, đừng phosphus lên mênh…"
+
+`--lang auto` behaved the same; `--lang en-US` recovered some English terms ("Deploy", "Lathency") while
+degrading the Vietnamese. Nemotron keeps the Vietnamese carrier sentence noticeably better than Whisper
+does, but every English technical token is mangled by both.
+
+**Conclusion.** Nemotron 3.5 ASR is decisively better for Vietnamese and should become the Vietnamese
+path. Code-switching remains an open problem for both engines and must not be claimed as solved — it is
+its own research axis ([TSPC](https://arxiv.org/pdf/2509.05983)) and the honest product behaviour is to
+warn that English technical terms in a Vietnamese meeting will be unreliable.
 
 ### 2.2 Streaming diarization
 
@@ -131,6 +184,16 @@ intersection nobody currently serves:
 
 Sketched for discussion; each needs its own evidence before any code.
 
+- **A0. Adopt Nemotron 3.5 ASR as the Vietnamese engine (now the highest-value change).** Measured in
+  §2.6: zero word errors versus ~18% WER, and faster. It needs a second Support Pack tier — the
+  parakeet.cpp binary plus a 748 MiB GGUF — carrying the same discipline the Whisper pack already has:
+  pinned release asset, SHA-256 digest, bounded size, safe extraction, version probe, integrity
+  re-verification. Its native cache-aware streaming would **replace** the windowed LocalAgreement loop
+  for Vietnamese rather than sit on top of it; the Whisper path stays as the small-footprint fallback
+  (57 MiB versus 748 MiB is a real choice for some users). Open questions before committing: quantization
+  quality (q5_k was tested; q4_k halves the download), licence terms for redistribution, and behaviour on
+  noisy multi-speaker audio rather than clean TTS.
+
 - **A. Live transcript loop (the unlock for obligations 2 and 3).** Capture already streams PCM to disk.
   A bounded rolling window (order ~10–20 s, cut on Silero VAD boundaries) decoded by the existing verified
   `whisper-cli` yields segment-level text during the meeting. Open questions: real-time factor on a
@@ -166,6 +229,8 @@ Nothing above may be claimed without:
 
 ## 6. Sources
 
+- [NVIDIA Nemotron-3.5-ASR-streaming-0.6B](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) — 40+ locales incl. `vi-VN`, cache-aware streaming; the model that falsified this memo's original Finding 1.
+- [mudler/parakeet.cpp](https://github.com/mudler/parakeet.cpp) — CPU inference plus GGUF conversions and prebuilt Windows/Linux/macOS binaries.
 - [Best Open Speech Recognition (ASR) Models in 2026](https://www.marktechpost.com/2026/07/23/best-open-speech-recognition-asr-models-in-2026-wer-languages-latency-and-license-compared/) — 2026-07-23 landscape, WER/latency/licence table.
 - [Voxtral Mini 4B Realtime model card](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602) — streaming, 13 languages, no Vietnamese.
 - [PhoWhisper: Automatic Speech Recognition for Vietnamese](https://arxiv.org/abs/2406.02555) — 844 h, Vietnamese SOTA, batch.
