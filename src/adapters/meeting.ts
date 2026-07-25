@@ -76,6 +76,9 @@ export interface MeetingTranscript {
   language: string;
   generatedAt: string;
   engine: { name: string; version?: string; model: string; modelSha256?: string };
+  /** Distinct voices found on the meeting channel, when speaker separation ran. A count is far safer
+   * than per-line identity - see meeting-diarize.ts for the measured accuracy. */
+  voices?: number;
   segments: MeetingTranscriptSegment[];
 }
 

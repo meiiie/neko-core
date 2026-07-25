@@ -443,6 +443,58 @@ test("transcription is retryable and records local provenance", async () => {
   await first;
 });
 
+test("speaker separation labels only the meeting channel, and a failure never costs the transcript", async () => {
+  const home = tempHome();
+  const meeting = createMeeting("Diarize test", home);
+  const raw = join(meetingDir(meeting.id, home), ".capture.pcm");
+  writeFileSync(raw, Buffer.alloc(16_000 * 4 * 10)); // 10 s, stereo
+  const audio = await finalizeMeetingWav(meeting.id, raw, 16_000, 2, home);
+  meeting.state = "recorded";
+  meeting.capture = {
+    kind: "browser-display-media", startedAt: new Date().toISOString(), stoppedAt: new Date().toISOString(),
+    sampleRate: 16_000, channels: 2, sources: ["microphone", "system"], videoStored: false,
+    audioFile: "audio.wav", audioBytes: audio.audioBytes, durationMs: audio.durationMs,
+  };
+  saveMeeting(meeting, home);
+  const transcriber = { executable: "fixture", executableSource: "managed" as const, engineVersion: "0.4.0", model: "m", modelId: "fixture", modelTier: "balanced" as const, modelSha256: "a".repeat(64) };
+  const words = (source: string) => JSON.stringify({ words: [
+    { w: source === "microphone" ? "mình" : "chốt", start: 1, end: 1.4, conf: 1 },
+    { w: source === "microphone" ? "đồng-ý" : "thứ-sáu", start: 5, end: 5.4, conf: 1 },
+  ] });
+
+  const transcript = await transcribeMeeting(meeting.id, {
+    home, transcriber, diarize: true,
+    runEngine: async (request) => words(request.source),
+    diarizeMono: async () => [
+      { cluster: "speaker_01", startMs: 900, endMs: 2_000 },
+      { cluster: "speaker_00", startMs: 4_800, endMs: 6_000 },
+    ],
+  });
+  const mic = transcript.segments.filter((s) => s.source === "microphone");
+  const system = transcript.segments.filter((s) => s.source === "system");
+  // The microphone is KNOWN to be the user, so a clustering guess never touches it.
+  expect(mic.every((s) => s.speaker === "You")).toBe(true);
+  // The meeting channel is numbered by who spoke first, never named.
+  expect(system.map((s) => s.speaker)).toEqual(["Speaker 1", "Speaker 2"]);
+  expect(transcript.voices).toBe(2);
+
+  // A diarizer that explodes must cost the labels, not the meeting.
+  const notes: string[] = [];
+  const readMeetingAgain = readMeeting(meeting.id, home)!;
+  readMeetingAgain.state = "recorded";
+  saveMeeting(readMeetingAgain, home);
+  const fallback = await transcribeMeeting(meeting.id, {
+    home, transcriber, diarize: true,
+    notify: (m) => notes.push(m),
+    runEngine: async (request) => words(request.source),
+    diarizeMono: async () => { throw new Error("onnx exploded"); },
+  });
+  expect(fallback.segments.length).toBe(4);
+  expect(fallback.segments.filter((s) => s.source === "system").every((s) => s.speaker === "Meeting audio")).toBe(true);
+  expect(fallback.voices).toBeUndefined();
+  expect(notes.some((n) => n.includes("Speaker separation failed"))).toBe(true);
+});
+
 describe("meeting support and tools", () => {
   test("target matrix is explicit and unsupported platforms never receive a guessed binary", () => {
     expect(meetingSupportTarget("win32", "x64")).toEqual({ assetSuffix: "bin-win-cpu-x64.zip", executableName: "parakeet-cli.exe" });

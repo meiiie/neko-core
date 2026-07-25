@@ -208,6 +208,52 @@ every substitution marked. That is AdaCS's inference-time contract, implementabl
 it fails safe: an empty glossary changes nothing. It is not built yet, and code-switching is **not**
 claimed as solved.
 
+### 2.9 Measured: speaker diarization on Vietnamese, and why it ships OFF (2026-07-26)
+
+The channel contract ("You" vs "Meeting audio") is honest but coarse: every remote participant shares one
+label. This axis was measured before deciding anything.
+
+**Published state of the art is not close to solved.** A July-2026 open benchmark reports DER of
+9-27% for VibeVoice, 10-49% for pyannote, and 14-58% for NeMo clustering/MSDD across 6-14 speaker
+recordings; NeMo Sortformer is end-to-end with native overlap handling but caps at 4 speakers, and
+real-time production-quality diarization is stated to remain an open problem.
+
+**Engine choice is forced by Neko's shape.** pyannote, NeMo and VibeVoice all want Python/PyTorch, and
+several want a GPU. [sherpa-onnx](https://k2-fsa.github.io/sherpa/onnx/speaker-diarization/index.html)
+runs the same pyannote-segmentation-3.0 plus CAM++ speaker embeddings as plain ONNX in a native binary -
+no Python, no PyTorch, no GPU - which is the same supply-chain shape as the ASR pack. Engine 19.8 MiB,
+segmentation 7.0 MiB, embeddings 28.3 MiB: ~55 MiB, next to a 785 MiB ASR model. RTF 0.216 on one CPU
+thread.
+
+**Measured here**, Vietnamese, on this machine, scored as *"does each transcript line get the right
+speaker?"* rather than DER, because that is what a meeting summary actually consumes:
+
+| | voices found | transcript lines correct | speaker confusion (DER component) |
+|---|---|---|---|
+| 2 speakers, male + female | 2/2, automatically | **10/10 (100%)** | **0.0%** |
+| 3 speakers, two same-gender | 3/3, automatically | **8/11 (72.7%)** | 19-24% |
+
+Cluster threshold was irrelevant anywhere in 0.4-0.7 (identical output, correct speaker count); 0.8
+collapsed everyone into one voice. Almost all DER outside the confusion column is trimmed segment edges,
+which does not change which speaker a sentence belongs to.
+
+**The finding that decided the design.** In the failing case the overlap between the ASR line and the
+chosen cluster was **1.00, 0.90, 1.00** - the diarizer is not hesitant when it is wrong. Unlike
+low-confidence ASR words (§2.8), there is **no per-line signal that separates good attributions from
+bad**, so the "flag the doubtful ones" pattern cannot be reused here. Assigning an action item to the
+wrong person is the same class of harm as losing the owner's name, which is what removing Whisper fixed.
+
+Caveat on the hard case: the second male voice is a pitch-shifted copy of the first, which may be harder
+than two genuinely different people. 72.7% is therefore probably a lower bound, and one synthetic test
+cannot settle whether it represents a real meeting.
+
+**Decision: build it, ship it off by default.** It is opt-in twice - the pack is a separate optional
+install, and `transcribe` needs `diarize: true`. It runs only on the system channel, because the
+microphone is already *known* to be the user and a guess must not overwrite knowledge. Labels are
+`Speaker 1`, `Speaker 2` - numbers, never names. The measured accuracy travels with the feature in
+`DIARIZATION_CAVEAT`, and the `meeting-notes` skill forbids assigning an action item on a label alone.
+A count of distinct voices is also reported, since a count is far safer than per-line identity.
+
 ### 2.2 Streaming diarization
 
 NVIDIA's Streaming Sortformer does online diarization with an Arrival-Order Speaker Cache, frame-level

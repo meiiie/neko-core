@@ -20,6 +20,7 @@ import {
 import { LiveMeetingTranscriber, parakeetWindowTranscriber } from "./meeting-live.ts";
 import { transcribeMeeting } from "./meeting-transcription.ts";
 import { detectMicrophoneUsers } from "./audio-activity.ts";
+import { DIARIZATION_CAVEAT } from "./meeting-diarize.ts";
 
 const PREFIX = "mcp__neko_meeting__";
 const SCHEMAS = [
@@ -55,6 +56,8 @@ const SCHEMAS = [
     properties: {
       meeting_id: { type: "string", description: "Meeting id; omit or use 'latest'." },
       language: { type: "string", description: "Language code such as vi, en, or auto; defaults to vi." },
+      diarize: { type: "boolean", description: "Split the meeting channel into numbered voices (Speaker 1, Speaker 2). Off by default and requires the optional diarization pack. Labels are voice clusters, never names, and are not reliable enough to assign an action item on their own." },
+      speakers: { type: "integer", minimum: 1, maximum: 20, description: "Exact number of people on the meeting channel, if known. Otherwise the count is detected." },
     },
     required: [],
   },
@@ -112,9 +115,12 @@ class MeetingTools implements McpTools {
     }
     if (action === "transcribe") {
       const meeting = this.resolveMeeting(args.meeting_id);
+      const diarize = args.diarize === true;
       const transcript = await transcribeMeeting(meeting.id, {
         home: this.home,
         language: String(args.language ?? "vi"),
+        diarize,
+        speakers: Number.isInteger(args.speakers) ? Number(args.speakers) : undefined,
         signal,
       });
       return JSON.stringify({
@@ -122,6 +128,8 @@ class MeetingTools implements McpTools {
         meetingId: meeting.id,
         language: transcript.language,
         segments: transcript.segments.length,
+        ...(transcript.voices ? { voices: transcript.voices, speakerCaveat: DIARIZATION_CAVEAT } : {}),
+        ...(diarize && !transcript.voices ? { speakerNote: "Speaker separation did not run; every remote voice is still labelled Meeting audio." } : {}),
         next: "Read transcript segments in bounded pages, then ground every summary/action item in timestamp citations.",
       }, null, 2);
     }

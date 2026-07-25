@@ -258,7 +258,7 @@ export async function installMeetingSupportPack(options: InstallMeetingSupportOp
       const release = resolveRelease(await response.json() as GitHubRelease, target);
       const archive = join(staging, release.assetName);
       notify(`Downloading ${formatMiB(release.size)} local transcription engine...`);
-      const archiveBytes = await download(fetchImpl, release.url, archive, release.size, release.digest.slice(7), MAX_ENGINE_BYTES, "Engine", notify);
+      const archiveBytes = await downloadVerified(fetchImpl, release.url, archive, release.size, release.digest.slice(7), MAX_ENGINE_BYTES, "Engine", notify);
       const engineDir = join(staging, "engine");
       mkdirSync(engineDir, { recursive: false, mode: 0o700 });
       (options.extractArchive ?? extractVerifiedArchive)(archive, engineDir);
@@ -292,7 +292,7 @@ export async function installMeetingSupportPack(options: InstallMeetingSupportOp
     const modelPath = join(modelDir, model.file);
     const modelUrl = `https://huggingface.co/${MODEL_REPO}/resolve/main/${model.file}?download=true`;
     notify(`Downloading ${formatMiB(model.bytes)} ${tier} multilingual model (Vietnamese supported)...`);
-    await download(fetchImpl, modelUrl, modelPath, model.bytes, model.sha256, MAX_MODEL_BYTES, "Model", notify);
+    await downloadVerified(fetchImpl, modelUrl, modelPath, model.bytes, model.sha256, MAX_MODEL_BYTES, "Model", notify);
 
     const manifest: MeetingSupportManifest = {
       schemaVersion: 1,
@@ -357,7 +357,7 @@ function resolveRelease(release: GitHubRelease, target: MeetingSupportTarget): {
   return { version, tag, assetName, digest, size, url, releaseUrl: releaseUrl.startsWith(`https://github.com/${RELEASE_REPO}/`) ? releaseUrl : `https://github.com/${RELEASE_REPO}/releases/tag/${tag}` };
 }
 
-async function download(
+export async function downloadVerified(
   fetchImpl: typeof fetch,
   url: string,
   path: string,
@@ -395,7 +395,7 @@ async function download(
   return received;
 }
 
-function extractVerifiedArchive(archive: string, destination: string): void {
+export function extractVerifiedArchive(archive: string, destination: string): void {
   const listed = spawnSync("tar", ["-tf", archive], { encoding: "utf8", timeout: 30_000, windowsHide: true });
   if (listed.status !== 0) throw new Error(`Could not inspect meeting engine archive: ${(listed.stderr || listed.stdout || "tar failed").trim()}`);
   const entries = listed.stdout.split(/\r?\n/).filter(Boolean);
@@ -449,7 +449,7 @@ function assertTreeInside(root: string): void {
   walk(root);
 }
 
-function findNamedFile(root: string, name: string): string | undefined {
+export function findNamedFile(root: string, name: string): string | undefined {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const path = join(root, entry.name);
     if (entry.isDirectory()) { const found = findNamedFile(path, name); if (found) return found; }
@@ -469,7 +469,7 @@ function findPathEngine(which: (name: string) => string | null): string | null {
   return which("parakeet-cli");
 }
 
-async function sha256File(path: string): Promise<string> {
+export async function sha256File(path: string): Promise<string> {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest("hex");
@@ -496,6 +496,6 @@ function isSafeRelative(value: string): boolean {
   return !!normalized && !isAbsolute(normalized) && !normalized.startsWith("/") && !normalized.split("/").includes("..");
 }
 
-function formatMiB(bytes: number): string {
+export function formatMiB(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }

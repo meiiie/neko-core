@@ -221,13 +221,35 @@ Each meeting lives under `~/.neko-core/meetings/<meeting-id>/`:
 - `transcript.json` - canonical timestamped segments and source labels;
 - `transcript.md` - human-readable timestamp citations.
 
-The two-channel contract distinguishes the local user from all remote meeting audio. It is **not** person-level
-diarization: several remote participants can share the system channel. Neko calls that source `Meeting audio`
-and does not invent names. Optional diarization must remain a separate adapter and earn its claims with DER/JER
-evaluation. `pyannote.audio` Community-1 is a credible local candidate but requires Python/PyTorch, ffmpeg,
-accepting model conditions, and a Hugging Face token; NVIDIA Streaming Sortformer is another research route.
-See the official [pyannote repository](https://github.com/pyannote/pyannote-audio) and
-[NVIDIA NeMo diarization documentation](https://docs.nvidia.com/nemo/speech/nightly/asr/speaker_diarization/models.html).
+The two-channel contract distinguishes the local user from all remote meeting audio. By default it is **not**
+person-level diarization: several remote participants share the system channel, Neko calls that source
+`Meeting audio`, and it does not invent names.
+
+### Optional speaker separation (off by default)
+
+`transcribe {"diarize": true}`, with the optional diarization pack installed, splits the meeting channel into
+`Speaker 1`, `Speaker 2`... using [sherpa-onnx](https://k2-fsa.github.io/sherpa/onnx/speaker-diarization/index.html)
+(pyannote-segmentation-3.0 + CAM++ embeddings, ONNX, ~55 MiB, CPU only, RTF 0.216). It runs **only on the
+system channel** - the microphone is already known to be the user, and a clustering guess must never
+overwrite something Neko knows.
+
+It is off by default for a measured reason. On Vietnamese, on this machine:
+
+| | voices found | transcript lines correct | confusion |
+|---|---|---|---|
+| 2 speakers, clearly different voices | 2/2 | 10/10 (100%) | 0.0% |
+| 3 speakers, two of the same gender | 3/3 | 8/11 (72.7%) | 19-24% |
+
+And the part that matters most: in the failing case the overlap between the line and the chosen cluster was
+1.00, 0.90, 1.00. **The diarizer is not hesitant when it is wrong**, so unlike doubtful ASR words there is no
+per-line flag that separates good attributions from bad. Labels are voice clusters, never names; the measured
+limit travels with the feature; and the `meeting-notes` skill forbids assigning an action item on a label
+alone. Neko also reports the number of distinct voices, which is far safer than per-line identity.
+
+See `MEETINGS-RESEARCH-2026-07.md` §2.9 for the full measurement, and the
+[pyannote repository](https://github.com/pyannote/pyannote-audio) and
+[NVIDIA NeMo diarization documentation](https://docs.nvidia.com/nemo/speech/nightly/asr/speaker_diarization/models.html)
+for the upstream models.
 
 The bundled `meeting-notes` skill requires every decision/action item to cite transcript timestamps. Missing
 owners or due dates remain `not stated`; contradictions remain visible. A successful ASR process is evidence

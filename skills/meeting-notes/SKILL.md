@@ -47,6 +47,14 @@ Use Neko's first-class meeting tools for consented local capture and timestamp-g
 
 - Stop/finalize before transcription. Use language `vi` for a Vietnamese meeting, `en` for English, and `auto` only when genuinely mixed or unknown.
 - Transcription is local ASR evidence, not ground truth. Preserve timestamps and uncertain wording. Do not “correct” names, numbers, owners, dates, or negation without evidence.
+- **Speaker labels.** By default every remote voice is `Meeting audio` - a channel, not a person - and
+  `You` is the local microphone, which IS certain. With `diarize: true` the meeting channel is split into
+  `Speaker 1`, `Speaker 2`... These are voice clusters, **never names**, and they are not reliable enough
+  to assign an action item on their own: measured on Vietnamese, attribution was correct for every line
+  when voices differed clearly but only 8 of 11 when two speakers had similar voices - and the wrong ones
+  looked exactly as confident as the right ones, so there is no per-line warning. Never map a label to a
+  real name unless someone is addressed by name in the transcript, and say which timestamp says so. If a
+  decision or action item depends on who spoke, ask the user to confirm.
 - Read long transcripts in pages of at most 50-100 segments. Keep only the relevant evidence in working context rather than injecting an entire long meeting at once.
 
 ### Produce grounded minutes

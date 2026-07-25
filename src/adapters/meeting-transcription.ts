@@ -16,6 +16,7 @@ import {
   type MeetingTranscriptSegment,
 } from "./meeting.ts";
 import { verifyMeetingSupportIntegrity, type MeetingTranscriber } from "./meeting-support-pack.ts";
+import { attributeSpeakers, diarizeMono, readDiarizationPack, speakerCount, type SpeakerSpan } from "./meeting-diarize.ts";
 import { homeDir } from "../shared/home.ts";
 
 export const MEETING_ENGINE_NAME = "parakeet.cpp";
@@ -27,6 +28,11 @@ export interface TranscribeMeetingOptions {
   notify?: (message: string) => void;
   transcriber?: MeetingTranscriber;
   runEngine?: (request: MeetingEngineRequest) => Promise<string>;
+  /** Split the meeting channel into numbered voices. Off unless asked for: see meeting-diarize.ts. */
+  diarize?: boolean;
+  /** Exact number of people, when the user knows it. Otherwise the voice count is found automatically. */
+  speakers?: number;
+  diarizeMono?: (audio: string) => Promise<SpeakerSpan[]>;
 }
 
 /** One decode of one MONO wav. Nemotron/parakeet has no channel diarization, so the caller splits
@@ -123,6 +129,7 @@ async function transcribeMeetingLocked(id: string, options: TranscribeMeetingOpt
     // manifest records which channels actually carry audio, so a system-only meeting costs one pass.
     const channels = meetingChannels(meeting.capture.channels, meeting.capture.sources);
     const segments: MeetingTranscriptSegment[] = [];
+    let voices = 0;
     for (const channel of channels) {
       const mono = join(staging, `${channel.source}.wav`);
       await extractChannelWav(audio, mono, meeting.capture.channels, channel.index);
@@ -136,13 +143,31 @@ async function transcribeMeetingLocked(id: string, options: TranscribeMeetingOpt
         signal: options.signal,
         notify,
       });
-      segments.push(...parseMeetingTranscript(id, json, {
+      let decoded = parseMeetingTranscript(id, json, {
         language,
         engineVersion: transcriber.engineVersion,
         model: transcriber.modelId,
         modelSha256: transcriber.modelSha256,
         source: channel.source,
-      }).segments);
+      }).segments;
+      // Only the system channel. The microphone is already known to be the user, and a clustering guess
+      // must never overwrite something Neko actually knows.
+      if (options.diarize && channel.source === "system") {
+        const run = options.diarizeMono ?? defaultDiarizer(home, options.speakers, options.signal);
+        if (run) {
+          try {
+            const spans = await run(mono);
+            decoded = attributeSpeakers(decoded, spans);
+            voices = Math.max(voices, speakerCount(spans));
+          } catch (error) {
+            // A failed split must never cost the transcript: keep the channel label and say so.
+            notify(`Speaker separation failed, keeping the channel label: ${boundedError(error)}`);
+          }
+        } else {
+          notify("Speaker separation was requested but is not installed; keeping the channel label.");
+        }
+      }
+      segments.push(...decoded);
       rmSync(mono, { force: true });
     }
     const transcript: MeetingTranscript = {
@@ -157,6 +182,7 @@ async function transcribeMeetingLocked(id: string, options: TranscribeMeetingOpt
         modelSha256: transcriber.modelSha256,
       },
       segments: renumber(segments.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs)),
+      ...(voices > 0 ? { voices } : {}),
     };
     writeMeetingTranscript(transcript, home);
     meeting.state = "ready";
@@ -432,6 +458,11 @@ export function readWavFormat(path: string): { sampleRate: number; channels: num
     at += 8 + size + (size % 2);
   }
   throw new Error("meeting audio has no PCM data chunk");
+}
+
+function defaultDiarizer(home: string, speakers: number | undefined, signal: AbortSignal | undefined): ((audio: string) => Promise<SpeakerSpan[]>) | null {
+  const pack = readDiarizationPack(home);
+  return pack ? (audio: string) => diarizeMono(pack, audio, { speakers, signal }) : null;
 }
 
 function renumber(segments: MeetingTranscriptSegment[]): MeetingTranscriptSegment[] {
