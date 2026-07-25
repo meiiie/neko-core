@@ -58,6 +58,14 @@ const MODELS = {
     bytes: 28_281_164,
     sha256: "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2",
   },
+  /** Silero VAD. Not optional: it gates the ASR so the model is never asked to transcribe non-speech,
+   * which is where it hallucinates. Installed with the base pack, unlike the speaker models. */
+  vad: {
+    tag: "asr-models",
+    file: "silero_vad.onnx",
+    bytes: 643_854,
+    sha256: "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
+  },
 } as const;
 
 export interface DiarizationTarget {
@@ -69,15 +77,24 @@ export interface DiarizationManifest {
   schemaVersion: 1;
   installedAt: string;
   engine: { version: string; assetName: string; assetDigest: string; executable: string; executableSha256: string; sourceUrl: string };
-  models: { segmentation: string; embedding: string; segmentationSha256: string; embeddingSha256: string };
+  models: { vad: string; vadSha256: string; segmentation?: string; embedding?: string; segmentationSha256?: string; embeddingSha256?: string };
 }
 
-export interface DiarizationPack {
+export interface SpeechToolsPack {
   root: string;
   executable: string;
+  version: string;
+  /** Always present: voice-activity detection gates the ASR. */
+  vad: string;
+  /** Present only when speaker separation was installed on top. */
+  segmentation?: string;
+  embedding?: string;
+}
+
+/** A pack that also carries the speaker models. */
+export interface DiarizationPack extends SpeechToolsPack {
   segmentation: string;
   embedding: string;
-  version: string;
 }
 
 /** One stretch of audio the diarizer assigned to one voice cluster. */
@@ -109,22 +126,38 @@ export function diarizationRoot(home = homeDir()): string {
   return join(meetingSupportRoot(home), "diarization");
 }
 
-export function readDiarizationPack(home = homeDir()): DiarizationPack | null {
+/** Everything sherpa-onnx gives us. VAD is always there; the speaker models only if asked for. */
+export function readSpeechTools(home = homeDir()): SpeechToolsPack | null {
   const root = diarizationRoot(home);
   try {
     const manifest = JSON.parse(readFileSync(join(root, "diarization.json"), "utf8")) as DiarizationManifest;
     if (manifest.schemaVersion !== 1) return null;
+    const file = (relativePath?: string) => (relativePath ? join(root, relativePath) : undefined);
     const executable = join(root, manifest.engine.executable);
-    const segmentation = join(root, manifest.models.segmentation);
-    const embedding = join(root, manifest.models.embedding);
-    for (const path of [executable, segmentation, embedding]) if (!existsSync(path) || !statSync(path).isFile()) return null;
-    return { root, executable, segmentation, embedding, version: manifest.engine.version };
+    const vad = file(manifest.models.vad);
+    if (!vad) return null;
+    for (const path of [executable, vad]) if (!existsSync(path) || !statSync(path).isFile()) return null;
+    const segmentation = file(manifest.models.segmentation);
+    const embedding = file(manifest.models.embedding);
+    const speakers = segmentation && embedding && existsSync(segmentation) && existsSync(embedding);
+    return {
+      root, executable, vad, version: manifest.engine.version,
+      ...(speakers ? { segmentation, embedding } : {}),
+    };
   } catch {
     return null;
   }
 }
 
+/** The pack, but only when the optional speaker models are present too. */
+export function readDiarizationPack(home = homeDir()): DiarizationPack | null {
+  const pack = readSpeechTools(home);
+  return pack?.segmentation && pack.embedding ? (pack as DiarizationPack) : null;
+}
+
 export interface InstallDiarizationOptions {
+  /** Also fetch the speaker models. Without it only the engine and the VAD are installed. */
+  withSpeakers?: boolean;
   home?: string;
   platform?: NodeJS.Platform;
   arch?: NodeJS.Architecture;
@@ -133,12 +166,12 @@ export interface InstallDiarizationOptions {
   extractArchive?: (archive: string, destination: string) => void;
 }
 
-export async function installDiarization(options: InstallDiarizationOptions = {}): Promise<DiarizationPack> {
+export async function installSpeechTools(options: InstallDiarizationOptions = {}): Promise<SpeechToolsPack> {
   const home = options.home ?? homeDir();
   const notify = options.notify ?? (() => {});
   const fetchImpl = options.fetchImpl ?? fetch;
   const target = diarizationTarget(options.platform ?? process.platform, options.arch ?? process.arch);
-  if (!target) throw new Error(`Speaker diarization has no verified binary for ${options.platform ?? process.platform}/${options.arch ?? process.arch}`);
+  if (!target) throw new Error(`Speech tools have no verified binary for ${options.platform ?? process.platform}/${options.arch ?? process.arch}`);
 
   const root = diarizationRoot(home);
   const staging = mkdtempSync(`${root}-staging-`);
@@ -173,17 +206,27 @@ export async function installDiarization(options: InstallDiarizationOptions = {}
 
     const modelDir = join(staging, "models");
     mkdirSync(modelDir, { recursive: false, mode: 0o700 });
-    const segArchive = join(modelDir, MODELS.segmentation.file);
-    notify(`Downloading ${formatMiB(MODELS.segmentation.bytes)} speaker segmentation model...`);
-    await downloadVerified(fetchImpl, modelUrl(MODELS.segmentation.tag, MODELS.segmentation.file), segArchive, MODELS.segmentation.bytes, MODELS.segmentation.sha256, MAX_MODEL_BYTES, "Segmentation model", notify);
-    (options.extractArchive ?? extractVerifiedArchive)(segArchive, modelDir);
-    rmSync(segArchive, { force: true });
-    const segmentation = findNamedFile(modelDir, MODELS.segmentation.entry);
-    if (!segmentation) throw new Error("segmentation archive is missing model.onnx");
 
-    const embedding = join(modelDir, MODELS.embedding.file);
-    notify(`Downloading ${formatMiB(MODELS.embedding.bytes)} speaker embedding model...`);
-    await downloadVerified(fetchImpl, modelUrl(MODELS.embedding.tag, MODELS.embedding.file), embedding, MODELS.embedding.bytes, MODELS.embedding.sha256, MAX_MODEL_BYTES, "Embedding model", notify);
+    // The VAD is always installed: it gates the ASR so the model is never handed non-speech, which is
+    // where it invents words. Real audio produced "nuoc", "ya", "loai" over breathing and room noise.
+    const vad = join(modelDir, MODELS.vad.file);
+    notify(`Downloading ${formatMiB(MODELS.vad.bytes)} voice-activity model...`);
+    await downloadVerified(fetchImpl, modelUrl(MODELS.vad.tag, MODELS.vad.file), vad, MODELS.vad.bytes, MODELS.vad.sha256, MAX_MODEL_BYTES, "Voice-activity model", notify);
+
+    let segmentation: string | undefined;
+    let embedding: string | undefined;
+    if (options.withSpeakers) {
+      const segArchive = join(modelDir, MODELS.segmentation.file);
+      notify(`Downloading ${formatMiB(MODELS.segmentation.bytes)} speaker segmentation model...`);
+      await downloadVerified(fetchImpl, modelUrl(MODELS.segmentation.tag, MODELS.segmentation.file), segArchive, MODELS.segmentation.bytes, MODELS.segmentation.sha256, MAX_MODEL_BYTES, "Segmentation model", notify);
+      (options.extractArchive ?? extractVerifiedArchive)(segArchive, modelDir);
+      rmSync(segArchive, { force: true });
+      segmentation = findNamedFile(modelDir, MODELS.segmentation.entry);
+      if (!segmentation) throw new Error("segmentation archive is missing model.onnx");
+      embedding = join(modelDir, MODELS.embedding.file);
+      notify(`Downloading ${formatMiB(MODELS.embedding.bytes)} speaker embedding model...`);
+      await downloadVerified(fetchImpl, modelUrl(MODELS.embedding.tag, MODELS.embedding.file), embedding, MODELS.embedding.bytes, MODELS.embedding.sha256, MAX_MODEL_BYTES, "Embedding model", notify);
+    }
 
     const manifest: DiarizationManifest = {
       schemaVersion: 1,
@@ -197,17 +240,21 @@ export async function installDiarization(options: InstallDiarizationOptions = {}
         sourceUrl: `https://github.com/${RELEASE_REPO}/releases/tag/${ENGINE_TAG}`,
       },
       models: {
-        segmentation: relative(staging, segmentation).replace(/\\/g, "/"),
-        embedding: relative(staging, embedding).replace(/\\/g, "/"),
-        segmentationSha256: MODELS.segmentation.sha256,
-        embeddingSha256: MODELS.embedding.sha256,
+        vad: relative(staging, vad).replace(/\\/g, "/"),
+        vadSha256: MODELS.vad.sha256,
+        ...(segmentation && embedding ? {
+          segmentation: relative(staging, segmentation).replace(/\\/g, "/"),
+          embedding: relative(staging, embedding).replace(/\\/g, "/"),
+          segmentationSha256: MODELS.segmentation.sha256,
+          embeddingSha256: MODELS.embedding.sha256,
+        } : {}),
       },
     };
     writeFileSync(join(staging, "diarization.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
     rmSync(root, { recursive: true, force: true });
     mkdirSync(dirname(root), { recursive: true, mode: 0o700 });
     renameSync(staging, root);
-    return readDiarizationPack(home)!;
+    return readSpeechTools(home)!;
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });
     throw error;

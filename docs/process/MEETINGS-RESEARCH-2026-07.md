@@ -254,6 +254,49 @@ microphone is already *known* to be the user and a guess must not overwrite know
 `DIARIZATION_CAVEAT`, and the `meeting-notes` skill forbids assigning an action item on a label alone.
 A count of distinct voices is also reported, since a count is far safer than per-line identity.
 
+### 2.10 Measured: the model invents words over non-speech, and only a model can gate it (2026-07-26)
+
+The owner's first real recording exposed this. Over breathing and room noise the ASR produced words that
+were never said - "nuoc" at confidence 0.150, "ya" at 0.262, "loai" at 0.476 - plus Han and Devanagari
+characters in a Vietnamese meeting.
+
+**An energy gate was measured and rejected before being built.** Per-word RMS over each word's own time
+span, from that recording:
+
+| token | confidence | RMS of its span |
+|---|---|---|
+| "loai" (invented) | 0.476 | **0.1342** - among the loudest in the clip |
+| "nuoc" (invented) | 0.150 | 0.0582 |
+| "mot" (correct) | 0.866 | **0.0221** |
+| "hom" (correct) | 0.798 | 0.0254 |
+
+Loudness ranks the hallucinations ABOVE the real words. A threshold on energy would delete correct
+speech and keep the inventions. Telling speech from sound needs a model - which is exactly the
+distinction an RMS check cannot make, and the reason the earlier RMS work here was slop.
+
+**Silero VAD through sherpa-onnx** was measured instead: 6 speech regions, 61% coverage on that
+recording. Decoding only those regions recovered the sentence that actually mattered - "du an nguy con
+den" became **"du an lien quan den"** - and surfaced content the ungated pass had missed entirely
+("Xin chao hom nay...", "Ok thi dai khai..."). On clean TTS audio it is neutral: 69 words either way,
+2 vs 3 below 0.5. So it is on by default, and `noVad` turns it off.
+
+It is not a cure. Short regions the VAD accepts are where the model still invents ("Hello.", "ne cua",
+"nho m"), and that recording remains a partial transcript because the speech itself was hesitant and
+quiet. What improved is measurable and the rest is stated rather than hidden.
+
+**Timestamps are the constraint that shapes the implementation.** Concatenating the speech into one file
+is simpler and destroys every citation, which is the one thing a meeting transcript may not lose. Each
+region is decoded on its own and its word times shifted back into meeting time.
+
+**The out-of-script guard was generalized** from a CJK range list to "a letter from a writing system
+other than the requested language's", after the VAD run produced a Devanagari character. Digits and
+punctuation are not letters, so "2026," survives; a clearly spoken foreign name survives too, since the
+guard only fires below 0.9 confidence.
+
+**Two implementation facts, both found by measurement, not by reading docs:** `sherpa-onnx-vad` prints
+its region list to **stderr**, so the first version parsed an always-empty stdout; and the base meeting
+pack now installs the VAD, because gating is not optional the way speaker separation is.
+
 ### 2.2 Streaming diarization
 
 NVIDIA's Streaming Sortformer does online diarization with an Arrival-Order Speaker Cache, frame-level

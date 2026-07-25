@@ -116,6 +116,26 @@ two. The engine also emits pseudo-tokens in its word list (`<vi-VN>` where it re
 where it could not decide, sometimes glued onto a real word as `hai<unk>`); those are stripped, and only the
 locale tag is honoured as a segment boundary.
 
+### Only the speech is decoded
+
+The ASR invents words when handed audio with no speech in it. On the first real recording it produced
+"nuoc" (0.150), "ya" (0.262) and "loai" (0.476) over breathing and room noise, plus Han and Devanagari
+characters in a Vietnamese meeting.
+
+Loudness cannot fix that, and this was measured rather than assumed: the invented "loai" sat at RMS
+0.1342, among the loudest moments in the clip, while the correctly heard "mot" sat at 0.0221. An energy
+gate would delete real words and keep the inventions. Telling speech from sound needs a model, so the
+base pack installs **Silero VAD** (through sherpa-onnx) and decodes only the regions it calls speech.
+
+Each region is decoded on its **own** and its word times shifted back into meeting time. Concatenating
+the speech into one file is simpler and destroys every timestamp, which the summary cites.
+
+Measured: on the real recording, 6 regions at 61% coverage, and "du an nguy con den" became "du an lien
+quan den" - the sentence that carried the meaning. On clean audio it is neutral (69 words either way).
+It is not a cure: short accepted regions still produce inventions. The gate falls back to decoding
+everything whenever it cannot be trusted - no tools installed, the detector failed, or it claimed under
+2% of the audio is speech - because losing real words is worse than keeping a few invented ones.
+
 ### Code-switching
 
 A Vietnamese technical meeting borrows English constantly, and **no local engine handles that today** -

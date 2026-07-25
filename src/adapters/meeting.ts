@@ -82,6 +82,8 @@ export interface MeetingTranscript {
   /** Tokens discarded for being in a different writing system than the language asked for, and
    * low-confidence with it. Recorded so a dropped word is never silently gone. */
   droppedOutOfScript?: string[];
+  /** Only the parts a voice-activity model called speech were decoded. */
+  speechGated?: boolean;
   segments: MeetingTranscriptSegment[];
 }
 

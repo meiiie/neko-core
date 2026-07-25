@@ -16,7 +16,8 @@ import {
   type MeetingTranscriptSegment,
 } from "./meeting.ts";
 import { verifyMeetingSupportIntegrity, type MeetingTranscriber } from "./meeting-support-pack.ts";
-import { attributeSpeakers, diarizeMono, readDiarizationPack, speakerCount, type SpeakerSpan } from "./meeting-diarize.ts";
+import { attributeSpeakers, diarizeMono, readDiarizationPack, readSpeechTools, speakerCount, type SpeakerSpan } from "./meeting-diarize.ts";
+import { detectSpeechRegions, sliceWav, speechCoverage, wavDurationMs, type SpeechRegion } from "./meeting-vad.ts";
 import { homeDir } from "../shared/home.ts";
 
 export const MEETING_ENGINE_NAME = "parakeet.cpp";
@@ -33,6 +34,10 @@ export interface TranscribeMeetingOptions {
   /** Exact number of people, when the user knows it. Otherwise the voice count is found automatically. */
   speakers?: number;
   diarizeMono?: (audio: string) => Promise<SpeakerSpan[]>;
+  /** Speech regions to decode instead of detecting them. Injected so tests need no VAD binary. */
+  speechRegions?: SpeechRegion[];
+  /** Decode the whole file even when the VAD is installed. */
+  noVad?: boolean;
 }
 
 /** One decode of one MONO wav. Nemotron/parakeet has no channel diarization, so the caller splits
@@ -95,8 +100,9 @@ const LOCALE_TAG = /^<[a-z]{2,3}(?:-[a-z0-9]{2,8})?>$/i;
  * Dropped only when the model is ALSO unsure: a confidently transcribed foreign name survives, and the
  * number dropped is reported rather than silently swallowed.
  */
-const CJK = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/;
 const LATIN_SCRIPT_LANGUAGES = /^(?:vi|en|fr|de|es|pt|it|nl|pl|id|ms|tr|cs|ro|hu|sv|da|fi|nb|hr|sk|sl|et|lv|lt)(?:[-_]|$)/i;
+const NON_LATIN_LETTER = /[\p{L}]/u;
+const LATIN_LETTER = /[\p{Script=Latin}]/u;
 const OUT_OF_SCRIPT_KEPT_ABOVE = 0.9;
 
 export async function transcribeMeeting(id: string, options: TranscribeMeetingOptions = {}): Promise<MeetingTranscript> {
@@ -145,29 +151,50 @@ async function transcribeMeetingLocked(id: string, options: TranscribeMeetingOpt
     const segments: MeetingTranscriptSegment[] = [];
     const dropped: string[] = [];
     let voices = 0;
+    let gated = false;
     for (const channel of channels) {
       const mono = join(staging, `${channel.source}.wav`);
       await extractChannelWav(audio, mono, meeting.capture.channels, channel.index);
       if (channels.length > 1) notify(`Decoding the ${channel.source === "microphone" ? "microphone" : "meeting audio"} channel...`);
-      const json = await runEngine({
-        executable: transcriber.executable,
-        model: transcriber.model,
-        audio: mono,
-        language,
-        source: channel.source,
-        signal: options.signal,
-        notify,
-      });
-      const parsed = parseMeetingTranscript(id, json, {
+      const provenance = {
         language,
         engineVersion: transcriber.engineVersion,
         model: transcriber.modelId,
         modelSha256: transcriber.modelSha256,
         source: channel.source,
-      });
-      // Carry the discard list up: a dropped token must be recorded somewhere, or it is silently gone.
-      if (parsed.droppedOutOfScript?.length) dropped.push(...parsed.droppedOutOfScript);
-      let decoded = parsed.segments;
+      };
+      const decode = async (audioPath: string, offsetMs: number) => {
+        const json = await runEngine({
+          executable: transcriber.executable,
+          model: transcriber.model,
+          audio: audioPath,
+          language,
+          source: channel.source,
+          signal: options.signal,
+          notify,
+        });
+        const parsed = parseMeetingTranscript(id, json, { ...provenance, offsetMs });
+        // Carry the discard list up: a dropped token must be recorded somewhere, or it silently vanishes.
+        if (parsed.droppedOutOfScript?.length) dropped.push(...parsed.droppedOutOfScript);
+        return parsed.segments;
+      };
+
+      // Decode only what the VAD calls speech. The model invents words when handed breathing or room
+      // noise, and loudness cannot tell the two apart - see meeting-vad.ts for the measurement.
+      const regions = options.speechRegions ?? await findSpeech(home, mono, options, notify);
+      let decoded: MeetingTranscriptSegment[];
+      if (regions?.length) {
+        decoded = [];
+        for (const [index, region] of regions.entries()) {
+          const slice = join(staging, `${channel.source}-${index}.wav`);
+          sliceWav(mono, slice, region.startMs, region.endMs);
+          try { decoded.push(...await decode(slice, region.startMs)); }
+          finally { rmSync(slice, { force: true }); }
+        }
+        gated = true;
+      } else {
+        decoded = await decode(mono, 0);
+      }
       // Only the system channel. The microphone is already known to be the user, and a clustering guess
       // must never overwrite something Neko actually knows.
       if (options.diarize && channel.source === "system") {
@@ -202,6 +229,7 @@ async function transcribeMeetingLocked(id: string, options: TranscribeMeetingOpt
       segments: renumber(segments.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs)),
       ...(voices > 0 ? { voices } : {}),
       ...(dropped.length ? { droppedOutOfScript: dropped } : {}),
+      ...(gated ? { speechGated: true } : {}),
     };
     writeMeetingTranscript(transcript, home);
     meeting.state = "ready";
@@ -304,6 +332,8 @@ export function parseMeetingTranscript(
     model: string;
     modelSha256?: string;
     source?: MeetingTranscriptSegment["source"];
+    /** Where this audio starts inside the meeting, for decoding one speech region at a time. */
+    offsetMs?: number;
   },
 ): MeetingTranscript {
   let parsed: ParakeetJson;
@@ -341,9 +371,10 @@ export function parseMeetingTranscript(
     // Real audio glued the tag ONTO a word ("hai<unk>"), so a whole-token check is not enough.
     const text = token.replace(ENGINE_TAG, "").trim();
     if (!text) continue;
-    if (latinScript && CJK.test(text) && (raw.conf ?? 0) < OUT_OF_SCRIPT_KEPT_ABOVE) { dropped.push(text); continue; }
-    const startMs = seconds(raw.start);
-    const endMs = seconds(raw.end);
+    if (latinScript && outOfScript(text) && (raw.conf ?? 0) < OUT_OF_SCRIPT_KEPT_ABOVE) { dropped.push(text); continue; }
+    const offset = provenance.offsetMs ?? 0;
+    const startMs = seconds(raw.start, offset);
+    const endMs = seconds(raw.end, offset);
     if (startMs == null || endMs == null || endMs < startMs) continue;
     const previous = words.at(-1);
     if (previous && (
@@ -484,6 +515,38 @@ export function readWavFormat(path: string): { sampleRate: number; channels: num
   throw new Error("meeting audio has no PCM data chunk");
 }
 
+/**
+ * Find the speech in one mono channel, or return null to mean "decode the whole thing".
+ *
+ * Null is returned whenever the gate cannot be trusted: no tools installed, the detector failed, or it
+ * claimed almost nothing is speech. Losing real words is far worse than keeping a few invented ones, so
+ * every uncertain case falls back to decoding everything.
+ */
+async function findSpeech(
+  home: string,
+  mono: string,
+  options: TranscribeMeetingOptions,
+  notify: (message: string) => void,
+): Promise<SpeechRegion[] | null> {
+  if (options.noVad) return null;
+  const tools = readSpeechTools(home);
+  if (!tools) return null;
+  try {
+    const regions = await detectSpeechRegions(tools, mono, { signal: options.signal });
+    const total = wavDurationMs(mono);
+    if (!regions.length) return null;
+    const coverage = speechCoverage(regions, total);
+    if (coverage < 0.02) {
+      notify(`Voice-activity detection found almost no speech (${Math.round(coverage * 100)}%); decoding everything instead.`);
+      return null;
+    }
+    return regions;
+  } catch (error) {
+    notify(`Voice-activity detection failed, decoding the whole channel: ${boundedError(error)}`);
+    return null;
+  }
+}
+
 function defaultDiarizer(home: string, speakers: number | undefined, signal: AbortSignal | undefined): ((audio: string) => Promise<SpeakerSpan[]>) | null {
   const pack = readDiarizationPack(home);
   return pack ? (audio: string) => diarizeMono(pack, audio, { speakers, signal }) : null;
@@ -508,8 +571,18 @@ export function normalizeLanguage(value: string): string {
   return DEFAULT_REGION[base] ? `${base}-${DEFAULT_REGION[base]}` : base;
 }
 
-function seconds(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value * 1000) : null;
+/** True when a token carries a letter from a writing system other than the one asked for. Real audio
+ * produced Han characters and a Devanagari letter inside a Vietnamese meeting. */
+function outOfScript(text: string): boolean {
+  for (const character of text) {
+    if (!NON_LATIN_LETTER.test(character)) continue; // not a letter at all: punctuation, digits
+    if (!LATIN_LETTER.test(character)) return true;
+  }
+  return false;
+}
+
+function seconds(value: unknown, offsetMs = 0): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value * 1000) + offsetMs : null;
 }
 
 function cleanEngineError(value: string): string {

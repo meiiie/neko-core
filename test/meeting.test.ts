@@ -366,14 +366,15 @@ test("a Vietnamese meeting does not get CJK hallucinations, but a confident fore
   const transcript = parseMeetingTranscript("m", JSON.stringify({
     words: [
       { w: "啊,", start: 5.8, end: 6.0, conf: 0.141 },
-      { w: "洛", start: 8.3, end: 8.5, conf: 0.204 },
+      { w: "ग", start: 8.3, end: 8.5, conf: 0.204 },   // Devanagari, from the same recording
       { w: "hôm", start: 15.4, end: 15.6, conf: 0.798 },
       { w: "nay", start: 15.6, end: 15.8, conf: 1 },
       { w: "小米", start: 16.0, end: 16.4, conf: 0.97 }, // said clearly: kept
+      { w: "2026,", start: 16.6, end: 16.9, conf: 0.3 }, // digits are not a script: kept
     ],
   }), { language: "vi-VN", model: "fixture", source: "microphone" });
-  expect(transcript.segments.map((s) => s.text)).toEqual(["hôm nay 小米"]);
-  expect(transcript.droppedOutOfScript).toEqual(["啊,", "洛"]);
+  expect(transcript.segments.map((s) => s.text)).toEqual(["hôm nay 小米 2026,"]);
+  expect(transcript.droppedOutOfScript).toEqual(["啊,", "ग"]);
 
   // Ask for a CJK language and nothing is dropped: the check is about the language requested.
   const japanese = parseMeetingTranscript("m", JSON.stringify({
@@ -381,6 +382,50 @@ test("a Vietnamese meeting does not get CJK hallucinations, but a confident fore
   }), { language: "ja-JP", model: "fixture", source: "microphone" });
   expect(japanese.segments.map((s) => s.text)).toEqual(["啊,"]);
   expect(japanese.droppedOutOfScript).toBeUndefined();
+});
+
+test("only the speech is decoded, and its words land back in meeting time", async () => {
+  const home = tempHome();
+  const meeting = createMeeting("VAD test", home);
+  const raw = join(meetingDir(meeting.id, home), ".capture.pcm");
+  writeFileSync(raw, Buffer.alloc(16_000 * 4 * 30)); // 30 s, stereo
+  const audio = await finalizeMeetingWav(meeting.id, raw, 16_000, 2, home);
+  meeting.state = "recorded";
+  meeting.capture = {
+    kind: "browser-display-media", startedAt: new Date().toISOString(), stoppedAt: new Date().toISOString(),
+    sampleRate: 16_000, channels: 2, sources: ["system"], videoStored: false,
+    audioFile: "audio.wav", audioBytes: audio.audioBytes, durationMs: audio.durationMs,
+  };
+  saveMeeting(meeting, home);
+  const transcriber = { executable: "fixture", executableSource: "managed" as const, engineVersion: "0.4.0", model: "m", modelId: "fixture", modelTier: "balanced" as const, modelSha256: "a".repeat(64) };
+
+  const decoded: string[] = [];
+  const transcript = await transcribeMeeting(meeting.id, {
+    home, transcriber,
+    speechRegions: [{ startMs: 5_000, endMs: 8_000 }, { startMs: 20_000, endMs: 23_000 }],
+    runEngine: async (request) => {
+      decoded.push(request.audio);
+      // Each region is handed to the engine on its OWN timeline, starting at zero.
+      return JSON.stringify({ words: [{ w: decoded.length === 1 ? "một" : "hai", start: 0.5, end: 0.9, conf: 1 }] });
+    },
+  });
+  expect(decoded.length).toBe(2); // one decode per speech region, not one for the whole file
+  expect(transcript.speechGated).toBe(true);
+  // 0.5 s inside each region, shifted back to where it really happened in the meeting.
+  expect(transcript.segments.map((s) => [s.text, s.startMs])).toEqual([["một", 5_500], ["hai", 20_500]]);
+
+  // Turning the gate off decodes the whole channel once, and nothing is marked as gated.
+  const again = readMeeting(meeting.id, home)!;
+  again.state = "recorded";
+  saveMeeting(again, home);
+  decoded.length = 0;
+  const ungated = await transcribeMeeting(meeting.id, {
+    home, transcriber, noVad: true,
+    runEngine: async () => JSON.stringify({ words: [{ w: "cả", start: 1, end: 1.4, conf: 1 }] }),
+  });
+  expect(decoded.length).toBe(0);
+  expect(ungated.speechGated).toBeUndefined();
+  expect(ungated.segments.map((s) => s.startMs)).toEqual([1_000]);
 });
 
 test("channel plan and language normalization match what the engine actually accepts", () => {

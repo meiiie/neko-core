@@ -23,7 +23,7 @@ import { clearKimiCredentials, loginKimi } from "../src/adapters/kimi-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../src/adapters/gemini-support-pack.ts";
 import { discoverOfficeCli, installOfficeSupportPack, readOfficeSupportPack, removeOfficeSupportPack } from "../src/adapters/office-support-pack.ts";
 import { activeBrowserMeeting, startBrowserMeeting, stopBrowserMeeting } from "../src/adapters/browser-meeting.ts";
-import { installDiarization, readDiarizationPack, diarizationRoot } from "../src/adapters/meeting-diarize.ts";
+import { installSpeechTools, readDiarizationPack, readSpeechTools, diarizationRoot } from "../src/adapters/meeting-diarize.ts";
 import { discoverMeetingSupport, installMeetingSupportPack, readMeetingSupportPack, removeMeetingSupportPack, type MeetingModelTier } from "../src/adapters/meeting-support-pack.ts";
 import { deleteMeeting, latestMeeting, listMeetings, readMeeting, readMeetingTranscript } from "../src/adapters/meeting.ts";
 import { transcribeMeeting } from "../src/adapters/meeting-transcription.ts";
@@ -587,7 +587,7 @@ async function cmdMeetingSupport(action: string, tierArg?: string): Promise<numb
       return 2;
     }
     try {
-      const pack = await installDiarization({ notify: console.log });
+      const pack = await installSpeechTools({ withSpeakers: true, notify: console.log });
       console.log(`Speaker separation is ready (sherpa-onnx ${pack.version}).`);
       console.log("It is still OFF unless you ask for it: neko meeting transcribe --diarize");
       console.log("Labels are voice clusters (Speaker 1, Speaker 2), never names. Measured on Vietnamese:");
@@ -608,6 +608,12 @@ async function cmdMeetingSupport(action: string, tierArg?: string): Promise<numb
         tier,
         notify: console.log,
       });
+      try {
+        // Not optional: without it the model is handed non-speech audio and invents words.
+        await installSpeechTools({ notify: console.log });
+      } catch (error) {
+        console.error(`Voice-activity gating could not be installed (${error instanceof Error ? error.message : error}); transcription will decode whole files.`);
+      }
       console.log(`Meeting transcription is ready (${installed.model.id}; ${installed.model.tier}).`);
       console.log("Audio and transcripts stay under ~/.neko-core/meetings and are never uploaded by this adapter.");
       return 0;
@@ -631,8 +637,10 @@ async function cmdMeetingSupport(action: string, tierArg?: string): Promise<numb
   console.log(`Meeting transcription support: ${status.state} (${status.detail})`);
   const managed = readMeetingSupportPack();
   if (managed) console.log(`  ${managed.model.id}: ${(managed.model.bytes / 1024 / 1024).toFixed(1)} MiB model; local-only`);
+  const tools = readSpeechTools();
+  console.log(`  voice-activity gating: ${tools ? `ready (sherpa-onnx ${tools.version})` : "not installed - the model will be handed non-speech audio"}`);
   const diar = readDiarizationPack();
-  console.log(`  speaker separation: ${diar ? `ready (sherpa-onnx ${diar.version}), still off unless --diarize` : "not installed (neko support meeting diarization install)"}`);
+  console.log(`  speaker separation: ${diar ? "ready, still off unless --diarize" : "not installed (neko support meeting diarization install)"}`);
   return status.state === "ready" ? 0 : 1;
 }
 
