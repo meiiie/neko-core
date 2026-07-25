@@ -10,6 +10,7 @@ import {
   readMeeting,
   readMeetingTranscript,
   type MeetingManifest,
+  type MeetingTranscriptSegment,
 } from "./meeting.ts";
 import {
   discoverMeetingSupport,
@@ -155,10 +156,15 @@ class MeetingTools implements McpTools {
       const all = session.liveSegments();
       const limit = boundedInt(args.limit, 1, 200, 50);
       const offset = boundedInt(args.offset, 0, Number.MAX_SAFE_INTEGER, Math.max(0, all.length - limit));
+      const quietMs = session.quietMs();
       return JSON.stringify({
         state: active.state,
         meeting: summarize(active.meeting),
         durationMs: active.durationMs,
+        quietMs,
+        ...(quietMs != null && quietMs >= 5 * 60_000
+          ? { endedHint: `No speech for ${Math.round(quietMs / 60_000)} min. Ask the user whether the meeting ended - never stop the recording on this signal alone.` }
+          : {}),
         live: live
           ? { ...live, note: "Provisional: windows can clip a word and audio may be skipped under load. The finalized transcription after stop is canonical." }
           : { note: "No live transcript engine is attached; install the Meeting Support Pack to hear the meeting as it happens." },
@@ -218,8 +224,12 @@ async function resolveLiveFactory(home: string, language: string) {
   let transcriber: MeetingTranscriber;
   try { transcriber = await verifyMeetingSupportIntegrity(home); } catch { return undefined; }
   const transcribeWindow = whisperWindowTranscriber(transcriber, { language });
-  return (context: { rawPath: string; sampleRate: number; channels: 2 }) =>
-    new LiveMeetingTranscriber({ ...context, transcribeWindow });
+  return (context: {
+    rawPath: string;
+    sampleRate: number;
+    channels: 2;
+    onSegments: (segments: MeetingTranscriptSegment[]) => void;
+  }) => new LiveMeetingTranscriber({ ...context, transcribeWindow });
 }
 
 function summarize(meeting: MeetingManifest): Record<string, unknown> {

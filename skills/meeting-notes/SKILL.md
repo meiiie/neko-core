@@ -37,6 +37,11 @@ Use Neko's first-class meeting tools for consented local capture and timestamp-g
 - Do not poll the live transcript on a timer. Read it when the user asks, or once before summarizing.
 - If `live.note` says no engine is attached, recording is still fine - offer `/support meeting` and
   transcribe after the meeting instead of pretending live notes exist.
+- `quietMs` reports how long the room has been silent, and `endedHint` appears once it is long enough to
+  be worth mentioning. **Ask, never assume.** A meeting legitimately goes quiet while people read, mute,
+  or wait for someone. Say what you observed - "no speech for 7 minutes, has the meeting ended?" - and
+  stop only when the user confirms. Stopping on the silence alone can discard evidence they cannot
+  recover; continuing costs nothing but disk.
 
 ### Transcribe
 

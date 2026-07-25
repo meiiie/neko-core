@@ -153,6 +153,62 @@ test("live transcript runs during capture and the agent can read it mid-meeting"
   expect(existsSync(join(meetingDir(result!.id, home), "audio.wav"))).toBe(true);
 });
 
+test("a quiet room is proposed as ended, never stopped, and speech resets it", async () => {
+  const home = tempHome();
+  let clock = 1_000_000;
+  const notices: string[] = [];
+  let opened = "";
+  const session = await startBrowserMeeting({
+    home,
+    openUrl: (value) => { opened = value; },
+    now: () => clock,
+    quietProposalMs: 60_000,
+    onEvent: (event) => { if (event.type === "notice" && event.message) notices.push(event.message); },
+  });
+  const url = new URL(opened);
+  const socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
+  const recording = new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("meeting websocket timeout")), 5_000);
+    socket.onopen = () => socket.send(JSON.stringify({ type: "hello", token: url.hash.slice(1) }));
+    socket.onerror = () => reject(new Error("meeting websocket failed"));
+    socket.onmessage = (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.type === "ready") socket.send(JSON.stringify({ type: "begin", consent: true, sampleRate: 16_000, sources: ["system"] }));
+      if (message.type === "recording") { clearTimeout(timer); resolve(); }
+    };
+  });
+  await recording;
+
+  // Real speech: a loud frame keeps the meeting alive.
+  const loud = Buffer.alloc(3_200);
+  for (let i = 0; i < loud.length; i += 2) loud.writeInt16LE(12_000, i);
+  socket.send(loud);
+  await Bun.sleep(60);
+  expect(session.quietMs()).toBe(0);
+
+  // Silence past the threshold: Neko says so exactly once and keeps recording.
+  const quiet = Buffer.alloc(3_200);
+  clock += 61_000;
+  socket.send(quiet);
+  await Bun.sleep(60);
+  socket.send(quiet);
+  await Bun.sleep(60);
+  expect(notices.filter((n) => n.includes("may have ended")).length).toBe(1);
+  expect(session.snapshot().state).toBe("recording"); // proposed, not acted on
+
+  // Someone speaks again: the proposal re-arms rather than latching.
+  socket.send(loud);
+  await Bun.sleep(60);
+  expect(session.quietMs()).toBe(0);
+  clock += 61_000;
+  socket.send(quiet);
+  await Bun.sleep(60);
+  expect(notices.filter((n) => n.includes("may have ended")).length).toBe(2);
+
+  socket.close();
+  await session.stop("test complete");
+});
+
 test("capture still records when no live engine is available", async () => {
   const home = tempHome();
   const session = new BrowserMeetingSession({

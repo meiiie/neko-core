@@ -167,6 +167,25 @@ that is also why the skip-ahead backpressure exists rather than being theoretica
 the plumbing keeps up, not Vietnamese accuracy — that still needs the corpus described in
 `MEETINGS-RESEARCH-2026-07.md`.
 
+## Presence and end-of-meeting
+
+The consent page is Neko's on-screen presence for the whole meeting: elapsed time, a live dot,
+microphone/meeting level meters, and — when the Support Pack is installed — the provisional transcript
+as it is heard. It deliberately sits on the same surface that carries the browser's own mandatory
+sharing indicator rather than becoming a separate always-on-top window, because the authoritative
+recording indicator belongs to the platform. macOS keeps its microphone dot on the main display and
+Chrome keeps its sharing bar; a third-party overlay that competed with those would weaken the exact
+signal a user relies on. Neko adds information beside that indicator; it never substitutes for it.
+
+Silence is measured from the PCM Neko already receives (sparse RMS per packet, no extra engine). After
+a long quiet period Neko emits **one** notice and `inspect live` exposes `quietMs` plus an `endedHint`.
+
+**Neko never stops a recording on that signal.** Turn-level endpointing is a sub-second decision, but a
+meeting is not a turn: people mute, read, or wait for a latecomer. Guessing "ended" and stopping
+destroys evidence the user cannot recover, while guessing the other way only costs disk — so the
+asymmetry decides the design. The skill instructs the agent to report what it observed and ask. Speech
+re-arms the proposal, so a long quiet stretch mid-meeting does not latch it off.
+
 ## Context and performance
 
 Transcript reads are paginated at most 200 segments in the tool and 50 in the TUI. Long audio therefore does
