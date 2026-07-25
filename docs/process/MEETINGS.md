@@ -139,6 +139,32 @@ identifiers, dependency names) matched phonetically, which is the inference-time
 [AdaCS](https://arxiv.org/abs/2501.07102). That is a designed, not built, direction. Code-switching is
 **not** claimed as solved.
 
+## Knowing the meeting ended
+
+Neko proposes, it never stops. Turn-level endpointing runs on sub-second silence, but a meeting is not a
+turn: people mute themselves, read a document, or wait for a latecomer. Stopping on a guess throws away
+evidence the user cannot get back, so Neko reports the silence and lets the user decide - the one
+direction that is safe to be wrong in.
+
+**The transcript is the speech detector**, whenever the Meeting Support Pack is installed. A committed
+segment is an ASR model saying words were spoken and where in the meeting they ended, which is strictly
+better than a signal-energy threshold: a fan, a keyboard, or a muted video keeps a room "loud" while
+nobody is talking. Energy remains the fallback when no engine is attached, and `quietSource` in the live
+inspection says which one answered, so the agent never overstates its evidence.
+
+The measurement is made in **meeting time over the audio the decoder has actually examined**
+(`decodedMs`), not wall-clock and not the committed point:
+
+- Wall-clock would count the decoder's own lag as silence - a transcriber running 20 s behind would
+  report 20 s of quiet while people are still talking.
+- `processedMs`, the committed point, **stops advancing the instant the room goes quiet**, because
+  silence commits nothing. Timing silence against it means the clock freezes exactly when the question
+  becomes interesting. This was a real bug, found by testing a loud-but-wordless room rather than a
+  silent one.
+
+During a long silence `decodedMs` trails by at most the live loop's own lag budget, so a five-minute
+proposal can fire a little late. Never early.
+
 ## Pet window and knowing what to share
 
 Neko is present during the meeting as a small always-on-top window - the "pet" - built on the

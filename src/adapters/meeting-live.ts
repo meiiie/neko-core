@@ -59,6 +59,14 @@ export interface LiveMeetingOptions {
 
 export interface LiveMeetingSnapshot {
   processedMs: number;
+  /**
+   * How far the decoder has LOOKED, as opposed to how far it has committed.
+   *
+   * These diverge exactly when nothing is being said: silence commits nothing, so `processedMs` stops
+   * advancing the moment a room goes quiet. Anything asking "how long has it been silent?" must measure
+   * against this instead, or the clock stops at the same instant the question becomes interesting.
+   */
+  decodedMs: number;
   segments: number;
   /** Audio the live loop skipped to keep up. The canonical pass still covers it. */
   skippedMs: number;
@@ -153,6 +161,7 @@ interface LiveTrack {
   index: number;
   source: MeetingTranscriptSegment["source"];
   processedMs: number;
+  decodedMs: number;
   /** Hypothesis from the previous pass over this channel's uncommitted buffer. */
   previous: HypothesisWord[];
 }
@@ -174,7 +183,7 @@ export class LiveMeetingTranscriber {
   constructor(options: LiveMeetingOptions) {
     this.options = { ...DEFAULTS, ...options };
     this.staging = options.workDir ?? mkdtempSync(join(process.env.TMPDIR ?? process.env.TEMP ?? ".", "neko-live-"));
-    this.tracks = liveTracks(options.channels, options.sources).map((track) => ({ ...track, processedMs: 0, previous: [] }));
+    this.tracks = liveTracks(options.channels, options.sources).map((track) => ({ ...track, processedMs: 0, decodedMs: 0, previous: [] }));
   }
 
   snapshot(): LiveMeetingSnapshot {
@@ -182,6 +191,7 @@ export class LiveMeetingTranscriber {
       // The meeting is only transcribed as far as its SLOWEST channel: reporting the fastest would
       // claim coverage of audio nobody has decoded yet.
       processedMs: Math.min(...this.tracks.map((track) => track.processedMs)),
+      decodedMs: Math.min(...this.tracks.map((track) => track.decodedMs)),
       segments: this.collected.length,
       skippedMs: this.skippedMs,
       windows: this.windows,
@@ -268,6 +278,7 @@ export class LiveMeetingTranscriber {
       const target = availableMs - this.options.windowMs;
       this.skippedMs += target - track.processedMs;
       track.processedMs = target;
+      track.decodedMs = Math.max(track.decodedMs, target);
       track.previous = [];
     }
     // The buffer runs from the last COMMITTED point, not the last decoded point: LocalAgreement
@@ -283,6 +294,7 @@ export class LiveMeetingTranscriber {
     let failed = false;
     try {
       const decoded = await this.options.transcribeWindow({ wavPath, offsetMs: startMs, durationMs: bufferMs, source: track.source }, signal);
+      track.decodedMs = Math.max(track.decodedMs, endMs);
       this.absorb(track, toWords(decoded, startMs), endMs, flushTail || bufferMs >= this.options.windowMs);
     } catch (error) {
       // One unreadable window must not wedge the rest of the meeting: record it, step over that
@@ -291,6 +303,7 @@ export class LiveMeetingTranscriber {
       this.lastError = error instanceof Error ? error.message : String(error);
       this.skippedMs += endMs - track.processedMs;
       track.processedMs = endMs;
+      track.decodedMs = Math.max(track.decodedMs, endMs);
       track.previous = [];
     } finally {
       rmSync(wavPath, { force: true });

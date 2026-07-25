@@ -232,6 +232,67 @@ test("a quiet room is proposed as ended, never stopped, and speech resets it", a
   await session.stop("test complete");
 });
 
+test("a loud but wordless room is reported as quiet, because the transcript decides, not energy", async () => {
+  // The failure an energy threshold cannot see: a fan, a keyboard, or a muted video keeps the signal
+  // loud while nobody is speaking. With the transcriber attached, an ASR model decides what speech is.
+  const home = tempHome();
+  const notices: string[] = [];
+  let clock = Date.parse("2026-07-26T09:00:00.000Z");
+  let live!: LiveMeetingTranscriber;
+  let opened!: string;
+  const session = await startBrowserMeeting({
+    home,
+    openUrl: (value) => { opened = value; },
+    now: () => clock,
+    liveIntervalMs: 10,
+    quietProposalMs: 60_000,
+    onEvent: (event) => { if (event.type === "notice" && event.message) notices.push(event.message); },
+    liveTranscriberFactory: (context) => (live = new LiveMeetingTranscriber({
+      ...context,
+      windowMs: 4_000,
+      minWindowMs: 1_000,
+      // Loud audio, but the decoder finds words only in the first window: after that the room is noisy
+      // and wordless, which is exactly what an energy threshold calls "still going".
+      transcribeWindow: async (window) => (window.offsetMs === 0
+        ? [{ id: "w", startMs: 0, endMs: 900, speaker: "Meeting audio", source: "system", text: "chốt thứ sáu" }]
+        : []),
+    })),
+  });
+  const url = new URL(opened);
+
+  const socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("meeting websocket timeout")), 5_000);
+    socket.onopen = () => socket.send(JSON.stringify({ type: "hello", token: url.hash.slice(1) }));
+    socket.onerror = () => reject(new Error("meeting websocket failed"));
+    socket.onmessage = (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.type === "ready") socket.send(JSON.stringify({ type: "begin", consent: true, sampleRate: 16_000, sources: ["system"] }));
+      if (message.type === "recording") { clearTimeout(timer); resolve(); }
+    };
+  });
+
+  // 8 s of continuously LOUD audio - energy would never call this quiet. Sent one second at a time,
+  // as the capture bridge does, because a single frame that large is over the packet cap.
+  const second = Buffer.alloc(16_000 * 2 * 2);
+  for (let i = 0; i < second.length; i += 2) second.writeInt16LE(12_000, i);
+  for (let n = 0; n < 8; n++) { socket.send(second); await Bun.sleep(10); }
+  for (let waited = 0; waited < 3_000 && !session.liveSegments().length; waited += 25) await Bun.sleep(25);
+  await live.drain();
+
+  expect(session.quietSource()).toBe("transcript");
+  // Speech ended at 900 ms; the decoder has since worked through several more seconds of noise.
+  const quiet = session.quietMs()!;
+  expect(quiet).toBeGreaterThan(2_000);
+  expect(quiet).toBe(live.snapshot().decodedMs - 900);
+  // The committed point froze the instant the words stopped - the exact reason it cannot time silence.
+  expect(live.snapshot().processedMs).toBe(900);
+  // A few seconds of quiet is not a finished meeting: nothing is proposed below the threshold.
+  expect(notices.filter((n) => n.includes("may have ended"))).toEqual([]);
+  socket.close();
+  await session.stop("test complete");
+});
+
 test("capture still records when no live engine is available", async () => {
   const home = tempHome();
   const session = new BrowserMeetingSession({

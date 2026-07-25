@@ -88,7 +88,9 @@ export class BrowserMeetingSession {
   private startedAtMs = 0;
   private live: LiveMeetingTranscriber | null = null;
   private liveTimer: ReturnType<typeof setInterval> | null = null;
-  private lastSpeechAtMs = 0;
+  private lastLoudAtMs = 0;
+  /** End of the last segment the transcriber committed, in meeting time. */
+  private lastSpeechEndMs = 0;
   private quietNoticeSent = false;
   private readonly home: string;
   private resolveStopped!: (meeting: MeetingManifest | null) => void;
@@ -258,13 +260,20 @@ export class BrowserMeetingSession {
   }
 
   /**
-   * Track how long the room has been quiet, from the PCM Neko already receives.
+   * Track how long the room has been quiet.
    *
    * This deliberately does NOT stop anything. Turn-level endpointing runs on sub-second silence, but a
    * meeting is not a turn: people mute themselves, read a document, or wait for a latecomer. Guessing
    * "the meeting ended" and stopping would throw away evidence the user cannot get back, while guessing
    * the other way keeps recording a room that already emptied. So Neko reports the silence and lets the
    * user decide - the one direction that is safe to be wrong in.
+   *
+   * Two detectors, and the better one wins. When the live transcriber is attached, quiet time comes from
+   * the TRANSCRIPT: how much decoded audio has passed since the last thing anybody actually said. That is
+   * an ASR model deciding what speech is, which is strictly better than an energy threshold - a fan, a
+   * keyboard, or a muted video keeps a room "loud" while nobody is talking. Energy remains the fallback
+   * when the Meeting Support Pack is not installed, and `quietSource` says which one answered so the
+   * agent never overstates its evidence.
    */
   private observeLoudness(raw: Buffer): void {
     const samples = Math.floor(raw.length / 2);
@@ -280,27 +289,47 @@ export class BrowserMeetingSession {
     }
     const rms = counted ? Math.sqrt(sum / counted) : 0;
     const now = this.now();
-    if (rms >= SPEECH_RMS) {
-      this.lastSpeechAtMs = now;
-      this.quietNoticeSent = false;
-      return;
-    }
-    if (!this.lastSpeechAtMs) this.lastSpeechAtMs = this.startedAtMs || now;
+    if (rms >= SPEECH_RMS) this.lastLoudAtMs = now;
+    else if (!this.lastLoudAtMs) this.lastLoudAtMs = this.startedAtMs || now;
+    // Always evaluate, including after a loud frame: that is what re-arms the proposal so a meeting
+    // which goes quiet, resumes, then ends is reported again instead of latching after the first time.
+    this.proposeEndIfQuiet();
+  }
+
+  private proposeEndIfQuiet(): void {
+    const quiet = this.quietMs();
+    if (quiet == null) return;
+    if (quiet < (this.options.quietProposalMs ?? QUIET_PROPOSAL_MS)) { this.quietNoticeSent = false; return; }
     if (this.quietNoticeSent) return;
-    const quietMs = now - this.lastSpeechAtMs;
-    if (quietMs < (this.options.quietProposalMs ?? QUIET_PROPOSAL_MS)) return;
     this.quietNoticeSent = true;
     this.options.onEvent?.({
       type: "notice",
       meetingId: this.meeting.id,
-      message: `no speech for ${Math.round(quietMs / 60_000)} min - the meeting may have ended; recording continues until you stop it`,
+      message: `no speech for ${Math.round(quiet / 60_000)} min - the meeting may have ended; recording continues until you stop it`,
     });
   }
 
-  /** Milliseconds since speech was last heard, or null before any audio has arrived. */
+  /** Which evidence answered `quietMs`: the ASR transcript, or raw signal energy. */
+  quietSource(): "transcript" | "energy" | null {
+    if (!this.live) return this.lastLoudAtMs ? "energy" : null;
+    return this.live.snapshot().decodedMs > 0 ? "transcript" : null;
+  }
+
+  /** Milliseconds of silence since anybody last spoke, or null before there is evidence either way. */
   quietMs(): number | null {
-    if (!this.lastSpeechAtMs) return null;
-    return Math.max(0, this.now() - this.lastSpeechAtMs);
+    if (this.live) {
+      // Measured in MEETING time over the audio the decoder has actually finished, so the decoder's own
+      // lag never reads as silence: a transcriber running 20 s behind would otherwise report 20 s of
+      // quiet while people are still talking.
+      // `decodedMs`, not `processedMs`: silence commits nothing, so the committed point stops advancing
+      // at the exact moment the room goes quiet. During a long silence this trails by at most the live
+      // loop's own lag budget, so a 5-minute proposal can fire a little late - never early.
+      const decidedMs = this.live.snapshot().decodedMs;
+      if (decidedMs <= 0) return null;
+      return Math.max(0, decidedMs - this.lastSpeechEndMs);
+    }
+    if (!this.lastLoudAtMs) return null;
+    return Math.max(0, this.now() - this.lastLoudAtMs);
   }
 
   /** Provisional live transcript so the agent can answer "what has been said so far" mid-meeting. It is
@@ -317,6 +346,10 @@ export class BrowserMeetingSession {
         // Mirror provisional text back to the consent page so the user can SEE that Neko is listening
         // and what it is hearing, on the same surface that carries the browser's sharing indicator.
         onSegments: (segments) => {
+          // The transcript is the speech detector: a committed segment is an ASR model saying words
+          // were spoken, and where in the meeting they ended.
+          for (const segment of segments) this.lastSpeechEndMs = Math.max(this.lastSpeechEndMs, segment.endMs);
+          this.proposeEndIfQuiet();
           try {
             this.socket?.send(JSON.stringify({
               type: "live",

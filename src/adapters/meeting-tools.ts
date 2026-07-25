@@ -162,6 +162,7 @@ class MeetingTools implements McpTools {
       const limit = boundedInt(args.limit, 1, 200, 50);
       const offset = boundedInt(args.offset, 0, Number.MAX_SAFE_INTEGER, Math.max(0, all.length - limit));
       const quietMs = session.quietMs();
+      const quietSource = session.quietSource();
       const mixed = codeSwitchHint(all);
       return JSON.stringify({
         state: active.state,
@@ -169,7 +170,10 @@ class MeetingTools implements McpTools {
         durationMs: active.durationMs,
         quietMs,
         ...(quietMs != null && quietMs >= 5 * 60_000
-          ? { endedHint: `No speech for ${Math.round(quietMs / 60_000)} min. Ask the user whether the meeting ended - never stop the recording on this signal alone.` }
+          ? {
+              endedHint: `No speech for ${Math.round(quietMs / 60_000)} min${quietSource === "energy" ? " (signal energy only - no transcript engine, so a quiet fan or a muted video can fool this)" : " of transcribed audio"}. Ask the user whether the meeting ended - never stop the recording on this signal alone.`,
+              quietSource,
+            }
           : {}),
         ...(mixed ? { codeSwitchHint: mixed } : {}),
         live: live
