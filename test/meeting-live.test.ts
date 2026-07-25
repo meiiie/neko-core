@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, appendFileSync, existsSync, readFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { LiveMeetingTranscriber, trimRepeatedPrefix, type LiveWindow } from "../src/adapters/meeting-live.ts";
+import { agreedPrefix, LiveMeetingTranscriber, toWords, type LiveWindow } from "../src/adapters/meeting-live.ts";
 import type { MeetingTranscriptSegment } from "../src/adapters/meeting.ts";
 
 const SAMPLE_RATE = 16_000;
@@ -33,7 +33,7 @@ function segment(startMs: number, endMs: number, text: string): MeetingTranscrip
   return { id: "x", startMs, endMs, speaker: "Meeting audio", source: "system", text };
 }
 
-test("live windows become meeting-relative segments and the overlap does not duplicate words", async () => {
+test("confirmed text is emitted with meeting-relative timestamps and never duplicated", async () => {
   const { raw, dir } = setup();
   const seen: LiveWindow[] = [];
   const emitted: MeetingTranscriptSegment[][] = [];
@@ -42,42 +42,35 @@ test("live windows become meeting-relative segments and the overlap does not dup
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
     workDir: dir,
-    windowMs: 10_000,
-    overlapMs: 2_000,
+    windowMs: 30_000,
     minWindowMs: 6_000,
     onSegments: (segments) => emitted.push(segments),
     transcribeWindow: async (window) => {
       seen.push(window);
-      // Window 1 covers 0-10s. Window 2 starts at 8s (2s overlap) and re-hears "chốt thứ sáu".
+      // Both passes hear the same opening; the second also hears what came after it.
       return seen.length === 1
-        ? [segment(1_000, 3_000, "chào mọi người"), segment(8_200, 9_500, "chốt thứ sáu")]
-        : [segment(200, 1_500, "chốt thứ sáu"), segment(4_000, 5_200, "ai làm phần backend")];
+        ? [segment(1_000, 3_000, "chào mọi người")]
+        : [segment(1_000, 3_000, "chào mọi người"), segment(8_000, 9_500, "chốt thứ sáu")];
     },
   });
 
-  record(raw, 12_000);
+  record(raw, 8_000);
   live.start();
   await live.drain();
+  expect(seen[0].offsetMs).toBe(0);
+  expect(live.segments()).toEqual([]); // one hypothesis confirms nothing
 
-  expect(seen[0]).toMatchObject({ offsetMs: 0 });
-  expect(seen.length).toBe(1);
-
-  record(raw, 8_000); // 20s total
+  record(raw, 8_000);
   await live.drain();
 
-  // Second window re-decodes the tail, so it must start before what window 1 already consumed.
-  expect(seen[1].offsetMs).toBe(8_000);
-
-  const texts = live.segments().map((s) => s.text);
-  expect(texts).toEqual(["chào mọi người", "chốt thứ sáu", "ai làm phần backend"]);
-
-  // Timestamps are meeting-relative, not window-relative: the last line really is at ~12s.
-  const last = live.segments().at(-1)!;
-  expect(last.startMs).toBe(12_000);
-  expect(last.endMs).toBe(13_200);
-
-  // Callers are notified per window, and the duplicate never reaches them.
-  expect(emitted.flat().map((s) => s.text)).toEqual(["chào mọi người", "chốt thứ sáu", "ai làm phần backend"]);
+  // The agreed opening is committed once, with meeting-relative timing preserved.
+  const segments = live.segments();
+  expect(segments.map((s) => s.text)).toEqual(["chào mọi người"]);
+  expect(segments[0].startMs).toBe(1_000);
+  // The buffer resumes at the confirmed end, so committed audio is not re-emitted.
+  expect(seen[1].offsetMs).toBe(0);
+  expect(live.snapshot().processedMs).toBe(3_000);
+  expect(emitted.flat().map((s) => s.text)).toEqual(["chào mọi người"]);
   await live.stop();
 });
 
@@ -127,7 +120,7 @@ test("sustained lag skips forward and reports it rather than drifting behind the
   expect(offsets[0]).toBe(290_000); // jumped to availableMs - windowMs
   const snapshot = live.snapshot();
   expect(snapshot.skippedMs).toBe(290_000);
-  expect(snapshot.processedMs).toBe(300_000);
+  expect(snapshot.processedMs).toBe(290_000); // the buffer restarts at the skip point
   await live.stop();
 });
 
@@ -198,53 +191,98 @@ test("flush decodes the closing tail that is shorter than a full window", async 
   await live.stop();
 });
 
-test("the overlap is decoder context, not output: timestamps stay monotonic", async () => {
-  // Found on real audio: re-decoded overlap produced duplicated lines and timestamps that went
-  // backwards (4.9s then 4.0s), because a window re-worded audio the previous window already emitted.
+test("re-decoded audio never produces a second copy or a backwards timestamp", async () => {
+  // Found on real audio before LocalAgreement: re-decoding produced duplicated lines and timestamps
+  // that went backwards (4.9s then 4.0s) because each window committed its own wording.
   const { raw, dir } = setup();
-  let call = 0;
+  // What was actually said, in meeting time. A real decoder only ever sees the audio still in the
+  // buffer, so the stub returns the spoken lines that fall inside the requested window.
+  const spoken = [
+    { startMs: 1_000, endMs: 3_000, text: "câu một" },
+    { startMs: 8_000, endMs: 9_500, text: "câu hai" },
+    { startMs: 12_000, endMs: 13_000, text: "câu ba" },
+  ];
   const live = new LiveMeetingTranscriber({
     rawPath: raw,
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
     workDir: dir,
-    windowMs: 10_000,
-    overlapMs: 3_000,
+    windowMs: 30_000,
     minWindowMs: 6_000,
-    transcribeWindow: async () => {
-      call++;
-      // Window 2 starts at 7s and re-hears 7-10s, wording it differently the second time.
-      return call === 1
-        ? [segment(1_000, 3_000, "câu một"), segment(8_000, 9_500, "câu hai")]
-        : [segment(1_200, 2_600, "câu hai nghe lại"), segment(4_000, 5_000, "câu ba")];
+    transcribeWindow: async (window) => {
+      const end = window.offsetMs + window.durationMs;
+      return spoken
+        .filter((line) => line.startMs >= window.offsetMs && line.startMs < end)
+        .map((line, index, all) => {
+          // The last line in a window has no right-hand context, so the decoder mis-hears it.
+          const unstable = index === all.length - 1 && line.endMs > end - 2_000;
+          return segment(line.startMs - window.offsetMs, line.endMs - window.offsetMs, unstable ? `${line.text} sai` : line.text);
+        });
     },
   });
   live.start();
 
-  record(raw, 10_000);
+  record(raw, 8_000);
+  await live.drain();
+  record(raw, 8_000);
   await live.drain();
   record(raw, 8_000);
   await live.drain();
 
-  const segments = live.segments();
-  expect(segments.map((s) => s.text)).toEqual(["câu một", "câu hai", "câu ba"]);
-  const starts = segments.map((s) => s.startMs);
-  expect(starts).toEqual([...starts].sort((a, b) => a - b)); // never moves backwards
+  const texts = live.segments().map((s) => s.text).join(" ");
+  expect(texts.split("câu một").length - 1).toBe(1); // committed exactly once
+  expect(texts).not.toContain("sai");                // the unstable wording never shipped
+  const starts = live.segments().map((s) => s.startMs);
+  expect(starts).toEqual([...starts].sort((a, b) => a - b));
   await live.stop();
 });
 
-test("a restated prefix is trimmed even when a spurious line landed in between", () => {
-  // Real transcript: "...NAM will own the database migration" / "and thank you" /
-  // "will own the database migration and finish it by Wednesday".
-  const recent = "we will ship the release on friday nam will own the database migration and thank you";
-  // The longest already-seen prefix wins, so the trailing "and" goes too - this is exactly what the
-  // real engine produced: the line becomes "finish it by Wednesday."
-  expect(trimRepeatedPrefix(recent, "will own the database migration and finish it by Wednesday"))
-    .toBe("finish it by Wednesday");
-  // A short coincidence is left alone.
-  expect(trimRepeatedPrefix("chúng ta chốt thứ sáu", "thứ sáu nhé")).toBe("thứ sáu nhé");
-  // Nothing to compare against yet.
-  expect(trimRepeatedPrefix("", "câu đầu tiên")).toBe("câu đầu tiên");
+test("LocalAgreement-2 commits only the prefix two hypotheses agree on", () => {
+  const first = toWords([segment(0, 2_000, "chúng ta chốt thứ sáu và")]);
+  const second = toWords([segment(0, 2_000, "chúng ta chốt thứ sáu nhé")]);
+  // The shared opening is stable; the diverging tail is not committed yet.
+  expect(agreedPrefix(first, second)).toBe(5);
+  // Punctuation and case differences between passes are not disagreements.
+  expect(agreedPrefix(toWords([segment(0, 1_000, "Chốt thứ sáu.")]), toWords([segment(0, 1_000, "chốt thứ sáu")]))).toBe(3);
+  // No previous hypothesis means nothing is confirmed.
+  expect(agreedPrefix([], first)).toBe(0);
+});
+
+test("an unstable window tail is withheld until a second pass confirms it", async () => {
+  // The failure this policy exists for: the end of a window has no right-hand context, so the decoder
+  // guesses. The earlier heuristic committed such a guess permanently ("and thank you" on real audio).
+  const { raw, dir } = setup();
+  const emitted: string[] = [];
+  let pass = 0;
+  const live = new LiveMeetingTranscriber({
+    rawPath: raw,
+    sampleRate: SAMPLE_RATE,
+    channels: CHANNELS,
+    workDir: dir,
+    windowMs: 30_000,
+    minWindowMs: 6_000,
+    onSegments: (segments) => emitted.push(...segments.map((s) => s.text)),
+    transcribeWindow: async () => {
+      pass++;
+      // Both passes agree on the opening line. The trailing line has no right-hand context in pass 1,
+      // so the decoder mis-hears it and corrects itself in pass 2.
+      return pass === 1
+        ? [segment(0, 3_000, "chốt thứ sáu"), segment(4_000, 5_000, "cảm ơn")]
+        : [segment(0, 3_000, "chốt thứ sáu"), segment(4_000, 6_500, "Nam làm phần backend")];
+    },
+  });
+  live.start();
+
+  record(raw, 8_000);
+  await live.drain();
+  expect(emitted).toEqual([]); // a single hypothesis confirms nothing
+
+  record(raw, 8_000);
+  await live.drain();
+  // The stable opening ships; the mis-heard tail never reaches the user.
+  expect(emitted).toEqual(["chốt thứ sáu"]);
+  expect(emitted.join(" ")).not.toContain("cảm ơn");
+  await live.stop();
 });
 
 test("window WAVs are valid PCM16 and are cleaned up after decoding", async () => {

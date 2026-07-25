@@ -73,29 +73,75 @@ function fingerprint(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
 }
 
-const MIN_REPEATED_WORDS = 3;
-const MAX_REPEATED_WORDS = 15;
+/** One word of a hypothesis, carrying the timing of the segment it came from. */
+export interface HypothesisWord {
+  text: string;
+  startMs: number;
+  endMs: number;
+  speaker: string;
+  source: MeetingTranscriptSegment["source"];
+}
+
+/** Split decoded segments into comparable words, keeping each word's segment timing and channel. */
+export function toWords(segments: MeetingTranscriptSegment[], offsetMs = 0): HypothesisWord[] {
+  const words: HypothesisWord[] = [];
+  for (const segment of segments.slice().sort((a, b) => a.startMs - b.startMs)) {
+    for (const text of segment.text.trim().split(/\s+/).filter(Boolean)) {
+      words.push({
+        text,
+        startMs: offsetMs + segment.startMs,
+        endMs: offsetMs + segment.endMs,
+        speaker: segment.speaker,
+        source: segment.source,
+      });
+    }
+  }
+  return words;
+}
 
 /**
- * Drop a leading run of words that merely restates something already said in the recent lines.
+ * LocalAgreement-2: the longest prefix on which two consecutive hypotheses agree.
  *
- * A decoder given overlapping audio often re-utters the sentence it was in the middle of, so two
- * windows both contain "will own the database migration". The repeat is not always adjacent - a short
- * spurious line can land between them - so this searches the recent tail rather than only the previous
- * line. It only ever removes a prefix that is already on screen; it never reorders or invents text, and
- * a line that is entirely a restatement is dropped by the caller.
+ * This is the published stabilization policy for turning Whisper into a streaming system
+ * (ufal/whisper_streaming, arXiv:2307.14743) and it exists because the END of a decoded window is the
+ * least reliable part - the model has no right-hand context there, so it guesses, and those guesses
+ * change on the next pass. Committing only what two passes agree on means Neko never shows a line it is
+ * about to contradict. An earlier hand-rolled heuristic here committed every window immediately and
+ * permanently recorded exactly such a guess ("and thank you") on real audio.
  */
-export function trimRepeatedPrefix(recent: string, next: string): string {
-  const haystack = fingerprint(recent);
-  const nextRaw = next.trim().split(/\s+/).filter(Boolean);
-  const nextWords = fingerprint(next).split(" ").filter(Boolean);
-  if (!haystack || nextWords.length !== nextRaw.length) return next;
-  const limit = Math.min(MAX_REPEATED_WORDS, nextWords.length);
-  for (let size = limit; size >= MIN_REPEATED_WORDS; size--) {
-    const head = nextWords.slice(0, size).join(" ");
-    if (haystack.includes(head)) return nextRaw.slice(size).join(" ");
+export function agreedPrefix(previous: HypothesisWord[], current: HypothesisWord[]): number {
+  const limit = Math.min(previous.length, current.length);
+  let agreed = 0;
+  while (agreed < limit && fingerprint(previous[agreed].text) === fingerprint(current[agreed].text)) agreed++;
+  return agreed;
+}
+
+/** Largest cut at or below `agreed` that does not split a segment, so timings stay consistent. */
+export function segmentBoundary(words: HypothesisWord[], agreed: number): number {
+  let cut = Math.min(agreed, words.length);
+  while (cut > 0 && cut < words.length && words[cut].startMs === words[cut - 1].startMs) cut--;
+  return cut;
+}
+
+/** Regroup committed words back into segments, splitting whenever the channel or timing changes. */
+export function wordsToSegments(words: HypothesisWord[], startIndex: number): MeetingTranscriptSegment[] {
+  const segments: MeetingTranscriptSegment[] = [];
+  for (const word of words) {
+    const last = segments.at(-1);
+    if (last && last.startMs === word.startMs && last.source === word.source) {
+      last.text = `${last.text} ${word.text}`;
+      continue;
+    }
+    segments.push({
+      id: `live_${String(startIndex + segments.length + 1).padStart(5, "0")}`,
+      startMs: word.startMs,
+      endMs: word.endMs,
+      speaker: word.speaker,
+      source: word.source,
+      text: word.text,
+    });
   }
-  return next;
+  return segments;
 }
 
 export class LiveMeetingTranscriber {
@@ -105,10 +151,8 @@ export class LiveMeetingTranscriber {
   private processedMs = 0;
   private skippedMs = 0;
   private windows = 0;
-  private lastEndMs = 0;
-  private lastFingerprint = "";
-  /** Last few emitted lines; a restated phrase is not always adjacent to the line that caused it. */
-  private readonly recentText: string[] = [];
+  /** Hypothesis from the previous pass over the uncommitted buffer, for LocalAgreement-2. */
+  private previous: HypothesisWord[] = [];
   private lastError: string | undefined;
   private running = false;
   private draining: Promise<void> | null = null;
@@ -170,69 +214,65 @@ export class LiveMeetingTranscriber {
         this.skippedMs += target - this.processedMs;
         this.processedMs = target;
       }
-      const remainingMs = availableMs - this.processedMs;
-      if (remainingMs <= 0) return;
-      // Normally wait for a full window; on flush take whatever is left so the closing words survive.
-      if (remainingMs < this.options.minWindowMs && !flushTail) return;
-
-      const acceptFromMs = this.processedMs;
-      const startMs = Math.max(0, this.processedMs - this.options.overlapMs);
+      // The buffer runs from the last COMMITTED point, not the last decoded point: LocalAgreement
+      // re-decodes what is not yet confirmed so a second opinion can confirm or correct it.
+      const startMs = this.processedMs;
       const endMs = Math.min(availableMs, startMs + this.options.windowMs);
-      if (endMs <= startMs) return;
+      const bufferMs = endMs - startMs;
+      if (bufferMs <= 0) return;
+      if (bufferMs < this.options.minWindowMs && !flushTail) return;
 
       const wavPath = this.writeWindow(startMs, endMs);
+      const before = this.processedMs;
       let failed = false;
       try {
-        const decoded = await this.options.transcribeWindow({ wavPath, offsetMs: startMs, durationMs: endMs - startMs }, signal);
-        this.absorb(decoded, startMs, acceptFromMs);
+        const decoded = await this.options.transcribeWindow({ wavPath, offsetMs: startMs, durationMs: bufferMs }, signal);
+        this.absorb(toWords(decoded, startMs), endMs, flushTail || bufferMs >= this.options.windowMs);
       } catch (error) {
         // One unreadable window must not wedge the rest of the meeting: record it, step over that
         // audio, and stop this pass. The canonical transcription still covers the skipped range.
         failed = true;
         this.lastError = error instanceof Error ? error.message : String(error);
         this.skippedMs += endMs - this.processedMs;
+        this.processedMs = endMs;
+        this.previous = [];
       } finally {
         rmSync(wavPath, { force: true });
       }
       this.windows++;
-      this.processedMs = endMs;
-      if (failed || !this.running) return;
+      // Nothing was confirmed, so the same audio would be re-decoded identically. Wait for more of the
+      // meeting instead of spinning: the next arriving audio is what gives the second opinion.
+      if (failed || !this.running || this.processedMs === before) return;
     }
   }
 
   /**
-   * Shift window-relative segments to meeting time and keep the output monotonic.
+   * Commit only what two consecutive hypotheses agree on (LocalAgreement-2), then advance the buffer.
    *
-   * The overlap exists to give the decoder acoustic context, NOT to emit text twice: a segment belongs
-   * to whichever window contains its midpoint, so re-decoded audio from the previous window is dropped
-   * even when the decoder splits or words it differently the second time. Without this, real audio
-   * produced duplicated lines and timestamps that jumped backwards.
+   * `forceAll` commits everything without a second opinion. That is correct in exactly two places: the
+   * final flush, where no further audio is coming, and a full buffer, where waiting for agreement would
+   * grow the re-decoded region without bound.
    */
-  private absorb(decoded: MeetingTranscriptSegment[], windowStartMs: number, acceptFromMs: number): void {
-    const fresh: MeetingTranscriptSegment[] = [];
-    for (const segment of decoded.slice().sort((a, b) => a.startMs - b.startMs)) {
-      const startMs = windowStartMs + segment.startMs;
-      const endMs = windowStartMs + segment.endMs;
-      const print = fingerprint(segment.text);
-      if (!print) continue;
-      if ((startMs + endMs) / 2 < acceptFromMs) continue;  // belongs to the previous window
-      if (endMs <= this.lastEndMs) continue;               // wholly inside already-emitted audio
-      if (print === this.lastFingerprint && startMs < this.lastEndMs) continue; // repeated phrase
-      const text = trimRepeatedPrefix(this.recentText.join(" "), segment.text).trim();
-      if (!text) continue; // the whole line was a restatement of the previous one
-      const shifted: MeetingTranscriptSegment = {
-        ...segment,
-        id: `live_${String(this.collected.length + fresh.length + 1).padStart(5, "0")}`,
-        startMs: Math.max(startMs, this.lastEndMs), // never hand back a timestamp that moves backwards
-        endMs: Math.max(endMs, this.lastEndMs),
-        text,
-      };
-      fresh.push(shifted);
-      this.lastEndMs = Math.max(this.lastEndMs, endMs);
-      this.lastFingerprint = print;
-      this.recentText.push(text);
-      if (this.recentText.length > 3) this.recentText.shift();
+  private absorb(current: HypothesisWord[], bufferEndMs: number, forceAll: boolean): void {
+    const agreed = forceAll ? current.length : agreedPrefix(this.previous, current);
+    if (agreed <= 0) {
+      this.previous = current;
+      return; // nothing is confirmed yet; the same audio is re-decoded next pass
     }
+    // Word timings come from the decoder's SEGMENT, so committing half a segment would advance the
+    // buffer past words that were never emitted - real audio lost "Nam will own the database
+    // migration" exactly that way. Commit whole segments only; a half-agreed one waits for the next
+    // pass, which is what LocalAgreement is for anyway.
+    const wholeSegments = forceAll ? agreed : segmentBoundary(current, agreed);
+    if (wholeSegments <= 0) {
+      this.previous = current;
+      return;
+    }
+    const committed = current.slice(0, wholeSegments);
+    this.processedMs = forceAll ? bufferEndMs : Math.max(this.processedMs, committed.at(-1)!.endMs);
+    this.previous = forceAll ? [] : current.slice(wholeSegments);
+
+    const fresh = wordsToSegments(committed, this.collected.length);
     if (!fresh.length) return;
     this.collected.push(...fresh);
     this.options.onSegments?.(fresh);

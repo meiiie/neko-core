@@ -150,22 +150,43 @@ unreadable window is recorded in `lastError` and stepped over instead of wedging
 finalized WAV plus the existing single-pass transcription remains the canonical record, and the live
 loop is strictly additive — a missing or failing engine never affects the recording.
 
-Three rules come from running the real engine over real speech rather than from unit fixtures:
+Stabilization uses **LocalAgreement-2**, the published policy for turning Whisper into a streaming
+system ([ufal/whisper_streaming](https://github.com/ufal/whisper_streaming),
+[arXiv:2307.14743](https://arxiv.org/abs/2307.14743)): the decoder re-runs over the not-yet-committed
+buffer, and only the longest prefix on which **two consecutive hypotheses agree** is emitted. The end of
+any decoded window is the least reliable part — the model has no right-hand context there and guesses —
+so committing a window immediately ships text that the next pass would contradict. An earlier
+hand-rolled heuristic here did exactly that and permanently recorded a hallucinated "and thank you" on
+real audio. Two safety valves force a commit without a second opinion: the final flush, where no further
+audio is coming, and a full buffer, where waiting would grow the re-decoded region without bound.
 
-- **The overlap is decoder context, not output.** A segment belongs to whichever window contains its
-  midpoint. Without that rule a re-decoded overlap emitted the same sentence twice and pushed timestamps
-  backwards (4.9 s then 4.0 s).
+Three further rules come from running the real engine over real speech rather than from unit fixtures:
+
+- **Only whole segments are committed.** Word timings come from the decoder's segment, so committing a
+  half-agreed segment advanced the buffer past words that were never emitted — real audio lost "Nam will
+  own the database migration" that way.
 - **The tail must be flushed at stop.** A meeting's closing seconds are shorter than a window, so they
   were never decoded live until `flush()` was added — the last sentence simply disappeared.
-- **A restated prefix is trimmed against the last few lines, not just the previous one.** A spurious
-  short line can land between a sentence and its restatement.
+- **No progress means wait, not spin.** When nothing is confirmed the same audio would decode
+  identically, so the loop returns and lets more of the meeting arrive to provide the second opinion.
 
 Measured on this repository's Windows dev machine with the **quick** (`base-q5_1`) model over 22.5 s of
-clean speech: real-time factor ranged **0.46x–1.10x** across runs on a busy CPU. Quick is therefore the
-right tier for the live loop, and the larger balanced model belongs to the canonical post-meeting pass;
-that is also why the skip-ahead backpressure exists rather than being theoretical. These numbers prove
-the plumbing keeps up, not Vietnamese accuracy — that still needs the corpus described in
-`MEETINGS-RESEARCH-2026-07.md`.
+clean speech, real-time factor ran **0.93x–0.96x** with LocalAgreement (it re-decodes unconfirmed audio,
+so it costs more than committing every window blind). Quick is therefore the right tier for the live
+loop, and the larger balanced model belongs to the canonical post-meeting pass; that margin is also why
+the skip-ahead backpressure exists rather than being theoretical.
+
+The same 22.5 s clip, before and after the policy change, shows what it buys:
+
+| | Ad-hoc window commits | LocalAgreement-2 |
+|---|---|---|
+| Hallucinated line (`and thank you`) | committed permanently | never emitted |
+| Duplicated phrases | needed a prefix-trim hack | none |
+| Lost speech | — | none (after whole-segment commits) |
+| Segments for the same audio | 7 | 5 |
+
+These numbers prove the plumbing keeps up and is stable, **not** Vietnamese accuracy — that still needs
+the corpus described in `MEETINGS-RESEARCH-2026-07.md`.
 
 ## Presence and end-of-meeting
 
