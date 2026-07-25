@@ -73,6 +73,31 @@ function fingerprint(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
 }
 
+const MIN_REPEATED_WORDS = 3;
+const MAX_REPEATED_WORDS = 15;
+
+/**
+ * Drop a leading run of words that merely restates something already said in the recent lines.
+ *
+ * A decoder given overlapping audio often re-utters the sentence it was in the middle of, so two
+ * windows both contain "will own the database migration". The repeat is not always adjacent - a short
+ * spurious line can land between them - so this searches the recent tail rather than only the previous
+ * line. It only ever removes a prefix that is already on screen; it never reorders or invents text, and
+ * a line that is entirely a restatement is dropped by the caller.
+ */
+export function trimRepeatedPrefix(recent: string, next: string): string {
+  const haystack = fingerprint(recent);
+  const nextRaw = next.trim().split(/\s+/).filter(Boolean);
+  const nextWords = fingerprint(next).split(" ").filter(Boolean);
+  if (!haystack || nextWords.length !== nextRaw.length) return next;
+  const limit = Math.min(MAX_REPEATED_WORDS, nextWords.length);
+  for (let size = limit; size >= MIN_REPEATED_WORDS; size--) {
+    const head = nextWords.slice(0, size).join(" ");
+    if (haystack.includes(head)) return nextRaw.slice(size).join(" ");
+  }
+  return next;
+}
+
 export class LiveMeetingTranscriber {
   private readonly options: Required<Pick<LiveMeetingOptions, "windowMs" | "overlapMs" | "minWindowMs" | "maxLagMs">> & LiveMeetingOptions;
   private readonly collected: MeetingTranscriptSegment[] = [];
@@ -82,6 +107,8 @@ export class LiveMeetingTranscriber {
   private windows = 0;
   private lastEndMs = 0;
   private lastFingerprint = "";
+  /** Last few emitted lines; a restated phrase is not always adjacent to the line that caused it. */
+  private readonly recentText: string[] = [];
   private lastError: string | undefined;
   private running = false;
   private draining: Promise<void> | null = null;
@@ -110,7 +137,16 @@ export class LiveMeetingTranscriber {
 
   /** Decode every window that is currently available. Serialized: a second call awaits the first. */
   drain(signal?: AbortSignal): Promise<void> {
-    this.draining = (this.draining ?? Promise.resolve()).then(() => this.drainOnce(signal)).catch((error) => {
+    this.draining = (this.draining ?? Promise.resolve()).then(() => this.drainOnce(signal, false)).catch((error) => {
+      this.lastError = error instanceof Error ? error.message : String(error);
+    });
+    return this.draining;
+  }
+
+  /** Decode the remaining tail even though it is shorter than a normal window. Without this the last
+   * few seconds of a meeting - often the decisions and goodbyes - are never transcribed live. */
+  flush(signal?: AbortSignal): Promise<void> {
+    this.draining = (this.draining ?? Promise.resolve()).then(() => this.drainOnce(signal, true)).catch((error) => {
       this.lastError = error instanceof Error ? error.message : String(error);
     });
     return this.draining;
@@ -118,11 +154,11 @@ export class LiveMeetingTranscriber {
 
   async stop(): Promise<void> {
     this.running = false;
-    try { await this.draining; } catch { /* recorded in lastError */ }
+    try { await this.flush(); } catch { /* recorded in lastError */ }
     rmSync(this.staging, { recursive: true, force: true });
   }
 
-  private async drainOnce(signal?: AbortSignal): Promise<void> {
+  private async drainOnce(signal: AbortSignal | undefined, flushTail: boolean): Promise<void> {
     for (;;) {
       if (signal?.aborted) return;
       const availableMs = this.availableMs();
@@ -134,17 +170,21 @@ export class LiveMeetingTranscriber {
         this.skippedMs += target - this.processedMs;
         this.processedMs = target;
       }
-      if (availableMs - this.processedMs < this.options.minWindowMs) return;
+      const remainingMs = availableMs - this.processedMs;
+      if (remainingMs <= 0) return;
+      // Normally wait for a full window; on flush take whatever is left so the closing words survive.
+      if (remainingMs < this.options.minWindowMs && !flushTail) return;
 
+      const acceptFromMs = this.processedMs;
       const startMs = Math.max(0, this.processedMs - this.options.overlapMs);
       const endMs = Math.min(availableMs, startMs + this.options.windowMs);
-      if (endMs - startMs < this.options.minWindowMs) return;
+      if (endMs <= startMs) return;
 
       const wavPath = this.writeWindow(startMs, endMs);
       let failed = false;
       try {
         const decoded = await this.options.transcribeWindow({ wavPath, offsetMs: startMs, durationMs: endMs - startMs }, signal);
-        this.absorb(decoded, startMs);
+        this.absorb(decoded, startMs, acceptFromMs);
       } catch (error) {
         // One unreadable window must not wedge the rest of the meeting: record it, step over that
         // audio, and stop this pass. The canonical transcription still covers the skipped range.
@@ -160,25 +200,38 @@ export class LiveMeetingTranscriber {
     }
   }
 
-  /** Shift window-relative segments to meeting time and drop what the overlap already produced. */
-  private absorb(decoded: MeetingTranscriptSegment[], windowStartMs: number): void {
+  /**
+   * Shift window-relative segments to meeting time and keep the output monotonic.
+   *
+   * The overlap exists to give the decoder acoustic context, NOT to emit text twice: a segment belongs
+   * to whichever window contains its midpoint, so re-decoded audio from the previous window is dropped
+   * even when the decoder splits or words it differently the second time. Without this, real audio
+   * produced duplicated lines and timestamps that jumped backwards.
+   */
+  private absorb(decoded: MeetingTranscriptSegment[], windowStartMs: number, acceptFromMs: number): void {
     const fresh: MeetingTranscriptSegment[] = [];
     for (const segment of decoded.slice().sort((a, b) => a.startMs - b.startMs)) {
       const startMs = windowStartMs + segment.startMs;
       const endMs = windowStartMs + segment.endMs;
       const print = fingerprint(segment.text);
       if (!print) continue;
-      if (endMs <= this.lastEndMs) continue;                       // wholly inside already-emitted audio
-      if (startMs < this.lastEndMs && print === this.lastFingerprint) continue; // same words re-decoded
+      if ((startMs + endMs) / 2 < acceptFromMs) continue;  // belongs to the previous window
+      if (endMs <= this.lastEndMs) continue;               // wholly inside already-emitted audio
+      if (print === this.lastFingerprint && startMs < this.lastEndMs) continue; // repeated phrase
+      const text = trimRepeatedPrefix(this.recentText.join(" "), segment.text).trim();
+      if (!text) continue; // the whole line was a restatement of the previous one
       const shifted: MeetingTranscriptSegment = {
         ...segment,
         id: `live_${String(this.collected.length + fresh.length + 1).padStart(5, "0")}`,
-        startMs,
-        endMs,
+        startMs: Math.max(startMs, this.lastEndMs), // never hand back a timestamp that moves backwards
+        endMs: Math.max(endMs, this.lastEndMs),
+        text,
       };
       fresh.push(shifted);
       this.lastEndMs = Math.max(this.lastEndMs, endMs);
       this.lastFingerprint = print;
+      this.recentText.push(text);
+      if (this.recentText.length > 3) this.recentText.shift();
     }
     if (!fresh.length) return;
     this.collected.push(...fresh);

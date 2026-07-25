@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, appendFileSync, existsSync, readFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { LiveMeetingTranscriber, type LiveWindow } from "../src/adapters/meeting-live.ts";
+import { LiveMeetingTranscriber, trimRepeatedPrefix, type LiveWindow } from "../src/adapters/meeting-live.ts";
 import type { MeetingTranscriptSegment } from "../src/adapters/meeting.ts";
 
 const SAMPLE_RATE = 16_000;
@@ -162,6 +162,89 @@ test("one unreadable window is skipped and reported instead of wedging the meeti
   expect(offsets[1]).toBe(8_000);
   expect(live.segments().map((s) => s.text)).toEqual(["vẫn chạy"]);
   await live.stop();
+});
+
+test("flush decodes the closing tail that is shorter than a full window", async () => {
+  // Found on real audio: the last sentence of a meeting was never transcribed live because the
+  // remaining seconds never reached minWindowMs.
+  const { raw, dir } = setup();
+  const offsets: number[] = [];
+  const live = new LiveMeetingTranscriber({
+    rawPath: raw,
+    sampleRate: SAMPLE_RATE,
+    channels: CHANNELS,
+    workDir: dir,
+    windowMs: 10_000,
+    overlapMs: 0,
+    minWindowMs: 6_000,
+    transcribeWindow: async (window) => {
+      offsets.push(window.offsetMs);
+      return [segment(0, 500, offsets.length === 1 ? "phần đầu" : "câu cuối cùng")];
+    },
+  });
+  live.start();
+
+  record(raw, 10_000);
+  await live.drain();
+  expect(offsets).toEqual([0]);
+
+  record(raw, 3_000); // only 3s left: below the minimum, so a normal pass ignores it
+  await live.drain();
+  expect(offsets).toEqual([0]);
+
+  await live.flush(); // the meeting ended - take the tail anyway
+  expect(offsets).toEqual([0, 10_000]);
+  expect(live.segments().map((s) => s.text)).toEqual(["phần đầu", "câu cuối cùng"]);
+  await live.stop();
+});
+
+test("the overlap is decoder context, not output: timestamps stay monotonic", async () => {
+  // Found on real audio: re-decoded overlap produced duplicated lines and timestamps that went
+  // backwards (4.9s then 4.0s), because a window re-worded audio the previous window already emitted.
+  const { raw, dir } = setup();
+  let call = 0;
+  const live = new LiveMeetingTranscriber({
+    rawPath: raw,
+    sampleRate: SAMPLE_RATE,
+    channels: CHANNELS,
+    workDir: dir,
+    windowMs: 10_000,
+    overlapMs: 3_000,
+    minWindowMs: 6_000,
+    transcribeWindow: async () => {
+      call++;
+      // Window 2 starts at 7s and re-hears 7-10s, wording it differently the second time.
+      return call === 1
+        ? [segment(1_000, 3_000, "câu một"), segment(8_000, 9_500, "câu hai")]
+        : [segment(1_200, 2_600, "câu hai nghe lại"), segment(4_000, 5_000, "câu ba")];
+    },
+  });
+  live.start();
+
+  record(raw, 10_000);
+  await live.drain();
+  record(raw, 8_000);
+  await live.drain();
+
+  const segments = live.segments();
+  expect(segments.map((s) => s.text)).toEqual(["câu một", "câu hai", "câu ba"]);
+  const starts = segments.map((s) => s.startMs);
+  expect(starts).toEqual([...starts].sort((a, b) => a - b)); // never moves backwards
+  await live.stop();
+});
+
+test("a restated prefix is trimmed even when a spurious line landed in between", () => {
+  // Real transcript: "...NAM will own the database migration" / "and thank you" /
+  // "will own the database migration and finish it by Wednesday".
+  const recent = "we will ship the release on friday nam will own the database migration and thank you";
+  // The longest already-seen prefix wins, so the trailing "and" goes too - this is exactly what the
+  // real engine produced: the line becomes "finish it by Wednesday."
+  expect(trimRepeatedPrefix(recent, "will own the database migration and finish it by Wednesday"))
+    .toBe("finish it by Wednesday");
+  // A short coincidence is left alone.
+  expect(trimRepeatedPrefix("chúng ta chốt thứ sáu", "thứ sáu nhé")).toBe("thứ sáu nhé");
+  // Nothing to compare against yet.
+  expect(trimRepeatedPrefix("", "câu đầu tiên")).toBe("câu đầu tiên");
 });
 
 test("window WAVs are valid PCM16 and are cleaned up after decoding", async () => {

@@ -150,6 +150,23 @@ unreadable window is recorded in `lastError` and stepped over instead of wedging
 finalized WAV plus the existing single-pass transcription remains the canonical record, and the live
 loop is strictly additive — a missing or failing engine never affects the recording.
 
+Three rules come from running the real engine over real speech rather than from unit fixtures:
+
+- **The overlap is decoder context, not output.** A segment belongs to whichever window contains its
+  midpoint. Without that rule a re-decoded overlap emitted the same sentence twice and pushed timestamps
+  backwards (4.9 s then 4.0 s).
+- **The tail must be flushed at stop.** A meeting's closing seconds are shorter than a window, so they
+  were never decoded live until `flush()` was added — the last sentence simply disappeared.
+- **A restated prefix is trimmed against the last few lines, not just the previous one.** A spurious
+  short line can land between a sentence and its restatement.
+
+Measured on this repository's Windows dev machine with the **quick** (`base-q5_1`) model over 22.5 s of
+clean speech: real-time factor ranged **0.46x–1.10x** across runs on a busy CPU. Quick is therefore the
+right tier for the live loop, and the larger balanced model belongs to the canonical post-meeting pass;
+that is also why the skip-ahead backpressure exists rather than being theoretical. These numbers prove
+the plumbing keeps up, not Vietnamese accuracy — that still needs the corpus described in
+`MEETINGS-RESEARCH-2026-07.md`.
+
 ## Context and performance
 
 Transcript reads are paginated at most 200 segments in the tool and 50 in the TUI. Long audio therefore does
