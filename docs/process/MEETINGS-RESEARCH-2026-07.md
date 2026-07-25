@@ -107,9 +107,10 @@ Vietnamese tech meeting, and it defeated **both** engines:
 > Nemotron (`vi-VN`): "Tim Bắc Ken Deploi lên Saging chiều nay nhé. Nhớ chạy migraine trước khi mét pung
 > rít. Nếu Bill thì run bắt về con mích cũ, đừng phosphus lên mênh…"
 
-`--lang auto` behaved the same; `--lang en-US` recovered some English terms ("Deploy", "Lathency") while
-degrading the Vietnamese. Nemotron keeps the Vietnamese carrier sentence noticeably better than Whisper
-does, but every English technical token is mangled by both.
+`--lang auto` behaved the same. (**Corrected 2026-07-26:** an earlier version of this paragraph claimed
+`--lang en-US` recovered some English terms. It does not - the flag is inert in parakeet-cli v0.4.0. See
+§2.8.) Nemotron keeps the Vietnamese carrier sentence noticeably better than Whisper does, but every
+English technical token is mangled by both.
 
 **Conclusion.** Nemotron 3.5 ASR is decisively better for Vietnamese and should become the Vietnamese
 path. Code-switching remains an open problem for both engines and must not be claimed as solved — it is
@@ -144,6 +145,68 @@ meeting decodes twice; a system-only meeting still decodes once.
 continuous real speech): 21 windows, lag oscillating 8-20 s, ending at 9.8 s, `skippedMs` 0. The loop
 keeps up. Per-invocation model load is ~0.6 s and decode is ~0.25x real time, so the residual lag is
 LocalAgreement's second-pass cost, which is the point of it.
+
+### 2.8 Code-switching (Vietnamese + English): what the literature says, and what Neko does (2026-07-26)
+
+This was researched as its own axis because it is the realistic failure mode of a Vietnamese tech
+meeting, and because §2.6 measured **both** engines failing it.
+
+**The literature is unanimous that no inference-time configuration fixes intra-sentential
+code-switching.** ViMedCSS ([arXiv:2602.12911](https://arxiv.org/abs/2602.12911)), the first Vietnamese
+medical code-switching benchmark (34 h, 16,576 utterances), reports zero-shot CS-WER of 46.7-69.1% for
+*every* system tested - MMS 68.4, wav2vec2-vi 69.1, Whisper-Small 61.3, PhoWhisper-Small 62.6,
+PhoWhisper-Large 55.1, VietASR 58.4, Whisper-Large-v3 46.7 - and notes the diagnostic asymmetry that
+Vietnamese-optimized models win on overall WER while the multilingual Whisper-Large-v3 wins on CS-WER.
+Only *training* moved it: LoRA took PhoWhisper-Small from 62.6 to 30.3 CS-WER, and Attention Guide to
+**19.5**. Decoder-side tricks gave "only modest changes".
+
+The one non-training method with real numbers is **AdaCS**
+([arXiv:2501.07102](https://arxiv.org/abs/2501.07102), IEEE 2025): a *text normalization* model with an
+adaptive bias-attention module that takes a bias list at inference time, reporting 56.2% and 36.8%
+relative WER reduction on two Vietnamese CS test sets. Its mechanism - identify a suspicious span, match
+it against a known term list, normalize - is the shape of any honest local fix. Its implementation is a
+neural encoder-decoder needing PyTorch, so it does not go into a single Bun binary as-is. TSPC
+([arXiv:2509.05983](https://arxiv.org/pdf/2509.05983)) reaches the same conclusion from the phoneme side.
+
+**Two things NVIDIA's "code-switching support" claim does not mean.** Nemotron 3.5 ASR advertises
+automatic language detection with code-switching across 40 locales. Tested directly on the 17 s
+Vietnamese/English clip with `--lang auto`, `--lang multi`, and no flag at all: the word list carries
+three `<vi-VN>` tags and never a single `<en-US>`. The claim is *inter*-segment switching - a speaker
+changing language for a whole utterance - not English terms borrowed inside a Vietnamese sentence.
+
+**Correction to an earlier claim in this memo.** §2.6 stated that `--lang en-US` "recovered some English
+terms while degrading the Vietnamese". That is wrong. In parakeet-cli v0.4.0 the `--lang` flag is
+**inert**: it is validated for locale format and then ignored, and the model always uses its own language
+ID. Proof - forcing `--lang ja-JP` on the pure-Vietnamese clip returns perfect Vietnamese, and vi-VN vs
+en-US decodes of the code-switched clip are byte-identical, word for word, confidence for confidence.
+This also kills the dual-locale decode-and-merge idea before it was built: there is nothing to merge.
+
+**What Neko ships instead: report the doubt, never invent the word.** The engine's own per-word posterior
+turns out to be a good code-switching detector, because the model is exactly as unsure as it should be:
+
+| | clean Vietnamese (0 word errors) | Vietnamese + English |
+|---|---|---|
+| words | 69 | 42 |
+| median posterior | 0.991 | - |
+| flagged below 0.5 | **2 (2.9%)** | **11 (26.2%)** |
+| what was flagged | "người,", "chưa" | Bắc, Ken, Deploi, Saging, migraine, pung, Bill, rôn, con, thensi (+1 false positive) |
+
+Ten of the eleven flagged words are precisely the mangled English terms: ~91% precision. Recall is only
+~50% - "mét" (*merge*) at 0.880 and "optimi" (*optimize*) at 0.879 slip through - and that limit is
+stated wherever the flag is used. 0.6 was rejected as a threshold because it starts flagging correct
+Vietnamese, including the owner's name "Nam". The 9x separation in flag *rate* is itself the signal that
+a meeting is code-switched, so `inspect {"operation":"live"}` raises `codeSwitchHint` above 12%.
+
+Uncertain words are recorded per segment, rendered as `?word?` in `transcript.md`, and the
+`meeting-notes` skill forbids quoting one as exact wording or silently repairing it. **Neko does not
+guess what was meant.** That is the AdaCS mechanism minus the part we cannot honestly do locally: we can
+identify the suspicious span, but without a bias list we must not normalize it.
+
+**The open path**, if this is worth building later: a bias list from the user's own world - project
+glossary, repository identifiers, dependency names - matched phonetically against flagged spans, with
+every substitution marked. That is AdaCS's inference-time contract, implementable deterministically, and
+it fails safe: an empty glossary changes nothing. It is not built yet, and code-switching is **not**
+claimed as solved.
 
 ### 2.2 Streaming diarization
 

@@ -57,7 +57,7 @@ Every substantive claim must cite one or more transcript timestamps, for example
 2. **Decisions** - decision, scope, decision-maker if explicitly stated, and citation.
 3. **Action items** - action, owner, due date, status, and citation. Write `not stated` instead of guessing an owner or deadline.
 4. **Open questions / risks** - unresolved issue and evidence.
-5. **Transcript caveats** - low-confidence audio, overlaps, missing intervals, language switches, or unverified names.
+5. **Transcript caveats** - low-confidence audio, overlaps, missing intervals, language switches, or unverified names. List the `?word?` spans that mattered to any decision or action item.
 
 Contradictions remain contradictions: cite both positions rather than synthesizing a false agreement. A summary is complete only when every decision/action item is traceable to evidence and the user can reopen the canonical transcript.
 

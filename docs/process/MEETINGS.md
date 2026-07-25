@@ -116,6 +116,29 @@ two. The engine also emits pseudo-tokens in its word list (`<vi-VN>` where it re
 where it could not decide, sometimes glued onto a real word as `hai<unk>`); those are stripped, and only the
 locale tag is honoured as a segment boundary.
 
+### Code-switching
+
+A Vietnamese technical meeting borrows English constantly, and **no local engine handles that today** -
+not Nemotron, not Whisper, not PhoWhisper. The published Vietnamese benchmark reports zero-shot CS-WER of
+47-69% for every system tested ([ViMedCSS](https://arxiv.org/abs/2602.12911)); only fine-tuning fixed it.
+Nemotron's advertised "code-switching support" is *inter*-segment language detection, and measurement
+confirms it never switches mid-sentence. The `--lang` flag in parakeet-cli v0.4.0 is inert - forcing
+`ja-JP` on Vietnamese audio still returns perfect Vietnamese - so there is no decode-level lever either.
+
+Neko therefore **reports the doubt instead of inventing the word.** Words below the engine's own 0.5
+posterior are recorded per segment as `uncertain`, rendered as `?word?` in `transcript.md`, and the
+`meeting-notes` skill forbids quoting one as exact wording or silently repairing it. Measured: on clean
+Vietnamese the engine transcribed perfectly and flagged 2.9% of words; on code-switched speech it flagged
+26.2%, and 10 of those 11 words were exactly the mangled English terms - ~91% precision, ~50% recall. The
+recall limit is stated wherever the flag appears, because an unflagged English term can still be wrong.
+The 9x difference in flag rate is itself the signal, so `inspect {"operation":"live"}` raises a
+`codeSwitchHint` once a sustained stretch passes 12%.
+
+Repairing a flagged span would need a bias list from the user's own world (project glossary, repository
+identifiers, dependency names) matched phonetically, which is the inference-time contract of
+[AdaCS](https://arxiv.org/abs/2501.07102). That is a designed, not built, direction. Code-switching is
+**not** claimed as solved.
+
 ## Evidence and speaker truth
 
 Each meeting lives under `~/.neko-core/meetings/<meeting-id>/`:

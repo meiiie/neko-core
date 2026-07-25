@@ -64,6 +64,10 @@ export interface MeetingTranscriptSegment {
   source: "microphone" | "system" | "unknown";
   text: string;
   confidence?: number;
+  /** Words the engine itself was unsure of. In Vietnamese meetings these are overwhelmingly borrowed
+   * English technical terms, which the model mangles - see MEETINGS.md, "Code-switching". Recorded so
+   * the summary can hedge instead of quoting a word that was never really heard. */
+  uncertain?: string[];
 }
 
 export interface MeetingTranscript {
@@ -182,11 +186,25 @@ export function writeMeetingTranscript(transcript: MeetingTranscript, home = hom
     "",
     "## Transcript",
     "",
-    ...transcript.segments.map((segment) =>
-      `- [${formatMeetingTime(segment.startMs)}] **${segment.speaker}:** ${segment.text.replace(/\s+/g, " ").trim()}`),
+    ...transcript.segments.map((segment) => {
+      const text = markUncertain(segment.text.replace(/\s+/g, " ").trim(), segment.uncertain);
+      return `- [${formatMeetingTime(segment.startMs)}] **${segment.speaker}:** ${text}`;
+    }),
     "",
+    ...(transcript.segments.some((segment) => segment.uncertain?.length)
+      ? ["> Words in `?word?` are ones the engine itself was unsure of - usually English technical terms",
+         "> borrowed into Vietnamese speech. Do not quote them as exact wording.", ""]
+      : []),
   ].join("\n");
   atomicWriteFileSync(join(dir, "transcript.md"), markdown, 0o600);
+}
+
+/** Mark the words the engine doubted, so a human reading a citation sees the doubt at the exact word
+ * rather than having to open transcript.json. The stored text is never altered. */
+function markUncertain(text: string, uncertain: string[] | undefined): string {
+  if (!uncertain?.length) return text;
+  const doubted = new Set(uncertain);
+  return text.split(" ").map((word) => (doubted.has(word) ? `?${word}?` : word)).join(" ");
 }
 
 /** Convert streamed interleaved PCM16 into a standard RIFF/WAVE evidence file without buffering it. */

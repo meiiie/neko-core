@@ -58,6 +58,18 @@ interface ParakeetJson {
  * the model extracts, this code computes. A break happens at the engine's own locale marker, at a
  * pause, after sentence-final punctuation, or when a line would grow past what a reader can scan. */
 const SEGMENT_GAP_MS = 700;
+/**
+ * Below this posterior, a word is reported as uncertain rather than trusted.
+ *
+ * Measured on this machine, `q5_k`, 16 kHz speech. On 69 words of clean Vietnamese that the engine
+ * transcribed with ZERO errors, the median posterior was 0.991 and only 2 words (2.9%) fell below 0.5.
+ * On 42 words of Vietnamese/English code-switched engineering speech, 10 of the 11 words below 0.5 were
+ * exactly the mangled English terms ("Deploi" 0.32, "Saging" 0.34, "migraine" 0.35, "thensi" 0.20).
+ * So the threshold is high-precision (~91%) and moderate-recall (~50%): what it flags is almost always
+ * wrong, but it does not catch every borrowed term. 0.6 was rejected - it starts flagging correct
+ * Vietnamese, including the owner's name "Nam".
+ */
+const UNCERTAIN_BELOW = 0.5;
 const SEGMENT_MAX_MS = 12_000;
 const SEGMENT_MAX_WORDS = 40;
 /** The engine mixes pseudo-tokens into its word list: `<vi-VN>` wherever it restarts a segment, and
@@ -260,6 +272,7 @@ export function parseMeetingTranscript(
   const emit = () => {
     if (!words.length) return;
     const confidences = words.map((word) => word.conf).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    const uncertain = words.filter((word) => typeof word.conf === "number" && word.conf < UNCERTAIN_BELOW).map((word) => word.text);
     segments.push({
       id: `seg_${String(segments.length + 1).padStart(5, "0")}`,
       startMs: words[0].startMs,
@@ -268,6 +281,7 @@ export function parseMeetingTranscript(
       source,
       text: words.map((word) => word.text).join(" "),
       ...(confidences.length ? { confidence: confidences.reduce((sum, value) => sum + value, 0) / confidences.length } : {}),
+      ...(uncertain.length ? { uncertain } : {}),
     });
     words = [];
   };

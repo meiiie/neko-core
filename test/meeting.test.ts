@@ -47,10 +47,18 @@ test("meeting evidence store finalizes PCM as stereo WAV and writes timestamp-ci
     language: "vi",
     generatedAt: "2026-07-15T08:01:00.000Z",
     engine: { name: "test", model: "fixture" },
-    segments: [{ id: "seg_00001", startMs: 1_234, endMs: 2_000, speaker: "You", source: "microphone", text: "  Xin   chao  " }],
+    segments: [
+      { id: "seg_00001", startMs: 1_234, endMs: 2_000, speaker: "You", source: "microphone", text: "  Xin   chao  " },
+      { id: "seg_00002", startMs: 3_000, endMs: 4_000, speaker: "You", source: "microphone", text: "chay migraine truoc", uncertain: ["migraine"] },
+    ],
   }, home);
   expect(readMeetingTranscript(meeting.id, home)?.segments[0].text).toContain("Xin");
-  expect(readFileSync(join(meetingDir(meeting.id, home), "transcript.md"), "utf8")).toContain("[00:00:01.234] **You:** Xin chao");
+  const rendered = readFileSync(join(meetingDir(meeting.id, home), "transcript.md"), "utf8");
+  expect(rendered).toContain("[00:00:01.234] **You:** Xin chao");
+  // A doubted word is marked where it was said, and the stored text is left untouched.
+  expect(rendered).toContain("chay ?migraine? truoc");
+  expect(rendered).toContain("Do not quote them as exact wording");
+  expect(readMeetingTranscript(meeting.id, home)?.segments[1].text).toBe("chay migraine truoc");
   expect(formatMeetingTime(3_723_004)).toBe("01:02:03.004");
   expect(listMeetings(home)[0].title).toBe("Weekly sync");
   expect(deleteMeeting(meeting.id, home)).toBe(true);
@@ -266,6 +274,10 @@ test("engine words become segments at the model's own boundaries, and the locale
   expect(transcript.segments.every((segment) => segment.speaker === "Meeting audio" && segment.source === "system")).toBe(true);
   expect(transcript.segments[0].confidence).toBeCloseTo(0.85);
   expect(transcript.segments[2].startMs).toBe(4_000);
+  // The engine's own posterior marks what it doubted; in Vietnamese meetings that is almost always a
+  // borrowed English term. Nothing is rewritten - the doubt is recorded next to the word.
+  expect(transcript.segments[0].uncertain).toBeUndefined();
+  expect(transcript.segments[2].uncertain).toEqual(["hai"]);
   expect(JSON.stringify(transcript)).not.toContain("vi-VN>");
   expect(() => parseMeetingTranscript("m", "{}", { language: "vi-VN", model: "f" })).toThrow("missing words");
 });

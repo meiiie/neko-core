@@ -157,6 +157,7 @@ class MeetingTools implements McpTools {
       const limit = boundedInt(args.limit, 1, 200, 50);
       const offset = boundedInt(args.offset, 0, Number.MAX_SAFE_INTEGER, Math.max(0, all.length - limit));
       const quietMs = session.quietMs();
+      const mixed = codeSwitchHint(all);
       return JSON.stringify({
         state: active.state,
         meeting: summarize(active.meeting),
@@ -165,6 +166,7 @@ class MeetingTools implements McpTools {
         ...(quietMs != null && quietMs >= 5 * 60_000
           ? { endedHint: `No speech for ${Math.round(quietMs / 60_000)} min. Ask the user whether the meeting ended - never stop the recording on this signal alone.` }
           : {}),
+        ...(mixed ? { codeSwitchHint: mixed } : {}),
         live: live
           ? { ...live, note: "Provisional: windows can clip a word and audio may be skipped under load. The finalized transcription after stop is canonical." }
           : { note: "No live transcript engine is attached; install the Meeting Support Pack to hear the meeting as it happens." },
@@ -231,6 +233,23 @@ async function resolveLiveFactory(home: string, language: string) {
     sources: Array<"microphone" | "system">;
     onSegments: (segments: MeetingTranscriptSegment[]) => void;
   }) => new LiveMeetingTranscriber({ ...context, transcribeWindow });
+}
+
+/**
+ * Warn when the meeting is mixing English into Vietnamese, using the engine's own doubt rate.
+ *
+ * Measured on this machine: clean Vietnamese that the engine got perfectly right flagged 2.9% of words,
+ * while Vietnamese/English code-switched engineering speech flagged 26.2% - a 9x separation. So a
+ * sustained high rate is evidence of code-switching, which no local engine handles well today. Neko
+ * says so rather than letting a confident-looking summary quote "migraine" for "migration".
+ */
+function codeSwitchHint(segments: MeetingTranscriptSegment[]): string | null {
+  const recent = segments.slice(-40);
+  const words = recent.reduce((total, segment) => total + segment.text.split(/\s+/).filter(Boolean).length, 0);
+  if (words < 30) return null; // too little evidence to claim anything
+  const uncertain = recent.reduce((total, segment) => total + (segment.uncertain?.length ?? 0), 0);
+  if (uncertain / words < 0.12) return null;
+  return `${Math.round((uncertain / words) * 100)}% of recent words were low-confidence, which usually means English technical terms inside Vietnamese speech. Local ASR renders those unreliably; do not quote them as exact wording, and tell the user if a decision depends on one.`;
 }
 
 function summarize(meeting: MeetingManifest): Record<string, unknown> {
