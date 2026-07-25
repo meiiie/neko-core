@@ -5,7 +5,7 @@
  * Commands: config · doctor · profiles · init-user · init · chat · run
  * (chat/run are wired in later TS steps; config-first, offline-capable.)
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { join } from "node:path";
@@ -23,6 +23,7 @@ import { clearKimiCredentials, loginKimi } from "../src/adapters/kimi-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../src/adapters/gemini-support-pack.ts";
 import { discoverOfficeCli, installOfficeSupportPack, readOfficeSupportPack, removeOfficeSupportPack } from "../src/adapters/office-support-pack.ts";
 import { activeBrowserMeeting, startBrowserMeeting, stopBrowserMeeting } from "../src/adapters/browser-meeting.ts";
+import { installDiarization, readDiarizationPack, diarizationRoot } from "../src/adapters/meeting-diarize.ts";
 import { discoverMeetingSupport, installMeetingSupportPack, readMeetingSupportPack, removeMeetingSupportPack, type MeetingModelTier } from "../src/adapters/meeting-support-pack.ts";
 import { deleteMeeting, latestMeeting, listMeetings, readMeeting, readMeetingTranscript } from "../src/adapters/meeting.ts";
 import { transcribeMeeting } from "../src/adapters/meeting-transcription.ts";
@@ -70,15 +71,18 @@ interface Args {
   device: boolean;
   trials?: number;
   images?: string[];
+  /** Split the meeting channel into numbered voices. Opt-in: see src/adapters/meeting-diarize.ts. */
+  diarize: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
   const tokens: string[] = [];
-  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, once: false, version: false, help: false, doctor: false, device: false };
+  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, once: false, version: false, help: false, doctor: false, device: false, diarize: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--profile") args.profile = argv[++i];
     else if (a === "--force") args.force = true;
+    else if (a === "--diarize") args.diarize = true;
     else if (a === "--yolo") args.yolo = true;
     else if (a === "--loop") args.loop = true;
     else if (a === "--once" || a === "--no-loop") args.once = true;
@@ -562,6 +566,40 @@ async function cmdSupport(args: Args): Promise<number> {
 
 async function cmdMeetingSupport(action: string, tierArg?: string): Promise<number> {
   const normalized = action.toLowerCase();
+  // Speaker separation is a SEPARATE opt-in install, not part of the default pack, because it is
+  // confidently wrong often enough to matter. See src/adapters/meeting-diarize.ts for the measurement.
+  if (normalized === "diarization" || normalized === "speakers") {
+    const sub = (tierArg ?? "install").toLowerCase();
+    if (sub === "remove" || sub === "uninstall") {
+      const root = diarizationRoot();
+      const had = existsSync(root);
+      if (had) rmSync(root, { recursive: true, force: true });
+      console.log(had ? "Speaker separation removed." : "Speaker separation is not installed.");
+      return 0;
+    }
+    if (sub === "status") {
+      const pack = readDiarizationPack();
+      console.log(pack ? `Speaker separation: ready (sherpa-onnx ${pack.version})` : "Speaker separation: not installed");
+      return pack ? 0 : 1;
+    }
+    if (sub !== "install") {
+      console.error("usage: neko support meeting diarization [install|status|remove]");
+      return 2;
+    }
+    try {
+      const pack = await installDiarization({ notify: console.log });
+      console.log(`Speaker separation is ready (sherpa-onnx ${pack.version}).`);
+      console.log("It is still OFF unless you ask for it: neko meeting transcribe --diarize");
+      console.log("Labels are voice clusters (Speaker 1, Speaker 2), never names. Measured on Vietnamese:");
+      console.log("  every line correct when voices differ clearly; 8 of 11 when two voices are similar,");
+      console.log("  and the wrong ones look exactly as confident as the right ones. Confirm before you");
+      console.log("  record who owns an action item.");
+      return 0;
+    } catch (error) {
+      console.error(`Speaker separation install failed: ${error instanceof Error ? error.message : error}`);
+      return 1;
+    }
+  }
   if (normalized === "install" || normalized === "update") {
     const tier: MeetingModelTier = tierArg === "quick" ? "quick" : "balanced";
     try {
@@ -586,12 +624,15 @@ async function cmdMeetingSupport(action: string, tierArg?: string): Promise<numb
   }
   if (normalized !== "status") {
     console.error("usage: neko support meeting [status|install|update|remove] [balanced|quick]");
+    console.error("       neko support meeting diarization [install|status|remove]");
     return 2;
   }
   const status = discoverMeetingSupport();
   console.log(`Meeting transcription support: ${status.state} (${status.detail})`);
   const managed = readMeetingSupportPack();
   if (managed) console.log(`  ${managed.model.id}: ${(managed.model.bytes / 1024 / 1024).toFixed(1)} MiB model; local-only`);
+  const diar = readDiarizationPack();
+  console.log(`  speaker separation: ${diar ? `ready (sherpa-onnx ${diar.version}), still off unless --diarize` : "not installed (neko support meeting diarization install)"}`);
   return status.state === "ready" ? 0 : 1;
 }
 
@@ -652,7 +693,7 @@ async function cmdMeeting(args: Args): Promise<number> {
     console.log(`Audio finalized locally for ${meeting.id}.`);
     if (discoverMeetingSupport().state === "ready") {
       try {
-        const transcript = await transcribeMeeting(meeting.id, { language: "vi", notify: console.log });
+        const transcript = await transcribeMeeting(meeting.id, { language: "vi", diarize: args.diarize, notify: console.log });
         console.log(`Transcript ready: ${transcript.segments.length} timestamped segments.`);
       } catch (error) {
         console.error(`Transcription failed; audio was kept for retry: ${error instanceof Error ? error.message : error}`);
