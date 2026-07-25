@@ -139,6 +139,53 @@ identifiers, dependency names) matched phonetically, which is the inference-time
 [AdaCS](https://arxiv.org/abs/2501.07102). That is a designed, not built, direction. Code-switching is
 **not** claimed as solved.
 
+## Pet window and knowing what to share
+
+Neko is present during the meeting as a small always-on-top window - the "pet" - built on the
+[Document Picture-in-Picture API](https://developer.mozilla.org/en-US/docs/Web/API/Document_Picture-in-Picture_API).
+It carries the recording dot, the timer, both level meters, the live transcript, and the Stop button, so
+the user can watch Neko listen while working in the meeting app itself. No Electron, no native GUI, no
+new dependency: the consent page Neko already serves is the opener.
+
+The pet is **one movable DOM node**, not a copy. `#pet` is moved into the picture-in-picture document and
+moved back on `pagehide`, which means every handler, timer, and websocket callback keeps working with no
+duplicated state. The one thing that breaks under a move is a fresh `document.getElementById` - once the
+node leaves the opener's document that lookup returns `null` - and it did break the live transcript in
+testing, exactly when the pet is most useful. Every element is now looked up once, at load.
+
+Constraints, all verified in a real browser rather than assumed:
+
+- `documentPictureInPicture` is Chrome/Edge only. The button is hidden entirely where it is absent.
+- `requestWindow()` needs **transient activation**, so it is bound to a real button press.
+- It needs a **secure context**. Neko serves on `127.0.0.1`, which qualifies.
+- Stylesheets do not follow the node; they are copied into the pet document at open.
+- The pet is a fixed-size window, so it lays out as a flex column: only the transcript scrolls. Before
+  that, a growing transcript pushed the Stop button off-screen.
+
+**Starting stays on the full page.** The pet's Start button focuses the Neko window instead of calling
+`getDisplayMedia` itself, because the share picker and the privacy text belong to the surface the user
+already read. Stopping works straight from the pet. This mirrors the tool boundary: reducing access is
+always safe, acquiring it needs the full consent surface.
+
+### Which app is in a call
+
+Neko never picks the capture source - `getDisplayMedia` deliberately puts that in the browser's own
+picker, and that boundary is the point. What Neko does is name the applications **currently holding the
+microphone**, on the consent page right next to the button, because sharing the wrong window or
+forgetting "Share audio" is the most common way a recording comes out silent.
+
+The microphone is the signal rather than the speaker: playing audio means a video is running, while
+holding the microphone open means somebody is in a conversation. Both backends are plain reads of what
+the OS already shows the user - the Windows Capability Access Manager consent store (`LastUsedTimeStop
+== 0` means in use now, the same data as Settings' "recent activity"), and `pactl list source-outputs` on
+PulseAudio/PipeWire. macOS reports unsupported rather than guessing. No process-memory polling, no
+injection, no elevation.
+
+A small named list labels well-known conferencing clients, but it only **labels** what the OS already
+reported: an unrecognized application is still listed, just without the label, so a stale list degrades
+the hint instead of hiding a real meeting. Tested against this machine's live state, where a game was
+holding the microphone: it was reported, and it was not called a meeting.
+
 ## Evidence and speaker truth
 
 Each meeting lives under `~/.neko-core/meetings/<meeting-id>/`:

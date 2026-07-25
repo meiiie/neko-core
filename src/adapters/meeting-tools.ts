@@ -19,6 +19,7 @@ import {
 } from "./meeting-support-pack.ts";
 import { LiveMeetingTranscriber, parakeetWindowTranscriber } from "./meeting-live.ts";
 import { transcribeMeeting } from "./meeting-transcription.ts";
+import { detectMicrophoneUsers } from "./audio-activity.ts";
 
 const PREFIX = "mcp__neko_meeting__";
 const SCHEMAS = [
@@ -141,8 +142,12 @@ class MeetingTools implements McpTools {
       const active = activeBrowserMeeting()?.snapshot();
       const support = discoverMeetingSupport(this.home);
       const latest = latestMeeting(this.home);
+      // Neko never picks the capture source - that is the browser's consent dialog. It can say which
+      // app currently holds the microphone, so the user shares the right window.
+      const listening = active ? null : detectMicrophoneUsers();
       return JSON.stringify({
         capture: active ? { state: active.state, meeting: summarize(active.meeting), audioBytes: active.audioBytes, durationMs: active.durationMs } : { state: "idle" },
+        ...(listening ? { microphoneInUse: listening } : {}),
         transcription: { state: support.state, detail: support.detail },
         latest: latest ? summarize(latest) : null,
         install: { tui: "/support meeting", cli: "neko support meeting install" },

@@ -74,7 +74,22 @@ test("browser capture requires consent, accepts bounded stereo PCM, and never st
   const url = new URL(started.url);
   const page = await fetch(url.origin);
   expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
-  expect(await page.text()).toContain("video không được đọc, gửi hoặc ghi xuống đĩa");
+  const pageHtml = await page.text();
+  expect(pageHtml).toContain("video không được đọc, gửi hoặc ghi xuống đĩa");
+  // The pet is one movable node: everything live sits inside #pet so moving it into the
+  // Document Picture-in-Picture window carries its event handlers with it. Verified in a real
+  // browser - see docs/process/MEETINGS.md, "Pet window".
+  const pet = pageHtml.slice(pageHtml.indexOf('id="pet"'), pageHtml.indexOf('id="petBtn"'));
+  for (const id of ["dot", "status", "timer", "micLevel", "sysLevel", "livePanel", "start", "stop"]) {
+    expect(pet).toContain(`id="${id}"`);
+  }
+  // The pet button itself stays on the page, or closing the pet would take its own control with it.
+  expect(pet).not.toContain('id="petBtn"');
+  expect(pageHtml).toContain("documentPictureInPicture.requestWindow");
+  // Live rows are looked up ONCE. A fresh document.getElementById returns null after the node moves,
+  // which silently killed the live transcript the moment the pet opened.
+  expect(pageHtml).toContain("const livePanel=document.getElementById('livePanel')");
+  expect(pageHtml.match(/document\.getElementById\('livePanel'\)/g)?.length).toBe(1);
   expect(await (await fetch(`${url.origin}/meeting-worklet.js`)).text()).toContain("AudioWorkletProcessor");
 
   const stopped = new Promise<void>((resolve, reject) => {

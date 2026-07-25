@@ -16,6 +16,7 @@ import {
   type MeetingTranscriptSegment,
 } from "./meeting.ts";
 import type { LiveMeetingTranscriber } from "./meeting-live.ts";
+import { detectMicrophoneUsers } from "./audio-activity.ts";
 import { homeDir } from "../shared/home.ts";
 
 export type BrowserMeetingState = "starting" | "waiting" | "recording" | "finalizing" | "stopped" | "failed";
@@ -48,6 +49,8 @@ export interface BrowserMeetingOptions {
   liveIntervalMs?: number;
   /** Quiet time before Neko suggests the meeting ended. It never stops the recording itself. */
   quietProposalMs?: number;
+  /** Which apps hold the microphone, for the share-picker hint. Injected so tests stay hermetic. */
+  microphoneUsers?: () => { active: Array<{ name: string; meetingApp: boolean }> };
 }
 
 interface MeetingSocketData { authenticated: boolean }
@@ -205,7 +208,9 @@ export class BrowserMeetingSession {
   private handleHttp(request: Request, server: Bun.Server<MeetingSocketData>): Response | undefined {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/") {
-      return new Response(meetingPage(this.meeting.title), { headers: PAGE_HEADERS });
+      // The share picker is where the user chooses wrong most often, so the hint about which app is
+      // actually in a call belongs on this page, next to the button - not in a log somewhere.
+      return new Response(meetingPage(this.meeting.title, this.options.microphoneUsers ?? detectMicrophoneUsers), { headers: PAGE_HEADERS });
     }
     if (request.method === "GET" && url.pathname === "/meeting-worklet.js") {
       return new Response(MEETING_WORKLET, { headers: { ...PAGE_HEADERS, "Content-Type": "text/javascript; charset=utf-8" } });
@@ -424,7 +429,8 @@ const PAGE_HEADERS = {
   "Content-Security-Policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:*",
 };
 
-function meetingPage(title: string): string {
+function meetingPage(title: string, microphoneUsers: () => { active: Array<{ name: string; meetingApp: boolean }> }): string {
+  const listening = microphoneUsers().active.filter((entry) => entry.meetingApp);
   return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Neko Meeting - ${html(title)}</title><style>
 :root{color-scheme:dark;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#0b0d0f;color:#e7e7e7}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 20% 0,#17211f 0,transparent 35%),#0b0d0f}.shell{width:min(760px,100%);border:1px solid #30363b;background:#101315;border-radius:18px;overflow:hidden;box-shadow:0 28px 90px #000a}.top{padding:18px 22px;border-bottom:1px solid #252b2f;display:flex;justify-content:space-between;gap:16px;align-items:center}.brand{color:#34d6c3;font-weight:800;letter-spacing:.08em}.pill{font-size:12px;color:#a7b0b5;border:1px solid #394147;border-radius:999px;padding:6px 10px}.body{padding:24px}h1{font-size:24px;margin:0 0 8px}.sub{color:#9aa4aa;line-height:1.6;margin:0 0 22px}.privacy{border:1px solid #5b4622;background:#211b11;color:#efd18e;border-radius:12px;padding:14px;line-height:1.55}.consent{display:flex;gap:12px;align-items:flex-start;margin:18px 0;padding:14px;border:1px solid #2e353a;border-radius:12px}.consent input{margin-top:4px;accent-color:#34d6c3}.option{display:flex;gap:10px;align-items:center;color:#c7ced2;margin:14px 0}.status{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;border-top:1px solid #252b2f;border-bottom:1px solid #252b2f;padding:16px 0;margin:18px 0}.dot{width:11px;height:11px;border-radius:50%;background:#687177}.dot.live{background:#ff5d68;box-shadow:0 0 0 7px #ff5d6820}.timer{font-variant-numeric:tabular-nums;color:#9aa4aa}.meters{display:grid;grid-template-columns:78px 1fr;gap:8px 12px;align-items:center;margin:16px 0;color:#9aa4aa;font-size:13px}
@@ -435,15 +441,33 @@ function meetingPage(title: string): string {
 .liveRow{display:grid;grid-template-columns:46px 92px 1fr;gap:8px;padding:3px 0;color:#dfe5e8}
 .liveAt{color:#5f6b73}
 .liveWho{color:#8fb7c9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.liveNote{padding:8px 12px;border-top:1px solid #24292e;color:#8a939a;font-size:11.5px}.bar{height:7px;background:#252b2f;border-radius:99px;overflow:hidden}.fill{width:0;height:100%;background:#34d6c3;transition:width .12s linear}.fill.sys{background:#d58b27}button{border:0;border-radius:10px;padding:12px 17px;font:inherit;font-weight:750;cursor:pointer;background:#34d6c3;color:#06110f;margin-right:8px}button.secondary{background:#2a3035;color:#e7e7e7}button.danger{background:#5e242a;color:#ffd9dc}button:disabled{opacity:.4;cursor:not-allowed}.error{color:#ff858f;white-space:pre-wrap;line-height:1.5}.hint{color:#778187;font-size:13px;line-height:1.55}.hidden{display:none}@media(max-width:560px){body{padding:0;display:block}.shell{border-radius:0;min-height:100vh;border-left:0;border-right:0}.top,.body{padding:18px}h1{font-size:21px}.status{grid-template-columns:auto 1fr}.timer{grid-column:2}.actions{display:grid;gap:8px}.actions button{width:100%;margin:0}}
+.liveNote{padding:8px 12px;border-top:1px solid #24292e;color:#8a939a;font-size:11.5px}
+.listening{border:1px solid #24503f;background:#12211b;color:#8fe0be;border-radius:12px;padding:12px 14px;margin:18px 0 0;line-height:1.55}
+.petTop{display:none}
+#pet.floating .petTop{display:flex;gap:10px;align-items:center;padding:2px 0 12px;color:#34d6c3;font-weight:800;letter-spacing:.06em;font-size:13px}
+#pet.floating .petTitle{color:#9aa4aa;font-weight:600;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pet.floating{padding:14px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+#pet.floating .status{margin:0 0 10px;padding:10px 0;flex:none}
+#pet.floating .meters{margin:0;flex:none}
+#pet.floating .live{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;margin:12px 0}
+#pet.floating .liveHead{flex:none}
+#pet.floating .liveLog{flex:1 1 auto;min-height:0;max-height:none}
+#pet.floating .liveNote{flex:none}
+#pet.floating .actions{flex:none}
+#pet.floating .actions button{width:100%;margin:0}
+#pet.floating .actions button+button{margin-top:8px}
+body.petBody{margin:0;padding:0;display:block;min-height:0;height:100vh;overflow:hidden;background:#101315}.bar{height:7px;background:#252b2f;border-radius:99px;overflow:hidden}.fill{width:0;height:100%;background:#34d6c3;transition:width .12s linear}.fill.sys{background:#d58b27}button{border:0;border-radius:10px;padding:12px 17px;font:inherit;font-weight:750;cursor:pointer;background:#34d6c3;color:#06110f;margin-right:8px}button.secondary{background:#2a3035;color:#e7e7e7}button.danger{background:#5e242a;color:#ffd9dc}button:disabled{opacity:.4;cursor:not-allowed}.error{color:#ff858f;white-space:pre-wrap;line-height:1.5}.hint{color:#778187;font-size:13px;line-height:1.55}.hidden{display:none}@media(max-width:560px){body{padding:0;display:block}.shell{border-radius:0;min-height:100vh;border-left:0;border-right:0}.top,.body{padding:18px}h1{font-size:21px}.status{grid-template-columns:auto 1fr}.timer{grid-column:2}.actions{display:grid;gap:8px}.actions button{width:100%;margin:0}}
 </style></head><body><main class="shell"><header class="top"><div class="brand">/\\ · · ▽ &nbsp; NEKO CORE</div><div class="pill">LOCAL MEETING</div></header><section class="body"><h1>${html(title)}</h1><p class="sub">Neko ghi lại âm thanh cuộc họp đang phát trên máy và micro của bạn. Không cần bot tham gia Zoom, Meet, Teams hay Zalo.</p>
 <div class="privacy"><strong>Ranh giới riêng tư:</strong> browser sẽ cho bạn chọn chính xác màn hình/tab và có chỉ báo chia sẻ riêng. Neko chỉ lưu audio; video không được đọc, gửi hoặc ghi xuống đĩa. Audio và transcript ở trên máy này.</div>
+${listening.length ? `<div class="listening"><strong>Đang trong cuộc gọi:</strong> ${html(listening.map((entry) => entry.name).join(", "))}. Rất có thể đây là cửa sổ cần chia sẻ.</div>` : ""}
 <label class="consent"><input id="consent" type="checkbox"><span>Tôi đã thông báo và có quyền ghi âm cuộc họp này theo quy định áp dụng cho mình.</span></label>
 <label class="option"><input id="mic" type="checkbox" checked> Ghi thêm micro của tôi ở kênh riêng</label>
+<div id="petHost"><div id="pet"><div class="petTop"><span class="brand">/\ &middot; &middot; &#9661;</span><span class="petTitle">${html(title)}</span></div>
 <div class="status"><span id="dot" class="dot"></span><strong id="status">Đang kết nối với Neko...</strong><span id="timer" class="timer">00:00:00</span></div>
 <div class="meters"><span>Micro</span><div class="bar"><div id="micLevel" class="fill"></div></div><span>Cuộc họp</span><div class="bar"><div id="sysLevel" class="fill sys"></div></div></div>
 <div id="livePanel" class="live hidden"><div class="liveHead">Neko đang nghe <span id="liveCount" class="liveCount"></span></div><div id="liveLog" class="liveLog"></div><div class="liveNote">Bản nghe tạm thời - có thể sót hoặc sai chữ. Bản chép chính thức được tạo sau khi dừng.</div></div>
-<div class="actions"><button id="start" disabled>Bắt đầu ghi</button><button id="stop" class="danger hidden">Dừng và lưu</button></div><p id="error" class="error"></p>
+<div class="actions"><button id="start" disabled>Bắt đầu ghi</button><button id="stop" class="danger hidden">Dừng và lưu</button></div></div></div>
+<div class="actions"><button id="petBtn" class="secondary hidden">Thu nhỏ thành pet</button></div><p id="error" class="error"></p>
 <p class="hint">Khi hộp thoại chia sẻ xuất hiện, hãy bật <strong>Share audio / Chia sẻ âm thanh</strong>. Nút Stop của browser, nút trên trang này, hoặc <code>/meeting stop</code> đều dừng ngay.</p></section></main>
 <script>
 const token=location.hash.slice(1),startBtn=document.getElementById('start'),stopBtn=document.getElementById('stop'),consent=document.getElementById('consent'),micBox=document.getElementById('mic'),statusEl=document.getElementById('status'),timerEl=document.getElementById('timer'),dot=document.getElementById('dot'),errorEl=document.getElementById('error'),micLevel=document.getElementById('micLevel'),sysLevel=document.getElementById('sysLevel');history.replaceState(null,'',location.pathname);let ws,displayStream,micStream,ctx,processor,active=false,ended=false,recordingReady=false,startedAt=0,timer,heartbeatTimer;
@@ -451,12 +475,28 @@ const send=m=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify(m))};const state=
 function connect(){ws=new WebSocket('ws://'+location.host+'/bridge');ws.binaryType='arraybuffer';ws.onopen=()=>send({type:'hello',token});ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='ready'){startBtn.disabled=false;state('Sẵn sàng - chưa ghi âm')}else if(m.type==='ping')send({type:'pong'});else if(m.type==='recording'){recordingReady=true;active=true;startedAt=Date.now();state('ĐANG GHI - audio lưu cục bộ',true);startBtn.classList.add('hidden');stopBtn.classList.remove('hidden');timer=setInterval(updateTimer,250)}else if(m.type==='live')showLive(m.segments);else if(m.type==='capture-error'){errorEl.textContent=m.message;cleanup(false)}else if(m.type==='stop')cleanup(false)};ws.onclose=()=>{if(!ended)cleanup(false)}}connect();heartbeatTimer=setInterval(()=>send({type:'heartbeat'}),5000);
 function updateTimer(){const s=Math.floor((Date.now()-startedAt)/1000);timerEl.textContent=[Math.floor(s/3600),Math.floor(s/60)%60,s%60].map(v=>String(v).padStart(2,'0')).join(':')}
 function stopTracks(stream){if(stream)for(const track of stream.getTracks())track.stop()}
-async function begin(){if(!consent.checked){errorEl.textContent='Hãy xác nhận quyền ghi âm trước khi bắt đầu.';return}startBtn.disabled=true;errorEl.textContent='';state('Chọn màn hình hoặc tab và bật chia sẻ âm thanh...');try{displayStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true,systemAudio:'include',surfaceSwitching:'include'});if(!displayStream.getAudioTracks().length)throw new Error('Nguồn đã chọn không có audio. Hãy thử lại và bật Share audio / Chia sẻ âm thanh.');displayStream.getTracks().forEach(t=>t.addEventListener('ended',()=>{if(active)finish()}));if(micBox.checked)micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:true,autoGainControl:true},video:false});ctx=new AudioContext({sampleRate:16000,latencyHint:'interactive'});await ctx.audioWorklet.addModule('/meeting-worklet.js');const merger=ctx.createChannelMerger(2),sys=ctx.createMediaStreamSource(new MediaStream(displayStream.getAudioTracks()));sys.connect(merger,0,1);if(micStream){const mic=ctx.createMediaStreamSource(micStream);mic.connect(merger,0,0)}processor=new AudioWorkletNode(ctx,'neko-pcm16',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1],channelCount:2,channelCountMode:'explicit'});merger.connect(processor);const silent=ctx.createGain();silent.gain.value=0;processor.connect(silent);silent.connect(ctx.destination);processor.port.onmessage=e=>{const d=e.data;micLevel.style.width=d.mic+'%';sysLevel.style.width=d.system+'%';if(recordingReady&&ws&&ws.readyState===1)ws.send(d.buffer)};send({type:'begin',consent:true,sampleRate:ctx.sampleRate,sources:micStream?['microphone','system']:['system']})}catch(e){errorEl.textContent=e&&e.message?e.message:String(e);state('Chưa ghi âm');stopTracks(displayStream);stopTracks(micStream);try{ctx&&ctx.close()}catch{}startBtn.disabled=false}}
+async function begin(){if(pipWindow){pipWindow.close();window.focus();state('Bấm Bắt đầu lại ở cửa sổ Neko - hộp thoại chia sẻ thuộc về cửa sổ đó.');return}if(!consent.checked){errorEl.textContent='Hãy xác nhận quyền ghi âm trước khi bắt đầu.';return}startBtn.disabled=true;errorEl.textContent='';state('Chọn màn hình hoặc tab và bật chia sẻ âm thanh...');try{displayStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true,systemAudio:'include',surfaceSwitching:'include'});if(!displayStream.getAudioTracks().length)throw new Error('Nguồn đã chọn không có audio. Hãy thử lại và bật Share audio / Chia sẻ âm thanh.');displayStream.getTracks().forEach(t=>t.addEventListener('ended',()=>{if(active)finish()}));if(micBox.checked)micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:true,autoGainControl:true},video:false});ctx=new AudioContext({sampleRate:16000,latencyHint:'interactive'});await ctx.audioWorklet.addModule('/meeting-worklet.js');const merger=ctx.createChannelMerger(2),sys=ctx.createMediaStreamSource(new MediaStream(displayStream.getAudioTracks()));sys.connect(merger,0,1);if(micStream){const mic=ctx.createMediaStreamSource(micStream);mic.connect(merger,0,0)}processor=new AudioWorkletNode(ctx,'neko-pcm16',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1],channelCount:2,channelCountMode:'explicit'});merger.connect(processor);const silent=ctx.createGain();silent.gain.value=0;processor.connect(silent);silent.connect(ctx.destination);processor.port.onmessage=e=>{const d=e.data;micLevel.style.width=d.mic+'%';sysLevel.style.width=d.system+'%';if(recordingReady&&ws&&ws.readyState===1)ws.send(d.buffer)};send({type:'begin',consent:true,sampleRate:ctx.sampleRate,sources:micStream?['microphone','system']:['system']})}catch(e){errorEl.textContent=e&&e.message?e.message:String(e);state('Chưa ghi âm');stopTracks(displayStream);stopTracks(micStream);try{ctx&&ctx.close()}catch{}startBtn.disabled=false}}
 let liveTotal=0;
 function clock(ms){const s=Math.floor(ms/1000);return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
-function showLive(segments){if(!segments||!segments.length)return;const panel=document.getElementById('livePanel'),log=document.getElementById('liveLog'),count=document.getElementById('liveCount');panel.classList.remove('hidden');for(const s of segments){const row=document.createElement('div');row.className='liveRow';const at=document.createElement('span');at.className='liveAt';at.textContent=clock(s.startMs);const who=document.createElement('span');who.className='liveWho';who.textContent=s.speaker;const text=document.createElement('span');text.textContent=s.text;row.append(at,who,text);log.appendChild(row);liveTotal++}
+const livePanel=document.getElementById('livePanel'),liveLog=document.getElementById('liveLog'),liveCount=document.getElementById('liveCount');
+function showLive(segments){if(!segments||!segments.length)return;const panel=livePanel,log=liveLog,count=liveCount;panel.classList.remove('hidden');for(const s of segments){const row=document.createElement('div');row.className='liveRow';const at=document.createElement('span');at.className='liveAt';at.textContent=clock(s.startMs);const who=document.createElement('span');who.className='liveWho';who.textContent=s.speaker;const text=document.createElement('span');text.textContent=s.text;row.append(at,who,text);log.appendChild(row);liveTotal++}
 while(log.childElementCount>200)log.removeChild(log.firstChild);count.textContent=liveTotal+' đoạn';log.scrollTop=log.scrollHeight}
-function finish(){if(ended)return;send({type:'stop'});cleanup(true)}function cleanup(local){if(ended)return;ended=true;active=false;recordingReady=false;clearInterval(timer);clearInterval(heartbeatTimer);stopTracks(displayStream);stopTracks(micStream);try{processor&&processor.disconnect()}catch{}try{ctx&&ctx.close()}catch{}dot.classList.remove('live');state(local?'Đã dừng - Neko đang hoàn tất file':'Đã dừng');stopBtn.disabled=true;micLevel.style.width=sysLevel.style.width='0%'}
+function finish(){if(ended)return;send({type:'stop'});cleanup(true)}function cleanup(local){if(ended)return;ended=true;if(pipWindow)try{pipWindow.close()}catch(e){}active=false;recordingReady=false;clearInterval(timer);clearInterval(heartbeatTimer);stopTracks(displayStream);stopTracks(micStream);try{processor&&processor.disconnect()}catch{}try{ctx&&ctx.close()}catch{}dot.classList.remove('live');state(local?'Đã dừng - Neko đang hoàn tất file':'Đã dừng');stopBtn.disabled=true;micLevel.style.width=sysLevel.style.width='0%'}
+const petBtn=document.getElementById('petBtn'),petHost=document.getElementById('petHost'),pet=document.getElementById('pet');
+let pipWindow=null;
+if(window.documentPictureInPicture)petBtn.classList.remove('hidden');
+function petLabel(){petBtn.textContent=pipWindow?'Đóng pet':'Thu nhỏ thành pet'}
+function dockPet(){pet.classList.remove('floating');petHost.append(pet);pipWindow=null;petLabel()}
+async function togglePet(){
+if(pipWindow){pipWindow.close();return}
+try{pipWindow=await documentPictureInPicture.requestWindow({width:360,height:460})}
+catch(e){errorEl.textContent=e&&e.message?e.message:String(e);return}
+for(const sheet of document.styleSheets){try{const css=[...sheet.cssRules].map(r=>r.cssText).join('');const style=pipWindow.document.createElement('style');style.textContent=css;pipWindow.document.head.appendChild(style)}catch(e){}}
+pipWindow.document.title='Neko';pipWindow.document.body.classList.add('petBody');
+pet.classList.add('floating');pipWindow.document.body.append(pet);
+pipWindow.addEventListener('pagehide',dockPet);
+petLabel()}
+petBtn.onclick=togglePet;
 startBtn.onclick=begin;stopBtn.onclick=finish;addEventListener('pagehide',()=>{if(active)send({type:'stop'});stopTracks(displayStream);stopTracks(micStream)});
 </script></body></html>`;
 }
