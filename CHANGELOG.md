@@ -6,6 +6,22 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.17.1] — 2026-07-25
+
+### Fixed
+
+- Newly published releases are no longer invisible for a day. The startup check cached **any** result
+  for 24 hours, including "you are on the latest" — which is only true until the next release. In
+  practice: a check recorded v0.16.0 as the latest version at 18:10, v0.16.1 shipped at 18:16, and
+  every session for the next 24 hours skipped the check entirely, so `auto_update: true` installed
+  nothing and no notice appeared either. A found update still keeps the day-long cache (it is
+  installed immediately, so re-asking changes nothing), while "up to date" — and a check that failed
+  to reach GitHub — is now re-asked after 3 hours. Restarting repeatedly still costs no network call.
+
+  The download, checksum, version-probe, and binary-swap path was never affected; only discovery
+  timing was. If you are on 0.16.x or 0.17.0 and want this now, run `neko update` once — it always
+  asks GitHub directly and ignores the cache.
+
 ## [0.17.0] — 2026-07-25
 
 ### Fixed

@@ -3,6 +3,30 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-25 - v0.17.1 auto-update discovery fix
+
+Field report: "auto-update looks broken". Diagnosed by probing the live path rather than reading code
+alone - `latestVersion()` returned v0.17.0, the sidecar and binary were both reachable (HTTP 200), and
+`isNewer` was correct. Then ran the real thing end to end on the installed binary: v0.16.0 -> v0.17.0
+downloaded, SHA-256 matched, version-probed, swapped, `.old` backup left for the next-launch cleanup.
+So the download/verify/swap machinery was never the problem.
+
+- **Root cause was discovery, not installation.** `checkForUpdate` cached ANY result for 24h, including
+  "you are on the latest" - a statement that expires at the next release. The user's cache recorded
+  v0.16.0 as latest at 18:10 and v0.16.1 shipped at 18:16, so for the next ~24h every session returned
+  the cached answer without asking GitHub: `auto_update: true` installed nothing and the notify branch
+  never ran either, because both sit behind `if (!v) return`.
+- **Fix** splits the TTL by what was learned (`UPDATE_RECHECK_MS`): a found update keeps 24h (it is
+  installed immediately, so re-asking is pointless), while "up to date" - and a failed check, which
+  records no version - expires after 3h. Worst case a handful of unauthenticated calls per day, far
+  under GitHub's limit, and `latestVersion` already falls back to the release redirect if it is hit.
+- `checkForUpdate`'s cache had **no test at all**, which is why this survived. The regression pins both
+  halves: rapid restarts make zero network calls, and a release published minutes after the cache write
+  is found on the next same-day launch.
+
+Evidence: typecheck clean; **817/817 tests, 3,550 assertions**; policy PASS; CI green on
+ubuntu/macOS/windows; verified against the real install as described above.
+
 ## 2026-07-25 - v0.17.0 provider reliability + delivery discipline (PR #4)
 
 Merged @thaonhuyen2004's branch, whose findings came from making Neko build a real website and a

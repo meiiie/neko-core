@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-25) — v0.17.0 release
+## Current status (2026-07-25) — v0.17.1 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,7 +38,11 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.17.0 (2026-07-25)** - provider reliability (max_tokens auto,
+- **Branch:** `main`. **Current release: v0.17.1 (2026-07-25)** - a newly published release is no longer
+  invisible for a day: the startup check cached "you are on the latest" for 24h, so a release shipping
+  minutes after a launch was never discovered and `auto_update` installed nothing. "Up to date" (and a
+  failed check) now expires after 3h while a found update keeps the day-long cache. Download, checksum,
+  version-probe, and swap were unaffected. **v0.17.0 (2026-07-25)** - provider reliability (max_tokens auto,
   anthropic self-heal, stream-stall retry), delivery discipline (chunked writes, always-on Web & HTML
   rule, completion nudge), unsandboxed docker, and the build-real-software skill set. **v0.16.1
   (2026-07-25)** - a field hotfix over v0.16.0: voice
