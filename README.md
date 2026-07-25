@@ -71,7 +71,7 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
   never downloads it silently. See [`docs/process/OFFICE.md`](docs/process/OFFICE.md).
 - **Local meeting companion** — `/meeting` opens a consent-first capture surface for audio already playing on
   this computer plus an optional separate microphone channel. Audio streams to a local stereo WAV; video is
-  never read or stored. A verified optional whisper.cpp pack transcribes Vietnamese locally, and the
+  never read or stored. A verified optional Nemotron ASR pack transcribes Vietnamese locally, and the
   `meeting-notes` skill produces decisions/actions only with timestamp evidence. It works with meeting products
   through the browser/OS audio source rather than pretending to be a bot that can silently join every service.
   See [`docs/process/MEETINGS.md`](docs/process/MEETINGS.md).
@@ -314,7 +314,7 @@ neko meeting start "Weekly sync"
 neko meeting eval ./my-reference-cases.json
 ```
 
-The pack uses verified official whisper.cpp release/model artifacts and installs under
+The pack uses verified official parakeet.cpp release and Nemotron GGUF model artifacts and installs under
 `~/.neko-core/meeting-support`; recordings remain separately under `~/.neko-core/meetings`. Removing the pack
 never deletes evidence. Neko does not claim person-level diarization from its two-channel mic/system capture or
 claim SOTA ASR without a frozen corpus; the built-in evaluator reports WER, CER, RTF, and channel-source accuracy.

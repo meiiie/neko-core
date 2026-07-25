@@ -17,10 +17,11 @@ import {
   readMeeting,
   readMeetingTranscript,
   saveMeeting,
+  wavHeader,
   writeMeetingTranscript,
 } from "../src/adapters/meeting.ts";
 import { discoverMeetingSupport, meetingSupportRoot, meetingSupportTarget, validateMeetingArchiveEntries, verifyMeetingSupportIntegrity } from "../src/adapters/meeting-support-pack.ts";
-import { parseWhisperTranscript, transcribeMeeting } from "../src/adapters/meeting-transcription.ts";
+import { extractChannelWav, meetingChannels, normalizeLanguage, parseMeetingTranscript, transcribeMeeting } from "../src/adapters/meeting-transcription.ts";
 import { evaluateMeetingAsr, renderMeetingEval } from "../src/adapters/meeting-eval.ts";
 
 const homes: string[] = [];
@@ -108,7 +109,6 @@ test("live transcript runs during capture and the agent can read it mid-meeting"
     liveTranscriberFactory: (context) => new LiveMeetingTranscriber({
       ...context,
       windowMs: 4_000,
-      overlapMs: 0,
       minWindowMs: 1_000,
       transcribeWindow: async (window) => {
         decoded.push(window.offsetMs);
@@ -247,20 +247,62 @@ test("a consent-page launch failure tears down the loopback owner and incomplete
   expect(listMeetings(home)).toEqual([]);
 });
 
-test("whisper JSON maps stereo channels without inventing remote participant identities", () => {
-  const transcript = parseWhisperTranscript("mtg_20260715T120000_abcdef", JSON.stringify({
-    result: { language: "vi" },
-    transcription: [
-      { offsets: { from: 0, to: 900 }, speaker: "0", text: "Toi dong y" },
-      { offsets: { from: 1_000, to: 2_000 }, speaker: "1", text: "Chot ngay thu Sau" },
-      { offsets: { from: 2_100, to: 2_500 }, text: "Khong ro" },
+test("engine words become segments at the model's own boundaries, and the locale tag never leaks", () => {
+  const transcript = parseMeetingTranscript("mtg_20260715T120000_abcdef", JSON.stringify({
+    text: "ignored",
+    frame_sec: 0.08,
+    words: [
+      { w: "Chot", start: 0.0, end: 0.4, conf: 0.9 },
+      { w: "ngay", start: 0.4, end: 0.8, conf: 0.8 },
+      { w: "<vi-VN>", start: 1.0, end: 1.08, conf: 0.99 },
+      { w: "thu", start: 1.2, end: 1.4, conf: 1 },
+      { w: "Sau.", start: 1.4, end: 1.6, conf: 1 },
+      { w: "Nam", start: 4.0, end: 4.3, conf: 1 },
+      // Real audio glued the unknown-token marker onto a word: "Thu hai<unk> Nam se phu trach".
+      { w: "hai<unk>", start: 4.3, end: 4.5, conf: 0.4 },
     ],
-  }), { language: "vi", model: "fixture" });
-  expect(transcript.segments.map((segment) => [segment.source, segment.speaker])).toEqual([
-    ["microphone", "You"],
-    ["system", "Meeting audio"],
-    ["unknown", "Speaker"],
+  }), { language: "vi-VN", model: "fixture", source: "system" });
+  expect(transcript.segments.map((segment) => segment.text)).toEqual(["Chot ngay", "thu Sau.", "Nam hai"]);
+  expect(transcript.segments.every((segment) => segment.speaker === "Meeting audio" && segment.source === "system")).toBe(true);
+  expect(transcript.segments[0].confidence).toBeCloseTo(0.85);
+  expect(transcript.segments[2].startMs).toBe(4_000);
+  expect(JSON.stringify(transcript)).not.toContain("vi-VN>");
+  expect(() => parseMeetingTranscript("m", "{}", { language: "vi-VN", model: "f" })).toThrow("missing words");
+});
+
+test("channel plan and language normalization match what the engine actually accepts", () => {
+  expect(meetingChannels(2, ["microphone", "system"])).toEqual([
+    { index: 0, source: "microphone" },
+    { index: 1, source: "system" },
   ]);
+  expect(meetingChannels(2, ["system"])).toEqual([{ index: 1, source: "system" }]);
+  expect(meetingChannels(1, ["system"])).toEqual([{ index: 0, source: "system" }]);
+  expect(normalizeLanguage("vi")).toBe("vi-VN");
+  expect(normalizeLanguage("en")).toBe("en-US");
+  expect(normalizeLanguage("vi-VN")).toBe("vi-VN");
+  expect(normalizeLanguage("pt_br")).toBe("pt-BR");
+  expect(normalizeLanguage("auto")).toBe("auto");
+  expect(() => normalizeLanguage("vietnamese!")).toThrow("invalid transcription language");
+});
+
+test("a capture channel is deinterleaved into a mono wav the engine can open", async () => {
+  const home = tempHome();
+  const stereo = join(home, "stereo.wav");
+  const frames = 4;
+  const pcm = Buffer.alloc(frames * 4);
+  for (let frame = 0; frame < frames; frame++) {
+    pcm.writeInt16LE(100 + frame, frame * 4);      // microphone
+    pcm.writeInt16LE(-(100 + frame), frame * 4 + 2); // system
+  }
+  writeFileSync(stereo, Buffer.concat([wavHeader(pcm.length, 16_000, 2), pcm]));
+  const mono = join(home, "mic.wav");
+  await extractChannelWav(stereo, mono, 2, 0);
+  const written = readFileSync(mono);
+  expect(written.length).toBe(44 + frames * 2);
+  expect(written.readUInt16LE(22)).toBe(1);
+  expect([0, 1, 2, 3].map((frame) => written.readInt16LE(44 + frame * 2))).toEqual([100, 101, 102, 103]);
+  await extractChannelWav(stereo, join(home, "sys.wav"), 2, 1);
+  expect(readFileSync(join(home, "sys.wav")).readInt16LE(44)).toBe(-100);
 });
 
 test("transcription is retryable and records local provenance", async () => {
@@ -288,7 +330,7 @@ test("transcription is retryable and records local provenance", async () => {
   const transcript = await transcribeMeeting(meeting.id, {
     home,
     transcriber,
-    runEngine: async ({ outputPrefix }) => writeFileSync(`${outputPrefix}.json`, JSON.stringify({ result: { language: "vi" }, transcription: [{ offsets: { from: 0, to: 100 }, speaker: "1", text: "Xin chao" }] })),
+    runEngine: async () => JSON.stringify({ words: [{ w: "Xin", start: 0, end: 0.05, conf: 1 }, { w: "chao", start: 0.05, end: 0.1, conf: 1 }] }),
   });
   expect(transcript.engine.version).toBe("1.9.1");
   expect(readMeeting(meeting.id, home)?.state).toBe("ready");
@@ -301,25 +343,26 @@ test("transcription is retryable and records local provenance", async () => {
   const first = transcribeMeeting(meeting.id, {
     home,
     transcriber,
-    runEngine: async ({ outputPrefix }) => {
+    runEngine: async () => {
       engineStarted();
       await continueRun;
-      writeFileSync(`${outputPrefix}.json`, JSON.stringify({ result: { language: "vi" }, transcription: [] }));
+      return JSON.stringify({ words: [] });
     },
   });
   await started;
-  await expect(transcribeMeeting(meeting.id, { home, transcriber, runEngine: async () => {} })).rejects.toThrow("already being transcribed");
+  await expect(transcribeMeeting(meeting.id, { home, transcriber, runEngine: async () => "{}" })).rejects.toThrow("already being transcribed");
   continueEngine();
   await first;
 });
 
 describe("meeting support and tools", () => {
   test("target matrix is explicit and unsupported platforms never receive a guessed binary", () => {
-    expect(meetingSupportTarget("win32", "x64")).toEqual({ assetName: "whisper-bin-x64.zip", executableName: "whisper-cli.exe" });
-    expect(meetingSupportTarget("linux", "arm64")?.assetName).toContain("arm64");
-    expect(meetingSupportTarget("darwin", "arm64")).toBeNull();
+    expect(meetingSupportTarget("win32", "x64")).toEqual({ assetSuffix: "bin-win-cpu-x64.zip", executableName: "parakeet-cli.exe" });
+    expect(meetingSupportTarget("linux", "arm64")?.assetSuffix).toContain("arm64");
+    expect(meetingSupportTarget("darwin", "arm64")?.assetSuffix).toContain("metal");
     expect(meetingSupportTarget("win32", "arm64")).toBeNull();
-    expect(() => validateMeetingArchiveEntries(["engine/whisper-cli"], ["-rwxr-xr-x engine/whisper-cli"])).not.toThrow();
+    expect(meetingSupportTarget("freebsd" as NodeJS.Platform, "x64")).toBeNull();
+    expect(() => validateMeetingArchiveEntries(["engine/parakeet-cli"], ["-rwxr-xr-x engine/parakeet-cli"])).not.toThrow();
     expect(() => validateMeetingArchiveEntries(["engine/lib.so"], ["lrwxrwxrwx engine/lib.so -> lib.so.1"])).not.toThrow();
     expect(() => validateMeetingArchiveEntries(["../escape"], ["-rw-r--r-- ../escape"])).toThrow("Unsafe");
     expect(() => validateMeetingArchiveEntries(["engine/link"], ["lrwxrwxrwx engine/link -> ../../escape"])).toThrow("unsafe link");
@@ -335,17 +378,17 @@ describe("meeting support and tools", () => {
     const engine = Buffer.from("verified engine fixture");
     const engineDigest = createHash("sha256").update(engine).digest("hex");
     writeFileSync(join(root, "models", "fixture.bin"), model);
-    writeFileSync(join(root, "engine", "whisper-cli.exe"), engine);
+    writeFileSync(join(root, "engine", "parakeet-cli.exe"), engine);
     writeFileSync(join(root, "support-pack.json"), JSON.stringify({
       schemaVersion: 1,
       installedAt: new Date().toISOString(),
       engine: {
-        version: "1.9.1", releaseTag: "v1.9.1", assetName: "fixture.zip",
+        version: "0.4.0", releaseTag: "v0.4.0", assetName: "fixture.zip",
         assetDigest: `sha256:${engineDigest}`, archiveBytes: engine.length,
-        executable: "engine/whisper-cli.exe", executableBytes: engine.length,
-        executableSha256: engineDigest, sourceUrl: "https://github.com/ggml-org/whisper.cpp/releases/tag/v1.9.1", license: "MIT",
+        executable: "engine/parakeet-cli.exe", executableBytes: engine.length,
+        executableSha256: engineDigest, sourceUrl: "https://github.com/mudler/parakeet.cpp/releases/tag/v0.4.0", license: "MIT",
       },
-      model: { tier: "quick", id: "fixture", file: "models/fixture.bin", bytes: model.length, sha256: digest, sourceUrl: "https://huggingface.co/ggerganov/whisper.cpp" },
+      model: { tier: "quick", id: "fixture", file: "models/fixture.bin", bytes: model.length, sha256: digest, sourceUrl: "https://huggingface.co/mudler/parakeet-cpp-gguf" },
     }));
     const status = discoverMeetingSupport(home, () => null);
     expect(status.state).toBe("ready");

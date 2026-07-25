@@ -116,6 +116,35 @@ path. Code-switching remains an open problem for both engines and must not be cl
 its own research axis ([TSPC](https://arxiv.org/pdf/2509.05983)) and the honest product behaviour is to
 warn that English technical terms in a Vietnamese meeting will be unreliable.
 
+### 2.7 Measured: what the swap actually cost and fixed (2026-07-26)
+
+Whisper was removed, not kept as a fallback: two engines mean two supply chains, two digest sets, and a
+silent quality cliff whenever the fallback fires. The port is `parakeet-cli transcribe --json`, whose
+output is a **word list**, not lines — so segment shape became Neko's own deterministic computation
+(break at the engine's locale marker, at a >=700 ms pause, after sentence-final punctuation, or at 12 s /
+40 words), matching the standing rule that the model extracts and code computes.
+
+Three defects only real audio exposed:
+
+1. **`<unk>` leaked into the transcript.** The engine emits pseudo-tokens in the word list, and it glued
+   one onto a real word — `hai<unk>` — so a whole-token filter was not enough. Every `<...>` run is now
+   stripped from inside words; only the locale tag is honoured as a segment boundary.
+2. **The live log jumped backwards in time.** Channels decode independently, so the microphone confirmed
+   0:06 while the room audio was still at 0:05, and commit order printed them in that order. Committed
+   segments are now held behind a watermark at the slowest channel's position.
+3. **`overlapMs` was dead configuration.** LocalAgreement's re-decode of the uncommitted buffer *is* the
+   overlap; the option had no reader. Removed rather than left as decoration.
+
+**Channel attribution survived the swap.** whisper.cpp got mic/system separation free from `-di`;
+parakeet takes mono only. The capture is therefore deinterleaved and each channel decoded on its own, in
+both the canonical pass and the live loop, each with its own LocalAgreement state. Cost: a mic+system
+meeting decodes twice; a system-only meeting still decodes once.
+
+**Measured pacing** (Windows x64 CPU, 8 threads, `q5_k`, both channels, 5 s drain interval, 90 s of
+continuous real speech): 21 windows, lag oscillating 8-20 s, ending at 9.8 s, `skippedMs` 0. The loop
+keeps up. Per-invocation model load is ~0.6 s and decode is ~0.25x real time, so the residual lag is
+LocalAgreement's second-pass cost, which is the point of it.
+
 ### 2.2 Streaming diarization
 
 NVIDIA's Streaming Sortformer does online diarization with an Arrival-Order Speaker Cache, frame-level

@@ -87,24 +87,34 @@ provenance, and revocation rather than bypass them.
 
 The optional Meeting Support Pack is an adapter, not a core dependency. On supported Windows/Linux targets it:
 
-1. reads the current stable official `ggml-org/whisper.cpp` GitHub release;
+1. reads the current stable official `mudler/parakeet.cpp` GitHub release;
 2. requires GitHub's SHA-256 asset digest, exact host/path, bounded size, stable tag, safe archive paths, and a
    real binary version probe;
-3. downloads either the balanced multilingual `small-q5_1` model (default) or quick `base-q5_1` model from the
-   official `ggerganov/whisper.cpp` Hugging Face repository;
+3. downloads NVIDIA **Nemotron-3.5-ASR-streaming-0.6b** as GGUF from `mudler/parakeet-cpp-gguf` - `q5_k`
+   (balanced, the measured default) or `q4_k` (quick). One multilingual checkpoint covers 40+ locales
+   including `vi-VN`;
 4. verifies fixed model byte counts and SHA-256 values, then installs atomically under
    `~/.neko-core/meeting-support`;
 5. verifies the engine/model SHA-256 before first use and re-verifies whenever file size or modification time changes.
 
-macOS currently reuses an explicit PATH/Homebrew `whisper.cpp` engine because the upstream release does not
-publish the same standalone CLI asset; Neko can still install and verify its model. Unsupported platform/CPU
-pairs fail with a precise message rather than guessing a binary.
+Windows x64, Linux x64/arm64, and macOS (Metal on Apple silicon, CPU on Intel) all have official binaries.
+Unsupported platform/CPU pairs fail with a precise message rather than guessing a binary.
 
-Whisper is the portable baseline, not a permanent claim of best Vietnamese accuracy. Vietnamese upgrade
-adapters should be accepted by measured corpus results. Relevant candidates include VinAI's PhoWhisper,
-trained on 844 hours spanning diverse accents ([paper](https://arxiv.org/abs/2406.02555)), and NVIDIA's
-Vietnamese Parakeet model ([model card](https://huggingface.co/nvidia/parakeet-ctc-0.6b-Vietnamese)). Their
-larger Python/NeMo/GPU footprints are not silently added to the single Neko binary.
+The engine replaced whisper.cpp on **measured Vietnamese**, not on novelty. On the same 21 s clip of real
+Vietnamese meeting speech, Whisper `base-q5_1` made ~18% WER and destroyed both facts a summary must carry -
+it turned the owner "Nam" into "nằm" and the deadline "thứ tư" into "thứ" - while Nemotron `q5_k` made zero
+word errors and decoded faster. See `MEETINGS-RESEARCH-2026-07.md` §2.6. Further Vietnamese upgrades are
+still accepted only on measured corpus results; VinAI's PhoWhisper ([paper](https://arxiv.org/abs/2406.02555))
+remains a candidate whose Python/NeMo/GPU footprint is not silently added to the single Neko binary.
+
+### Channels
+
+The engine takes **mono** and has no channel diarization, so the microphone/system split that whisper.cpp got
+from `-di` is preserved by deinterleaving the capture and decoding each channel separately - in the canonical
+pass and in the live loop alike. A system-only meeting therefore costs one decode; a mic+system meeting costs
+two. The engine also emits pseudo-tokens in its word list (`<vi-VN>` where it restarts a segment, `<unk>`
+where it could not decide, sometimes glued onto a real word as `hai<unk>`); those are stripped, and only the
+locale tag is honoured as a segment boundary.
 
 ## Evidence and speaker truth
 
@@ -132,17 +142,29 @@ that transcription ran, not proof that every word, name, number, negation, or sp
 When the Meeting Support Pack is installed, capture also runs a live loop so the agent can answer
 "what has been said so far" without stopping the meeting. It reads windows out of the same growing PCM
 file the capture already writes, wraps each window in a WAV header, and decodes it with the same
-verified `whisper-cli` binary — no second engine, no second supply chain, no upload.
+verified `parakeet-cli` binary — no second engine, no second supply chain, no upload.
 
 ```
-growing .capture.pcm ──► window (default 15 s, 2 s overlap) ──► verified whisper-cli ──► provisional segments
-                                                                                          │
-                            mcp__neko_meeting__inspect {"operation":"live"} ◄──────────────┘
+growing .capture.pcm ─┬─ ch0 window (15 s, mono) ─► parakeet-cli ─► LocalAgreement ─┐
+                      └─ ch1 window (15 s, mono) ─► parakeet-cli ─► LocalAgreement ─┤
+                                                                                    ▼
+                                                            time-ordered provisional segments
+                                                                                    │
+                            mcp__neko_meeting__inspect {"operation":"live"} ◄────────┘
 ```
 
-The design is windowed rather than streaming for a measured reason: as of 2026-07 no open streaming ASR
-model covers Vietnamese, while every model that does Vietnamese well is batch. See
-`MEETINGS-RESEARCH-2026-07.md`.
+The design is windowed rather than streaming for an engine reason, not a model one: Nemotron 3.5 *is*
+cache-aware streaming, but `parakeet-cli` v0.4.0 exposes `--stream` as a whole-file convenience that prints
+one cumulative line at the end and drops timestamps. Until the CLI emits incremental hypotheses, windowed
+decoding stabilized by LocalAgreement-2 is what gives live Vietnamese notes with usable timings.
+
+Each channel advances independently, so committed segments are held behind a **watermark**: nothing is shown
+until every channel has decoded past it. Without that, a fast microphone channel printed "You" at 0:06 above
+"Meeting audio" at 0:05 on real audio, and a live log that jumps backwards in time is unreadable.
+
+Measured pacing (Windows x64 CPU, 8 threads, `q5_k`, both channels, 5 s drain interval, 90 s of continuous
+real speech): 21 windows, lag oscillating between 8 s and 20 s and ending at 9.8 s, `skippedMs` 0. The loop
+keeps up; the lag is LocalAgreement's cost, since text needs a second pass before it is shown.
 
 Live output is **provisional by contract**: a window boundary can clip a word, and when decoding falls
 behind the meeting the loop skips forward and reports `skippedMs` rather than drifting minutes late. One
@@ -266,7 +288,7 @@ Future measured adapters fit at the edges without changing `core/agent.ts`:
 
 - `MeetingSource`: browser display audio today; native WASAPI/ScreenCaptureKit/PipeWire or authorized vendor
   transcript/media APIs later;
-- `MeetingTranscriber`: portable whisper.cpp today; Vietnamese/streaming engines later;
+- `MeetingTranscriber`: Nemotron 3.5 ASR through parakeet.cpp today; other engines later;
 - `MeetingDiarizer`: absent by default until installed, licensed, and DER-tested;
 - summary remains the normal provider/agent path over bounded canonical evidence.
 

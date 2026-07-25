@@ -6,28 +6,33 @@
  * Pack binary that is already downloaded, digest-verified, and version-probed. No second engine, no
  * second supply chain, and no cloud upload.
  *
- * Why windows rather than a streaming model: as of 2026-07 no open streaming ASR model covers Vietnamese
- * (Voxtral Realtime is 13 languages without it; Kyutai is EN/FR), while every model that does Vietnamese
- * well - PhoWhisper, Omnilingual, Whisper - is batch. Windowed decoding is what makes local Vietnamese
- * live notes possible at all. See docs/process/MEETINGS-RESEARCH-2026-07.md.
+ * Why windows rather than the engine's own streaming mode: Nemotron 3.5 IS cache-aware streaming, but
+ * parakeet-cli v0.4.0 exposes `--stream` as a whole-file convenience - it prints one cumulative line at
+ * the end and drops timestamps. Until the CLI emits incremental hypotheses, windowed decoding stabilized
+ * by LocalAgreement-2 is what gives live Vietnamese notes with usable timings.
+ *
+ * Why one decode PER CHANNEL: the engine takes mono, so the "You" / "Meeting audio" split that whisper.cpp
+ * got from `-di` is preserved here by deinterleaving the capture and giving each channel its own
+ * LocalAgreement state. See docs/process/MEETINGS-RESEARCH-2026-07.md.
  *
  * Live output is PROVISIONAL by construction: a window can cut a word, and a late window can be skipped
  * under load. The finalized WAV plus the existing single-pass transcription stays the canonical record.
  */
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
 import { wavHeader, type MeetingTranscriptSegment } from "./meeting.ts";
-import { parseWhisperTranscript } from "./meeting-transcription.ts";
+import { normalizeLanguage, parseMeetingTranscript } from "./meeting-transcription.ts";
 import type { MeetingTranscriber } from "./meeting-support-pack.ts";
 
-/** One decoded window. `offsetMs` is where the window starts inside the meeting. */
+/** One decoded window of ONE capture channel. `offsetMs` is where it starts inside the meeting. */
 export interface LiveWindow {
   wavPath: string;
   offsetMs: number;
   durationMs: number;
+  source: MeetingTranscriptSegment["source"];
 }
 
 /** Decodes one window into meeting-relative segments. Injected so the loop is testable without an engine. */
@@ -39,11 +44,11 @@ export interface LiveMeetingOptions {
   sampleRate: number;
   channels: 2;
   transcribeWindow: LiveWindowTranscriber;
+  /** Which capture channels carry audio. Each is decoded and stabilized independently. */
+  sources?: Array<"microphone" | "system">;
   onSegments?: (segments: MeetingTranscriptSegment[]) => void;
-  /** Audio decoded per pass. Longer gives Whisper more context; shorter lowers latency. */
+  /** Audio decoded per pass. Longer gives the decoder more context; shorter lowers latency. */
   windowMs?: number;
-  /** Re-decoded tail, so a word split across two windows still lands in one of them. */
-  overlapMs?: number;
   /** Smallest amount of new audio worth a pass. */
   minWindowMs?: number;
   /** When unprocessed audio exceeds this, skip ahead instead of falling further behind. */
@@ -63,7 +68,6 @@ export interface LiveMeetingSnapshot {
 
 const DEFAULTS = {
   windowMs: 15_000,
-  overlapMs: 2_000,
   minWindowMs: 6_000,
   maxLagMs: 90_000,
 } as const;
@@ -144,15 +148,25 @@ export function wordsToSegments(words: HypothesisWord[], startIndex: number): Me
   return segments;
 }
 
+/** One capture channel and everything LocalAgreement-2 needs to keep for it. */
+interface LiveTrack {
+  index: number;
+  source: MeetingTranscriptSegment["source"];
+  processedMs: number;
+  /** Hypothesis from the previous pass over this channel's uncommitted buffer. */
+  previous: HypothesisWord[];
+}
+
 export class LiveMeetingTranscriber {
-  private readonly options: Required<Pick<LiveMeetingOptions, "windowMs" | "overlapMs" | "minWindowMs" | "maxLagMs">> & LiveMeetingOptions;
+  private readonly options: Required<Pick<LiveMeetingOptions, "windowMs" | "minWindowMs" | "maxLagMs">> & LiveMeetingOptions;
   private readonly collected: MeetingTranscriptSegment[] = [];
+  /** Committed on one channel but not yet safe to show: a slower channel may still produce audio
+   * from an EARLIER moment, and a live log that jumps backwards in time is unreadable. */
+  private readonly pending: MeetingTranscriptSegment[] = [];
   private readonly staging: string;
-  private processedMs = 0;
+  private readonly tracks: LiveTrack[];
   private skippedMs = 0;
   private windows = 0;
-  /** Hypothesis from the previous pass over the uncommitted buffer, for LocalAgreement-2. */
-  private previous: HypothesisWord[] = [];
   private lastError: string | undefined;
   private running = false;
   private draining: Promise<void> | null = null;
@@ -160,11 +174,14 @@ export class LiveMeetingTranscriber {
   constructor(options: LiveMeetingOptions) {
     this.options = { ...DEFAULTS, ...options };
     this.staging = options.workDir ?? mkdtempSync(join(process.env.TMPDIR ?? process.env.TEMP ?? ".", "neko-live-"));
+    this.tracks = liveTracks(options.channels, options.sources).map((track) => ({ ...track, processedMs: 0, previous: [] }));
   }
 
   snapshot(): LiveMeetingSnapshot {
     return {
-      processedMs: this.processedMs,
+      // The meeting is only transcribed as far as its SLOWEST channel: reporting the fastest would
+      // claim coverage of audio nobody has decoded yet.
+      processedMs: Math.min(...this.tracks.map((track) => track.processedMs)),
       segments: this.collected.length,
       skippedMs: this.skippedMs,
       windows: this.windows,
@@ -199,51 +216,89 @@ export class LiveMeetingTranscriber {
   async stop(): Promise<void> {
     this.running = false;
     try { await this.flush(); } catch { /* recorded in lastError */ }
+    this.release(true); // no more audio is coming, so nothing is still waiting on a slower channel
     rmSync(this.staging, { recursive: true, force: true });
   }
 
   private async drainOnce(signal: AbortSignal | undefined, flushTail: boolean): Promise<void> {
     for (;;) {
       if (signal?.aborted) return;
-      const availableMs = this.availableMs();
-      // Under sustained load the decoder can fall behind the meeting. Dropping the middle keeps live
-      // text near the present instead of drifting minutes late; the canonical pass still has the audio.
-      const lag = availableMs - this.processedMs;
-      if (lag > this.options.maxLagMs) {
-        const target = availableMs - this.options.windowMs;
-        this.skippedMs += target - this.processedMs;
-        this.processedMs = target;
+      let advanced = false;
+      for (const track of this.tracks) {
+        if (signal?.aborted) return;
+        if (await this.drainTrack(track, signal, flushTail)) advanced = true;
       }
-      // The buffer runs from the last COMMITTED point, not the last decoded point: LocalAgreement
-      // re-decodes what is not yet confirmed so a second opinion can confirm or correct it.
-      const startMs = this.processedMs;
-      const endMs = Math.min(availableMs, startMs + this.options.windowMs);
-      const bufferMs = endMs - startMs;
-      if (bufferMs <= 0) return;
-      if (bufferMs < this.options.minWindowMs && !flushTail) return;
-
-      const wavPath = this.writeWindow(startMs, endMs);
-      const before = this.processedMs;
-      let failed = false;
-      try {
-        const decoded = await this.options.transcribeWindow({ wavPath, offsetMs: startMs, durationMs: bufferMs }, signal);
-        this.absorb(toWords(decoded, startMs), endMs, flushTail || bufferMs >= this.options.windowMs);
-      } catch (error) {
-        // One unreadable window must not wedge the rest of the meeting: record it, step over that
-        // audio, and stop this pass. The canonical transcription still covers the skipped range.
-        failed = true;
-        this.lastError = error instanceof Error ? error.message : String(error);
-        this.skippedMs += endMs - this.processedMs;
-        this.processedMs = endMs;
-        this.previous = [];
-      } finally {
-        rmSync(wavPath, { force: true });
-      }
-      this.windows++;
-      // Nothing was confirmed, so the same audio would be re-decoded identically. Wait for more of the
-      // meeting instead of spinning: the next arriving audio is what gives the second opinion.
-      if (failed || !this.running || this.processedMs === before) return;
+      // Every channel is either caught up or waiting for the audio that gives it a second opinion.
+      if (!advanced || !this.running) { this.release(flushTail); return; }
+      this.release(false);
     }
+  }
+
+  /**
+   * Release committed segments in time order, up to the point every channel has decoded.
+   *
+   * Channels advance independently, so the microphone can confirm 00:12 while the room audio is still
+   * at 00:05. Emitting on commit order alone produced exactly that on real audio - "You" at 0:06, then
+   * "Meeting audio" at 0:05. Below the slowest channel's position no earlier segment can still appear,
+   * so everything under that watermark is safe to sort and show; the rest waits one pass.
+   */
+  private release(final: boolean): void {
+    if (!this.pending.length) return;
+    const watermark = final ? Number.POSITIVE_INFINITY : Math.min(...this.tracks.map((track) => track.processedMs));
+    const ready = this.pending.filter((segment) => segment.startMs <= watermark)
+      .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+    if (!ready.length) return;
+    for (const segment of ready) this.pending.splice(this.pending.indexOf(segment), 1);
+    const fresh = ready.map((segment, index) => ({
+      ...segment,
+      id: `live_${String(this.collected.length + index + 1).padStart(5, "0")}`,
+    }));
+    this.collected.push(...fresh);
+    this.options.onSegments?.(fresh);
+  }
+
+  /** One pass over one channel. Returns whether it committed anything, so the outer loop knows if
+   * another round is worth running. */
+  private async drainTrack(track: LiveTrack, signal: AbortSignal | undefined, flushTail: boolean): Promise<boolean> {
+    const availableMs = this.availableMs();
+    // Under sustained load the decoder can fall behind the meeting. Dropping the middle keeps live
+    // text near the present instead of drifting minutes late; the canonical pass still has the audio.
+    const lag = availableMs - track.processedMs;
+    if (lag > this.options.maxLagMs) {
+      const target = availableMs - this.options.windowMs;
+      this.skippedMs += target - track.processedMs;
+      track.processedMs = target;
+      track.previous = [];
+    }
+    // The buffer runs from the last COMMITTED point, not the last decoded point: LocalAgreement
+    // re-decodes what is not yet confirmed so a second opinion can confirm or correct it.
+    const startMs = track.processedMs;
+    const endMs = Math.min(availableMs, startMs + this.options.windowMs);
+    const bufferMs = endMs - startMs;
+    if (bufferMs <= 0) return false;
+    if (bufferMs < this.options.minWindowMs && !flushTail) return false;
+
+    const wavPath = this.writeWindow(track, startMs, endMs);
+    const before = track.processedMs;
+    let failed = false;
+    try {
+      const decoded = await this.options.transcribeWindow({ wavPath, offsetMs: startMs, durationMs: bufferMs, source: track.source }, signal);
+      this.absorb(track, toWords(decoded, startMs), endMs, flushTail || bufferMs >= this.options.windowMs);
+    } catch (error) {
+      // One unreadable window must not wedge the rest of the meeting: record it, step over that
+      // audio, and stop this pass. The canonical transcription still covers the skipped range.
+      failed = true;
+      this.lastError = error instanceof Error ? error.message : String(error);
+      this.skippedMs += endMs - track.processedMs;
+      track.processedMs = endMs;
+      track.previous = [];
+    } finally {
+      rmSync(wavPath, { force: true });
+    }
+    this.windows++;
+    // Nothing was confirmed, so the same audio would be re-decoded identically. Wait for more of the
+    // meeting instead of spinning: the next arriving audio is what gives the second opinion.
+    return !failed && track.processedMs !== before;
   }
 
   /**
@@ -253,10 +308,10 @@ export class LiveMeetingTranscriber {
    * final flush, where no further audio is coming, and a full buffer, where waiting for agreement would
    * grow the re-decoded region without bound.
    */
-  private absorb(current: HypothesisWord[], bufferEndMs: number, forceAll: boolean): void {
-    const agreed = forceAll ? current.length : agreedPrefix(this.previous, current);
+  private absorb(track: LiveTrack, current: HypothesisWord[], bufferEndMs: number, forceAll: boolean): void {
+    const agreed = forceAll ? current.length : agreedPrefix(track.previous, current);
     if (agreed <= 0) {
-      this.previous = current;
+      track.previous = current;
       return; // nothing is confirmed yet; the same audio is re-decoded next pass
     }
     // Word timings come from the decoder's SEGMENT, so committing half a segment would advance the
@@ -265,17 +320,15 @@ export class LiveMeetingTranscriber {
     // pass, which is what LocalAgreement is for anyway.
     const wholeSegments = forceAll ? agreed : segmentBoundary(current, agreed);
     if (wholeSegments <= 0) {
-      this.previous = current;
+      track.previous = current;
       return;
     }
     const committed = current.slice(0, wholeSegments);
-    this.processedMs = forceAll ? bufferEndMs : Math.max(this.processedMs, committed.at(-1)!.endMs);
-    this.previous = forceAll ? [] : current.slice(wholeSegments);
+    track.processedMs = forceAll ? bufferEndMs : Math.max(track.processedMs, committed.at(-1)!.endMs);
+    track.previous = forceAll ? [] : current.slice(wholeSegments);
 
-    const fresh = wordsToSegments(committed, this.collected.length);
-    if (!fresh.length) return;
-    this.collected.push(...fresh);
-    this.options.onSegments?.(fresh);
+    // Held, not shown: `release` decides when this is safe to display in time order.
+    this.pending.push(...wordsToSegments(committed, 0));
   }
 
   private availableMs(): number {
@@ -285,8 +338,9 @@ export class LiveMeetingTranscriber {
     return Math.floor((bytes / frameBytes / this.options.sampleRate) * 1000);
   }
 
-  /** Copy one byte range of the growing capture into a standalone WAV the engine can open. */
-  private writeWindow(startMs: number, endMs: number): string {
+  /** Copy one channel of one byte range of the growing capture into a standalone MONO WAV. The engine
+   * has no channel diarization, so deinterleaving here is what keeps "You" separable from the room. */
+  private writeWindow(track: LiveTrack, startMs: number, endMs: number): string {
     const frameBytes = this.options.channels * 2;
     const bytesPerMs = (this.options.sampleRate * frameBytes) / 1000;
     const start = Math.floor((startMs * bytesPerMs) / frameBytes) * frameBytes;
@@ -295,10 +349,27 @@ export class LiveMeetingTranscriber {
     const pcm = Buffer.alloc(length);
     const fd = openSync(this.options.rawPath, "r");
     try { readSync(fd, pcm, 0, length, start); } finally { closeSync(fd); }
-    const path = join(this.staging, `window-${this.windows}-${start}.wav`);
-    writeFileSync(path, Buffer.concat([wavHeader(pcm.length, this.options.sampleRate, this.options.channels), pcm]), { mode: 0o600 });
+    const mono = Buffer.alloc((length / frameBytes) * 2);
+    for (let frame = 0, at = 0; frame < length; frame += frameBytes, at += 2) {
+      mono.writeInt16LE(pcm.readInt16LE(frame + track.index * 2), at);
+    }
+    const path = join(this.staging, `window-${this.windows}-${track.index}-${start}.wav`);
+    writeFileSync(path, Buffer.concat([wavHeader(mono.length, this.options.sampleRate, 1), mono]), { mode: 0o600 });
     return path;
   }
+}
+
+/** Channel plan for the live loop: mic on 0, system on 1, matching the consent page's ChannelMerger. */
+export function liveTracks(
+  channels: number,
+  sources: Array<"microphone" | "system"> = [],
+): Array<{ index: number; source: MeetingTranscriptSegment["source"] }> {
+  if (channels !== 2) return [{ index: 0, source: sources.length === 1 ? sources[0] : "unknown" }];
+  const wanted = sources.length ? sources : (["microphone", "system"] as const);
+  const plan: Array<{ index: number; source: MeetingTranscriptSegment["source"] }> = [];
+  if (wanted.includes("microphone")) plan.push({ index: 0, source: "microphone" });
+  if (wanted.includes("system")) plan.push({ index: 1, source: "system" });
+  return plan.length ? plan : [{ index: 1, source: "system" }];
 }
 
 /**
@@ -306,25 +377,24 @@ export class LiveMeetingTranscriber {
  * canonical pass: no progress notifications, single-shot output, and a hard timeout so one slow window
  * can never wedge the live loop for the rest of the meeting.
  */
-export function whisperWindowTranscriber(
+export function parakeetWindowTranscriber(
   transcriber: MeetingTranscriber,
-  options: { language?: string; stereo?: boolean; timeoutMs?: number } = {},
+  options: { language?: string; timeoutMs?: number } = {},
 ): LiveWindowTranscriber {
-  const language = options.language ?? "vi";
+  const language = normalizeLanguage(options.language ?? "vi");
   const timeoutMs = options.timeoutMs ?? 120_000;
   return async (window, signal) => {
-    const outputPrefix = `${window.wavPath}.out`;
     const args = [
-      "-m", transcriber.model,
-      "-f", window.wavPath,
-      "-l", language,
-      "-t", String(Math.max(2, Math.min(8, availableParallelism()))),
-      "-oj", "-of", outputPrefix,
-      "-np", "-pp", "-sns",
-      ...(options.stereo === false ? [] : ["-di"]),
+      "transcribe",
+      "--model", transcriber.model,
+      "--input", window.wavPath,
+      "--lang", language,
+      "--timestamps",
+      "--threads", String(Math.max(2, Math.min(8, availableParallelism()))),
+      "--json",
     ];
     const engineDir = dirname(transcriber.executable);
-    await new Promise<void>((resolve, reject) => {
+    const json = await new Promise<string>((resolve, reject) => {
       const child = spawn(transcriber.executable, args, {
         cwd: engineDir,
         env: {
@@ -333,9 +403,16 @@ export function whisperWindowTranscriber(
           LD_LIBRARY_PATH: [engineDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(delimiter),
         },
         windowsHide: true,
-        stdio: ["ignore", "ignore", "pipe"],
+        stdio: ["ignore", "pipe", "pipe"],
       });
+      const chunks: Buffer[] = [];
+      let bytes = 0;
       let tail = "";
+      child.stdout?.on("data", (chunk: Buffer) => {
+        bytes += chunk.length;
+        if (bytes > 8 * 1024 * 1024) { child.kill(); return; }
+        chunks.push(chunk);
+      });
       child.stderr?.on("data", (chunk: Buffer) => { tail = `${tail}${chunk.toString("utf8")}`.slice(-4_000); });
       const timer = setTimeout(() => child.kill(), timeoutMs);
       const abort = () => child.kill();
@@ -344,19 +421,15 @@ export function whisperWindowTranscriber(
       child.once("close", (code) => {
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
-        if (code === 0) resolve();
+        if (code === 0) resolve(Buffer.concat(chunks).toString("utf8"));
         else reject(new Error(`live window decode failed (${code}): ${tail.trim().slice(-300)}`));
       });
     });
-    const json = `${outputPrefix}.json`;
-    try {
-      if (!existsSync(json)) return [];
-      return parseWhisperTranscript("live", readFileSync(json, "utf8"), {
-        language,
-        model: transcriber.model,
-      }).segments;
-    } finally {
-      rmSync(json, { force: true });
-    }
+    if (!json.trim()) return [];
+    return parseMeetingTranscript("live", json, {
+      language,
+      model: transcriber.model,
+      source: window.source,
+    }).segments;
   };
 }

@@ -89,7 +89,7 @@ lightweight typed binary lifecycle and never confuses existing PATH/system insta
 ## Meeting evidence boundary
 
 Meeting capability also composes through `McpTools`; `core/` knows nothing about browser capture, audio codecs,
-whisper.cpp, vendor APIs, or transcript storage. `browser-meeting.ts` is a consent shell around native
+the ASR engine, vendor APIs, or transcript storage. `browser-meeting.ts` is a consent shell around native
 `getDisplayMedia`/`getUserMedia`: an exact-Origin, random-token loopback WebSocket accepts only bounded stereo
 PCM16 from an AudioWorklet. The browser must expose system audio and the user must select it every time. A video
 track is required by the platform API but never crosses the page/server boundary.

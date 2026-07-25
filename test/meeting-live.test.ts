@@ -41,6 +41,7 @@ test("confirmed text is emitted with meeting-relative timestamps and never dupli
     rawPath: raw,
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
+    sources: ["system"],
     workDir: dir,
     windowMs: 30_000,
     minWindowMs: 6_000,
@@ -81,6 +82,7 @@ test("a window shorter than the minimum waits instead of decoding a fragment", a
     rawPath: raw,
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
+    sources: ["system"],
     workDir: dir,
     minWindowMs: 6_000,
     transcribeWindow: async () => { calls++; return []; },
@@ -104,9 +106,9 @@ test("sustained lag skips forward and reports it rather than drifting behind the
     rawPath: raw,
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
+    sources: ["system"],
     workDir: dir,
     windowMs: 10_000,
-    overlapMs: 0,
     minWindowMs: 6_000,
     maxLagMs: 30_000,
     transcribeWindow: async (window) => { offsets.push(window.offsetMs); return []; },
@@ -131,9 +133,9 @@ test("one unreadable window is skipped and reported instead of wedging the meeti
     rawPath: raw,
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
+    sources: ["system"],
     workDir: dir,
     windowMs: 10_000,
-    overlapMs: 0,
     minWindowMs: 6_000,
     transcribeWindow: async (window) => {
       offsets.push(window.offsetMs);
@@ -166,9 +168,9 @@ test("flush decodes the closing tail that is shorter than a full window", async 
     rawPath: raw,
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
+    sources: ["system"],
     workDir: dir,
     windowMs: 10_000,
-    overlapMs: 0,
     minWindowMs: 6_000,
     transcribeWindow: async (window) => {
       offsets.push(window.offsetMs);
@@ -206,6 +208,7 @@ test("re-decoded audio never produces a second copy or a backwards timestamp", a
     rawPath: raw,
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
+    sources: ["system"],
     workDir: dir,
     windowMs: 30_000,
     minWindowMs: 6_000,
@@ -258,6 +261,7 @@ test("an unstable window tail is withheld until a second pass confirms it", asyn
     rawPath: raw,
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
+    sources: ["system"],
     workDir: dir,
     windowMs: 30_000,
     minWindowMs: 6_000,
@@ -293,6 +297,7 @@ test("window WAVs are valid PCM16 and are cleaned up after decoding", async () =
     rawPath: raw,
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
+    sources: ["system"],
     workDir: dir,
     windowMs: 10_000,
     minWindowMs: 6_000,
@@ -309,9 +314,115 @@ test("window WAVs are valid PCM16 and are cleaned up after decoding", async () =
   expect(header).not.toBeNull();
   expect(header!.toString("ascii", 0, 4)).toBe("RIFF");
   expect(header!.toString("ascii", 8, 12)).toBe("WAVE");
-  expect(header!.readUInt16LE(22)).toBe(CHANNELS);
+  expect(header!.readUInt16LE(22)).toBe(1); // the engine takes mono, so each channel is decoded alone
   expect(header!.readUInt32LE(24)).toBe(SAMPLE_RATE);
   expect(header!.readUInt16LE(34)).toBe(16); // PCM16
   expect(existsSync(windowPath)).toBe(false); // temporary audio does not linger
   await live.stop();
+});
+
+test("each capture channel is deinterleaved, decoded, and stabilized on its own", async () => {
+  // The engine has no channel diarization, so "You" vs "Meeting audio" only survives if the mic and the
+  // system channel are decoded separately - and each then needs its OWN LocalAgreement state, or one
+  // channel's confirmation would advance the other channel past audio nobody decoded.
+  const { raw, dir } = setup();
+  workspace = dir;
+  const seen: LiveWindow[] = [];
+  const live = new LiveMeetingTranscriber({
+    rawPath: raw,
+    sampleRate: SAMPLE_RATE,
+    channels: CHANNELS,
+    sources: ["microphone", "system"],
+    workDir: dir,
+    windowMs: 30_000,
+    minWindowMs: 6_000,
+    transcribeWindow: async (window) => {
+      seen.push(window);
+      const text = window.source === "microphone" ? "mình đồng ý" : "chốt thứ sáu";
+      const speaker = window.source === "microphone" ? "You" : "Meeting audio";
+      return [{ id: "x", startMs: 1_000, endMs: 3_000, speaker, source: window.source, text }];
+    },
+  });
+  live.start();
+
+  record(raw, 8_000);
+  await live.drain();
+  expect(seen.map((w) => w.source)).toEqual(["microphone", "system"]);
+  expect(live.segments()).toEqual([]); // neither channel has a second opinion yet
+
+  record(raw, 8_000);
+  await live.drain();
+  const segments = live.segments();
+  expect(segments.map((s) => [s.source, s.text])).toEqual([
+    ["microphone", "mình đồng ý"],
+    ["system", "chốt thứ sáu"],
+  ]);
+  expect(segments.map((s) => s.speaker)).toEqual(["You", "Meeting audio"]);
+  await live.stop();
+});
+
+test("channel audio is separated, not mixed, when a window is written", async () => {
+  const { raw, dir } = setup();
+  const frames = SAMPLE_RATE * 8;
+  const pcm = Buffer.alloc(frames * 4);
+  for (let frame = 0; frame < frames; frame++) {
+    pcm.writeInt16LE(1_000, frame * 4);   // microphone tone
+    pcm.writeInt16LE(-2_000, frame * 4 + 2); // system tone
+  }
+  writeFileSync(raw, pcm);
+  const samples = new Map<string, number>();
+  const live = new LiveMeetingTranscriber({
+    rawPath: raw,
+    sampleRate: SAMPLE_RATE,
+    channels: CHANNELS,
+    sources: ["microphone", "system"],
+    workDir: dir,
+    windowMs: 10_000,
+    minWindowMs: 6_000,
+    transcribeWindow: async (window) => {
+      samples.set(window.source, readFileSync(window.wavPath).readInt16LE(44));
+      return [];
+    },
+  });
+  live.start();
+  await live.drain();
+  expect(samples.get("microphone")).toBe(1_000);
+  expect(samples.get("system")).toBe(-2_000);
+  await live.stop();
+});
+
+test("a live log never jumps backwards in time when one channel runs ahead", async () => {
+  // Real audio produced this: the microphone confirmed 0:06 while the room audio was still at 0:05, so
+  // commit order alone showed "You 0:06" above "Meeting audio 0:05". Nothing is shown until every
+  // channel has decoded past it.
+  const { raw, dir } = setup();
+  const emitted: Array<[string, number]> = [];
+  const live = new LiveMeetingTranscriber({
+    rawPath: raw,
+    sampleRate: SAMPLE_RATE,
+    channels: CHANNELS,
+    sources: ["microphone", "system"],
+    workDir: dir,
+    windowMs: 30_000,
+    minWindowMs: 6_000,
+    onSegments: (segments) => emitted.push(...segments.map((s) => [s.source, s.startMs] as [string, number])),
+    transcribeWindow: async (window) => {
+      // The mic speaks a second later than the room, so commit order and time order disagree.
+      const startMs = window.source === "microphone" ? 6_000 : 5_000;
+      const endMs = startMs + 1_000;
+      // A decoder only hears what is inside the window it was handed.
+      if (window.offsetMs > startMs || window.offsetMs + window.durationMs < endMs) return [];
+      return [{ id: "x", startMs, endMs, speaker: window.source === "microphone" ? "You" : "Meeting audio", source: window.source, text: "x" }];
+    },
+  });
+  live.start();
+  record(raw, 8_000);
+  await live.drain();
+  record(raw, 8_000);
+  await live.drain();
+  await live.stop();
+
+  expect(emitted.map(([source]) => source)).toEqual(["system", "microphone"]);
+  expect(emitted.map(([, startMs]) => startMs)).toEqual([5_000, 6_000]);
+  expect(live.segments().map((s) => s.id)).toEqual(["live_00001", "live_00002"]);
 });

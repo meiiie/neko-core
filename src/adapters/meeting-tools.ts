@@ -17,7 +17,7 @@ import {
   verifyMeetingSupportIntegrity,
   type MeetingTranscriber,
 } from "./meeting-support-pack.ts";
-import { LiveMeetingTranscriber, whisperWindowTranscriber } from "./meeting-live.ts";
+import { LiveMeetingTranscriber, parakeetWindowTranscriber } from "./meeting-live.ts";
 import { transcribeMeeting } from "./meeting-transcription.ts";
 
 const PREFIX = "mcp__neko_meeting__";
@@ -223,11 +223,12 @@ async function resolveLiveFactory(home: string, language: string) {
   if (discoverMeetingSupport(home).state !== "ready") return undefined;
   let transcriber: MeetingTranscriber;
   try { transcriber = await verifyMeetingSupportIntegrity(home); } catch { return undefined; }
-  const transcribeWindow = whisperWindowTranscriber(transcriber, { language });
+  const transcribeWindow = parakeetWindowTranscriber(transcriber, { language });
   return (context: {
     rawPath: string;
     sampleRate: number;
     channels: 2;
+    sources: Array<"microphone" | "system">;
     onSegments: (segments: MeetingTranscriptSegment[]) => void;
   }) => new LiveMeetingTranscriber({ ...context, transcribeWindow });
 }

@@ -318,7 +318,7 @@ function openSupportCenter(ctx: CommandCtx): void {
         label: "Meeting Transcription Support Pack",
         detail: meetingManaged
           ? `installed by Neko - ${formatMiB(meetingPackBytes(meetingManaged))} managed files - ${meeting.state}`
-          : meeting.state === "ready" ? `using existing local whisper.cpp - Neko installed nothing` : "not installed - capture still works; local transcription is optional",
+          : meeting.state === "ready" ? `using an existing local parakeet-cli - Neko installed nothing` : "not installed - capture still works; local transcription is optional",
       },
       { id: "close", label: "Close", detail: "No changes" },
     ],
@@ -339,7 +339,7 @@ function openMeetingSupportManager(ctx: CommandCtx): void {
     { id: "remove", label: "Remove support pack", detail: `free managed engine/model files; meeting audio and transcripts stay` },
     { id: "back", label: "Back", detail: "Return to all support components" },
   ] : status.state === "ready" ? [
-    { id: "back", label: "Back", detail: "Using an existing whisper.cpp with Neko's verified model. Neko will not remove the external engine." },
+    { id: "back", label: "Back", detail: "Using an existing parakeet-cli with Neko's verified model. Neko will not remove the external engine." },
   ] : [
     { id: "install", label: "Install balanced Vietnamese support", detail: "about 190 MiB model plus engine; local-only; no administrator access" },
     { id: "quick", label: "Install quick support", detail: "about 60 MiB model; faster and smaller, with lower accuracy" },

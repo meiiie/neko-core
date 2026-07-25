@@ -22,26 +22,34 @@ import { pipeline } from "node:stream/promises";
 
 import { homeDir } from "../shared/home.ts";
 
-const RELEASE_API = "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest";
-const RELEASE_REPO = "ggml-org/whisper.cpp";
+// Engine: NVIDIA Nemotron 3.5 ASR through parakeet.cpp. It replaced whisper.cpp for a measured reason -
+// on real Vietnamese meeting speech Whisper base made ~18% WER and destroyed the two facts a summary
+// must carry (it turned the owner "Nam" into "nằm" and dropped the deadline "tư"), while Nemotron made
+// zero word errors and ran faster. One 0.6B checkpoint covers 40+ locales including vi-VN and streams
+// natively. See docs/process/MEETINGS-RESEARCH-2026-07.md §2.6.
+const RELEASE_API = "https://api.github.com/repos/mudler/parakeet.cpp/releases/latest";
+const RELEASE_REPO = "mudler/parakeet.cpp";
+const MODEL_REPO = "mudler/parakeet-cpp-gguf";
 const MAX_ENGINE_BYTES = 64 * 1024 * 1024;
 const MAX_MODEL_BYTES = 2 * 1024 * 1024 * 1024;
 const INTEGRITY_CACHE = new Map<string, Promise<void>>();
 
 export type MeetingModelTier = "quick" | "balanced";
 
+// Both tiers are the same multilingual checkpoint at different quantization; `balanced` is the one
+// measured on Vietnamese speech. Sizes and digests are the published Hugging Face LFS object ids.
 const MODELS = {
   quick: {
-    id: "whisper-base-q5_1",
-    file: "ggml-base-q5_1.bin",
-    bytes: 59_707_625,
-    sha256: "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
+    id: "nemotron-3.5-asr-q4_k",
+    file: "nemotron-3.5-asr-streaming-0.6b-q4_k.gguf",
+    bytes: 718_102_624,
+    sha256: "5ad85eb3f3014c1a300d67b7ccbd23c38c4c952405cbe33a861e19fb2775e84b",
   },
   balanced: {
-    id: "whisper-small-q5_1",
-    file: "ggml-small-q5_1.bin",
-    bytes: 190_085_487,
-    sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
+    id: "nemotron-3.5-asr-q5_k",
+    file: "nemotron-3.5-asr-streaming-0.6b-q5_k.gguf",
+    bytes: 784_801_888,
+    sha256: "7bb14605a707f821560952521034002c91653d676272a80dca0cd2aa886d0ab2",
   },
 } as const;
 
@@ -61,7 +69,7 @@ interface GitHubRelease {
 }
 
 export interface MeetingSupportTarget {
-  assetName: string;
+  assetSuffix: string;
   executableName: string;
 }
 
@@ -130,10 +138,15 @@ export function meetingSupportTarget(
   platform: NodeJS.Platform = process.platform,
   arch: NodeJS.Architecture = process.arch,
 ): MeetingSupportTarget | null {
-  if (platform === "win32" && arch === "x64") return { assetName: "whisper-bin-x64.zip", executableName: "whisper-cli.exe" };
+  // parakeet.cpp embeds the version in its asset names, so a target carries the suffix and the full
+  // name is composed once the release tag is known.
+  if (platform === "win32" && arch === "x64") return { assetSuffix: "bin-win-cpu-x64.zip", executableName: "parakeet-cli.exe" };
   if (platform === "linux" && (arch === "x64" || arch === "arm64")) {
-    return { assetName: `whisper-bin-ubuntu-${arch}.tar.gz`, executableName: "whisper-cli" };
+    return { assetSuffix: `bin-linux-cpu-${arch}.tar.gz`, executableName: "parakeet-cli" };
   }
+  // macOS now has official binaries too: Metal on Apple silicon, CPU on Intel.
+  if (platform === "darwin" && arch === "arm64") return { assetSuffix: "bin-macos-metal-arm64.tar.gz", executableName: "parakeet-cli" };
+  if (platform === "darwin" && arch === "x64") return { assetSuffix: "bin-macos-cpu-x64.tar.gz", executableName: "parakeet-cli" };
   return null;
 }
 
@@ -165,7 +178,7 @@ export function discoverMeetingSupport(
   which: (name: string) => string | null = (name) => Bun.which(name),
 ): MeetingSupportStatus {
   const pack = readMeetingSupportPack(home);
-  const pathEngine = which("whisper-cli") ?? which("whisper.cpp");
+  const pathEngine = which("parakeet-cli");
   const executable = pack?.executablePath ?? pathEngine;
   if (!pack && !executable) return {
     state: "missing",
@@ -173,17 +186,17 @@ export function discoverMeetingSupport(
   };
   if (!pack) return {
     state: "missing",
-    detail: "a whisper.cpp executable exists, but Neko's verified meeting model is not installed",
+    detail: "a parakeet-cli executable exists, but Neko's verified meeting model is not installed",
   };
   if (!executable) return {
     state: "missing",
     detail: process.platform === "darwin"
-      ? "the meeting model is installed; install whisper.cpp (for example `brew install whisper-cpp`) and retry"
+      ? "the meeting model is installed, but the managed engine is missing; reinstall with `neko support meeting update`"
       : "the managed meeting engine is missing",
   };
   return {
     state: "ready",
-    detail: `${pack.model.id} (${pack.model.tier}) through ${pack.executablePath ? `managed whisper.cpp ${pack.engine?.version ?? ""}`.trim() : "existing whisper.cpp"}`,
+    detail: `${pack.model.id} (${pack.model.tier}) through ${pack.executablePath ? `managed parakeet.cpp ${pack.engine?.version ?? ""}`.trim() : "existing parakeet-cli"}`,
     transcriber: {
       executable,
       executableSource: pack.executablePath ? "managed" : "path",
@@ -236,14 +249,14 @@ export async function installMeetingSupportPack(options: InstallMeetingSupportOp
     let engine: MeetingSupportManifest["engine"];
     let executablePath: string | undefined;
     if (target) {
-      notify("Checking the official ggml-org whisper.cpp release...");
+      notify("Checking the official parakeet.cpp release...");
       const response = await fetchImpl(RELEASE_API, {
         headers: { Accept: "application/vnd.github+json", "User-Agent": "neko-core-meeting-support" },
         signal: AbortSignal.timeout(30_000),
       });
-      if (!response.ok) throw new Error(`Could not read the official whisper.cpp release (HTTP ${response.status})`);
+      if (!response.ok) throw new Error(`Could not read the official parakeet.cpp release (HTTP ${response.status})`);
       const release = resolveRelease(await response.json() as GitHubRelease, target);
-      const archive = join(staging, target.assetName);
+      const archive = join(staging, release.assetName);
       notify(`Downloading ${formatMiB(release.size)} local transcription engine...`);
       const archiveBytes = await download(fetchImpl, release.url, archive, release.size, release.digest.slice(7), MAX_ENGINE_BYTES, "Engine", notify);
       const engineDir = join(staging, "engine");
@@ -251,15 +264,15 @@ export async function installMeetingSupportPack(options: InstallMeetingSupportOp
       (options.extractArchive ?? extractVerifiedArchive)(archive, engineDir);
       rmSync(archive, { force: true });
       executablePath = findNamedFile(engineDir, target.executableName);
-      if (!executablePath) throw new Error(`whisper.cpp archive is missing ${target.executableName}`);
+      if (!executablePath) throw new Error(`parakeet.cpp archive is missing ${target.executableName}`);
       try { chmodSync(executablePath, 0o755); } catch { /* Windows executable ACLs. */ }
-      const version = (options.versionOf ?? whisperVersion)(executablePath);
-      if (version !== release.version) throw new Error(`whisper.cpp binary version ${version ?? "unknown"} does not match ${release.version}`);
+      const version = (options.versionOf ?? parakeetVersion)(executablePath);
+      if (version !== release.version) throw new Error(`parakeet.cpp binary version ${version ?? "unknown"} does not match ${release.version}`);
       const executableSha256 = await sha256File(executablePath);
       engine = {
         version,
         releaseTag: release.tag,
-        assetName: target.assetName,
+        assetName: release.assetName,
         assetDigest: release.digest,
         archiveBytes,
         executable: relative(staging, executablePath).replace(/\\/g, "/"),
@@ -270,14 +283,14 @@ export async function installMeetingSupportPack(options: InstallMeetingSupportOp
       };
     } else if (!findPathEngine(options.which ?? ((name: string) => Bun.which(name)))) {
       throw new Error(platform === "darwin"
-        ? "The upstream release has no macOS CLI binary. Install `whisper-cpp` with Homebrew, then rerun this command to add Neko's verified model."
+        ? "The upstream release has no binary for this Mac. Build parakeet-cli from mudler/parakeet.cpp, put it on PATH, then rerun this command to add Neko's verified model."
         : `Meeting Support Pack does not yet provide a managed engine for ${platform}/${arch}`);
     }
 
     const modelDir = join(staging, "models");
     mkdirSync(modelDir, { recursive: false, mode: 0o700 });
     const modelPath = join(modelDir, model.file);
-    const modelUrl = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${model.file}?download=true`;
+    const modelUrl = `https://huggingface.co/${MODEL_REPO}/resolve/main/${model.file}?download=true`;
     notify(`Downloading ${formatMiB(model.bytes)} ${tier} multilingual model (Vietnamese supported)...`);
     await download(fetchImpl, modelUrl, modelPath, model.bytes, model.sha256, MAX_MODEL_BYTES, "Model", notify);
 
@@ -322,25 +335,26 @@ export function removeMeetingSupportPack(home = homeDir()): boolean {
 }
 
 function resolveRelease(release: GitHubRelease, target: MeetingSupportTarget): {
-  version: string; tag: string; digest: string; size: number; url: string; releaseUrl: string;
+  version: string; tag: string; assetName: string; digest: string; size: number; url: string; releaseUrl: string;
 } {
-  if (release.draft || release.prerelease) throw new Error("The latest whisper.cpp release is not stable");
+  if (release.draft || release.prerelease) throw new Error("The latest parakeet.cpp release is not stable");
   const tag = String(release.tag_name ?? "");
   const version = tag.match(/^v(\d+\.\d+\.\d+)$/)?.[1];
-  if (!version) throw new Error(`Unexpected whisper.cpp release tag: ${tag || "unknown"}`);
-  const asset = release.assets?.find((candidate) => candidate.name === target.assetName);
+  if (!version) throw new Error(`Unexpected parakeet.cpp release tag: ${tag || "unknown"}`);
+  const assetName = `parakeet-${tag}-${target.assetSuffix}`;
+  const asset = release.assets?.find((candidate) => candidate.name === assetName);
   const size = Number(asset?.size ?? 0);
   const digest = String(asset?.digest ?? "").toLowerCase();
   const url = String(asset?.browser_download_url ?? "");
-  if (!asset || !Number.isSafeInteger(size) || size <= 0 || size > MAX_ENGINE_BYTES) throw new Error(`Release is missing ${target.assetName}`);
-  if (!/^sha256:[0-9a-f]{64}$/.test(digest)) throw new Error("whisper.cpp asset does not publish a SHA-256 digest");
+  if (!asset || !Number.isSafeInteger(size) || size <= 0 || size > MAX_ENGINE_BYTES) throw new Error(`Release is missing ${assetName}`);
+  if (!/^sha256:[0-9a-f]{64}$/.test(digest)) throw new Error("parakeet.cpp asset does not publish a SHA-256 digest");
   const parsed = new URL(url);
-  const expectedPath = `/${RELEASE_REPO}/releases/download/${tag}/${target.assetName}`;
-  if (parsed.protocol !== "https:" || parsed.hostname !== "github.com" || parsed.pathname !== expectedPath || basename(parsed.pathname) !== target.assetName) {
-    throw new Error("whisper.cpp release returned an unexpected download URL");
+  const expectedPath = `/${RELEASE_REPO}/releases/download/${tag}/${assetName}`;
+  if (parsed.protocol !== "https:" || parsed.hostname !== "github.com" || parsed.pathname !== expectedPath || basename(parsed.pathname) !== assetName) {
+    throw new Error("parakeet.cpp release returned an unexpected download URL");
   }
   const releaseUrl = String(release.html_url ?? "");
-  return { version, tag, digest, size, url, releaseUrl: releaseUrl.startsWith(`https://github.com/${RELEASE_REPO}/`) ? releaseUrl : `https://github.com/${RELEASE_REPO}/releases/tag/${tag}` };
+  return { version, tag, assetName, digest, size, url, releaseUrl: releaseUrl.startsWith(`https://github.com/${RELEASE_REPO}/`) ? releaseUrl : `https://github.com/${RELEASE_REPO}/releases/tag/${tag}` };
 }
 
 async function download(
@@ -444,15 +458,15 @@ function findNamedFile(root: string, name: string): string | undefined {
   return undefined;
 }
 
-function whisperVersion(path: string): string | null {
+function parakeetVersion(path: string): string | null {
   const env = { ...process.env, PATH: `${dirname(path)}${delimiter}${process.env.PATH ?? ""}`, LD_LIBRARY_PATH: dirname(path) };
   const result = spawnSync(path, ["--version"], { cwd: dirname(path), encoding: "utf8", timeout: 15_000, windowsHide: true, env });
   if (result.status !== 0) return null;
-  return `${result.stdout ?? ""}\n${result.stderr ?? ""}`.match(/whisper\.cpp version:\s*(\d+\.\d+\.\d+)/i)?.[1] ?? null;
+  return `${result.stdout ?? ""}\n${result.stderr ?? ""}`.match(/parakeet-cli\s+v?(\d+\.\d+\.\d+)/i)?.[1] ?? null;
 }
 
 function findPathEngine(which: (name: string) => string | null): string | null {
-  return which("whisper-cli") ?? which("whisper.cpp");
+  return which("parakeet-cli");
 }
 
 async function sha256File(path: string): Promise<string> {

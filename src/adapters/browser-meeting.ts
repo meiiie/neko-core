@@ -41,6 +41,7 @@ export interface BrowserMeetingOptions {
     rawPath: string;
     sampleRate: number;
     channels: 2;
+    sources: Array<"microphone" | "system">;
     onSegments: (segments: MeetingTranscriptSegment[]) => void;
   }) => LiveMeetingTranscriber | null;
   /** How often the live loop looks for new audio. */
@@ -299,7 +300,7 @@ export class BrowserMeetingSession {
 
   /** Provisional live transcript so the agent can answer "what has been said so far" mid-meeting. It is
    * strictly additive: a missing engine, or any live failure, never touches the recording. */
-  private startLive(sampleRate: number): void {
+  private startLive(sampleRate: number, sources: Array<"microphone" | "system">): void {
     const factory = this.options.liveTranscriberFactory;
     if (!factory) return;
     try {
@@ -307,6 +308,7 @@ export class BrowserMeetingSession {
         rawPath: this.rawPath,
         sampleRate,
         channels: 2,
+        sources,
         // Mirror provisional text back to the consent page so the user can SEE that Neko is listening
         // and what it is hearing, on the same surface that carries the browser's sharing indicator.
         onSegments: (segments) => {
@@ -365,7 +367,7 @@ export class BrowserMeetingSession {
       videoStored: false,
     };
     saveMeeting(meeting, this.home);
-    this.startLive(sampleRate);
+    this.startLive(sampleRate, meeting.capture.sources);
     this.emitState("recording", `capturing ${meeting.capture.sources.join(" + ")}`);
   }
 
