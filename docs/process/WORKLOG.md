@@ -3,6 +3,45 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-25 - v0.17.0 provider reliability + delivery discipline (PR #4)
+
+Merged @thaonhuyen2004's branch, whose findings came from making Neko build a real website and a
+production platform end to end rather than from unit reasoning.
+
+- **Root cause of the "large file write" failure chain.** `max_tokens` defaulted to a hardcoded 8192,
+  which silently capped every provider that did not declare its own budget and defeated the existing
+  "omit the field -> full native budget" path; a large `write_file` tool call was truncated mid-JSON.
+  Default is now 0 (auto): compat/responses omit the field; anthropic (where it is required) sends
+  `ANTHROPIC_DEFAULT_MAX_TOKENS = 32768` and self-heals by parsing the real cap out of a 400
+  (`anthropicMaxTokensLimit`) and retrying once - no per-model table.
+- **Silence during a buffered tool call is not death.** Idle window 120s -> 300s (it resets on every
+  streamed byte, so it only fires on genuine silence) plus `isRetryableStreamStall`, because z.ai/GLM
+  composes a large tool_use server-side and streams nothing meanwhile. Real disconnects stay fatal.
+- **Skills are not reliably loaded in headless `neko run`,** so rules that must always hold moved into
+  places that always load: the `write_file` contract now teaches chunked shipping (skeleton, ~300
+  lines, then `edit`), and the core prompt gained an always-on "Web & HTML" section (full SEO head,
+  one committed design direction, anti-slop). The run after that rule shipped complete SEO and a
+  coherent direction; the two runs before it, which only had the skill, did not.
+- **docker/podman must not be sandboxed** - they need the host daemon socket, and a container has
+  host-level power anyway, so `isDockerCommand` routes them unsandboxed and simultaneously excludes
+  them from sandboxed-bash auto-approval (still one confirmation in default mode).
+- Skills added: `hackathon-engine` (11 references incl. design-engine Law 0 with the aesthetic-direction
+  menu, the 2026 AI-slop cluster list, and the signature-wordmark footer), `web-app` (covers static
+  sites through full-stack), `docker`, `sql`, `research-method`, `clean-writing`.
+
+Merge notes: the branch forked at `ef78426`, before v0.15.0/v0.15.1/v0.16.0/v0.16.1, and several of its
+early commits had already reached main through the squashed #2/#3 merges, so most of the 79-file/+4022
+PR was duplicated history - the real delta was 29 files/+1493. Ten files conflicted (18 hunks). The
+browser autonomous-attach model was kept from main: it is the newer reviewed decision (e4e6a79 09:51 and
+the 0cba8ce pairing hotfix 10:18 on 2026-07-24 vs the branch's explicit-only stance at 00:46), it has
+shipped publicly since v0.15.0, and it is gated on an explicit prior pairing token, the user's persisted
+preference, no tab already attached, and a bounded window. The docker exemption and the 9000-byte system
+prompt budget were taken from the branch; WORKLOG and the voice-panel mouse test were unioned. The owner
+confirmed keeping auto-attach after the merge.
+
+Evidence: typecheck (tsgo + tsc 5.9) clean; **816/816 tests, 3,543 assertions, 86 files**; policy PASS;
+build + render + real-PTY input smoke PASS; CI green on ubuntu/macOS/windows; secret scan CLEAN.
+
 ## 2026-07-25 - v0.16.1 voice-resilience + GPT-5.6 history hotfix
 
 Three field failures, all root-caused against tagged Codex source (`rust-v0.145.0`, cross-checked

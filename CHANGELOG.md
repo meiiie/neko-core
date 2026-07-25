@@ -6,6 +6,46 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-07-25
+
+### Fixed
+
+- Large file writes are no longer truncated mid-tool-call. The hardcoded `max_tokens: 8192` default
+  silently capped every provider that did not declare its own budget, defeating the intended
+  "omit the field → use the model's full native output budget" path — a big `write_file` could be cut
+  off partway. The default is now `0` (auto): OpenAI-compatible and Responses endpoints omit the
+  field entirely. Anthropic, where the field is required, sends `32768` and self-heals — if the API
+  returns a 400 naming a smaller real cap, Neko clamps to it and retries once, with no per-model table
+  to maintain. Set a positive `max_tokens` in a profile or config to cap output deliberately.
+- A provider that goes quiet while composing a large tool call is no longer killed. The idle window
+  (which resets on every streamed byte, and is not a total request cap) moved from 120s to 300s, and a
+  stalled stream is now retried like a dropped connection instead of failing the whole run. Genuine
+  disconnects remain fatal.
+- `docker` and `podman` now run outside the bash sandbox, because they talk to a host daemon the
+  sandbox user cannot reach — sandboxing them only produced "cannot connect to the Docker daemon".
+  They are correspondingly excluded from sandboxed-bash auto-approval, so in default mode they still
+  ask for one confirmation.
+
+### Added
+
+- **Skills for building real software.** `hackathon-engine` (with 11 references: design-engine, seo,
+  motion, backend, data, devops, golden-stacks, mobile, security, testing-strategy, tracks) for timed
+  builds, and `web-app` for production websites and full-stack apps — including static sites, landing
+  pages, and portfolios. Also `docker`, `sql`, `research-method`, and `clean-writing`.
+- **Design direction is now decided before any token.** The design engine's Law 0 makes Neko commit to
+  one aesthetic direction out loud — stoic/cold, brutalist, editorial serif, warm humanist, technical,
+  or maximal — and derive every region from it, including the footer. If you name a house style or a
+  reference, your words win. It also names the 2026 AI-slop clusters to avoid.
+- **SEO is no longer an afterthought.** A copy-paste complete `<head>` (title, meta description,
+  canonical, Open Graph, Twitter card, JSON-LD, favicon) lives in the SEO reference, and the core
+  prompt now carries an always-on Web & HTML rule so headless `neko run` ships it even when skills are
+  not loaded.
+- **Large files ship in chunks by contract.** The `write_file` tool description now instructs writing a
+  skeleton first (roughly 300 lines) and extending it with `edit`, which avoids both output-token
+  truncation and provider idle timeouts.
+- **A budget-aware completion nudge** reminds the agent to land the deliverable before the step budget
+  runs out, without cutting the research phase short.
+
 ## [0.16.1] — 2026-07-25
 
 ### Fixed

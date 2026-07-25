@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-25) — v0.16.1 release
+## Current status (2026-07-25) — v0.17.0 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -28,7 +28,20 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   no longer fail `items[0] ... missing field type`: injected history is tagged `type: "message"` for the
   strict App Server item schema.
 
-- **Branch:** `main`. **Current release: v0.16.1 (2026-07-25)** - a field hotfix over v0.16.0: voice
+- **Provider reliability + delivery discipline (2026-07-25, PR #4):** the hardcoded `max_tokens: 8192`
+  default that silently truncated large `write_file` tool calls is gone (0 = auto: omit the field and use
+  the model's full budget; anthropic sends 32768 and self-heals from a 400 that names the real cap). A
+  provider buffering a large tool call is no longer killed - idle window 120s->300s plus stream-stall
+  retry. `docker`/`podman` run unsandboxed (they need the host daemon) and are excluded from
+  sandboxed-bash auto-approval. Chunked-write guidance and an always-on Web & HTML rule live where they
+  always load, because skills are not reliably loaded in headless `neko run`. Skills added:
+  `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
+  `clean-writing`.
+
+- **Branch:** `main`. **Current release: v0.17.0 (2026-07-25)** - provider reliability (max_tokens auto,
+  anthropic self-heal, stream-stall retry), delivery discipline (chunked writes, always-on Web & HTML
+  rule, completion nudge), unsandboxed docker, and the build-real-software skill set. **v0.16.1
+  (2026-07-25)** - a field hotfix over v0.16.0: voice
   survives control-socket blips, dead-end voice errors read honestly, and GPT-5.6 history injection is
   App-Server-valid. **v0.16.0 (2026-07-24)** - GPT-Live now runs directly inside
   the Windows terminal with native PCM input/output, transcript-level interruption, persistent finalized
