@@ -76,6 +76,17 @@ function requiresChecksum(tag: string): boolean {
 
 const cachePath = () => join(homeDir(), ".neko-core", ".update-check.json");
 
+/** How long a check result is reused before asking GitHub again.
+ *
+ * A "you are on the latest" answer is only true until the next release, so caching it for a whole day
+ * created a real blind spot: v0.16.0 was recorded as latest at 18:10 and v0.16.1 shipped at 18:16, so
+ * every session for the next 24h skipped the check entirely - `auto_update: true` installed nothing
+ * because `checkForUpdate` never asked. A found update keeps the day-long cache (auto-update installs
+ * it immediately, and re-asking changes nothing), while "up to date" is re-checked a few times a day.
+ * Worst case is a handful of unauthenticated calls per day, far under GitHub's rate limit, and
+ * `latestVersion` already falls back to the release redirect if that limit is ever hit. */
+export const UPDATE_RECHECK_MS = { found: 24 * 3600 * 1000, upToDate: 3 * 3600 * 1000 } as const;
+
 /** Remove the stale `<exe>.old` left by a previous self-update. On Windows the old exe is still LOCKED
  * by the running process during the update itself, so the swap can't delete it - only the NEXT launch
  * (this call) can. Cheap no-op when there's nothing to clean; never throws. Called from startup. */
@@ -97,13 +108,14 @@ export function activateStagedBinary(exe: string, staged: string): void {
   try { rmSync(old); } catch { /* in use on Windows; cleaned on next launch */ }
 }
 
-/** Daily-cached check: returns the newer version string if one exists, else null. Never throws. */
+/** Cached startup check: returns the newer version string if one exists, else null. Never throws.
+ * See UPDATE_RECHECK_MS for why "up to date" expires sooner than "an update is waiting". */
 export async function checkForUpdate(now = Date.now()): Promise<string | null> {
   try {
     const c = JSON.parse(readFileSync(cachePath(), "utf-8"));
-    if (typeof c.at === "number" && now - c.at < 24 * 3600 * 1000) {
-      return c.latest && isNewer(c.latest, VERSION) ? c.latest : null;
-    }
+    const cachedNewer = Boolean(c.latest) && isNewer(c.latest, VERSION);
+    const ttl = cachedNewer ? UPDATE_RECHECK_MS.found : UPDATE_RECHECK_MS.upToDate;
+    if (typeof c.at === "number" && now - c.at < ttl) return cachedNewer ? c.latest : null;
   } catch {
     /* no/!valid cache -> fetch fresh */
   }

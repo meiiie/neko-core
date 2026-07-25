@@ -76,6 +76,49 @@ test("latestVersion falls back to GitHub's official redirect when the public API
   }
 });
 
+test("an 'up to date' check is re-asked the same day, so a release minutes later is not missed", async () => {
+  // The field failure: the cache recorded v0.16.0 as latest at 18:10, v0.16.1 shipped at 18:16, and
+  // every session for the next 24h skipped the check entirely - auto_update installed nothing.
+  const saved = { up: process.env.USERPROFILE, home: process.env.HOME, fetch: globalThis.fetch };
+  const home = mkdtempSync(join(tmpdir(), "neko-update-cache-"));
+  process.env.USERPROFILE = home; process.env.HOME = home;
+  require("node:fs").mkdirSync(join(home, ".neko-core"), { recursive: true });
+  const cache = join(home, ".neko-core", ".update-check.json");
+  const current = require("../src/shared/version.ts").VERSION as string;
+  const [major, minor] = current.split(".").map(Number);
+  const shipped = `v${major}.${minor + 1}.0`;
+  let apiCalls = 0;
+  globalThis.fetch = (async (input: any) => {
+    apiCalls++;
+    return String(input).includes("api.github.com")
+      ? { ok: true, json: async () => ({ tag_name: shipped, draft: false, prerelease: false }) } as unknown as Response
+      : { ok: true, url: `https://github.com/meiiie/neko-core/releases/tag/${shipped}` } as Response;
+  }) as typeof fetch;
+  try {
+    const { checkForUpdate, UPDATE_RECHECK_MS } = require("../src/adapters/update.ts");
+    const wroteAt = Date.now();
+    writeFileSync(cache, JSON.stringify({ at: wroteAt, latest: `v${current}` })); // "you are on the latest"
+
+    // Minutes later: still cached, no network call - the check stays cheap on rapid restarts.
+    expect(await checkForUpdate(wroteAt + 6 * 60_000)).toBe(null);
+    expect(apiCalls).toBe(0);
+
+    // A few hours later it asks again and finds the release that shipped after the cache was written.
+    expect(await checkForUpdate(wroteAt + UPDATE_RECHECK_MS.upToDate + 1_000)).toBe(shipped);
+    expect(apiCalls).toBeGreaterThan(0);
+
+    // Once an update IS known, re-asking adds nothing: it stays cached for the full day.
+    const seen = apiCalls;
+    expect(await checkForUpdate(wroteAt + UPDATE_RECHECK_MS.upToDate + 2 * 3600_000)).toBe(shipped);
+    expect(apiCalls).toBe(seen);
+    expect(JSON.parse(readFileSync(cache, "utf-8")).latest).toBe(shipped);
+  } finally {
+    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    globalThis.fetch = saved.fetch;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("release checksum sidecars are parsed strictly", () => {
   const sha = "a".repeat(64);
   expect(parseSha256Sidecar(`${sha} *neko-windows-x64.exe\n`)).toBe(sha);
