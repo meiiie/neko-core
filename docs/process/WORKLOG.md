@@ -3096,3 +3096,24 @@ column past 78ch. It found button padding at 9/20 and 14/30, section rhythm at 7
 uses of 15px type, a language control at 39x32, `sha256` links at 20x20, and a nav needing 380px of content
 inside 312px of usable width at 360px — where the wordmark and the CTA were overlapping. All fixed; the
 tool ships next to `DEPLOY.md` so the next visual change is measured too.
+
+## v0.18.1 — the tiers the subscription already paid for (2026-07-27)
+
+A question — "can I reach 5.6 Pro through the normal prompt?" — turned into a capability audit. Reading
+the LIVE account catalog rather than the code's fallback list showed `gpt-5.6-sol` advertising
+`low/medium/high/xhigh/max/ultra`, while the shipped profile declared `effort_ceiling: "xhigh"` and
+`clampEffort` quietly discarded anything above it. Two tiers, paid for and unreachable, with no message
+saying so.
+
+Also corrected an answer I had given: I said the ceiling on that route was xhigh, which was true of a
+hardcoded fallback in the provider and not of the account. The catalog is the fact; the constant was a
+guess that had aged.
+
+Nearly published a second wrong claim on the way: the first "ultra works" test used `NEKO_EFFORT=ultra`,
+but the getter reads `reasoning_effort`, so the run proved nothing and looked like proof. Resolving the
+value explicitly before the call (`requested -> ceiling -> on wire`) is what caught it.
+
+Raising the ceiling is safe on any plan: the account catalog stays authoritative and the provider heals
+downward from a rejection, so a ceiling above what an account offers costs nothing while one below it
+hides what the user is paying for. `oracle.effort` lands alongside it — the oracle is one expensive
+question by design, and it should be allowed to cost more than an ordinary turn.

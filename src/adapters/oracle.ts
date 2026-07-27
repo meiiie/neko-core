@@ -389,6 +389,8 @@ export function resolveOracle(cfg: NekoConfig): ResolvedOracle {
   let oracleCfg = loadConfig({ profile: settings.profile });
   const model = settings.model || oracleCfg.modelShadow?.profileModel || oracleCfg.model;
   if (model !== oracleCfg.model) oracleCfg = oracleCfg.withModel(model);
+  // One expensive question is the whole idea, so the oracle may run hotter than the coding loop.
+  if (settings.effort) oracleCfg = oracleCfg.withEffort(settings.effort);
   return {
     provider: getProvider(oracleCfg),
     profile: settings.profile,

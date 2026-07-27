@@ -238,3 +238,26 @@ test("an empty question or a missing thread fails loudly instead of consulting",
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("the oracle can run hotter than the coding loop, and the ceiling no longer hides paid-for tiers", async () => {
+  const { loadConfig } = await import("../src/adapters/config.ts");
+  const { clampEffort } = await import("../src/adapters/effort.ts");
+
+  // The shipped ChatGPT profile silently clamped every request for the two tiers above xhigh, while the
+  // live account catalog advertises low/medium/high/xhigh/max/ultra for gpt-5.6.
+  const chatgpt = loadConfig({ profile: "chatgpt" });
+  expect(chatgpt.effortCeiling).toBe("ultra");
+  expect(clampEffort("ultra", chatgpt.effortCeiling)).toBe("ultra");
+  expect(clampEffort("max", chatgpt.effortCeiling)).toBe("max");
+  // An account that only offers xhigh is still protected: the ceiling caps comparable tiers, and the
+  // provider heals downward from what the endpoint actually advertises.
+  expect(clampEffort("ultra", "xhigh")).toBe("xhigh");
+
+  // The oracle's own tier is config, and it clones the profile rather than mutating it.
+  const base = loadConfig({});
+  expect(base.oracle.effort).toBe("");
+  const hot = base.withEffort("ultra");
+  expect(hot.effort).toBe("ultra");
+  expect(base.effort).not.toBe("ultra"); // the original is untouched
+  expect(hot.model).toBe(base.model);    // same endpoint, same model - only the tier differs
+});

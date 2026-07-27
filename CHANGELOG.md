@@ -6,6 +6,27 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.1] — 2026-07-27
+
+### Fixed
+
+- **The ChatGPT subscription's two highest reasoning tiers were being silently thrown away.** The
+  profile declared `effort_ceiling: "xhigh"`, so every request for anything above it was clamped down
+  without a word — while the live account catalog advertises `low/medium/high/xhigh/max/ultra` for the
+  gpt-5.6 family. If you have wondered where "Pro" went on a Plus/Pro plan, this was it: it is not a
+  separate model on the surfaces Neko reaches, it is these tiers. `/effort ultra` now reaches them.
+
+  Raising the ceiling is safe on any account, because the account-aware catalog stays authoritative and
+  the provider heals downward from a rejection: a ceiling above what your plan offers costs nothing,
+  while a ceiling below it hides what you paid for.
+
+### Added
+
+- **`oracle.effort`** — the oracle's own reasoning tier, separate from the one you code at. One
+  expensive question is the entire idea of the feature, so it is worth spending more there than on an
+  ordinary turn: `{"oracle": {"profile": "chatgpt", "effort": "ultra"}}`.
+
+
 ## [0.18.0] — 2026-07-27
 
 ### Fixed

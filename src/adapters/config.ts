@@ -97,7 +97,10 @@ export const DEFAULTS: Record<string, any> = {
   // The oracle: a second opinion from a STRONGER model, consulted with a curated bundle of files and
   // no tools. `profile` names any profile below - which model is "the strong one" is your decision, not
   // ours, so there is no default. Empty = the feature reports how to turn it on instead of guessing.
-  oracle: { profile: "", model: "", max_bytes: 400_000, max_file_bytes: 128_000, max_files: 80 },
+  // `effort` is the oracle's own reasoning tier. The whole point of the feature is ONE expensive
+  // question, so it is worth spending more there than on an ordinary turn. Empty = whatever the
+  // profile already resolves to.
+  oracle: { profile: "", model: "", effort: "", max_bytes: 400_000, max_file_bytes: 128_000, max_files: 80 },
   // Exact Chrome extension ids allowed to pair with the loopback Browser Bridge. The bundled
   // developer id is deterministic; add the Chrome Web Store item id here after its first upload.
   browser_extension_ids: ["koalaflndbcddboachbdfmppdeblldje"],
@@ -118,7 +121,11 @@ export const DEFAULTS: Record<string, any> = {
       model: "gpt-5.5",
       models: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"],
       model_context: { "gpt-5.5": 272_000, "gpt-5.4": 272_000, "gpt-5.4-mini": 272_000, "gpt-5.3-codex-spark": 128_000 },
-      effort_ceiling: "xhigh",
+      // The live account catalog advertises low/medium/high/xhigh/max/ultra for gpt-5.6; this said xhigh
+      // and silently clamped every request for the two tiers above it. The catalog is account-aware and
+      // authoritative (see chatgpt-provider.ts), and the provider heals downward from a rejection, so a
+      // ceiling ABOVE what an account offers costs nothing while a ceiling below it hides what it paid for.
+      effort_ceiling: "ultra",
       vision: true,
     },
     // Gemini Code Assist Standard/Enterprise through official Gemini CLI ACP. Consumer OAuth ended 2026-06-18.
@@ -382,6 +389,11 @@ export class NekoConfig {
   withModel(model: string): NekoConfig {
     return new NekoConfig({ ...this.data, model }, this.profile, this.profiles, this.apiKey);
   }
+  /** A clone at a different reasoning tier (same endpoint, key and model) — the oracle spends more than
+   * an ordinary turn does, and that is the only difference between them. */
+  withEffort(effort: string): NekoConfig {
+    return new NekoConfig({ ...this.data, reasoning_effort: effort }, this.profile, this.profiles, this.apiKey);
+  }
   get baseUrl(): string { return String(this.data.base_url ?? "").replace(/\/+$/, ""); }
   /** A local model server (Ollama/llama.cpp/LM Studio/vLLM) — no API key required. */
   get isLocalEndpoint(): boolean {
@@ -570,7 +582,7 @@ export class NekoConfig {
 
   /** Which profile answers `neko oracle`, and how much of the project it may be sent. An unset profile
    * is not an error here - the oracle surface reports it and names the candidates. */
-  get oracle(): { profile: string; model: string; maxBytes: number; maxFileBytes: number; maxFiles: number } {
+  get oracle(): { profile: string; model: string; effort: string; maxBytes: number; maxFileBytes: number; maxFiles: number } {
     const o = this.data.oracle && typeof this.data.oracle === "object" ? this.data.oracle : {};
     const bounded = (value: unknown, fallback: number, min: number, max: number) => {
       const number = Number(value ?? fallback);
@@ -579,6 +591,7 @@ export class NekoConfig {
     return {
       profile: String(o.profile ?? "").trim(),
       model: String(o.model ?? "").trim(),
+      effort: String(o.effort ?? "").trim().toLowerCase(),
       maxBytes: bounded(o.max_bytes, 400_000, 4_000, 8_000_000),
       maxFileBytes: bounded(o.max_file_bytes, 128_000, 1_000, 4_000_000),
       maxFiles: bounded(o.max_files, 80, 1, 1_000),
