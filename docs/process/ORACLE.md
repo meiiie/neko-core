@@ -21,8 +21,20 @@ Any profile works — `neko profiles` lists them. Pick a **different family** fr
 an oracle that shares your model's blind spots has nothing to add. Optional knobs, with their defaults:
 
 ```json
-{ "oracle": { "profile": "claude", "model": "", "max_bytes": 400000, "max_file_bytes": 128000, "max_files": 80 } }
+{ "oracle": { "profile": "claude", "model": "", "effort": "", "max_bytes": 400000, "max_file_bytes": 128000, "max_files": 80 } }
 ```
+
+**`effort` is the one worth setting.** The oracle is one expensive question by design, so it should be
+allowed to cost more than an ordinary turn — and only the oracle, not every turn you take:
+
+```json
+{ "oracle": { "profile": "chatgpt", "effort": "ultra" } }
+```
+
+On a ChatGPT plan the account catalog advertises `low / medium / high / xhigh / max / ultra` for the
+gpt-5.6 family. Those top tiers are what people mean by "Pro" — on the surfaces Neko reaches it is not a
+separate model id, it is a reasoning level. Ask for one your plan does not carry and the provider heals
+downward from the endpoint's own answer, so naming a high tier is never a way to break a request.
 
 ## Asking
 
