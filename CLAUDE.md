@@ -15,7 +15,7 @@ enforced by `test/architecture.test.ts`).
 | **`core/`** (pure domain) | |
 | `core/ports.ts` | The interfaces core depends on: `Provider` (LLM), `McpTools`, plus `ToolCall`/`ProviderResponse`/`DeltaHook`. |
 | `core/agent.ts` | The agent loop (`complete → tool_calls → observe`, `max_steps`) + cost; `compact()`; `appendSystem()`. |
-| `core/tools.ts` · `core/tool-runtime.ts` | Tool contracts (safe: read_file/search/glob/ls/todo_write · gated: write_file/edit/bash) + `describeToolCall` + executable `ToolRegistry`; path-escape refused. |
+| `core/tools.ts` · `core/tool-runtime.ts` | Tool contracts (safe: read_file/search/glob/ls/todo_write · gated: write_file/edit/bash) + `describeToolCall` + executable `ToolRegistry`. **Reads may leave the project root** (`read_outside_root`, default on); writes/edits never may, and credential paths (`OUTSIDE_DENIED`) are refused either way. |
 | `core/permissions.ts` · `core/cost.ts` | Permission modes (default/accept-edits/plan/auto) · token usage. |
 | **`adapters/`** (edge) | |
 | `adapters/providers.ts` | `openai_compat` over `fetch`: SSE streaming, retry, abort (implements `Provider`). |

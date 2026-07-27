@@ -41,6 +41,8 @@
 <div class="progress" id="progress" aria-hidden="true"></div>
 <a class="visually-hidden" href="#main">Skip to content</a>
 
+<div class="topfield band-ink">
+<div class="rail" aria-hidden="true">NEKO CORE / LOCAL-FIRST AGENT</div>
 <div class="announce">
   <div class="wrap">
     <span class="pip" aria-hidden="true"></span>
@@ -60,8 +62,8 @@
       <a href="#download" data-i18n="nav.download">Download</a>
       <a href="https://github.com/meiiie/neko-core#readme" data-i18n="nav.docs">Docs</a>
       <a href="https://github.com/meiiie/neko-core">GitHub</a>
-      <button class="langbtn" id="lang" type="button" aria-label="Switch language">VI</button>
-      <a class="btn btn-primary" href="#download" data-i18n="nav.cta">Get Neko</a>
+      <div class="langswitch" role="group" aria-label="Language"><button type="button" data-lang="vi" aria-pressed="false">VI</button><button type="button" data-lang="en" aria-pressed="true">EN</button></div>
+      <a class="btn btn-accent" href="#download" data-i18n="nav.cta">Get Neko</a>
     </nav>
   </div>
 </header>
@@ -102,7 +104,7 @@
             <span data-i18n="hero.download">Download for</span>&nbsp;<span data-os-name>Windows</span>
             <span class="sub" data-os-size>87 MB</span>
           </a>
-          <a class="btn btn-secondary btn-lg" href="#download" data-i18n="hero.other">Other platforms</a>
+          <a class="btn btn-line btn-lg" href="#download" data-i18n="hero.other">Other platforms</a>
         </div>
 
         <p class="small trust" data-i18n="hero.trust">Free forever · MIT licensed · Windows, macOS and Linux · no account needed</p>
@@ -118,6 +120,7 @@
       </div>
     </div>
   </section>
+</div>
 
   <div class="marquee" aria-hidden="true">
     <div class="marquee-track">
@@ -127,8 +130,9 @@
   </div>
 
   <!-- ============ 01 safety ============ -->
-  <section id="how">
+  <section id="how" class="band-cream">
     <div class="wrap">
+      <span class="mark mark-tr" aria-hidden="true">+</span>
       <div class="sec-head reveal">
         <p class="eyebrow"><span class="num">01</span><span data-i18n="s1.label">Approvals</span><span class="hair"></span></p>
         <h2 data-i18n="s1.title">It asks before it touches your machine.</h2>
@@ -161,8 +165,9 @@ Verdict: <span class="c-ok">PASS</span>
   </section>
 
   <!-- ============ 02 models ============ -->
-  <section>
+  <section class="band-cream">
     <div class="wrap">
+      <span class="mark mark-tr" aria-hidden="true">+</span>
       <div class="sec-head reveal">
         <p class="eyebrow"><span class="num">02</span><span data-i18n="s2.label">Models</span><span class="hair"></span></p>
         <h2 data-i18n="s2.title">Adding a model means editing one file.</h2>
@@ -192,8 +197,9 @@ Verdict: <span class="c-ok">PASS</span>
   </section>
 
   <!-- ============ 03 oracle ============ -->
-  <section>
+  <section class="band-ink">
     <div class="wrap">
+      <span class="mark mark-tr" aria-hidden="true">+</span>
       <div class="sec-head reveal">
         <p class="eyebrow"><span class="num">03</span><span>Oracle</span><span class="hair"></span></p>
         <h2 data-i18n="s3.title">A second opinion from a model that cannot touch your machine.</h2>
@@ -224,8 +230,9 @@ Bundle: 6 file(s), 92 KB, about 23k tokens.
   </section>
 
   <!-- ============ 04 extend ============ -->
-  <section>
+  <section class="band-cream">
     <div class="wrap">
+      <span class="mark mark-tr" aria-hidden="true">+</span>
       <div class="sec-head reveal">
         <p class="eyebrow"><span class="num">04</span><span data-i18n="s4.label">Extending</span><span class="hair"></span></p>
         <h2 data-i18n="s4.title">One Markdown file teaches it a new job.</h2>
@@ -257,8 +264,9 @@ A request to buy, price, or compare suppliers.
   </section>
 
   <!-- ============ 05 capabilities ============ -->
-  <section>
+  <section class="band-cream">
     <div class="wrap">
+      <span class="mark mark-tr" aria-hidden="true">+</span>
       <div class="sec-head reveal">
         <p class="eyebrow"><span class="num">05</span><span data-i18n="s5.label">Capabilities</span><span class="hair"></span></p>
         <h2 data-i18n="s5.title">One tool for the whole loop.</h2>
@@ -289,8 +297,9 @@ A request to buy, price, or compare suppliers.
   </section>
 
   <!-- ============ 06 download ============ -->
-  <section id="download">
+  <section id="download" class="band-ink">
     <div class="wrap">
+      <span class="mark mark-tr" aria-hidden="true">+</span>
       <div class="sec-head reveal">
         <p class="eyebrow"><span class="num">06</span><span data-i18n="s6.label">Install</span><span class="hair"></span></p>
         <h2 data-i18n="dl.title">Two ways to install, both about a minute.</h2>
@@ -299,7 +308,7 @@ A request to buy, price, or compare suppliers.
 
       <div class="dl">
         <div class="dl-card is-primary reveal">
-          <span class="chip chip-ok" data-i18n="dl.recommended">RECOMMENDED</span>
+          <span class="chip chip-band" data-i18n="dl.recommended">RECOMMENDED</span>
           <h3 style="margin-top:16px" data-i18n="dl.a.title">Paste one line</h3>
           <p class="body" data-i18n="dl.a.body">The installer picks the right build for your machine, puts <code>neko</code> on your PATH so any terminal can find it, and keeps it updated afterwards.</p>
           <div class="install">
@@ -377,7 +386,7 @@ A request to buy, price, or compare suppliers.
   </section>
 </main>
 
-<footer>
+<footer class="band-ink">
   <div class="wrap">
     <div class="foot-rows">
       <div>

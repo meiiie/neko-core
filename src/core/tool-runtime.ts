@@ -53,6 +53,9 @@ export class ToolRegistry {
   mode: PermissionMode;
   /** Built-in tools turned off at runtime (via `/tools <name>` in chat). */
   disabled = new Set<string>();
+  /** Reads may leave the project root (default). Writes never do. Credential paths are refused either
+   * way - see OUTSIDE_DENIED. Set false to restore a hard wall around the project. */
+  readOutsideRoot = true;
   /** The agent's current todo list (set by the todo_write tool; rendered by the REPL). */
   todos: { content: string; status: string }[] = [];
   /** Opt-in shell hooks around tool calls (set from config). */
@@ -415,16 +418,18 @@ export class ToolRegistry {
       if (!v.ok) return `Blocked by adversarial check: ${v.reason || "looks unsafe"}`;
     }
 
-    // Snapshot the target before a structured mutation so /rewind can restore it.
-    if ((name === "write_file" || name === "edit" || name === "multi_edit") && args.path) {
-      this.snapshotFile(resolveInRoot(this.root, String(args.path)));
-    }
     try {
+      // Snapshot the target before a structured mutation so /rewind can restore it. This sits INSIDE
+      // the try because resolveInRoot throws on a path escape, and a tool that throws out of execute
+      // crashes the agent loop instead of handing it an observation it can recover from.
+      if ((name === "write_file" || name === "edit" || name === "multi_edit") && args.path) {
+        this.snapshotFile(resolveInRoot(this.root, String(args.path)));
+      }
       const out = name === "bash" ? await this.runBash(args, signal)
         : name === "read_file" ? await this.runReadFile(args)
         : name === "skill" ? this.runSkill(args)
         : name === "computer" ? await this.runComputer(args, signal)
-        : await DISPATCH[name](this.root, args);
+        : await DISPATCH[name](this.root, args, { readOutsideRoot: this.readOutsideRoot });
       this.runPostHook(name, args, typeof out === "string" ? out : "[image]");
       return out;
     } catch (error) {
@@ -436,12 +441,12 @@ export class ToolRegistry {
    * everything else -> the line-numbered text path. */
   private async runReadFile(args: Record<string, any>): Promise<string | any[]> {
     const raw = requireArg(args, "path");
-    const path = resolveInRoot(this.root, raw);
+    const path = resolveForRead(this.root, raw, this.readOutsideRoot);
     if (!existsSync(path)) return `Error: no such file: ${raw}`;
     const ext = (raw.split(".").pop() ?? "").toLowerCase();
     if (IMAGE_EXTS.has(ext)) return readImageFile(path, raw, ext, this.vision);
     if (ext === "pdf") return readPdfFile(path, raw, args);
-    return await toolReadFile(this.root, args);
+    return await toolReadFile(this.root, args, { readOutsideRoot: this.readOutsideRoot });
   }
 
   /** First-class desktop/GUI control (Windows): dispatches to the computer-use skill's accessibility-tree
@@ -631,9 +636,9 @@ export class ToolRegistry {
   }
 }
 
-async function toolReadFile(root: string, args: Record<string, any>): Promise<string> {
+async function toolReadFile(root: string, args: Record<string, any>, opts: ToolOpts): Promise<string> {
   const raw = requireArg(args, "path");
-  const path = resolveInRoot(root, raw);
+  const path = resolveForRead(root, raw, opts.readOutsideRoot);
   if (!existsSync(path)) return `Error: no such file: ${raw}`;
   const stat = statSync(path);
   if (stat.isDirectory()) return `Error: is a directory: ${raw}`;
@@ -853,21 +858,21 @@ function imageDims(buf: Buffer, ext: string): { w: number; h: number } | null {
   return null;
 }
 
-function toolSearch(root: string, args: Record<string, any>): string {
+function toolSearch(root: string, args: Record<string, any>, opts: ToolOpts): string {
   const pattern = requireArg(args, "pattern");
   // Prefer ripgrep when installed: far faster on big trees + honors .gitignore. Fall back to the
   // built-in walk (no rg) — both support glob/case_insensitive/context so behavior is consistent.
   const rg = Bun.which("rg");
   if (rg) {
-    const out = ripgrepSearch(rg, root, pattern, args);
+    const out = ripgrepSearch(rg, root, pattern, args, opts);
     if (out !== null) return out; // null = rg couldn't run -> use the JS walk
   }
-  return jsSearch(root, pattern, args);
+  return jsSearch(root, pattern, args, opts);
 }
 
 /** ripgrep search. Returns null only if rg fails to spawn (so the caller falls back to jsSearch). */
-function ripgrepSearch(rgPath: string, root: string, pattern: string, args: Record<string, any>): string | null {
-  const rel = args.path ? relative(resolve(root), resolveInRoot(root, args.path)).split(sep).join("/") || "." : ".";
+function ripgrepSearch(rgPath: string, root: string, pattern: string, args: Record<string, any>, opts: ToolOpts): string | null {
+  const rel = args.path ? relative(resolve(root), resolveForRead(root, args.path, opts.readOutsideRoot)).split(sep).join("/") || "." : ".";
   const ctx = Math.max(0, Math.min(5, Math.floor(Number(args.context) || 0)));
   const rgArgs = ["--line-number", "--no-heading", "--color=never", "--max-columns=250", "--max-count=2000"];
   if (args.case_insensitive) rgArgs.push("-i");
@@ -885,14 +890,14 @@ function ripgrepSearch(rgPath: string, root: string, pattern: string, args: Reco
 }
 
 /** Built-in regex walk — the fallback when ripgrep isn't installed. Also supports glob/case/context. */
-function jsSearch(root: string, pattern: string, args: Record<string, any>): string {
+function jsSearch(root: string, pattern: string, args: Record<string, any>, opts: ToolOpts): string {
   let regex: RegExp;
   try {
     regex = new RegExp(pattern, args.case_insensitive ? "i" : "");
   } catch (error) {
     return `Error: invalid regex: ${(error as Error).message}`;
   }
-  const base = resolveInRoot(root, args.path || ".");
+  const base = resolveForRead(root, args.path || ".", opts.readOutsideRoot);
   const rootResolved = resolve(root);
   const ctx = Math.max(0, Math.min(5, Math.floor(Number(args.context) || 0)));
   const glob = args.glob ? new Bun.Glob(String(args.glob)) : null;
@@ -929,9 +934,9 @@ function jsSearch(root: string, pattern: string, args: Record<string, any>): str
   return matches.length ? matches.join("\n") : "(no matches)";
 }
 
-function toolGlob(root: string, args: Record<string, any>): string {
+function toolGlob(root: string, args: Record<string, any>, opts: ToolOpts): string {
   const pattern = requireArg(args, "pattern");
-  const base = resolveInRoot(root, args.path || ".");
+  const base = resolveForRead(root, args.path || ".", opts.readOutsideRoot);
   const rootResolved = resolve(root);
   const results: string[] = [];
   try {
@@ -952,9 +957,9 @@ function toolGlob(root: string, args: Record<string, any>): string {
   return results.length ? results.sort().join("\n") : "(no files)";
 }
 
-function toolLs(root: string, args: Record<string, any>): string {
+function toolLs(root: string, args: Record<string, any>, opts: ToolOpts): string {
   const raw = args.path || ".";
-  const path = resolveInRoot(root, raw);
+  const path = resolveForRead(root, raw, opts.readOutsideRoot);
   if (!existsSync(path)) return `Error: no such directory: ${raw}`;
   if (!statSync(path).isDirectory()) return `Error: not a directory: ${raw}`;
   const entries = readdirSync(path, { withFileTypes: true })
@@ -1092,6 +1097,49 @@ function realpathNearest(p: string): string {
   }
 }
 
+/**
+ * Paths a READ may not reach even when reads are allowed outside the project root.
+ *
+ * The root confinement was always about limiting the blast radius of MUTATION; it caught reads by
+ * accident, and a wall people route around is not a control. What actually needs defending is
+ * credential material, so that is defended directly and by name.
+ */
+const OUTSIDE_DENIED: Array<[RegExp, string]> = [
+  [/(^|[\\/])\.ssh([\\/]|$)/i, "SSH keys"],
+  [/(^|[\\/])id_(rsa|dsa|ecdsa|ed25519)([.\\/]|$)/i, "a private key"],
+  [/(^|[\\/])\.gnupg([\\/]|$)/i, "GnuPG keys"],
+  [/(^|[\\/])\.aws([\\/]|$)/i, "AWS credentials"],
+  [/(^|[\\/])\.docker[\\/]config\.json$/i, "Docker credentials"],
+  [/(^|[\\/])\.netrc$/i, "netrc credentials"],
+  [/(^|[\\/])\.git-credentials$/i, "git credentials"],
+  [/(^|[\\/])\.neko-core[\\/]config\.json$/i, "Neko's own key store"],
+  [/(^|[\\/])\.env(\.|$)/i, "an environment file"],
+  [/\.(pem|key|p12|pfx|jks|keystore|ppk)$/i, "key material"],
+  [/(^|[\\/])(Keychains|Login Data|Cookies|Web Data)([\\/]|$)/i, "a credential store"],
+  [/(^|[\\/])User Data[\\/]/i, "a browser profile"],
+  [/^\/etc\/(shadow|sudoers|gshadow)/i, "a system credential file"],
+];
+
+export function deniedOutsideRoot(path: string): string | null {
+  for (const [pattern, what] of OUTSIDE_DENIED) if (pattern.test(path)) return what;
+  return null;
+}
+
+/**
+ * Resolve a path for a READ. Inside the root nothing changes. Outside it, the host decides: with
+ * `allowOutside` the read proceeds unless the path is credential material, and without it the old
+ * refusal stands. Writes never come through here - they keep `resolveInRoot`.
+ */
+function resolveForRead(root: string, p: string, allowOutside: boolean): string {
+  if (!allowOutside) return resolveInRoot(root, p);
+  const rootResolved = resolve(root);
+  const resolved = resolve(rootResolved, p);
+  if (resolved === rootResolved || resolved.startsWith(rootResolved + sep)) return resolveInRoot(root, p);
+  const denied = deniedOutsideRoot(resolved);
+  if (denied) throw new Error(`refused: ${denied} is never read, inside the project or out: ${p}`);
+  return resolved;
+}
+
 function resolveInRoot(root: string, p: string): string {
   const resolved = resolve(root, p);
   const rootResolved = resolve(root);
@@ -1164,7 +1212,9 @@ function describe(name: string, args: Record<string, any>): string {
   return name;
 }
 
-const DISPATCH: Record<string, (root: string, args: Record<string, any>) => string | Promise<string>> = {
+export interface ToolOpts { readOutsideRoot: boolean }
+
+const DISPATCH: Record<string, (root: string, args: Record<string, any>, opts: ToolOpts) => string | Promise<string>> = {
   read_file: toolReadFile,
   search: toolSearch,
   glob: toolGlob,

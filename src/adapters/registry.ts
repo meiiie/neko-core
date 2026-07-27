@@ -162,7 +162,8 @@ export function renderCapabilities(caps: Capability[]): string {
 
 // --------------------------------------------------------------- policy
 export interface PolicyFinding {
-  severity: "fail" | "warn";
+  /** `info` states a deliberate posture rather than a problem; it never moves the verdict. */
+  severity: "fail" | "warn" | "info";
   code: string;
   subject: string;
   message: string;
@@ -229,6 +230,18 @@ export function evaluatePolicy(config: NekoConfig): PolicyReport {
     findings.push({ severity: "warn", code: "bounded_autonomy_on", subject: "mode", message: "mode=auto (--yolo): gated tools run without prompting. Named state, not hidden." });
   }
 
+  // Reads reaching outside the project is a deliberate default, not a leak: writes stay confined and
+  // credential paths are refused either way. It is reported so the boundary stays something you can
+  // read off a command rather than something you have to trust.
+  if (config.readOutsideRoot) {
+    findings.push({
+      severity: "info",
+      code: "reads_outside_root",
+      subject: "read_outside_root",
+      message: "Reads may resolve outside the project directory; writes, edits and bash may not. Credential paths (SSH, .env, key material, browser stores) stay refused. Set read_outside_root:false for a hard wall.",
+    });
+  }
+
   const verdict = findings.some((f) => f.severity === "fail")
     ? "fail"
     : findings.some((f) => f.severity === "warn")
@@ -239,9 +252,10 @@ export function evaluatePolicy(config: NekoConfig): PolicyReport {
 
 export function renderPolicyReport(report: PolicyReport): string {
   const lines = ["Neko Core policy", `Verdict: ${report.verdict.toUpperCase()}`, "", "Findings:"];
-  if (!report.findings.length) {
+  // An informational line states a posture, not a problem — it must not swallow the reassurance that
+  // the boundary itself audited clean.
+  if (!report.findings.some((f) => f.severity !== "info")) {
     lines.push("- PASS the safe/gated boundary is consistent.");
-    return lines.join("\n");
   }
   for (const f of report.findings) {
     lines.push(`- ${f.severity.toUpperCase()} ${f.code} [${f.subject}]: ${f.message}`);

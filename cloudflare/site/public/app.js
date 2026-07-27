@@ -143,20 +143,22 @@
     });
     document.documentElement.lang = lang;
     document.title = TITLES[lang];
-    var button = document.getElementById("lang");
-    if (button) button.textContent = lang === "vi" ? "EN" : "VI";
+    // Show which language is ON rather than which one a click would reach. A single button reading
+    // "EN" above Vietnamese text is ambiguous, and readers took it as a label of the current state.
+    [].forEach.call(document.querySelectorAll(".langswitch button"), function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === lang));
+    });
     current = lang;
   }
 
   apply(current);
 
-  var langButton = document.getElementById("lang");
-  if (langButton) {
-    langButton.addEventListener("click", function () {
-      apply(current === "vi" ? "en" : "vi");
+  [].forEach.call(document.querySelectorAll(".langswitch button"), function (button) {
+    button.addEventListener("click", function () {
+      apply(button.getAttribute("data-lang"));
       try { localStorage.setItem("neko-lang", current); } catch (e) { /* private mode */ }
     });
-  }
+  });
 
   /* ---------- platform ---------- */
   var RELEASE = "https://github.com/meiiie/neko-core/releases/latest/download/";

@@ -6,6 +6,21 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Reads may now leave the project directory; writes still may not.** Asking Neko to read a skill, a
+  doc, or a file in a sibling repo returned `path escapes project root` — a wall that stopped ordinary
+  work without bounding any damage, since the reason for the confinement was always the blast radius of
+  a *mutation*. `write_file`, `edit`, `multi_edit` and the bash sandbox are unchanged. What actually
+  needed defending is defended by name instead: SSH keys, `.env`, `.aws`, `.gnupg`, netrc and git
+  credentials, key material, browser and OS credential stores, and Neko's own `~/.neko-core/config.json`
+  are refused outside the root whatever the setting. `neko policy` prints the posture, and
+  `"read_outside_root": false` restores the old wall.
+
+  Found while testing it: a path escape on `write_file` **threw out of `execute`** instead of returning
+  an observation, because the `/rewind` snapshot ran before the try block — a tool that throws crashes
+  the agent loop rather than handing it something it can recover from.
+
 ### Added
 
 - **The oracle** — a second opinion from a *different* model, deliberately given no tools. It receives a

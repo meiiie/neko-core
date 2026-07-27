@@ -104,8 +104,14 @@ test("edit unique / not found / ambiguous", async () => {
   expect(await reg.execute("edit", { path: "a.ts", old_string: "const ", new_string: "let " })).toContain("times");
 });
 
-test("path escape refused", async () => {
+test("path escape refused for writes; reads are the host's call", async () => {
   const { reg } = makeReg();
+  // Writes never leave the project, whatever the read setting is.
+  expect(await reg.execute("write_file", { path: "../x", content: "no" })).toContain("escapes project root");
+  // Reads do by default — the wall around them stopped ordinary work (a skill file one directory over)
+  // without bounding any damage. Full coverage in test/read-outside-root.test.ts.
+  expect(await reg.execute("read_file", { path: "../x" })).toContain("no such file");
+  reg.readOutsideRoot = false;
   expect(await reg.execute("read_file", { path: "../x" })).toContain("escapes project root");
 });
 

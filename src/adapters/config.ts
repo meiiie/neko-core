@@ -88,6 +88,11 @@ export const DEFAULTS: Record<string, any> = {
   image_max_bytes: 450_000, // protects strict OpenAI-compatible endpoints from oversized inline data URLs
   auto_update_check: true, // check for a newer release at startup (daily-cached; set false to silence)
   auto_update: true, // AUTO-INSTALL that newer release in the background (claude-code style); false = notify only
+  // READS may leave the project directory; writes and edits never may. The root confinement exists to
+  // bound what a mistake can DAMAGE, and reading a doc, a skill, or a sibling repo damages nothing -
+  // while refusing it made ordinary work impossible. Credential paths stay refused either way
+  // (core/tool-runtime.ts OUTSIDE_DENIED). Set false for a hard wall around the project.
+  read_outside_root: true,
   mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
   // The oracle: a second opinion from a STRONGER model, consulted with a curated bundle of files and
   // no tools. `profile` names any profile below - which model is "the strong one" is your decision, not
@@ -288,6 +293,7 @@ const BOOLEAN_ENV_KEYS = new Set([
   "fullscreen",
   "mcp_lazy",
   "prompt_cache",
+  "read_outside_root",
   "sandbox",
   "sandbox_auto_approve",
   "sandbox_network",
@@ -465,6 +471,9 @@ export class NekoConfig {
       aggregatorTemperature: m.aggregator_temperature != null ? Number(m.aggregator_temperature) : this.temperature,
     };
   }
+  /** Reads may resolve outside the project root (default true); writes never may. */
+  get readOutsideRoot(): boolean { return this.data.read_outside_root !== false; }
+
   /** When true, the catastrophic-bash seatbelt is disabled (default false). */
   get allowDangerousBash(): boolean { return Boolean(this.data.allow_dangerous_bash); }
 
