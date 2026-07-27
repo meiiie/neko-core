@@ -69,6 +69,29 @@ curl -fsSL https://neko.holilihu.online/install.sh | head -3            # the re
 The last one is the one that matters. `curl … | sh` is printed in the README, inside both installer
 scripts, and in every release note: if it ever returns HTML, every new user's first command fails.
 
+## The version on the page comes from the release, not from this repo
+
+The Worker reads `releases/latest` from the GitHub API and rewrites `[data-release]` spots — the version
+in the announce bar and the footer, and the five download sizes — so shipping a release needs no site
+deploy. Three things keep that safe: it is cached ten minutes, it fails open to whatever was baked in at
+deploy time, and it only fills in elements the markup marked for it.
+
+Two traps, both paid for:
+
+- **Static assets are served BEFORE the Worker.** `/` never reached it, so the rewrite silently did
+  nothing while `/install.sh` and `/__release` worked fine — they have no matching file. Fixed with
+  `run_worker_first = ["/", "/index.html"]` in `wrangler.toml`. If the version ever stops updating, check
+  this first.
+- **Do not stack two caches with the same TTL.** The first version also passed `cf: { cacheTtl: 600 }` on
+  the GitHub call. When the outer cache expired it re-read the still-cached inner one and re-primed the
+  same stale answer for another ten minutes — v0.18.0 shipped and one region kept serving 0.17.1 while
+  another was already correct. There is now exactly one cache, and freshness is checked against a
+  timestamp the Worker writes into the entry rather than against the platform honouring `max-age`.
+
+To check by hand: `curl -s https://neko.holilihu.online/__release`. It must agree with
+`gh release view --json tagName`, and the rendered page must contain the same number — `/__release` being
+right while the page is stale means the HTML rewrite is not running.
+
 ## The scales are measured, not asserted
 
 `audit.js` (next to this file) walks every rendered element and reports anything off the spacing or type

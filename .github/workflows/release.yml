@@ -117,6 +117,13 @@ jobs:
   # It waits because the Worker caches the API response for ten minutes; a fresh tag can take that long
   # to surface. Failure here does not invalidate the binaries (they are already attached) — it means the
   # site needs looking at.
+  #
+  # Honest limit: this checks the ONE edge location the runner resolves to. In v0.18.0 it passed green
+  # while another region still served the previous version, because the Worker was stacking two caches
+  # with the same TTL and each expiry re-primed the stale answer from the still-cached one underneath.
+  # That is fixed at the source (one cache, freshness checked against a timestamp the Worker writes), so
+  # the worst case is now a bounded ten minutes that self-heals — but a green tick here is evidence about
+  # one colo, not a proof about all of them.
   site:
     name: site reports the new version
     needs: build

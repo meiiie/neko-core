@@ -43,10 +43,19 @@ async function latestRelease(ctx) {
   const key = new Request("https://neko.holilihu.online/__release", { method: "GET" });
   const cache = caches.default;
   const hit = await cache.match(key);
-  if (hit) return hit.json().catch(() => null);
+  if (hit) {
+    const cached = await hit.json().catch(() => null);
+    // Freshness is checked against a timestamp WE wrote, not against the platform honouring
+    // Cache-Control. v0.18.0 shipped and this endpoint kept answering 0.17.1 in one region while
+    // another was already correct: the entry was outliving its max-age, and each expiry re-read a
+    // still-cached upstream and re-primed the same stale answer for another interval.
+    if (cached && typeof cached.at === "number" && Date.now() - cached.at < RELEASE_TTL * 1000) return cached;
+  }
 
   let res;
   try {
+    // No `cf.cacheTtl` here on purpose. Two caches with the same TTL stacked on one another is what
+    // produced the self-refreshing stale loop; this Worker keeps exactly one, the one above.
     res = await fetch(RELEASE_API, {
       headers: {
         // GitHub rejects unidentified clients; the version pin keeps the response shape stable.
@@ -54,7 +63,7 @@ async function latestRelease(ctx) {
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
       },
-      cf: { cacheTtl: RELEASE_TTL, cacheEverything: true },
+      cf: { cacheTtl: 0 },
     });
   } catch {
     return null;
@@ -65,6 +74,7 @@ async function latestRelease(ctx) {
   if (!data || typeof data.tag_name !== "string") return null;
 
   const info = {
+    at: Date.now(),
     version: data.tag_name.replace(/^v/, ""),
     url: typeof data.html_url === "string" ? data.html_url : `https://github.com/${REPO}/releases`,
     sizes: Object.fromEntries(
