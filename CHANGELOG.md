@@ -6,6 +6,23 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The oracle** — a second opinion from a *different* model, deliberately given no tools. It receives a
+  curated bundle of your files and returns a diagnosis, a plan keyed to real paths, how to verify it, and
+  what it could not determine. `neko oracle -p "…" -f "src/**/*.ts"`, `--dry-run` to see exactly what
+  would be sent, `--followup` to push back on the answer, `neko oracle sessions|show` to read past ones.
+  In a session Neko can consult it itself; that call is approval-gated, because the files leave your
+  machine — the same bar as `bash`. Secret stores are refused whole and credential-shaped literals are
+  masked in place, while `process.env.API_KEY` and `` `Bearer ${token}` `` are left intact so the code
+  stays readable. Over budget drops whole files and names them rather than truncating a body. Which
+  model answers is a profile: `{"oracle": {"profile": "claude"}}`. See `docs/process/ORACLE.md`.
+
+- **A landing page for `neko.holilihu.online`** (`cloudflare/site/`). It also fixes a live bug: the root
+  of the public install domain redirected to the frozen `bang_c` predecessor repo. `/install.sh` and
+  `/install.ps1` keep behaving exactly as before — they are printed in the README and in every release
+  note, so they are a contract. Deploy runbook: `cloudflare/site/DEPLOY.md`.
+
 ## [0.17.1] — 2026-07-25
 
 ### Fixed

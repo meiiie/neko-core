@@ -75,7 +75,7 @@ test("patterns that leave the project root are refused, not resolved", () => {
 
 test("credential-shaped literals are masked, but code that merely names a key is left intact", () => {
   const masked = maskCredentials([
-    'const apiKey = "sk-live-9f2b7c41d8e6a05314bd";',
+    'const apiKey = "sk-live-EXAMPLE-not-a-real-key";',
     "const key = process.env.OPENAI_API_KEY;",
     'password: "hunter2hunter2hunter2"',
     'token: ""',
@@ -83,7 +83,7 @@ test("credential-shaped literals are masked, but code that merely names a key is
     "aws = AKIAIOSFODNN7EXAMPLE",
   ].join("\n"));
   // The real values are gone.
-  expect(masked.text).not.toContain("sk-live-9f2b7c41d8e6a05314bd");
+  expect(masked.text).not.toContain("sk-live-EXAMPLE-not-a-real-key");
   expect(masked.text).not.toContain("hunter2hunter2hunter2");
   expect(masked.text).not.toContain("AKIAIOSFODNN7EXAMPLE");
   // The code stays readable: an env reference and an empty string are not credentials.
@@ -108,7 +108,7 @@ test("secret stores are recognised by name", () => {
 test("a bundle refuses secret files and key material, and says so", () => {
   const root = workspace({
     "src/a.ts": "export const a = 1;\n",
-    ".env": "OPENAI_API_KEY=sk-live-9f2b7c41d8e6a05314bd\n",
+    ".env": "OPENAI_API_KEY=sk-live-EXAMPLE-not-a-real-key\n",
     "certs/key.txt": "-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----\n",
   });
   try {
@@ -117,7 +117,7 @@ test("a bundle refuses secret files and key material, and says so", () => {
     expect(bundle.skipped.find((item) => item.path === ".env")!.reason).toContain("credential store");
     expect(bundle.skipped.find((item) => item.path === "certs/key.txt")!.reason).toContain("private key");
     // Refused content never reaches the payload, and the refusal is visible in it.
-    expect(bundle.text).not.toContain("sk-live-9f2b7c41d8e6a05314bd");
+    expect(bundle.text).not.toContain("sk-live-EXAMPLE-not-a-real-key");
     expect(bundle.text).not.toContain("BEGIN RSA PRIVATE KEY");
     expect(bundle.text).toContain("<not-included>");
   } finally {

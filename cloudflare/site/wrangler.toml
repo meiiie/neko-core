@@ -1,0 +1,15 @@
+name = "neko-site"
+main = "worker.js"
+compatibility_date = "2026-07-27"
+workers_dev = true # bootstrap URL; the Custom Domain neko.holilihu.online is attached in the dashboard
+
+# The landing page is plain static files. The Worker exists only to keep /install.sh and /install.ps1
+# behaving EXACTLY as they do today - those two paths are printed in the README, in the installers
+# themselves, and in every release note, so they are a contract, not a page.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[observability]
+enabled = true
+head_sampling_rate = 0.1
