@@ -80,8 +80,13 @@ Two traps, both paid for:
 
 - **Static assets are served BEFORE the Worker.** `/` never reached it, so the rewrite silently did
   nothing while `/install.sh` and `/__release` worked fine — they have no matching file. Fixed with
-  `run_worker_first = ["/", "/index.html"]` in `wrangler.toml`. If the version ever stops updating, check
-  this first.
+  `run_worker_first` in `wrangler.toml`. If the version ever stops updating, check this first.
+
+  It bit a second time, in the opposite direction: adding `not_found_handling = "404-page"` made the
+  asset layer answer every non-matching path with `404.html` instead of falling through, which swallowed
+  `/__release` the moment the 404 page shipped. Every path the Worker must own is now listed in
+  `run_worker_first` explicitly — including the two installer paths, because a contract should not
+  depend on a fall-through that a later setting can remove.
 - **Do not stack two caches with the same TTL.** The first version also passed `cf: { cacheTtl: 600 }` on
   the GitHub call. When the outer cache expired it re-read the still-cached inner one and re-primed the
   same stale answer for another ten minutes — v0.18.0 shipped and one region kept serving 0.17.1 while
