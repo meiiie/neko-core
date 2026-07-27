@@ -10,7 +10,7 @@
 
   var VI = {
     "announce": "Phiên bản 0.17.1 có thêm Oracle — ý kiến thứ hai từ một mô hình khác.",
-    "announce.link": "Nó làm gì",
+    "announce.link": "Nó làm gì <span class=\"arrow\">&rarr;</span>",
 
     "nav.how": "Cách hoạt động",
     "nav.download": "Tải về",
@@ -18,7 +18,7 @@
     "nav.cta": "Lấy Neko",
 
     "hero.eyebrow": "Tác tử lập trình chạy tại máy",
-    "hero.h1": "Nó chạy trên máy bạn.<br>Và hỏi trước khi ra tay.",
+    "hero.h1": "Nó chạy trên máy bạn.<br>Và hỏi trước khi đổi gì.",
     "hero.lead": "Một tác tử trong terminal biết đọc, sửa, chạy, duyệt web và ghi nhớ — với bất kỳ mô hình nào, kể cả mô hình chạy ngoại tuyến ngay trên phần cứng của bạn.",
     "copy": "Chép",
     "hero.download": "Tải cho",
@@ -51,8 +51,8 @@
     "s2.f4.t": "Khoá vẫn là của bạn",
     "s2.f4.d": "Đọc từ biến môi trường khi một yêu cầu cần đến, để ngoài dự án, và không bao giờ in ra.",
 
-    "s3.title": "Ý kiến thứ hai, từ một mô hình không có tay.",
-    "s3.body": "Khi bí, Neko gửi được một lát cắt bạn chọn của dự án sang một mô hình mạnh hơn để hỏi ý. Mô hình đó không nhận công cụ nào, nên điều nhiều nhất nó làm được là trả lời. Đưa tay cho nó thì nó thành một tác tử thứ hai, tính tiền bạn hai lần cho cùng một ngữ cảnh.",
+    "s3.title": "Ý kiến thứ hai từ một mô hình không chạm được vào máy bạn.",
+    "s3.body": "Khi bí, Neko gửi được một lát cắt bạn chọn của dự án sang một mô hình mạnh hơn để hỏi ý. Mô hình đó không được cấp công cụ nào: nó không mở được tệp trên ổ đĩa của bạn, không chạy được lệnh, không sửa được dòng nào. Nó nhận đúng những tệp bạn đã duyệt và gửi lại chữ.",
     "s3.f1.t": "Bạn thấy bản kê khai trước",
     "s3.f1.d": "Mọi tệp trong gói đều được liệt kê trước khi yêu cầu đi ra, và <code>--dry-run</code> dừng lại đúng ở đó.",
     "s3.f2.t": "Tệp chứa bí mật bị bỏ nguyên tệp",
@@ -109,7 +109,7 @@
     "dl.get": "Tải",
     "dl.b.help": "<b>Hai điều nên biết trước.</b> Neko là chương trình chạy trong terminal, nên mở tệp ra bạn sẽ thấy một cửa sổ đầy chữ chứ không phải ứng dụng đồ hoạ — cửa sổ đó chính là Neko. Và các bản dựng này chưa có chữ ký số, nên Windows sẽ hiện màn hình xanh \"ứng dụng không nhận dạng được\": chọn <b>More info</b>, rồi <b>Run anyway</b>.",
     "dl.foot": "Mọi bản dựng đều công bố trên GitHub kèm mã SHA-256, ra thẳng từ quy trình dựng công khai.",
-    "dl.foot.link": "Tất cả bản phát hành",
+    "dl.foot.link": "Tất cả bản phát hành <span class=\"arrow\">&rarr;</span>",
 
     "foot.by": "Do The Wiii Lab xây dựng. Miễn phí, giấy phép MIT.",
     "foot.releases": "Bản phát hành",
@@ -210,4 +210,54 @@
       });
     });
   });
+
+  /*
+   * Motion. Everything below is additive: the class that enables the hidden-then-revealed state is
+   * added HERE, so a visitor with JavaScript off, or with reduced motion asked for, sees a complete
+   * page rather than a blank one waiting for an observer that will never fire.
+   */
+  var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (still || !("IntersectionObserver" in window)) return;
+
+  document.documentElement.classList.add("js-reveal");
+
+  // A section's hairline draws itself and its number flickers in as the section arrives; blocks rise
+  // 12px. Studied from cindy.cn, kept to the parts that mark structure rather than decorate it.
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add("is-in");
+      observer.unobserve(entry.target);
+    });
+  }, { rootMargin: "0px 0px -12% 0px", threshold: 0.1 });
+
+  [].forEach.call(document.querySelectorAll(".reveal, .eyebrow"), function (node) { observer.observe(node); });
+
+  // The nav steps out of the way going down and returns going up. Below the fold only: at the top of
+  // the page it must always be present.
+  var header = document.querySelector("header");
+  var lastY = window.scrollY;
+  var progress = document.getElementById("progress");
+  var ticking = false;
+
+  function onScroll() {
+    var y = window.scrollY;
+    if (header) {
+      var goingDown = y > lastY;
+      header.classList.toggle("is-hidden", goingDown && y > 320);
+    }
+    if (progress) {
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      progress.style.width = (max > 0 ? Math.min(100, (y / max) * 100) : 0) + "%";
+    }
+    lastY = y;
+    ticking = false;
+  }
+
+  window.addEventListener("scroll", function () {
+    if (ticking) return;
+    ticking = true;
+    window.requestAnimationFrame(onScroll);
+  }, { passive: true });
+  onScroll();
 })();
