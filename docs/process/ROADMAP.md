@@ -38,7 +38,7 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.17.1 (2026-07-25)** - a newly published release is no longer
+- **Branch:** `main`. **Current release: v0.18.1 (2026-07-27)** - a newly published release is no longer
   invisible for a day: the startup check cached "you are on the latest" for 24h, so a release shipping
   minutes after a launch was never discovered and `auto_update` installed nothing. "Up to date" (and a
   failed check) now expires after 3h while a found update keeps the day-long cache. Download, checksum,

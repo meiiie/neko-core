@@ -144,7 +144,7 @@ window rather than a graphical app, and the builds are not code-signed yet, so W
 "unrecognised app" screen — choose **More info → Run anyway**, or use the one-line install above, which
 also puts `neko` on your PATH and handles updates.
 
-**Current release: [v0.17.1](https://github.com/meiiie/neko-core/releases/tag/v0.17.1).**
+**[Latest release](https://github.com/meiiie/neko-core/releases/latest)** (the badge above tracks the version).
 Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
 real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). **Pin or roll back any time**
 (the pin holds — auto-update won't undo it): `neko update 0.9.0`, or at install time

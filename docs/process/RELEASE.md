@@ -23,7 +23,13 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
 - `CHANGELOG.md`: a dated section, written for USERS (what changed for them, with measurements where
   claims are made). No marketing adjectives without a number behind them.
 - `docs/process/WORKLOG.md`: the engineering story (what broke, how it was proven, what it cost).
-- `docs/process/ROADMAP.md`: status line reflects the new release.
+- `docs/process/ROADMAP.md`: BOTH the `## Current status` heading and the `**Current release:**`
+  bullet under it. Missing the second one shipped a roadmap claiming v0.17.1 after v0.18.1 was out.
+- `README.md` carries no version number by design — the release badge is the live one. If a number
+  ever creeps back in, delete it rather than maintain it.
+- `cloudflare/site/public/index.html`: the baked `data-release` values are the FAIL-OPEN fallback,
+  shown when the GitHub API is unreachable. Refresh them at release time and redeploy the site;
+  the live path needs no deploy, this one does.
 - Version bumped in BOTH `src/shared/version.ts` and `package.json`.
 
 ## 3. Tag → watch → verify (never tag-and-walk-away)
