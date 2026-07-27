@@ -1,6 +1,6 @@
 # Image briefs — Neko Core
 
-Ready-to-paste prompts for generating the visual assets the site, README and social cards need.
+Ready-to-paste prompts for the visual assets the site, README and social cards need.
 Companion to `assets/video-kit/README.md` (video) and `05-brand-board.png` (the system itself).
 
 ---
@@ -8,158 +8,146 @@ Companion to `assets/video-kit/README.md` (video) and `05-brand-board.png` (the 
 ## Read this before generating anything
 
 **1. The mark is not up for redesign.** `assets/neko-icon.png` — the amber pixel `/\_ _/\` — is the
-logo. Every asset below either uses those exact pixels or does not show a mark at all. This is the
-existing hard rule from the video kit: *do not replace the mark with a generic cat, robot, sparkle,
-brain, or purple AI orb.*
+logo. Every asset here either uses those exact pixels or shows no mark at all. The video kit's rule
+stands: *do not replace the mark with a generic cat, robot, sparkle, brain, or purple AI orb.*
 
 **2. Never ask an image model for text.** Image models still render typography as convincing gibberish,
 and half of these assets are bilingual. Generate **art only** — character, texture, background — and
 composite the words afterwards in HTML/CSS, then screenshot at the exact pixel size. That is how
-`social-preview.png` was made, it is why it is crisp, and it is the only way the Vietnamese diacritics
-come out right. Every prompt below therefore ends with *no text, no letters, no numbers, no watermark*.
+`social-preview.png` was made, it is why it is crisp, and it is the only way Vietnamese diacritics come
+out right. Every prompt below therefore ends with *no text, no letters, no numbers, no watermark*.
 
 **3. The palette is fixed.** Paste the hex values into the prompt; models drift to purple AI-glow
-otherwise.
+otherwise. These are the site's live tokens.
 
 ```
-ink       #0E0E12   background, always
-panel     #16161C   raised surfaces
-amber     #F0A030   THE accent - one signal, nothing competes with it
-cream     #F4F1EA   light bands
-ok green  #3ECF6E   only for "passed"
-cyan      #2ED9D9   only for keys/labels in code
+ink        #0A0B0D   the page ground, always
+surface    #0F1013   raised panels
+line       #1C1F24   hairline borders
+amber      #F0A030   THE accent — one signal, nothing competes with it
+cream      #F4F5F7   primary text
 ```
 
 ---
 
 ## Should Neko be anime-styled?
 
-Short answer: **a character, yes. The identity, no.** Three reasons, then the scope.
+**Yes, as a character in the hero — and never as the mark.**
 
-- The reference you liked, `cindy.cn`, contains **zero illustration**. Its whole force is typography,
-  numbered section markers, one red accent and a rotated ticker. We already match that structurally. So
-  anime is not what would close the gap with it — nothing is; we are there.
-- Neko's own brand board commits to "quiet dark-tech, one amber signal, pixel mark plus monospace
-  product type". A soft-shaded anime hero contradicts that in one screen, and a landing page that
-  contradicts its product's own visual language reads as a template.
-- But a **character is not a mark.** Cursor, Ollama, Bun, Hugging Face all run a character alongside a
-  strict wordmark. For a Vietnamese-first tool that wants non-engineers to try it, a friendly Neko is a
-  real asset — it just belongs where a character helps and typography cannot.
+An earlier version of this file said to keep the character out of the hero, on the grounds that
+cindy.cn uses no illustration. That was wrong. cindy.cn loads its art lazily; its hero does carry a
+painted anime character with a black cat, set opposite the wordmark. Recorded here so nobody plans
+around the mistake.
 
-**Scope it to:** the social/OG card, a 404 page, README section breaks, stickers and community posts,
-and the Vietnamese-language social posts. **Keep it out of:** the logo, the favicon, the app icon, the
-hero, and anything inside the product.
+What survives the correction is the boundary between two different objects:
 
----
+- The **mark** is `assets/neko-icon.png`. It stays exactly as drawn, in the nav, the favicon and the app
+  icon.
+- The **character** appears beside the mark and never instead of it: the hero, the social card, a 404
+  page, stickers, community posts.
 
-## A1 — Character sheet (the one anime asset)
+The site is already built for this. `.hero-grid` becomes two columns only when `/neko-hero.png` exists,
+so the page is correct today and gains the character the moment that file lands — no code change.
 
-Generate once, reuse forever. Ask for a sheet, not a single pose, so later assets stay consistent.
-
-> A character reference sheet for a mascot named Neko, drawn in a clean modern anime style with crisp
-> flat cel shading and confident dark linework — closer to a studio production sheet than to soft
-> pastel fan art. The character is a small black cat with a slightly angular, technical silhouette and
-> two glowing amber eyes (#F0A030), sitting or standing upright like a companion, calm and attentive
-> rather than cute-aggressive. Its only marking is a thin amber underline motif on the chest, echoing a
-> terminal cursor. Background is flat near-black #0E0E12. Palette strictly limited to #0E0E12,
-> #16161C, #F0A030 and #F4F1EA. Show four views arranged in a row: front sitting, three-quarter
-> standing, side profile walking, and a close-up of the face. Even studio lighting, no gradients on the
-> background, no glow effects, no neon, no purple, no lens flare, no cyberpunk city.
-> No text, no letters, no numbers, no logo, no watermark. 16:9.
-
-Save as `assets/character/neko-sheet.png`.
-
-## A2 — Character cut-out for compositing
-
-Run after A1, attaching A1 so the model matches it.
-
-> The same cat character from the attached reference sheet, single figure, three-quarter view, sitting
-> upright and looking slightly toward the viewer's right, as if watching a screen just out of frame.
-> Same flat cel shading, same dark linework, same amber eyes #F0A030. Fully isolated on a plain solid
-> background for cut-out, with a clean silhouette and no cast shadow.
-> No text, no letters, no numbers, no logo, no watermark. Square.
-
-Save as `assets/character/neko-cut.png`, then remove the background and keep a transparent PNG.
-
-## A3 — Sticker set (optional, community)
-
-> Six small chibi expressions of the attached cat character in the same flat anime style, arranged in a
-> 3x2 grid, each fully isolated with a thick cream #F4F1EA outline like a die-cut sticker: thinking,
-> approving with a raised paw, sleeping, surprised, focused at work, and waving. Flat colours only,
-> palette limited to #0E0E12, #F0A030 and #F4F1EA, no gradients, no glow.
-> No text, no letters, no numbers, no watermark. 3:2.
+One constraint the design direction imposes: the page is deliberately austere, so **the character is its
+single loud element**. It has to carry the amber signal on the near-black ground, or it reads as a
+sticker pasted onto someone else's website.
 
 ---
 
-## B1 — Social / Open Graph card (highest value — do this first)
+## A1 — The hero character *(generate this first)*
 
-The site currently serves `assets/social-preview.png`, which is correct but says nothing about the
-product. Replace it with a card that carries the promise.
+Target: `cloudflare/site/public/neko-hero.png`, portrait 3:4, displayed at 360×480. Generate on the
+site's own background colour so it composites with no cut-out step.
 
-**Do not generate this whole card.** Generate only the backdrop, then composite.
+> A portrait illustration of a mascot character named Neko, in a clean modern anime style with crisp cel
+> shading, confident dark linework and painterly rim light — studio production quality, not soft pastel
+> fan art. The character is a black cat with a slightly angular, technical silhouette, sitting upright
+> and alert like a companion beside a workstation, head turned three-quarters toward the viewer, calm
+> and attentive rather than cute. Its eyes glow warm amber (#F0A030) and are the brightest point in the
+> frame. A single thin amber rim light traces its back and one ear; everything else falls into near
+> black. One small amber underscore glyph floats near it like a terminal cursor. Background is flat
+> near-black #0A0B0D with no scenery, no room, no desk and no devices — the character sits in empty
+> space. Palette strictly limited to #0A0B0D, #1C1F24, #F0A030 and #F4F5F7. Vertical portrait
+> composition, full body, centred, with generous empty space above the head and below the paws.
+> No text, no letters, no numbers, no logo, no watermark, no glow bloom, no neon, no purple, no
+> cyberpunk city, no lens flare. Aspect ratio 3:4.
 
-Backdrop prompt:
+**If you want the cindy.cn read instead** — a human character holding the cat — swap the first two
+sentences for: *"A portrait illustration of a calm young engineer in a plain dark jacket, holding a small
+black cat with glowing amber eyes against their shoulder, both looking toward the viewer."* Keep every
+other sentence, especially the palette and the empty background. Pick one and stay with it; two
+characters in one brand is how a visual identity comes apart.
 
-> An abstract technical backdrop for a developer tool, near-black #0E0E12, extremely restrained. A
-> faint large-scale grid of thin lines at about 6 percent opacity, a few small amber #F0A030 crosshair
-> plus-marks scattered sparsely as registration marks, and one soft amber glow bleeding in from the
-> lower right corner at low intensity. Flat, editorial, print-like — like the endpaper of a technical
-> manual. Nothing centred; leave the left two thirds visually empty for text. No devices, no screens,
-> no people, no circuits, no neon, no purple, no 3D render.
-> No text, no letters, no numbers, no logo, no watermark. 1200x630.
+**After generating:** save at 720×960 (2× the display size, for retina), keep it under about 300 KB, and
+drop it at `cloudflare/site/public/neko-hero.png`. Nothing else needs changing — reload and the hero
+becomes two columns.
 
-Then composite in HTML at exactly **1200x630** and screenshot:
+## A2 — Consistency pass (only once A1 is chosen)
 
-- `assets/neko-icon.png` at 64px, top left, plus `NEKO CORE` in the monospace face
-- headline, one line, EN: **It works on your machine. It asks before it acts.**
-- headline, VI (separate card `og-vi.png`): **Nó chạy trên máy bạn. Và hỏi trước khi ra tay.**
+Attach A1 to every later generation and ask for the same character. Assets worth having, in order of
+value: a transparent cut-out for compositing into the OG card, a 404 pose (same character alone in a
+large empty frame, looking up and away, one amber dash far from it), and a 3×2 sticker sheet of chibi
+expressions with a thick cream die-cut outline.
+
+---
+
+## B1 — Social / Open Graph card *(generate this second)*
+
+The site currently serves `assets/social-preview.png`, which is on-brand but says nothing about the
+product. This is the asset most people will actually see, because it is what renders when the link is
+pasted anywhere.
+
+**Do not generate the whole card.** Generate the backdrop, then composite the words.
+
+> An abstract technical backdrop for a developer tool, near-black #0A0B0D, extremely restrained. A faint
+> large-scale grid of thin straight lines at roughly 6 percent opacity, a few small amber #F0A030
+> crosshair plus-marks scattered sparsely like registration marks, and one soft amber glow bleeding in
+> from the lower right corner at low intensity. Flat, editorial, print-like — the endpaper of a technical
+> manual. Nothing in the centre; leave the left two thirds visually empty for text. No devices, no
+> screens, no people, no circuits, no neon, no purple, no 3D render, no perspective.
+> No text, no letters, no numbers, no logo, no watermark. Aspect ratio 1200x630.
+
+Then composite at exactly **1200×630** and screenshot:
+
+- `assets/neko-icon.png` at 64 px, top left, with `NEKO CORE` beside it in the monospace face
+- headline, one line — EN: **It runs on your computer. It asks before it acts.**
+- the same card in Vietnamese as `og-vi.png` — **Nó chạy trên máy bạn. Và hỏi trước khi ra tay.**
 - footer strip: `neko.holilihu.online` · `MIT` · `Windows · macOS · Linux`
-- optional: A2's cut-out character at the right edge, bottom-aligned, about 38% of the height
+- optional: the A2 cut-out at the right edge, bottom-aligned, about 38% of the height
 
-Save as `cloudflare/site/public/og.png` (and `og-vi.png`), then point `og:image` at it in
-`index.html` — it currently falls back to `social-preview.png`.
+Save to `cloudflare/site/public/og.png`, then point `og:image` at it in `index.html` — it currently
+falls back to `social-preview.png`.
 
 ## B2 — README banner
 
-Replaces `assets/neko-core-banner.png`, which is only 1.9 KB and shows at low quality on GitHub.
-Same rule: generate the backdrop, composite the words.
+Replaces `assets/neko-core-banner.png`, which is 1.9 KB and shows at low quality on GitHub. Same rule:
+generate the backdrop, composite the words.
 
-> A wide, very restrained technical banner backdrop, near-black #0E0E12, aspect ratio 4:1. A single
-> thin amber #F0A030 horizontal rule running across the lower third, a sparse scatter of small amber
-> plus-marks, and a barely visible large grid. Flat and print-like, deep empty space in the middle for
-> a wordmark. No devices, no glow orbs, no circuits, no neon, no purple, no 3D.
+> A wide, restrained technical banner backdrop, near-black #0A0B0D, aspect ratio 4:1. One thin amber
+> #F0A030 horizontal rule across the lower third, a sparse scatter of small amber plus-marks, and a
+> barely visible large grid. Flat and print-like, with deep empty space through the middle for a
+> wordmark. No devices, no glow orbs, no circuits, no neon, no purple, no 3D.
 > No text, no letters, no numbers, no logo, no watermark. 1280x320.
-
-## B3 — 404 page
-
-The one place the character earns its keep unaccompanied.
-
-> The attached cat character sitting alone in a large empty near-black #0E0E12 space, small in frame,
-> looking up and to the right at nothing, one amber #F0A030 cursor-like dash floating far away from it.
-> Melancholy but not sad, lots of negative space, flat anime cel shading, no gradients, no glow.
-> No text, no letters, no numbers, no watermark. 16:9.
 
 ---
 
-## C — Assets you should NOT generate
+## Assets you should NOT generate
 
 | Asset | Why not | Do this instead |
 |---|---|---|
-| Product screenshots | A generated "terminal" always contains fake code and gibberish text | Capture a real session. `assets/video-kit/04-terminal-real.png` is one; the site uses hand-marked-up HTML so the text is real and translatable |
+| Product screenshots | A generated "terminal" always contains fake code and gibberish text | Capture a real session. The site marks its terminal up in HTML so the text is real and translatable |
 | Architecture diagrams | Image models cannot draw an accurate box-and-arrow diagram, and a wrong one is worse than none | Hand-author SVG, or Mermaid in the docs |
-| The logo / favicon / app icon | Already exists and is deliberately pixel-exact | `assets/neko-icon.png`, `assets/neko.ico`, `assets/avatar-512.png` |
-| Anything with a UI in it | Generated UI has invented affordances we do not ship | Screenshot the real thing |
+| The logo, favicon, app icon | Already exist and are deliberately pixel-exact | `assets/neko-icon.png`, `assets/neko.ico`, `assets/avatar-512.png` |
+| Anything containing a UI | Generated UI shows affordances we do not ship | Screenshot the real thing |
 
 ---
 
 ## Workflow
 
-1. Generate **A1** first. Everything else that shows the character attaches A1 as a reference — that is
-   what keeps the design from drifting between assets.
-2. Generate the **B1 backdrop**, composite the card, and ship it. That is the single asset most people
-   will actually see, because it is what appears when the link is pasted anywhere.
-3. Put source art in `assets/character/`, and only the final web-sized files in
-   `cloudflare/site/public/`. The site directory is served to the public byte for byte; nothing large
-   or unfinished belongs in it.
-4. Re-run `bun run build` only if you changed anything under `assets/` that the binary bundles
-   (`neko-icon.png` and the computer-use helpers are bundled; marketing art is not).
+1. Generate **A1**, pick one of the two readings, and drop the file in. The hero changes on reload.
+2. Generate the **B1** backdrop, composite the card, ship it, and update `og:image`.
+3. Keep source art in `assets/character/`; put only final web-sized files in
+   `cloudflare/site/public/`. That directory is served to the public byte for byte.
+4. Attach A1 to every later character generation. That is what keeps the design from drifting between
+   assets.

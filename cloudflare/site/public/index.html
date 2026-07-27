@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Neko Core - a local-first terminal coding agent</title>
-<meta name="description" content="Neko Core is a local-first terminal coding agent: it reads, edits, runs, browses and remembers - on your machine, with any model, and it asks before it changes anything. Free and MIT licensed.">
+<title>Neko Core — a coding agent that runs on your computer</title>
+<meta name="description" content="Neko Core is a terminal coding agent that reads, edits, runs, browses and remembers on your own machine, with any model. It asks before it changes anything. Free and MIT licensed.">
+<link rel="canonical" href="https://neko.holilihu.online/">
 <link rel="icon" href="/neko.ico" sizes="any">
 <link rel="icon" href="/neko-icon.png" type="image/png">
 <link rel="apple-touch-icon" href="/avatar-512.png">
-<meta property="og:title" content="Neko Core - a local-first terminal coding agent">
-<meta property="og:description" content="Reads, edits, runs, browses and remembers - on your machine, with any model. It asks before it changes anything.">
+<meta property="og:title" content="Neko Core — a coding agent that runs on your computer">
+<meta property="og:description" content="It reads, edits, runs, browses and remembers on your own machine, with any model. It asks before it changes anything.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://neko.holilihu.online/">
 <meta property="og:image" content="https://neko.holilihu.online/social-preview.png">
@@ -18,140 +19,131 @@
 <meta property="og:locale" content="en">
 <meta property="og:locale:alternate" content="vi">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#0e0e12">
+<meta name="theme-color" content="#0a0b0d">
 <link rel="stylesheet" href="/styles.css">
 <script>
-  // Resolve the language before first paint so the page never flashes the wrong one.
+  // Resolve language before first paint so the page never flashes the wrong one.
   (function () {
     var lang = "en";
     try {
       lang = localStorage.getItem("neko-lang")
         || (String(navigator.language || "").toLowerCase().indexOf("vi") === 0 ? "vi" : "en");
-    } catch (e) { /* private mode: English, which is what the markup already says */ }
+    } catch (e) { /* private mode: English, which the markup already is */ }
     document.documentElement.lang = lang;
   })();
 </script>
 </head>
 <body>
 
+<a class="visually-hidden" href="#main">Skip to content</a>
+
 <div class="announce">
-  <span class="slashes">//</span>
-  <span data-i18n="announce">Neko Core 0.17.1 is out - now with the Oracle, a second opinion from a different model.</span>
-  <a href="https://github.com/meiiie/neko-core/blob/main/docs/process/ORACLE.md" data-i18n="announce.link">Read about it &rarr;</a>
+  <div class="wrap">
+    <span class="pip" aria-hidden="true"></span>
+    <span data-i18n="announce">Version 0.17.1 adds the Oracle — a second opinion from a different model.</span>
+    <a href="https://github.com/meiiie/neko-core/blob/main/docs/process/ORACLE.md" data-i18n="announce.link">What it does</a>
+  </div>
 </div>
 
 <header>
   <div class="wrap nav">
     <a class="brand" href="/">
-      <img src="/neko-icon.png" alt="" width="26" height="26">
-      <span>NEKO<span class="brand-dim">&nbsp;CORE</span></span>
+      <img src="/neko-icon.png" alt="" width="24" height="24">
+      <span>NEKO<span class="dim"> CORE</span></span>
     </a>
     <nav class="nav-links">
-      <a href="#capabilities" data-i18n="nav.capabilities">Capabilities</a>
+      <a href="#how" data-i18n="nav.how">How it works</a>
       <a href="#download" data-i18n="nav.download">Download</a>
       <a href="https://github.com/meiiie/neko-core#readme" data-i18n="nav.docs">Docs</a>
       <a href="https://github.com/meiiie/neko-core">GitHub</a>
       <button class="langbtn" id="lang" type="button" aria-label="Switch language">VI</button>
-      <a class="btn btn-primary nav-cta" href="#download" data-os-label data-i18n="nav.cta">Download</a>
+      <a class="btn btn-primary" href="#download" data-i18n="nav.cta">Get Neko</a>
     </nav>
   </div>
 </header>
 
-<main>
-  <!-- ================= hero ================= -->
+<main id="main">
+
+  <!-- ============ hero: install lives here, at the top ============ -->
   <section class="hero">
-    <div class="wrap">
-      <div class="marker"><span class="rule"></span><span data-i18n="hero.marker">LOCAL-FIRST CODING AGENT</span></div>
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow"><span data-i18n="hero.eyebrow">Local-first coding agent</span></p>
 
-      <h1 class="wordmark">NEKO<span class="amber"> CORE</span><span class="caret">_</span></h1>
+        <h1>
+          <span data-i18n="hero.h1">It runs on your computer.<br>It asks before it acts.</span><span class="caret">_</span>
+        </h1>
 
-      <p class="tagline">
-        <span data-i18n="hero.tagline">It works on your machine.</span>
-        <span class="amber" data-i18n="hero.tagline2">It asks before it acts.</span>
-      </p>
+        <p class="lead" data-i18n="hero.lead">A terminal agent that reads, edits, runs, browses and remembers — with any model, including one running offline on your own hardware.</p>
 
-      <p class="lede" data-i18n="hero.lede">A terminal agent that reads, edits, runs, browses and remembers - with any model, including one running offline on your own hardware. Free, open source, and it never touches a file without telling you.</p>
+        <div class="install">
+          <div class="tabs" role="tablist">
+            <button class="tab" role="tab" id="tab-ps" aria-selected="true" aria-controls="cmd-ps">Windows</button>
+            <button class="tab" role="tab" id="tab-sh" aria-selected="false" aria-controls="cmd-sh">macOS &amp; Linux</button>
+          </div>
+          <div class="cmdrow" id="cmd-ps" role="tabpanel" aria-labelledby="tab-ps">
+            <span class="prompt" aria-hidden="true">&gt;</span>
+            <code>irm https://neko.holilihu.online/install.ps1 | iex</code>
+            <button class="copy" type="button" data-copy="irm https://neko.holilihu.online/install.ps1 | iex" data-i18n="copy">Copy</button>
+          </div>
+          <div class="cmdrow" id="cmd-sh" role="tabpanel" aria-labelledby="tab-sh" hidden>
+            <span class="prompt" aria-hidden="true">$</span>
+            <code>curl -fsSL https://neko.holilihu.online/install.sh | sh</code>
+            <button class="copy" type="button" data-copy="curl -fsSL https://neko.holilihu.online/install.sh | sh" data-i18n="copy">Copy</button>
+          </div>
+        </div>
 
-      <div class="hero-actions">
-        <a class="btn btn-primary btn-lg" id="heroDownload" href="#download">
-          <span data-i18n="hero.download">Download for</span> <span data-os-name>Windows</span>
-        </a>
-        <a class="btn btn-ghost btn-lg" href="#install" data-i18n="hero.terminal">Install from the terminal</a>
+        <div class="actions">
+          <a class="btn btn-primary btn-lg" id="heroDownload" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-windows-x64.exe">
+            <span data-i18n="hero.download">Download for</span>&nbsp;<span data-os-name>Windows</span>
+            <span class="sub" data-os-size>87 MB</span>
+          </a>
+          <a class="btn btn-secondary btn-lg" href="#download" data-i18n="hero.other">Other platforms</a>
+        </div>
+
+        <p class="small trust" data-i18n="hero.trust">Free forever · MIT licensed · Windows, macOS and Linux · no account needed</p>
       </div>
 
-      <p class="micro">
-        <span data-i18n="hero.micro">Free forever &middot; MIT licensed &middot; Windows, macOS, Linux &middot; no account required</span>
-      </p>
-
-      <div class="term" id="install">
-        <div class="termbar">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="termtitle">neko &mdash; ~/project</span>
-          <span class="chip chip-ok">NEKO // READY</span>
-        </div>
-<pre class="termbody"><span class="c-dim">$</span> neko
-
-  <span class="c-amber">/\_ _/\</span>  <span class="c-bold">NEKO CORE</span> <span class="c-dim">0.17.1</span>
-  <span class="c-dim">gpt-5.6-sol &middot; default &middot; ~/project</span>
-
-<span class="c-amber">&rsaquo;</span> <span class="c-bold">the live transcript stalls when one channel is silent - find out why</span>
-
-  <span class="c-dim">Search(processedMs)</span>
-  <span class="c-dim">Read(src/adapters/meeting-live.ts)</span>
-
-  A silent channel commits nothing, so its watermark never advances and
-  every confirmed line on the other channel waits forever.
-
-  <span class="c-warn">[approval]</span> edit src/adapters/meeting-live.ts
-  <span class="c-red">  - const agreed = agreedPrefix(track.previous, current);</span>
-  <span class="c-ok">  + if (forceAll) track.processedMs = Math.max(track.processedMs, bufferEndMs);</span>
-  <span class="c-dim">  Approve? [y/N]</span> <span class="c-bold">y</span>
-
-  <span class="c-ok">Bash(bun test)</span> <span class="c-dim">866 pass, 0 fail</span>
-</pre>
+      <div class="hero-art" id="heroArt">
+        <img src="/neko-hero.png" alt="" width="360" height="480" loading="eager" onerror="document.getElementById('heroArt').remove()">
+        <span class="badge">NEKO <span class="c-dim">//</span> <b>READY</b></span>
       </div>
     </div>
   </section>
 
-  <!-- ================= ticker ================= -->
-  <div class="ticker" aria-hidden="true">
-    <div class="ticker-track">
-      <span>LOCAL-FIRST</span><i>&bull;</i><span>ANY MODEL</span><i>&bull;</i><span>SAFE BY DEFAULT</span><i>&bull;</i>
-      <span>OFFLINE CAPABLE</span><i>&bull;</i><span>SKILLS &middot; MCP &middot; MEMORY</span><i>&bull;</i><span>MIT</span><i>&bull;</i>
-      <span>MADE IN VIETNAM</span><i>&bull;</i><span>LOCAL-FIRST</span><i>&bull;</i><span>ANY MODEL</span><i>&bull;</i>
-      <span>SAFE BY DEFAULT</span><i>&bull;</i><span>OFFLINE CAPABLE</span><i>&bull;</i><span>SKILLS &middot; MCP &middot; MEMORY</span><i>&bull;</i>
-      <span>MIT</span><i>&bull;</i><span>MADE IN VIETNAM</span><i>&bull;</i>
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track">
+      <span>LOCAL-FIRST</span><i>/</i><span>ANY MODEL</span><i>/</i><span>APPROVAL-GATED</span><i>/</i><span>WORKS OFFLINE</span><i>/</i><span>SKILLS · MCP · MEMORY</span><i>/</i><span>MIT</span><i>/</i><span>MADE IN VIETNAM</span><i>/</i>
+      <span>LOCAL-FIRST</span><i>/</i><span>ANY MODEL</span><i>/</i><span>APPROVAL-GATED</span><i>/</i><span>WORKS OFFLINE</span><i>/</i><span>SKILLS · MCP · MEMORY</span><i>/</i><span>MIT</span><i>/</i><span>MADE IN VIETNAM</span><i>/</i>
     </div>
   </div>
 
-  <!-- ================= 01 safety ================= -->
-  <section class="band band-ink" id="capabilities">
+  <!-- ============ 01 safety ============ -->
+  <section id="how">
     <div class="wrap">
-      <div class="sectionhead">
-        <span class="num">// 01</span><span class="label" data-i18n="s1.label">SAFE BY DEFAULT</span><span class="hair"></span>
+      <div class="sec-head">
+        <p class="eyebrow"><span class="num">01</span><span data-i18n="s1.label">Approvals</span><span class="hair"></span></p>
+        <h2 data-i18n="s1.title">It asks before it touches your machine.</h2>
+        <p class="body" data-i18n="s1.body">Neko puts the tools that only look in one category and the tools that change something in another. The first category runs straight away. The second waits for you, and the line between them is printed by a command you can run yourself.</p>
       </div>
       <div class="split">
-        <div>
-          <h2 data-i18n="s1.title">It asks before it touches your machine.</h2>
-          <p class="body" data-i18n="s1.body">Most agents ask you to trust them. Neko makes trust unnecessary: the tools that can change something are a different category from the tools that only look, and the boundary is auditable rather than promised.</p>
-          <ul class="ticks">
-            <li data-i18n="s1.p1"><b>Reading is free, changing is not.</b> read, search, glob and list run immediately; write, edit and bash wait for you.</li>
-            <li data-i18n="s1.p2"><b>Autonomy is a named state.</b> Turning approvals off is an explicit mode, not a hidden default - and it is visible while it is on.</li>
-            <li data-i18n="s1.p3"><b>The boundary is audited.</b> <code>neko policy</code> re-derives it from the code and fails loudly if it ever drifts.</li>
-            <li data-i18n="s1.p4"><b>Contained by the OS.</b> Bash runs in a real sandbox where one exists, and escaping the project directory is refused everywhere.</li>
-          </ul>
+        <div class="facts">
+          <div class="fact"><b data-i18n="s1.f1.t">Read now, write on approval</b><span data-i18n="s1.f1.d"><code>read_file</code>, <code>search</code>, <code>glob</code> and <code>ls</code> run immediately. <code>write_file</code>, <code>edit</code> and <code>bash</code> wait for you to say yes.</span></div>
+          <div class="fact"><b data-i18n="s1.f2.t">Autonomy has a name</b><span data-i18n="s1.f2.d">Turning approvals off is a mode you enter deliberately, and the session footer shows it for as long as it is on.</span></div>
+          <div class="fact"><b data-i18n="s1.f3.t">Checkable, not promised</b><span data-i18n="s1.f3.d"><code>neko policy</code> re-derives the boundary from the source and exits non-zero when anything has drifted.</span></div>
+          <div class="fact"><b data-i18n="s1.f4.t">Held by the OS</b><span data-i18n="s1.f4.d">Bash runs inside a real sandbox on platforms that provide one. Paths outside the project directory are refused everywhere.</span></div>
         </div>
-        <div class="card">
-          <div class="cardhead"><span data-i18n="s1.card">PERMISSION AUDIT</span><span class="chip chip-ok">PASS</span></div>
-<pre class="code"><span class="c-dim">$</span> neko policy
+        <div class="panel">
+          <div class="panel-head"><span data-i18n="s1.panel">PERMISSION AUDIT</span><span class="chip chip-ok">PASS</span></div>
+<pre><span class="c-dim">$</span> neko policy
 
 Neko Core policy
 Verdict: <span class="c-ok">PASS</span>
 
-<span class="c-dim">[safe ]</span> read_file  search  glob  ls  todo_write
-<span class="c-warn">[gated]</span> write_file  edit  multi_edit  bash
-<span class="c-warn">[gated]</span> computer
-<span class="c-warn">[gated]</span> mcp__neko_oracle__consult
+<span class="c-dim">[safe ]</span>  read_file  search  glob  ls  todo_write
+<span class="c-warn">[gated]</span>  write_file  edit  multi_edit  bash
+<span class="c-warn">[gated]</span>  computer
+<span class="c-warn">[gated]</span>  mcp__neko_oracle__consult
 
 <span class="c-dim">Findings:</span>
 - PASS the safe/gated boundary is consistent.</pre>
@@ -160,26 +152,18 @@ Verdict: <span class="c-ok">PASS</span>
     </div>
   </section>
 
-  <!-- ================= 02 models ================= -->
-  <section class="band band-cream">
+  <!-- ============ 02 models ============ -->
+  <section>
     <div class="wrap">
-      <div class="sectionhead">
-        <span class="num">// 02</span><span class="label" data-i18n="s2.label">ANY MODEL, INCLUDING NONE OF THEIRS</span><span class="hair"></span>
+      <div class="sec-head">
+        <p class="eyebrow"><span class="num">02</span><span data-i18n="s2.label">Models</span><span class="hair"></span></p>
+        <h2 data-i18n="s2.title">Adding a model means editing one file.</h2>
+        <p class="body" data-i18n="s2.body">Neko speaks to any OpenAI-compatible endpoint — a hosted API, your work account, or a model server running on the machine in front of you. The last one is what makes it work with the network unplugged.</p>
       </div>
-      <div class="split split-rev">
-        <div>
-          <h2 data-i18n="s2.title">A new model is a line of config, not a new release.</h2>
-          <p class="body" data-i18n="s2.body">Neko talks to any OpenAI-compatible endpoint. That includes a hosted API, your work account, and a model server running on your own machine - which is what makes it genuinely offline-capable rather than offline-marketed.</p>
-          <ul class="ticks">
-            <li data-i18n="s2.p1"><b>Subscriptions or keys.</b> ChatGPT, Claude, Gemini, Grok, Kimi, DeepSeek - or any endpoint you can reach.</li>
-            <li data-i18n="s2.p2"><b>Or nothing at all.</b> Point a profile at llama.cpp or Ollama and no byte leaves the machine.</li>
-            <li data-i18n="s2.p3"><b>Switch mid-task.</b> <code>/provider</code> and <code>/model</code> change the endpoint live; the conversation survives.</li>
-            <li data-i18n="s2.p4"><b>Keys stay yours.</b> Read on demand from the environment, never stored in the project, never printed.</li>
-          </ul>
-        </div>
-        <div class="card card-light">
-          <div class="cardhead"><span data-i18n="s2.card">A LOCAL PROFILE</span><span class="chip">~/.neko-core/config.json</span></div>
-<pre class="code">{
+      <div class="split">
+        <div class="panel">
+          <div class="panel-head"><span data-i18n="s2.panel">A LOCAL PROFILE</span><span class="chip">~/.neko-core/config.json</span></div>
+<pre>{
   <span class="c-key">"active_profile"</span>: <span class="c-str">"local"</span>,
   <span class="c-key">"profiles"</span>: {
     <span class="c-key">"local"</span>: {
@@ -188,32 +172,35 @@ Verdict: <span class="c-ok">PASS</span>
     }
   }
 }</pre>
-          <p class="cardnote" data-i18n="s2.note">That is the entire change. No plugin, no rebuild, no key.</p>
+        </div>
+        <div class="facts">
+          <div class="fact"><b data-i18n="s2.f1.t">Subscriptions or API keys</b><span data-i18n="s2.f1.d">ChatGPT, Claude, Gemini, Grok, Kimi and DeepSeek sign in from inside the app. Anything else is a base URL away.</span></div>
+          <div class="fact"><b data-i18n="s2.f2.t">Or nothing at all</b><span data-i18n="s2.f2.d">Point a profile at llama.cpp or Ollama and every byte stays on your hardware.</span></div>
+          <div class="fact"><b data-i18n="s2.f3.t">Switch mid-task</b><span data-i18n="s2.f3.d"><code>/provider</code> and <code>/model</code> change the endpoint while a session is running. The conversation carries over.</span></div>
+          <div class="fact"><b data-i18n="s2.f4.t">Keys stay yours</b><span data-i18n="s2.f4.d">Read from the environment when a request needs one, kept out of the project, and never printed.</span></div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ================= 03 oracle ================= -->
-  <section class="band band-ink">
+  <!-- ============ 03 oracle ============ -->
+  <section>
     <div class="wrap">
-      <div class="sectionhead">
-        <span class="num">// 03</span><span class="label">THE ORACLE</span><span class="hair"></span>
+      <div class="sec-head">
+        <p class="eyebrow"><span class="num">03</span><span>Oracle</span><span class="hair"></span></p>
+        <h2 data-i18n="s3.title">A second opinion from a model with no hands.</h2>
+        <p class="body" data-i18n="s3.body">When Neko is stuck it can send a chosen slice of your project to a stronger model and ask what it thinks. That model receives no tools at all, so the most it can do is answer. Giving it hands would make it a second agent charging you twice for the same context.</p>
       </div>
       <div class="split">
-        <div>
-          <h2 data-i18n="s3.title">A second opinion - from a model with no hands.</h2>
-          <p class="body" data-i18n="s3.body">When Neko is stuck, it can send a curated slice of your project to a different, stronger model. That model gets no tools at all: it advises, it does not act. If the advisor also had hands it would just be a second agent, and you would pay twice for the same context.</p>
-          <ul class="ticks">
-            <li data-i18n="s3.p1"><b>Nothing leaves silently.</b> The manifest of what is being sent prints first, every time. <code>--dry-run</code> sends nothing at all.</li>
-            <li data-i18n="s3.p2"><b>Secrets are refused, not trimmed.</b> A credential store is dropped whole; a key-shaped literal is masked in place.</li>
-            <li data-i18n="s3.p3"><b>Your code stays readable.</b> Only string values are touched, so <code>process.env.API_KEY</code> survives - masking it would corrupt what you asked to have read.</li>
-            <li data-i18n="s3.p4"><b>Approval-gated.</b> Neko cannot consult on its own. Sending source off the machine has the same bar as running a shell command.</li>
-          </ul>
+        <div class="facts">
+          <div class="fact"><b data-i18n="s3.f1.t">You see the manifest first</b><span data-i18n="s3.f1.d">Every file in the bundle is listed before the request goes out, and <code>--dry-run</code> stops there.</span></div>
+          <div class="fact"><b data-i18n="s3.f2.t">Credential stores are dropped whole</b><span data-i18n="s3.f2.d"><code>.env</code>, private keys and anything under <code>.neko-core/</code> never enter a bundle.</span></div>
+          <div class="fact"><b data-i18n="s3.f3.t">Your code arrives readable</b><span data-i18n="s3.f3.d">Only key-shaped string values are masked, so <code>process.env.API_KEY</code> reaches the oracle exactly as you wrote it.</span></div>
+          <div class="fact"><b data-i18n="s3.f4.t">Approval-gated</b><span data-i18n="s3.f4.d">Sending source off your machine sits behind the same prompt as running a shell command.</span></div>
         </div>
-        <div class="card">
-          <div class="cardhead"><span data-i18n="s3.card">DRY RUN</span><span class="chip chip-warn">NOTHING SENT</span></div>
-<pre class="code"><span class="c-dim">$</span> neko oracle --dry-run \
+        <div class="panel">
+          <div class="panel-head"><span data-i18n="s3.panel">DRY RUN</span><span class="chip">NOTHING SENT</span></div>
+<pre><span class="c-dim">$</span> neko oracle --dry-run \
     -p <span class="c-str">"why does the transcript stall?"</span> \
     -f <span class="c-str">"src/adapters/meeting-*.ts"</span>
 
@@ -228,26 +215,18 @@ Bundle: 6 file(s), 92 KB, about 23k tokens.
     </div>
   </section>
 
-  <!-- ================= 04 extend ================= -->
-  <section class="band band-cream">
+  <!-- ============ 04 extend ============ -->
+  <section>
     <div class="wrap">
-      <div class="sectionhead">
-        <span class="num">// 04</span><span class="label" data-i18n="s4.label">YOURS TO SHAPE</span><span class="hair"></span>
+      <div class="sec-head">
+        <p class="eyebrow"><span class="num">04</span><span data-i18n="s4.label">Extending</span><span class="hair"></span></p>
+        <h2 data-i18n="s4.title">One Markdown file teaches it a new job.</h2>
+        <p class="body" data-i18n="s4.body">Coding is what Neko does out of the box, and a skill is how it learns anything else. Write the instructions once in a folder; Neko loads them only when a task actually matches, so a wide library costs nothing to carry.</p>
       </div>
-      <div class="split split-rev">
-        <div>
-          <h2 data-i18n="s4.title">One Markdown file teaches it a new job.</h2>
-          <p class="body" data-i18n="s4.body">Neko is a coding agent out of the box, but it is not limited to coding. A skill is a folder with a Markdown file in it; Neko loads the full instructions only when a task actually matches, so breadth costs you nothing in context.</p>
-          <ul class="ticks">
-            <li data-i18n="s4.p1"><b>Skills.</b> Write how you want a job done once. Neko finds it when the job comes up.</li>
-            <li data-i18n="s4.p2"><b>MCP.</b> Any MCP server plugs in; an existing project <code>.mcp.json</code> works untouched.</li>
-            <li data-i18n="s4.p3"><b>Memory.</b> Decisions persist across sessions, and every entry is a file you can read or delete.</li>
-            <li data-i18n="s4.p4"><b>Subagents.</b> Hand a side investigation its own context so it never clutters the main thread.</li>
-          </ul>
-        </div>
-        <div class="card card-light">
-          <div class="cardhead"><span data-i18n="s4.card">A SKILL</span><span class="chip">skills/procurement/SKILL.md</span></div>
-<pre class="code"><span class="c-dim">---</span>
+      <div class="split">
+        <div class="panel">
+          <div class="panel-head"><span data-i18n="s4.panel">A SKILL</span><span class="chip">skills/procurement/SKILL.md</span></div>
+<pre><span class="c-dim">---</span>
 <span class="c-key">name</span>: procurement
 <span class="c-key">description</span>: sourcing, quotes, supplier checks
 <span class="c-dim">---</span>
@@ -256,154 +235,148 @@ Bundle: 6 file(s), 92 KB, about 23k tokens.
 A request to buy, price, or compare suppliers.
 
 <span class="c-bold"># Rules</span>
-- Never commit to a purchase. Humans approve.
-- Quote in VND, and name the source of every price.</pre>
+- A human approves every purchase.
+- Quote in VND and name the source of each price.</pre>
+        </div>
+        <div class="facts">
+          <div class="fact"><b data-i18n="s4.f1.t">Skills</b><span data-i18n="s4.f1.d">Describe how you want a job done once, and Neko finds it the next time that job comes up.</span></div>
+          <div class="fact"><b data-i18n="s4.f2.t">MCP</b><span data-i18n="s4.f2.d">Any MCP server plugs in, and a project that already has <code>.mcp.json</code> works untouched.</span></div>
+          <div class="fact"><b data-i18n="s4.f3.t">Memory</b><span data-i18n="s4.f3.d">Decisions survive between sessions as plain files you can open, edit or delete.</span></div>
+          <div class="fact"><b data-i18n="s4.f4.t">Subagents</b><span data-i18n="s4.f4.d">Hand a side investigation its own context so the main conversation stays readable.</span></div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ================= 05 download ================= -->
-  <section class="band band-ink" id="download">
+  <!-- ============ 05 capabilities ============ -->
+  <section>
     <div class="wrap">
-      <div class="sectionhead">
-        <span class="num">// 05</span><span class="label" data-i18n="s5.label">GET IT</span><span class="hair"></span>
+      <div class="sec-head">
+        <p class="eyebrow"><span class="num">05</span><span data-i18n="s5.label">Capabilities</span><span class="hair"></span></p>
+        <h2 data-i18n="s5.title">One tool for the whole loop.</h2>
       </div>
-      <h2 class="center" data-i18n="dl.title">Two ways in. Both take a minute.</h2>
-      <p class="body center" data-i18n="dl.body">Neko is one standalone file. There is nothing else to install - no Node, no Bun, no Python, no account.</p>
+      <div class="split">
+        <div class="facts">
+          <div class="fact"><b data-i18n="c1.t">Plan mode</b><span data-i18n="c1.d">Neko proposes an approach and every edit stays blocked until you approve the plan.</span></div>
+          <div class="fact"><b data-i18n="c2.t">Multi-file edits</b><span data-i18n="c2.d">Refactor across a codebase with each change shown as a diff before it lands.</span></div>
+          <div class="fact"><b data-i18n="c3.t">Code search</b><span data-i18n="c3.d">ripgrep when your machine has it, and a built-in walk when it does not.</span></div>
+          <div class="fact"><b data-i18n="c4.t">Terminal execution</b><span data-i18n="c4.d">Run builds and tests with per-call timeouts and a background mode for long jobs.</span></div>
+          <div class="fact"><b data-i18n="c5.t">Web access</b><span data-i18n="c5.d">Search works with zero setup, and one command upgrades it to a private SearXNG.</span></div>
+          <div class="fact"><b data-i18n="c6.t">Browser bridge</b><span data-i18n="c6.d">Drive one signed-in Chrome tab, with the consent state visible on the page itself.</span></div>
+          <div class="fact"><b data-i18n="c7.t">Computer use</b><span data-i18n="c7.d">On Windows: UI Automation, Unicode typing, and a pointer of its own that leaves your mouse alone.</span></div>
+          <div class="fact"><b data-i18n="c8.t">Meetings</b><span data-i18n="c8.d">Record and transcribe after you consent. The audio is processed on your machine and stays there.</span></div>
+        </div>
+        <div class="facts">
+          <div class="fact"><b data-i18n="c9.t">Office documents</b><span data-i18n="c9.d">Word, Excel and PowerPoint files are built, then opened and validated before Neko calls them done.</span></div>
+          <div class="fact"><b data-i18n="c10.t">Hooks</b><span data-i18n="c10.d">Run your own scripts around every tool call. The pre-hook can stop one from happening.</span></div>
+          <div class="fact"><b data-i18n="c11.t">Sessions</b><span data-i18n="c11.d">Saved, listed and resumed at the exact point you left off.</span></div>
+          <div class="fact"><b data-i18n="c12.t">Project context</b><span data-i18n="c12.d">Reads the NEKO.md, AGENTS.md and CLAUDE.md your repository already has.</span></div>
+          <div class="fact"><b data-i18n="c13.t">Phone control</b><span data-i18n="c13.d">Drive a running session from your phone over an end-to-end encrypted relay.</span></div>
+          <div class="fact"><b data-i18n="c14.t">Voice</b><span data-i18n="c14.d">Speak to Neko in the terminal, or dictate into the prompt line.</span></div>
+          <div class="fact"><b data-i18n="c15.t">Headless</b><span data-i18n="c15.d"><code>neko run</code> fits CI and scripts, and <code>--loop</code> keeps reviewing its own work until the task is done.</span></div>
+          <div class="fact"><b data-i18n="c16.t">Measured</b><span data-i18n="c16.d"><code>neko bench lift</code> reports how much of the result comes from the harness rather than the model.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-      <div class="dl-grid">
-        <!-- recommended: installer -->
-        <div class="dl-card dl-card-primary">
-          <div class="dl-rank"><span class="chip chip-ok" data-i18n="dl.recommended">RECOMMENDED</span></div>
-          <h3 data-i18n="dl.a.title">Paste one line</h3>
-          <p data-i18n="dl.a.body">Copies the right build for your machine and puts <code>neko</code> on your PATH, so you can type it in any terminal afterwards. It also handles updates.</p>
+  <!-- ============ 06 download ============ -->
+  <section id="download">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow"><span class="num">06</span><span data-i18n="s6.label">Install</span><span class="hair"></span></p>
+        <h2 data-i18n="dl.title">Two ways to install, both about a minute.</h2>
+        <p class="body" data-i18n="dl.body">Neko ships as a single standalone file. Node, Bun, Python and an account are all things you can skip.</p>
+      </div>
+
+      <div class="dl">
+        <div class="dl-card is-primary">
+          <span class="chip chip-ok" data-i18n="dl.recommended">RECOMMENDED</span>
+          <h3 style="margin-top:16px" data-i18n="dl.a.title">Paste one line</h3>
+          <p class="body" data-i18n="dl.a.body">The installer picks the right build for your machine, puts <code>neko</code> on your PATH so any terminal can find it, and keeps it updated afterwards.</p>
           <div class="install">
             <div class="tabs" role="tablist">
-              <button class="tab" role="tab" id="tab-ps" aria-selected="true" aria-controls="cmd-ps">Windows</button>
-              <button class="tab" role="tab" id="tab-sh" aria-selected="false" aria-controls="cmd-sh">macOS &amp; Linux</button>
+              <button class="tab" role="tab" id="tab2-ps" aria-selected="true" aria-controls="cmd2-ps">Windows</button>
+              <button class="tab" role="tab" id="tab2-sh" aria-selected="false" aria-controls="cmd2-sh">macOS &amp; Linux</button>
             </div>
-            <div class="cmdrow" id="cmd-ps" role="tabpanel" aria-labelledby="tab-ps">
-              <span class="prompt">&gt;</span>
+            <div class="cmdrow" id="cmd2-ps" role="tabpanel" aria-labelledby="tab2-ps">
+              <span class="prompt" aria-hidden="true">&gt;</span>
               <code>irm https://neko.holilihu.online/install.ps1 | iex</code>
               <button class="copy" type="button" data-copy="irm https://neko.holilihu.online/install.ps1 | iex" data-i18n="copy">Copy</button>
             </div>
-            <div class="cmdrow" id="cmd-sh" role="tabpanel" aria-labelledby="tab-sh" hidden>
-              <span class="prompt">$</span>
+            <div class="cmdrow" id="cmd2-sh" role="tabpanel" aria-labelledby="tab2-sh" hidden>
+              <span class="prompt" aria-hidden="true">$</span>
               <code>curl -fsSL https://neko.holilihu.online/install.sh | sh</code>
               <button class="copy" type="button" data-copy="curl -fsSL https://neko.holilihu.online/install.sh | sh" data-i18n="copy">Copy</button>
             </div>
           </div>
-          <p class="dl-help" data-i18n="dl.a.help">On Windows: press the Start button, type <b>PowerShell</b>, open it, paste the line, press Enter. Then type <code>neko</code>.</p>
+          <p class="dl-note" data-i18n="dl.a.help"><b>Never used a terminal?</b> Press Start, type <b>PowerShell</b>, open it, paste the line above, and press Enter. When it finishes, type <code>neko</code> and press Enter again.</p>
         </div>
 
-        <!-- direct file -->
         <div class="dl-card">
-          <h3 data-i18n="dl.b.title">Or download the file</h3>
-          <p data-i18n="dl.b.body">If you would rather have a file than run a command. It is the same program - you just place it and run it yourself.</p>
-          <a class="btn btn-primary btn-block" id="mainDownload" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-windows-x64.exe">
-            <span data-i18n="dl.b.button">Download for</span> <span data-os-name>Windows</span>
-            <span class="btn-sub" data-os-size>87 MB</span>
+          <h3 data-i18n="dl.b.title">Or take the file</h3>
+          <p class="body" data-i18n="dl.b.body">The same program as a plain download, for when you would rather place a file yourself than run a command.</p>
+          <a class="btn btn-primary btn-lg btn-block" id="mainDownload" style="margin-top:24px" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-windows-x64.exe">
+            <span data-i18n="dl.b.button">Download for</span>&nbsp;<span data-os-name>Windows</span>
+            <span class="sub" data-os-size>87 MB</span>
           </a>
           <details class="dl-all">
             <summary data-i18n="dl.b.all">All platforms and checksums</summary>
             <table class="dl-table">
               <tbody>
                 <tr data-platform="windows">
-                  <td>Windows <span class="dim">x64</span></td>
-                  <td class="dim">87 MB</td>
+                  <td>Windows <span class="small">x64</span></td>
+                  <td class="small">87 MB</td>
                   <td><a href="https://github.com/meiiie/neko-core/releases/latest/download/neko-windows-x64.exe" data-i18n="dl.get">Download</a></td>
-                  <td><a class="dim" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-windows-x64.exe.sha256">sha256</a></td>
+                  <td><a class="small" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-windows-x64.exe.sha256">sha256</a></td>
                 </tr>
                 <tr data-platform="macos-arm64">
-                  <td>macOS <span class="dim">Apple Silicon</span></td>
-                  <td class="dim">64 MB</td>
+                  <td>macOS <span class="small">Apple silicon</span></td>
+                  <td class="small">64 MB</td>
                   <td><a href="https://github.com/meiiie/neko-core/releases/latest/download/neko-macos-arm64" data-i18n="dl.get">Download</a></td>
-                  <td><a class="dim" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-macos-arm64.sha256">sha256</a></td>
+                  <td><a class="small" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-macos-arm64.sha256">sha256</a></td>
                 </tr>
                 <tr data-platform="macos-x64">
-                  <td>macOS <span class="dim">Intel</span></td>
-                  <td class="dim">73 MB</td>
+                  <td>macOS <span class="small">Intel</span></td>
+                  <td class="small">73 MB</td>
                   <td><a href="https://github.com/meiiie/neko-core/releases/latest/download/neko-macos-x64" data-i18n="dl.get">Download</a></td>
-                  <td><a class="dim" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-macos-x64.sha256">sha256</a></td>
+                  <td><a class="small" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-macos-x64.sha256">sha256</a></td>
                 </tr>
                 <tr data-platform="linux-x64">
-                  <td>Linux <span class="dim">x64</span></td>
-                  <td class="dim">81 MB</td>
+                  <td>Linux <span class="small">x64</span></td>
+                  <td class="small">81 MB</td>
                   <td><a href="https://github.com/meiiie/neko-core/releases/latest/download/neko-linux-x64" data-i18n="dl.get">Download</a></td>
-                  <td><a class="dim" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-linux-x64.sha256">sha256</a></td>
+                  <td><a class="small" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-linux-x64.sha256">sha256</a></td>
                 </tr>
                 <tr data-platform="linux-arm64">
-                  <td>Linux <span class="dim">arm64</span></td>
-                  <td class="dim">79 MB</td>
+                  <td>Linux <span class="small">arm64</span></td>
+                  <td class="small">79 MB</td>
                   <td><a href="https://github.com/meiiie/neko-core/releases/latest/download/neko-linux-arm64" data-i18n="dl.get">Download</a></td>
-                  <td><a class="dim" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-linux-arm64.sha256">sha256</a></td>
+                  <td><a class="small" href="https://github.com/meiiie/neko-core/releases/latest/download/neko-linux-arm64.sha256">sha256</a></td>
                 </tr>
               </tbody>
             </table>
           </details>
-          <p class="dl-help" data-i18n="dl.b.help"><b>Two honest warnings.</b> Neko is a terminal program: opening the file by double-clicking gives you a black window with text, which is the app, not an error. And because the build is not code-signed yet, Windows will show a blue "unrecognised app" screen - choose More info, then Run anyway, or use the one-line install above.</p>
+          <p class="dl-note" data-i18n="dl.b.help"><b>Two things to expect.</b> Neko is a terminal program, so opening the file gives you a window of text rather than a graphical app — that window is Neko. And these builds carry no code signature yet, so Windows shows its blue "unrecognised app" screen: choose <b>More info</b>, then <b>Run anyway</b>.</p>
         </div>
       </div>
 
-      <p class="dl-foot">
-        <span data-i18n="dl.foot">Every build is published on GitHub with its SHA-256, straight from the public build pipeline.</span>
-        <a href="https://github.com/meiiie/neko-core/releases" data-i18n="dl.foot.link">See all releases &rarr;</a>
+      <p class="small" style="margin-top:32px">
+        <span data-i18n="dl.foot">Every build is published on GitHub with its SHA-256, straight from the public pipeline.</span>
+        <a href="https://github.com/meiiie/neko-core/releases" style="color:var(--action)" data-i18n="dl.foot.link">All releases</a>
       </p>
-    </div>
-  </section>
-
-  <!-- ================= grid ================= -->
-  <section class="band band-cream">
-    <div class="wrap">
-      <div class="sectionhead">
-        <span class="num">// 06</span><span class="label" data-i18n="s6.label">EVERYTHING IN THE BOX</span><span class="hair"></span>
-      </div>
-      <h2 data-i18n="s6.title">One tool for the whole loop.</h2>
-      <div class="grid">
-        <div class="cell"><b data-i18n="g1.t">Plan mode</b><span data-i18n="g1.d">Propose the approach first; every edit is blocked until you approve it.</span></div>
-        <div class="cell"><b data-i18n="g2.t">Multi-file edits</b><span data-i18n="g2.d">Refactor across files, with every change shown as a diff before it lands.</span></div>
-        <div class="cell"><b data-i18n="g3.t">Code search</b><span data-i18n="g3.d">ripgrep when it is installed, a built-in walk when it is not.</span></div>
-        <div class="cell"><b data-i18n="g4.t">Terminal execution</b><span data-i18n="g4.d">Run builds and tests, with per-call timeouts and a background mode.</span></div>
-        <div class="cell"><b data-i18n="g5.t">Web, as a ladder</b><span data-i18n="g5.d">Search works with zero setup; upgrade to a private SearXNG when you want to.</span></div>
-        <div class="cell"><b data-i18n="g6.t">Browser bridge</b><span data-i18n="g6.d">Drive one signed-in Chrome tab, with consent that is visible on the page.</span></div>
-        <div class="cell"><b data-i18n="g7.t">Computer use</b><span data-i18n="g7.d">On Windows: UI Automation, Unicode typing, and its own pointer that never steals your mouse.</span></div>
-        <div class="cell"><b data-i18n="g8.t">Meetings</b><span data-i18n="g8.d">Record and transcribe locally after you consent. The audio never leaves the machine.</span></div>
-        <div class="cell"><b data-i18n="g9.t">Office documents</b><span data-i18n="g9.d">Word, Excel and PowerPoint built then validated, not clicked at.</span></div>
-        <div class="cell"><b data-i18n="g10.t">Hooks</b><span data-i18n="g10.d">Run your own scripts around every tool call; the pre-hook can block one.</span></div>
-        <div class="cell"><b data-i18n="g11.t">Sessions</b><span data-i18n="g11.d">Saved, listed, and resumed exactly where you stopped.</span></div>
-        <div class="cell"><b data-i18n="g12.t">Project context</b><span data-i18n="g12.d">Reads the NEKO.md, AGENTS.md and CLAUDE.md you already have.</span></div>
-        <div class="cell"><b data-i18n="g13.t">Phone control</b><span data-i18n="g13.d">Drive a running session from your phone, end-to-end encrypted.</span></div>
-        <div class="cell"><b data-i18n="g14.t">Voice</b><span data-i18n="g14.d">Talk to Neko in the terminal, or dictate into the prompt.</span></div>
-        <div class="cell"><b data-i18n="g15.t">Headless</b><span data-i18n="g15.d"><code>neko run</code> for CI and scripts; <code>--loop</code> self-reviews until the work is done.</span></div>
-        <div class="cell"><b data-i18n="g16.t">Measured</b><span data-i18n="g16.d"><code>neko bench lift</code> measures what the harness itself is worth, not just the model.</span></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ================= cta ================= -->
-  <section class="band band-ink cta">
-    <div class="wrap center">
-      <h2 data-i18n="cta.title">Open a terminal and start.</h2>
-      <p class="body center" data-i18n="cta.body">Works with any codebase, in any language, on the machine you already have.</p>
-      <div class="hero-actions center">
-        <a class="btn btn-primary btn-lg" href="#download">
-          <span data-i18n="hero.download">Download for</span> <span data-os-name>Windows</span>
-        </a>
-        <a class="btn btn-ghost btn-lg" href="https://github.com/meiiie/neko-core#readme" data-i18n="cta.docs">Read the docs</a>
-      </div>
     </div>
   </section>
 </main>
 
 <footer>
   <div class="wrap">
-    <div class="footgrid">
+    <div class="foot-rows">
       <div>
-        <a class="brand" href="/"><img src="/neko-icon.png" alt="" width="22" height="22"><span>NEKO<span class="brand-dim">&nbsp;CORE</span></span></a>
-        <p class="footnote" data-i18n="foot.by">Built by The Wiii Lab. Free and MIT licensed.</p>
+        <a class="brand" href="/"><img src="/neko-icon.png" alt="" width="20" height="20"><span>NEKO<span class="dim"> CORE</span></span></a>
+        <p class="small" style="margin-top:12px" data-i18n="foot.by">Built by The Wiii Lab. Free and MIT licensed.</p>
       </div>
-      <div class="footlinks">
+      <div class="foot-links">
         <a href="https://github.com/meiiie/neko-core">GitHub</a>
         <a href="https://github.com/meiiie/neko-core/releases" data-i18n="foot.releases">Releases</a>
         <a href="https://github.com/meiiie/neko-core/blob/main/CHANGELOG.md" data-i18n="foot.changelog">Changelog</a>
@@ -411,8 +384,12 @@ A request to buy, price, or compare suppliers.
         <a href="https://github.com/meiiie/neko-core/blob/main/LICENSE">MIT</a>
       </div>
     </div>
-    <p class="sov" data-i18n="foot.sov">Neko Core is a Vietnamese product. Hoang Sa and Truong Sa belong to Vietnam.</p>
+    <div class="foot-meta">
+      <span class="mono-label">NEKO CORE / v0.17.1 / HAI PHONG, VIET NAM</span>
+      <span class="small" data-i18n="foot.sov">Hoang Sa and Truong Sa belong to Vietnam.</span>
+    </div>
   </div>
+  <div class="signature" aria-hidden="true">NEKO CORE</div>
 </footer>
 
 <script src="/app.js"></script>
