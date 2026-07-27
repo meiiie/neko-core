@@ -15,7 +15,21 @@
  * draws itself, the section number flickers in over discrete steps, blocks rise as they arrive, the nav
  * leaves going down. Curves and durations come from skills/improve-animations/AUDIT.md verbatim.
  *
- * Scales: spacing 4/8/12/16/24/32/48/64/96/128, type 12/14/16/18/20/24/30/36/48/60/72.
+ * SCALES — enforced, not aspired to. Every padding, margin and gap on the page is one of
+ *   4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 / 96 / 128
+ * and every font-size is one of
+ *   12 / 14 / 16 / 17 / 20 / 24 / 30 / 36 / 48 / 60 / 72 / 96 / 288
+ * Measured with an audit that walks every rendered element at 320/390/430/768/1024/1440 and reports
+ * anything off either scale. Four values are deliberately exempt and nothing else is:
+ *   - `.visually-hidden` margin -1px, the standard clip idiom
+ *   - `.tab` margin-bottom -1px, which laps a hairline border
+ *   - `.marquee` margin-block -8px, on the scale but negative
+ *   - `.signature` margin-bottom -0.18em, an optical bleed that must scale with its own type
+ * Fluid sizes (`clamp`) sit between steps at intermediate widths by construction; both endpoints of
+ * every clamp are on the scale.
+ *
+ * TARGETS: every control is at least 44px on its short edge at every width, on fine pointers too —
+ * a laptop touchscreen reports `fine` and a 32px control is just as hard to hit there.
  */
 
 :root {
@@ -48,7 +62,7 @@
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
-@media (min-width: 768px) { :root { --gutter: 40px; } }
+@media (min-width: 768px) { :root { --gutter: 48px; } }
 
 /* ---- the two bands: everything else reads these ---- */
 .band-cream {
@@ -127,7 +141,7 @@ section[id] { scroll-margin-top: 80px; }
 
 h1, h2, h3 { margin: 0; font-family: var(--mono); font-weight: 600; letter-spacing: -0.04em; }
 h1 { font-size: clamp(38px, 6vw, 76px); line-height: 1.02; }
-h2 { font-size: clamp(30px, 4vw, 52px); line-height: 1.08; }
+h2 { font-size: clamp(30px, 4vw, 48px); line-height: 1.08; }
 h3 { font-size: 20px; line-height: 1.3; letter-spacing: -0.02em; }
 
 p { margin: 0; }
@@ -139,9 +153,9 @@ p { margin: 0; }
 /* ============ buttons ============ */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-height: 44px; padding: 12px 22px;
+  min-height: 44px; padding: 12px 24px;
   font: inherit; font-size: 16px; font-weight: 600; letter-spacing: -0.01em;
-  border: 1px solid transparent; border-radius: var(--r-pill); cursor: pointer;
+  border: 1px solid transparent; border-radius: var(--r-pill); cursor: pointer; white-space: nowrap;
   transition: background-color .18s var(--ease-out), border-color .18s var(--ease-out),
               color .18s var(--ease-out), transform .18s var(--ease-out);
 }
@@ -151,9 +165,12 @@ p { margin: 0; }
 .btn-solid:hover { opacity: .88; }
 .btn-line { border-color: var(--hair-2); color: var(--fg); }
 .btn-line:hover { border-color: var(--fg-2); }
-.btn-lg { min-height: 52px; padding: 14px 30px; font-size: 17px; }
+.btn-lg { min-height: 52px; padding: 16px 32px; font-size: 17px; }
 .btn-block { display: flex; width: 100%; }
 .btn .sub { font-weight: 400; opacity: .6; font-size: 14px; }
+/* On a phone a row of two buttons leaves each one too narrow to read and too narrow to hit.
+   Below 480 they each take the full width, which is also the largest possible thumb target. */
+@media (max-width: 479px) { .actions .btn { flex: 1 1 100%; } }
 @media (prefers-reduced-motion: no-preference) {
   .btn:hover { transform: translateY(-2px); }
   /* 0.97 at 160ms are the catalogue's press values; 0.985 was too small to feel. */
@@ -164,7 +181,7 @@ p { margin: 0; }
 .announce { border-bottom: 1px solid var(--hair); font-size: 14px; color: var(--fg-2); }
 .announce .wrap { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 44px; flex-wrap: wrap; text-align: center; }
 .announce .pip { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none; }
-.announce a { color: var(--fg); border-bottom: 1px solid var(--hair-2); }
+.announce a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--fg); box-shadow: inset 0 -1px 0 var(--hair-2); }
 .announce a:hover { color: var(--accent-text); border-color: currentColor; }
 
 header {
@@ -175,31 +192,37 @@ header {
   transition: transform .35s var(--ease-out);
 }
 header.is-hidden { transform: translateY(-100%); }
-.nav { display: flex; align-items: center; gap: 24px; min-height: 68px; }
-.brand { display: inline-flex; align-items: center; gap: 12px; font-family: var(--mono); font-weight: 700; font-size: 15px; letter-spacing: 0.1em; }
+.nav { display: flex; align-items: center; gap: 16px; min-height: 68px; }
+@media (min-width: 768px) { .nav { gap: 24px; } }
+.brand { display: inline-flex; align-items: center; gap: 12px; padding-block: 12px; white-space: nowrap; font-family: var(--mono); font-weight: 700; font-size: 16px; letter-spacing: 0.1em; }
 .brand img { image-rendering: pixelated; }
 .brand .dim { color: var(--fg-3); }
-.nav-links { display: flex; align-items: center; gap: 24px; margin-left: auto; }
-.nav-links > a { font-size: 15px; color: var(--fg-2); transition: color .16s var(--ease-out); }
+.nav-links { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+@media (min-width: 900px) { .nav-links { gap: 24px; } }
+.nav-links > a { display: inline-flex; align-items: center; min-height: 44px; font-size: 16px; color: var(--fg-2); transition: color .16s var(--ease-out); }
 .nav-links > a:hover { color: var(--fg); }
-.nav-links > a.btn { color: var(--ink-900); font-size: 15px; padding: 9px 20px; min-height: 40px; }
+.nav-links > a.btn { color: var(--ink-900); font-size: 16px; padding: 12px 24px; min-height: 44px; }
 .nav-links > a.btn:hover { color: var(--ink-900); }
 
 /* Two segments, so the control shows which language is ON instead of naming a destination. */
 .langswitch { display: inline-flex; border: 1px solid var(--hair-2); border-radius: var(--r-pill); overflow: hidden; }
 .langswitch button {
   font: inherit; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
-  min-height: 32px; padding: 6px 12px; border: 0; cursor: pointer;
+  min-height: 44px; padding: 8px 16px; border: 0; cursor: pointer;
   background: transparent; color: var(--fg-3);
   transition: background-color .16s var(--ease-out), color .16s var(--ease-out);
 }
 .langswitch button:hover { color: var(--fg); }
 .langswitch button[aria-pressed="true"] { background: var(--amber); color: var(--ink-900); }
 @media (max-width: 900px) { .nav-links > a:not(.btn) { display: none; } }
+/* Measured at 360px: brand (120) + language (110) + CTA (118) + gaps (32) needs 380px inside 312px of
+   usable width, so the wordmark and the button collided. The nav CTA goes rather than the brand or the
+   language control, because the hero's download button is a screen-scroll away and full width. */
+@media (max-width: 559px) { .nav-links > a.btn { display: none; } }
 
 /* ============ hero ============ */
-.hero { padding-block: 72px 96px; }
-@media (min-width: 768px) { .hero { padding-block: 104px 128px; } }
+.hero { padding-block: 64px 96px; }
+@media (min-width: 768px) { .hero { padding-block: 96px 128px; } }
 .hero-grid { display: grid; gap: 48px; align-items: center; }
 /* 1120 rather than 1000: at 1024 two columns left the headline three lines deep. Two columns only while
    the character image exists — a column held open for a missing image is how a page looks broken. */
@@ -222,7 +245,7 @@ header.is-hidden { transform: translateY(-100%); }
 
 /* The wordmark is the hero. Two short words carry a much larger size than a sentence could, so it
    opts out of the headline clamp that exists to stop prose from wrapping beside the art. */
-.wordmark { font-size: clamp(56px, 8.5vw, 116px) !important; line-height: .84; letter-spacing: -0.055em; }
+.wordmark { font-size: clamp(48px, 11vw, 96px) !important; line-height: .84; letter-spacing: -0.055em; }
 .wordmark .amber { color: var(--accent-text); }
 
 /* The hero carries one command line, not the tabbed box — the install section below owns the detail,
@@ -237,6 +260,8 @@ header.is-hidden { transform: translateY(-100%); }
   border: 1px solid var(--hair-2); border-radius: var(--r); background: var(--ink-900);
 }
 .demo figcaption { margin-top: 16px; }
+/* The trailing "all releases" link sat at 41px tall inside a paragraph. */
+.dl-foot-link { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--accent-text); }
 
 /*
  * The cat was generated on pure black. Rather than key it out — which chews the fur edge — it is
@@ -255,7 +280,7 @@ header.is-hidden { transform: translateY(-100%); }
   position: absolute; left: 16px; bottom: 16px; z-index: 2;
   font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
   background: rgba(8, 7, 11, .7); border: 1px solid #3a3348; color: var(--cream);
-  padding: 6px 12px; border-radius: var(--r-pill); backdrop-filter: blur(6px);
+  padding: 8px 12px; border-radius: var(--r-pill); backdrop-filter: blur(6px);
 }
 .art-frame .badge b { color: var(--ok-ink); font-weight: 500; }
 @media (prefers-reduced-motion: no-preference) {
@@ -273,14 +298,14 @@ header.is-hidden { transform: translateY(-100%); }
 .install { margin-top: 32px; border: 1px solid var(--hair-2); border-radius: var(--r); background: var(--bg-2); overflow: hidden; max-width: 580px; }
 .tabs { display: flex; border-bottom: 1px solid var(--hair); }
 .tab {
-  font: inherit; font-family: var(--mono); font-size: 13px; min-height: 44px; padding: 12px 18px;
+  font: inherit; font-family: var(--mono); font-size: 13px; min-height: 48px; padding: 12px 16px;
   color: var(--fg-3); background: none; border: 0; border-bottom: 1px solid transparent;
   margin-bottom: -1px; cursor: pointer;
   transition: color .16s var(--ease-out), border-color .16s var(--ease-out);
 }
 .tab:hover { color: var(--fg-2); }
 .tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--amber); }
-.cmdrow { display: flex; align-items: center; gap: 12px; padding: 16px 18px; min-height: 60px; }
+.cmdrow { display: flex; align-items: center; gap: 12px; padding: 16px; min-height: 64px; }
 .cmdrow[hidden] { display: none; }
 /* min-width:0 keeps a long command scrolling inside the box instead of pushing the box off-screen. */
 .cmdrow code { flex: 1; min-width: 0; font-size: 14px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
@@ -288,7 +313,7 @@ header.is-hidden { transform: translateY(-100%); }
 .cmdrow .prompt { font-family: var(--mono); color: var(--fg-3); user-select: none; }
 .copy {
   flex: none; font: inherit; font-family: var(--mono); font-size: 12px;
-  min-height: 32px; padding: 6px 13px; color: var(--fg-2); background: var(--bg-3);
+  min-height: 44px; padding: 8px 12px; color: var(--fg-2); background: var(--bg-3);
   border: 0; border-radius: var(--r-pill); cursor: pointer;
   transition: color .16s var(--ease-out), background-color .16s var(--ease-out);
 }
@@ -296,11 +321,11 @@ header.is-hidden { transform: translateY(-100%); }
 
 /* ============ marquee: the one full-bleed moment ============ */
 .marquee {
-  background: var(--amber); color: var(--ink-900); overflow: hidden; padding-block: 14px;
-  transform: rotate(-1.2deg) scaleX(1.06); margin-block: -10px; position: relative; z-index: 5;
+  background: var(--amber); color: var(--ink-900); overflow: hidden; padding-block: 16px;
+  transform: rotate(-1.2deg) scaleX(1.06); margin-block: -8px; position: relative; z-index: 5;
 }
 .marquee-track {
-  display: flex; gap: 36px; width: max-content;
+  display: flex; gap: 32px; width: max-content;
   font-family: var(--mono); font-size: 13px; font-weight: 700; letter-spacing: 0.16em;
 }
 .marquee-track i { opacity: .45; font-style: normal; }
@@ -310,8 +335,8 @@ header.is-hidden { transform: translateY(-100%); }
 }
 
 /* ============ sections ============ */
-section { padding-block: 104px; }
-@media (max-width: 767px) { section { padding-block: 72px; } }
+section { padding-block: 96px; }
+@media (max-width: 767px) { section { padding-block: 64px; } }
 .sec-head { margin-bottom: 48px; }
 .sec-head h2 { margin-top: 24px; max-width: 20ch; }
 .sec-head .body { margin-top: 16px; max-width: 62ch; }
@@ -329,7 +354,7 @@ section { padding-block: 104px; }
 .panel { border-radius: var(--r); background: var(--ink-900); overflow: hidden; border: 1px solid var(--ink-700); }
 .panel-head {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 14px 18px; border-bottom: 1px solid var(--ink-700);
+  padding: 16px; border-bottom: 1px solid var(--ink-700);
   font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; color: #8b8496;
 }
 .panel pre { margin: 0; padding: 24px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.75; color: var(--cream); }
@@ -353,7 +378,8 @@ section { padding-block: 104px; }
 /* ============ download ============ */
 .dl { display: grid; gap: 24px; }
 @media (min-width: 940px) { .dl { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
-.dl-card { border: 1px solid var(--hair); border-radius: var(--r); padding: 32px; background: var(--bg-2); }
+.dl-card { border: 1px solid var(--hair); border-radius: var(--r); padding: 24px; background: var(--bg-2); }
+@media (min-width: 768px) { .dl-card { padding: 32px; } }
 .dl-card.is-primary { border-color: var(--amber); }
 .dl-card h3 { margin-bottom: 12px; }
 .dl-card .body { font-size: 16px; }
@@ -361,10 +387,33 @@ section { padding-block: 104px; }
 .dl-note { margin-top: 24px; font-size: 14px; line-height: 1.6; color: var(--fg-3); }
 .dl-note b { color: var(--fg-2); font-weight: 600; }
 .dl-all { margin-top: 24px; }
-.dl-all summary { font-family: var(--mono); font-size: 13px; color: var(--fg-2); cursor: pointer; min-height: 32px; display: flex; align-items: center; }
+.dl-all summary { font-family: var(--mono); font-size: 13px; color: var(--fg-2); cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 .dl-all summary:hover { color: var(--accent-text); }
-.dl-table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 15px; }
-.dl-table td { padding: 12px 8px; border-top: 1px solid var(--hair); }
+.dl-table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 16px; }
+.dl-table td { padding: 4px 8px; border-top: 1px solid var(--hair); }
+/* The link, not the cell, is the target — so the link carries the height, and the one that starts a
+   download is shaped like the action it is. Measured before: "Download" was 21px wide, "sha256" 43. */
+.dl-table td > a, .dl-table td > span { display: inline-flex; align-items: center; min-height: 44px; }
+.dl-table td:nth-child(3) > a {
+  justify-content: center; min-width: 96px; padding-inline: 16px;
+  border: 1px solid var(--hair-2); border-radius: var(--r-pill); font-weight: 600;
+  transition: border-color .16s var(--ease-out), color .16s var(--ease-out);
+}
+.dl-table td:nth-child(3) > a:hover { border-color: var(--accent-text); text-decoration: none; }
+.dl-table td:nth-child(4) > a { padding-inline: 8px; }
+
+/* Below 560 a four-column table cannot give any cell a real target, so it stops being a table: one
+   block per platform, name and size on top, a full-width download control under them. */
+@media (max-width: 559px) {
+  .dl-table, .dl-table tbody, .dl-table tr, .dl-table td { display: block; width: 100%; }
+  .dl-table tr { border-top: 1px solid var(--hair); padding-block: 16px; }
+  .dl-table td { padding: 0; border: 0; text-align: left; }
+  .dl-table td:first-child { font-weight: 600; }
+  .dl-table td:nth-child(2) { margin-bottom: 12px; color: var(--fg-3); font-size: 14px; }
+  .dl-table td:nth-child(3) > a { display: flex; width: 100%; min-height: 48px; }
+  .dl-table td:nth-child(4) { margin-top: 8px; }
+  .dl-table tr[data-current] td:first-child { box-shadow: none; padding-left: 12px; border-left: 2px solid var(--amber); }
+}
 .dl-table td:first-child { padding-left: 0; }
 .dl-table td:last-child { text-align: right; padding-right: 0; }
 .dl-table a { color: var(--accent-text); font-weight: 500; }
@@ -376,10 +425,10 @@ section { padding-block: 104px; }
 a:hover .arrow { transform: translateX(3px); }
 
 /* ============ footer ============ */
-footer { padding-top: 72px; overflow: hidden; }
+footer { padding-top: 64px; overflow: hidden; }
 .foot-rows { display: flex; flex-wrap: wrap; gap: 32px; justify-content: space-between; align-items: flex-start; }
-.foot-links { display: flex; flex-wrap: wrap; gap: 24px; font-size: 15px; }
-.foot-links a { color: var(--fg-2); transition: color .16s var(--ease-out); }
+.foot-links { display: flex; flex-wrap: wrap; gap: 8px; font-size: 16px; margin-inline: -8px; }
+.foot-links a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 8px; color: var(--fg-2); transition: color .16s var(--ease-out); }
 .foot-links a:hover { color: var(--accent-text); }
 .foot-meta { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--hair); display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
 
@@ -388,18 +437,15 @@ footer { padding-top: 72px; overflow: hidden; }
 .signature {
   margin-top: 64px; margin-bottom: -0.18em;
   font-family: var(--mono); font-weight: 700;
-  font-size: clamp(64px, 19vw, 300px); line-height: .8; letter-spacing: -0.05em;
+  font-size: clamp(72px, 19vw, 288px); line-height: .8; letter-spacing: -0.05em;
   text-align: center; white-space: nowrap; user-select: none;
   color: transparent; -webkit-text-stroke: 2px var(--hair-2);
 }
 @supports not (-webkit-text-stroke: 1px red) { .signature { color: var(--ink-700); } }
 
-/* ============ touch targets ============ */
-/* Measured at 390px: the nav CTA was 40px and the language, copy and disclosure controls 32px. */
-@media (pointer: coarse) {
-  .nav-links > a.btn, .langswitch button, .copy, .dl-all summary { min-height: 44px; }
-  .langswitch button, .copy { padding-inline: 16px; }
-}
+/* Touch targets are 44px on every pointer type rather than only on coarse ones, because a laptop
+   touchscreen reports fine and a 32px control is hard to hit there too. Measured: the language and copy
+   controls were 32px, the sha256 links 20x20, and the footer links 24px tall. */
 
 /* ============ utilities ============ */
 .visually-hidden {

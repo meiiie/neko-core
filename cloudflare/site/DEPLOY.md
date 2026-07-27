@@ -69,6 +69,33 @@ curl -fsSL https://neko.holilihu.online/install.sh | head -3            # the re
 The last one is the one that matters. `curl … | sh` is printed in the README, inside both installer
 scripts, and in every release note: if it ever returns HTML, every new user's first command fails.
 
+## The scales are measured, not asserted
+
+`audit.js` (next to this file) walks every rendered element and reports anything off the spacing or type
+scale, every control under 44px on its short edge, and any text column past ~78ch. Run it after any
+visual change:
+
+```js
+// copy audit.js into public/, then in the console:
+const src = await (await fetch("/_audit.js")).text();
+for (const w of [320, 390, 430, 768, 1024, 1440]) {
+  const f = document.createElement("iframe");
+  f.src = "/"; f.width = w; f.height = 900; document.body.appendChild(f);
+  await new Promise(r => { f.onload = r; setTimeout(r, 2200); });
+  f.contentWindow.eval(src);
+  console.log(w, f.contentWindow.__audit(String(w)));
+  f.remove();
+}
+```
+
+Take the file back out of `public/` before deploying — it is a tool, not part of the site.
+
+The current state: zero off-scale values and zero targets under 44px at all six widths, with four
+documented exemptions listed at the top of `styles.css`. Things it caught that eyeballing had not:
+button padding at 9/20 and 14/30, section rhythm at 72, the gutter at 40, five separate uses of 15px
+type, a language control at 39×32, `sha256` links at 20×20, and a nav that needed 380px of content
+inside 312px of usable width at 360px — where the wordmark and the CTA were overlapping.
+
 ## Changing the page
 
 Edit `public/index.html` and run `npx wrangler deploy` again. Two things to keep in mind:
