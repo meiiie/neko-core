@@ -138,9 +138,15 @@ jobs:
             echo "attempt $attempt: site reports '${got:-<none>}', want '$want'"
             if [ "$got" = "$want" ]; then
               echo "site is current"
-              # The page itself must carry it too, not just the JSON probe.
-              curl -fsS --max-time 20 https://neko.holilihu.online/ | grep -q "$want" \
-                && echo "the rendered page carries $want" && exit 0
+              # The page itself must carry it too, not just the JSON probe. Read it into a variable
+              # rather than piping into grep: `grep -q` exits on the first match and closes the pipe,
+              # curl dies with exit 23, and `set -o pipefail` turns a PASSING check into a failure.
+              # That is exactly how v0.18.1 reported "the HTML rewrite is not running" about a page
+              # that was already serving the new version.
+              page=$(curl -fsS --max-time 20 https://neko.holilihu.online/ || true)
+              case "$page" in
+                *"$want"*) echo "the rendered page carries $want"; exit 0 ;;
+              esac
               echo "::error::/__release says $want but the page does not contain it - the HTML rewrite is not running"
               exit 1
             fi
