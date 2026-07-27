@@ -108,3 +108,36 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" "${{ matrix.asset }}" "${{ matrix.asset }}.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+
+  # The site reads the latest release from the GitHub API and rewrites its version + download sizes on
+  # the way out, so a release needs no site deploy. That is only true while it actually works, and a
+  # silent failure there means the download page advertises the wrong build — the exact class of bug
+  # nobody notices until a user reports a size mismatch. So the release ASSERTS it, rather than assuming.
+  #
+  # It waits because the Worker caches the API response for ten minutes; a fresh tag can take that long
+  # to surface. Failure here does not invalidate the binaries (they are already attached) — it means the
+  # site needs looking at.
+  site:
+    name: site reports the new version
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: wait for neko.holilihu.online to serve this version
+        shell: bash
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          for attempt in $(seq 1 20); do
+            got=$(curl -fsS --max-time 20 https://neko.holilihu.online/__release | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)
+            echo "attempt $attempt: site reports '${got:-<none>}', want '$want'"
+            if [ "$got" = "$want" ]; then
+              echo "site is current"
+              # The page itself must carry it too, not just the JSON probe.
+              curl -fsS --max-time 20 https://neko.holilihu.online/ | grep -q "$want" \
+                && echo "the rendered page carries $want" && exit 0
+              echo "::error::/__release says $want but the page does not contain it - the HTML rewrite is not running"
+              exit 1
+            fi
+            sleep 45
+          done
+          echo "::error::the site never reported $want (checked for 15 minutes) - see cloudflare/site/DEPLOY.md"
+          exit 1

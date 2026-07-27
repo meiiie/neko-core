@@ -12,6 +12,10 @@ routes = [{ pattern = "neko.holilihu.online", custom_domain = true }]
 [assets]
 directory = "./public"
 binding = "ASSETS"
+# Static assets are served BEFORE the Worker by default, so `/` never reached it and the release
+# rewrite silently did nothing — only paths with no matching file (/install.sh, /__release) ran. The
+# HTML has to pass through the Worker for the version and download sizes to be filled in.
+run_worker_first = ["/", "/index.html"]
 
 [observability]
 enabled = true

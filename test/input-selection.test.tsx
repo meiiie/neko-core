@@ -97,7 +97,7 @@ test("the geometry lookup is delta-based, which is what lets a drag anchor and e
 });
 
 test("looking up an index does not move the caret; clicking does, and says where", async () => {
-  let indexAt: ((dRow: number, dCol: number) => number) | null = null;
+  let indexAt: ((dRow: number, dCol: number, fromIndex?: number) => number) | null = null;
   let caretClick: ((dRow: number, dCol: number) => number) | null = null;
   const c = render(
     <TextInput

@@ -9,8 +9,8 @@
   "use strict";
 
   var VI = {
-    "announce": "Phiên bản 0.17.1 có thêm Oracle — ý kiến thứ hai từ một mô hình khác.",
-    "announce.link": "Nó làm gì <span class=\"arrow\">&rarr;</span>",
+    "announce": "Neko Core {v} đã ra.",
+    "announce.link": "Có gì mới <span class=\"arrow\">&rarr;</span>",
 
     "nav.how": "Cách hoạt động",
     "nav.download": "Tải về",
@@ -113,6 +113,11 @@
 
   // English is read out of the markup, so the dictionary only holds the translation and nothing can
   // drift out of sync with the page it describes.
+  // The Worker rewrites [data-release] spots on the way out, so the version in the page is the live
+  // one. Read it BEFORE any translation runs and substitute it back into {v}, or switching language
+  // would overwrite the injected number with whatever was baked into the dictionary.
+  var liveVersion = (document.querySelector('[data-release="version"]') || {}).textContent || "";
+
   var nodes = [].slice.call(document.querySelectorAll("[data-i18n]"));
   var EN = {};
   nodes.forEach(function (node) {
@@ -127,7 +132,8 @@
     nodes.forEach(function (node) {
       var key = node.getAttribute("data-i18n");
       var value = dict[key];
-      node.innerHTML = value === undefined ? EN[key] : value; // untranslated stays English, never empty
+      var html = value === undefined ? EN[key] : value; // untranslated stays English, never empty
+      node.innerHTML = liveVersion ? html.split("{v}").join(liveVersion) : html;
     });
     document.documentElement.lang = lang;
     document.title = TITLES[lang];
@@ -166,7 +172,16 @@
     return "windows";
   }
 
+  // The download table carries the live sizes (the Worker rewrote them), so the buttons read theirs
+  // from the page rather than keeping a second copy that can drift a release behind.
+  function liveSize(asset, fallback) {
+    var el = document.querySelector('[data-release="size:' + asset + '"]');
+    var text = el && el.textContent ? el.textContent.trim() : "";
+    return text || fallback;
+  }
+
   var platform = PLATFORMS[detect()];
+  platform.size = liveSize(platform.file, platform.size);
   [].forEach.call(document.querySelectorAll("[data-os-name]"), function (n) { n.textContent = platform.name; });
   [].forEach.call(document.querySelectorAll("[data-os-size]"), function (n) { n.textContent = platform.size; });
   [].forEach.call(document.querySelectorAll("#heroDownload, #mainDownload"), function (a) { a.href = RELEASE + platform.file; });

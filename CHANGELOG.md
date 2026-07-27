@@ -6,6 +6,8 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-07-27
+
 ### Fixed
 
 - **You can select and copy inside the prompt again.** Fullscreen turns on mouse reporting so the wheel
@@ -61,8 +63,14 @@ All notable changes to Neko Core are documented here. The format follows
   blank, and a crawler with no JavaScript still gets a real page. There is a **direct download** for
   people who would rather have a file than run a command — per-platform, size and SHA-256 next to each
   build, with the two things a non-developer needs to be told first: it is a terminal program, and it is
-  not code-signed yet. Deploy runbook: `cloudflare/site/DEPLOY.md`; art briefs:
-  `docs/marketing/IMAGE-BRIEFS.md`.
+  not code-signed yet. A 30-second clip of a real run shows Neko cleaning a 599-row spreadsheet and
+  building a dashboard from one Vietnamese sentence.
+
+  **The site keeps itself current.** Its Worker reads the latest release from the GitHub API and
+  rewrites the version and the five download sizes on the way out, cached ten minutes and failing open
+  to the values baked in at deploy time — so shipping a release needs no site deploy, and the release
+  workflow asserts the site caught up rather than trusting it. Deploy runbook:
+  `cloudflare/site/DEPLOY.md`; art briefs: `docs/marketing/IMAGE-BRIEFS.md`.
 
 ## [0.17.1] — 2026-07-25
 

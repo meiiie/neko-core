@@ -3055,3 +3055,44 @@ reserved for LATER if zero-dependency single-binary distribution becomes the mai
 - CI emitted only upstream informational annotations: checkout v4's Node 20 action is forced onto Node 24,
   and `macos-latest` is migrating to macOS 26. They did not affect any build/smoke; update checkout in the
   next maintenance pass rather than mutating the already-verified release tag.
+
+## v0.18.0 — the oracle, a public site that maintains itself, and the prompt you could not copy (2026-07-27)
+
+**The oracle.** A second opinion from a *different* model, given no tools at all. The division is the
+point: the executor has the machine, the oracle has one expensive read. Sending source somewhere else is
+the one thing this product does that needs defending, so secret stores are refused whole, credential-shaped
+literals are masked in place while `process.env.API_KEY` and `` `Bearer ${token}` `` survive intact
+(masking those corrupts the code the oracle was asked to read), the budget drops WHOLE files and names
+them, the manifest prints before anything leaves, and the in-session tool is approval-gated. Which model
+answers is a profile. Verified end to end against a live `chatgpt/gpt-5.6-sol` consultation.
+
+**Reads may leave the project root.** `path escapes project root` on a skill file one directory over was
+a wall that stopped ordinary work without bounding any damage — the confinement was always about what a
+MUTATION can break. Writes are unchanged; credential paths (SSH, `.env`, `.aws`, `.gnupg`, netrc, git
+credentials, key material, browser stores, Neko's own `config.json`) are refused outside the root whatever
+the setting, and `neko policy` prints the posture. Found while testing it: a path escape on `write_file`
+THREW out of `execute` instead of returning an observation, because the `/rewind` snapshot ran before the
+try block — a tool that throws crashes the agent loop rather than handing it something recoverable.
+
+**The prompt was the one thing on screen you could not select.** Fullscreen enables mouse reporting for
+the wheel, which takes the terminal's native select-to-copy away everywhere. Neko already replaced it —
+but only over the transcript, since that selection anchors to content rows and the input is not one. A
+selection in the prompt is a codepoint RANGE IN THE VALUE instead, which is what makes it survive wrapping
+and show bullets over a masked value. One race removed while building it: the first version measured each
+sample from the caret's screen cell, which the differ reads off the last PAINTED frame, so a fast drag
+measured from a stale caret. The anchor now carries the press point.
+
+**neko.holilihu.online is a site, and it maintains itself.** Its root previously redirected to the frozen
+`bang_c` repo. The Worker now reads the latest release from the GitHub API and rewrites the version and
+five download sizes on the way out — cached ten minutes, failing open to the values baked in at deploy
+time. Two things this cost: static assets are served BEFORE the Worker by default, so `/` never reached it
+and the rewrite silently did nothing until `run_worker_first` was set; and every value on the page
+happened to equal its baked twin, so the first "it works" was an illusion until a deliberately wrong probe
+value proved otherwise. `release.yml` now asserts the site reports the new version rather than assuming.
+
+**Design measured, not eyeballed.** An audit walks every rendered element at 320/390/430/768/1024/1440 and
+reports anything off the spacing or type scale, every control under 44px on its short edge, and any text
+column past 78ch. It found button padding at 9/20 and 14/30, section rhythm at 72, the gutter at 40, five
+uses of 15px type, a language control at 39x32, `sha256` links at 20x20, and a nav needing 380px of content
+inside 312px of usable width at 360px — where the wordmark and the CTA were overlapping. All fixed; the
+tool ships next to `DEPLOY.md` so the next visual change is measured too.
