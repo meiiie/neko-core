@@ -134,6 +134,31 @@ const MODIFIED_ENTER = /^\x1b?\[(?:13;[2-8]u|27;[2-8];13~)$/;
  * renderer uses, so wrap-path clicks are exact; the multiline (\n) path lets Ink wrap naturally,
  * so a click on an overlong logical line lands approximately (clamped). The scan is O(n^2) in
  * the input length - inputs stay short because big pastes collapse to placeholders. */
+/**
+ * Split the half-open range [start, end) at the selection bounds, marking which runs are selected.
+ *
+ * This is the whole of the highlight's correctness — clipping a selection to one visual line of a
+ * wrapped value, and collapsing an empty or inverted range to nothing — so it lives out here as a pure
+ * function rather than inside the render, where Ink strips styling in tests and it could not be checked.
+ * Returns a single unselected run when nothing is highlighted, so the caller can skip the split.
+ */
+export function selectionRuns(
+  start: number,
+  end: number,
+  sel: { from: number; to: number } | null | undefined,
+): Array<{ from: number; to: number; on: boolean }> {
+  const whole = start < end ? [{ from: start, to: end, on: false }] : [];
+  if (!sel || sel.to <= sel.from) return whole;
+  const a = Math.max(start, sel.from);
+  const b = Math.min(end, sel.to);
+  if (a >= b) return whole;
+  const runs: Array<{ from: number; to: number; on: boolean }> = [];
+  if (start < a) runs.push({ from: start, to: a, on: false });
+  runs.push({ from: a, to: b, on: true });
+  if (b < end) runs.push({ from: b, to: end, on: false });
+  return runs;
+}
+
 export function caretIndexForClick(value: string, caretIndex: number, width: number, dRow: number, dCol: number): number {
   const cps = [...value];
   const i = Math.min(Math.max(0, caretIndex), cps.length);
@@ -174,8 +199,16 @@ export function TextInput(props: {
     /** Legacy caret glyph override. Kept for config/API compatibility; overlay caret ignores it. */
     caretGlyph?: CaretStyle;
     /** Click-to-caret hook: ChatApp registers the handler it calls with the click's (dRow, dCol)
-     * delta from the hardware caret's screen cell. TextInput owns the geometry -> index math. */
-    registerCaretClick?: (fn: ((dRow: number, dCol: number) => void) | null) => void;
+     * delta from the hardware caret's screen cell. TextInput owns the geometry -> index math.
+     * Returns the resulting codepoint index, which is also where a drag-selection anchors. */
+    registerCaretClick?: (fn: ((dRow: number, dCol: number) => number) | null) => void;
+    /** The same geometry lookup WITHOUT moving the caret. `fromIndex` overrides the origin the delta
+     * is measured from: a drag measures from where it STARTED, not from the caret, so it does not
+     * depend on a repaint having landed between the press and the first motion. */
+    registerIndexAt?: (fn: ((dRow: number, dCol: number, fromIndex?: number) => number) | null) => void;
+    /** Highlighted codepoint range, rendered in reverse video. ChatApp owns it because the drag that
+     * produces it is a pointer gesture and pointer events arrive there. */
+    selection?: { from: number; to: number } | null;
   }) {
     const { value, onChange, onSubmit, placeholder, mask, width = 9999, pastedContents, nextPasteId, onCommitPastes, onPasteImage, caretGlyph = "thin-block" } = props;
   const ref = useRef(value);
@@ -293,15 +326,36 @@ export function TextInput(props: {
         props.registerCaretClick?.((dRow, dCol) => {
           cur.current = caretIndexForClick(ref.current, cur.current, visibleCols, dRow, dCol);
           rerender();
+          return cur.current;
         });
-        return () => props.registerCaretClick?.(null);
+        props.registerIndexAt?.((dRow, dCol, fromIndex) =>
+          caretIndexForClick(ref.current, fromIndex ?? cur.current, visibleCols, dRow, dCol));
+        return () => { props.registerCaretClick?.(null); props.registerIndexAt?.(null); };
       });
       const i = Math.min(cur.current, cps.length);
       const bullet = "\u2022";
       // shownChar maps a printable char to a bullet when mask is set, but PRESERVES a "\n" so a masked
       // multiline value still renders its line breaks (otherwise everything collapsed to one bullet row).
       const shownChar = (ch: string) => mask && ch !== "\n" ? bullet : ch;
-      const renderRange = (start: number, end: number) => cps.slice(start, end).map(shownChar).join("");
+      const plain = (start: number, end: number) => cps.slice(start, end).map(shownChar).join("");
+      /**
+       * A range of the value, split at the selection bounds so the selected part renders in reverse
+       * video. At most THREE segments per visual line — the component's own note warns that a
+       * per-codepoint <Text> fan-out breaks Ink's yoga height measurement after a resize-down, and
+       * three flat strings is nowhere near that.
+       */
+      const sel = props.selection ?? null;
+      const seg = (start: number, end: number, key: string) => {
+        const runs = selectionRuns(start, end, sel);
+        if (runs.length <= 1) return plain(start, end);
+        return (
+          <Text key={key}>
+            {runs.map((r, ri) => (r.on
+              ? <Text key={`${key}s${ri}`} inverse>{plain(r.from, r.to)}</Text>
+              : plain(r.from, r.to)))}
+          </Text>
+        );
+      };
       // The caret is the terminal's HARDWARE cursor (a bar between cells, like Claude Code's "khả|o").
       // TextInput only MARKS its position with the zero-width CARET_SENTINEL; the FrameDiffer strips it
       // and positions the real cursor there. No glyph is drawn, so text stays tight and the bar sits
@@ -322,9 +376,9 @@ export function TextInput(props: {
       if (value.includes("\n")) {
         return (
           <Text>
-            {renderRange(0, i)}
+            {seg(0, i, "a")}
             {CARET}
-            {renderRange(i, cps.length)}
+            {seg(i, cps.length, "b")}
           </Text>
         );
       }
@@ -343,20 +397,18 @@ export function TextInput(props: {
               {shown.map((ln, li) => {
                 const onThisLine = startLine + li === wrapped.caretLine;
                 const nl = li < shown.length - 1 ? "\n" : "";
+                const lineFrom = ln.cells.length ? ln.cells[0].index : 0;
+                const lineTo = ln.cells.length ? ln.cells[ln.cells.length - 1].index + 1 : 0;
                 if (!onThisLine) {
-                  return <Text key={`l${li}`}>{ln.cells.map((c) => shownChar(c.ch)).join("")}{nl}</Text>;
+                  return <Text key={`l${li}`}>{seg(lineFrom, lineTo, `p${li}`)}{nl}</Text>;
                 }
                 // Insert the caret before the first cell at/after the cursor index (or at line end).
-                let before = "", after = "";
-                for (const cell of ln.cells) {
-                  const ch = shownChar(cell.ch);
-                  if (cell.index < i) before += ch; else after += ch;
-                }
+                const caretCell = Math.min(Math.max(i, lineFrom), lineTo);
                 return (
                   <Text key={`l${li}`}>
-                    {before}
+                    {seg(lineFrom, caretCell, `b${li}`)}
                     {CARET}
-                    {after}
+                    {seg(caretCell, lineTo, `a${li}`)}
                     {nl}
                   </Text>
                 );
@@ -379,13 +431,11 @@ export function TextInput(props: {
   })();
   // Caret INSERTED at the cursor (clamped to the window): char i renders normally in `after`.
   const caretAt = Math.min(Math.max(i, winStart), winEnd);
-  const before = renderRange(winStart, caretAt);
-  const after = renderRange(caretAt, winEnd);
     return (
     <Text>
-      {before}
+      {seg(winStart, caretAt, "w0")}
       {CARET}
-      {after}
+      {seg(caretAt, winEnd, "w1")}
     </Text>
   );
 }

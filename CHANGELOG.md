@@ -6,6 +6,22 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **You can select and copy inside the prompt again.** Fullscreen turns on mouse reporting so the wheel
+  scrolls the transcript, and that takes the terminal's native click-drag select-to-copy away. Neko
+  replaced it with its own drag-select — but only over the transcript, because that selection is
+  anchored to content rows and the input is not one of them. A press in the prompt explicitly cancelled
+  the gesture, so the text you had just typed was the one thing on screen you could not copy.
+
+  Dragging in the prompt now selects, highlights in reverse video, copies on release, and keeps the
+  highlight so `Ctrl+C` copies the same range. It is a codepoint range in the input value rather than a
+  screen rectangle, so it survives wrapping across visual lines, and a masked value (`/login`) shows
+  bullets under the highlight rather than the secret.
+
+  The gesture measures from where the drag STARTED rather than from the caret, so a fast drag cannot be
+  thrown off by a repaint that has not landed yet.
+
 ### Changed
 
 - **Reads may now leave the project directory; writes still may not.** Asking Neko to read a skill, a

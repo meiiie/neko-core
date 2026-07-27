@@ -220,6 +220,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   });
     const [stream, setStream] = useState("");
     const [input, setInput] = useState("");
+    // The pointer handler shadows `input` with the keystroke it receives, so the prompt value is
+    // also kept in a ref — that is the only way a drag-selection can slice the text it covers.
+    const promptRef = useRef("");
+    promptRef.current = input;
     // Paste-collapse state owned here (not in TextInput) so BOTH submit and the external editor
     // (Ctrl+G) can expand `[Pasted text #N]` placeholders to their full content. TextInput stages a
     // paste by writing into this map + bumping the counter; submit consumes the map. See
@@ -227,7 +231,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const pastedContentsRef = useRef(new Map<number, string>());
     // Click-to-caret bridge: TextInput registers its handler here; the fullscreen pointer handler
     // calls it with the click's delta from the hardware caret cell (see the press branch).
-    const caretClickRef = useRef<((dRow: number, dCol: number) => void) | null>(null);
+    const caretClickRef = useRef<((dRow: number, dCol: number) => number) | null>(null);
+    // Drag-to-select inside the PROMPT. The transcript selection is anchored to content rows, which
+    // the input is not part of, so it needs its own model: a codepoint range in the input value.
+    // The anchor keeps the press POINT as well as its index: every later sample measures from there,
+    // so the gesture never depends on a repaint having moved the caret first.
+    const inputSelAnchor = useRef<{ index: number; x: number; y: number } | null>(null);
+    const indexAtRef = useRef<((dRow: number, dCol: number, fromIndex?: number) => number) | null>(null);
+    const [inputSel, setInputSel] = useState<{ from: number; to: number } | null>(null);
     const pastedImagesRef = useRef(new Map<number, string>()); // [Image #N] id -> data: URL (shares the paste id counter)
     const nextPasteIdRef = useRef(1);
     // Reset the shared id counter only when NOTHING is staged - a still-staged image (its turn is
@@ -703,7 +714,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // over the transcript; it PERSISTS after release so the "select, then Ctrl+C" habit works, and it also
   // copies on release. The selection is anchored to CONTENT rows (indices into the transcript), so a drag
   // can run PAST the top/bottom edge - the view auto-scrolls and the highlight keeps extending over the
-  // text above/below the fold, and scrolling afterward doesn't lose it (the differ re-maps content->screen). ---
+  // text above/below the fold, and scrolling afterward doesn't lose it (the differ re-maps content->screen).
+  //
+  // The PROMPT needs a second, separate model. It is not part of the transcript band, so a content-row
+  // anchor cannot describe it; a selection there is a codepoint range in the input value, rendered by
+  // TextInput itself. Both end in the same place - the text is copied on release and remembered for
+  // Ctrl+C - so from the user's side there is one gesture, not two. ---
   const selAnchor = useRef<{ x: number; row: number } | null>(null); // where a left-drag began: 1-based screen col + CONTENT row index
   const selectedText = useRef("");                                 // the current persisted selection's text (for Ctrl+C)
   const [copyNote, setCopyNote] = useState<string | null>(null);   // transient copy confirmation, auto-clears
@@ -767,6 +783,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     return out.join("\n").replace(/\n+$/, "");
   };
+  // Editing the prompt invalidates any highlight over it: the indices no longer point at the same
+  // characters. Typing, history navigation, /clear and a submit all land here.
+  useEffect(() => { setInputSel(null); }, [input]);
+
   // New transcript content shifts the band, so a screen-anchored highlight would land on the wrong rows -
   // drop the selection whenever the line count changes (a new turn, a committed reply, etc.).
   useEffect(() => { clearSelection(); }, [lines.length]);
@@ -2424,6 +2444,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setPillHover(pillHit(ptr.x, ptr.y));
         if (!search && ptr.kind === "press" && ptr.left) {
           clearSelection();                                                       // a fresh drag drops any old selection
+          setInputSel(null);                                                      // ...including one over the prompt
           if (pillHit(ptr.x, ptr.y)) return rowScroll.toBottom();                 // the pill is a click target
           if (ptr.y > viewH) {
             // Click in the input area: move the caret to the clicked cell (Claude Code parity).
@@ -2432,15 +2453,31 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             // keeps stray clicks on the chrome rows from teleporting the caret.
             const cp = frameDiffer?.caretScreenPos();
             if (cp && caretClickRef.current && Math.abs(ptr.y - cp.row) < MAX_INPUT_LINES) {
-              caretClickRef.current(ptr.y - cp.row, ptr.x - cp.col);
+              // The caret moves to the click, and that same index anchors a drag. Every later delta is
+              // measured from the caret's cell, so the caret must not move again until the drag ends.
+              const index = caretClickRef.current(ptr.y - cp.row, ptr.x - cp.col);
+              inputSelAnchor.current = { index, x: ptr.x, y: ptr.y };
+            } else {
+              inputSelAnchor.current = null;
             }
-            selAnchor.current = null; // clicks below the transcript never start a selection
+            setInputSel(null);
+            selAnchor.current = null; // a press in the input never starts a TRANSCRIPT selection
             return;
           }
           selAnchor.current = ptr.y >= 1 && ptr.y <= viewH ? { x: ptr.x, row: contentRowAt(ptr.y) } : null; // begin in the band only
           return;
         }
         if (ptr.kind === "move") {
+          const dragging = inputSelAnchor.current;
+          if (dragging && ptr.left) {
+            if (indexAtRef.current) {
+              const focus = indexAtRef.current(ptr.y - dragging.y, ptr.x - dragging.x, dragging.index);
+              const from = Math.min(dragging.index, focus);
+              const to = Math.max(dragging.index, focus);
+              setInputSel(to > from ? { from, to } : null);
+            }
+            return;
+          }
           if (selAnchor.current && ptr.left) {
             // Auto-scroll when the drag reaches an edge, so a selection can run PAST the fold: dragging
             // at/above the top row scrolls up (revealing earlier text); at/below the bottom scrolls down.
@@ -2452,6 +2489,22 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return; // a drag OR a bare hover - moves never fall through
         }
         if (ptr.kind === "release") {
+          if (inputSelAnchor.current) {
+            const anchor = inputSelAnchor.current;
+            inputSelAnchor.current = null;
+            const focus = indexAtRef.current
+              ? indexAtRef.current(ptr.y - anchor.y, ptr.x - anchor.x, anchor.index)
+              : anchor.index;
+            const from = Math.min(anchor.index, focus), to = Math.max(anchor.index, focus);
+            const text = [...promptRef.current].slice(from, to).join("");
+            if (text) {
+              setInputSel({ from, to });
+              selectedText.current = text;   // so Ctrl+C copies exactly this, like a transcript selection
+              copyBoth(text);
+              flashCopyNote(`copied ${text.length} chars to clipboard`);
+            } else setInputSel(null);
+            return;
+          }
           const a = selAnchor.current;
           selAnchor.current = null;
           if (a) {
@@ -2752,6 +2805,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                   onCommitPastes={commitPastes}
                   onPasteImage={pasteImage}
                   registerCaretClick={(fn) => { caretClickRef.current = fn; }}
+                  registerIndexAt={(fn) => { indexAtRef.current = fn; }}
+                  selection={inputSel}
                   caretGlyph={cfg.caretGlyph}
                   placeholder={awaitingKey ? "paste API key" : busy ? "type to queue while it works..." : started ? "" : 'Try: "explain src/agent.ts"   or   /help'}
                 />
