@@ -220,6 +220,24 @@ header.is-hidden { transform: translateY(-100%); }
   @keyframes caretBlink { 50% { opacity: 0; } }
 }
 
+/* The wordmark is the hero. Two short words carry a much larger size than a sentence could, so it
+   opts out of the headline clamp that exists to stop prose from wrapping beside the art. */
+.wordmark { font-size: clamp(56px, 8.5vw, 116px) !important; line-height: .84; letter-spacing: -0.055em; }
+.wordmark .amber { color: var(--accent-text); }
+
+/* The hero carries one command line, not the tabbed box — the install section below owns the detail,
+   and repeating the whole component twice on one page is the duplication, not the convenience. */
+.install-slim { max-width: 520px; }
+.install-slim .cmdrow { border: 0; }
+
+/* ============ demo ============ */
+.demo { margin: 0; }
+.demo video {
+  width: 100%; height: auto; display: block;
+  border: 1px solid var(--hair-2); border-radius: var(--r); background: var(--ink-900);
+}
+.demo figcaption { margin-top: 16px; }
+
 /*
  * The cat was generated on pure black. Rather than key it out — which chews the fur edge — it is
  * composited with mix-blend-mode: screen, where black resolves to the backdrop exactly and the white

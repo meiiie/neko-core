@@ -101,6 +101,19 @@ Edit `public/index.html` and run `npx wrangler deploy` again. Two things to keep
   ffmpeg -i bg.png  -vf "scale=1200:630:force_original_aspect_ratio=increase,crop=1200:630" -quality 85 public/og-bg.webp
   ```
 
+- **The demo clip is a real recording, cut and compressed, never re-enacted.** A 116-second screen
+  capture (57 MB) becomes a 30-second loop under 450 KB. The poster is a still of the *finished*
+  dashboard, so the page shows the outcome before anyone presses play:
+
+  ```bash
+  ffmpeg -ss 42 -t 30 -i run.mp4 -an -vf "scale=1280:-2:flags=lanczos"          -c:v libx264 -crf 31 -preset slow -movflags +faststart -pix_fmt yuv420p public/demo-excel.mp4
+  ffmpeg -ss 42 -t 30 -i run.mp4 -an -vf "scale=1280:-2:flags=lanczos"          -c:v libvpx-vp9 -crf 42 -b:v 0 -row-mt 1 public/demo-excel.webm
+  ffmpeg -i run.mp4 -vf "select='gte(t,108)',scale=1280:-2" -frames:v 1 -vsync 0 public/demo-excel-poster.webp
+  ```
+
+  `preload="none"` means nobody pays for the video until they ask for it, and the caption says plainly
+  that it is unedited. If the recording is ever re-shot, keep both of those true.
+
 - **The social card is regenerated, not hand-edited.** `og-card.html` (next to this file) is the source:
   copy it into `public/`, open it, screenshot, and crop. The viewport screenshot is scaled by
   `screenshotWidth / window.innerWidth` — 1.0208 on the machine this was built on — so the crop is
