@@ -8,6 +8,7 @@
 > **provider-agnostic**, **offline-capable**.
 
 **By [The Wiii Lab](https://github.com/meiiie).** MIT-licensed — contributions welcome.
+**[neko.holilihu.online](https://neko.holilihu.online)** — download, in English and Vietnamese.
 
 [![CI](https://github.com/meiiie/neko-core/actions/workflows/ci.yml/badge.svg)](https://github.com/meiiie/neko-core/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/meiiie/neko-core?sort=semver)](https://github.com/meiiie/neko-core/releases)
@@ -136,7 +137,14 @@ irm https://neko.holilihu.online/install.ps1 | iex
 > Fallback if the domain is unreachable: swap the URL for
 > `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` (and `…/install.ps1`).
 
-**Current release: [v0.16.0](https://github.com/meiiie/neko-core/releases/tag/v0.16.0).**
+**Prefer a file to a command?** [**neko.holilihu.online**](https://neko.holilihu.online) has a direct
+download for every platform, in English and Vietnamese, with the SHA-256 next to each build. Two things
+worth knowing before you double-click it: Neko is a *terminal* program, so opening it gives you a text
+window rather than a graphical app, and the builds are not code-signed yet, so Windows shows its
+"unrecognised app" screen — choose **More info → Run anyway**, or use the one-line install above, which
+also puts `neko` on your PATH and handles updates.
+
+**Current release: [v0.17.1](https://github.com/meiiie/neko-core/releases/tag/v0.17.1).**
 Every release passes the full gate battery before it is tagged — tests, render + input smokes, a
 real-ConPTY e2e, scroll bench, secret scan (`docs/process/RELEASE.md`). **Pin or roll back any time**
 (the pin holds — auto-update won't undo it): `neko update 0.9.0`, or at install time

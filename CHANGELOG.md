@@ -18,10 +18,20 @@ All notable changes to Neko Core are documented here. The format follows
   stays readable. Over budget drops whole files and names them rather than truncating a body. Which
   model answers is a profile: `{"oracle": {"profile": "claude"}}`. See `docs/process/ORACLE.md`.
 
-- **A landing page for `neko.holilihu.online`** (`cloudflare/site/`). It also fixes a live bug: the root
-  of the public install domain redirected to the frozen `bang_c` predecessor repo. `/install.sh` and
-  `/install.ps1` keep behaving exactly as before — they are printed in the README and in every release
-  note, so they are a contract. Deploy runbook: `cloudflare/site/DEPLOY.md`.
+- **[neko.holilihu.online](https://neko.holilihu.online) is a real site** (`cloudflare/site/`), not a
+  redirect. It also fixes a live bug: the root of the public install domain pointed at the frozen
+  `bang_c` predecessor repo, so anyone who typed the domain the README prints landed on the wrong
+  project. `/install.sh` and `/install.ps1` keep behaving exactly as before — they appear in the README,
+  inside both installers and in every release note, so they are a contract, and the Worker handles them
+  explicitly rather than leaving them to a convention of the assets layer.
+
+  Bilingual English/Vietnamese with a toggle that follows the browser: English lives in the markup and
+  Vietnamese in a dictionary, so an untranslated string falls back to English instead of rendering
+  blank, and a crawler with no JavaScript still gets a real page. There is a **direct download** for
+  people who would rather have a file than run a command — per-platform, size and SHA-256 next to each
+  build, with the two things a non-developer needs to be told first: it is a terminal program, and it is
+  not code-signed yet. Deploy runbook: `cloudflare/site/DEPLOY.md`; art briefs:
+  `docs/marketing/IMAGE-BRIEFS.md`.
 
 ## [0.17.1] — 2026-07-25
 

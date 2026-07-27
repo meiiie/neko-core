@@ -5,7 +5,9 @@ by a Cloudflare Worker; no build step, no framework, no external requests from t
 
 ```
 cloudflare/site/
-  public/index.html     the whole page (styles + script inline)
+  public/index.html     markup, in English, with data-i18n keys
+  public/styles.css     the brand system: ink/cream bands, amber accent, monospace headings
+  public/app.js         Vietnamese dictionary, platform detection, install tabs, copy
   public/*.png|ico      brand assets, copied from /assets
   worker.js             /install.sh and /install.ps1 -> raw.githubusercontent; everything else -> assets
   wrangler.toml         the deploy config
@@ -71,9 +73,24 @@ scripts, and in every release note: if it ever returns HTML, every new user's fi
 
 Edit `public/index.html` and run `npx wrangler deploy` again. Two things to keep in mind:
 
-- **Both languages live in the markup.** Every user-visible string appears twice, as
-  `<span class="vi">` and `<span class="en">`; CSS shows one and the toggle swaps them. If you add copy,
-  add both — a missing half renders as an empty gap, not as a fallback.
+- **English lives in the markup, Vietnamese lives in `app.js`.** Add a `data-i18n="some.key"` to the
+  element with the English text inside it, then add `"some.key"` to the `VI` object. A key with no
+  translation falls back to the English already in the page, so a half-finished translation degrades to
+  English rather than to a blank element — and a crawler or a reader with JavaScript off still gets a
+  real page. To check nothing was missed:
+
+  ```js
+  // paste in the browser console after switching to Vietnamese
+  [...document.querySelectorAll("[data-i18n]")].filter(n => !n.innerHTML.trim())
+  ```
+
+- **Download links use GitHub's `releases/latest/download/` permalinks**, so a new release needs no site
+  change. The file *sizes* printed next to them are hardcoded — update them when a build's size moves
+  by more than a few MB, or drop them.
 - **Claims on this page are checkable.** Everything it says about tools, gating, offline use and the
   oracle is true of the shipped binary. Keep it that way; a landing page that oversells is a support
   burden, not marketing.
+- **Art briefs** for the OG card, the README banner and the mascot are in
+  [`docs/marketing/IMAGE-BRIEFS.md`](../../docs/marketing/IMAGE-BRIEFS.md). The short version: generate
+  art only, never text — then composite the words in HTML and screenshot, or the Vietnamese diacritics
+  come out as gibberish.

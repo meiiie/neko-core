@@ -1,7 +1,10 @@
 name = "neko-site"
 main = "worker.js"
 compatibility_date = "2026-07-27"
-workers_dev = true # bootstrap URL; the Custom Domain neko.holilihu.online is attached in the dashboard
+workers_dev = true # bootstrap URL, kept so the site is reachable even if the zone changes hands
+# The public home. Declared here rather than clicked in the dashboard so the binding is in version
+# control: whoever redeploys gets the same hostname without knowing to go and attach it.
+routes = [{ pattern = "neko.holilihu.online", custom_domain = true }]
 
 # The landing page is plain static files. The Worker exists only to keep /install.sh and /install.ps1
 # behaving EXACTLY as they do today - those two paths are printed in the README, in the installers
