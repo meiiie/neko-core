@@ -73,11 +73,16 @@ interface Args {
   images?: string[];
   /** Split the meeting channel into numbered voices. Opt-in: see src/adapters/meeting-diarize.ts. */
   diarize: boolean;
+  /** `neko oracle`: the question, the globs to attach, the thread to continue, and the no-send preview. */
+  prompt?: string;
+  files?: string[];
+  followup?: string;
+  dryRun: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
   const tokens: string[] = [];
-  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, once: false, version: false, help: false, doctor: false, device: false, diarize: false };
+  const args: Args = { positionals: [], force: false, yolo: false, resume: false, loop: false, once: false, version: false, help: false, doctor: false, device: false, diarize: false, dryRun: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--profile") args.profile = argv[++i];
@@ -89,6 +94,10 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--no-tools") args.noTools = true;
     else if (a === "--trials") args.trials = Number(argv[++i]) || 1;
     else if (a === "--image" || a === "--img") { const p = argv[++i]; if (p) (args.images ??= []).push(p); }
+    else if (a === "--prompt" || a === "-p") args.prompt = argv[++i];
+    else if (a === "--file" || a === "-f") { const p = argv[++i]; if (p) (args.files ??= []).push(p); }
+    else if (a === "--followup") args.followup = argv[++i];
+    else if (a === "--dry-run") args.dryRun = true;
     else if (a === "--resume") {
       args.resume = true;
       const next = argv[i + 1];
@@ -247,6 +256,8 @@ Commands:
   mcp           list configured MCP servers and their tools
   browser       browser setup/status; normal users can use /browser inside the interactive app
   meeting       consented local meeting capture, transcription, status, list, show, or delete
+  oracle        ask a stronger model for a second opinion, with project files attached;
+                'oracle sessions' lists past consultations, 'oracle show <id>' reads one back
   setup [web]   one command to stand up the SOTA web stack (SearXNG + browser MCP, wired);
                 'setup browser [persistent|attach|isolated]' controls browser identity;
                 'setup tavily <key>' wires hosted search; 'setup codex' / 'setup gemini' add optional bridges;
@@ -270,6 +281,10 @@ Options:
                      e.g. NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko run --image pkg.jpg "what is this?"
   --resume [id]      (chat) resume a session by id, or the latest for this directory
   --continue, -c     (chat) resume the latest session for this directory (then /continue to pick up)
+  --prompt, -p <q>   (oracle) the question to ask
+  --file, -f <glob>  (oracle) attach files by glob, repeatable; '!glob' excludes
+  --followup <id>    (oracle) continue an earlier consultation
+  --dry-run          (oracle) print exactly what would be sent, and send nothing
   --doctor           alias of 'neko doctor' (setup diagnostics)
   --device           device-code flow with 'neko login openai chatgpt' (headless/SSH)
   --version          print version`;
@@ -1014,6 +1029,74 @@ async function cmdRun(args: Args): Promise<number> {
   return 0;
 }
 
+/**
+ * `neko oracle` - one expensive question to a stronger model, with a curated slice of the project.
+ *
+ * The order here is deliberate: the bundle is built and PRINTED before anything is sent, so the manifest
+ * of what leaves the machine is on screen whether or not you asked for --dry-run.
+ */
+async function cmdOracle(args: Args): Promise<number> {
+  const {
+    buildBundle, describeBundle, listOracleSessions, readOracleSession, resolveOracle, selectFiles, oracleSetupHint, consultOracle,
+  } = await import("../src/adapters/oracle.ts");
+  const sub = args.positionals[0];
+  const cfg = loadConfig({});
+
+  if (sub === "sessions") {
+    const sessions = listOracleSessions();
+    if (!sessions.length) { console.log("No oracle consultations yet."); return 0; }
+    for (const session of sessions) {
+      console.log(`${session.id}  ${session.createdAt.slice(0, 16).replace("T", " ")}  ${session.profile}/${session.model}  ${session.files.length} file(s)`);
+      console.log(`  ${session.question.replace(/\s+/g, " ").slice(0, 150)}`);
+    }
+    return 0;
+  }
+  if (sub === "show") {
+    const session = readOracleSession(args.positionals[1] ?? "");
+    if (!session) { console.error(`neko: error: no oracle session '${args.positionals[1] ?? ""}'`); return 1; }
+    console.log(`Session ${session.meta.id} - ${session.meta.profile}/${session.meta.model}`);
+    console.log(`Files sent: ${session.meta.files.join(", ") || "(none)"}\n`);
+    console.log(`Question: ${session.meta.question}\n`);
+    console.log(session.answer);
+    return 0;
+  }
+
+  const question = (args.prompt ?? args.positionals.join(" ")).trim();
+  if (!question) {
+    console.error("neko: error: the oracle needs a question. Example:\n  neko oracle -p \"why does the live transcript stall?\" -f \"src/adapters/meeting-*.ts\"");
+    return 2;
+  }
+  // A profile named on the command line IS the oracle for this run - that is the only profile the
+  // command has any use for.
+  if (args.profile) cfg.data.oracle = { ...(cfg.data.oracle ?? {}), profile: args.profile };
+  const settings = cfg.oracle;
+  const limits = { maxBytes: settings.maxBytes, maxFileBytes: settings.maxFileBytes, maxFiles: settings.maxFiles };
+
+  const patterns = args.files ?? [];
+  const { paths, skipped } = patterns.length ? selectFiles(process.cwd(), patterns) : { paths: [], skipped: [] };
+  const bundle = buildBundle(process.cwd(), question, paths, limits, skipped);
+  console.log(describeBundle(bundle));
+
+  if (args.dryRun) {
+    console.log("\n--dry-run: nothing was sent.");
+    return 0;
+  }
+  if (!settings.profile) { console.error(`\n${oracleSetupHint(cfg)}`); return 2; }
+
+  const oracle = resolveOracle(cfg);
+  console.log(`\nAsking ${oracle.profile}/${oracle.model}...\n`);
+  const consultation = await consultOracle(oracle.provider, { profile: oracle.profile, model: oracle.model }, {
+    root: process.cwd(),
+    question,
+    files: patterns,
+    limits,
+    followup: args.followup,
+    onDelta: (text) => process.stdout.write(text),
+  });
+  console.log(`\n\nSaved as ${consultation.id}. Continue with: neko oracle --followup ${consultation.id} -p "..."`);
+  return 0;
+}
+
 async function cmdBench(args: Args): Promise<number> {
   const cfg = load(args);
   // `neko bench lift`: measure the HARNESS LIFT — the same tasks raw (model only) vs +Neko (tools + loop).
@@ -1100,6 +1183,7 @@ async function main(): Promise<number> {
       case "logout": return cmdLogout(args);
       case "support": return await cmdSupport(args);
       case "meeting": return await cmdMeeting(args);
+      case "oracle": return await cmdOracle(args);
       case "update": {
         const { selfUpdate } = await import("../src/adapters/update.ts");
         const { setAutoUpdate } = await import("../src/adapters/project.ts");

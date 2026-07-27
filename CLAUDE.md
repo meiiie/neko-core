@@ -21,6 +21,7 @@ enforced by `test/architecture.test.ts`).
 | `adapters/providers.ts` | `openai_compat` over `fetch`: SSE streaming, retry, abort (implements `Provider`). |
 | `adapters/config.ts` | Config-first loader: overlay (built-in → profile preset → `~/.neko-core` → `./.neko-core` → `NEKO_*`) + profiles. Key read on demand, never stored/printed. |
 | `adapters/mcp.ts` · `adapters/session.ts` · `adapters/context.ts` · `adapters/skills.ts` | MCP client · session persistence/resume · global identity + project context (NEKO.md/AGENTS.md/CLAUDE.md) · `.md` skills. |
+| `adapters/oracle.ts` · `adapters/oracle-tools.ts` | Second opinion from a *different* model: curated file bundle (secrets refused/masked, whole-file budget), no tools, durable sessions + follow-up. Gated via the MCP seam. `docs/process/ORACLE.md`. |
 | `adapters/tool-registry.ts` | Shared CLI/TUI/subagent composition for native web, skills, vision, sandbox and inherited safety boundaries. |
 | `adapters/registry.ts` · `adapters/doctor.ts` · `adapters/project.ts` | capabilities + `policy` audit · `doctor` diagnostics · `init` scaffolds. |
 | **`shared/`** | `version.ts` (leaf). |

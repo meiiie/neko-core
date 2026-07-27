@@ -89,6 +89,10 @@ export const DEFAULTS: Record<string, any> = {
   auto_update_check: true, // check for a newer release at startup (daily-cached; set false to silence)
   auto_update: true, // AUTO-INSTALL that newer release in the background (claude-code style); false = notify only
   mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
+  // The oracle: a second opinion from a STRONGER model, consulted with a curated bundle of files and
+  // no tools. `profile` names any profile below - which model is "the strong one" is your decision, not
+  // ours, so there is no default. Empty = the feature reports how to turn it on instead of guessing.
+  oracle: { profile: "", model: "", max_bytes: 400_000, max_file_bytes: 128_000, max_files: 80 },
   // Exact Chrome extension ids allowed to pair with the loopback Browser Bridge. The bundled
   // developer id is deterministic; add the Chrome Web Store item id here after its first upload.
   browser_extension_ids: ["koalaflndbcddboachbdfmppdeblldje"],
@@ -554,6 +558,23 @@ export class NekoConfig {
    * Patterns match a server name, a bare tool name, "server__tool", or "*". */
   get mcpAllow(): string[] { return Array.isArray(this.data.mcp_allow) ? this.data.mcp_allow.map(String) : []; }
   get mcpDeny(): string[] { return Array.isArray(this.data.mcp_deny) ? this.data.mcp_deny.map(String) : []; }
+
+  /** Which profile answers `neko oracle`, and how much of the project it may be sent. An unset profile
+   * is not an error here - the oracle surface reports it and names the candidates. */
+  get oracle(): { profile: string; model: string; maxBytes: number; maxFileBytes: number; maxFiles: number } {
+    const o = this.data.oracle && typeof this.data.oracle === "object" ? this.data.oracle : {};
+    const bounded = (value: unknown, fallback: number, min: number, max: number) => {
+      const number = Number(value ?? fallback);
+      return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
+    };
+    return {
+      profile: String(o.profile ?? "").trim(),
+      model: String(o.model ?? "").trim(),
+      maxBytes: bounded(o.max_bytes, 400_000, 4_000, 8_000_000),
+      maxFileBytes: bounded(o.max_file_bytes, 128_000, 1_000, 4_000_000),
+      maxFiles: bounded(o.max_files, 80, 1, 1_000),
+    };
+  }
 
   /** Shell hooks run around tool calls (opt-in). `pre_tool_use` can block (non-zero exit). */
   get hooks(): { preToolUse?: string; postToolUse?: string } {
