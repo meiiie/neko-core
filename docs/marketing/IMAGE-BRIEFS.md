@@ -55,6 +55,15 @@ sticker pasted onto someone else's website.
 
 ---
 
+> **Status: A1, B1, B2 and the 404 have shipped.** Only the optional consistency set (A2 — cut-out,
+> sticker sheet) is still unmade, and it needs a fresh generation rather than anything derivable from
+> what exists.
+>
+> **A2's transparent cut-out was deliberately NOT produced.** Keying the black out of the delivered
+> character leaves a chewed edge on fur, which is the exact failure this file warns about — and the
+> compositing the cut-out was for (`mix-blend-mode: screen`) does the job better with no cut at all.
+> A worse asset that ticks a box is not progress.
+>
 > **Status: A1 and B1 have shipped.** The hero character and the backdrop are live at
 > `cloudflare/site/public/neko-hero.webp` and `hero-bg.webp`, and the social card is built from them at
 > `og.jpg` / `og-vi.jpg`. The prompts below produced them and are kept so the set can be extended in the
@@ -130,10 +139,12 @@ Then composite at exactly **1200×630** and screenshot:
 Save to `cloudflare/site/public/og.png`, then point `og:image` at it in `index.html` — it currently
 falls back to `social-preview.png`.
 
-## B2 — README banner
+## B2 — README banner *(done — kept for regeneration)*
 
-Replaces `assets/neko-core-banner.png`, which is 1.9 KB and shows at low quality on GitHub. Same rule:
-generate the backdrop, composite the words.
+`assets/neko-core-banner.png` was 1.9 KB of black-on-white pixel art; it is now the delivered backdrop
+with the mark, the wordmark and the character composited over it. The source is
+`cloudflare/site/banner-card.html` — render it at 1280x320 and crop, the same way the social card is
+made. Generate a new backdrop only if the look should change:
 
 > A wide, restrained technical banner backdrop, near-black #0A0B0D, aspect ratio 4:1. One thin amber
 > #F0A030 horizontal rule across the lower third, a sparse scatter of small amber plus-marks, and a

@@ -16,6 +16,9 @@ binding = "ASSETS"
 # rewrite silently did nothing — only paths with no matching file (/install.sh, /__release) ran. The
 # HTML has to pass through the Worker for the version and download sizes to be filled in.
 run_worker_first = ["/", "/index.html"]
+# A wrong URL used to get Cloudflare's bare page. 404.html is served instead, with the real status code
+# so crawlers and link checkers still read it as missing rather than as a page that exists.
+not_found_handling = "404-page"
 
 [observability]
 enabled = true

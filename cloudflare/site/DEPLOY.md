@@ -164,6 +164,13 @@ Edit `public/index.html` and run `npx wrangler deploy` again. Two things to keep
   `preload="none"` means nobody pays for the video until they ask for it, and the caption says plainly
   that it is unedited. If the recording is ever re-shot, keep both of those true.
 
+- **The README banner and the 404 come from the same recipe.** `banner-card.html` renders at 1280x320
+  (crop `1307x327` and scale, the same screenshot-scale correction as the social card) into
+  `assets/neko-core-banner.png`. `public/404.html` is a real page rather than Cloudflare's default:
+  `not_found_handling = "404-page"` in `wrangler.toml` serves it with a genuine 404 status, so a link
+  checker still reads it as missing. It carries its own tiny language script — `app.js` assumes the
+  landing page's elements, and a 404 that throws is worse than one that is only in English.
+
 - **The social card is regenerated, not hand-edited.** `og-card.html` (next to this file) is the source:
   copy it into `public/`, open it, screenshot, and crop. The viewport screenshot is scaled by
   `screenshotWidth / window.innerWidth` — 1.0208 on the machine this was built on — so the crop is

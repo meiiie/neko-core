@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not here — Neko Core</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/neko.ico" sizes="any">
+<link rel="icon" href="/neko-icon.png" type="image/png">
+<meta name="theme-color" content="#131018">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  /* The 404 borrows the site's tokens and adds only what a one-screen page needs. */
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  .lost { flex: 1; display: grid; place-items: center; padding-block: 64px; }
+  .lost-grid { display: grid; gap: 48px; align-items: center; justify-items: center; text-align: center; }
+  @media (min-width: 860px) {
+    .lost-grid { grid-template-columns: 1fr 280px; text-align: left; justify-items: start; gap: 64px; }
+  }
+  .code { font-family: var(--mono); font-size: clamp(72px, 14vw, 144px); line-height: .9; letter-spacing: -.05em; color: var(--accent-text); }
+  .lost h1 { font-size: clamp(24px, 4vw, 36px); margin-top: 16px; }
+  .lost .body { margin-top: 16px; max-width: 46ch; }
+  .lost .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; justify-content: center; }
+  @media (min-width: 860px) { .lost .actions { justify-content: flex-start; } }
+  .lost .hero-art { max-width: 280px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
+</style>
+</head>
+<body class="band-ink">
+  <header>
+    <div class="wrap nav">
+      <a class="brand" href="/">
+        <img src="/neko-icon.png" alt="" width="24" height="24">
+        <span>NEKO<span class="dim"> CORE</span></span>
+      </a>
+      <nav class="nav-links">
+        <div class="langswitch" role="group" aria-label="Language">
+          <button type="button" data-lang="vi" aria-pressed="false">VI</button>
+          <button type="button" data-lang="en" aria-pressed="true">EN</button>
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <main class="lost">
+    <div class="wrap lost-grid">
+      <div>
+        <p class="code">404</p>
+        <h1 data-t="title">This page is not here.</h1>
+        <p class="body" data-t="body">The link may be old, or the address slightly off. Everything Neko Core has lives in two places: the site, and the repository.</p>
+        <div class="actions">
+          <a class="btn btn-accent btn-lg" href="/" data-t="home">Back to the start</a>
+          <a class="btn btn-line btn-lg" href="https://github.com/meiiie/neko-core" data-t="repo">Open the source</a>
+        </div>
+      </div>
+      <div class="hero-art">
+        <div class="art-frame">
+          <div class="art-bg" aria-hidden="true"></div>
+          <img class="art-cat" src="/neko-hero.webp" alt="" width="720" height="960">
+          <span class="badge">NEKO <span style="opacity:.5">//</span> <b data-t="looking">LOOKING</b></span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="band-ink">
+    <div class="wrap">
+      <span class="mono-label">NEKO CORE / HAI PHONG, VIET NAM</span>
+      <span class="small" data-t="sov">Hoang Sa and Truong Sa belong to Vietnam.</span>
+    </div>
+  </footer>
+
+<script>
+  // Self-contained: app.js assumes the landing page's elements, and a 404 that throws is worse than a
+  // 404 that is only in English.
+  var VI = {
+    title: "Trang này không có ở đây.",
+    body: "Có thể liên kết đã cũ, hoặc địa chỉ lệch một chút. Mọi thứ của Neko Core nằm ở hai nơi: trang này, và kho mã.",
+    home: "Về trang đầu",
+    repo: "Mở mã nguồn",
+    looking: "ĐANG TÌM",
+    sov: "Hoàng Sa và Trường Sa thuộc chủ quyền Việt Nam."
+  };
+  var nodes = [].slice.call(document.querySelectorAll("[data-t]"));
+  var EN = {};
+  nodes.forEach(function (n) { EN[n.getAttribute("data-t")] = n.textContent; });
+
+  function apply(lang) {
+    nodes.forEach(function (n) {
+      var k = n.getAttribute("data-t");
+      n.textContent = lang === "vi" && VI[k] ? VI[k] : EN[k];
+    });
+    document.documentElement.lang = lang;
+    document.title = lang === "vi" ? "Không có ở đây — Neko Core" : "Not here — Neko Core";
+    [].forEach.call(document.querySelectorAll(".langswitch button"), function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === lang));
+    });
+    try { localStorage.setItem("neko-lang", lang); } catch (e) { /* private mode */ }
+  }
+
+  var start = "en";
+  try {
+    start = localStorage.getItem("neko-lang")
+      || (String(navigator.language || "").toLowerCase().indexOf("vi") === 0 ? "vi" : "en");
+  } catch (e) { /* private mode */ }
+  apply(start);
+
+  [].forEach.call(document.querySelectorAll(".langswitch button"), function (b) {
+    b.addEventListener("click", function () { apply(b.getAttribute("data-lang")); });
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!doctype html>
+<!--
+  Source for the README banner. Rendered, not drawn: the words are composited in HTML because an image
+  model renders type — especially Vietnamese diacritics — as convincing gibberish.
+
+    (serve public/, open /banner-card.html, screenshot, then)
+    ffmpeg -i shot.jpg -vf "crop=1307:327:0:0,scale=1280:320:flags=lanczos" assets/neko-core-banner.png
+
+  1307x327 is 1280x320 times the screenshot's scale factor; measure it as
+  screenshotWidth / window.innerWidth before cropping on a different machine.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>banner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: #0a0b0d; }
+  .banner {
+    position: absolute; top: 0; left: 0;
+    width: 1280px; height: 320px; overflow: hidden;
+    background: url("/og-bg.webp") 60% 55% / cover no-repeat #0a0b0d;
+    isolation: isolate;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    color: #f4f1e4;
+    display: flex; align-items: center;
+  }
+  .cat {
+    position: absolute; right: 56px; bottom: -56px; height: 400px; width: auto;
+    mix-blend-mode: screen; opacity: .95;
+  }
+  .inner { position: relative; padding-left: 72px; z-index: 2; }
+  .mark { display: flex; align-items: center; gap: 20px; }
+  .mark img { width: 52px; height: 52px; image-rendering: pixelated; display: block; }
+  .word { font-size: 76px; font-weight: 700; letter-spacing: -.05em; line-height: 1; }
+  .word .amber { color: #eda12c; }
+  .tag { margin-top: 18px; font-size: 20px; letter-spacing: .02em; color: #a9a49b; }
+  .meta {
+    position: absolute; left: 72px; bottom: 26px; z-index: 2;
+    font-size: 14px; letter-spacing: .16em; text-transform: uppercase; color: #6f6a63;
+  }
+  .rule { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: #eda12c; z-index: 3; }
+</style>
+</head>
+<body>
+  <div class="banner">
+    <img class="cat" src="/neko-hero.webp" alt="">
+    <div class="inner">
+      <div class="mark">
+        <img src="/neko-icon.png" alt="">
+        <div class="word">NEKO <span class="amber">CORE</span></div>
+      </div>
+      <div class="tag">A coding agent that runs on your computer, and asks before it acts.</div>
+    </div>
+    <div class="meta">LOCAL-FIRST &nbsp;/&nbsp; ANY MODEL &nbsp;/&nbsp; MIT &nbsp;/&nbsp; MADE IN VIETNAM</div>
+    <div class="rule"></div>
+  </div>
+</body>
+</html>
