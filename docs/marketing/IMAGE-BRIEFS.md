@@ -64,10 +64,10 @@ sticker pasted onto someone else's website.
 > compositing the cut-out was for (`mix-blend-mode: screen`) does the job better with no cut at all.
 > A worse asset that ticks a box is not progress.
 >
-> **Status: A1 and B1 have shipped.** The hero character and the backdrop are live at
-> `cloudflare/site/public/neko-hero.webp` and `hero-bg.webp`, and the social card is built from them at
-> `og.jpg` / `og-vi.jpg`. The prompts below produced them and are kept so the set can be extended in the
-> same hand. Two things learned in the process, which now apply to every character asset:
+> The hero character and the backdrop are live at `cloudflare/site/public/neko-hero.webp` and
+> `hero-bg.webp`; the social card, the README banner and the 404 are all built from them. The prompts
+> below produced them and are kept so the set can be extended in the same hand. Two things learned in
+> the process, which now apply to every character asset:
 >
 > - **Generate on pure black and composite with `mix-blend-mode: screen`.** Black resolves to the
 >   backdrop exactly, so fur and rim light survive with no cut-out step and no chewed silhouette.
