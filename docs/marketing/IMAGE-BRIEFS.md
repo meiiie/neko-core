@@ -55,6 +55,17 @@ sticker pasted onto someone else's website.
 
 ---
 
+> **Status: A1 and B1 have shipped.** The hero character and the backdrop are live at
+> `cloudflare/site/public/neko-hero.webp` and `hero-bg.webp`, and the social card is built from them at
+> `og.jpg` / `og-vi.jpg`. The prompts below produced them and are kept so the set can be extended in the
+> same hand. Two things learned in the process, which now apply to every character asset:
+>
+> - **Generate on pure black and composite with `mix-blend-mode: screen`.** Black resolves to the
+>   backdrop exactly, so fur and rim light survive with no cut-out step and no chewed silhouette.
+> - **The model returned a white cat where the prompt asked for a black one.** That is fine — it reads
+>   better against the dark frame — but it means the character is now defined by the delivered image, not
+>   by the prompt. Attach `neko-hero.webp` to every later generation.
+
 ## A1 — The hero character *(generate this first)*
 
 Target: `cloudflare/site/public/neko-hero.png`, portrait 3:4, displayed at 360×480. Generate on the

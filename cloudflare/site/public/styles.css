@@ -56,7 +56,11 @@
   --max: 1160px;
   --gutter: 24px;
 
-  --ease: cubic-bezier(.16, 1, .3, 1);
+  /* Exact curves from skills/improve-animations/AUDIT.md. The built-in CSS easings are too weak to
+     read as deliberate; these are the ones that catalogue prescribes, used verbatim rather than eyeballed. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);      /* entering, and anything answering the user */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);  /* moving between states on screen */
+  --ease: var(--ease-out);
 }
 @media (min-width: 768px) { :root { --gutter: 40px; } }
 
@@ -138,7 +142,8 @@ p { margin: 0; }
 .btn .sub { font-weight: 400; opacity: .6; font-size: 14px; }
 @media (prefers-reduced-motion: no-preference) {
   .btn:hover { transform: translateY(-2px); }
-  .btn:active { transform: translateY(0) scale(.985); }
+  /* 0.97 and 160ms are the catalogue's values for press feedback; 0.985 was too small to feel. */
+  .btn:active { transform: translateY(0) scale(.97); transition-duration: .16s; }
 }
 
 /* ============ announce ============ */
@@ -181,9 +186,14 @@ header.is-hidden { transform: translateY(-100%); }
 .hero-grid { display: grid; gap: 48px; align-items: center; }
 /* Two columns only while the character image exists. It has not shipped yet, and a column held open
    for a missing image is how a page looks broken to everyone who arrives early. */
-@media (min-width: 1000px) {
-  .hero-grid:has(.hero-art) { grid-template-columns: minmax(0, 1fr) 380px; gap: 64px; }
+/* 1120 rather than 1000: at 1024 the two columns left the headline three lines deep. */
+@media (min-width: 1120px) {
+  .hero-grid:has(.hero-art) { grid-template-columns: minmax(0, 1fr) 340px; gap: 64px; }
   .hero-grid:has(.hero-art) .lead { max-width: 34ch; }
+  /* The art costs the headline about 400px of measure. At the full display size the Vietnamese line
+     broke into four; capping it here keeps two lines in both languages rather than shrinking the
+     headline for everyone. */
+  .hero-grid:has(.hero-art) h1 { font-size: clamp(32px, 4.4vw, 52px); }
 }
 .hero h1 { margin-top: 24px; }
 .hero .lead { margin-top: 24px; max-width: 46ch; }
@@ -194,19 +204,54 @@ header.is-hidden { transform: translateY(-100%); }
   .caret { animation: caretBlink 1.2s step-end infinite; }
   @keyframes caretBlink { 50% { opacity: 0; } }
 }
-.hero-art { position: relative; justify-self: center; }
-.hero-art img { border-radius: var(--r); }
+/*
+ * The hero art is the page's one loud moment, so it is the only place with layered motion.
+ *
+ * The cat was generated on pure black. Rather than key it out — which leaves a chewed edge on fur —
+ * it is composited with mix-blend-mode: screen, where black resolves to the backdrop exactly and the
+ * white coat and amber rim light survive untouched. `isolation: isolate` keeps that blend inside the
+ * frame instead of letting it reach the page.
+ */
+.hero-art { position: relative; justify-self: center; width: 100%; max-width: 340px; }
+.art-frame {
+  position: relative; isolation: isolate; overflow: hidden;
+  aspect-ratio: 3 / 4; border-radius: 16px; background: #0a0a0d;
+  border: 1px solid var(--line-2);
+}
+.art-bg {
+  position: absolute; inset: -8% -2%;
+  /* biased down-right so the backdrop's amber bloom sits behind the cat rather than off-frame */
+  background: url("/hero-bg.webp") 72% 62% / cover no-repeat;
+}
+.art-cat {
+  position: absolute; inset: auto 0 0 0; width: 100%; height: auto;
+  mix-blend-mode: screen;
+}
+.art-frame .badge {
+  position: absolute; left: 16px; bottom: 16px; z-index: 2;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
+  background: rgba(10, 10, 13, .72); border: 1px solid #34343c; color: var(--on-dark);
+  padding: 6px 12px; border-radius: var(--r-pill);
+  backdrop-filter: blur(6px);
+}
+.art-frame .badge b { color: #63cf8d; font-weight: 500; }
+
 @media (prefers-reduced-motion: no-preference) {
-  .hero-art img { animation: float 7s ease-in-out infinite; }
-  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+  .art-cat { animation: float 8s ease-in-out infinite; }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+
+  /* Parallax without JavaScript: the backdrop is scrubbed by the frame's own position in the viewport,
+     so it drifts against the cat and gives the frame depth. Native scroll-driven animation runs on the
+     compositor; the @supports guard leaves it a still image everywhere it is unavailable. */
+  @supports (animation-timeline: view()) {
+    .art-bg {
+      animation: drift linear both;
+      animation-timeline: view();
+      animation-range: entry 0% exit 100%;
+    }
+    @keyframes drift { from { transform: translate3d(0, -5%, 0); } to { transform: translate3d(0, 5%, 0); } }
+  }
 }
-.hero-art .badge {
-  position: absolute; left: 0; bottom: 24px;
-  font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em;
-  background: var(--paper-2); border: 1px solid var(--line-2);
-  padding: 6px 12px; border-radius: var(--r);
-}
-.hero-art .badge b { color: var(--ok); font-weight: 500; }
 
 /* ============ install block ============ */
 .install { margin-top: 32px; border: 1px solid var(--line); border-radius: var(--r); background: var(--paper-2); overflow: hidden; max-width: 580px; }

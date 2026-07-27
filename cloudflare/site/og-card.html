@@ -1,0 +1,70 @@
+<!doctype html>
+<!--
+  Source for the Open Graph card. Not part of the site's navigation — it exists so the card can be
+  regenerated instead of being a mystery PNG. Render it at exactly 1200x630 and crop from (0,0):
+
+    (serve public/, open /og-card.html, screenshot, then)
+    ffmpeg -i shot.jpg -vf "crop=1200:630:0:0" og.png
+
+  Set ?lang=vi for the Vietnamese card. Text is composited here rather than generated, because image
+  models render type — especially Vietnamese diacritics — as convincing gibberish.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OG card</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: #0a0b0d; }
+  .card {
+    position: absolute; top: 0; left: 0;
+    width: 1200px; height: 630px; overflow: hidden;
+    background: url("/og-bg.webp") center / cover no-repeat #0a0b0d;
+    isolation: isolate;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    color: #f4f5f7;
+  }
+  .cat {
+    position: absolute; right: 40px; bottom: -40px; height: 620px; width: auto;
+    mix-blend-mode: screen;
+  }
+  .inner { position: absolute; inset: 0; padding: 64px 72px; display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 16px; font-size: 22px; letter-spacing: .1em; font-weight: 600; }
+  .brand img { width: 40px; height: 40px; image-rendering: pixelated; display: block; }
+  .brand .dim { color: #8b8a91; }
+  .head {
+    margin-top: auto; font-size: 54px; line-height: 1.12; letter-spacing: -.035em; font-weight: 600;
+    max-width: 700px; text-wrap: balance;
+  }
+  .head .amber { color: #f0a94a; }
+  .foot {
+    margin-top: 28px; display: flex; gap: 20px; align-items: center;
+    font-size: 19px; letter-spacing: .06em; color: #a5a4ab;
+  }
+  .foot .sep { color: #4a4a52; }
+  .rule { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: #eda12c; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <img class="cat" src="/neko-hero.webp" alt="">
+    <div class="inner">
+      <div class="brand"><img src="/neko-icon.png" alt="">NEKO<span class="dim">&nbsp;CORE</span></div>
+      <h1 class="head" id="head">It runs on your computer.<br><span class="amber">It asks before it changes anything.</span></h1>
+      <div class="foot">
+        <span>neko.holilihu.online</span><span class="sep">/</span>
+        <span>MIT</span><span class="sep">/</span>
+        <span>Windows · macOS · Linux</span>
+      </div>
+    </div>
+    <div class="rule"></div>
+  </div>
+<script>
+  if (new URLSearchParams(location.search).get("lang") === "vi") {
+    document.documentElement.lang = "vi";
+    document.getElementById("head").innerHTML =
+      'Nó chạy trên máy bạn.<br><span class="amber">Và hỏi trước khi đổi gì.</span>';
+  }
+</script>
+</body>
+</html>

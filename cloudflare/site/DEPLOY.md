@@ -90,6 +90,34 @@ Edit `public/index.html` and run `npx wrangler deploy` again. Two things to keep
 - **Claims on this page are checkable.** Everything it says about tools, gating, offline use and the
   oracle is true of the shipped binary. Keep it that way; a landing page that oversells is a support
   burden, not marketing.
+- **Images are compressed with ffmpeg, not committed raw.** The generated art arrives at 1–1.5 MB; the
+  whole `public/` directory is 276 KB because everything goes through this:
+
+  ```bash
+  # the hero character: 3:4, screened over the frame, so its pure-black ground must survive
+  ffmpeg -i src.png -vf "scale=720:-1:flags=lanczos" -quality 90 public/neko-hero.webp
+  # the hero frame backdrop and the OG backdrop
+  ffmpeg -i bg.png  -vf "scale=1440:-1:flags=lanczos" -quality 82 public/hero-bg.webp
+  ffmpeg -i bg.png  -vf "scale=1200:630:force_original_aspect_ratio=increase,crop=1200:630" -quality 85 public/og-bg.webp
+  ```
+
+- **The social card is regenerated, not hand-edited.** `og-card.html` (next to this file) is the source:
+  copy it into `public/`, open it, screenshot, and crop. The viewport screenshot is scaled by
+  `screenshotWidth / window.innerWidth` — 1.0208 on the machine this was built on — so the crop is
+  `1200 × 630` multiplied by that factor, then scaled back down:
+
+  ```bash
+  ffmpeg -i shot.jpg -vf "crop=1225:643:0:0,scale=1200:630:flags=lanczos" -q:v 3 public/og.jpg
+  ```
+
+  Set `?lang=vi` (or overwrite `#head` from the console) for `og-vi.jpg`. Do not ask an image model to
+  render the words — Vietnamese diacritics come back as gibberish.
+
+- **The cat is composited, never cut out.** It was generated on pure black and is drawn with
+  `mix-blend-mode: screen` inside `.art-frame`, where black resolves to the backdrop exactly and the fur
+  edges stay intact. Keying it out by hand leaves a chewed silhouette. If you regenerate the character,
+  keep the background pure `#000` or this stops working.
+
 - **Art briefs** for the OG card, the README banner and the mascot are in
   [`docs/marketing/IMAGE-BRIEFS.md`](../../docs/marketing/IMAGE-BRIEFS.md). The short version: generate
   art only, never text — then composite the words in HTML and screenshot, or the Vietnamese diacritics

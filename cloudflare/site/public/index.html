@@ -13,13 +13,16 @@
 <meta property="og:description" content="It reads, edits, runs, browses and remembers on your own machine, with any model. It asks before it changes anything.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://neko.holilihu.online/">
-<meta property="og:image" content="https://neko.holilihu.online/social-preview.png">
-<meta property="og:image:width" content="1280">
-<meta property="og:image:height" content="640">
+<meta property="og:image" content="https://neko.holilihu.online/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
 <meta property="og:locale" content="en">
 <meta property="og:locale:alternate" content="vi">
 <meta name="twitter:card" content="summary_large_image">
+<meta property="og:image:alt" content="Neko Core - it runs on your computer, it asks before it changes anything.">
 <meta name="theme-color" content="#faf9f6">
+<link rel="preload" as="image" href="/neko-hero.webp">
+<link rel="preload" as="image" href="/hero-bg.webp">
 <link rel="stylesheet" href="/styles.css">
 <script>
   // Resolve language before first paint so the page never flashes the wrong one.
@@ -106,8 +109,12 @@
       </div>
 
       <div class="hero-art" id="heroArt">
-        <img src="/neko-hero.png" alt="" width="360" height="480" loading="eager" onerror="document.getElementById('heroArt').remove()">
-        <span class="badge">NEKO <span class="c-dim">//</span> <b>READY</b></span>
+        <div class="art-frame">
+          <div class="art-bg" aria-hidden="true"></div>
+          <img class="art-cat" src="/neko-hero.webp" alt="" width="720" height="960" loading="eager"
+               onerror="document.getElementById('heroArt').remove()">
+          <span class="badge">NEKO <span style="opacity:.5">//</span> <b>READY</b></span>
+        </div>
       </div>
     </div>
   </section>
