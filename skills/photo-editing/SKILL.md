@@ -45,6 +45,78 @@ FilmLight Base Grade ordering, JarvisArt/PhotoAgent 2025-26 parametric-editing r
    geometry, same texture)? Iterate at most 3 rounds; report diminishing returns honestly.
 6. **Hand over:** final path + the full recipe (every command), so the user can re-run or tweak.
 
+## CRITICAL EYE PASS (before touching pixels)
+
+Do not start with a style label. Read the photograph in this order and report evidence:
+
+1. INTENT — name the subject, story, genre and emotional temperature in one sentence; attach confidence. A supplied brief overrides your guess.
+2. LIGHT — describe direction, height, hardness/softness and key:fill ratio separately. Then name the facial pattern only if visible: loop, Rembrandt, split, butterfly, back/rim, or uncertain.
+3. COMPOSITION — trace leading lines from start to endpoint; name foreground/midground/background layers; inspect edge tangencies, mergers, negative space and visual balance.
+4. FIGURE–GROUND — state exactly how the subject separates by value, hue/chroma, focus, texture, edge light or space. Local separation beats global “pop”.
+5. TONE — place black point, face, important whites and speculars; check shadow texture and highlight headroom. Do not stretch the histogram by default.
+6. COLOR — name dominant, support and accent colors; describe hue/value/chroma relationships; protect skin and other memory colors.
+7. MOMENT — read gaze, hands, body gesture and relationships. A decisive moment requires human meaning and formal organization, not merely peak motion.
+
+Every critique sentence must follow: observation -> relationship -> effect -> relevance to intent -> bounded action -> confidence. Ban empty phrases such as “make it pop”, “more cinematic”, “nice leading lines” or “rule of thirds” unless they are localized and explained.
+
+## PORTRAIT LIGHTING GRAMMAR
+
+- Loop: short nose shadow angles toward the cheek but does not touch it. Use as a readable, friendly default with moderate facial modeling.
+- Rembrandt: nose and cheek shadows meet, leaving a small lit triangle below the far eye. Use for weight and inwardness only when the original light geometry supports it.
+- Split: side key divides the face near the center. Use for tension or polarity; inspect the dark eye and skin texture before increasing contrast.
+- Butterfly/Paramount: high frontal key makes a short, centered shadow below the nose. Use for frontal beauty/fashion; clamshell fill reduces under-eye and chin shadows. Pattern name alone never guarantees soft skin.
+- Backlight/rim: a source behind the subject creates glow, silhouette or an edge on hair/shoulders. Decide whether the face should remain silhouette or needs existing fill/dodge; protect hair and white clothing from clipping.
+
+Pattern and quality are independent. Never synthesize a new light direction, catchlight, Rembrandt triangle, rim or light shaft in post. When evidence is occluded or ambiguous, output `pattern=uncertain` and describe only the shadows you can see.
+
+## ARTIST SIGNATURES ARE THINKING LENSES, NOT PRESETS
+
+- Leibovitz lens: ask how environment, prop, clothing, gesture and light reveal the subject. Preserve narrative relationships; never fabricate biography with inserted objects or a generic dark vignette.
+- McCurry lens: find the human presence first, then explain how dominant/support/accent colors and gaze direct attention. Never equate the look with maximum saturation; documentary edits must not remove or clone content.
+- Cartier-Bresson lens: test whether event meaning, gesture, geometry and timing converge. Do not award a “decisive moment” for geometry or peak action alone.
+- Fan Ho lens: read light/shadow as architecture and the person as scale, rhythm and timing. Preserve tonal structure; never create haze, rays or figures, and never crush blacks until the human story disappears.
+- Kawauchi lens: attend to quiet everyday detail, milky natural light, fragility, negative space and sequence/juxtaposition. Airy does not mean blanket haze, clipped highlights or no black anchor.
+- Deakins/Paulson lens: seek motivated, believable sources, restrained continuity, color separation and story-specific grading. Roger Deakins is a cinematographer, not a colorist; naturalism is designed believability, not “available light only” or a teal–orange LUT.
+
+Use these lenses to ask better questions. Never infer authorship or nationality from a palette and never claim to reproduce an artist’s oeuvre with one recipe.
+
+## ASIAN VERNACULAR LOOKS (2025–26, descriptive not universal)
+
+- Japanese airy: bright mids, low-to-moderate contrast, slightly soft black anchor, restrained saturation, clean/slightly cool ambient color and warm-neutral skin. Keep highlight gradation and breathing room; do not bleach skin or apply negative clarity globally.
+- Korean film tone: clean composition, natural skin, soft highlight shoulder, moderate/low contrast, controlled greens/blues and optional fine grain. It is a family of neutral, peach, muted and nostalgic palettes—not one beige preset. Describe a reference before matching it.
+- Dreamy graduation / bubble backlight: expose for the face; allow existing backlight to bloom gently while retaining important whites; use existing bubbles as foreground rhythm and depth; keep hair rim and eye detail. Never generate bubbles/bokeh or hallucinate detail from clipped areas.
+
+Treat popularity claims as context, not a quality signal. Choose a look from the image and brief, never from nationality.
+
+## VLM CRITIQUE CONTRACT AND SCORE
+
+Run safety/validity gates before aesthetics: uncertainty, unrecoverable clipping/blur, documentary integrity, identity, geometry and forbidden operations. Then score six axes from 0 to 4 with one localized evidence statement per score:
+
+- intent_moment — story, gesture and timing;
+- light_exposure — pattern, quality, ratio and headroom;
+- hierarchy_figure_ground — subject separation and distractors;
+- space_composition — lines, layers, balance, edges and negative space;
+- tone_color — black/face/highlight placement, palette and memory colors;
+- technical_integrity — texture, noise, sharpening and edit artifacts.
+
+0 = fails the intended reading; 1 = major obstruction; 2 = usable but unresolved; 3 = strong with a minor friction; 4 = coherent and intentional. Do not total these into universal beauty. Weight them by the brief and compare before/after on the same axes.
+
+Output this compact record before editing:
+
+INTENT: <one sentence> | confidence=<0..1>
+OBSERVED: <literal evidence with locations>
+LIGHT: direction=<...>; height=<...>; quality=<...>; ratio=<...>; pattern=<.../uncertain>
+COMPOSITION: path=<...>; layers=<...>; figure-ground=<...>; edges=<...>
+TONE_COLOR: black=<...>; face=<...>; headroom=<...>; palette=<dominant/support/accent>
+SCORES_0_4: intent=<n>; light=<n>; hierarchy=<n>; space=<n>; color=<n>; integrity=<n>
+STRENGTHS: <evidence -> effect>
+FRICTIONS: <at most 3; location -> effect -> severity -> confidence>
+EDIT_PLAN: <FilmLight order; small parameter/mask; expected effect>
+DO_NOT_CHANGE: identity, geometry, skin texture, objects/background, plus brief constraints
+CAPTURE_ONLY: <issues that cannot be repaired honestly in post>
+
+Prioritize at most three edits by impact × confidence ÷ risk. After rendering, score again and stop after at most three rounds or when gains require sacrificing skin, memory colors, texture, headroom or identity.
+
 ## Taste guardrails (what separates a photographer from a filter)
 
 - Every image gets ITS OWN recipe (Zone System: per-negative development) - never a blanket preset.
