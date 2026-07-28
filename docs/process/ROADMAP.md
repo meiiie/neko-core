@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-27) — v0.18.1 release
+## Current status (2026-07-28) — v0.19.0 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,7 +38,15 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.18.1 (2026-07-27)** - a newly published release is no longer
+- **Branch:** `main`. **Current release: v0.19.0 (2026-07-28)** - a day of hard field use, fixed the
+  same day: the /resume picker went claude-code/codex-class (folder-first, global type-search, `neko
+  resume`) after the test suite was found flooding the real session store with 6,491 fake sessions;
+  GPT-5.6 turns stopped undercounting tokens (the app-server's internal tool loop is many model calls,
+  not one) and stopped dying mid-research to an idle timer that fired DURING the turn; the model is
+  told up front that codex-native tools are read-only by design (no more "blocked by machine policy"
+  dead ends); one Windows `nul` file no longer kills a whole search; and reading scrolled-up while
+  Neko streams no longer fights the stream for the event loop.
+  Previous (v0.18.1, 2026-07-27): a newly published release is no longer
   invisible for a day: the startup check cached "you are on the latest" for 24h, so a release shipping
   minutes after a launch was never discovered and `auto_update` installed nothing. "Up to date" (and a
   failed check) now expires after 3h while a found update keeps the day-long cache. Download, checksum,

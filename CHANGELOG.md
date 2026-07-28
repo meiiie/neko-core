@@ -6,6 +6,45 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-07-28
+
+### Fixed
+
+- **Your /resume list is yours again.** Every `bun test` run had been writing its fake sessions into
+  the real `~/.neko-core/sessions` — 6,611 files, ~98% test junk, burying every real conversation and
+  handing `--resume` a test transcript as "the latest session". The store now isolates itself under
+  test runs, 6,492 junk sessions were quarantined (recoverably) to `sessions-quarantine-20260728/`,
+  and your 118 real conversations are what the picker shows.
+- **GPT-5.6 long turns no longer die with "Codex App Server stopped".** The idle shutdown timer was
+  armed when a turn finished but never disarmed when the next one began — so any turn streaming past
+  `codex_keepalive` (15 min) was killed mid-flight. Deep-research turns now run as long as they need.
+- **GPT-5.6 token counts are real now.** One turn on the app-server route can be several internal
+  model calls; only the last one was counted. The session counter now reports the turn's true sum and
+  the real number of model calls, and the context % keeps reading the live context rather than a sum.
+- **No more "the workspace is read-only" dead ends on GPT-5.6.** The model's codex-native shell runs
+  in a read-only sandbox *by design* (all real execution goes through Neko's approval gate). The model
+  is now told this up front, so it goes straight to Neko's tools instead of concluding the machine is
+  locked — this was behind both "ran fine, wrote nothing" delegations and "blocked by machine policy"
+  reports for ordinary CLIs.
+- **A file named `nul` no longer kills a whole search.** ripgrep reports "an error occurred" even when
+  it also found every match; Neko treated that as fatal and threw the matches away. Partial trouble is
+  now a note under the results, and Windows reserved-name debris is skipped entirely.
+- **Scrolling while Neko works is smooth again.** Reading older output during a streaming turn no
+  longer competes with the stream for the event loop: the invisible tail syncs at ~3fps while you are
+  scrolled away (measured: 49 → 26 terminal writes per 600ms window) and snaps current the moment you
+  jump back down.
+- **Non-interactive `neko run` failures are loud.** Without a TTY, gated tools (write/edit/bash) are
+  auto-denied; the model is told before the turn, every denial says "do not retry, tell the caller",
+  and the run ends with a stderr summary naming the count and the `--yolo` fix.
+
+### Added
+
+- **`/resume` is now folder-first with global search** — claude-code/codex-class. Plain `/resume`
+  lists this folder's sessions first and every other project after, so typing filters across all
+  projects (titles *and* folder names). `Ctrl+A` cycles this-folder-only → all-projects → back.
+  `/resume all` (and `/sessions all`) jump straight to the flat newest-first view. Resuming a session
+  recorded in another folder says so. New top-level command: `neko resume [id]`.
+
 ## [0.18.1] — 2026-07-27
 
 ### Fixed
