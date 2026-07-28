@@ -1,6 +1,7 @@
 ---
 name: imagegen
 description: Generate images (tao anh / ve anh / sinh anh / image / illustration / logo / poster / banner / mascot) through the user's ChatGPT subscription via the Codex image tool. Use when the user asks for a new picture; for EDITING an existing photo use the photo-editing skill instead.
+match: (tạo|tao|vẽ|ve|sinh|generate|draw|render).{0,30}(ảnh|anh\b|image|logo|poster|banner|illustration|mascot)|image.?gen
 ---
 
 # Skill: Image generation (ChatGPT subscription route)
