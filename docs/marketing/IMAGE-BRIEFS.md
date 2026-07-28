@@ -141,10 +141,13 @@ falls back to `social-preview.png`.
 
 ## B2 — README banner *(done — kept for regeneration)*
 
-`assets/neko-core-banner.png` was 1.9 KB of black-on-white pixel art; it is now the delivered backdrop
-with the mark, the wordmark and the character composited over it. The source is
-`cloudflare/site/banner-card.html` — render it at 1280x320 and crop, the same way the social card is
-made. Generate a new backdrop only if the look should change:
+`assets/neko-core-banner.png` was 1.9 KB of black-on-white pixel art; it is now a 1280x420
+ROUNDED-CORNER card (cindy.cn-style, owner-requested 2026-07-28): kicker, big wordmark, accented
+tagline, short description, feature strip, the cat with a `NEKO // READY` badge — with real alpha
+corners so it reads as a card on both GitHub themes. The source is
+`cloudflare/site/banner-card.html`; render it with the headless-Chrome one-liner in that file's
+header (transparent page background is what makes the corners genuinely round). Generate a new
+backdrop only if the look should change:
 
 > A wide, restrained technical banner backdrop, near-black #0A0B0D, aspect ratio 4:1. One thin amber
 > #F0A030 horizontal rule across the lower third, a sparse scatter of small amber plus-marks, and a

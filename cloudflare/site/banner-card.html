@@ -1,13 +1,18 @@
 <!doctype html>
 <!--
-  Source for the README banner. Rendered, not drawn: the words are composited in HTML because an image
-  model renders type — especially Vietnamese diacritics — as convincing gibberish.
+  Source for the README banner: a ROUNDED CARD on a transparent page, cindy.cn-style.
+  Rendered, not drawn: the words are composited in HTML because an image model renders type -
+  especially Vietnamese diacritics - as convincing gibberish.
 
-    (serve public/, open /banner-card.html, screenshot, then)
-    ffmpeg -i shot.jpg -vf "crop=1307:327:0:0,scale=1280:320:flags=lanczos" assets/neko-core-banner.png
+  Render headlessly (no server, no scale correction, REAL alpha corners):
 
-  1307x327 is 1280x320 times the screenshot's scale factor; measure it as
-  screenshotWidth / window.innerWidth before cropping on a different machine.
+    & "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new ^
+      --screenshot=assets/neko-core-banner.png --window-size=1280,420 ^
+      --force-device-scale-factor=1 --default-background-color=00000000 ^
+      --hide-scrollbars file:///E:/Sach/Sua/NekoCore/cloudflare/site/banner-card.html
+
+  The transparent page + card radius is what makes the corners round on BOTH GitHub themes;
+  a baked page background would show square corners on the other theme.
 -->
 <html lang="en">
 <head>
@@ -15,45 +20,65 @@
 <title>banner</title>
 <style>
   * { box-sizing: border-box; margin: 0; }
-  html, body { background: #0a0b0d; }
-  .banner {
+  html, body { background: transparent; }
+  .card {
     position: absolute; top: 0; left: 0;
-    width: 1280px; height: 320px; overflow: hidden;
-    background: url("/og-bg.webp") 60% 55% / cover no-repeat #0a0b0d;
+    width: 1280px; height: 420px; overflow: hidden;
+    border-radius: 28px;
+    background: url("public/og-bg.webp") 62% 55% / cover no-repeat #0a0b0d;
     isolation: isolate;
     font-family: ui-monospace, "SF Mono", Consolas, monospace;
-    color: #f4f1e4;
-    display: flex; align-items: center;
+    color: #f4f5f7;
   }
+  /* The character: generated on pure black, composited with screen-blend (black -> backdrop). */
   .cat {
-    position: absolute; right: 56px; bottom: -56px; height: 400px; width: auto;
-    mix-blend-mode: screen; opacity: .95;
+    position: absolute; right: 40px; bottom: -70px; height: 500px; width: auto;
+    mix-blend-mode: screen; opacity: .96;
   }
-  .inner { position: relative; padding-left: 72px; z-index: 2; }
-  .mark { display: flex; align-items: center; gap: 20px; }
-  .mark img { width: 52px; height: 52px; image-rendering: pixelated; display: block; }
-  .word { font-size: 76px; font-weight: 700; letter-spacing: -.05em; line-height: 1; }
-  .word .amber { color: #eda12c; }
-  .tag { margin-top: 18px; font-size: 20px; letter-spacing: .02em; color: #a9a49b; }
-  .meta {
-    position: absolute; left: 72px; bottom: 26px; z-index: 2;
-    font-size: 14px; letter-spacing: .16em; text-transform: uppercase; color: #6f6a63;
+  .inner { position: absolute; left: 64px; top: 52px; z-index: 2; max-width: 720px; }
+  .kicker {
+    display: flex; align-items: center; gap: 14px;
+    font-size: 15px; font-weight: 700; letter-spacing: .34em; text-transform: uppercase;
+    color: #f0a030;
   }
-  .rule { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: #eda12c; z-index: 3; }
+  .kicker .dash { width: 34px; height: 3px; background: #f0a030; }
+  .word { margin-top: 22px; display: flex; align-items: baseline; gap: 6px; }
+  .word .txt { font-size: 104px; font-weight: 800; letter-spacing: -.06em; line-height: .95; }
+  .word .cursor { width: 46px; height: 18px; background: #f0a030; margin-left: 10px; }
+  .tagline { margin-top: 26px; font-size: 30px; font-weight: 700; letter-spacing: -.01em; }
+  .tagline .amber { color: #f0a030; }
+  .desc { margin-top: 18px; font-size: 16.5px; line-height: 1.6; color: #b9b4ab; max-width: 600px; }
+  .strip {
+    position: absolute; left: 64px; bottom: 30px; z-index: 2;
+    font-size: 13px; letter-spacing: .22em; text-transform: uppercase; color: #7a756d;
+  }
+  .strip b { color: #9a948b; font-weight: 400; }
+  .badge {
+    position: absolute; right: 330px; bottom: 96px; z-index: 3;
+    padding: 9px 16px; border: 1px solid #3a3d44; border-radius: 8px;
+    background: rgba(10, 11, 13, .82);
+    font-size: 14px; letter-spacing: .22em; color: #f4f5f7;
+  }
+  .badge .dim { opacity: .5; }
+  .mark { position: absolute; left: 64px; top: 54px; display: none; }
+  .plus { position: absolute; z-index: 2; color: #6f6a63; font-size: 18px; }
 </style>
 </head>
 <body>
-  <div class="banner">
-    <img class="cat" src="/neko-hero.webp" alt="">
+  <div class="card">
+    <img class="cat" src="public/neko-hero.webp" alt="">
     <div class="inner">
-      <div class="mark">
-        <img src="/neko-icon.png" alt="">
-        <div class="word">NEKO <span class="amber">CORE</span></div>
-      </div>
-      <div class="tag">A coding agent that runs on your computer, and asks before it acts.</div>
+      <div class="kicker"><span class="dash"></span><span>It asks before it acts</span></div>
+      <div class="word"><span class="txt">NEKO <span style="color:#f0a030">CORE</span></span><span class="cursor"></span></div>
+      <div class="tagline">It runs on your computer. <span class="amber">And asks first.</span></div>
+      <div class="desc">An open-source coding agent in your terminal — local-first, config-first,
+        one self-updating binary. Bring any model: a cloud API, a subscription, or a GGUF on your
+        own GPU.</div>
     </div>
-    <div class="meta">LOCAL-FIRST &nbsp;/&nbsp; ANY MODEL &nbsp;/&nbsp; MIT &nbsp;/&nbsp; MADE IN VIETNAM</div>
-    <div class="rule"></div>
+    <span class="plus" style="left: 712px; top: 56px;">+</span>
+    <span class="plus" style="left: 760px; bottom: 44px;">+</span>
+    <div class="strip">&middot; <b>LOCAL-FIRST</b> &nbsp;&middot;&nbsp; <b>ANY MODEL</b> &nbsp;&middot;&nbsp; <b>OPEN SOURCE</b> &nbsp;&middot;&nbsp; <b>MADE IN VIET NAM</b></div>
+    <div class="badge">NEKO <span class="dim">//</span> READY</div>
   </div>
 </body>
 </html>

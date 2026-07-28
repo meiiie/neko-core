@@ -169,9 +169,22 @@ Edit `public/index.html` and run `npx wrangler deploy` again. Two things to keep
   `preload="none"` means nobody pays for the video until they ask for it, and the caption says plainly
   that it is unedited. If the recording is ever re-shot, keep both of those true.
 
-- **The README banner and the 404 come from the same recipe.** `banner-card.html` renders at 1280x320
-  (crop `1307x327` and scale, the same screenshot-scale correction as the social card) into
-  `assets/neko-core-banner.png`. `public/404.html` is a real page rather than Cloudflare's default:
+- **The README banner is a ROUNDED CARD rendered headlessly.** `banner-card.html` is a 1280x420
+  rounded-corner card (cindy.cn-style: kicker, big wordmark, accented tagline, feature strip, the
+  cat + a READY badge) on a TRANSPARENT page. Render it with headless Chrome - no server, no
+  screenshot-scale correction, and `--default-background-color=00000000` bakes REAL alpha corners,
+  which is what keeps them round on both GitHub themes:
+
+  ```powershell
+  & "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new `
+    --screenshot=assets/neko-core-banner.png --window-size=1280,420 `
+    --force-device-scale-factor=1 --default-background-color=00000000 `
+    --hide-scrollbars file:///E:/Sach/Sua/NekoCore/cloudflare/site/banner-card.html
+  ```
+
+  (The old flow - serve public/, screenshot, ffmpeg crop at the 1.0208 scale factor - still works
+  for the OG cards, which want a solid background anyway.) `public/404.html` is a real page rather
+  than Cloudflare's default:
   `not_found_handling = "404-page"` in `wrangler.toml` serves it with a genuine 404 status, so a link
   checker still reads it as missing. It carries its own tiny language script — `app.js` assumes the
   landing page's elements, and a 404 that throws is worse than one that is only in English.
