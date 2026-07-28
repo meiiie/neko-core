@@ -1238,7 +1238,7 @@ async function main(): Promise<number> {
         // Plain `neko update` means "follow latest" even when no download is needed (or possible while
         // running from source). Resume before the updater's early returns so an existing pin cannot stick.
         if (!target) setAutoUpdate(true);
-        const ok = await selfUpdate(console.log, target);
+        const ok = await selfUpdate(console.log, target, { progressTty: true });
         if (ok) {
           // A pinned version HOLDS: auto_update off so the daily updater can't drag it forward again
           // (that flag is honored by the version being installed, so the pin sticks). Plain `neko update`

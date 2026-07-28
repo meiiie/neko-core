@@ -3,6 +3,27 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-28 (3) - the updater raced itself and read as a hang
+
+Minutes after v0.19.0 shipped, the owner's screenshot: two `neko --yolo` launches, two `neko update`
+runs, "Updating v0.18.1 -> v0.19.0 ..." with a garbled "-265" on one line and an apparent freeze on
+the next. Diagnosis from the code, then confirmed on the machine:
+
+- **Silence read as death.** The ~88 MB download printed nothing for its whole duration (up to the
+  300s timeout), so a healthy update was indistinguishable from a hang - and got killed.
+- **No mutual exclusion.** Every `neko` startup with `auto_update: true` may start a BACKGROUND
+  install (chat.tsx), so the screenshot had up to four updaters racing over ONE shared staging file
+  (`neko.exe.new.exe`) and the same rename pair. Only luck decided the winner - and luck did win:
+  the machine ended on a byte-perfect v0.19.0 (SHA verified against the release sidecar) at 20:00:21.
+- Fixes (v0.19.1): a machine-wide lock file with a 10-minute stale takeover (second caller reports
+  and exits instead of double-downloading), per-process staging names, a startup sweep for orphaned
+  staging debris older than 30 minutes, and live `\r` progress on the CLI path only (the in-app
+  background updater must stay silent - its stdout is an Ink alt-screen).
+- Proven through REAL PTYs: two concurrent `dist/neko.exe update 0.18.1` - A downloaded with visible
+  progress ("downloading 83.7 / 83.8 MB (99%)"), installed and pinned; B printed the lock message and
+  exited 1. The up-path then restored latest + auto-update. Two new unit tests pin the lock
+  (live respected, stale taken over) and the sweep (orphans die, fresh staging and the binary live).
+
 ## 2026-07-28 (2) - six field reports from one day of real use
 
 The owner ran Neko hard (delegated research, long GPT-5.6 turns, cross-project work) and came back

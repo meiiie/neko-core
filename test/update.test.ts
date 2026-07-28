@@ -163,3 +163,47 @@ test("plain update resumes auto-updates even when no binary replacement can run"
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("the machine-wide update lock: one holder, live locks respected, stale locks taken over", () => {
+  // The field failure: two `neko --yolo` startups (background auto-update) plus a manual `neko update`
+  // raced over ONE staging file and the same rename - garbled output and an apparent hang.
+  const saved = { up: process.env.USERPROFILE, home: process.env.HOME };
+  const home = mkdtempSync(join(tmpdir(), "neko-update-lock-"));
+  process.env.USERPROFILE = home; process.env.HOME = home;
+  try {
+    const { acquireUpdateLock, releaseUpdateLock } = require("../src/adapters/update.ts");
+    const t0 = Date.now();
+    expect(acquireUpdateLock(t0)).toBe(true);      // first caller holds it
+    expect(acquireUpdateLock(t0 + 60_000)).toBe(false); // a live lock is respected
+    releaseUpdateLock();
+    expect(acquireUpdateLock(t0 + 61_000)).toBe(true);  // released -> free again
+    // A holder killed mid-download must not brick updates: >10 min old is presumed dead.
+    expect(acquireUpdateLock(t0 + 61_000 + 11 * 60_000)).toBe(true);
+    releaseUpdateLock();
+  } finally {
+    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("cleanupStaleUpdate sweeps orphaned staging files but never a fresh one", () => {
+  const dir = mkdtempSync(join(tmpdir(), "neko-staging-"));
+  const exe = join(dir, "neko.exe");
+  try {
+    const fs = require("node:fs");
+    fs.writeFileSync(exe, "x");
+    fs.writeFileSync(`${exe}.old`, "old");
+    fs.writeFileSync(`${exe}.new-111.exe`, "orphan");   // a killed updater's debris
+    fs.writeFileSync(`${exe}.new-222.exe`, "active");   // another process, mid-write
+    const past = (Date.now() - 45 * 60_000) / 1000;
+    fs.utimesSync(`${exe}.new-111.exe`, past, past);    // 45 min old -> orphan
+    const { cleanupStaleUpdate } = require("../src/adapters/update.ts");
+    cleanupStaleUpdate(exe);
+    expect(fs.existsSync(`${exe}.old`)).toBe(false);        // the classic backup sweep still works
+    expect(fs.existsSync(`${exe}.new-111.exe`)).toBe(false); // orphan removed
+    expect(fs.existsSync(`${exe}.new-222.exe`)).toBe(true);  // fresh staging is someone's live download
+    expect(fs.existsSync(exe)).toBe(true);                   // the binary itself is untouchable
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

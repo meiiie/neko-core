@@ -6,6 +6,21 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.19.1] — 2026-07-28
+
+### Fixed
+
+- **`neko update` no longer looks frozen, and updates no longer race each other.** Two things were
+  wrong, and they compounded in the field: the ~88 MB download printed *nothing* for minutes (so a
+  healthy update read as a hang), and there was no machine-wide lock — every `neko` startup with
+  `auto_update` on could kick a background install, so two open sessions plus a manual `neko update`
+  fought over one staging file and the same rename. Now: the CLI shows live progress
+  (`downloading 41.2 / 87.7 MB (47%)`), one updater runs at a time (a second caller says
+  "Another neko is already installing an update" and exits), each updater stages to its own
+  per-process file, and orphaned staging debris older than 30 minutes is swept at startup.
+  Verified live: two concurrent updates — one downloaded with visible progress and installed,
+  the other was refused cleanly.
+
 ## [0.19.0] — 2026-07-28
 
 ### Fixed

@@ -3,8 +3,8 @@
  * place, plus a daily-cached startup check that notifies when a newer release exists (Claude-Code style).
  * Releases are published by the `v*` tag CI (.github/workflows/release.yml); assets are per-platform.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 
@@ -89,9 +89,51 @@ export const UPDATE_RECHECK_MS = { found: 24 * 3600 * 1000, upToDate: 3 * 3600 *
 
 /** Remove the stale `<exe>.old` left by a previous self-update. On Windows the old exe is still LOCKED
  * by the running process during the update itself, so the swap can't delete it - only the NEXT launch
- * (this call) can. Cheap no-op when there's nothing to clean; never throws. Called from startup. */
-export function cleanupStaleUpdate(exe = process.execPath): void {
+ * (this call) can. Also sweeps ORPHANED staging files (`<exe>.new-<pid>*`) older than 30 minutes -
+ * debris of an update that was killed mid-download; fresh ones are left alone because another process
+ * may be actively writing them. Cheap no-op when there's nothing to clean; never throws. */
+export function cleanupStaleUpdate(exe = process.execPath, now = Date.now()): void {
   try { rmSync(`${exe}.old`, { force: true }); } catch { /* still locked or permission - try again next launch */ }
+  try {
+    const dir = dirname(exe);
+    const prefix = `${basename(exe)}.new`;
+    for (const f of readdirSync(dir)) {
+      if (!f.startsWith(prefix)) continue;
+      const p = join(dir, f);
+      try { if (now - statSync(p).mtimeMs > 30 * 60_000) rmSync(p, { force: true }); } catch { /* next launch */ }
+    }
+  } catch { /* unreadable dir - nothing to sweep */ }
+}
+
+/** One update at a time, MACHINE-wide. Without this, two `neko --yolo` startups (auto_update installs
+ * in the background) plus a manual `neko update` all raced over ONE staging file and the same rename -
+ * the field failure: garbled progress, an apparent hang, and only luck deciding which copy won.
+ * The lock is a `wx`-created file with pid+timestamp; a holder older than 10 minutes is presumed dead
+ * (killed mid-download) and its lock is taken over. */
+const LOCK_STALE_MS = 10 * 60_000;
+const lockPath = () => join(homeDir(), ".neko-core", ".update.lock");
+
+export function acquireUpdateLock(now = Date.now()): boolean {
+  try { mkdirSync(join(homeDir(), ".neko-core"), { recursive: true }); } catch { /* homeless: let wx decide */ }
+  try {
+    writeFileSync(lockPath(), JSON.stringify({ pid: process.pid, at: now }), { flag: "wx" });
+    return true;
+  } catch {
+    try {
+      const held = JSON.parse(readFileSync(lockPath(), "utf-8"));
+      if (typeof held.at === "number" && now - held.at < LOCK_STALE_MS) return false; // someone live is updating
+    } catch { /* unreadable -> stale */ }
+    try {
+      writeFileSync(lockPath(), JSON.stringify({ pid: process.pid, at: now })); // take over the stale lock
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+export function releaseUpdateLock(): void {
+  try { rmSync(lockPath(), { force: true }); } catch { /* stale takeover will handle it */ }
 }
 
 /** Activate a fully verified staged binary. If the second rename fails, restore the original immediately. */
@@ -140,8 +182,12 @@ export function normalizeTag(v: string): string | null {
  *   selfUpdate(log)            -> latest (refuses if already current)
  *   selfUpdate(log, "v0.7.7")  -> that EXACT version, UP or DOWN (a rollback). Downgrades are allowed:
  *                                 the caller pins `auto_update: false` so the daily updater can't undo it.
+ * `opts.progressTty` streams inline `\r` download progress to stdout - ONLY for the CLI path on a real
+ * TTY. The in-app background updater must never set it: its stdout is an Ink alt-screen, and a stray
+ * `\r` line would corrupt the frame. (An 88 MB download with no output at all is the other failure
+ * mode: it reads as a hang, and the user kills it mid-swap.)
  */
-export async function selfUpdate(log: (s: string) => void, target?: string): Promise<boolean> {
+export async function selfUpdate(log: (s: string) => void, target?: string, opts: { progressTty?: boolean } = {}): Promise<boolean> {
   const exe = process.execPath;
   if (basename(exe).replace(/\.exe$/i, "").toLowerCase() === "bun") {
     log("Running from source (bun). Update with:  git pull && bun run build");
@@ -167,55 +213,95 @@ export async function selfUpdate(log: (s: string) => void, target?: string): Pro
     tag = latest;
     log(`Updating v${VERSION} -> ${tag} ...`);
   }
-  const url = `https://github.com/${REPO}/releases/download/${tag}/${assetName()}`;
-  let expectedSha: string | null = null;
-  try {
-    const sum = await fetch(`${url}.sha256`, { headers: { "user-agent": "neko-core" }, signal: AbortSignal.timeout(15000) });
-    if (sum.ok) expectedSha = parseSha256Sidecar(await sum.text());
-  } catch {
-    /* handled by the required-check below */
-  }
-  if (!expectedSha && requiresChecksum(tag)) {
-    log(`Release ${tag} is missing its required SHA-256 sidecar.`);
+  // One installer at a time, machine-wide (see acquireUpdateLock). A second caller says so and
+  // leaves, instead of silently double-downloading and racing the swap.
+  if (!acquireUpdateLock()) {
+    log("Another neko is already installing an update. Let it finish, then check with `neko --version`.");
     return false;
   }
-  let bytes: Buffer;
   try {
-    const res = await fetch(url, { headers: { "user-agent": "neko-core" }, signal: AbortSignal.timeout(300000) });
-    if (!res.ok) {
-      log(`Download failed: HTTP ${res.status} (${url})`);
+    const url = `https://github.com/${REPO}/releases/download/${tag}/${assetName()}`;
+    let expectedSha: string | null = null;
+    try {
+      const sum = await fetch(`${url}.sha256`, { headers: { "user-agent": "neko-core" }, signal: AbortSignal.timeout(15000) });
+      if (sum.ok) expectedSha = parseSha256Sidecar(await sum.text());
+    } catch {
+      /* handled by the required-check below */
+    }
+    if (!expectedSha && requiresChecksum(tag)) {
+      log(`Release ${tag} is missing its required SHA-256 sidecar.`);
       return false;
     }
-    bytes = Buffer.from(await res.arrayBuffer());
-  } catch (e) {
-    log(`Download failed: ${(e as Error).message}`);
-    return false;
-  }
-  if (expectedSha) {
-    const actualSha = createHash("sha256").update(bytes).digest("hex");
-    if (actualSha !== expectedSha) {
-      log(`Downloaded SHA-256 does not match the official ${tag} release.`);
+    const showProgress = Boolean(opts.progressTty) && Boolean((process.stdout as any).isTTY);
+    let bytes: Buffer;
+    try {
+      const res = await fetch(url, { headers: { "user-agent": "neko-core" }, signal: AbortSignal.timeout(300000) });
+      if (!res.ok) {
+        log(`Download failed: HTTP ${res.status} (${url})`);
+        return false;
+      }
+      // Stream so the CLI can SHOW the download moving. A silent 88 MB fetch reads as a hang - the
+      // field screenshot was a user killing exactly that wait.
+      const reader = res.body?.getReader?.();
+      if (!reader) {
+        bytes = Buffer.from(await res.arrayBuffer());
+      } else {
+        const total = Number(res.headers.get("content-length") ?? 0);
+        const mb = (n: number) => (n / 1048576).toFixed(1);
+        const chunks: Uint8Array[] = [];
+        let got = 0;
+        let lastShown = 0;
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          chunks.push(chunk.value);
+          got += chunk.value.byteLength;
+          if (showProgress && Date.now() - lastShown > 250) {
+            lastShown = Date.now();
+            const line = total > 0
+              ? `  downloading ${mb(got)} / ${mb(total)} MB (${Math.floor((100 * got) / total)}%)`
+              : `  downloading ${mb(got)} MB`;
+            process.stdout.write(`\r${line.padEnd(48)}`);
+          }
+        }
+        if (showProgress) process.stdout.write(`\r${`  downloaded ${mb(got)} MB - verifying ...`.padEnd(48)}\n`);
+        bytes = Buffer.concat(chunks as any);
+      }
+    } catch (e) {
+      if (showProgress) process.stdout.write("\n");
+      log(`Download failed: ${(e as Error).message}`);
       return false;
     }
-  }
-  // Replace the running binary. Windows can't OVERWRITE a running exe, but it CAN rename it out of the
-  // way and put the new one in place; the stale .old is cleaned up next launch.
-  const tmp = process.platform === "win32" ? `${exe}.new.exe` : `${exe}.new`;
-  try {
-    writeFileSync(tmp, bytes, { mode: 0o755 });
-    const probe = spawnSync(tmp, ["version"], { encoding: "utf8", timeout: 15000, windowsHide: true });
-    const probed = /^neko-core\s+([0-9]+\.[0-9]+\.[0-9]+)/m.exec(probe.stdout ?? "")?.[1];
-    if (probe.status !== 0 || !probed || `v${probed}` !== tag) {
-      rmSync(tmp, { force: true });
-      log(`Downloaded binary failed its version probe (expected ${tag}).`);
+    if (expectedSha) {
+      const actualSha = createHash("sha256").update(bytes).digest("hex");
+      if (actualSha !== expectedSha) {
+        log(`Downloaded SHA-256 does not match the official ${tag} release.`);
+        return false;
+      }
+    }
+    // Replace the running binary. Windows can't OVERWRITE a running exe, but it CAN rename it out of
+    // the way and put the new one in place; the stale .old is cleaned up next launch. The staging file
+    // is PER-PROCESS (pid suffix): even if the lock is ever bypassed, two updaters can no longer write
+    // into each other's half-downloaded binary.
+    const tmp = process.platform === "win32" ? `${exe}.new-${process.pid}.exe` : `${exe}.new-${process.pid}`;
+    try {
+      writeFileSync(tmp, bytes, { mode: 0o755 });
+      const probe = spawnSync(tmp, ["version"], { encoding: "utf8", timeout: 15000, windowsHide: true });
+      const probed = /^neko-core\s+([0-9]+\.[0-9]+\.[0-9]+)/m.exec(probe.stdout ?? "")?.[1];
+      if (probe.status !== 0 || !probed || `v${probed}` !== tag) {
+        rmSync(tmp, { force: true });
+        log(`Downloaded binary failed its version probe (expected ${tag}).`);
+        return false;
+      }
+      activateStagedBinary(exe, tmp);
+      log(`Installed ${tag}. Restart neko to use it.`);
+      return true;
+    } catch (e) {
+      log(`Install failed: ${(e as Error).message}`);
+      try { if (existsSync(tmp)) rmSync(tmp); } catch { /* */ }
       return false;
     }
-    activateStagedBinary(exe, tmp);
-    log(`Installed ${tag}. Restart neko to use it.`);
-    return true;
-  } catch (e) {
-    log(`Install failed: ${(e as Error).message}`);
-    try { if (existsSync(tmp)) rmSync(tmp); } catch { /* */ }
-    return false;
+  } finally {
+    releaseUpdateLock();
   }
 }
