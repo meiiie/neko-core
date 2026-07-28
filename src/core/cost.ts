@@ -17,6 +17,12 @@ export interface Usage {
   prompt_tokens_details?: { cached_tokens?: number };
   /** DeepSeek's cache-hit shape (they pioneered context caching with their own field name). */
   prompt_cache_hit_tokens?: number;
+  /** When one provider complete() spans SEVERAL internal model calls (the Codex app-server runs its
+   * own tool loop), prompt/completion above are the TURN SUM. This is the LAST call's prompt size -
+   * the live context - so the ctx% display doesn't read a sum as one giant prompt. */
+  context_tokens?: number;
+  /** Internal model calls behind this one usage report (default 1). */
+  model_calls?: number;
 }
 
 export class CostTracker {
@@ -49,11 +55,11 @@ export class CostTracker {
     this.totalTokens += Math.max(reportedTotal, prompt + completion);
     this.cachedTokens += cached;
     this.cacheWriteTokens += cacheWrite;
-    if (usage.prompt_tokens !== undefined) this.lastPrompt = prompt;
+    if (usage.prompt_tokens !== undefined) this.lastPrompt = count(usage.context_tokens) || prompt;
     if (usage.completion_tokens !== undefined) this.lastCompletion = completion;
     this.lastCached = cached;
     this.lastCacheWrite = cacheWrite;
-    this.calls += 1;
+    this.calls += Math.max(1, count(usage.model_calls));
   }
 
   summary(): string {

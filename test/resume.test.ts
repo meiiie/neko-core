@@ -39,21 +39,40 @@ function mockCtx() {
   return { ctx, calls };
 }
 
-test("/resume opens the this-project picker; /resume all opens the all-projects picker", async () => {
+test("/resume is folder-first with every project searchable; /resume all is the flat global list", async () => {
   const a = mockCtx();
   await runSlashCommand("/resume", a.ctx);
   expect(a.calls.overlays.length).toBe(1);
   expect(a.calls.overlays[0].title).toBe("Resume session");
-  expect(a.calls.overlays[0].items.map((i: any) => i.id)).toEqual(["here-1"]); // scoped to this cwd
+  // Smart scope: this folder's sessions FIRST, other projects after (so typing can find them).
+  expect(a.calls.overlays[0].items.map((i: any) => i.id)).toEqual(["here-1", "away-1"]);
+  expect(a.calls.overlays[0].items[0].detail).not.toContain("other/project"); // local rows stay clean
+  expect(a.calls.overlays[0].items[1].detail).toContain("other/project"); // foreign rows carry their folder
 
   const b = mockCtx();
   await runSlashCommand("/resume all", b.ctx);
   expect(b.calls.overlays.length).toBe(1);
-  expect(b.calls.overlays[0].title).toBe("Resume session (all projects)");
+  expect(b.calls.overlays[0].title).toBe("Resume session (all projects, newest first)");
   const ids = b.calls.overlays[0].items.map((i: any) => i.id);
   expect(ids).toContain("here-1");
   expect(ids).toContain("away-1"); // "all" is a scope, never a session id
   expect(b.calls.lines).toEqual([]); // and never "no session 'all'"
+});
+
+test("resuming a session from another folder states where it was recorded", async () => {
+  const a = mockCtx();
+  await runSlashCommand("/resume", a.ctx);
+  const overlay = a.calls.overlays[0];
+  overlay.onSelect(overlay.items.find((i: any) => i.id === "away-1"));
+  expect(a.calls.resumed).toEqual(["away-1"]);
+  expect(a.calls.lines.join("\n")).toContain("recorded in /some/other/project");
+  // A local pick stays quiet.
+  const b = mockCtx();
+  await runSlashCommand("/resume", b.ctx);
+  const ob = b.calls.overlays[0];
+  ob.onSelect(ob.items.find((i: any) => i.id === "here-1"));
+  expect(b.calls.resumed).toEqual(["here-1"]);
+  expect(b.calls.lines).toEqual([]);
 });
 
 test("/resume <id> still resumes by id, and an unknown id explains the 'all' scope", async () => {

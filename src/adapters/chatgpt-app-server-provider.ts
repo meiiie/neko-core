@@ -24,7 +24,15 @@ interface ActiveTurn {
   threadId: string;
   turnId?: string;
   answer: string;
-  usage?: Usage;
+  /** Sum of every internal model call's usage this turn (the app-server runs its own tool loop, so
+   * one complete() can be many model calls - reporting only the last one undercounted every turn). */
+  usageSum: { prompt: number; completion: number; total: number; cached: number };
+  /** The latest per-call usage - its prompt size is the live context (for ctx%). */
+  lastCall?: { prompt: number; completion: number; total: number; cached: number };
+  /** The thread-cumulative usage as last reported (preferred over usageSum when present: duplicate
+   * or coalesced notifications cannot double- or under-count a running total). */
+  cumulative?: { prompt: number; completion: number; total: number; cached: number };
+  modelCalls: number;
   onDelta?: DeltaHook;
   executeTool?: CompleteOptions["executeTool"];
   toolResults: Map<string, Promise<{ contentItems: any[]; success: boolean }>>;
@@ -52,6 +60,8 @@ export class ChatGptAppServerProvider implements Provider {
   private active: ActiveTurn | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private dynamicToolNames = new Map<string, string>();
+  /** Thread-cumulative usage at the end of the previous turn - this turn's usage is the delta. */
+  private cumulativeBase = { prompt: 0, completion: 0, total: 0, cached: 0 };
 
   constructor(private readonly cfg: NekoConfig, private readonly clientFactory: CodexClientFactory = defaultClientFactory) {}
 
@@ -65,13 +75,31 @@ export class ChatGptAppServerProvider implements Provider {
     if (this.active) throw new Error("Codex App Server already has an active turn");
     if (!this.cfg.model.startsWith("gpt-5.6-")) throw new Error(`Codex App Server route is not required for ${this.cfg.model}`);
     if (tools.length && !opts.executeTool) throw new Error("Codex App Server tools need Neko's safe execution callback");
+    // Disarm the idle stop the moment a turn begins. It is armed at the END of a turn, so a LONG
+    // next turn (a deep-research run streaming past codex_keepalive minutes) used to have the timer
+    // fire mid-flight: dispose() rejected the live turn with "Codex App Server stopped" - the field
+    // failure. Idle means idle: the countdown runs only between turns.
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
 
     const client = await this.ensureClient();
+    // The Codex-native shell/apply_patch run inside codex's own read-only, no-network sandbox (a
+    // deliberate wall: every real execution must pass Neko's approval gate, never a second path).
+    // Untold, the model tries its native tools first, gets refused, and concludes the MACHINE is
+    // read-only - two field failures: a delegated write that "finished" with no file, and
+    // `agent-reach doctor` reported as "blocked by machine policy". Tell it the routing up front.
+    const toolRouting = tools.length
+      ? "\n\n# Tool routing (Codex App Server route)\n" +
+        "Your built-in shell and apply_patch run in a READ-ONLY, no-network Codex sandbox and will be " +
+        "refused. That refusal says nothing about this machine: for any command, file write, edit, or " +
+        "network work, call the provided dynamic tools (bash, write_file, edit, ...) - they execute in " +
+        "Neko with the user's real permissions. Never conclude the workspace is read-only from a " +
+        "native-tool refusal."
+      : "";
     const developerInstructions = messages
       .filter((message) => message?.role === "system")
       .map((message) => textContent(message.content))
       .filter(Boolean)
-      .join("\n\n");
+      .join("\n\n") + toolRouting;
     const encodedTools = encodeCodexDynamicTools(tools);
     this.dynamicToolNames = encodedTools.originalNames;
     const signature = JSON.stringify({ developerInstructions, dynamicTools: encodedTools.tools });
@@ -91,6 +119,7 @@ export class ChatGptAppServerProvider implements Provider {
       if (!id) throw new Error("Codex App Server did not return a thread id");
       this.threadId = id;
       this.threadSignature = signature;
+      this.cumulativeBase = { prompt: 0, completion: 0, total: 0, cached: 0 }; // fresh thread, fresh running total
 
       // Preserve a conversation that began on GPT-5.5 or another provider. The app-server thread is
       // new, so inject only the prior structured items; the final user message starts the live turn.
@@ -118,7 +147,7 @@ export class ChatGptAppServerProvider implements Provider {
       signal?.addEventListener("abort", abort, { once: true });
       if (signal?.aborted) abort();
       await active.done;
-      return { content: active.answer, tool_calls: [], usage: active.usage };
+      return { content: active.answer, tool_calls: [], usage: this.finishUsage(active) };
     } finally {
       if (abort) signal?.removeEventListener("abort", abort);
       if (this.active === active) this.active = null;
@@ -140,8 +169,37 @@ export class ChatGptAppServerProvider implements Provider {
   private armIdleStop(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.cfg.codexKeepalive <= 0 || !this.client) { this.idleTimer = null; return; }
-    this.idleTimer = setTimeout(() => this.dispose(), this.cfg.codexKeepalive * 60_000);
+    // Belt + suspenders to the disarm in complete(): if the timer somehow fires while a turn is
+    // live, re-arm instead of killing the turn out from under the model.
+    this.idleTimer = setTimeout(() => { if (this.active) this.armIdleStop(); else this.dispose(); }, this.cfg.codexKeepalive * 60_000);
     (this.idleTimer as any).unref?.();
+  }
+
+  /** The turn's usage: the delta of the thread-cumulative when available (duplicate-proof), else the
+   * sum of per-call reports. Carries the LAST call's prompt as `context_tokens` (the live context for
+   * ctx%) and the internal call count, so one multi-call codex turn counts like the N calls it was. */
+  private finishUsage(active: ActiveTurn): Usage | undefined {
+    if (!active.modelCalls && !active.cumulative) return undefined;
+    let use = active.usageSum;
+    if (active.cumulative) {
+      const delta = {
+        prompt: active.cumulative.prompt - this.cumulativeBase.prompt,
+        completion: active.cumulative.completion - this.cumulativeBase.completion,
+        total: active.cumulative.total - this.cumulativeBase.total,
+        cached: active.cumulative.cached - this.cumulativeBase.cached,
+      };
+      // A cumulative that moved backwards means the server reset behind us; trust the per-call sum.
+      if (delta.prompt >= 0 && delta.completion >= 0 && delta.total >= 0 && delta.cached >= 0) use = delta;
+      this.cumulativeBase = active.cumulative;
+    }
+    return {
+      prompt_tokens: use.prompt,
+      completion_tokens: use.completion,
+      total_tokens: use.total,
+      cached_tokens: use.cached,
+      context_tokens: active.lastCall?.prompt,
+      model_calls: Math.max(1, active.modelCalls),
+    };
   }
 
   private ensureClient(): Promise<RpcClient> {
@@ -214,13 +272,20 @@ export class ChatGptAppServerProvider implements Provider {
       return;
     }
     if (method === "thread/tokenUsage/updated") {
-      const last = params?.tokenUsage?.last;
-      if (last) active.usage = {
-        prompt_tokens: Number(last.inputTokens ?? 0),
-        completion_tokens: Number(last.outputTokens ?? 0),
-        total_tokens: Number(last.totalTokens ?? 0),
-        cached_tokens: Number(last.cachedInputTokens ?? 0),
-      };
+      // One notification per completed internal model call: `last` is that call, `total` is the
+      // thread-cumulative. Both are kept - the sum of lasts for the turn, the cumulative as the
+      // preferred (duplicate-proof) source, and the last call's prompt as the live context size.
+      const last = readTokenUsage(params?.tokenUsage?.last);
+      const total = readTokenUsage(params?.tokenUsage?.total);
+      if (last) {
+        active.lastCall = last;
+        active.modelCalls += 1;
+        active.usageSum.prompt += last.prompt;
+        active.usageSum.completion += last.completion;
+        active.usageSum.total += last.total;
+        active.usageSum.cached += last.cached;
+      }
+      if (total) active.cumulative = total;
       return;
     }
     if (method === "error" && params?.willRetry !== true) {
@@ -240,7 +305,17 @@ function makeActiveTurn(threadId: string, onDelta?: DeltaHook, executeTool?: Com
   let resolve!: () => void;
   let reject!: (error: Error) => void;
   const done = new Promise<void>((ok, fail) => { resolve = ok; reject = fail; });
-  return { threadId, answer: "", onDelta, executeTool, toolResults: new Map(), resolve, reject, done };
+  return {
+    threadId, answer: "", usageSum: { prompt: 0, completion: 0, total: 0, cached: 0 }, modelCalls: 0,
+    onDelta, executeTool, toolResults: new Map(), resolve, reject, done,
+  };
+}
+
+/** One usage shape from a codex tokenUsage record ({input,output,total,cachedInput}Tokens). */
+function readTokenUsage(raw: any): { prompt: number; completion: number; total: number; cached: number } | null {
+  if (!isObject(raw)) return null;
+  const n = (v: unknown) => { const x = Number(v ?? 0); return Number.isFinite(x) && x > 0 ? Math.floor(x) : 0; };
+  return { prompt: n(raw.inputTokens), completion: n(raw.outputTokens), total: n(raw.totalTokens), cached: n(raw.cachedInputTokens) };
 }
 
 /**

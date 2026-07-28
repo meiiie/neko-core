@@ -196,6 +196,90 @@ test("dynamic tool call ids are idempotent inside one App Server turn", async ()
   provider.dispose();
 });
 
+test("a multi-call codex turn reports the SUM of its internal model calls, not just the last one", async () => {
+  const cfg = setup();
+  let handlers!: CodexAppServerHandlers;
+  let turns = 0;
+  const factory: CodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}), close: () => {},
+      request: async (method) => {
+        if (method === "thread/start") return { thread: { id: "t1" } };
+        if (method === "turn/start") {
+          turns++;
+          // Thread-cumulative totals carry across turns: turn 2's counters start where turn 1 ended.
+          const b = turns === 1 ? { p: 0, o: 0, t: 0, c: 0 } : { p: 360, o: 45, t: 405, c: 200 };
+          setTimeout(() => {
+            // Three internal model calls in ONE turn (the app-server runs its own tool loop).
+            handlers.onNotification?.("thread/tokenUsage/updated", { threadId: "t1", tokenUsage: {
+              last: { inputTokens: 100, outputTokens: 10, totalTokens: 110, cachedInputTokens: 0 },
+              total: { inputTokens: b.p + 100, outputTokens: b.o + 10, totalTokens: b.t + 110, cachedInputTokens: b.c + 0 },
+            } });
+            handlers.onNotification?.("thread/tokenUsage/updated", { threadId: "t1", tokenUsage: {
+              last: { inputTokens: 120, outputTokens: 20, totalTokens: 140, cachedInputTokens: 90 },
+              total: { inputTokens: b.p + 220, outputTokens: b.o + 30, totalTokens: b.t + 250, cachedInputTokens: b.c + 90 },
+            } });
+            handlers.onNotification?.("thread/tokenUsage/updated", { threadId: "t1", tokenUsage: {
+              last: { inputTokens: 140, outputTokens: 15, totalTokens: 155, cachedInputTokens: 110 },
+              total: { inputTokens: b.p + 360, outputTokens: b.o + 45, totalTokens: b.t + 405, cachedInputTokens: b.c + 200 },
+            } });
+            handlers.onNotification?.("item/agentMessage/delta", { threadId: "t1", delta: "done" });
+            handlers.onNotification?.("turn/completed", { threadId: "t1", turn: { id: `turn-${turns}`, status: "completed" } });
+          }, 0);
+          return { turn: { id: `turn-${turns}` } };
+        }
+        return {};
+      },
+    };
+  };
+  const provider = new ChatGptAppServerProvider(cfg, factory);
+  const first = await provider.complete([{ role: "user", content: "go" }]);
+  // The old behavior kept only the LAST call (140/15) - every multi-call turn undercounted.
+  expect(first.usage).toMatchObject({
+    prompt_tokens: 360, completion_tokens: 45, total_tokens: 405, cached_tokens: 200,
+    context_tokens: 140, // the LIVE context is the last call's prompt, not the turn sum
+    model_calls: 3,
+  });
+  // Turn 2 on the same thread: only ITS delta is reported, not the thread-cumulative again.
+  const second = await provider.complete([{ role: "user", content: "more" }]);
+  expect(second.usage).toMatchObject({ prompt_tokens: 360, completion_tokens: 45, total_tokens: 405, cached_tokens: 200, model_calls: 3 });
+  provider.dispose();
+});
+
+test("a turn RUNNING LONGER than codex_keepalive is not killed mid-flight by the idle timer", async () => {
+  const cfg = setup();
+  cfg.data.codex_keepalive = 0.0002; // 12ms - far shorter than the second turn below
+  let handlers!: CodexAppServerHandlers;
+  let turns = 0;
+  const factory: CodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}), close: () => {},
+      request: async (method) => {
+        if (method === "thread/start") return { thread: { id: "t1" } };
+        if (method === "turn/start") {
+          turns++;
+          const wait = turns === 1 ? 0 : 60; // the second turn streams well past the keepalive window
+          setTimeout(() => {
+            handlers.onNotification?.("item/agentMessage/delta", { threadId: "t1", delta: `t${turns}` });
+            handlers.onNotification?.("turn/completed", { threadId: "t1", turn: { id: `turn-${turns}`, status: "completed" } });
+          }, wait);
+          return { turn: { id: `turn-${turns}` } };
+        }
+        return {};
+      },
+    };
+  };
+  const provider = new ChatGptAppServerProvider(cfg, factory);
+  await provider.complete([{ role: "user", content: "quick" }]); // arms the 12ms idle timer on settle
+  // Start the long turn immediately; the armed timer used to fire MID-TURN and reject it with
+  // "Codex App Server stopped" (the field failure on long research turns).
+  const long = await provider.complete([{ role: "user", content: "deep research" }]);
+  expect(long.content).toBe("t2");
+  provider.dispose();
+});
+
 test("a missing bridge can be installed and retried without restarting Neko", async () => {
   const cfg = setup();
   cfg.data.codex_keepalive = 0.0002;

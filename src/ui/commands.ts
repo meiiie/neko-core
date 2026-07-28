@@ -136,23 +136,37 @@ export interface CommandCtx {
   exit: () => void;
 }
 
-/** Open the resume picker for a scope; Ctrl+A flips between this project and all projects. */
-function openResumePicker(ctx: CommandCtx, scope: "cwd" | "all"): void {
+/** The last two path segments - enough to tell projects apart without eating the row. */
+function folderTail(cwd: string): string {
+  const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
+  return parts.slice(-2).join("/") || cwd;
+}
+
+/** Open the resume picker (claude-code/codex-class).
+ * - "smart" (default): this folder's sessions first, every other project after - so plain /resume
+ *   reads as the per-folder list, while TYPING searches across every project (titles + folders).
+ * - "cwd": strictly this folder (Ctrl+A from smart).
+ * - "all": flat every-project list, newest first (/resume all). */
+function openResumePicker(ctx: CommandCtx, scope: "smart" | "cwd" | "all"): void {
   // Metadata only (no full transcript parse) - listing 2860 sessions this way is ~50ms of stat calls
   // vs ~600ms of JSON parsing, which is what made the picker lag ~1s to open.
   const all = listSessionMetas();
-  const list = scope === "cwd" ? all.filter((s) => s.cwd === process.cwd()) : all;
+  const here = process.cwd();
+  const mine = all.filter((s) => s.cwd === here);
+  const list = scope === "cwd" ? mine : scope === "all" ? all : [...mine, ...all.filter((s) => s.cwd !== here)];
   if (!list.length) {
-    // This directory has no sessions. If OTHER projects do, open the all-projects picker directly
+    // This scope has no sessions. If OTHER projects do, open the all-projects picker directly
     // (don't dead-end on a "Ctrl+A" hint when there's no picker on screen to press it on - which read
     // as a freeze). Only when nothing exists anywhere is an info line the right answer.
-    if (scope === "cwd" && all.length) return openResumePicker(ctx, "all");
+    if (scope !== "all" && all.length) return openResumePicker(ctx, "all");
     return ctx.addLine("info", "no saved sessions yet");
   }
   ctx.setOverlay({
-    title: scope === "all" ? "Resume session (all projects)" : "Resume session",
-    ctrlAHint: scope === "all" ? "this project" : "all projects",
-    onCtrlA: () => openResumePicker(ctx, scope === "cwd" ? "all" : "cwd"),
+    title: scope === "all" ? "Resume session (all projects, newest first)"
+      : scope === "cwd" ? "Resume session (this folder only)" : "Resume session",
+    description: scope === "smart" ? "this folder first · typing searches every project" : undefined,
+    ctrlAHint: scope === "smart" ? "this folder only" : scope === "cwd" ? "all projects" : "this folder first",
+    onCtrlA: () => openResumePicker(ctx, scope === "smart" ? "cwd" : scope === "cwd" ? "all" : "smart"),
     onRename: (it, name) => {
       renameSession(it.id, name);
       openResumePicker(ctx, scope); // refresh the list with the new title
@@ -160,9 +174,11 @@ function openResumePicker(ctx: CommandCtx, scope: "cwd" | "all"): void {
     items: list.map((s) => ({
       id: s.id,
       label: sessionTitle(s),
+      // The folder rides on every out-of-folder row (and is part of what typing filters on), so a
+      // global search can be steered by project name, claude-code style.
       detail: `${relativeTime(s.updatedAt)} · ${s.msgCount} msgs` +
         (s.branch ? ` · ${s.branch}` : "") + (s.bytes ? ` · ${fmtBytes(s.bytes)}` : "") +
-        (scope === "all" ? ` · ${s.cwd.replace(/\\/g, "/").split("/").pop()}` : ""),
+        (s.cwd !== here ? ` · ${folderTail(s.cwd)}` : ""),
     })),
     // Preview is built LAZILY (Space on the highlighted item) - only THEN is that one transcript loaded.
     getPreview: (it) => {
@@ -177,7 +193,12 @@ function openResumePicker(ctx: CommandCtx, scope: "cwd" | "all"): void {
     onSelect: (it) => {
       ctx.setOverlay(null);
       const target = loadSession(it.id);
-      if (target) ctx.resumeInto(target);
+      if (!target) return;
+      // Honest note when crossing projects: the transcript is that folder's, the tools are this one's.
+      if (target.cwd && target.cwd !== process.cwd()) {
+        ctx.addLine("info", `(this session was recorded in ${target.cwd}; tools keep running in the current folder)`);
+      }
+      ctx.resumeInto(target);
     },
   });
 }
@@ -1091,7 +1112,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         return;
       }
       if (!listSessionMetas().length) return addLine("info", "no saved sessions yet");
-      return openResumePicker(ctx, arg ? "all" : "cwd");
+      return openResumePicker(ctx, arg ? "all" : "smart");
     }
     case "/continue": {
       // Pick up an interrupted/incomplete task. The trajectory (sealed) + the todo list are already in

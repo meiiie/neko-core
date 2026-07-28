@@ -467,3 +467,20 @@ test("mcp_load routes to the hub loader as a safe meta-tool (no approval)", asyn
   expect(await reg.execute("mcp_load", { names: ["mcp__x__a", "mcp__x__b"] })).toBe("loaded 2"); // not denied
   expect(gotNames).toEqual(["mcp__x__a", "mcp__x__b"]);
 });
+
+// rg exits 2 whenever ANY error occurred - including one unreadable file (a Windows `nul`, a
+// vanished temp file) in a tree full of real matches. That exit must not throw the matches away.
+test("formatRipgrepResult: partial read errors keep the matches; only a matchless error is fatal", async () => {
+  const { formatRipgrepResult } = await import("../src/core/tool-runtime.ts");
+  // One bad file, real matches on stdout (the field report: `rg: .\nul: Incorrect function`).
+  const partial = formatRipgrepResult(2, "src\\a.ts:3: hit one\nsrc\\b.ts:9: hit two\n", "rg: .\\nul: Incorrect function. (os error 1)\n");
+  expect(partial).toContain("src/a.ts:3: hit one");
+  expect(partial).toContain("src/b.ts:9: hit two");
+  expect(partial).toContain("some files could not be read");
+  expect(partial).not.toStartWith("Error:");
+  // A genuinely failed search (bad regex) still errors.
+  expect(formatRipgrepResult(2, "", "regex parse error")).toStartWith("Error: regex parse error");
+  // The boring paths are unchanged.
+  expect(formatRipgrepResult(1, "", "")).toBe("(no matches)");
+  expect(formatRipgrepResult(0, "src\\a.ts:1: x\n", "")).toBe("src/a.ts:1: x");
+});

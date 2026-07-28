@@ -880,17 +880,33 @@ function ripgrepSearch(rgPath: string, root: string, pattern: string, args: Reco
   const rel = args.path ? relative(resolve(root), resolveForRead(root, args.path, opts.readOutsideRoot)).split(sep).join("/") || "." : ".";
   const ctx = Math.max(0, Math.min(5, Math.floor(Number(args.context) || 0)));
   const rgArgs = ["--line-number", "--no-heading", "--color=never", "--max-columns=250", "--max-count=2000"];
+  // Windows: a file literally named `nul` (usually debris from a cmd-style `> nul` redirect run in the
+  // wrong shell) opens as the NUL DEVICE, and rg's read of it fails with "Incorrect function".
+  if (process.platform === "win32") rgArgs.push("--glob", "!nul");
   if (args.case_insensitive) rgArgs.push("-i");
   if (args.glob) rgArgs.push("--glob", String(args.glob));
   if (ctx) rgArgs.push("-C", String(ctx));
   rgArgs.push("--", pattern, rel); // -- so a pattern starting with '-' isn't read as a flag
   const r = spawnSync(rgPath, rgArgs, { cwd: root, encoding: "utf-8", maxBuffer: 16 * 1024 * 1024, timeout: 30_000 });
   if (r.error) return null; // couldn't spawn -> let the JS fallback handle it
-  if (r.status === 2) return `Error: ${String(r.stderr || "").trim().slice(0, 200) || "search failed"}`; // e.g. bad regex
-  const lines = String(r.stdout || "").split("\n").filter(Boolean);
+  return formatRipgrepResult(r.status, String(r.stdout || ""), String(r.stderr || ""));
+}
+
+/** Turn an rg exit into an observation. Exit 2 means "an error occurred" - INCLUDING one unreadable
+ * file in an otherwise fine tree (a Windows `nul`, a vanished temp file, a permission hole), where
+ * stdout still carries every real match. Treating any exit-2 as fatal threw the whole search away
+ * over one bad file (field report: `rg: .\nul: Incorrect function`); it is fatal only when NOTHING
+ * matched, and partial trouble is a note under the matches instead. Exported for tests. */
+export function formatRipgrepResult(status: number | null, stdout: string, stderr: string): string {
+  const lines = stdout.split("\n").filter(Boolean);
+  if (status === 2 && !lines.length) return `Error: ${stderr.trim().slice(0, 200) || "search failed"}`; // e.g. bad regex
   if (!lines.length) return "(no matches)";
   const shown = lines.slice(0, MAX_SEARCH_MATCHES).map((l) => l.replace(/\\/g, "/"));
   if (lines.length > MAX_SEARCH_MATCHES) shown.push(`... (truncated at ${MAX_SEARCH_MATCHES} matches)`);
+  if (status === 2) {
+    const first = stderr.split("\n").map((l) => l.trim()).filter(Boolean)[0] ?? "";
+    shown.push(`(some files could not be read${first ? `: ${first.slice(0, 120)}` : ""})`);
+  }
   return shown.join("\n");
 }
 

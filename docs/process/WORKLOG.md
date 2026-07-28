@@ -3,6 +3,49 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-28 (2) - six field reports from one day of real use
+
+The owner ran Neko hard (delegated research, long GPT-5.6 turns, cross-project work) and came back
+with a list. Every item reproduced and fixed the same day:
+
+- **/resume is now claude-code/codex-class.** Plain `/resume` lists this folder's sessions first with
+  every other project after them, so TYPING searches across all projects (titles AND folder names);
+  Ctrl+A cycles this-folder-only -> all-projects-flat -> back; `/resume all` jumps straight to the
+  flat newest-first view. Picking a session recorded in another folder prints where it came from,
+  because the transcript is that folder's while tools keep running here. New top-level `neko resume
+  [id]` mirrors `codex resume`.
+- **One file named `nul` no longer kills a whole search.** rg exits 2 whenever ANY read failed - even
+  with a full set of matches on stdout - and the tool treated every exit-2 as fatal, so one Windows
+  reserved-name file (debris of a cmd-style `> nul` redirect) threw away every real match with
+  `rg: .\nul: Incorrect function`. Exit 2 is now fatal only when nothing matched; partial trouble
+  becomes a note under the matches, and `nul` is excluded from scans on Windows. The two stray `nul`
+  files on disk (this repo + the contest project) are deleted via `\\?\` literal paths.
+- **The token counter was undercounting GPT-5.6 turns.** The app-server runs its OWN tool loop, so
+  one complete() spans several internal model calls - and only the LAST call's usage was kept. The
+  provider now reports the turn's true sum (preferring the thread-cumulative delta, which duplicate
+  notifications cannot double-count), plus two new Usage fields: `context_tokens` (the last call's
+  prompt, so ctx% doesn't read a sum as one giant prompt) and `model_calls` (the counter now says
+  "4 model calls" when a turn really was 4).
+- **"Codex App Server stopped" mid-research: the idle timer fired DURING a turn.** It is armed when a
+  turn settles and was never disarmed when the next one began, so any turn streaming past
+  codex_keepalive (15 min) got dispose()d out from under the model. The timer is disarmed the moment
+  a turn starts, and its callback re-arms instead of killing when a turn is somehow live.
+- **"agent-reach doctor blocked by machine policy" - it was codex's native sandbox again.** Same
+  mechanism as the read-only-write failure: the model reaches for its NATIVE shell first, which runs
+  read-only/no-network BY DESIGN (every real execution must pass Neko's gate, never a second path).
+  The route now says so up front in developerInstructions; live re-run went straight to Neko's bash
+  and answered. The pattern generalizes: NEVER conclude machine state from a native-tool refusal.
+- **Scrolling lagged while Neko worked.** Scrolled away, the streaming tail sits BELOW the viewport -
+  yet every ~40ms pump still cost a full React render plus the streamed-markdown re-render, for rows
+  nobody could see, and wheel input queued behind that work. Reading mode now syncs at ~300ms (refs
+  keep accumulating; the relay still gets pushed) and re-pinning pumps immediately. Locked by a
+  fullscreen sim measuring terminal writes under identical streams: pinned=49, scrolled=26 per 600ms
+  window, the difference being exactly the per-pump work.
+
+Evidence: typecheck clean; **890/890 tests, 3,908 assertions** (5 new); the real session store held at
+118 files across full-suite runs; live delegation trials for the codex-routing fix (agent-reach ok,
+"4 provider-reported model calls" from one turn confirming the counter).
+
 ## 2026-07-28 - /resume unbroken: the test suite was flooding the real session store
 
 Field report: "resume bị hỏng" plus a delegated `neko run` that "finished cleanly" without writing the

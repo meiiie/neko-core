@@ -418,8 +418,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // instead of once per token — smooth, no flicker, far less CPU. Any final tokens within the last
   // window land when flushStream commits the assistant line, so nothing is lost.
   const STREAM_MS = 40;
-  const maybePump = () => {
-    if (Date.now() - lastPumpRef.current < STREAM_MS) return;
+  // Scrolled away, the live tail sits BELOW the viewport - each pump still costs a full React render
+  // plus the streamed-markdown re-render, for rows nobody can see. At 25fps that saturated the event
+  // loop and wheel input queued behind it: "scrolling lags while Neko is working" (field report).
+  // Reading mode drops the sync to ~3fps (refs keep accumulating; the phone relay is pushed from the
+  // same pump, and 300ms is still live there); re-pinning to the bottom pumps immediately.
+  const STREAM_SCROLLED_MS = 300;
+  const scrolledAwayRef = useRef(false);
+  const maybePump = (force = false) => {
+    if (!force && Date.now() - lastPumpRef.current < (scrolledAwayRef.current ? STREAM_SCROLLED_MS : STREAM_MS)) return;
     lastPumpRef.current = Date.now();
     // Progressive commit: the terminal auto-follows output, so a live region TALLER than the viewport
     // makes it redraw from the top every frame -- the "streaming keeps jumping to the top" bug. Once the
@@ -2316,6 +2323,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     frameDiffer ? (dist) => { if (bandActiveRef.current) frameDiffer.setBandContent(paddedRowsRef.current, dist, streamRowsRef.current); } : undefined,
     Math.max(4, Math.round(1000 / fps)), // glide hop follows the resolved fps (live-adjustable via /fps)
   );
+  // Reading mode <-> live mode for the stream pump: scrolled away slows the sync (see maybePump);
+  // re-pinning to the bottom pumps at once so the tail is current the moment it is visible again.
+  useEffect(() => {
+    scrolledAwayRef.current = fullscreen && rowScroll.scrolled;
+    if (!scrolledAwayRef.current && streamRef.current) maybePump(true);
+  }, [fullscreen, rowScroll.scrolled]);
   // Which LINE the current scroll position looks at (walk row counts from the end; O(scroll depth),
   // only while scrolled). Quantized on BOTH ends: the walk re-runs per ~120 rows of travel (not per
   // 60fps flush - a deep scroll would walk thousands of map lookups per frame otherwise), and the

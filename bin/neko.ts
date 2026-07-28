@@ -252,6 +252,7 @@ Commands:
   capabilities  list runtime/CLI capabilities
   policy        audit the safe/gated permission boundary
   context       show global identity + project context files loaded
+  resume [id]   reopen the latest session for this folder (or an exact id); /resume inside picks others
   sessions      list saved chat sessions
   skills        list available skills (~/.neko-core/skills)
   recipes       list runnable recipes (~/.neko-core/recipes)
@@ -1194,7 +1195,13 @@ async function main(): Promise<number> {
   }
   if (args.doctor) return cmdDoctor(args);
   // Activation: bare `neko` (or `neko core`; legacy `neko code`) starts the interactive session.
-  if (!cmd || cmd === "chat" || cmd === "code" || cmd === "core") {
+  // `neko resume [id]` is claude-code/codex parity for `neko --resume [id]`: pick up the latest
+  // session for this folder (or an exact one), then choose others with /resume inside.
+  if (!cmd || cmd === "chat" || cmd === "code" || cmd === "core" || cmd === "resume") {
+    if (cmd === "resume") {
+      args.resume = true;
+      if (args.positionals[0]) args.resumeId = args.positionals[0];
+    }
     try {
       return await cmdChat(args);
     } catch (error) {
