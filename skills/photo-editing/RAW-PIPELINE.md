@@ -2,6 +2,16 @@
 
 Use this block for deterministic, headless RAW development on Windows without admin rights. Knowledge baseline: 2026-07-29.
 
+### Tools on this machine
+
+RawTherapee 5.13 and LibRaw 0.22.2 are RESIDENT (portable, no admin) - substitute these for the
+`D:\tools\...` placeholders in the templates below; `D:\job\...` stays your per-job working dir:
+
+- `%USERPROFILE%\.neko-core\tools\rawtherapee\rawtherapee-cli.exe`
+- `%USERPROFILE%\.neko-core\tools\libraw\bin\raw-identify.exe` (and `dcraw_emu.exe`)
+
+ART is not installed; offer it only if a format genuinely needs it.
+
 ### Default routing
 
 1. Probe every input with bundled LibRaw `raw-identify`; reject corrupt/unsupported compression modes before rendering.
