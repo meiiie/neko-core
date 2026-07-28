@@ -33,7 +33,7 @@ FilmLight Base Grade ordering, JarvisArt/PhotoAgent 2025-26 parametric-editing r
    black point -> exposure/balance -> contrast (pivot near middle gray) -> saturation -> tonal-zone
    moves (shadows/mids/highlights) -> the LOOK (grade/film emulation) last. Small steps: +-1/3 to
    +-1 EV-equivalent per iteration, never max sliders.
-4. **Perform - apply with magick**, e.g.:
+4. **Perform - apply with magick** (if `magick` is not on PATH, try `%USERPROFILE%/.neko-core/tools/imagemagick/magick.exe`; if missing entirely, say so and stop - never fake edits), e.g.:
    - exposure/contrast: `magick in.jpg -modulate 100,104 -level 2%,98% ... out.jpg` (levels = black/white point)
    - curves: `-function polynomial` or `-sigmoidal-contrast 3x46%` (gentle S; pivot ~46-50%)
    - white balance: sample a neutral, then `-channel R/B -evaluate multiply ...` to neutralize it

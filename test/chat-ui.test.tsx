@@ -694,7 +694,7 @@ test("/voice prefers native GPT-Live when available and keeps browser/official f
     options.onEvent?.({ type: "transcript-delta", role: "user", delta: "xin chao Neko" });
     expect(await until(() => (lastFrame() ?? "").includes("● LIVE"))).toBe(true);
     expect(lastFrame() ?? "").toContain("V3");
-    expect(lastFrame() ?? "").toContain("> xin chao Neko");
+    expect(lastFrame() ?? "").toContain("You  xin chao Neko"); // live speaker tag: WHO is talking, unmistakably
     expect(lastFrame() ?? "").toContain("Mute");
     expect(lastFrame() ?? "").toContain("Stop");
     expect(lastFrame() ?? "").toContain("speak naturally to interrupt");

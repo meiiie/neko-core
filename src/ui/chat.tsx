@@ -1354,7 +1354,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setVoiceTranscript(null);
         if (text) {
           const role = event.role === "user" ? "user" : "assistant";
-          addLine(role, text);
+          // The scrollback marks SPOKEN turns so a later reader can tell them from typed ones;
+          // the session messages stay clean text (the marker is UI, not model context).
+          addLine(role, `(voice) ${text}`);
           // Voice owns a separate App Server thread while it is live. Mirror finalized transcripts
           // into Neko's session so a later text turn or resumed session keeps the conversation.
           agentRef.current!.messages.push({ role, content: text });
@@ -2719,7 +2721,22 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             {voiceSnapshot.transport ? <Text dimColor>{`  ·  ${voiceSnapshot.transport}`}</Text> : null}
             {voiceSnapshot.startedAt ? <Text dimColor>{`  ·  ${fmtDuration(Math.floor((voiceNow - voiceSnapshot.startedAt) / 1000))}`}</Text> : null}
           </Text>
-          {voiceTranscript?.text ? <Text color="gray" italic>{`${voiceTranscript.role === "user" ? ">" : "Neko:"} ${trunc(voiceTranscript.text, Math.max(20, contentCols - 10))}`}</Text> : null}
+          {voiceTranscript?.text ? (
+            // WHO is talking, unmistakably: the speaker tag is bold + colored (user cyan, Neko green),
+            // the words stream in italic gray beside it.
+            <Text>
+              <Text bold color={voiceTranscript.role === "user" ? "cyan" : "green"}>{voiceTranscript.role === "user" ? "You  " : "Neko "}</Text>
+              <Text color="gray" italic>{trunc(voiceTranscript.text, Math.max(20, contentCols - 12))}</Text>
+            </Text>
+          ) : (
+            // No live words: say what Neko is DOING instead of leaving a blank row - working (a tool
+            // turn is running), listening, or muted. The panel always answers "what is happening?".
+            <Text dimColor italic>{voiceSnapshot.state === "muted"
+              ? "muted - Neko cannot hear you"
+              : busy
+                ? "working on your request ... (speak to interrupt)"
+                : voiceSnapshot.state === "live" ? "listening ..." : ""}</Text>
+          )}
           <Box>
             {voiceSnapshot.state === "live" || voiceSnapshot.state === "muted" ? (
               <>
