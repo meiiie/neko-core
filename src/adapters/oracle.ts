@@ -195,7 +195,11 @@ export function selectFiles(root: string, patterns: string[]): { paths: string[]
   const found = new Set<string>();
 
   for (const pattern of includes) {
-    if (isAbsolute(pattern) || pattern.includes("..")) {
+    // A drive-letter prefix is checked by hand: POSIX isAbsolute() calls "C:/Windows/win.ini"
+    // relative, so on Linux/macOS that pattern sailed past this guard into the glob scan and came
+    // back "matched no files" instead of "refused" (the Unix-only CI failure of 2026-07-27). A
+    // Windows-absolute pattern is never a valid project-relative glob on ANY platform.
+    if (isAbsolute(pattern) || /^[A-Za-z]:[\\/]/.test(pattern) || pattern.includes("..")) {
       skipped.push({ path: pattern, reason: "refused: pattern escapes the project root" });
       continue;
     }

@@ -14,7 +14,6 @@
  * memory, no injection, no elevation. An unsupported platform says so rather than guessing.
  */
 import { spawnSync } from "node:child_process";
-import { basename } from "node:path";
 
 export interface AudioActivity {
   /** What the OS reports, as the OS names it. */
@@ -50,7 +49,10 @@ const MEETING_APPS: Array<[RegExp, string]> = [
 
 export function describeAudioActivity(id: string): AudioActivity {
   const raw = id.replace(/#/g, "\\");
-  const label = /[\\/]/.test(raw) ? basename(raw) : raw;
+  // These ids are WINDOWS registry paths whatever OS this code runs on, so the last segment is cut by
+  // hand: POSIX basename() does not treat `\` as a separator and returned the whole path on Linux/macOS
+  // (the Unix-only CI failure of 2026-07-27 - tests pass on Windows, where basename knows both slashes).
+  const label = raw.split(/[\\/]/).pop() || raw;
   const known = MEETING_APPS.find(([pattern]) => pattern.test(raw));
   return {
     id,
