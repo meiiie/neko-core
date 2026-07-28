@@ -53,3 +53,27 @@ FilmLight Base Grade ordering, JarvisArt/PhotoAgent 2025-26 parametric-editing r
 - Skin: hue stays in the natural band; smoothing beyond gentle denoise is refused (that is the
   beauty-filter slope). Backgrounds may be dodged/burned darker/lighter, never replaced.
 - One look per image. Two competing looks = no look.
+
+## Look library (name the look, then place tones - never copy blind)
+
+Each look below is INTENT + tone placement + color move, in the recipe order above. Pick ONE.
+
+- **Airy pastel portrait** (the "tho mong" graduation-photo look: bright, backlit, soap-bubble
+  soft): expose for the FACE and let the background bloom 1/2 to 1 stop high; lift blacks slightly
+  (no true 0%), keep highlights JUST under clipping; desaturate globally ~5-10%, then warm the
+  highlights a touch (backlight glow) and cool shadows barely; gentle S-curve with a HIGH pivot
+  (~55-60%) so mids stay luminous. Skin stays warm-neutral; whites of the outfit must stay white.
+- **Cinematic (teal-orange, restrained)**: contrast around a LOW pivot (~40%) for weighted mids;
+  shadows nudged toward teal/cyan, skin-adjacent highlights toward warm - SMALL moves (the amateur
+  tell is maxed split-toning); crush blacks slightly but keep texture; consider a 2.39-ish crop
+  only if the composition survives it.
+- **Golden-hour warmth**: white balance toward amber WITHOUT losing neutral memory colors
+  (whites/greys may lean warm, skin must not go orange); lift shadow warmth, soften contrast.
+- **Classic film (Portra-like)**: slight highlight roll-off (shoulder), muted greens, warm mids,
+  fine grain acceptable; NEVER add fake light leaks/scratches unless asked.
+- **Quiet B&W (zone thinking)**: convert via channel mix (usually red-weighted for skin), place
+  the face on zone VI, let the scene fall around it; dodge the eyes a touch, burn distractions.
+
+For a reference image ("lam giong anh nay"): FIRST describe the reference's tone placement and
+palette in words (where do its blacks sit? what hue are its shadows/highlights? how bright is the
+face?), then reproduce THAT recipe on the target - never pixel-copy or style-transfer generatively.

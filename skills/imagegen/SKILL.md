@@ -17,8 +17,9 @@ consumes subscription usage ~3-5x faster than a text turn, so make every generat
    - light (golden hour, studio softbox, rim light...), palette, mood
    - style anchor (photorealistic / flat vector / watercolor / anime cel...), aspect intent
    - what must NOT appear (text and typography are usually rendered as gibberish - say "no text")
-2. Vietnamese text INSIDE an image comes out as diacritic gibberish. Never ask the model to render
-   Vietnamese words - generate art only, composite words in HTML/CSS afterwards.
+2. Text inside images (including Vietnamese with diacritics) renders well on current GPT-Image
+   models - but ALWAYS verify rendered words with vision afterwards, character by character; one
+   wrong diacritic ruins a poster. For pixel-perfect typography, HTML/CSS compositing still wins.
 3. Ask the user before burning multiple variations; default is ONE image per request.
 
 ## After generating
