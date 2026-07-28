@@ -1,4 +1,7 @@
 /** GPT-5.6 ChatGPT subscription transport through the official local Codex App Server. */
+import { writeFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
+
 import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 import type { NekoConfig } from "./config.ts";
@@ -269,6 +272,25 @@ export class ChatGptAppServerProvider implements Provider {
     }
     if (method === "item/reasoning/summaryTextDelta" || method === "item/reasoning/textDelta") {
       active.onDelta?.(String(params?.delta ?? ""), "reasoning");
+      return;
+    }
+    // Codex's built-in image_gen tool finished: surface the picture instead of dropping the item.
+    // The item carries base64 (`result`) and usually a path codex already saved (`savedPath`); when
+    // only base64 arrives, write it next to the user's work so the answer can point at a real file.
+    if (method === "item/completed" && params?.item?.type === "imageGeneration") {
+      const item = params.item;
+      let saved: string = typeof item.savedPath === "string" ? item.savedPath : "";
+      if (!saved && typeof item.result === "string" && item.result.length) {
+        try {
+          saved = joinPath(process.cwd(), `neko-image-${Date.now()}.png`);
+          writeFileSync(saved, Buffer.from(item.result, "base64"));
+        } catch { saved = ""; }
+      }
+      if (saved) {
+        const note = `\n[image saved: ${saved}]${item.revisedPrompt ? `\n(prompt as rendered: ${String(item.revisedPrompt).slice(0, 200)})` : ""}\n`;
+        active.answer += note;
+        active.onDelta?.(note, "content");
+      }
       return;
     }
     if (method === "thread/tokenUsage/updated") {
