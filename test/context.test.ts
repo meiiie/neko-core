@@ -136,3 +136,15 @@ test("rememberNote appends under a Memory section (newest first)", () => {
     process.chdir(cwd);
   }
 });
+
+test("the environment block names the ACTIVE shell on Windows (the anti quoting-war line)", () => {
+  const { environmentBlock } = require("../src/adapters/context.ts");
+  const block = environmentBlock({}, process.cwd());
+  if (process.platform === "win32") {
+    // Told nothing, a model sees win32 and reaches for PowerShell syntax, which fails in Git Bash -
+    // the classic agent-vs-shell escaping spiral. The block must state which shell really runs.
+    expect(block).toMatch(/Shell: .*(GIT BASH|cmd\.exe)/);
+  } else {
+    expect(block).not.toContain("Shell:"); // POSIX platforms have nothing to disambiguate
+  }
+});

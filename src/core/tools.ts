@@ -110,7 +110,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "bash",
     permission: GATED,
-    summary: "Run a shell command in the project root (approval-gated). Set a longer timeout for slow builds/tests, or run_in_background for long-lived processes (servers, watchers).",
+    summary: "Run a shell command in the project root (approval-gated). The <env> block states which shell executes it - match its syntax and never wrap commands in another shell yourself. For multi-line or quote-heavy commands, write_file a script first and run that (no nested-escaping spiral). Set a longer timeout for slow builds/tests, or run_in_background for long-lived processes (servers, watchers).",
     parameters: {
       command: { type: "string", description: "The shell command to run." },
       timeout: { type: "number", description: "Timeout in milliseconds (default 60000, max 600000)." },

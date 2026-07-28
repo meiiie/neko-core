@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { platform, release } from "node:os";
 import { appendCoreMemory, ensureCoreMemories, type MemoryBootstrapState } from "../core/memory.ts";
+import { findWindowsBash } from "../core/sandbox.ts";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -193,9 +194,19 @@ export function environmentBlock(info: { model?: string; provider?: string } = {
   const hit = envSnapshot.get(key);
   if (hit) return hit;
   const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  // The single highest-cost ambiguity on Windows agents is WHICH shell runs `bash` commands: told
+  // nothing, a model sees "win32" and reaches for PowerShell syntax, which fails in Git Bash, and
+  // the retry spiral piles escaping layers (the classic agent-vs-PowerShell quoting war). State the
+  // truth once, at session start, and the war never begins.
+  const shellLine = platform() === "win32"
+    ? (findWindowsBash()
+      ? "Shell: the bash tool runs GIT BASH (POSIX) - use Unix syntax ($VAR, /dev/null, &&); PowerShell/cmd syntax FAILS there. For PowerShell-specific work, write a .ps1 file and run `powershell -File script.ps1`."
+      : "Shell: no bash found - the bash tool falls back to cmd.exe; use Windows syntax (%VAR%, NUL) or write .ps1/.cmd files for anything complex.")
+    : "";
   const lines = [
     `Working directory: ${cwd}`,
     `Platform: ${platform()} ${release()}`,
+    ...(shellLine ? [shellLine] : []),
     `Date: ${new Date().toISOString().slice(0, 10)}`,
     `Git: ${branch ? `branch ${branch}` : "not a git repo"}`,
   ];
