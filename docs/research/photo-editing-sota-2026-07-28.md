@@ -1,6 +1,6 @@
 # Chỉnh sửa ảnh chuẩn nhiếp ảnh gia cho AI agent — SOTA đến 2026-07-28
 
-> Trạng thái: đang nghiên cứu · Hạn chót kiến thức: 2026-07-28  
+> Trạng thái: hoàn tất · Hạn chót kiến thức: 2026-07-28
 > Phạm vi cứng: chỉ chỉnh sửa tham số/tonal và hình học theo quy trình nhiếp ảnh; không dùng generative inpainting, resynthesis hay thay đổi danh tính/chủ thể.
 
 ## Mục lục
@@ -228,9 +228,9 @@ C²LUT và VLM-CC (2026) là nhánh technical color/white balance bổ trợ; ch
 |---|---|---:|---:|---:|---:|---|
 | ImageMagick 7 | Ordered raster CLI graph | Không phải RAW developer; ICC/colorspace có nhưng phải khai báo tường minh | Mạnh: read/write mask, compose, alpha | Tốt nếu lưu argv + profiles + build; không bit-exact cross-build | Native Windows | Geometry/mask/composite + fallback raster |
 | libvips | Demand-driven, horizontally threaded graph | LittleCMS/ICC, scRGB/OKLab; không phải camera-RAW developer | Tốt qua graph/composite, cần tự dựng mask | Rất tốt nếu serialize graph/version; CLI đơn lẻ bất tiện | Prebuilt Windows | Preview/batch/final raster core qua binding |
-| darktable-cli | RAW non-destructive pipeline | TBD | TBD | TBD | TBD | TBD |
-| RawTherapee CLI | RAW profile pipeline | TBD | TBD | TBD | TBD | TBD |
-| FFmpeg filters | Video/frame filter graph | TBD | TBD | TBD | TBD | TBD |
+| darktable-cli | Scene-referred RAW pixelpipe + XMP history | Rất mạnh; lens/RAW/exposure/color calibration/display transform/ICC | Rất mạnh: vector, parametric, raster/external | Tốt khi khóa XMP/config/build; default GUI/DB phải vô hiệu hóa | Native, headless | **RAW master + local grade chính** |
+| RawTherapee CLI | RAW pipeline + PP3 text profiles | Rất mạnh; 16-bit TIFF/PNG, camera pipeline | Mạnh trong GUI (RT-spots/content-aware), PP3 local schema chưa được đặc tả | **Rất tốt cho global** nhờ PP3 text/partial profiles; khóa version | Native, headless | RAW alternative; global/base recipe dễ sinh |
+| FFmpeg filters | Frame/video filtergraph | Mạnh cho primaries/TRC/matrix/range; không RAW/ICC-photo pipeline | Có `maskedmerge`, nhưng mask orchestration thủ công | Tốt same-build khi khóa graph/pixfmt/threads; không hứa cross-build | Native, headless; đã smoke-test 7.1.1 | Video/timelapse/sequence parity, không phải still RAW chính |
 
 ### 5.2 ImageMagick 7
 
@@ -257,45 +257,237 @@ C²LUT và VLM-CC (2026) là nhánh technical color/white balance bổ trợ; ch
 
 ### 5.4 darktable-cli
 
-_Đang đọc tài liệu chính thức._
+- `[verified · high]` **Đây là lựa chọn đầy đủ nhất cho RAW + local grade chuyên nghiệp.** Pipeline scene-referred giữ dữ liệu RAW ở thang linear không chặn rồi mới nén dynamic range ở display transform. Workflow chính thức: lens correction nếu cần → `exposure` đặt mid-gray/brightness nghệ thuật → `filmic rgb` đặt white/black relative exposure và contrast → `color balance rgb` cho saturation/look. White-balance module thường để nguyên; sửa illuminant/chromatic adaptation ở `color calibration`.
+- `[verified · high]` **Recipe render là XMP history stack, nhưng thứ tự có hai nghĩa.** Danh sách module trong pixelpipe chạy từ dưới lên; history chỉ ghi thứ tự thao tác của người dùng. CLI có thể nhận XMP cụ thể, tự tìm sidecar nếu bỏ qua, hoặc lấy history từ `--library`. Neko phải luôn truyền XMP tuyệt đối và không suy execution order từ history-row order.
+- `[verified · high]` **Local adjustment là first-class.** Có drawn masks (brush/circle/ellipse/path/gradient), parametric masks trên kênh scene RGB `g/R/G/B/Jz/Cz/hz`, tổ hợp set union/intersection/difference/exclusion, raster mask tái dùng cho module phía sau. Shapes lưu dạng vector trong tọa độ RAW gốc và đi qua lens/rotate/perspective/crop cùng pixelpipe. AI object mask được vector hóa thành nhóm Bézier; model/prompt không cần ở lúc render—phù hợp nếu Neko chỉ dùng AI để phân đoạn rồi khóa hình học, không sinh pixel.
+- `[verified · high]` **Có đường nhập mask ngoài không-generative.** `external raster mask` đọc PFM/PNG, scale về kích thước ảnh và đưa mask rất sớm trong linear RAW pipe. Mask ngoài phải cùng orientation với sensor RAW; nó chỉ dùng được bởi module ở sau nguồn mask. Executor phải lưu file mask + SHA-256 + orientation/source dimensions.
+- `[verified · high]` **Reproducibility không đến từ defaults.** `--apply-custom-presets` mặc định `true` và đọc `data.db`; style cần configdir; không nêu format option thì CLI dùng cấu hình export cuối của GUI; bỏ XMP thì tự tìm sidecar. Recipe tái lập phải truyền XMP, output extension, ICC type/file/intent, format options, configdir cô lập và `--apply-custom-presets false` khi không cần style. Disable DB cho phép nhiều instance nhưng làm `--style` không dùng được.
+- `[verified · medium-high]` **Không có cam kết bit-exact xuyên version/build.** Khóa darktable version/build, module params/XMP, configdir, ICC, output codec/depth, CPU/OpenCL policy; lưu stdout/stderr, exit code và output hash. Nếu style chỉ là look anchor, materialize nó thành XMP/history cụ thể thay vì phụ thuộc database theo tên.
+
+**Vai trò đề xuất:** engine chính cho RAW master và edit local/final scene-referred. Điểm yếu là sinh XMP/module blobs theo version khó hơn PP3 hoặc graph libvips; dùng adapter theo từng darktable version và golden-image conformance tests.
+
+**Nguồn:** darktable official user manual development: `darktable-cli`, scene-referred workflow, masks/drawn/parametric/raster và `external raster mask`; truy cập 2026-07-28.
 
 ### 5.5 RawTherapee CLI
 
-_Đang đọc tài liệu chính thức._
+- `[verified · high]` **CLI/PP3 là contract tự động hóa rõ nhất cho global RAW edits.** Cú pháp `rawtherapee-cli ... -p recipe.pp3 ... -c input` (bắt buộc `-c` cuối). PP3 là text; có thể nạp nhiều `-p` và sidecar `-s/-S` theo thứ tự, profile sau override profile trước. `-d` luôn là base bất kể vị trí. Đây là primitive tốt để compile `technical.pp3 → intent.pp3 → look.pp3`.
+- `[verified · high]` **Partial profile hỗ trợ composition nhưng cần phân biệt mode.** `Preserve` chỉ ghi đè tham số có trong profile; `Fill` đặt tham số thiếu về hard-coded defaults và có thể xóa edit cũ. Neko phải tạo partial profile theo semantics Preserve, không dựa GUI default/dynamic profile, và lưu toàn bộ PP3 thực tế đã merge.
+- `[verified · high]` **Output phải khai báo hết.** Mặc định là JPEG quality 92; TIFF/PNG mặc định 16-bit, JPEG luôn 8-bit. `-t -b16` hoặc `-n -b16`, `-Y`, output path và sidecar policy phải explicit. `-O` copy PP3 cạnh output; `-S` bỏ qua ảnh thiếu sidecar, tránh âm thầm render neutral/default.
+- `[verified · medium-high]` **Local Adjustments mạnh về nhiếp ảnh nhưng kém auditability cho code generation.** RT-spots ellipse/rectangle chọn vùng theo ΔE từ hue/chroma/luminance quanh reference circle, có graduated/parametric masks và nhiều module exposure/tone/color/CAM16. Tuy nhiên RawPedia không đặc tả schema PP3 cho spot/mask; selection content-aware thay đổi khi dời reference; pipeline position cố định chứ không theo thứ tự thêm. Không nên để v1 tự sinh local PP3 bằng chuỗi key reverse-engineered.
+- `[verified · high]` **PP3 không khóa renderer xuyên phiên bản.** RawPedia nói tool defaults/behavior có thể đổi và cùng giá trị có thể render khác; muốn reproduce chính xác cần version, cache/config và profiles tương ứng. Lưu executable hash/version, PP3 merged, output profile/bit-depth và golden-image hash.
+
+**Vai trò đề xuất:** alternative RAW developer và base/global recipe dễ sinh, rất hợp MVP không local; darktable thắng khi cần masks/dodge-burn/local grade có semantics chính thức.
+
+**Nguồn:** RawPedia official “Command-Line Options”, “Sidecar Files – Processing Profiles” và “Local Adjustments” (cập nhật 2025-01-22); truy cập 2026-07-28.
 
 ### 5.6 FFmpeg
 
-_Đang đọc tài liệu chính thức._
+- `[verified-local · high]` **Binary hiện có đủ global parametric primitives.** `ffmpeg 7.1.1-essentials_build-www.gyan.dev` expose: `exposure` (−3..+3 EV, black −1..1), `eq` brightness/contrast/gamma/RGB gamma/saturation, `curves` (master/R/G/B, PCHIP monotonic), `colorbalance` shadow/midtone/highlight RGB, `colorchannelmixer`, `colortemperature` 1000–40000 K, `selectivecolor`, `lut1d/lut3d`, crop/rotate và `maskedmerge`. Histogram/waveform có thể làm diagnostics.
+- `[verified-local · high]` **Color management thiên về video signal.** `colorspace`/`zscale` khai báo và đổi matrix, range, primaries, transfer, bit depth, chromatic adaptation/dither; đây là nền tảng tốt cho BT.709/BT.2020/HDR/video. Nó không phải camera RAW developer hay ICC-centric photo engine ngang darktable/RawTherapee/libvips+LittleCMS.
+- `[verified-local · high]` **Local edit làm được nhưng không ergonomic.** Cần tạo ba stream base/edited/mask rồi `maskedmerge`; mỗi stage phải quản pixel format/timebase/framesync. Với một ảnh đơn và nhiều mask nối tiếp, graph dài, escaping Windows và accidental YUV subsampling/range là rủi ro lớn.
+- `[verified-local · high]` **Same-build reproducibility đã smoke-test.** Hai lần chạy cùng generated frame, `-threads 1 -bitexact`, float RGB exposure→PCHIP curve→eq→crop→RGB24 cho cùng `framemd5` `8eeb66f614176df72a1f9fb9d788593d`. Đây chỉ xác nhận pipeline cụ thể trên build này; codec, swscale/zimg, hardware, thread, pixfmt và version khác vẫn có thể đổi output.
+
+**Vai trò đề xuất:** engine chính nếu skill mở rộng sang video/timelapse hoặc cần áp một LUT/grade đồng nhất theo frame; không chọn làm engine ảnh RAW/still chính.
+
+**Nguồn:** FFmpeg official filter documentation (trang quá lớn nên web extractor chỉ lấy mục lục); tham số được kiểm chứng trực tiếp bằng `ffmpeg -h filter=<name>` và smoke test local ngày 2026-07-28.
 
 ### 5.7 Kết luận lựa chọn engine
 
-_Chưa kết luận trước khi kiểm chứng._
+1. **Nếu buộc chọn một executable duy nhất cho đề bài:** `darktable-cli` — mạnh nhất về RAW, scene-referred color pipeline, local/drawn/parametric masks, history và ICC. Cái giá là adapter XMP phụ thuộc version.
+2. **Kiến trúc tốt nhất:** `darktable-cli` làm RAW master/final local grade + libvips binding làm preview nhanh, metrics, mask algebra và rendered-input pipeline. Đây là phân vai theo thế mạnh, không chạy hai engine chồng cùng phép màu.
+3. **RawTherapee CLI:** lựa chọn thực dụng cho v1 global/base RAW vì PP3 text/partial profiles dễ compile; chỉ dùng local khi đã có adapter PP3 được golden-test theo version.
+4. **ImageMagick 7:** geometry, mask conversion/composite, diagnostic/fallback; không làm color/RAW spine.
+5. **FFmpeg:** video/sequence/LUT parity; không làm still-photo spine.
+
+**Ý nghĩa “deterministic” trong báo cáo:** cùng source hash + recipe/materialized masks + engine/dependency build + color assets + execution policy phải cho output hash ổn định trong conformance matrix. Không engine nào ở đây cung cấp lời hứa bit-identical xuyên version/platform; Neko phải pin và kiểm thử, không chỉ lưu command.
 
 ## 6. Cách các sản phẩm AI hiện hành giữ danh tính
 
 ### 6.1 Adobe Lightroom
 
-_Đang đọc tài liệu chính thức._
+- `[verified · high]` **Lightroom giữ original bằng metadata, không phải bằng identity model.** Local-tab edits là non-destructive metadata; tùy file chúng nằm trong file hoặc XMP sidecar, và phải export mới tạo rendition nhìn được ở app khác. Camera Raw tương tự: giữ raw gốc, lưu WB/tone/color/sharpening vào XMP/database/DNG metadata. Đây là provenance/reversibility, chưa phải bảo đảm khuôn mặt không đổi.
+- `[verified · high]` **Auto là ví dụ tốt về ML→tham số.** Adobe Sensei phân tích ảnh rồi đặt các slider Exposure, Contrast, Highlights, Shadows, Whites, Blacks, Saturation và Vibrance; người dùng vẫn sửa từng slider. Neko có thể học pattern này: model đề xuất named parameters, renderer cổ điển thực thi.
+- `[verified · high]` **AI Mask là discriminative selection, rồi local parametric edit.** Subject/Sky/Background/People (cả hair/skin/teeth) được phân đoạn; sau đó người dùng Add/Subtract/refine và dùng slider exposure/color/tone. Với ràng buộc đề tài, AI mask được phép nếu materialize raster/vector mask, hash và render không cần chạy lại model.
+- `[verified · high]` **Adobe tự tách operation family trong AI Edit Status.** Thứ tự chính thức gồm Enhance/Remove/Lens Blur/Adaptive Profile/global/masking; một số mask/model phải “Update” lại theo nền tảng. Điều này chứng minh nhãn “AI edit” không nói lên safety: từng operation phải có policy riêng.
+- `[verified · high]` **Hard deny:** Generative Remove/Expand, Distracting People/Reflection removal, Content-Aware Remove/Heal/Clone vì thay nội dung chứ không chỉ tonal; Neural/Enhance-style detail reconstruction ngoài scope. `Denoise`, `Raw Details`, `Super Resolution`, `Adaptive Profiles`, `Lens Blur` không nhất thiết đổi danh tính, nhưng renderer/model không được materialize thành named tonal recipe và có thể cần recompute—để ngoài deterministic core, chỉ opt-in sau conformance.
+
+**Kết luận:** Lightroom không có một “identity lock” chung. Vùng giữ danh tính đến từ non-destructive original + operation provenance + parametric sliders/masks. Neko phải tái tạo chính vùng đó và từ chối phần còn lại.
 
 ### 6.2 Adobe Photoshop parametric/non-generative
 
-_Đang đọc tài liệu chính thức._
+- `[verified · high]` **Adjustment Layers** lưu tone/color settings riêng, có Properties và layer mask; không ghi đè source pixels. **Camera Raw Smart Object** cho phép mở lại WB/tone/color; **Smart Filters** có thể sửa/reorder/delete, blend và mask. Đây là mô hình recipe/layer stack tốt cho Neko.
+- `[verified · high]` **“Non-destructive” chỉ nói khả năng undo, không nói phép biến đổi an toàn.** Smart Filter có thể bọc nhiều filter tùy ý; layer riêng có thể chứa clone/heal; cả hai vẫn không phá original nhưng rendition đã thay nội dung. Executor phải allowlist operation semantics, không allow chỉ vì nó là Smart Object/layer.
+- `[verified · high]` **Hard deny từ chính mô tả Adobe:** Generative Fill add/remove/replace object; Generative Expand mở canvas; Generate Background/Image/Similar và Generative Upscale sinh pixel. Neural Filters có thể thay expression, age, gaze, hair thickness/head direction và tài liệu gọi chúng là generative; tất cả vi phạm identity constraint.
+- `[verified · high]` **Safe subset:** Curves/Levels/Color Balance/Hue-Saturation/Selective Color/Black & White/Photo Filter/Gradient Map (nếu dùng như color mapping), Camera Raw tonal/HSL/color grading, crop/rotate/perspective, và mask chỉ điều khiển opacity của các phép trên. Smart Sharpen/blur/texture cần bounds riêng; không nằm core tonal v1.
+
+**Kết luận:** Photoshop đưa ra mô hình lớp/mask/reversible recipe tốt, nhưng product surface quá rộng để coi toàn bộ là identity-preserving.
 
 ### 6.3 Google Photos
 
-_Đang đọc tài liệu chính thức._
+- `[verified · high]` **Google bảo vệ khả năng quay lại bản gốc, không bảo vệ danh tính của mọi edit.** `Save as copy` giữ original; `Save` có thể áp vào original nhưng `Edit → Revert` phục hồi; giữ preview để so before/after. Với Neko, luôn tương đương `Save as copy`, không overwrite source.
+- `[verified · high]` **Safe subset có thể ánh xạ:** crop/straighten/rotate/perspective/mirror; Brightness/Contrast/Saturation/Warmth/Shadows; classic filters nếu biết/khóa transfer function. Portrait Light cho đặt vị trí/độ sáng ánh sáng và Blur/Depth/Color Focus/Sky là local effect hợp ý tưởng, nhưng Google không công bố recipe/mask—chỉ là UX reference, không dùng làm deterministic backend.
+- `[verified · high]` **Hard deny:** Magic Eraser/Erase bỏ object; Move cần tái dựng nền; Auto Frame có thể mở rộng và fill; Magic Editor dùng generative AI để reposition subject/thay sky; conversational Gemini có ví dụ remove cars, change background, add party hat/glasses. Photo Remix/Reimagine/Video Remix/Zoom Enhance/Unblur có thể sinh hoặc suy đoán detail; ngoài core.
+- `[verified · high]` **C2PA/IPTC/SynthID là transparency, không phải identity guarantee.** Google Photos hiển thị Content Credentials, IPTC cho AI-edited images và SynthID cho Reimagine. Chúng giúp biết provenance sau khi edit, nhưng không ngăn model thay khuôn mặt/chủ thể và không thay recipe-level allowlist.
+- `[verified · medium-high]` **Nhãn “Enhance/AI-powered” không đủ chi tiết.** Help page không công bố các tham số hay xác nhận thao tác nào generative. Nếu một product không export được named recipe/masks/build, Neko phải coi đó là opaque và không dùng trong deterministic executor.
 
 ### 6.4 Ranh giới parametric, discriminative ML và generative AI
 
-_Đang kiểm chứng._
+| Lớp | Ví dụ | Chính sách Neko |
+|---|---|---|
+| Parametric/geometric | EV, WB, monotonic curves, HSL, CDL, crop/rotate/perspective, fixed LUT | **Cho phép** với bounds, color-space và recipe rõ |
+| Discriminative AI | detect subject/person/sky, classify WB cast, aesthetic critique | **Cho phép ở planner/masker**; materialize output, model không render pixel |
+| Learned but compiled photometric | fixed 3D LUT, affine bilateral grid, vector/raster mask | **Optional** nếu geometry giữ nguyên, seed/version cố định, asset hash và verifier pass |
+| Opaque adaptive renderer | Adaptive Profile, Portrait Light, Denoise/SR/Unblur | **Không ở core**; chỉ opt-in sau benchmark và materialization/conformance |
+| Content synthesis/removal | inpaint, gen fill/expand, move/add/remove/replace, face/body reshape | **Cấm cứng** |
 
 ## 7. Nguyên tắc chống “AI slop” và kiểm định
 
-_Đang xây dựng từ bằng chứng._
+1. **Identity by construction trước identity by score:** executor không expose tool nào có thể add/remove/repaint/warp chủ thể. Metric chỉ phát hiện bug/regression; không hợp pháp hóa operation bị cấm.
+2. **Model không chạm pixel:** VLM chỉ trả diagnosis, intent, vùng và structured parameters. Mọi pixel do engine tham số đã pin thực thi.
+3. **Mọi local edit có mask hữu hình:** raster/vector mask được lưu, hash, overlay trong contact sheet và có thể sửa; không có “semantic brush” chạy lại âm thầm lúc final render.
+4. **Original immutable:** source hash bất biến; mọi preview/final là derivative; recipe có undo/diff. Không có save-in-place.
+5. **Color pipeline đóng:** input/working/output profile, transfer, bit depth, LUT domain/interpolation và display transform phải explicit; không hai display transforms.
+6. **Bounded deltas:** planner chọn bước nhỏ theo stop/slider bounds, giữ tham số không được nhắc, chỉ commit candidate tốt hơn và giới hạn vòng lặp.
+7. **Protected-region verifier:** sau khi map crop/rotation về tọa độ gốc, kiểm geometry/landmarks/edge/segmentation overlap; tách skin-tone ΔE/chroma, clipping, gamut và texture drift. VLM aesthetic score không tự chấm safety.
+8. **Provenance hoàn chỉnh:** source/recipe/mask/profile/LUT/engine/output hashes, argv/exit/stderr, model/version/prompt và từng preview score. C2PA là lớp xuất bản bổ sung, không thay log nội bộ.
+9. **Human veto:** before/after, mask overlay, histogram/vectorscope, recipe diff và nút chỉnh/khóa từng operation trước final high-res.
 
 ## 8. Thiết kế đề xuất cho skill Neko
 
-_Đề xuất cuối sẽ mô tả cụ thể pipeline, schema recipe, planner VLM, engine, preview/render, guardrail, verifier và điều kiện dừng._
+### 8.1 Quyết định kiến trúc
+
+**Tên working:** `pro-photo-grade` — skill chuyên *develop/grade*, không phải image editor tổng quát.
+
+```text
+source immutable
+  → ingest + color/EXIF manifest
+  → deterministic measurements
+  → VLM diagnosis/intent (không pixel, không CLI)
+  → typed recipe compiler + numeric solver
+  → materialize masks/assets
+  → policy validation
+  → same-engine preview candidates
+  → metrics + VLM critique + user locks
+  → improve-only commit / bounded iteration
+  → full-res render + independent verification
+  → final derivative + recipe + provenance report
+```
+
+Phân tách bốn thành phần bắt buộc:
+
+1. **Planner VLM:** nhìn preview, mô tả ý đồ/thứ tự và chọn operation từ enum; không sinh command, curve blob tùy ý hay pixel.
+2. **Numeric compiler:** đổi diagnosis thành bước số có bounds; ví dụ VLM chỉ phân loại WB cast, solver tìm illuminant/temperature-tint như VLM-CC.
+3. **Deterministic executor:** chỉ nhận typed recipe đã validate; không có generic `shell`, free-form filtergraph hoặc plugin tùy ý.
+4. **Verifier độc lập:** đọc source/recipe/masks/output; policy/geometry/signal checks không dùng reasoning của planner.
+
+### 8.2 Engine routing
+
+| Input/nhu cầu | Preview và final | Vai trò phụ |
+|---|---|---|
+| Camera RAW, cần local grade | **darktable-cli cùng XMP/pixelpipe** ở kích thước preview và full-res | libvips làm thumbnail, mask/metrics/contact sheet |
+| Camera RAW, global MVP | RawTherapee CLI với merged PP3 16-bit | libvips diagnostics/output conversion |
+| TIFF/PNG/JPEG rendered | **Một graph libvips** cho cả preview và final | ImageMagick khi cần geometry/mask format chưa có binding |
+| Video/timelapse | FFmpeg filtergraph/LUT đã khóa | libvips cho keyframe analysis |
+
+Không render preview bằng libvips rồi final bằng darktable cho cùng một recipe: khác transfer/module semantics có thể làm VLM duyệt một ảnh nhưng xuất ảnh khác. Preview là cùng engine, chỉ đổi resolution/output encoding.
+
+### 8.3 Recipe contract
+
+```json
+{
+  "schema_version": "1.0",
+  "source": {"sha256": "…", "path": "…", "orientation": 1},
+  "intent": {"genre": "portrait", "target": "natural editorial", "protected": ["subject", "skin"]},
+  "color": {
+    "input_profile_sha256": "…",
+    "working_space": "engine-native-scene-referred",
+    "display_transform": "sigmoid",
+    "output_profile_sha256": "…",
+    "bit_depth": 16
+  },
+  "engine": {"name": "darktable-cli", "version": "…", "build_sha256": "…", "opencl": false},
+  "operations": [
+    {"id": "op01", "stage": "technical", "type": "exposure", "params": {"ev": 0.35}, "bounds": {"ev": [-2, 2]}, "mask": null, "locked": false, "reason": "place mid-gray"}
+  ],
+  "masks": [{"id": "m01", "kind": "raster", "sha256": "…", "source_space": "raw-sensor", "orientation": 1}],
+  "look_assets": [{"path": "…", "sha256": "…", "input_space": "…", "output_space": "…", "interpolation": "tetrahedral"}],
+  "execution": {"threads": 1, "random_seed": null, "rounding": "engine-default-pinned"}
+}
+```
+
+**Allowlist v1:** orientation/lens profile/CA; crop/rotate/straighten/perspective; WB illuminant hoặc temperature/tint; exposure EV; black/white relative exposure; **một** display transform (`filmic` hoặc `sigmoid`, không cả hai); monotonic tone/RGB curves; contrast/pivot; HSL/color mixer; saturation/vibrance; CDL/lift-gamma-gain; vignette; fixed LUT/CMT/film-print emulation; local exposure/WB/contrast/saturation/color grade qua vector/raster/luma/chroma/hue mask; deterministic grain với fixed seed và bounds.
+
+**Denylist compile-time:** mọi tên chứa/ánh xạ tới generate/inpaint/fill/expand/erase/remove/replace/move subject/background/face/body/beauty/reshape/neural portrait/super-resolution/restore hallucinated detail; generic script/plugin/filter; crop ngoài source canvas; non-affine subject warp; unpinned downloaded model/LUT/profile.
+
+Curve phải có `x` tăng, `y` không giảm trừ khi recipe được người dùng mở khóa rõ; LUT phải có domain/profile/hash. Grain bị tắt ở protected skin mặc định hoặc giới hạn sau calibration.
+
+### 8.4 Vòng lặp agentic
+
+1. **Ingest:** hash source; đọc EXIF/lens/orientation/embedded ICC; copy vào job read-only; tạo manifest. RAW clipping được đo trước display transform.
+2. **Measure:** histogram/percentiles theo luminance, RGB channel clipping, neutral candidates, dominant cast, horizon/verticals, face/subject/skin masks và sharp/noise diagnostics. Detection chỉ tạo metadata/mask, không sửa ảnh.
+3. **Previsualize:** VLM trả `intent`, tonal zones, protected regions, crop rationale và ordered change list. Nó phải nói rõ “không cần chỉnh” khi baseline đã đạt.
+4. **Compile:** numeric solver bắt đầu từ neutral/current recipe; mỗi vòng chỉ đổi 1–3 dimensions bằng delta nhỏ. Tham số không được nhắc giữ nguyên—pattern của IEA/RetouchAgent.
+5. **Preview search:** render baseline + 3–5 bounded candidates bằng cùng engine; giữ top-K từ hard metrics và critique, rồi full-resolution recheck candidate thắng nếu local texture/gamut có thể đổi—mượn preview-search của PhotoAgent nhưng bỏ toàn bộ generative actions.
+6. **Reflect:** VLM so contact sheet, histogram/vectorscope, mask overlay và diff recipe; output phải là `accept | revise | stop`, lý do và đúng parameters được phép đổi.
+7. **Commit:** chỉ nhận candidate không có hard failure và tốt hơn baseline theo tiêu chí ưu tiên; lưu full history, không overwrite recipe trước.
+8. **Stop:** tối đa 3 vòng mặc định/5 vòng hard cap; dừng khi VLM `stop`, hai vòng không cải thiện, delta dưới epsilon đã calibration, hoặc user lock/accept. Không tối ưu vô hạn tới một aesthetic score.
+
+### 8.5 Verifier và failure policy
+
+**Gate trước render:** JSON Schema; enum allowlist; path trong job; file/hash/version/profile có mặt; curve/LUT/mask/color order hợp lệ; không hai display transforms; source chưa đổi.
+
+**Gate sau render:**
+
+- Map output về source coordinates bằng affine/crop transform trước khi so; chỉ đánh giá vùng overlap.
+- Protected subject: landmark distances, segmentation IoU/contour, edge map và structure similarity sau khi loại ảnh hưởng tone; face embedding chỉ là một cảnh báo bổ sung, không phải identity proof.
+- Color/tone: channel clipping, highlight/shadow occupancy, out-of-gamut, neutral/skin hue-chroma/ΔE drift, local halo/banding, noise/texture drift.
+- Recipe/render: mask coverage/feather, operation diff, output profile/bit depth/metadata; render lặp trong CI/golden suite phải cho hash kỳ vọng trên pinned build.
+- Aesthetic: VLM/human chấm intent, composition, zone placement và consistency; không được override hard failure.
+
+Không đặt threshold “chuẩn” từ suy đoán. Calibrate theo FiveK/PPR10K + bộ RAW nội bộ có chân dung, landscape, low/high key, mixed light và nhiều skin tone; báo ROC/failure tail rồi version hóa threshold theo engine/camera class.
+
+### 8.6 Job artifact và provenance
+
+```text
+job/
+  source/immutable-original
+  manifest.json
+  recipe.v1.json
+  engine-materialized/edit.xmp | edit.pp3
+  masks/*.png|*.pfm + masks.json
+  previews/round-*/candidate-*.*
+  reports/measurements.json
+  reports/verification.json
+  final/<source-stem>.tif|jpg
+  provenance.json
+```
+
+`provenance.json` giữ source/recipe/mask/profile/LUT/engine/output hash, model ID/prompt hash, commands dưới dạng argv array, environment, exit code/stderr và history candidate. C2PA Content Credentials là optional export layer; internal manifest vẫn là nguồn audit chính.
+
+### 8.7 Windows execution
+
+- Dùng `spawn(exe, argv[])`, không dựng command string; đường dẫn có dấu cách không qua shell quoting.
+- Mỗi job có temp/output riêng; validate resolved path ở workspace; source mở read-only; final dùng tên mới.
+- Kiểm exit code và stderr; xóa output dở khi command fail; atomic rename sau verification.
+- Pin binary/dependency bundle và hash ICC/LUT. Với darktable, configdir cô lập, XMP explicit, format options explicit, tắt custom presets DB nếu không dùng style; với RawTherapee, `-c` cuối và PP3 merge materialized.
+- Log text CLI giữ ASCII-safe vì Windows console của Neko có thể dùng code page không-UTF-8.
+
+### 8.8 Lộ trình triển khai
+
+1. **MVP-A rendered RGB:** libvips JSON→graph; global tone/color/geometry + vector/raster masks; verifier/provenance đầy đủ.
+2. **MVP-B RAW global:** RawTherapee PP3 compiler vì contract text dễ test; 16-bit TIFF intermediate.
+3. **Pro RAW/local:** darktable XMP adapter theo version, external/drawn/parametric mask và same-engine preview/final.
+4. **Learned optional:** chỉ thêm fixed LUT/ICELUT hoặc serialized bilateral grid sau khi seed/build/asset được khóa và benchmark identity/structure pass; không mặc định.
+5. **Batch/colorist mode:** shot/group balance, reference still, shared look layer và per-image correction; đo PPR10K-style group consistency.
+
+### 8.9 Definition of done cho một edit
+
+- Source hash còn nguyên; output là derivative.
+- Recipe chỉ có operation allowlist; mọi local edit có mask đã materialize/hash.
+- Color pipeline và engine version/build đầy đủ; không dùng hidden GUI/default DB.
+- Hard verifier không fail; warnings/metric và VLM critique có trong report.
+- Final render tái tạo được trên supported pinned bundle; golden conformance pass.
+- Người dùng thấy before/after, mask overlay, recipe diff và có thể undo/lock/approve.
 
 ## 9. Khoảng trống, phản chứng và câu hỏi mở
 
@@ -306,8 +498,67 @@ _Đề xuất cuối sẽ mô tả cụ thể pipeline, schema recipe, planner V
 
 ## 10. Nguồn gốc đã đọc
 
-_Chưa có — chưa thực hiện truy vấn web trước khi tạo khung._
+Tất cả truy cập ngày 2026-07-28 trừ khi ghi khác. Link là paper/project/manual/trang hãng gốc, không link trang kết quả tìm kiếm.
+
+### 10.1 Nhiếp ảnh và color grading
+
+- Center for Creative Photography — [Intimate Nature: Ansel Adams and the Close View](https://ccp.arizona.edu/learn/educators-guides-archive/intimate-nature-ansel-adams-and-close-view/); Smithsonian — [Zone System Manual catalog record](https://www.si.edu/object/zone-system-manual-previsualization-exposure-development-printing-ansel-adams-zone-system-basis%3Asiris_sil_259476).
+- Ira H. Latour — [Ansel Adams, the zone system and the California School of Fine Arts](https://www.tandfonline.com/doi/abs/10.1080/03087298.1998.10443870), *History of Photography* 22(2), 1998.
+- FilmLight — [Base Grade and the evolution of grading tools](https://www.filmlight.ltd.uk/store/news_articles/lowepost-base-grade-and-the-evolution-of-grading-tools/) (2017-04-12); [Meet the Colourist: Aljoscha Hoffmann](https://www.filmlight.ltd.uk/customers/meet-the-colourist/aljoscha_hoffmann.php).
+- ARRI — [What is an ARRI Look File?](https://www.arri.com/en/learn-help/learn-help-camera-system/image-science/look-files).
+- Blackmagic Design — [DaVinci Resolve: Color](https://www.blackmagicdesign.com/products/davinciresolve/color).
+
+### 10.2 Paper, dataset và benchmark
+
+- Dutt et al. — [MonetGPT project](https://monetgpt.github.io/), SIGGRAPH/TOG 2025.
+- Lin et al. — [JarvisArt official NeurIPS proceedings](https://papers.neurips.cc/paper_files/paper/2025/hash/4ac4365b98bc242acd5ab974a05c68a8-Abstract-Conference.html), 2025.
+- Wu et al. — [RetouchIQ CVF page](https://openaccess.thecvf.com/content/CVPR2026/html/Wu_RetouchIQ_MLLM_Agents_for_Instruction-Based_Image_Retouching_with_Generalist_Reward_CVPR_2026_paper.html) và [arXiv HTML](https://arxiv.org/html/2602.17558), CVPR 2026.
+- Zhang & Yang — [RetouchAgent AAAI article](https://ojs.aaai.org/index.php/AAAI/article/view/40237) và [paper PDF](https://ojs.aaai.org/index.php/AAAI/article/download/40237/44198), AAAI 2026.
+- Yao et al. — [PhotoAgent arXiv HTML](https://arxiv.org/html/2602.22809), ICML 2026.
+- Guo et al. — [LumiVideo arXiv HTML](https://arxiv.org/html/2604.02409), 2026.
+- Li et al. — [VLM-CC CVF page](https://openaccess.thecvf.com/content/CVPR2026/html/Li_White-Balance_First_Adjust_Later_Cross-Camera_Color_Constancy_via_Vision-Language_Evaluation_CVPR_2026_paper.html) và [arXiv HTML](https://arxiv.org/html/2605.19613), CVPR 2026.
+- Chen et al. — [PhotoArtAgent](https://arxiv.org/abs/2505.23130), 2025.
+- Zhu et al. — [IEA arXiv HTML](https://arxiv.org/html/2606.08016v1), CVPR Findings 2026.
+- Wu et al. — [InstantRetouch arXiv HTML](https://arxiv.org/html/2606.05071), CVPR 2026.
+- Guo et al. — [VeraRetouch arXiv HTML](https://arxiv.org/html/2604.27375), 2026.
+- Liu et al. — [MirrorPPR](https://arxiv.org/abs/2606.29308), ECCV 2026.
+- MIT CSAIL — [MIT-Adobe FiveK dataset](https://data.csail.mit.edu/graphics/fivek/).
+- Hu et al. — [Exposure arXiv API record](https://export.arxiv.org/api/query?id_list=1709.09602), SIGGRAPH/TOG 2018. PDF gốc timeout trong lượt này.
+- Moran et al. — [DeepLPF CVF page](https://openaccess.thecvf.com/content_CVPR_2020/html/Moran_DeepLPF_Deep_Local_Parametric_Filters_for_Image_Enhancement_CVPR_2020_paper.html), CVPR 2020.
+- Liang et al. — [PPR10K CVF page](https://openaccess.thecvf.com/content/CVPR2021/html/Liang_PPR10K_A_Large-Scale_Portrait_Photo_Retouching_Dataset_With_Human-Region_Mask_CVPR_2021_paper.html), CVPR 2021.
+- Ouyang et al. — [RSFNet CVF page](https://openaccess.thecvf.com/content/ICCV2023/html/Ouyang_RSFNet_A_White-Box_Image_Retouching_Approach_using_Region-Specific_Color_Filters_ICCV_2023_paper.html), ICCV 2023.
+- Yang et al. — [ICELUT ECCV poster](https://eccv.ecva.net/virtual/2024/poster/703), ECCV 2024.
+- Zhang et al. — [LLF-LUT++ arXiv HTML](https://arxiv.org/html/2510.11613), 2025.
+- Rota et al. — [C²LUT](https://arxiv.org/abs/2607.11681), 2026-07-14.
+- Elezabi et al. — [Photography Retouching Transfer, NTIRE 2026 Challenge](https://openaccess.thecvf.com/content/CVPR2026W/NTIRE/html/Elezabi_Photography_Retouching_Transfer_NTIRE_2026_Challenge_Report_CVPRW_2026_paper.html), CVPRW 2026.
+
+### 10.3 CLI và color pipeline
+
+- ImageMagick — [Command-line Options](https://imagemagick.org/command-line-options/); [Color Management](https://imagemagick.org/color-management/).
+- libvips — [official homepage](https://www.libvips.org/); [Windows install](https://www.libvips.org/install.html); [How it works](https://www.libvips.org/API/8.16/How-it-works.html); [Colour API](https://www.libvips.org/API/current/libvips-colour.html).
+- darktable — [`darktable-cli`](https://docs.darktable.org/usermanual/development/en/special-topics/program-invocation/darktable-cli/); [scene-referred workflow](https://docs.darktable.org/usermanual/development/en/overview/workflow/process/); [mask overview](https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/overview/); [drawn](https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/drawn/), [parametric](https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/parametric/), [raster](https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/raster/) và [external raster mask](https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/external-raster/).
+- RawTherapee/RawPedia — [Command-Line Options](https://rawpedia.rawtherapee.com/Command-Line_Options); [Sidecar Files – Processing Profiles](https://rawpedia.rawtherapee.com/Sidecar_Files_-_Processing_Profiles); [Local Adjustments](https://rawpedia.rawtherapee.com/Local_Adjustments).
+- FFmpeg — [official filter documentation](https://ffmpeg.org/ffmpeg-filters.html); do trang quá lớn, filter facts còn được xác nhận bằng `ffmpeg 7.1.1 -h filter=<name>` trên máy nghiên cứu.
+
+### 10.4 Adobe và Google
+
+- Adobe Lightroom — [Local non-destructive editing/XMP](https://helpx.adobe.com/lightroom-cc/using/access-photos.html); [Auto settings](https://helpx.adobe.com/uk/lightroom/mobile/adjust-light-and-color/apply-auto-settings.html); [Masking](https://helpx.adobe.com/lightroom/desktop/edit-photos/masking.html); [Camera Raw masking](https://helpx.adobe.com/uk/camera-raw/using/masking.html); [Manage AI Edits](https://helpx.adobe.com/ca/lightroom-cc/web/share-your-work/review-and-download/manage-ai-edits.html); [Adaptive Profiles](https://helpx.adobe.com/lightroom/web/edit-photos/apply-effects/use-adaptive-profiles.html); [Enhance](https://helpx.adobe.com/lightroom-classic/desktop/process-and-develop-photos/enhance-details.html).
+- Adobe Camera Raw — [Introduction to Camera Raw](https://helpx.adobe.com/camera-raw/using/introduction-camera-raw.html); [2026 release notes](https://helpx.adobe.com/camera-raw/using/whats-new/release-notes.html).
+- Adobe Photoshop — [Adjustment Layers](https://helpx.adobe.com/photoshop/desktop/create-manage-layers/color-adjustment-fill-layers/create-adjustment-layers.html); [Smart Filters](https://helpx.adobe.com/photoshop/using/applying-smart-filters.html); [Non-destructive editing](https://helpx.adobe.com/photoshop/using/nondestructive-editing.html); [Generative AI features](https://helpx.adobe.com/photoshop/desktop/generative-ai/generative-ai-features-overview.html); [Neural Filters overview](https://helpx.adobe.com/photoshop/desktop/effects-filters/neural-filters/overview-of-neural-filters.html).
+- Google Photos Help — [Edit your photos](https://support.google.com/photos/answer/6128850?co=GENIE.Platform%3DAndroid&hl=en); [Pixel photo editing](https://support.google.com/photos/answer/9940184?hl=en); [Use AI to create](https://support.google.com/photos/answer/16763021?hl=en).
+- Google Blog — [AI editing tools availability](https://blog.google/products-and-platforms/products/photos/google-photos-editing-features-availability/) (2024-04-10); [Edit images by asking](https://blog.google/products-and-platforms/products/photos/ai-photo-editing-google-photos/) (2025-08-20); [C2PA and trusted images](https://blog.google/security/pixel-android-trusted-images-c2pa-content-credentials/) (2025-09-10); [Tools to understand content provenance](https://blog.google/innovation-and-ai/products/identifying-ai-generated-media-online/) (2026-05-19).
+
+### 10.5 Ghi chú truy xuất
+
+- Đã dùng cả `web_search` và `web_fetch` theo yêu cầu. Backend SearXNG cục bộ không kết nối được trong một số truy vấn và DuckDuckGo fallback trả rỗng; khi đó dùng search engine tích hợp khác để tìm URL rồi đọc trang hãng/paper gốc.
+- `web_fetch` đọc trực tiếp được paper/CVF/arXiv, darktable, RawPedia, Google và các manual nhỏ. Một số Adobe Help page timeout ở `web_fetch`; nội dung được đọc từ kết quả mở trang gốc của search engine, và URL gốc được liệt kê trên.
+- FFmpeg HTML bị cắt ở mục lục; tham số được kiểm qua chính binary `-h filter=` và output bằng repeated `framemd5`. Không suy các option không xuất hiện trong help local.
 
 ## 11. Nhật ký cập nhật
 
 - **2026-07-28 — Khởi tạo:** tạo khung mục lục, khóa phạm vi non-generative và tiêu chí đánh giá trước khi tìm nguồn.
+- **2026-07-28 — Workflow nghề nghiệp:** thêm Zone System, Base Grade/Resolve, ARRI Look File và triết lý show LUT.
+- **2026-07-28 — Paper ledger:** thêm white-box/parametric lineage, VLM/LLM agents, compiled photometric methods, datasets/metrics, phản chứng MirrorPPR và cutoff C²LUT 2026-07-14.
+- **2026-07-28 — CLI:** thêm ma trận ImageMagick/libvips/darktable/RawTherapee/FFmpeg, local binary inventory và repeated FFmpeg framemd5.
+- **2026-07-28 — Product boundary:** phân loại Lightroom/Camera Raw, Photoshop và Google Photos theo parametric/mask/opaque/generative; provenance không được coi là identity guarantee.
+- **2026-07-28 — Tổng hợp:** hoàn thiện thiết kế `pro-photo-grade`, recipe contract, engine routing, bounded preview loop, verifier, Windows execution và Definition of Done.

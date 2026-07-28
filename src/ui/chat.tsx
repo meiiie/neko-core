@@ -1274,7 +1274,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   };
 
-  const beginVoice = async (transport: "native" | "browser" = "native") => {
+  const beginVoice = async (transport: "native" | "browser" = "browser") => {
     if (voiceRef.current) return addLine("info", "voice is already active - use /voice status, /voice mute, or /voice stop");
     if (!hasChatGptCredentials()) {
       addLine("error", "ChatGPT is not signed in. Run /login > OpenAI > ChatGPT Plus/Pro before using subscription voice.");
@@ -1748,8 +1748,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       const action = text.slice("/voice".length).trim().toLowerCase();
       if (!action) { openVoicePicker(); return; }
       if (action === "start") {
-        if (discoverNativeVoiceAudio().state === "ready") await beginVoice("native");
-        else await beginBrowserVoice();
+        // WebRTC browser transport is the recommended default (research 2026-07-29: automatic
+        // playout/truncation, no 400ms native queue; native stays an explicit picker choice).
+        await beginVoice("browser");
         return;
       }
       if (action === "stop" || action === "off") { await stopVoice(); return; }
