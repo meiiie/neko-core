@@ -68,6 +68,11 @@ export class ToolRegistry {
   web?: WebPort;
   /** Opt-in adversarial review of auto-approved mutating actions (set by the host). */
   checkAction?: (toolName: string, args: Record<string, any>) => Promise<{ ok: boolean; reason: string }>;
+  /** Appended to every denial observation (set by the host). A non-interactive `neko run` sets this so
+   * the model learns the FIRST time a gated call bounces that no approval can ever arrive - otherwise it
+   * quietly retries or falls back to a text answer and the caller never learns why the file wasn't
+   * written (the "ran fine, produced nothing" delegation failure). */
+  denialNote = "";
   /** Load a skill's body by name (set by the wiring layer; core can't import the skills adapter). */
   loadSkill?: (name: string) => { body: string; dir: string } | null;
   /** Injected desktop backend for the `computer` tool (set by the host). Default unset = the real
@@ -375,7 +380,7 @@ export class ToolRegistry {
       const decision = declaredSafe ? "allow" : this.mode === "auto" ? "allow" : this.mode === "plan" ? "deny" : "prompt";
       if (decision === "deny") return `Blocked: ${name} (MCP) is not allowed in 'plan' mode.`;
       if (decision === "prompt" && !(await this.prompt(name, args))) {
-        return `Denied by user: ${name}`;
+        return `Denied by user: ${name}${this.denialNote ? `\n${this.denialNote}` : ""}`;
       }
       // Auto-approved + adversarial review on: vet the call (MCP tools are a prime injection vector).
       if (!declaredSafe && decision === "allow" && this.checkAction) {
@@ -409,7 +414,7 @@ export class ToolRegistry {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
     }
     if (decision === "prompt" && !(await this.prompt(name, args))) {
-      return `Denied by user: ${name} (${describe(name, args)})`;
+      return `Denied by user: ${name} (${describe(name, args)})${this.denialNote ? `\n${this.denialNote}` : ""}`;
     }
     // Adversarial review: when a mutating tool is auto-approved (no human in the loop), a model
     // pass vets it for prompt injection / destructive intent before it runs.

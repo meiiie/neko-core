@@ -3,6 +3,41 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-28 - /resume unbroken: the test suite was flooding the real session store
+
+Field report: "resume bị hỏng" plus a delegated `neko run` that "finished cleanly" without writing the
+requested file. Three distinct defects, one shared lesson: silence is what made all of them expensive.
+
+- **The test suite polluted the real `~/.neko-core/sessions`.** UI tests render ChatApp, ChatApp
+  persists after every turn, and only `session.test.ts` isolated HOME - the store had grown to
+  **6,611 files / 130.8 MB**, ~98% of them scripted test prompts ("go", "plan it", "run echo"...).
+  The /resume picker was buried in junk and `--resume`/`-c` handed back a test transcript as "the
+  latest session for this directory". Fix at one choke point: under `NODE_ENV=test` (bun test sets it;
+  the shipped CLI never runs that way) `sessionsDir()` diverts to a per-process temp dir, and tests
+  that assert on the store's files call the new `setSessionsDir()` explicitly - per-file env juggling
+  is exactly the racy pattern the bun-test-env history warns about. One test had silently DEPENDED on
+  the pollution (its picker only had items because the real store leaked through); it now seeds its
+  own store, which is the proof the isolation is real. Cleanup: 6,492 junk sessions moved (not
+  deleted) to `~/.neko-core/sessions-quarantine-20260728/`, 118 real conversations kept, index cache
+  dropped to rebuild.
+- **`/resume all` was parsed as a session id** and answered "no session 'all'". It now opens the
+  all-projects picker (same scope Ctrl+A reaches); `/sessions all` lists across projects the same way.
+- **A delegated non-interactive `neko run` could fail silently.** Without a TTY every gated tool is
+  auto-denied, the model quietly downgraded to a text answer, and the caller saw a clean exit with no
+  file and no explanation. Three changes, all using existing machinery: the model is told UP FRONT
+  (system note) that approvals cannot arrive; every denial observation now carries a `denialNote`
+  explaining not to retry and what to tell the caller; and the run ends with a stderr summary
+  (`[neko] N gated tool calls were auto-denied...`). Separately, `verifyBeforeExit` - the existing
+  pre-completion gate - is now ON by default for tool-ful `neko run` (config `verify_before_exit:
+  false` still opts out; `--no-tools` keeps the old default). Live trials: the ChatGPT app-server
+  model opens by claiming its NATIVE sandbox is read-only and previously gave up right there (the
+  reported 191-token failure); with the gate it re-inspects, switches to the registry's `write_file`,
+  and delivered the file 3/3 runs.
+
+Evidence: typecheck clean; **885/885 tests, 3,889 assertions** (4 new regression tests); the real
+store stayed at exactly 118 files across a full suite run; live headless runs verified both the deny
+path (loud, actionable, file untouched) and the --yolo path (file written and verified).
+
 ## 2026-07-25 - v0.17.1 auto-update discovery fix
 
 Field report: "auto-update looks broken". Diagnosed by probing the live path rather than reading code

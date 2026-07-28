@@ -3,18 +3,18 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { latestSession, listSessionMetas, listSessions, loadSession, newSessionId, saveSession } from "../src/adapters/session.ts";
+import { latestSession, listSessionMetas, listSessions, loadSession, newSessionId, saveSession, setSessionsDir } from "../src/adapters/session.ts";
 
-// Isolate from the user's real ~/.neko-core: these tests WRITE session files, so point HOME at a throwaway
-// dir for their duration. Otherwise they pollute the user's real session history AND get slowed by it —
-// running this suite hundreds of times (the self-improve loop) bloated that dir to thousands of files,
-// making latestSession's directory scan time out here (a false test failure). Restored in afterAll.
-const TEST_HOME = mkdtempSync(join(tmpdir(), "neko-sess-home-"));
-const SAVED = { up: process.env.USERPROFILE, home: process.env.HOME };
-beforeAll(() => { process.env.USERPROFILE = TEST_HOME; process.env.HOME = TEST_HOME; });
+// Isolate from the user's real ~/.neko-core: these tests WRITE session files. Pointing HOME at a
+// temp dir was the old way, but env mutation across bun test files is racy (see bun-test-env-races)
+// — so the store is now redirected explicitly via setSessionsDir. (Without an override, NODE_ENV=test
+// already diverts the store to a per-process temp dir; the explicit dir here lets the tests assert on
+// the files themselves.)
+const TEST_DIR = mkdtempSync(join(tmpdir(), "neko-sess-store-"));
+beforeAll(() => setSessionsDir(TEST_DIR));
 afterAll(() => {
-  process.env.USERPROFILE = SAVED.up; process.env.HOME = SAVED.home;
-  rmSync(TEST_HOME, { recursive: true, force: true });
+  setSessionsDir(null);
+  rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
 test("sessions are isolated per folder (latestSession filters by cwd)", () => {
@@ -26,7 +26,7 @@ test("sessions are isolated per folder (latestSession filters by cwd)", () => {
     expect(latestSession("/tmp/neko-folder-A")?.id).toBe(a);
     expect(latestSession("/tmp/neko-folder-B")?.id).toBe(b);
   } finally {
-    for (const id of [a, b]) rmSync(join(TEST_HOME, ".neko-core", "sessions", `${id}.json`), { force: true });
+    for (const id of [a, b]) rmSync(join(TEST_DIR, `${id}.json`), { force: true });
   }
 });
 
@@ -46,7 +46,7 @@ test("save / load / list round-trip", () => {
     expect(loaded?.messages.length).toBe(1);
     expect(listSessions().some((s) => s.id === id)).toBe(true);
   } finally {
-    rmSync(join(TEST_HOME, ".neko-core", "sessions", `${id}.json`), { force: true });
+    rmSync(join(TEST_DIR, `${id}.json`), { force: true });
   }
 });
 
@@ -64,7 +64,7 @@ test("listSessionMetas: lightweight metadata, mtime-cached index, self-heals on 
     expect((m as any).messages).toBeUndefined(); // it's metadata only
 
     // The index file was written; a 2nd call reads it (mtime cache) and still returns the entry.
-    expect(existsSync(join(TEST_HOME, ".neko-core", "sessions", ".index.json"))).toBe(true);
+    expect(existsSync(join(TEST_DIR, ".index.json"))).toBe(true);
     expect(listSessionMetas().find((x) => x.id === id)?.msgCount).toBe(2);
 
     // Change the session (more messages, new mtime) -> the meta re-parses, not stale.
@@ -73,7 +73,7 @@ test("listSessionMetas: lightweight metadata, mtime-cached index, self-heals on 
 
     // LEGACY index migration: entries without fsize (pre-upgrade) must be reused + stamped, NOT re-parsed
     // en masse (the one-time /resume picker stall after upgrading). Simulate by stripping fsize.
-    const idxPath = join(TEST_HOME, ".neko-core", "sessions", ".index.json");
+    const idxPath = join(TEST_DIR, ".index.json");
     const idx = JSON.parse(readFileSync(idxPath, "utf-8"));
     for (const k of Object.keys(idx.metas)) delete idx.metas[k].fsize;
     writeFileSync(idxPath, JSON.stringify(idx));
@@ -81,7 +81,23 @@ test("listSessionMetas: lightweight metadata, mtime-cached index, self-heals on 
     const migrated = JSON.parse(readFileSync(idxPath, "utf-8"));
     expect(typeof migrated.metas[id].fsize).toBe("number"); // ...and the entry was stamped in place
   } finally {
-    rmSync(join(TEST_HOME, ".neko-core", "sessions", `${id}.json`), { force: true });
+    rmSync(join(TEST_DIR, `${id}.json`), { force: true });
   }
 });
 
+// The pollution guard itself: under bun test WITHOUT an explicit override, nothing may touch the
+// real ~/.neko-core/sessions. This is the regression test for the flood that broke /resume.
+test("NODE_ENV=test diverts the store away from the real home", () => {
+  setSessionsDir(null); // drop this file's override to observe the default test-time resolution
+  try {
+    const id = `${newSessionId()}-guard`;
+    saveSession({ id, createdAt: new Date().toISOString(), updatedAt: "", cwd: "/tmp/g", model: "m", messages: [{ role: "user", content: "guard" }] });
+    const real = join(process.env.USERPROFILE || process.env.HOME || "", ".neko-core", "sessions", `${id}.json`);
+    const diverted = join(tmpdir(), `neko-test-sessions-${process.pid}`, `${id}.json`);
+    expect(existsSync(real)).toBe(false);
+    expect(existsSync(diverted)).toBe(true);
+    rmSync(diverted, { force: true });
+  } finally {
+    setSessionsDir(TEST_DIR); // restore for any test that runs after this one
+  }
+});

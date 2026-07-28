@@ -73,7 +73,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/loop", desc: "run a task N times (/loop <n> <task>)" },
   { name: "/auto", desc: "closed loop: work + self-review until done (/auto <goal>)" },
   { name: "/sessions", desc: "list saved sessions here" },
-  { name: "/resume", desc: "resume a session (/resume [id])" },
+  { name: "/resume", desc: "resume a session (/resume [id|all]; Ctrl+A in the picker flips scope)" },
   { name: "/continue", desc: "pick up an interrupted task where it left off" },
   { name: "/retry", desc: "re-run the last message (e.g. after an error)" },
   { name: "/effort", desc: "model-aware reasoning preference (/effort <level>|default|list)" },
@@ -1072,24 +1072,26 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       agent.messages = [];
       return addLine("info", "(conversation reset)");
     case "/sessions": {
-      const mine = listSessionMetas().filter((s) => s.cwd === process.cwd());
+      const all = input.split(/\s+/)[1]?.toLowerCase() === "all";
+      const mine = all ? listSessionMetas() : listSessionMetas().filter((s) => s.cwd === process.cwd());
       return addLine(
         "info",
         mine.length
           ? "sessions (newest first):\n" + mine.slice(0, 10).map((s) => `  ${s.id}  "${sessionTitle(s)}"`).join("\n")
-          : "no saved sessions for this directory",
+          : all ? "no saved sessions yet" : "no saved sessions for this directory (/sessions all shows every project)",
       );
     }
     case "/resume": {
       const arg = input.split(/\s+/)[1];
-      if (arg) {
+      // "/resume all" is a scope, not a session id (people type it instead of pressing Ctrl+A).
+      if (arg && arg.toLowerCase() !== "all") {
         const target = loadSession(arg);
-        if (!target) addLine("info", `no session '${arg}'`);
+        if (!target) addLine("info", `no session '${arg}' - /resume opens the picker, /resume all shows every project`);
         else ctx.resumeInto(target);
         return;
       }
       if (!listSessionMetas().length) return addLine("info", "no saved sessions yet");
-      return openResumePicker(ctx, "cwd");
+      return openResumePicker(ctx, arg ? "all" : "cwd");
     }
     case "/continue": {
       // Pick up an interrupted/incomplete task. The trajectory (sealed) + the todo list are already in

@@ -159,7 +159,7 @@ async function buildAgent(
   yolo: boolean,
   onDelta?: (t: string, kind?: string) => void,
   noTools = false,
-): Promise<{ agent: Agent; close: () => Promise<void> }> {
+): Promise<{ agent: Agent; registry: ToolRegistry; close: () => Promise<void> }> {
   ensureNekoHome();
   const mode = yolo ? "auto" : cfg.mode;
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy);
@@ -215,12 +215,19 @@ async function buildAgent(
         .join("\n\n"),
     onEvent: printEvent,
     onDelta,
-    verifyBeforeExit: cfg.verifyBeforeExit,
+    // ON by default for a tool-ful `neko run` (the delegation path). The observed failure
+    // (2026-07-28, live session): the model's FIRST response announced the plan in prose, called no
+    // tool, and ended the run - the caller got a clean exit and no work. The pre-completion gate is
+    // the existing countermeasure (one nudge to re-inspect actual state before finishing), so the
+    // one-shot path gets it unless the config explicitly opts out. --no-tools runs keep the config
+    // default: there a text answer IS the deliverable, and no tool exists to verify with.
+    verifyBeforeExit: noTools ? cfg.verifyBeforeExit : cfg.data.verify_before_exit !== false,
     verifyStateChangesBeforeExit: true,
     adaptiveEffort: cfg.adaptiveEffort,
   });
   return {
     agent,
+    registry,
     close: async () => {
       browserBridge?.close();
       await hub.close();
@@ -1003,12 +1010,38 @@ async function cmdRun(args: Args): Promise<number> {
       process.stderr.write(`(vision pre-pass failed: ${e instanceof Error ? e.message : e}; continuing without it)\n`);
     }
   }
-  const { agent, close } = await buildAgent(cfg, args.yolo, (t, kind) => {
+  const { agent, registry, close } = await buildAgent(cfg, args.yolo, (t, kind) => {
     if (kind === "reasoning" || kind === "tool") return; // CLI prints only the final content
     streamed += t.length;
     process.stdout.write(t);
   }, images.length > 0 || !!args.noTools); // perception/no-tools mode: pure text completion, no tool schemas
     // (image present -> vision endpoints reject tool-calling; --no-tools -> e.g. a pure-judgment reviewer pass)
+  // Non-interactive without --yolo: every approval prompt auto-denies (no human to answer). Left
+  // implicit, the model discovers this one bounced write at a time, quietly downgrades to a text
+  // answer, and the CALLER - a script or another agent that piped this command - sees a clean exit
+  // with no file and no explanation ("ran fine, wrote nothing"). Say it up front to the model, stamp
+  // every denial with the reason, and count denials so the run can end with a visible warning.
+  const headlessGated = !process.stdin.isTTY && registry.mode !== "auto" && !registry.noTools;
+  let denials = 0;
+  if (headlessGated) {
+    registry.denialNote =
+      "(non-interactive run: approval prompts cannot be answered, so gated tools are auto-denied. " +
+      "Do NOT retry this call. Finish what the allowed tools can do, and end by stating exactly which " +
+      "deliverables were blocked and that the caller should re-run with --yolo to permit them.)";
+    const gate = registry.prompt;
+    registry.prompt = async (name, a) => {
+      const ok = await gate(name, a);
+      if (!ok) denials++;
+      return ok;
+    };
+    agent.appendSystem(
+      "# Non-interactive run\n" +
+      "There is no human at this terminal. Tool calls that need approval (write_file/edit/bash in the " +
+      "current mode) will be DENIED automatically. If the task asks for changes those tools would make, " +
+      "do what is possible with allowed tools, then say plainly in the final answer what was blocked " +
+      "and that re-running with --yolo (or mode accept_edits for file edits) would allow it.",
+    );
+  }
   // Deterministically load a clearly-matching domain skill (don't rely on the model to pull it).
   const matched = matchSkill(instruction);
   if (matched) agent.appendSystem(`# Skill: ${matched.name}\n(skill files dir: ${matched.dir} - run bundled scripts from here)\n${matched.body}`);
@@ -1023,6 +1056,13 @@ async function cmdRun(args: Args): Promise<number> {
     process.stdout.write("\n");
     if (streamed === 0 && answer.trim()) console.log(answer); // synthetic/non-streamed result
     console.log(`[${agent.cost.summary()}]`);
+    if (denials > 0) {
+      // stderr, after the answer: the delegating caller (script/agent) must see WHY output is missing.
+      process.stderr.write(
+        `[neko] ${denials} gated tool call${denials > 1 ? "s were" : " was"} auto-denied (non-interactive run). ` +
+        "The task could not write files or run commands. Re-run with --yolo to allow gated tools.\n",
+      );
+    }
   } finally {
     await close();
   }

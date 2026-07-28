@@ -401,14 +401,16 @@ test("/resume picker while SCROLLED UP renders names intact (no flex-squash, no 
   const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const home = join(tmpdir(), `neko-sim-resume-${process.pid}`);
-  mkdirSync(join(home, ".neko-core", "sessions"), { recursive: true });
-  const savedEnv = { up: process.env.USERPROFILE, home: process.env.HOME };
-  process.env.USERPROFILE = home; process.env.HOME = home;
+  const { setSessionsDir } = await import("../src/adapters/session.ts");
+  // Point the store at this test's own dir (env-home overrides are ignored under NODE_ENV=test —
+  // the store isolation that keeps test sessions out of the real ~/.neko-core/sessions).
+  const store = join(tmpdir(), `neko-sim-resume-${process.pid}`);
+  mkdirSync(store, { recursive: true });
+  setSessionsDir(store);
   try {
     for (let i = 0; i < 5; i++) {
       const id = `2026070${i}-00000${i}-00${i}`;
-      writeFileSync(join(home, ".neko-core", "sessions", `${id}.json`), JSON.stringify({
+      writeFileSync(join(store, `${id}.json`), JSON.stringify({
         id, createdAt: new Date(Date.now() - i * 3600e3).toISOString(), updatedAt: new Date(Date.now() - i * 3600e3).toISOString(),
         cwd: process.cwd(), model: "m",
         messages: [{ role: "user", content: `ten phien so ${i} rat de nhan` }, { role: "assistant", content: `tra loi ${i}` }],
@@ -436,8 +438,8 @@ test("/resume picker while SCROLLED UP renders names intact (no flex-squash, no 
     app.unmount();
     await tick(50);
   } finally {
-    process.env.USERPROFILE = savedEnv.up; process.env.HOME = savedEnv.home;
-    rmSync(home, { recursive: true, force: true });
+    setSessionsDir(null);
+    rmSync(store, { recursive: true, force: true });
   }
 }, 30000);
 

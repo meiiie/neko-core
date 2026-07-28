@@ -5,6 +5,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
@@ -39,7 +40,23 @@ export interface SessionMeta {
   // saves land on one tick in tests); size catches the append. rsync-style mtime+size composite check.
 }
 
+/** Test hook: point the store at an explicit directory (null restores the default resolution).
+ * Env-based isolation (setting HOME per test file) is racy under bun test, so tests that assert on
+ * the store's files set the directory directly instead. */
+let dirOverride: string | null = null;
+export function setSessionsDir(dir: string | null): void {
+  dirOverride = dir;
+}
+
 function sessionsDir(): string {
+  if (dirOverride) return dirOverride;
+  // Under `bun test` (which sets NODE_ENV=test; the shipped CLI never runs that way) the store
+  // diverts to a per-process temp dir. UI tests render ChatApp, and ChatApp persists after every
+  // turn — unisolated runs flooded the real ~/.neko-core/sessions with thousands of fake sessions
+  // (6,611 files observed), burying every real conversation in the /resume picker and handing
+  // --resume/-c a test transcript as "the latest session". This single choke point isolates every
+  // caller — saves, loads, the list, and the .index.json cache — without per-file env juggling.
+  if (process.env.NODE_ENV === "test") return join(tmpdir(), `neko-test-sessions-${process.pid}`);
   return join(homeDir(), ".neko-core", "sessions");
 }
 

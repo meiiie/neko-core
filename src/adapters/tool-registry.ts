@@ -48,6 +48,7 @@ export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRe
   target.summarize = source.summarize;
   target.web = source.web;
   target.checkAction = source.checkAction;
+  target.denialNote = source.denialNote;
   target.loadSkill = source.loadSkill;
   target.allowDangerousBash = source.allowDangerousBash;
   target.readOutsideRoot = source.readOutsideRoot;
