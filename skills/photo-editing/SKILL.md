@@ -1,7 +1,7 @@
 ---
 name: photo-editing
-description: Edit/retouch/grade an EXISTING photo like a top photographer (chinh anh / sua anh / retouch / color grade / lam dep anh / hau ky) - parametric only, never generative. Identity of people and places must survive untouched. For creating a NEW image use the imagegen skill instead.
-match: (chỉnh|chinh|sửa|sua|retouch|hậu kỳ|hau ky|grade).{0,40}(ảnh|anh\b|photo|image)|photo.?edit
+description: Edit/retouch/grade an EXISTING photo like a top photographer (chinh anh / sua anh / retouch / color grade / hau ky), develop RAW files, coach a shoot before the shutter (tu van chup / tao dang / posing / ky yeu), and gate documentary edits ethically. Parametric only, never generative; identity survives untouched. For creating a NEW image use the imagegen skill.
+match: (chỉnh|chinh|sửa|sua|retouch|hậu kỳ|hau ky|grade).{0,40}(ảnh|anh\b|photo|image)|photo.?edit|(tư vấn|tu van|hướng dẫn|huong dan|coach).{0,30}(chụp|chup|tạo dáng|tao dang|pose|posing)|(chụp|chup|tạo dáng|tao dang).{0,24}(kỷ yếu|ky yeu|graduation|chân dung|chan dung|nhóm|nhom|ảnh|anh\b)
 ---
 
 # Skill: Photo editing (photographer-grade, identity-preserving)
@@ -116,6 +116,19 @@ DO_NOT_CHANGE: identity, geometry, skin texture, objects/background, plus brief 
 CAPTURE_ONLY: <issues that cannot be repaired honestly in post>
 
 Prioritize at most three edits by impact × confidence ÷ risk. After rendering, score again and stop after at most three rounds or when gains require sacrificing skin, memory colors, texture, headroom or identity.
+
+## Deeper tiers (read the bundled file when the situation calls for it)
+
+- RAW input (.ARW/.CR3/.DNG/ProRAW/HEIF) -> read `RAW-PIPELINE.md` in this skill's dir FIRST: probe
+  with raw-identify, render via portable RawTherapee 5.13 + layered PP3 deltas to a 16-bit master,
+  honest highlight-recovery rules, full provenance record. Never promise RAW latitude for HEIF.
+- Pre-shoot / posing / "tu van chup" (e.g. the graduation-yearbook scenario) -> read
+  `CAPTURE-COACH.md`: consent-first cueing, the 90-second field script (light -> group skeleton ->
+  feet -> chin/eyes -> hands -> three beats -> safety frames), pre-shutter phone checklist, and
+  generic pose illustrations via image-gen (mannequin/stick-figure ONLY - never a real or
+  photorealistic person, never the user's photos as reference).
+- News/documentary/contest work -> read `ETHICS-GATE.md`: AP / World Press Photo 2026 profiles,
+  ALLOW/BLOCK/ESCALATE before any editor runs.
 
 ## Taste guardrails (what separates a photographer from a filter)
 
