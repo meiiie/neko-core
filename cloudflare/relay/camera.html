@@ -156,14 +156,36 @@
   }
 
   // ---- cue channel: the same read-only mirror socket the client page uses ----
-  let speakOn = true, lastSpoken = "";
+  let speakOn = true, lastSpoken = "", voiceWarned = false;
+  // Pick the BEST Vietnamese voice the device actually has: the default pick is often the oldest,
+  // most robotic one. Prefer named neural/enhanced/premium voices, then cloud (non-local) voices,
+  // then anything vi-*. With NO Vietnamese voice at all, speaking Vietnamese through an English
+  // engine sounds worse than silence - so show the cue and say so once instead.
+  function pickVoice() {
+    const all = speechSynthesis.getVoices().filter((v) => /^vi/i.test(v.lang));
+    if (!all.length) return null;
+    const score = (v) => (/(neural|enhanced|premium|natural)/i.test(v.name) ? 4 : 0)
+      + (/(google|siri|linh|hoaimy|nam\b|an\b)/i.test(v.name) ? 2 : 0)
+      + (v.localService === false ? 1 : 0);
+    return all.slice().sort((a, b) => score(b) - score(a))[0];
+  }
+  let viVoice = null;
+  const refreshVoice = () => { viVoice = pickVoice(); };
+  refreshVoice();
+  if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = refreshVoice;
   function speak(text) {
     if (!speakOn || !("speechSynthesis" in window) || text === lastSpoken) return;
     lastSpoken = text;
+    if (!viVoice) {
+      if (!voiceWarned) {
+        voiceWarned = true;
+        $("state").textContent = "máy chưa có giọng tiếng Việt - cue chỉ hiện chữ (cài giọng vi-VN trong cài đặt máy)";
+      }
+      return; // never read Vietnamese with an English engine
+    }
     speechSynthesis.cancel(); // a fresh cue replaces a stale one mid-sentence
     const u = new SpeechSynthesisUtterance(text);
-    const vi = speechSynthesis.getVoices().find((v) => /^vi/i.test(v.lang));
-    if (vi) u.voice = vi; u.lang = vi ? vi.lang : "vi-VN"; u.rate = 1.02;
+    u.voice = viVoice; u.lang = viVoice.lang; u.rate = 0.98; u.pitch = 1.0;
     speechSynthesis.speak(u);
   }
   function connectCues() {
