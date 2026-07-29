@@ -465,3 +465,30 @@ test("pairings carry 128-bit components", () => {
     expect(Buffer.from(part, "base64url").length).toBeGreaterThanOrEqual(16);
   }
 });
+
+test("phone voice: a sealed SDP offer reaches the host; plaintext and junk do not", async () => {
+  const relay = makeWsDouble(4716);
+  const secret = "voice-secret";
+  const offers: string[] = [];
+  const h: RemoteHandlers = {
+    run: async () => ({ reply: "unused" }),
+    status: () => ({ busy: false }),
+    interrupt: () => false,
+    onVoiceOffer: (sdp) => { offers.push(sdp); },
+  };
+  try {
+    const rc = await startRemoteRelay(relay.url, h, { secret });
+    try {
+      await until(() => relay.state.connections === 1);
+      const sock = relay.state.sockets[0];
+      sock.send(JSON.stringify({ t: "voice-offer", offer: seal(secret, "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\n") }));
+      await until(() => offers.length === 1);
+      expect(offers[0]).toStartWith("v=0");
+      // Paired means sealed: an unsealed offer is refused, and a sealed NON-SDP payload is dropped.
+      sock.send(JSON.stringify({ t: "voice-offer", offer: "v=0\r\nplaintext" }));
+      sock.send(JSON.stringify({ t: "voice-offer", offer: seal(secret, "not an sdp") }));
+      await Bun.sleep(120);
+      expect(offers.length).toBe(1);
+    } finally { rc.stop(); }
+  } finally { relay.server.stop(); }
+});

@@ -287,6 +287,13 @@ export async function startRemoteRelay(
       let m: any;
       try { m = JSON.parse(String(ev.data)); } catch { return; }
       if (m?.t === "interrupt") { handlers.interrupt(); return; } // phone Stop, mid-turn
+      if (m?.t === "voice-offer") {
+        // Phone-side realtime voice: decrypt the SDP offer and hand it to the host, which answers
+        // by publishing a sealed voice-answer event. Sealed-only, like every paired payload.
+        const raw = decrypt(m.offer);
+        if (raw !== null && raw.startsWith("v=0")) handlers.onVoiceOffer?.(raw);
+        return;
+      }
       if (m?.t === "frame") {
         // Live-coach snapshot: sealed data URL from the phone camera page. Perishable by contract.
         const raw = decrypt(m.frame);

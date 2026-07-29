@@ -41,6 +41,9 @@ export interface RemoteHandlers {
   /** A live-coach camera snapshot (data: URL) from the paired phone's /camera page. Perishable:
    * handle or drop, never queue behind turns. */
   onFrame?: (dataUrl: string) => void;
+  /** A WebRTC SDP offer from the paired phone: it wants Neko's REAL realtime voice at the scene.
+   * The host answers by publishing a sealed voice-answer event. */
+  onVoiceOffer?: (sdp: string) => void;
   status: () => {
     busy: boolean;
     model?: string;

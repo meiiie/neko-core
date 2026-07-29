@@ -6,6 +6,27 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-07-29
+
+### Added
+
+- **Neko's real voice, at the scene.** The camera coach used to read cues with the phone's built-in
+  text-to-speech — a robot. Now the phone can hold an actual GPT-Live session: tap **Giọng Neko** and
+  the phone becomes the WebRTC endpoint (audio flows phone ↔ OpenAI directly; the terminal never
+  carries it). You get Neko's own warm, natively-Vietnamese voice, you can interrupt it, and you can
+  **talk back** — ask for another pose idea, tell it to wait, anything — while the camera keeps
+  feeding it what it sees. The device TTS stays as the fallback for the cue text, and switches itself
+  off the moment the real voice is live.
+- Spoken turns from the phone appear in the terminal transcript as `(voice · phone)` and join the
+  session history, so the conversation continues after you put the phone down.
+
+### Changed
+
+- The camera page now asks for the microphone too (`microphone=(self)` on that page only — the main
+  client page keeps its full lockdown). Both camera and mic start only on an explicit tap and are
+  released when the tab hides.
+
+
 ## [0.20.1] — 2026-07-29
 
 ### Fixed

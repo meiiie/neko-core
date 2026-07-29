@@ -40,7 +40,7 @@ export interface VoiceSnapshot {
   startedAt?: number;
   muted: boolean;
   protocol?: typeof REALTIME_VERSION;
-  transport?: "native" | "browser";
+  transport?: "native" | "browser" | "remote";
   error?: string;
 }
 
@@ -57,7 +57,7 @@ export interface VoiceUsage {
 
 export interface ChatGptVoiceOptions {
   model: string;
-  transport?: "native" | "browser";
+  transport?: "native" | "browser" | "remote";
   inputDevice?: string;
   tools?: any[];
   history?: any[];
@@ -71,7 +71,7 @@ export interface ChatGptVoiceOptions {
 
 export interface ChatGptVoiceControl {
   snapshot(): VoiceSnapshot;
-  start(): Promise<{ transport: "native" | "browser"; url?: string }>;
+  start(): Promise<{ transport: "native" | "browser" | "remote"; url?: string }>;
   setMuted(muted: boolean): void;
   stop(reason?: string): Promise<void>;
 }
@@ -122,7 +122,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
   private startedAt = 0;
   private muted = false;
   private negotiatedVersion = "";
-  private transport: "native" | "browser";
+  private transport: "native" | "browser" | "remote";
   private state: VoiceState = "starting";
   private sdpWaiter: { sdp?: string; version?: string; resolve: (sdp: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
   private readyWaiter: { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
@@ -146,7 +146,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
     };
   }
 
-  async start(): Promise<{ transport: "native" | "browser"; url?: string }> {
+  async start(): Promise<{ transport: "native" | "browser" | "remote"; url?: string }> {
     if (this.client || this.server) throw new Error("voice session is already started");
     this.emitState("starting");
     const clientFactory = this.options.clientFactory ?? defaultClientFactory;
@@ -185,6 +185,12 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
         await this.startNativeAudio();
         return { transport: "native" };
       }
+      if (this.transport === "remote") {
+        // The PHONE is the WebRTC endpoint (camera coach): preflight is done, and the offer arrives
+        // later through the relay - see attachRemoteOffer. Nothing local is served or opened.
+        this.emitState("waiting");
+        return { transport: "remote" };
+      }
       const url = this.startBridge();
       this.emitState("waiting");
       (this.options.openUrl ?? defaultOpenUrl)(url);
@@ -199,6 +205,15 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
       this.recordError(friendly);
       throw new Error(friendly);
     }
+  }
+
+  /** Complete a REMOTE realtime call: a paired device (the phone's camera-coach page) supplies the
+   * WebRTC offer over the relay, and gets the answer back the same way. Audio then flows phone <->
+   * OpenAI directly - the terminal never carries it, and the voice is Neko's real one, not device TTS. */
+  async attachRemoteOffer(sdp: string): Promise<string> {
+    if (this.transport !== "remote") throw new Error("this voice session is not remote");
+    if (!sdp.startsWith("v=0") || sdp.length < 20) throw new Error("invalid SDP offer");
+    return await this.startRealtime(sdp);
   }
 
   setMuted(muted: boolean): void {

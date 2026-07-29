@@ -136,19 +136,21 @@ function clientResponse(request) {
 }
 
 function cameraResponse(request) {
-  // The live-coach page. Identical hardening to the client page with EXACTLY ONE deliberate
-  // relaxation: camera=(self) - the whole point of the page - while microphone and everything else
-  // stay forbidden. The main client page keeps its full lockdown; a policy this sensitive is never
-  // shared between pages (research: docs/research/live-camera-coach-2026-07-29.md).
+  // The live-coach page. Identical hardening to the client page with exactly TWO deliberate
+  // relaxations, both the point of the page: camera=(self) for the framing, and microphone=(self)
+  // so Neko's own realtime voice can hear you at the scene (device TTS talked AT you; this talks
+  // WITH you). Everything else stays forbidden, and the main client page keeps its full lockdown -
+  // a policy this sensitive is never shared between pages. Both capture paths start only on an
+  // explicit tap and stop when the tab hides.
   const nonce = crypto.randomUUID().replaceAll("-", "");
   const url = new URL(request.url);
   const socketOrigin = `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`;
   return new Response(CAMERA_HTML.replaceAll("__CSP_NONCE__", nonce), { headers: {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store",
-    "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src data: blob:; media-src 'self' blob:; connect-src 'self' ${socketOrigin}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+    "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src data: blob:; media-src 'self' blob: mediastream:; connect-src 'self' ${socketOrigin}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
     "cross-origin-opener-policy": "same-origin",
-    "permissions-policy": "camera=(self), microphone=(), geolocation=(), payment=(), usb=()",
+    "permissions-policy": "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()",
     "referrer-policy": "no-referrer",
     "strict-transport-security": "max-age=31536000",
     "x-content-type-options": "nosniff",
@@ -357,6 +359,19 @@ export class RelaySession {
         await this.writeQueue(id, q);
       }
       return json(200, { id: job.id, hostId: id });
+    }
+
+    if (path === "/voice-offer" && request.method === "POST") {
+      // WebRTC handshake for the phone-side realtime voice: the sealed SDP offer is FORWARDED to the
+      // host (never stored - it is a one-shot handshake), and the sealed answer comes back to the
+      // phone as a normal live event on the mirror socket.
+      const { offer, hostId: requestedHost } = await request.json().catch(() => ({}));
+      if (!offer) return json(400, { error: "missing offer" });
+      const id = await this.resolveHost(requestedHost);
+      const ws = this.hostSocket(id);
+      if (!ws) return json(200, { sent: false, hostId: id });
+      try { ws.send(JSON.stringify({ t: "voice-offer", offer })); } catch { return json(200, { sent: false, hostId: id }); }
+      return json(200, { sent: true, hostId: id });
     }
 
     if (path === "/frame" && request.method === "POST") {

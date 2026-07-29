@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-29) — v0.20.1 release
+## Current status (2026-07-29) — v0.21.0 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,7 +38,13 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.20.1 (2026-07-29)** - what running the camera lane FOR
+- **Branch:** `main`. **Current release: v0.21.0 (2026-07-29)** - Neko's OWN voice at the scene: the
+  phone can now hold a real GPT-Live session (it becomes the WebRTC endpoint; audio flows phone <->
+  OpenAI, the terminal never carries it), so the camera coach speaks in Neko's warm natively-Vietnamese
+  voice, can be interrupted, and TALKS BACK while the camera keeps feeding it the frame. Device TTS
+  drops to fallback and silences itself when the real voice is live. Built on a seam that was already
+  there: startRealtime() accepts any SDP, so the relay only had to broker a sealed offer/answer.
+  Previous (v0.20.1, 2026-07-29): what running the camera lane FOR
   REAL taught us in one afternoon: the coach was silent on the very profile that can see best (it
   demanded a separate vision_model), a cue took 21.9s until phone-sized frames + glance-level effort
   + reusing the warm provider brought it to 7.9s, and each conversation now gets its OWN camera link

@@ -38,8 +38,9 @@
   button { flex: 1; min-height: 52px; border: 1px solid var(--line); border-radius: 12px; background: #1d2027;
            color: var(--cream); font: inherit; font-size: 16px; font-weight: 700; }
   button:disabled { opacity: .45; }
-  #go.on { background: var(--amber); color: #100c04; border-color: var(--amber); }
-  #flip, #mute { flex: 0 0 84px; }
+  #go.on, #voice.on { background: var(--amber); color: #100c04; border-color: var(--amber); }
+  #flip { flex: 0 0 84px; }
+  #voice { flex: 0 0 116px; }
   #setup { padding: 24px 16px; max-width: 480px; margin: 0 auto; }
   #setup h1 { font-size: 18px; margin-bottom: 10px; }
   #setup p { color: var(--dim); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
@@ -67,8 +68,9 @@
   <footer>
     <button id="flip" type="button">Đổi cam</button>
     <button id="go" type="button">Bắt đầu</button>
-    <button id="mute" type="button">Tắt đọc</button>
+    <button id="voice" type="button">Giọng Neko</button>
   </footer>
+  <audio id="a" autoplay></audio>
 
 <script nonce="__CSP_NONCE__">
   const $ = (id) => document.getElementById(id);
@@ -195,9 +197,11 @@
         const m = JSON.parse(e.data);
         if (m.t !== "event" || !m.event || !m.event.ct) return; // events arrive as sealed envelopes
         const ev = JSON.parse(await unseal(m.event));
+        if (ev.type === "voice-answer" && ev.sdp && answerWaiter) { answerWaiter(ev.sdp); answerWaiter = null; return; }
+        if (ev.type === "voice-error") { stopNekoVoice(); $("state").textContent = "giọng Neko lỗi: " + String(ev.message || "").slice(0, 80); return; }
         if (ev.type !== "cue" || !ev.text) return; // the mirror also carries transcript events - not ours
         $("cueText").textContent = ev.text;
-        speak(ev.text);
+        speak(ev.text); // no-op while Neko's own voice is live (speakOn is false then)
       } catch { /* not a cue / not ours */ }
     };
     socket.onclose = () => { if (paired) setTimeout(connectCues, 2500); };
@@ -223,7 +227,45 @@
   document.addEventListener("visibilitychange", () => { if (document.hidden && running) stopCoach("tạm dừng - quay lại tab để tiếp tục"); });
   window.addEventListener("pagehide", () => stopCoach());
   $("flip").onclick = async () => { facing = facing === "environment" ? "user" : "environment"; if (running) { try { await openCam(); } catch {} } };
-  $("mute").onclick = () => { speakOn = !speakOn; $("mute").textContent = speakOn ? "Tắt đọc" : "Bật đọc"; if (!speakOn) speechSynthesis.cancel(); };
+
+  // ---- Neko's REAL voice, here at the scene (WebRTC to OpenAI, brokered by the host over the relay).
+  // Device TTS is the fallback for the cue text; this is the actual GPT-Live voice, and it listens too.
+  let pc = null, voiceLive = false;
+  async function startNekoVoice() {
+    if (voiceLive) { stopNekoVoice(); return; }
+    $("voice").textContent = "Đang nối…";
+    try {
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      pc = new RTCPeerConnection();
+      for (const t of mic.getTracks()) pc.addTrack(t, mic);
+      pc.addTransceiver("audio", { direction: "recvonly" });
+      pc.ontrack = (e) => { $("a").srcObject = e.streams[0]; };
+      pc.onconnectionstatechange = () => { if (["failed", "closed", "disconnected"].includes(pc.connectionState)) stopNekoVoice(); };
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      // Wait briefly for ICE candidates so the offer is complete (trickle is not brokered here).
+      await new Promise((r) => { if (pc.iceGatheringState === "complete") return r();
+        const t = setTimeout(r, 2500);
+        pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === "complete") { clearTimeout(t); r(); } }; });
+      answerWaiter = (sdp) => { void pc.setRemoteDescription({ type: "answer", sdp }); voiceLive = true;
+        speakOn = false; // Neko speaks for itself now - stop the robot TTS
+        $("voice").textContent = "Tắt giọng"; $("voice").classList.add("on"); $("state").textContent = "giọng Neko đang bật"; };
+      const sealed = await seal(pc.localDescription.sdp);
+      const r = await fetch("/voice-offer", { method: "POST", headers: { "content-type": "application/json", ...auth() },
+        body: JSON.stringify({ session, offer: sealed, ...(hostSel ? { hostId: hostSel } : {}) }) });
+      const out = await r.json().catch(() => ({}));
+      if (!out.sent) { stopNekoVoice(); $("state").textContent = "Neko offline - không bật được giọng"; }
+    } catch (e) { stopNekoVoice(); $("state").textContent = "không bật được micro/giọng"; }
+  }
+  function stopNekoVoice() {
+    voiceLive = false; answerWaiter = null;
+    if (pc) { try { pc.getSenders().forEach((s) => s.track && s.track.stop()); pc.close(); } catch {} pc = null; }
+    $("a").srcObject = null; speakOn = true;
+    $("voice").textContent = "Giọng Neko"; $("voice").classList.remove("on");
+  }
+  let answerWaiter = null;
+  $("voice").onclick = startNekoVoice;
+  window.addEventListener("pagehide", () => stopNekoVoice());
   if (paired) { connectCues(); void checkAlive(); setInterval(checkAlive, 12000); }
 </script>
 </body>

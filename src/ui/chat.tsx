@@ -2188,8 +2188,60 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     })();
   };
 
+  // The phone asks for Neko's REAL voice at the scene (camera coach): preflight a realtime session
+  // whose WebRTC endpoint is the PHONE, then send the answer back over the relay. Audio flows phone
+  // <-> OpenAI directly - the terminal never carries it, and it is Neko's voice, not device TTS.
+  const remoteVoiceRef = useRef<ChatGptVoiceControl | null>(null);
+  const handleVoiceOffer = (sdp: string) => {
+    void (async () => {
+      try {
+        if (remoteVoiceRef.current) { try { await remoteVoiceRef.current.stop("replaced"); } catch { /* stale */ } }
+        const session = (voiceFactory ?? ((options: ChatGptVoiceOptions) => new ChatGptVoiceSession(options)))({
+          model: /^gpt-/i.test(cfg.model) ? cfg.model : "gpt-5.5",
+          transport: "remote",
+          tools: agentRef.current!.externalToolSchemas(),
+          history: agentRef.current!.messages,
+          executeTool: (call) => agentRef.current!.executeExternalTool(call),
+          onEvent: (event) => {
+            if (event.type === "state") {
+              setVoiceSnapshot(event.snapshot);
+              if (event.snapshot.state === "stopped" && remoteVoiceRef.current === session) remoteVoiceRef.current = null;
+              return;
+            }
+            if (event.type === "transcript-delta") {
+              setVoiceTranscript((current) => current?.role === event.role
+                ? { role: event.role, text: current.text + event.delta }
+                : { role: event.role, text: event.delta });
+              return;
+            }
+            const text = event.text.trim();
+            setVoiceTranscript(null);
+            if (text) {
+              const role = event.role === "user" ? "user" : "assistant";
+              addLine(role, `(voice · phone) ${text}`);
+              agentRef.current!.messages.push({ role, content: text });
+              persistRef.current();
+            }
+          },
+        });
+        remoteVoiceRef.current = session;
+        voiceRef.current = session; // /voice status, Alt+X stop and the LIVE panel all apply
+        await session.start();
+        const answer = await (session as ChatGptVoiceSession).attachRemoteOffer(sdp);
+        relayRef.current?.publish({ type: "voice-answer", sdp: answer });
+        addLine("info", "Voice is live on your phone (Neko's own voice) - speak naturally; /voice stop ends it.");
+      } catch (error) {
+        remoteVoiceRef.current = null;
+        const message = error instanceof Error ? error.message : String(error);
+        relayRef.current?.publish({ type: "voice-error", message: message.slice(0, 200) });
+        addLine("error", `phone voice failed: ${message}`);
+      }
+    })();
+  };
+
   const makeRemoteHandlers = (): RemoteHandlers => ({
     onFrame: handleCoachFrame,
+    onVoiceOffer: handleVoiceOffer,
     run: async (msg, onDelta, onAct) => {
       if (msg === "\u0000neko:cycle-mode") {
         const next = nextMode(modeRef.current);
