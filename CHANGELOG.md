@@ -6,6 +6,17 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.21.1] — 2026-07-29
+
+### Added
+
+- **`/coach` — the photo shoot has its own command now.** Bringing up the camera coach used to mean
+  noticing a line inside `/relay`'s output, which is a different job entirely (`/relay` is "drive Neko
+  from my phone"). `/coach` brings the transport up if needed and hands you one thing: a QR code and
+  the link the filming phone opens, with the three phone buttons explained. `/coach stop` ends it and
+  the phone releases its camera and microphone at once.
+
+
 ## [0.21.0] — 2026-07-29
 
 ### Added

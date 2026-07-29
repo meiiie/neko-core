@@ -1672,6 +1672,53 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       return;
     }
+    // /coach - the photo shoot mode, in its own command because it is a DIFFERENT job from /relay
+    // (which is "drive Neko from my phone"). It brings up the same paired transport underneath, then
+    // hands you one thing: the link your phone films from. Discovery should not depend on noticing a
+    // line inside another command's output.
+    if (text === "/coach" || text.startsWith("/coach ")) {
+      const arg = text.slice("/coach".length).trim().toLowerCase();
+      if (arg === "stop" || arg === "off") {
+        const voice = remoteVoiceRef.current;
+        remoteVoiceRef.current = null;
+        if (voice) { try { await voice.stop("coach ended"); } catch { /* already gone */ } }
+        relayRef.current?.publish({ type: "coach-stop" });
+        addLine("info", "coach stopped. The phone page releases its camera and microphone; /relay stays as it was.");
+        return;
+      }
+      const url = relayScopeRef.current?.url || cfg.relayUrl;
+      if (!url) return addLine("info", "coach needs a relay: set \"relay_url\" in config (see /relay), then run /coach again.");
+      try {
+        if (!relayRef.current) {
+          // Bring the transport up exactly the way /relay does, then keep going - the user asked for
+          // the coach, not for a relay lecture.
+          const pairing = loadOrCreateSessionPairing(sessionIdRef.current, false);
+          const r = await startRemoteRelay(url, makeRemoteHandlers(), {
+            session: pairing.session, token: pairing.token, secret: pairing.secret, hostId: relayHostIdRef.current,
+          });
+          relayRef.current = r;
+          relayScopeRef.current = { key: sessionIdRef.current, hub: false, url };
+        }
+        const p = loadOrCreateSessionPairing(relayScopeRef.current?.key ?? sessionIdRef.current, false);
+        const base = url.replace(/\/+$/, "");
+        const link = `${base}/camera/${encodeURIComponent(p.session)}#t=${p.token}&k=${p.secret}`;
+        const qr = qrMatrix(link);
+        if (qr) addLine("info", qrToText(qr).split("\n").map((l) => "  " + l).join("\n"), undefined, false);
+        addLine("info", [
+          `Coach is ready - open this on the phone that will film:`,
+          `  ${link}`,
+          "",
+          "On the phone: [ Bắt đầu ] starts the camera (Neko watches the framing and speaks a posing cue",
+          "every few seconds) · [ Giọng Neko ] switches to Neko's own realtime voice, so you can talk back",
+          "and interrupt · [ Đổi cam ] flips front/back.",
+          "The camera and microphone start only when you tap, and stop when you leave the page.",
+          "Here: /coach stop ends it · /voice status shows the live voice.",
+        ].join("\n"), undefined, false);
+      } catch (e) {
+        addLine("error", `coach failed to start: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return;
+    }
     if (text === "/relay" || text.startsWith("/relay ")) {
       const arg = text.slice("/relay".length).trim();
       const args = arg.split(/\s+/).filter(Boolean);

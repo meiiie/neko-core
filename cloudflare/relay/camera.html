@@ -197,6 +197,7 @@
         const m = JSON.parse(e.data);
         if (m.t !== "event" || !m.event || !m.event.ct) return; // events arrive as sealed envelopes
         const ev = JSON.parse(await unseal(m.event));
+        if (ev.type === "coach-stop") { stopNekoVoice(); stopCoach("đã dừng từ máy tính (/coach stop)"); return; }
         if (ev.type === "voice-answer" && ev.sdp && answerWaiter) { answerWaiter(ev.sdp); answerWaiter = null; return; }
         if (ev.type === "voice-error") { stopNekoVoice(); $("state").textContent = "giọng Neko lỗi: " + String(ev.message || "").slice(0, 80); return; }
         if (ev.type !== "cue" || !ev.text) return; // the mirror also carries transcript events - not ours
