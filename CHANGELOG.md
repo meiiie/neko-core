@@ -6,6 +6,37 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-07-29
+
+### Added
+
+- **Image generation on your ChatGPT plan.** Ask GPT-5.6 for a picture mid-conversation and the saved
+  file lands in your reply; any model can call the new gated `generate` image tool (Codex image
+  surface — no API key, no extra billing, capability checked before a single credit is spent). The
+  `imagegen` skill teaches art-director prompting and verify-with-vision.
+- **A photographer in the terminal.** The `photo-editing` skill edits like a pro and never like "AI
+  slop": a seven-step critical eye pass, portrait lighting grammar, artist thinking-lenses, named
+  looks (airy pastel, restrained cinematic, Portra-like film...), and parametric-only edits through
+  ImageMagick — identity is untouchable by rule. Deeper tiers load on demand: a real RAW pipeline
+  (portable RawTherapee 5.13 + LibRaw, installed under `~/.neko-core/tools`), a consent-first
+  capture/posing coach for real shoots, and an AP / World Press Photo ethics gate for documentary work.
+- **Live camera coach.** Open `/camera` on the paired relay from your phone, tap Start, and Neko
+  watches the framing and SPEAKS short Vietnamese posing cues through the phone itself. Frames are
+  end-to-end sealed, forwarded only (never stored), and the page is inert without your pairing keys.
+- **Interface craft skills.** Seven MIT-licensed `better-*` skills (accessibility, colors, layout,
+  typography, UI, writing, holistic review) now ship to `~/.neko-core/skills`.
+
+### Fixed
+
+- **Voice sounds like a person, natively Vietnamese.** The realtime prompt asked for clipped
+  progress-report answers — that flattened the prosody. It now instructs warmth, varied cadence and
+  natural Vietnamese (xung ho nhất quán, từ đệm đúng chỗ, never translation cadence); `/voice start`
+  goes straight to the recommended WebRTC transport; the voice panel always answers who-is-talking
+  and what-is-happening, and spoken turns are marked `(voice)` in the transcript.
+- **The Windows quoting war never starts.** The `<env>` block now states which shell really executes
+  `bash` commands (Git Bash POSIX, or the cmd.exe fallback) with matching syntax guidance, and the
+  bash tool tells the model to write quote-heavy commands to a script file instead of nesting escapes.
+
 ## [0.19.1] — 2026-07-28
 
 ### Fixed

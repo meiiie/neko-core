@@ -43,9 +43,11 @@
 
   <div id="setup">
     <h1>Camera coach cần ghép cặp</h1>
-    <p>Mở trang này từ liên kết/QR ghép cặp của Neko (liên kết mang khóa trong phần #fragment - khóa
-       không bao giờ rời máy bạn). Sau đó bấm Bắt đầu: ảnh xem trước được niêm phong đầu-cuối và chỉ
-       máy Neko của bạn đọc được; Worker không lưu khung hình nào.</p>
+    <p>Trang này là VỎ RỖNG với người lạ: không có bộ ba khóa ghép cặp (session · token · secret)
+       thì không gửi được khung hình nào và không giải mã được gì. Mở nó từ liên kết/QR ghép cặp
+       của Neko trên máy bạn (chạy <b>/rc</b> trong neko để lấy) — khóa nằm trong phần #fragment,
+       không bao giờ rời thiết bị. Ảnh niêm phong đầu-cuối AES-256-GCM, chỉ máy Neko của bạn đọc
+       được; Worker chuyển tiếp và không lưu khung hình nào.</p>
   </div>
 
   <div id="stage" class="hidden">
@@ -62,18 +64,35 @@
 <script nonce="__CSP_NONCE__">
   const $ = (id) => document.getElementById(id);
   // ---- pairing (same contract as the client page: s/t/k in the fragment, saved locally) ----
-  let session = "", token = "", secret = "";
+  let session = "", token = "", secret = "", hostSel = "";
   try {
     const saved = JSON.parse(localStorage.nekoRelayPairings || "{}");
     const h = new URLSearchParams(location.hash.length > 1 ? location.hash.slice(1) : "");
     session = h.get("s") || localStorage.nekoSession || "";
     token = h.get("t") || (saved[session] && saved[session].token) || localStorage.nekoToken || "";
     secret = h.get("k") || (saved[session] && saved[session].secret) || localStorage.nekoSecret || "";
+    hostSel = h.get("h") || localStorage.nekoCoachHost || "";
     if (h.get("s")) { const p = JSON.parse(localStorage.nekoRelayPairings || "{}"); p[session] = { token, secret }; localStorage.nekoRelayPairings = JSON.stringify(p); localStorage.nekoSession = session; }
+    if (h.get("h")) localStorage.nekoCoachHost = hostSel;
     if (location.hash.length > 1) history.replaceState(null, "", location.pathname);
   } catch {}
   const paired = session && token && secret;
   if (paired) { $("setup").classList.add("hidden"); $("stage").classList.remove("hidden"); }
+
+  // Honest connection state: the page says whether YOUR Neko is reachable BEFORE you start filming.
+  // (The bare URL without a pairing shows only the setup note - it can neither send nor decrypt.)
+  let hostOnline = false;
+  async function checkAlive() {
+    if (!paired) return;
+    try {
+      const r = await fetch("/alive?session=" + encodeURIComponent(session) + (hostSel ? "&host=" + encodeURIComponent(hostSel) : ""), { headers: auth() });
+      const a = await r.json();
+      hostOnline = !!a.online;
+      if (!running) $("state").textContent = hostOnline
+        ? "đã ghép …" + session.slice(-4) + " · Neko online"
+        : "đã ghép …" + session.slice(-4) + " · Neko OFFLINE — mở neko trên máy trước";
+    } catch { if (!running) $("state").textContent = "không tới được relay"; }
+  }
 
   // ---- E2E (wire-compatible with relay-crypto.ts and the client page) ----
   const b64 = (u) => btoa(String.fromCharCode(...u)), ub64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -113,9 +132,12 @@
     inFlight = true;
     try {
       const frame = await seal(dataUrl);
-      await fetch("/frame", { method: "POST", headers: { "content-type": "application/json", ...auth() },
-        body: JSON.stringify({ session, frame }) });
-      $("state").textContent = "đang coach · " + new Date().toLocaleTimeString();
+      const r = await fetch("/frame", { method: "POST", headers: { "content-type": "application/json", ...auth() },
+        body: JSON.stringify({ session, frame, ...(hostSel ? { hostId: hostSel } : {}) }) });
+      const out = await r.json().catch(() => ({}));
+      $("state").textContent = out.sent
+        ? "đang coach · " + new Date().toLocaleTimeString()
+        : "Neko OFFLINE — mở neko trên máy rồi khung hình sẽ tự nối lại";
     } catch { $("state").textContent = "mất kết nối - thử lại..."; }
     finally { inFlight = false; }
   }
@@ -157,7 +179,7 @@
   };
   $("flip").onclick = async () => { facing = facing === "environment" ? "user" : "environment"; if (running) { try { await openCam(); } catch {} } };
   $("mute").onclick = () => { speakOn = !speakOn; $("mute").textContent = speakOn ? "Tắt đọc" : "Bật đọc"; if (!speakOn) speechSynthesis.cancel(); };
-  if (paired) connectCues();
+  if (paired) { connectCues(); void checkAlive(); setInterval(checkAlive, 12000); }
 </script>
 </body>
 </html>

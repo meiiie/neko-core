@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-28) — v0.19.1 release
+## Current status (2026-07-29) — v0.20.0 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,7 +38,16 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.19.1 (2026-07-28)** - the updater grew a progress meter, a
+- **Branch:** `main`. **Current release: v0.20.0 (2026-07-29)** - Neko learns photography end to end,
+  research-first (five neko-authored studies in docs/research/): image generation through the ChatGPT
+  subscription's Codex surface (in-conversation + a gated tool + skill); a photographer-grade editing
+  skill (critical eye pass, lighting grammar, artist lenses, RAW pipeline with a resident portable
+  toolchain, capture/posing coach, WPP/AP ethics gate) - proven on a real photo with identity intact;
+  a LIVE camera coach: the phone's /camera relay page streams sealed snapshots and speaks Vietnamese
+  posing cues back through its own speaker; voice realtime got a natural warm prompt (natively
+  Vietnamese), WebRTC-first default, and a who-is-talking panel; the Windows shell truth is stated in
+  <env> so the agent-vs-PowerShell quoting war never starts.
+  Previous (v0.19.1, 2026-07-28): the updater grew a progress meter, a
   machine-wide lock, per-process staging and an orphan sweep, after two auto-updating startups and a
   manual `neko update` raced over one staging file and read as a hang (verified live: one wins with
   visible progress, the second is refused cleanly).

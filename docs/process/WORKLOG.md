@@ -3,6 +3,31 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-29 - v0.20.0: photography end to end, research-first
+
+One day, five neko-authored studies (docs/research/), each feeding a shipped capability:
+
+- **Image generation via the ChatGPT subscription** - the ONE legitimate surface (Codex app-server
+  image tool) found by ruling out API-billing and ToS-violating routes; wired in-conversation, as a
+  gated tool for any model, and as a skill. Capability read before any spend; no silent paid fallback.
+- **The photo-editing skill grew from recipe to craft**: critical eye pass, lighting grammar, artist
+  lenses, look library - then three progressive-disclosure tiers: RAW pipeline (RawTherapee 5.13 +
+  LibRaw resident under ~/.neko-core/tools, honest highlight-recovery language), capture/posing coach
+  (consent-first, the 90-second field script), WPP/AP documentary ethics gate. Proven live on a real
+  photo: masked face dodges, identity byte-intact.
+- **Live camera coach MVP** on infrastructure that already existed: /camera relay page (exactly one
+  policy relaxation - camera=(self); the client page stays locked), sealed forward-only /frame lane
+  (never queued, never mirrored), host vision -> one short Vietnamese cue -> the PHONE speaks it
+  (speechSynthesis vi-VN). One frame in flight, drop-old. Relay deployed + live-verified.
+- **Voice**: the clipped progress-report prompt was the top gap vs Codex voice (neko's own ranked
+  comparison) - replaced with warmth/cadence + natively-Vietnamese instruction; WebRTC-first default;
+  the panel always answers who-is-talking / what-is-happening.
+- **The Windows quoting war cancelled**: <env> now states the ACTIVE shell (Git Bash vs cmd.exe
+  fallback) and the bash tool mandates script files over nested escaping.
+
+Evidence: typecheck x2 clean; **897/897 tests, 3,934 assertions**; policy PASS; build + probes OK;
+ConPTY e2e 3/3; scroll bench 15ms/156ms vs 15/326 baseline; secret scan clean; relay + site deployed.
+
 ## 2026-07-28 (3) - the updater raced itself and read as a hang
 
 Minutes after v0.19.0 shipped, the owner's screenshot: two `neko --yolo` launches, two `neko update`
