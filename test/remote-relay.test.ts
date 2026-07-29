@@ -398,3 +398,32 @@ test("remote-relay: a wrong token can't submit to the session", async () => {
     relay.server.stop();
   }
 });
+
+test("live-coach frames: sealed data URLs reach onFrame; anything else is dropped", async () => {
+  const relay = makeWsDouble(4714);
+  const secret = "coach-secret";
+  const frames: string[] = [];
+  const h: RemoteHandlers = {
+    run: async () => ({ reply: "unused" }),
+    status: () => ({ busy: false }),
+    interrupt: () => false,
+    onFrame: (dataUrl) => { frames.push(dataUrl); },
+  };
+  try {
+    const rc = await startRemoteRelay(relay.url, h, { secret });
+    try {
+      await until(() => relay.state.connections === 1);
+      const sock = relay.state.sockets[0];
+      sock.send(JSON.stringify({ t: "frame", frame: seal(secret, "data:image/jpeg;base64,AAAA") }));
+      await until(() => frames.length === 1);
+      expect(frames[0]).toBe("data:image/jpeg;base64,AAAA");
+      // Wrong secret -> undecryptable -> dropped, never delivered as garbage.
+      sock.send(JSON.stringify({ t: "frame", frame: seal("other-secret", "data:image/jpeg;base64,BBBB") }));
+      // Decryptable but NOT an image data URL -> dropped (the frame lane carries frames only).
+      sock.send(JSON.stringify({ t: "frame", frame: seal(secret, "rm -rf /") }));
+      sock.send(JSON.stringify({ t: "frame", frame: seal(secret, "data:image/png;base64,CCCC") }));
+      await until(() => frames.length === 2);
+      expect(frames[1]).toBe("data:image/png;base64,CCCC"); // only the second real image landed
+    } finally { rc.stop(); }
+  } finally { relay.server.stop(); }
+});

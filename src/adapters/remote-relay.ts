@@ -278,6 +278,12 @@ export async function startRemoteRelay(
       let m: any;
       try { m = JSON.parse(String(ev.data)); } catch { return; }
       if (m?.t === "interrupt") { handlers.interrupt(); return; } // phone Stop, mid-turn
+      if (m?.t === "frame") {
+        // Live-coach snapshot: sealed data URL from the phone camera page. Perishable by contract.
+        const raw = decrypt(m.frame);
+        if (raw !== null && raw.startsWith("data:image/")) handlers.onFrame?.(raw);
+        return;
+      }
       if (m?.t === "control") {
         const raw = decrypt(m.control);
         if (raw === null) return;

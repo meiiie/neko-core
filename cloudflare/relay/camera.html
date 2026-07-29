@@ -1,0 +1,163 @@
+<!doctype html>
+<!--
+  Neko live camera coach (Architecture A - docs/research/live-camera-coach-2026-07-29.md).
+  The PHONE points its camera at the scene; sealed JPEG snapshots flow to the host at a gentle pace
+  (one in flight, drop-old); the host looks with vision and answers with a short posing cue, which
+  this page shows big and SPEAKS through the phone's own voice (vi-VN when available) - the speaker
+  is at the scene, not at the laptop. Camera frames leave this page ONLY as AES-256-GCM envelopes
+  (same E2E as every relay payload); nothing is stored durably on the Worker.
+-->
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Neko - Camera Coach</title>
+<style nonce="__CSP_NONCE__">
+  :root { --ink:#0a0b0d; --panel:#15171c; --line:#2a2d34; --amber:#f0a030; --cream:#f4f5f7; --dim:#9a948b; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--ink); color: var(--cream); font-family: ui-monospace, Menlo, Consolas, monospace;
+         min-height: 100dvh; display: flex; flex-direction: column; }
+  header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+  header b { letter-spacing: .06em; }
+  #state { margin-left: auto; font-size: 12px; color: var(--dim); }
+  #stage { position: relative; flex: 1; min-height: 0; background: #000; }
+  video { width: 100%; height: 100%; object-fit: contain; display: block; position: absolute; inset: 0; }
+  #cue { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+         background: linear-gradient(transparent, rgba(10,11,13,.92) 30%);
+         font-size: 22px; line-height: 1.45; font-weight: 700; text-shadow: 0 1px 4px #000; min-height: 88px; }
+  #cue .tag { display: block; font-size: 11px; font-weight: 400; letter-spacing: .22em; color: var(--amber); margin-bottom: 6px; }
+  footer { display: flex; gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--panel); }
+  button { flex: 1; min-height: 52px; border: 1px solid var(--line); border-radius: 12px; background: #1d2027;
+           color: var(--cream); font: inherit; font-size: 16px; font-weight: 700; }
+  button:disabled { opacity: .45; }
+  #go.on { background: var(--amber); color: #100c04; border-color: var(--amber); }
+  #flip, #mute { flex: 0 0 84px; }
+  #setup { padding: 24px 16px; max-width: 480px; margin: 0 auto; }
+  #setup h1 { font-size: 18px; margin-bottom: 10px; }
+  #setup p { color: var(--dim); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <header><b>NEKO <span style="color:#f0a030">COACH</span></b><span id="state">chưa kết nối</span></header>
+
+  <div id="setup">
+    <h1>Camera coach cần ghép cặp</h1>
+    <p>Mở trang này từ liên kết/QR ghép cặp của Neko (liên kết mang khóa trong phần #fragment - khóa
+       không bao giờ rời máy bạn). Sau đó bấm Bắt đầu: ảnh xem trước được niêm phong đầu-cuối và chỉ
+       máy Neko của bạn đọc được; Worker không lưu khung hình nào.</p>
+  </div>
+
+  <div id="stage" class="hidden">
+    <video id="v" autoplay playsinline muted></video>
+    <div id="cue"><span class="tag">NEKO COACH</span><span id="cueText">Bấm "Bắt đầu" rồi đứng vào khung hình nhé.</span></div>
+  </div>
+
+  <footer>
+    <button id="flip" type="button">Đổi cam</button>
+    <button id="go" type="button">Bắt đầu</button>
+    <button id="mute" type="button">Tắt đọc</button>
+  </footer>
+
+<script nonce="__CSP_NONCE__">
+  const $ = (id) => document.getElementById(id);
+  // ---- pairing (same contract as the client page: s/t/k in the fragment, saved locally) ----
+  let session = "", token = "", secret = "";
+  try {
+    const saved = JSON.parse(localStorage.nekoRelayPairings || "{}");
+    const h = new URLSearchParams(location.hash.length > 1 ? location.hash.slice(1) : "");
+    session = h.get("s") || localStorage.nekoSession || "";
+    token = h.get("t") || (saved[session] && saved[session].token) || localStorage.nekoToken || "";
+    secret = h.get("k") || (saved[session] && saved[session].secret) || localStorage.nekoSecret || "";
+    if (h.get("s")) { const p = JSON.parse(localStorage.nekoRelayPairings || "{}"); p[session] = { token, secret }; localStorage.nekoRelayPairings = JSON.stringify(p); localStorage.nekoSession = session; }
+    if (location.hash.length > 1) history.replaceState(null, "", location.pathname);
+  } catch {}
+  const paired = session && token && secret;
+  if (paired) { $("setup").classList.add("hidden"); $("stage").classList.remove("hidden"); }
+
+  // ---- E2E (wire-compatible with relay-crypto.ts and the client page) ----
+  const b64 = (u) => btoa(String.fromCharCode(...u)), ub64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  let keyPromise = null;
+  function key() {
+    if (!keyPromise) keyPromise = crypto.subtle.importKey("raw", new TextEncoder().encode(secret), "PBKDF2", false, ["deriveKey"])
+      .then((b) => crypto.subtle.deriveKey({ name: "PBKDF2", salt: new TextEncoder().encode("neko-relay-e2e-v1"), iterations: 100000, hash: "SHA-256" }, b, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]));
+    return keyPromise;
+  }
+  async function seal(t) { const k = await key(); const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, k, new TextEncoder().encode(t)));
+    return { iv: b64(iv), ct: b64(ct) }; }
+  async function unseal(s) { const k = await key();
+    return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: ub64(s.iv) }, k, ub64(s.ct))); }
+  const auth = () => ({ authorization: "Bearer " + token });
+
+  // ---- camera ----
+  let stream = null, facing = "environment", running = false, inFlight = false, timer = null;
+  const canvas = document.createElement("canvas");
+  async function openCam() {
+    if (stream) for (const t of stream.getTracks()) t.stop();
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 } }, audio: false });
+    $("v").srcObject = stream;
+  }
+  function snap() {
+    const v = $("v"); if (!v.videoWidth) return null;
+    const long = 1024, scale = Math.min(1, long / Math.max(v.videoWidth, v.videoHeight));
+    canvas.width = Math.round(v.videoWidth * scale); canvas.height = Math.round(v.videoHeight * scale);
+    canvas.getContext("2d").drawImage(v, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.72);
+  }
+  // One in flight, drop-old: a frame is sent only when the previous answer (or failure) came back.
+  const PACE_MS = 1600;
+  async function tick() {
+    if (!running || inFlight) return;
+    const dataUrl = snap(); if (!dataUrl) return;
+    inFlight = true;
+    try {
+      const frame = await seal(dataUrl);
+      await fetch("/frame", { method: "POST", headers: { "content-type": "application/json", ...auth() },
+        body: JSON.stringify({ session, frame }) });
+      $("state").textContent = "đang coach · " + new Date().toLocaleTimeString();
+    } catch { $("state").textContent = "mất kết nối - thử lại..."; }
+    finally { inFlight = false; }
+  }
+
+  // ---- cue channel: the same read-only mirror socket the client page uses ----
+  let speakOn = true, lastSpoken = "";
+  function speak(text) {
+    if (!speakOn || !("speechSynthesis" in window) || text === lastSpoken) return;
+    lastSpoken = text;
+    speechSynthesis.cancel(); // a fresh cue replaces a stale one mid-sentence
+    const u = new SpeechSynthesisUtterance(text);
+    const vi = speechSynthesis.getVoices().find((v) => /^vi/i.test(v.lang));
+    if (vi) u.voice = vi; u.lang = vi ? vi.lang : "vi-VN"; u.rate = 1.02;
+    speechSynthesis.speak(u);
+  }
+  function connectCues() {
+    const socket = new WebSocket(location.origin.replace(/^http/, "ws") + "/client-ws?session=" + encodeURIComponent(session), ["neko-relay", "t." + token]);
+    socket.onmessage = async (e) => {
+      try {
+        const m = JSON.parse(e.data);
+        if (m.t !== "event" || !m.event || !m.event.ct) return; // events arrive as sealed envelopes
+        const ev = JSON.parse(await unseal(m.event));
+        if (ev.type !== "cue" || !ev.text) return; // the mirror also carries transcript events - not ours
+        $("cueText").textContent = ev.text;
+        speak(ev.text);
+      } catch { /* not a cue / not ours */ }
+    };
+    socket.onclose = () => { if (paired) setTimeout(connectCues, 2500); };
+  }
+
+  // ---- controls (mic-free consent: nothing is captured until the user taps Start) ----
+  $("go").onclick = async () => {
+    if (!paired) return;
+    if (running) { running = false; clearInterval(timer); if (stream) for (const t of stream.getTracks()) t.stop(); stream = null;
+      $("go").textContent = "Bắt đầu"; $("go").classList.remove("on"); $("state").textContent = "đã dừng"; return; }
+    try { await openCam(); } catch { $("state").textContent = "không mở được camera - kiểm tra quyền"; return; }
+    running = true; timer = setInterval(tick, PACE_MS); void tick();
+    $("go").textContent = "Dừng"; $("go").classList.add("on"); $("state").textContent = "đang coach";
+  };
+  $("flip").onclick = async () => { facing = facing === "environment" ? "user" : "environment"; if (running) { try { await openCam(); } catch {} } };
+  $("mute").onclick = () => { speakOn = !speakOn; $("mute").textContent = speakOn ? "Tắt đọc" : "Bật đọc"; if (!speakOn) speechSynthesis.cancel(); };
+  if (paired) connectCues();
+</script>
+</body>
+</html>

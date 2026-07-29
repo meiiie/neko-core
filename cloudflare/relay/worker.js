@@ -32,6 +32,7 @@
  *   GET  /                                minimal phone web client (client.html)
  */
 import CLIENT_HTML from "./client.html";
+import CAMERA_HTML from "./camera.html";
 
 const LONG_POLL_MS = 25_000;
 const KEEP_RESULTS = 20; // ring of stored results per session (a phone may re-poll after a reconnect)
@@ -64,6 +65,9 @@ export default {
     }
     if (url.pathname === "/" || url.pathname === "/client" || /^\/(?:session|hub)\/[^/]+\/?$/.test(url.pathname)) {
       return clientResponse(request);
+    }
+    if (url.pathname === "/camera") {
+      return cameraResponse(request);
     }
     const session = url.searchParams.get("session") || (await peekSession(request));
     if (!validSession(session)) return json(400, { error: "invalid session" });
@@ -123,6 +127,26 @@ function clientResponse(request) {
     "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src data:; connect-src 'self' ${socketOrigin}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
     "cross-origin-opener-policy": "same-origin",
     "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    "referrer-policy": "no-referrer",
+    "strict-transport-security": "max-age=31536000",
+    "x-content-type-options": "nosniff",
+  } });
+}
+
+function cameraResponse(request) {
+  // The live-coach page. Identical hardening to the client page with EXACTLY ONE deliberate
+  // relaxation: camera=(self) - the whole point of the page - while microphone and everything else
+  // stay forbidden. The main client page keeps its full lockdown; a policy this sensitive is never
+  // shared between pages (research: docs/research/live-camera-coach-2026-07-29.md).
+  const nonce = crypto.randomUUID().replaceAll("-", "");
+  const url = new URL(request.url);
+  const socketOrigin = `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`;
+  return new Response(CAMERA_HTML.replaceAll("__CSP_NONCE__", nonce), { headers: {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src data: blob:; media-src 'self' blob:; connect-src 'self' ${socketOrigin}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+    "cross-origin-opener-policy": "same-origin",
+    "permissions-policy": "camera=(self), microphone=(), geolocation=(), payment=(), usb=()",
     "referrer-policy": "no-referrer",
     "strict-transport-security": "max-age=31536000",
     "x-content-type-options": "nosniff",
@@ -331,6 +355,19 @@ export class RelaySession {
         await this.writeQueue(id, q);
       }
       return json(200, { id: job.id, hostId: id });
+    }
+
+    if (path === "/frame" && request.method === "POST") {
+      // Live-coach snapshots: forward-only, NEVER queued or mirrored. A frame is perishable - a
+      // pose from twelve seconds ago is worse than no frame - and privacy demands the Worker holds
+      // no imagery at rest. Host offline simply means not coaching right now.
+      const { frame, hostId: requestedHost } = await request.json().catch(() => ({}));
+      if (!frame) return json(400, { error: "missing frame" });
+      const id = await this.resolveHost(requestedHost);
+      const ws = this.hostSocket(id);
+      if (!ws) return json(200, { sent: false, hostId: id });
+      try { ws.send(JSON.stringify({ t: "frame", frame })); } catch { return json(200, { sent: false, hostId: id }); }
+      return json(200, { sent: true, hostId: id });
     }
 
     if (path === "/interrupt" && request.method === "POST") {

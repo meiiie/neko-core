@@ -29,6 +29,7 @@ export async function describeImage(
   dataUrl: string,
   signal?: AbortSignal,
   providerOverride?: Provider, // tests inject a double; production resolves from config
+  prompt: string = IMAGE_READ_PROMPT, // callers with a different job (the live pose coach) bring their own eyes-instruction
 ): Promise<string> {
   const vm = cfg.visionModel;
   if (!vm) throw new Error("no vision_model configured");
@@ -37,7 +38,7 @@ export async function describeImage(
     [{
       role: "user",
       content: [
-        { type: "text", text: IMAGE_READ_PROMPT },
+        { type: "text", text: prompt },
         { type: "image_url", image_url: { url: dataUrl } },
       ],
     }],

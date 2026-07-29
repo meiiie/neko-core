@@ -38,6 +38,9 @@ export interface RemoteHandlers {
   /** Run one turn. `onDelta` (when given) streams output chunks as they arrive; `onAct` streams
    * one-line tool activity (the same "Read(src/agent.ts)" lines the terminal shows). */
   run: (text: string, onDelta?: (chunk: string) => void, onAct?: (line: string) => void) => Promise<RunResult>;
+  /** A live-coach camera snapshot (data: URL) from the paired phone's /camera page. Perishable:
+   * handle or drop, never queue behind turns. */
+  onFrame?: (dataUrl: string) => void;
   status: () => {
     busy: boolean;
     model?: string;

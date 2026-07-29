@@ -2149,7 +2149,39 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   // Shared remote handlers for /rc (HTTP) and /relay (outbound poll): run one turn (streaming to a
   // remote sink if given), report status, interrupt.
+  // Live camera coach (Architecture A - docs/research/live-camera-coach-2026-07-29.md): the phone's
+  // /camera page streams sealed snapshots; each one gets ONE short Vietnamese posing cue back, which
+  // the phone displays and speaks itself. One frame in flight - a queued frame is a stale pose.
+  const coachBusyRef = useRef(false);
+  const coachCuesRef = useRef<string[]>([]);
+  const COACH_PROMPT =
+    "You are a warm Vietnamese posing coach behind the camera at a friendly photo shoot. Look at this " +
+    "frame and reply with EXACTLY ONE short Vietnamese cue (max 16 words) the photographer can say out " +
+    "loud right now. Priorities: (1) light/framing problems first (backlit faces, cut-off heads, poles " +
+    "behind heads), (2) then group arrangement (spacing, staggered heights), (3) then pose details " +
+    "(shoulders, chin slightly down, hands holding something naturally, relaxed smiles). Describe visual " +
+    "intent, NEVER criticize bodies. If the frame already looks good, praise briefly and say giu nguyen. " +
+    "If no person is visible, guide the framing instead. Output ONLY the cue text, no quotes, no emoji.";
+  const handleCoachFrame = (dataUrl: string) => {
+    if (coachBusyRef.current) return; // drop-old: the next frame will be fresher than this one
+    coachBusyRef.current = true;
+    void (async () => {
+      try {
+        const recent = coachCuesRef.current.slice(-3);
+        const prompt = recent.length
+          ? `${COACH_PROMPT}\nYou already said (do not repeat, build on them): ${recent.join(" | ")}`
+          : COACH_PROMPT;
+        const cue = (await describeImage(cfg, dataUrl, undefined, undefined, prompt)).trim().replace(/^["']|["']$/g, "");
+        if (!cue) return;
+        coachCuesRef.current = [...coachCuesRef.current.slice(-5), cue];
+        relayRef.current?.publish({ type: "cue", text: cue.slice(0, 200) }); // non-durable: live only
+      } catch { /* no vision model / transient - the next frame retries naturally */ }
+      finally { coachBusyRef.current = false; }
+    })();
+  };
+
   const makeRemoteHandlers = (): RemoteHandlers => ({
+    onFrame: handleCoachFrame,
     run: async (msg, onDelta, onAct) => {
       if (msg === "\u0000neko:cycle-mode") {
         const next = nextMode(modeRef.current);
