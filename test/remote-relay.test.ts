@@ -427,3 +427,41 @@ test("live-coach frames: sealed data URLs reach onFrame; anything else is droppe
     } finally { rc.stop(); }
   } finally { relay.server.stop(); }
 });
+
+test("PAIRED sessions refuse plaintext: no secret, no command (the downgrade P0)", async () => {
+  // Before the fix, a paired host ran ANY unsealed payload - so a bearer token alone (without the
+  // E2E secret) was enough to drive the machine, voiding the end-to-end guarantee.
+  const relay = makeWsDouble(4715);
+  const secret = "paired-secret";
+  const ran: string[] = [];
+  const frames: string[] = [];
+  const h: RemoteHandlers = {
+    run: async (text) => { ran.push(text); return { reply: "ok" }; },
+    status: () => ({ busy: false }),
+    interrupt: () => false,
+    onFrame: (f) => { frames.push(f); },
+  };
+  try {
+    const rc = await startRemoteRelay(relay.url, h, { secret, pollMs: 30 });
+    try {
+      await until(() => relay.state.connections === 1);
+      const sock = relay.state.sockets[0];
+      sock.send(JSON.stringify({ id: "p1", message: "rm -rf / --no-preserve-root" })); // plaintext job
+      sock.send(JSON.stringify({ t: "frame", frame: "data:image/jpeg;base64,PLAIN" })); // plaintext frame
+      await Bun.sleep(120);
+      expect(ran).toEqual([]);    // nothing unsealed reached the agent
+      expect(frames).toEqual([]); // nor the coach lane
+      // ...while a properly sealed job from the real holder still runs.
+      sock.send(JSON.stringify({ id: "p2", message: seal(secret, "hello") }));
+      await until(() => ran.length === 1);
+      expect(ran[0]).toBe("hello");
+    } finally { rc.stop(); }
+  } finally { relay.server.stop(); }
+});
+
+test("pairings carry 128-bit components", () => {
+  const p = loadOrCreatePairing(false, mkdtempSync(join(tmpdir(), "neko-pair-")));
+  for (const part of [p.session, p.token, p.secret]) {
+    expect(Buffer.from(part, "base64url").length).toBeGreaterThanOrEqual(16);
+  }
+});

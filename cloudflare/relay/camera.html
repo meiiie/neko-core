@@ -26,6 +26,14 @@
          background: linear-gradient(transparent, rgba(10,11,13,.92) 30%);
          font-size: 22px; line-height: 1.45; font-weight: 700; text-shadow: 0 1px 4px #000; min-height: 88px; }
   #cue .tag { display: block; font-size: 11px; font-weight: 400; letter-spacing: .22em; color: var(--amber); margin-bottom: 6px; }
+  /* Prominent capture disclosure (EDPB video guidance / App Store + Play prominent-disclosure norms):
+     while frames are being sent, an unmissable live badge sits over the preview. */
+  #rec { position: absolute; top: 10px; left: 10px; display: none; align-items: center; gap: 8px;
+         background: rgba(10,11,13,.82); border: 1px solid #b3261e; border-radius: 999px; padding: 6px 12px;
+         font-size: 12px; letter-spacing: .1em; }
+  #rec.on { display: flex; }
+  #rec i { width: 9px; height: 9px; border-radius: 50%; background: #ff4136; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
   footer { display: flex; gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--panel); }
   button { flex: 1; min-height: 52px; border: 1px solid var(--line); border-radius: 12px; background: #1d2027;
            color: var(--cream); font: inherit; font-size: 16px; font-weight: 700; }
@@ -52,6 +60,7 @@
 
   <div id="stage" class="hidden">
     <video id="v" autoplay playsinline muted></video>
+    <div id="rec"><i></i><span>ĐANG GỬI ẢNH TỚI NEKO CỦA BẠN</span></div>
     <div id="cue"><span class="tag">NEKO COACH</span><span id="cueText">Bấm "Bắt đầu" rồi đứng vào khung hình nhé.</span></div>
   </div>
 
@@ -169,14 +178,24 @@
   }
 
   // ---- controls (mic-free consent: nothing is captured until the user taps Start) ----
+  function stopCoach(note) {
+    running = false;
+    if (timer) { clearInterval(timer); timer = null; }
+    if (stream) { for (const t of stream.getTracks()) t.stop(); stream = null; }
+    $("go").textContent = "Bắt đầu"; $("go").classList.remove("on"); $("rec").classList.remove("on");
+    $("state").textContent = note || "đã dừng";
+  }
   $("go").onclick = async () => {
     if (!paired) return;
-    if (running) { running = false; clearInterval(timer); if (stream) for (const t of stream.getTracks()) t.stop(); stream = null;
-      $("go").textContent = "Bắt đầu"; $("go").classList.remove("on"); $("state").textContent = "đã dừng"; return; }
+    if (running) return stopCoach();
     try { await openCam(); } catch { $("state").textContent = "không mở được camera - kiểm tra quyền"; return; }
     running = true; timer = setInterval(tick, PACE_MS); void tick();
-    $("go").textContent = "Dừng"; $("go").classList.add("on"); $("state").textContent = "đang coach";
+    $("go").textContent = "Dừng"; $("go").classList.add("on"); $("rec").classList.add("on"); $("state").textContent = "đang coach";
   };
+  // The camera must die with the page/tab, not linger: leaving, locking the phone or switching apps
+  // releases the hardware and stops sending (W3C media-capture lifecycle + prominent-disclosure norms).
+  document.addEventListener("visibilitychange", () => { if (document.hidden && running) stopCoach("tạm dừng - quay lại tab để tiếp tục"); });
+  window.addEventListener("pagehide", () => stopCoach());
   $("flip").onclick = async () => { facing = facing === "environment" ? "user" : "environment"; if (running) { try { await openCam(); } catch {} } };
   $("mute").onclick = () => { speakOn = !speakOn; $("mute").textContent = speakOn ? "Tắt đọc" : "Bật đọc"; if (!speakOn) speechSynthesis.cancel(); };
   if (paired) { connectCues(); void checkAlive(); setInterval(checkAlive, 12000); }

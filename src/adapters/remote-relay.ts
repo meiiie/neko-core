@@ -48,7 +48,10 @@ export interface RemoteRelay {
 export interface RelayPairing { session: string; token: string; secret: string; fresh: boolean }
 
 const makePairing = (): RelayPairing => {
-  const id = () => randomBytes(12).toString("base64url");
+  // 128-bit CSPRNG per component (was 96-bit): 96 bits is not brute-forceable in practice either,
+  // but 128 is the session-management baseline every reviewer checks against, and a capability URL
+  // IS the credential here (security review 2026-07-29). Existing pairings keep working untouched.
+  const id = () => randomBytes(16).toString("base64url");
   return { session: id(), token: id(), secret: id(), fresh: true };
 };
 
@@ -162,9 +165,15 @@ export async function startRemoteRelay(
   let ws: WebSocket | null = null;
 
   const decrypt = (payload: unknown): string | null => {
-    // E2E: the client encrypts with the shared secret; decrypt here so the relay never saw plaintext.
+    // E2E, STRICT once paired: a session with a secret accepts ONLY sealed payloads. The old
+    // `isSealed(...) ? open(...) : String(payload)` was a plaintext DOWNGRADE - anyone holding the
+    // bearer token but not the secret could send an unsealed command and the host would run it,
+    // which silently voided the end-to-end guarantee (security review 2026-07-29, finding P0).
+    // Unpaired/legacy sessions (no secret configured) keep accepting plaintext, unchanged.
     try {
-      return opts.secret && isSealed(payload) ? open(opts.secret, payload) : String(payload ?? "");
+      if (!opts.secret) return String(payload ?? "");
+      if (!isSealed(payload)) return null; // paired: unsealed is forgery or a stale client - refuse
+      return open(opts.secret, payload);
     } catch {
       return null; // wrong secret or tampered - can't run it
     }
