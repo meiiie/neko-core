@@ -1,6 +1,6 @@
 # Seedance 2.0 Prompt Playbook — nghiên cứu kỹ thuật đến 30/07/2026
 
-> Trạng thái: **bản nghiên cứu hoàn chỉnh, đang kiểm toán nguồn/cú pháp**  
+> Trạng thái: **bản nghiên cứu hoàn chỉnh, đã kiểm toán nguồn/cú pháp**
 > Tạo: 30/07/2026 (Asia/Saigon)  
 > Lần cập nhật gần nhất: 30/07/2026  
 > Phạm vi: Seedance 2.0 của ByteDance; tài liệu ByteDance Seed, Volcengine, Dreamina/CapCut; arXiv:2604.14148; trải nghiệm Reddit r/Seedance_AI, X và blog thực hành.
@@ -335,28 +335,132 @@ Dùng prompt này như **khung**, không copy nguyên style cho mọi video. V�
 
 ## Checklist và cú pháp chuẩn
 
-`[open]` Sẽ chốt sau khi hoàn tất đối chiếu 7 câu hỏi.
+### Checklist trước khi bấm Generate
+
+- [ ] Chọn đúng model/surface: Standard để chốt chất lượng; Fast/720p cho vòng thử; kiểm tra tài khoản/region có audio và mức resolution cần dùng.
+- [ ] Chọn trước tỷ lệ, duration và resolution; giữ chúng cố định giữa các take cần nối.
+- [ ] Viết một câu về **ý định cảnh**: ai, muốn gì, cảm xúc gì, kết thúc ở trạng thái nào.
+- [ ] Dùng reference sạch, cùng nhân vật/phong cách; ưu tiên 4–5 asset có vai trò riêng thay vì dùng tối đa.
+- [ ] Trong Dreamina, gọi đúng `@AssetName`; qua Volcengine, map đúng role `reference_*`, `first_frame`, `last_frame`.
+- [ ] Khóa 2–3 đặc điểm nhận dạng bền: khuôn mặt/tóc, trang phục, dấu hiệu riêng; không mô tả lại chúng mâu thuẫn với ảnh.
+- [ ] Mỗi shot có một hành động chính và một camera move; mô tả quán tính, tốc độ, hướng và điểm dừng.
+- [ ] Với multi-shot, đánh số `CẢNH QUAY 1`, `CẢNH QUAY 2`… và nêu loại cut; coi timestamp là nhịp mong muốn, không phải timecode cứng.
+- [ ] Lời thoại ngắn, gán rõ người nói + ngôn ngữ + chất giọng; dùng `{...}` trong prompt Volcengine, dấu `"..."` trong JSON API.
+- [ ] Đưa audio cue sát shot tương ứng: nhạc `(...)`, SFX `<...>`, thoại `{...}`; không bắt audio/video reference làm hai nhiệm vụ xung đột.
+- [ ] Chốt global look một lần: lens/shot size, ánh sáng, palette, texture, nhịp dựng.
+- [ ] Thêm ràng buộc ngắn, ưu tiên lỗi thật sự quan trọng; không nhồi danh sách negative hàng trăm từ.
+- [ ] Nếu cần nối cảnh, bật `return_last_frame`; dùng last frame làm first frame clip sau và overlap/cắt vài frame khi hậu kỳ.
+- [ ] Seed cố định chỉ để giảm biến thiên khi A/B prompt; không xem seed là khóa nhân vật.
+- [ ] Render draft ngắn/rẻ, thay một biến mỗi lượt; sau đó sinh nhiều take và QC hình + tiếng trước khi upscale/hậu kỳ.
+
+### Cú pháp bỏ túi
+
+| Nhu cầu | Cú pháp nên dùng |
+|---|---|
+| Text-to-video một shot | `[shot size + camera] + [subject/identity] + [một action có hướng/tốc độ] + [scene/light] + [audio] + [constraints]` |
+| Dreamina có reference | `@Image1 giữ khuôn mặt và trang phục; @Video1 chỉ tham chiếu chuyển động máy; ...` |
+| Volcengine reference | `图片1/视频1/音频1` theo thứ tự upload trong prompt; đặt đúng `type`/`role` trong API |
+| First/last frame | `first_frame` để khóa điểm xuất phát; thêm `last_frame` khi cần đi tới đích hình xác định |
+| Multi-shot | `CẢNH QUAY 1: ...` xuống dòng `CẢNH QUAY 2: Cắt sang ...`; một camera move/shot |
+| Thoại | `Mai nói bằng tiếng Việt, giọng miền Nam thấp và rõ {Có ai ở đó không?}`; API: `Mai nói ... \"Có ai ở đó không?\"` |
+| Nhạc/SFX/phụ đề | Nhạc `(piano căng thẳng)`, hiệu ứng `<tiếng cửa đóng>`, thoại `{...}`, phụ đề yêu cầu `【...】` |
+| Negative/ràng buộc | `Ràng buộc: không phụ đề/chữ/logo/watermark; không đổi mặt/tóc/trang phục; không người trùng; giải phẫu tự nhiên; không morphing/flicker.` |
+| Nối nhiều generation | `return_last_frame: true` → last frame clip A thành `first_frame` clip B; giữ ratio/resolution/look/identity text giống nhau |
+
+### Ba khung prompt chuẩn
+
+```text
+MỘT SHOT
+[Loại cảnh, lens, camera move]. [Nhân vật + 2–3 đặc điểm khóa] [một hành động, hướng, tốc độ, quán tính]. [Bối cảnh, ánh sáng, palette]. [Audio cue]. Ràng buộc: [3–6 lỗi phải tránh].
+```
+
+```text
+MULTI-SHOT
+GLOBAL: [identity lock + style + palette + audio bed].
+CẢNH QUAY 1: [shot size/camera] + [một action] + [SFX/thoại].
+CẢNH QUAY 2: Cắt sang [shot size/camera] + [reaction/action] + [SFX/thoại].
+CẢNH QUAY 3: [shot kết + trạng thái cuối].
+RÀNG BUỘC: [continuity + anatomy + text/logo + morphing/flicker].
+```
+
+```text
+REFERENCE-DRIVEN
+@Image1 chỉ khóa identity; @Image2 chỉ khóa trang phục; @Video1 chỉ lấy nhịp camera; @Audio1 chỉ lấy ambience.
+[Shot plan]. Giữ nguyên khuôn mặt, tuổi, tóc, tỷ lệ và trang phục ở mọi shot; không lấy nhân vật/bối cảnh từ @Video1.
+```
 
 ## Lỗi cần tránh
 
-`[open]` Sẽ chốt thành danh sách kiểm tra ngắn, áp dụng ngay.
+- Không ghi “Seedance 2.0 chính thức hỗ trợ tiếng Việt” hoặc chấm chất lượng tiếng Việt khi chưa có benchmark/sample kiểm chứng. Prompt tiếng Việt chạy được không đồng nghĩa thoại tiếng Việt chuẩn.
+- Không gọi đầu ra API 4K tháng 07/2026 là **native 4K**; paper công bố native 480p/720p, còn Volcengine mới mô tả luồng Standard 4K 10-bit HEVC.
+- Không gửi trường `negative_prompt`, `fps`, `frames` hoặc `camera_fixed` cho Seedance 2.0 khi schema API không hỗ trợ; đặt ràng buộc trong `prompt`.
+- Không dùng seed như khóa identity. Dùng reference/start frame/last frame và identity bible.
+- Không nhồi hết 9 ảnh + 3 video + 3 audio nếu chúng không có vai trò rõ; 4–5 asset sạch thường dễ điều khiển hơn.
+- Không gộp nhiều góc nhân vật thành một collage để làm reference trực tiếp; tách ảnh hoặc dùng start frame.
+- Không yêu cầu hai camera move đối nghịch trong một shot; không vừa “máy cố định” vừa “orbit/dolly/handheld”.
+- Không kỳ vọng timestamp giây chính xác trong một generation; dựng từng clip nếu cut phải đúng frame.
+- Không viết thoại dài, nhiều người nói chồng nhau hoặc không gán tên; đây là vùng dễ swap thoại/lip-sync sai.
+- Không yêu cầu chữ/logo/subtitle chính xác trong khung hình chính. Tạo clean plate và compositing typography hậu kỳ.
+- Không đổi ratio, resolution, ánh sáng hay mô tả identity giữa các clip cần nối.
+- Không kéo dài clip lỗi nhiều lần; extension có thể tích lũy drift, giảm chất lượng và tạo click âm thanh.
+- Không bỏ qua QC tay/mặt, vật thể, trọng lực/quán tính, continuity, morphing, text/logo và audio trước khi upscale.
+- Không xem video đẹp đầu tiên là master. Workflow production cần nhiều take, chọn shot và hậu kỳ.
 
 ## Ledger nguồn
 
-| ID | Loại | Nguồn | Ngày nguồn | Truy cập | Dùng để xác minh |
-|---|---|---|---|---|---|
-| P01 | Paper sơ cấp | [arXiv:2604.14148](https://arxiv.org/abs/2604.14148) | 04/2026 (cần xác minh revision) | 30/07/2026 | Kiến trúc/capability, prompting hoặc đánh giá được paper công bố |
+Quy ước: ngày nguồn là ngày công bố/cập nhật hiển thị; `n.d.` nghĩa là trang không công bố ngày ổn định. Tất cả nguồn dưới đây được truy cập ngày 30/07/2026.
+
+| ID | Loại | Nguồn | Ngày nguồn | Dùng để xác minh |
+|---|---|---|---|---|
+| P01 | Paper sơ cấp | [Seedance 2.0 Technical Report, arXiv:2604.14148](https://arxiv.org/abs/2604.14148) | 15/04/2026, v1 | Kiến trúc/capability, native 480p/720p, evaluation, sáu ngôn ngữ voice benchmark, hạn chế hình/âm thanh |
+| O01 | ByteDance Seed | [Seedance 2.0 Official Launch](https://seed.bytedance.com/en/blog/seedance-2-0-official-launch) | 12/02/2026 | Audio-visual joint generation, multi-shot, 15 s, tối đa 9 ảnh + 3 video + 3 audio |
+| O02 | ByteDance Seed | [Seedance 2.0 model page](https://seed.bytedance.com/en/seedance2_0) | n.d. | Capability và demo chính thức |
+| O03 | Volcengine | [Seedance 2.0 prompt guide](https://docs.volcengine.com/docs/82379/2222480?lang=zh) | 20/07/2026 | Công thức prompt, cú pháp shot/audio, constraint, lỗi và workaround |
+| O04 | Volcengine | [Seedance 2.0 quickstart](https://docs.volcengine.com/docs/82379/2291680?lang=zh) | 07/07/2026 | Model, reference mode và tham số cơ bản |
+| O05 | Volcengine | [Video generation tutorial](https://docs.volcengine.com/docs/82379/2298881?lang=zh) | 28/07/2026 | Standard/Fast/Mini, resolution và 4K 10-bit HEVC |
+| O06 | Volcengine API | [CreateContentsGenerationsTasks](https://api.volcengine.com/api-docs/view?action=CreateContentsGenerationsTasks&serviceCode=ark&version=2024-01-01) | 07/05/2026 | Schema `content`, audio, ratio, resolution, duration, seed, watermark, last frame |
+| O07 | Volcengine API | [GetContentsGenerationsTask](https://api.volcengine.com/api-docs/view?action=GetContentsGenerationsTask&serviceCode=ark&version=2024-01-01) | n.d. | Trạng thái task và output |
+| O08 | Dreamina | [Seedance 2.0 tool](https://dreamina.capcut.com/tools/seedance-2-0) | n.d. | UI, `@AssetName`, mode, tỷ lệ và download |
+| O09 | Dreamina | [How to use Seedance 2.0](https://dreamina.capcut.com/resource/how-to-use-seedance-2-0) | n.d. | Quy trình UI, first frame/multiframes, audio và duration được trang nêu |
+| O10 | Dreamina | [Seedance 2.0 prompt guide](https://dreamina.capcut.com/resource/seedance-2-0-prompt) | 20/04/2026 trên bản địa hóa | Prompt structure, negative instruction, continuity workflow |
+| O11 | Dreamina | [Seedance 2.0 4K workflow](https://dreamina.capcut.com/seedance/seedance-2-0-4k-for-content-creators) | n.d. | 1080p download, upscale/4K và post-processing |
+| C01 | Reddit | [Audio reference is not reproduced unchanged](https://www.reddit.com/r/Seedance_AI/comments/1v4cba5/how_can_i_force_seedance_20_to_use_my_uploaded/) | 23/07/2026 | Kinh nghiệm audio reference là điều kiện tham chiếu, không phải playback chính xác |
+| C02 | Reddit | [Seedance 2.0 prompt examples](https://www.reddit.com/r/Seedance_AI/comments/1rfw984/sharing_a_few_seedance_20_prompt_examples/) | 27/02/2026 | Cấu trúc prompt thực tế và giới hạn cần kiểm chứng |
+| C03 | Reddit | [Audio as input tutorial](https://www.reddit.com/r/seedance/comments/1uf6hjb/the_most_underused_seedance_20_feature_audio_as/) | 25/06/2026 | Audio-driven motion/cut workflow thực tế |
+| C04 | Reddit | [Character consistency across shots](https://www.reddit.com/r/aivideos/comments/1smtzb9/seedance_20_character_consistency_across_shots/) | 16/04/2026 | Reference/start-frame workflow và giới hạn identity drift |
+| C05 | Reddit | [Dialogue assignment failure report](https://www.reddit.com/r/u_Sakura_Liamahs/comments/1uu6kxr/anyone_else_struggling_with_character_dialogue/) | 07/2026 | Swap thoại và lip-sync nhiều người; bằng chứng giai thoại |
+| C06 | X | [ChatCut structured prompting guide](https://x.com/chatcutapp/status/2041763561333264865) | 08/04/2026 | Một nhiệm vụ/reference, prompt structure và conflict avoidance |
+| C07 | X | [15 micro-cuts demo](https://x.com/Dheepanratnam/status/2042910477320114293) | 11/04/2026 | Khả năng micro-cut thực tế; không dùng làm giới hạn đảm bảo |
+| C08 | X | [Multi-shot example](https://x.com/SDXLHQ/status/2024925187095863675) | 20/02/2026 | Ví dụ multi-shot cộng đồng |
+| B01 | Blog chuyên môn | [Higgsfield Seedance prompting guide](https://higgsfield.ai/blog/seedance-prompting-guide) | 13/04/2026 | Prompt structure và production tips; đối chiếu với nguồn chính thức |
+| B02 | Phỏng vấn filmmaker | [Creative Bloq: Kévin Mendiboure workflow](https://www.creativebloq.com/ai/how-a-filmmaker-turned-a-10-year-old-unmakeable-movie-idea-into-reality-with-ai) | 09/06/2026 | Start frame, Fast drafts, nhiều take và preproduction |
+| B03 | Báo công nghệ | [TechRadar hands-on observations](https://www.techradar.com/ai-platforms-assistants/ive-been-watching-seedance-2-0-videos-so-you-dont-have-to-and-they-are-a-nightmare-dreamscape) | 23/02/2026 | Quan sát lỗi morphing/physics; chỉ là nguồn bổ trợ |
 
 ## Claim ledger
 
-| Claim | Trạng thái | Nguồn | Ghi chú giới hạn |
+| Claim | Trạng thái | Bằng chứng chính | Ghi chú giới hạn |
 |---|---|---|---|
-| Seedance 2.0 sinh âm thanh/thoại | `[open]` | Chưa đối chiếu | Phải tách model capability khỏi surface được cấp quyền |
-| Hỗ trợ thoại tiếng Việt | `[open]` | Chưa đối chiếu | Phải tách “nhận prompt tiếng Việt” khỏi “phát âm tiếng Việt” |
-| Một generation hỗ trợ multi-shot | `[open]` | Chưa đối chiếu | Cần cú pháp và giới hạn thực tế |
-| Seed bảo đảm identity qua các lần sinh | `[open]` | Chưa đối chiếu | Không suy từ deterministic sampling sang identity lock |
-| Có negative prompt riêng | `[open]` | Chưa đối chiếu | Có thể khác giữa API và UI |
+| Seedance 2.0 sinh âm thanh và thoại | `[verified]` | O01 + P01 + O03/O06 | Cần bật `generate_audio` trên API; availability UI phụ thuộc surface/tài khoản |
+| Có thể yêu cầu thoại tiếng Việt | `[supported]` | O03 mô tả nhãn ngôn ngữ ngoài Trung/Anh | Model có thể nhận yêu cầu; đây không phải danh sách ngôn ngữ được bảo đảm |
+| Chất lượng thoại tiếng Việt đã được ByteDance kiểm chứng | `[open]` | P01 chỉ benchmark EN/JA/KO/ID/PT/ES | Không tìm thấy benchmark/sample chính thức tiếng Việt đến 30/07/2026 |
+| Một generation có thể chứa nhiều shot | `[verified]` | O01 + P01 + O03 | Không tìm thấy số shot tối đa được cam kết; tổng duration tối đa 15 s |
+| Timestamp chính xác đến giây là hard constraint | `[supported]` — **không** | O03 nói hỗ trợ chưa ổn định | Dùng số shot/nhịp tương đối hoặc render riêng từng clip |
+| Seed bảo đảm identity qua các lần sinh | `[verified]` — **không** | O06 + O03/P01 | Seed điều khiển randomness; không có identity-lock contract |
+| API có trường negative prompt riêng | `[verified]` — **không** | O06 + O03 | Đưa negative/ràng buộc vào `prompt`; UI có thể có UX khác theo phiên bản |
+| Volcengine Standard có đầu ra 4K | `[verified]` | O05 + O06 | Đây là option/output pipeline tháng 07/2026, không chứng minh model native 4K |
+| Seedance 2.0 native 4K | `[verified]` — **không** | P01 công bố native 480p/720p | Không đánh đồng output 4K/10-bit HEVC với native training/generation resolution |
+| Dreamina UI có duration/seed/watermark giống API | `[open]` | O08–O11 mâu thuẫn/thiếu trường | Xác minh trực tiếp theo region, plan và phiên đăng nhập trước khi sản xuất |
+
+## Giới hạn nghiên cứu
+
+- Không chạy generation trả phí trên tài khoản người dùng; playbook là tổng hợp tài liệu và bằng chứng công khai, không phải benchmark tiếng Việt do nhóm tự đo.
+- Không tìm thấy bảng ngôn ngữ hỗ trợ chính thức có tiếng Việt hoặc sample thoại tiếng Việt đủ kiểm soát để chấm chất lượng. Vì vậy hai claim này được giữ ở `[supported]`/`[open]`, không suy đoán.
+- Các trang Dreamina công khai hiện nêu duration/reference count không hoàn toàn nhất quán; tham số UI có thể đổi theo region/plan. Schema Ark API được ưu tiên khi cần giá trị máy đọc ổn định.
+- Bài Reddit/X/blog chỉ dùng cho workflow/lỗi thực tế và luôn được phân biệt với cam kết sản phẩm chính thức.
 
 ## Nhật ký cập nhật
 
-- 30/07/2026: Tạo ledger và khung câu hỏi; chưa chốt claim kỹ thuật nào trước khi đọc nguồn.
+- 30/07/2026: Tạo ledger và khung bảy câu hỏi ngay khi bắt đầu.
+- 30/07/2026: Đối chiếu technical report, ByteDance Seed, Volcengine prompt/API và Dreamina; chốt capability, cú pháp và tham số có tài liệu.
+- 30/07/2026: Đối chiếu Reddit/X/blog/filmmaker interview; bổ sung failure modes, production workflow và caveat cho tiếng Việt.
+- 30/07/2026: Hoàn thiện checklist/cú pháp chuẩn, claim ledger và đánh dấu rõ các điểm còn `[open]` thay vì lấp bằng suy đoán.
