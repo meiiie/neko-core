@@ -87,7 +87,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/paste", desc: "attach an image from the clipboard (or Alt+V)" },
   { name: "/remote-control", desc: "toggle a local HTTP control server (/rc) - drive Neko from elsewhere" },
   { name: "/relay", desc: "drive multiple Neko sessions from your phone (live + E2E; /relay new rotates)" },
-  { name: "/coach", desc: "photo coach: your phone films, Neko watches and speaks posing cues (/coach stop ends it)" },
+  { name: "/coach", desc: "photo coach: your phone films, Neko watches and speaks posing cues (/coach status, /coach stop)" },
   { name: "/login", desc: "connect ChatGPT or save a provider API key" },
   { name: "/logout", desc: "sign out the active auth route only" },
   { name: "/rewind", desc: "undo the last turn (restore context + revert this turn's file edits)" },

@@ -1688,6 +1688,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       const url = relayScopeRef.current?.url || cfg.relayUrl;
       if (!url) return addLine("info", "coach needs a relay: set \"relay_url\" in config (see /relay), then run /coach again.");
+      if (arg === "status") {
+        // What every good auxiliary-CLI surface offers (Claude Code /rc, tailscale serve status):
+        // show the link again AND whether the phone is actually filming - measured, not assumed.
+        if (!relayRef.current) return addLine("info", "coach is not running - /coach starts it.");
+        const p = loadOrCreateSessionPairing(relayScopeRef.current?.key ?? sessionIdRef.current, false);
+        const link = `${url.replace(/\/+$/, "")}/camera/${encodeURIComponent(p.session)}#t=${p.token}&k=${p.secret}`;
+        const since = coachLastFrameRef.current ? Math.round((Date.now() - coachLastFrameRef.current) / 1000) : -1;
+        const filming = since >= 0 && since < 15;
+        const voiceState = remoteVoiceRef.current?.snapshot().state;
+        return addLine("info", [
+          filming ? `coach: the phone is filming (last frame ${since}s ago)`
+            : since >= 0 ? `coach: link is live; the phone stopped filming ${since}s ago`
+              : "coach: link is live; the phone has not started filming yet",
+          voiceState ? `voice on the phone: ${voiceState}` : "voice on the phone: not started ([ Giọng Neko ] there)",
+          `  ${link}`,
+        ].join("\n"), undefined, false);
+      }
       try {
         if (!relayRef.current) {
           // Bring the transport up exactly the way /relay does, then keep going - the user asked for
@@ -2202,6 +2219,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // the phone displays and speaks itself. One frame in flight - a queued frame is a stale pose.
   const coachBusyRef = useRef(false);
   const coachCuesRef = useRef<string[]>([]);
+  const coachLastFrameRef = useRef(0); // proves the phone is actually filming (for /coach status)
   const COACH_PROMPT =
     "You are a warm Vietnamese posing coach behind the camera at a friendly photo shoot. Look at this " +
     "frame and reply with EXACTLY ONE short Vietnamese cue (max 16 words) the photographer can say out " +
@@ -2211,6 +2229,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     "intent, NEVER criticize bodies. If the frame already looks good, praise briefly and say giu nguyen. " +
     "If no person is visible, guide the framing instead. Output ONLY the cue text, no quotes, no emoji.";
   const handleCoachFrame = (dataUrl: string) => {
+    coachLastFrameRef.current = Date.now(); // counted even when dropped: the phone IS filming
     if (coachBusyRef.current) return; // drop-old: the next frame will be fresher than this one
     coachBusyRef.current = true;
     void (async () => {

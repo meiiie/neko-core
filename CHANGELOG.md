@@ -6,6 +6,16 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.21.2] — 2026-07-29
+
+### Added
+
+- **`/coach status`** — see the camera link again and, more useful, whether the phone is actually
+  filming (measured from real frames, not assumed) and what the phone's voice session is doing. This
+  is the pattern every good auxiliary surface follows (Claude Code's `/rc`, `tailscale serve status`):
+  a start command deserves a way to re-show its link and a truthful active state.
+
+
 ## [0.21.1] — 2026-07-29
 
 ### Added

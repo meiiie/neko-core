@@ -2,7 +2,7 @@
 
 **As of:** 2026-07-29  
 **Accessed:** 2026-07-29  
-**Status:** living research ledger; update claims as evidence changes
+**Status:** final design checkpoint; keep as a living ledger when evidence changes
 
 ## Research question
 
@@ -39,8 +39,10 @@ appears to reuse the same session, token, and shared secret. This research asks:
 - `[inference]`: a proposed Neko design derived from cited evidence; it is not a
   claim that another product implements the same design.
 - `[open]`: not yet verified.
-- `[refuted]` / `[superseded]`: retained briefly with the reason and replacement,
-  then removed at the final cleanup checkpoint.
+- `[rejected]`: a considered design alternative not selected; retained with the
+  evidence and failure mode so the unsafe option is not reintroduced.
+- `[refuted]` / `[superseded]`: a factual finding disproven or replaced; record the
+  reason during investigation, then remove it at the final cleanup checkpoint.
 
 For repository evidence, the source is a stable path and line range from the
 working tree inspected on 2026-07-29. For web evidence, the source includes the
@@ -76,12 +78,15 @@ access date.
   routing, and the host must independently reject out-of-scope inbound frame
   types. UI hiding and payload-type validation are defense-in-depth, not an
   authorization boundary.
-  - Confidence: high pending standards comparison.
-  - Derived from: the route and host traces above; final design to be cross-checked
-    against OAuth bearer-token guidance and capability systems.
-- [open] A dedicated `/coach` lifecycle should mint an independently revocable,
-  short-lived, least-privilege link and should stop automatically.
-  - Confidence: medium; pending product/CLI UX comparison.
+  - Confidence: high.
+  - Derived from: the route and host traces above, RFC 9700 §2.3, and the
+    role/grant systems compared in section A (accessed 2026-07-29).
+- [inference] A dedicated `/coach` lifecycle should mint an independently
+  revocable, short-lived, least-privilege link. It should stop media immediately
+  when capture ends and revoke authority on explicit off, host exit, or hard expiry.
+  - Confidence: high on the lifecycle; medium on the exact timeout.
+  - Derived from: the code trace below and the Claude Code, Tailscale, Cloudflare,
+    and Signal lifecycle sources in section B (accessed 2026-07-29).
 
 ## A. Security and architecture
 
@@ -243,9 +248,11 @@ access date.
 
 #### Role templates and endpoint policy
 
-The Worker owns these templates; the issuer requests a role, not arbitrary
-scopes. Scope names are wire-level constants, and unknown roles/scopes fail
-closed.
+All statements and table entries in this proposed policy are `[inference]` unless
+marked otherwise. The Worker owns these templates; the issuer requests a role, not
+arbitrary scopes. Scope names are wire-level constants, and unknown roles/scopes
+fail closed. They derive from RFC 9700 §2.3 and the compared server-enforced role/
+grant systems (accessed 2026-07-29).
 
 | Principal | P0 scopes | Explicitly absent |
 |---|---|---|
@@ -311,6 +318,10 @@ closed.
 
 ### Wire format
 
+All wire-format statements and examples below are `[inference]`. They derive from
+the security invariants above, RFC 8707/9700, and current Neko v5 wire paths
+(working tree and sources cited above, 2026-07-29).
+
 #### 1. Host registration and coach issuance (relay protocol v6)
 
 ```http
@@ -318,7 +329,7 @@ POST /register
 Authorization: Bearer <private-host-token>
 Content-Type: application/json
 
-{"v":6,"session":"S","hostId":"H","kid":"controller-kid","meta":{"iv":"...","ct":"..."}}
+{"v":6,"session":"S","hostId":"H"}
 ```
 
 ```json
@@ -343,20 +354,33 @@ Content-Type: application/json
 }
 ```
 
+- [inference] `/relay` uses the same host-only issuance endpoint with
+  `role:"controller"`, a separate controller `kid`, bounded controller TTL, and
+  controller-encrypted session metadata. The Worker maps that role to the
+  controller template and the CLI builds the `/session/S` link from the returned
+  controller token plus controller secret. Host registration itself contains no
+  controller key or controller metadata. This keeps all browser-facing authority
+  in capability records while registration remains a private transport identity.
+  - Confidence: high.
+  - Derived from: the three-principal invariant, RFC 8707's distinction between
+    resource and scope, and current host/controller credential conflation traced in
+    section A.
 - [inference] The Worker generates the bearer token, stores only its hash, maps
   `role:"coach"` to the fixed server template, caps `ttlSec`, and returns the raw
   token once. The local host separately generates `coachSecret`, retains
   `{capId, secret, kid, expiresAt}` in memory, and constructs:
 
 ```text
-https://relay.example/camera/S#v=6&c=cap_c_7A...&t=<coach-token>&k=<coach-secret>&h=H&e=1785291800000
+https://relay.example/camera/S#v=6&c=cap_c_7A...&t=<coach-token>&k=<coach-secret>&e=1785291800000
 ```
 
-  The fragment continues to keep credentials out of the HTTP request. The v6
-  camera page stores the credential in `sessionStorage`, clears the fragment,
-  and forgets it when the tab is closed; it must not add a coach credential to
-  the durable `nekoRelayPairings` local-storage map.
-  - Confidence: high.
+    The fragment continues to keep credentials out of the HTTP request. The v6
+    camera page stores the credential in `sessionStorage`, clears the fragment,
+    and forgets it when the tab is closed; it must not add a coach credential to
+    the durable `nekoRelayPairings` local-storage map. `e` is only a pre-connection
+    display hint: the page replaces it with the authoritative `expiresAt` received
+    from `/alive`/`cap_ready`, and expiry enforcement never trusts fragment data.
+    - Confidence: high.
   - Derived from: current fragment clearing in `camera.html:90-95`; current
     durable local-storage behavior at the same lines is the behavior being
     narrowed (working tree, 2026-07-29).
@@ -576,33 +600,306 @@ relay tests (working tree, 29/29 passed 2026-07-29).
 
 ### Current Neko flow
 
-Research in progress.
+- [supported] The working tree now recognizes a dedicated `/coach` command and
+  prints a camera link plus QR code. If no relay is active, however, it calls the
+  same `loadOrCreateSessionPairing(..., false)` and `startRemoteRelay()` path as
+  `/relay`, then constructs the camera URL from that pairing's token and secret.
+  This improves discovery but does not narrow authority.
+  - Confidence: high.
+  - Source: `src/ui/chat.tsx:1675-1719` (working tree, 2026-07-29).
+- [supported] `/coach stop` currently stops local remote voice and publishes a
+  sealed `coach-stop` mirror event, but it does not revoke or expire a credential.
+  The message explicitly says `/relay` remains active. `/relay` also still prints a
+  camera URL using the controller pairing.
+  - Confidence: high.
+  - Source: `src/ui/chat.tsx:1680-1687,1787-1792` (working tree, 2026-07-29).
+- [supported] The camera page asks for camera only after the user presses Start and
+  asks for microphone only after the separate voice action. It stops camera tracks
+  when stopped, hidden, or page-hidden, and stops voice tracks on page hide. These
+  are good consent and media-lifecycle behaviors worth preserving.
+  - Confidence: high.
+  - Source: `cloudflare/relay/camera.html:127-158,211-269` (working tree,
+    2026-07-29).
+- [supported] The current page persists the broad token and secret in
+  `localStorage` and reconnects `/client-ws` indefinitely while paired. Closing the
+  page therefore stops hardware capture but does not forget or revoke authority.
+  - Confidence: high.
+  - Source: `cloudflare/relay/camera.html:77-95,193-209` (working tree,
+    2026-07-29).
 
 ### Comparable onboarding patterns
 
-Research in progress.
+| Product/CLI | Observed onboarding/lifecycle pattern | Neko lesson | Primary source |
+|---|---|---|---|
+| Claude Code Remote Control | Provides dedicated `claude remote-control`, `--remote-control`/`--rc`, and in-session `/remote-control`/`/rc` entry points. Server mode prints a URL and toggles QR with Space; interactive mode opens a URL/QR status panel and displays `/rc active` in the footer. Stopping the local process ends the session. Its security section describes multiple short-lived credentials scoped to different purposes and expiring independently. | A secondary remote surface deserves a first-class command, repeatable status/QR view, visible active state, process-bound lifetime, and purpose-specific credentials. | Anthropic, [Remote Control](https://code.claude.com/docs/en/remote-control), n.d.; accessed 2026-07-29. |
+| Tailscale Serve | Foreground Serve output exposes the endpoint and says `Press Ctrl+C to exit`; `--bg` is explicit. `tailscale serve status` inspects active servers, appending `off` disables one, and `reset` clears configuration. | Default to a bounded foreground/session lifecycle; provide separate status and off operations rather than a destructive toggle. | Tailscale, [tailscale serve command](https://tailscale.com/kb/1242/tailscale-serve), last validated 2026-01-26; accessed 2026-07-29. |
+| Cloudflare Quick Tunnels | One command creates a random public URL and prints it in the terminal; the tunnel belongs to the running process. Cloudflare labels Quick Tunnels for testing/development rather than production. | A share URL should be generated at activation and visibly coupled to the process that owns it; scope and risk language must sit beside the link. | Cloudflare, [Quick Tunnels](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/), updated 2026-04-20; accessed 2026-07-29. |
+| Signal call links | Link creation is a distinct flow; the creator may require approval and may delete the link. A deleted link blocks new joins but does not terminate an already-running call; links expire after 90 days of inactivity. | Separate link authority from active media. Neko needs both immediate capture stop and explicit capability revocation; a social-call lifetime is too long for machine-adjacent coaching. | Signal Support, [How to create and share call links](https://support.signal.org/hc/en-us/articles/7860719423002-How-to-create-and-share-call-links), n.d.; accessed 2026-07-29. |
+
+- [verified] A discoverable auxiliary CLI feature should have its own start entry
+  point, a way to show current status/link again, and an explicit stop operation.
+  - Confidence: high.
+  - Sources: Claude Code Remote Control (n.d.), Tailscale Serve (validated
+    2026-01-26), and Cloudflare Quick Tunnels (updated 2026-04-20), URLs above;
+    accessed 2026-07-29.
+- [verified] The media-capture lifetime and the share credential lifetime are
+  different states. Stopping hardware does not necessarily revoke a link, and
+  revoking a link does not necessarily terminate media already established unless
+  the product explicitly couples them.
+  - Confidence: high.
+  - Sources: Signal link deletion behavior (n.d.) and current Neko camera/credential
+    code (working tree, 2026-07-29), cited above.
 
 ### Proposed `/coach` flow
 
-Research in progress.
+#### Command semantics
+
+- [inference] Make bare `/coach` **idempotent**: when off it starts scoped coach
+  mode; when already on it reprints status, expiry, link, and QR. It must never act
+  as a toggle. Destructive actions require a verb.
+  - `/coach` — start or re-open the current share panel.
+  - `/coach status` — show capability id prefix, connection/capture/voice state,
+    rights, and exact expiry without printing the secret link.
+  - `/coach qr` — reprint the current link and QR.
+  - `/coach off` — stop media and revoke the current coach capability immediately;
+    keep `/coach stop` as an alias during migration.
+  - `/coach new` — revoke and rotate only the coach capability/key.
+  - `/coach 45m` or `/coach --ttl 45m` — optional explicit TTL, clamped to the P0
+    maximum; no unbounded mode.
+  - Confidence: high except the convenience TTL syntax, which is medium.
+  - Derived from: Claude Code's repeatable status panel and Tailscale's separate
+    `status`/`off` lifecycle (sources above).
+
+#### First-run output
+
+- [inference] On success, print the security contract before the share material.
+  Keep terminal-rendered strings ASCII because Neko's documented Windows console
+  baseline is cp1252. A concrete P0 layout is:
+
+```text
+Coach on for this Neko session. Expires 15:40 (30 min).
+Allowed: send camera frames; start voice; receive posing cues.
+Blocked: prompts, approvals, transcript, interrupt, session or relay changes.
+
+Open on the filming phone:
+https://relay.example/camera/...#...
+<QR>
+
+Camera and microphone start only after a tap on the phone.
+Stop and revoke now: /coach off   Rotate link: /coach new
+Show again: /coach qr             Status: /coach status
+```
+
+  The URL and QR are secret-bearing output and must be excluded from relay mirror,
+  session export, diagnostics, and telemetry. UI text may say “Anyone with this
+  link can use camera/voice until the shown expiry, but cannot control Neko.”
+  - Confidence: high.
+  - Derived from: least-privilege disclosure in RFC 9700 §2.3, explicit URL/QR and
+    active-state patterns in Claude Code, the existing QR renderer in
+    `src/ui/chat.tsx:1704-1716`, and the ASCII console constraint in `AGENTS.md`
+    (working tree, 2026-07-29).
+
+#### Start, stop, and expiry behavior
+
+- [inference] If no `/relay` controller is active, `/coach` starts only the private
+  host connection and mints a coach capability; it does **not** mint or print a
+  controller capability. If a v6 host socket already exists, it reuses that private
+  transport and adds only the coach record/key.
+  - Confidence: high.
+  - Derived from: the three-principal architecture in section A.
+- [inference] If the Worker reports v5/`legacy`, `/coach` fails closed. It explains
+  that the existing protocol can create only a full-control link and offers the
+  explicit one-time `/relay upgrade` flow. It never silently rotates or falls back
+  to the broad pairing.
+  - Confidence: high.
+  - Derived from: the migration impossibility result in section A.
+- [inference] P0 uses a 30-minute hard TTL. `/coach off`, `/coach new`, or TUI exit
+  stops local voice, best-effort sends `coach-stop`, deletes the capability at the
+  Worker, closes coach sockets, and deletes the local coach key. Expiry performs
+  the same revocation without requiring either client to be online.
+  - Confidence: high on behavior; medium on 30 minutes.
+  - Derived from: per-token lifecycle evidence in section A, Cloudflare DO alarms
+    (updated 2026-04-21), and process-bound CLI patterns above.
+- [inference] Preserve immediate camera/microphone track release on stop, hide, and
+  page hide. Do **not** revoke the capability immediately on `visibilitychange`:
+  phone locks and app switches are normal transient states. Hard TTL remains the
+  security bound. P1 may revoke after five continuous minutes with no coach socket,
+  while allowing reconnection during that grace period.
+  - Confidence: high on separating media stop from immediate revocation; medium on
+    the five-minute grace.
+  - Derived from: current media release behavior in `camera.html:211-269`, Signal's
+    distinction between call and link lifecycle, and DO alarm support (sources
+    above).
+- [inference] Remove the camera URL from `/relay` output. Replace it with one safe
+  discovery line: `Need a limited camera/voice link? Run /coach.` `/relay` must
+  label its own link `Full remote control: prompts and approvals`.
+  - Confidence: high.
+  - Derived from: the current authority confusion and dedicated-command patterns
+    above.
+- [inference] P1 adds a persistent footer chip such as `coach active 18m`, connection
+  state, a two-minute expiry warning with an explicit extend action, and an audit
+  view containing only timestamps, capability id prefixes, role, allow/deny
+  decision, and denial reason.
+  - Confidence: medium.
+  - Derived from: Claude Code's active footer/status behavior (n.d.) and the
+    no-secret telemetry policy in section A.
 
 ## Alternatives and attempted refutations
 
-Research in progress.
+- [rejected] **Hide the prompt box and approval buttons in `camera.html`.** A custom
+  client can call `/send`, `/control`, `/interrupt`, and `/revoke` directly and can
+  retain all `/client-ws` events. The Worker, not the page, is the security boundary.
+  - Sources: current code trace and RFC 9700 §2.3, cited in section A (2026-07-29).
+- [rejected] **Give coach a new E2E secret but keep the same bearer token.** This
+  blocks prompt decryption only if the host never falls back, but the bearer alone
+  still interrupts and revokes; it also still opens the general mirror socket.
+  - Source: `worker.js:278-305,390-395` (working tree, 2026-07-29).
+- [rejected] **Trust `role:"coach"` or a scope list supplied by the browser.** A
+  bearer holder can edit the request. Role/template, host binding, and expiry must
+  come from trusted Worker state.
+  - Sources: RFC 6750 §1.2 (2012) and RFC 9700 §2.3 (2025), accessed 2026-07-29.
+- [rejected] **Put coach in a separate session/DO but reuse all current routes.** A
+  different token alone would still authorize `/send` and `/control` inside that
+  DO. A second deployment containing only media routes could isolate it, but would
+  duplicate transport/lifecycle logic; the scoped record plus route matrix gives a
+  smaller auditable boundary.
+  - Sources: current route dispatch in `worker.js:238-440` (working tree,
+    2026-07-29); the final preference is an inference.
+- [rejected for P0] **Adopt JWT, Macaroons, or Biscuit now.** Signed/self-attenuating
+  tokens solve offline or delegated policy problems Neko does not presently have;
+  exact online revocation and expiry already require the Durable Object. A fixed
+  opaque capability record has fewer parser, key-lifecycle, and policy surfaces.
+  - Sources: Jitsi JWT, Macaroons, Biscuit, and Cloudflare DO sources in section A;
+    accessed 2026-07-29. Revisit if third-party delegation or user-defined scopes
+    become a real requirement.
+- [rejected] **Preserve every old link while silently converting its owner into the
+  private host.** All old parties possess the same credential, so none can prove
+  that it is the local host. One explicit rotation is required.
+  - Source: current shared-credential trace (working tree, 2026-07-29).
+- [rejected] **Make bare `/coach` toggle on/off.** Users reasonably repeat a setup
+  command to recover its URL/QR or inspect status; a toggle could revoke a live
+  shoot without confirmation. Dedicated `off` is observable and scriptable.
+  - Sources: Claude Code repeatable status panel and Tailscale `status`/`off`
+    commands, cited above; accessed 2026-07-29.
+- [rejected] **Revoke on every page hide.** The current page intentionally treats
+  hide as a reversible capture pause. Immediate credential revocation would make a
+  phone lock or app switch destructive; hard TTL plus explicit off provides the
+  security bound without that fragility.
+  - Source: `camera.html:211-230` (working tree, 2026-07-29); the lifecycle choice
+    is an inference.
 
 ## Quyet dinh de xuat
 
 ### A — Bao mat/kien truc
 
-Research in progress.
+#### P0 — must ship before calling `/camera` a narrow coach capability
+
+1. [inference] Ship relay protocol v6 with three principals: private `host`, shared
+   `controller`, and shared `coach`. Use distinct random bearer tokens and distinct
+   E2E keys; never derive one from another and never try another role's key.
+2. [inference] Store hashed, stateful capability records in the session Durable
+   Object. Enforce fixed server-owned role templates, method/route scope, host
+   binding, and expiry on every request and WebSocket handshake. Use 401 for
+   invalid/expired and 403 for valid-but-out-of-scope credentials.
+3. [inference] Give coach only `frame:write`, `voice:offer`, `cue:read`, and reduced
+   `presence:read`. Target cues/voice answers to its capability id; provide no
+   transcript/mirror reset/replay, session listing, prompt, approval, interrupt,
+   revoke, result, host, or capability-management access.
+4. [inference] Add host-side keyring/type enforcement as an independent boundary.
+   Add the complete negative authorization matrix and the direct exploit regression
+   test proving coach ciphertext can never reach `handlers.run` or control handlers.
+5. [inference] Make coach capabilities individually revocable and alarm-expiring.
+   Keep old protocols only as visibly broad `legacy`; fail closed for `/coach` until
+   the user performs one explicit pairing rotation. Never present a v5 link as safe.
+
+Evidence base: current Neko source and 29/29 passing baseline relay tests
+(2026-07-29); Jitsi/Zoom/Signal role lifecycle; Cloudflare Access/DO lifecycle;
+LiveKit media grants; RFC 6750/8707/8827/9700; Macaroons and Biscuit primary sources,
+all cited in section A.
+
+#### P1 — hardening after the boundary exists
+
+1. [inference] Redeem the share-link bearer once into a browser-generated,
+   proof-of-possession session key, so copying the URL after first use cannot clone
+   the active device. Keep hard TTL and manual revocation because device binding is
+   defense-in-depth, not a replacement. This follows RFC 9700 §2.2's
+   sender-constrained-token direction; the exact browser protocol remains P1
+   research ([RFC 9700 §2.2](https://www.rfc-editor.org/rfc/rfc9700.html#section-2.2),
+   Jan 2025; accessed 2026-07-29).
+2. [inference] Add per-capability rate/body-size limits and metadata-only deny/audit
+   events; surface them through `/coach status` without secrets or content.
+3. [inference] Consider Macaroon/Biscuit-style attenuation only if Neko later needs
+   third-party delegation, offline verification, or user-defined policy. Do not add
+   a general policy engine for the fixed P0 matrix.
+
+P1 evidence base: RFC 9700 §2.2 sender-constrained tokens (Jan 2025), current
+bearer-link threat trace (working tree, 2026-07-29), and Macaroon/Biscuit delegation
+models (2014/n.d.), all cited above. The exact redemption and rate-limit protocols
+remain open design work rather than verified product behavior.
 
 ### B — UX
 
-Research in progress.
+#### P0 — clear activation and reliable shutdown
 
-## Checkpoint 2026-07-29 — initial
+1. [inference] Make `/coach` the only coach entry point. Bare `/coach` starts or
+   reprints the current panel; add `/coach status`, `/coach qr`, `/coach off`, and
+   `/coach new`, with `/coach stop` as a migration alias. Never use a destructive
+   toggle.
+2. [inference] Print rights, hard expiry, link, QR, explicit tap-to-capture consent,
+   and exact stop/rotate/status commands together. Mark `/relay` as full control and
+   replace its camera URL with `Run /coach` discovery text.
+3. [inference] Default to 30 minutes, max two hours. `/coach off`, rotation, TUI
+   exit, or expiry revokes the capability and stops voice/sockets; hide/pagehide
+   releases camera/mic immediately but does not turn a transient app switch into an
+   irreversible revoke.
+4. [inference] If safe scoped issuance is unavailable, explain the required v6
+   upgrade/rotation and produce no coach link. Never degrade to the full-control
+   pairing for convenience.
 
-- File created before investigation, per task requirement.
-- Open questions: exact token/secret checks, endpoint matrix, current expiry and
-  revocation behavior, camera-to-host data path, and current `/relay` output.
-- Next evidence pass: repository code and tests, then primary web sources.
+#### P1 — make the active state difficult to forget
+
+1. [inference] Add an always-visible `coach active <remaining>` footer/status item,
+   connection and media state, a two-minute expiry warning, and explicit bounded
+   extension.
+2. [inference] Add optional revoke after five uninterrupted minutes without a coach
+   WebSocket, plus a clear reconnection grace state. Hard TTL remains authoritative.
+3. [inference] Add one-time device redemption, a metadata-only local audit view, and
+   push/system notification when a coach connects or a denied route is attempted.
+
+P1 evidence base: Claude Code's visible active/footer and push-notification patterns
+(n.d.), Cloudflare DO alarm lifecycle (updated 2026-04-21), and the current camera
+socket/media lifecycle (working tree, 2026-07-29), all cited above. Exact warning and
+disconnect-grace durations require user testing.
+
+## Checkpoint 2026-07-29 — final
+
+- [verified] Direct code tracing established that the current camera URL is a full
+  remote-control credential despite its narrow UI. Confidence: high.
+  - Sources: `cloudflare/relay/worker.js:243-450`,
+    `src/adapters/remote-relay.ts:168-306`, `src/ui/chat.tsx:1679-1791`, and
+    `cloudflare/relay/camera.html:77-269` (working tree re-inspected 2026-07-29).
+- [verified] Primary product and standards sources converge on server-enforced
+  roles/grants, purpose-specific short-lived credentials, explicit lifecycle, and
+  visible active state. Confidence: high.
+  - Sources: Jitsi/Signal/Zoom/Cloudflare/LiveKit/RFC comparison sources in section
+    A and Claude Code/Tailscale/Cloudflare/Signal UX sources in section B; publisher
+    dates and access date 2026-07-29 are recorded in those tables.
+- [inference] The current best design is a protocol-v6 opaque stateful capability,
+  separate coach key, fixed route matrix, targeted non-replayed cue lane, 30-minute
+  TTL, individual revocation, and a dedicated idempotent `/coach` lifecycle.
+  Confidence: high on the boundary and flow; medium on exact timeout values.
+  - Derived from: the P0/P1 decisions and their cited evidence in sections A/B.
+- [open] Remaining measurements are real-user comprehension of the rights copy, QR
+  scan completion rate, whether 30 minutes fits common shoots, and false revocation
+  from the proposed five-minute disconnected grace. Validate these before promoting
+  P1 defaults.
+  - Source: these are explicitly unmeasured design parameters, identified during
+    the 2026-07-29 evidence-to-design review; no product-data claim is made.
+- [verified] Baseline relay tests passed 29 tests, 0 failed, and 203 assertions.
+  - Source: `rtk bun test test/relay-worker.test.ts test/remote-relay.test.ts`, rerun
+    against the current working tree on 2026-07-29 (exit 0, 3.32 s).
+- [verified] Every non-placeholder external URL except Signal returned HTTP 200
+  after redirects. Signal's official page was read successfully through the web
+  reader but returned 403 to a generic `curl` client; its cited lifecycle facts came
+  from the fetched page rather than a search snippet.
+  - Sources: parallel URL audit and direct Signal page fetch, rerun 2026-07-29.
