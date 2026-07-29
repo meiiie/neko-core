@@ -2171,7 +2171,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const prompt = recent.length
           ? `${COACH_PROMPT}\nYou already said (do not repeat, build on them): ${recent.join(" | ")}`
           : COACH_PROMPT;
-        const cue = (await describeImage(cfg, dataUrl, undefined, undefined, prompt)).trim().replace(/^["']|["']$/g, "");
+        // "low" effort: a posing cue is a glance, not a deliberation - and the person is HOLDING a
+        // pose while we think. Measured live 2026-07-29: a reasoning-heavy look cost ~21s, which is
+        // useless at the scene (target: first cue p50 <= 2s).
+        // The AGENT's provider is passed in deliberately: it is already warm (for the ChatGPT route
+        // that means a running app-server with a live login), while resolving a fresh provider per
+        // frame paid process spawn + login + thread start on every single glance.
+        const warm = cfg.vision ? agentRef.current!.currentProvider() : undefined;
+        const cue = (await describeImage(cfg, dataUrl, undefined, warm, prompt, "low")).trim().replace(/^["']|["']$/g, "");
         if (!cue) return;
         coachCuesRef.current = [...coachCuesRef.current.slice(-5), cue];
         relayRef.current?.publish({ type: "cue", text: cue.slice(0, 200) }); // non-durable: live only

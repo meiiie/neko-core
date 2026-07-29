@@ -40,3 +40,14 @@ Use image-gen only when a diagram would materially clarify a pose. Generate at m
 Google Camera Coach (2025) is product evidence for scene-based lighting/framing guidance. PhotoFramer (CVPR 2026) supports text plus synthetic composition exemplars. ShutterMuse (preprint, 2026-06-24) directly studies photographer-side framing and scene-conditioned pose recommendation, but is not peer-reviewed. Do not claim an on-device, bias-tested, real-time group portrait coach has been scientifically validated.
 
 Evidence basis (accessed 2026-07-29): Peter Hurley official jawline/squinch videos (2012-02-16, https://www.youtube.com/watch?v=Qe3oJnFtA_k; 2013-11-20, https://www.youtube.com/watch?v=ff7nltdBCHs); Lindsay Adler Posing Series (n.d., https://learn.lindsayadlerphotography.com/product/the-posing-series/); Sue Bryce posing rules (n.d., https://www.creativelive.com/class/28-days-portrait-photography-sue-bryce/lessons/day-7-the-rules-chin-shoulders-hands); Adobe decluttering guidance (2021-10-10, https://research.adobe.com/publication/dynamic-guidance-for-decluttering-photographic-compositions/); Google Camera Coach (2025-09-03, https://blog.google/products-and-platforms/devices/pixel/how-to-use-camera-coach/); PhotoFramer/CVPR 2026 (https://openaccess.thecvf.com/content/CVPR2026/html/You_PhotoFramer_Multi-modal_Image_Composition_Instruction_CVPR_2026_paper.html); ShutterMuse preprint (2026-06-24, https://arxiv.org/abs/2606.25763).
+
+### Live camera coach (measured, 2026-07-29)
+
+Neko can watch the frame live: on the phone open `<relay>/camera` from the pairing link, tap Start,
+and each snapshot returns ONE spoken Vietnamese cue. Measured round trip (phone frame -> cue on the
+phone) on the ChatGPT/GPT-5.6 route: **21.9s naive -> 12.0s with a phone-sized frame + low effort ->
+7.9s reusing the warm provider**. That is usable for held poses, not for continuous motion.
+
+For a faster lane, set a small dedicated VLM in config (`"vision_model": "<fast vision model>"`):
+the coach prefers it automatically, and a nano-class VLM answers in ~1-2s. State the real latency to
+the group ("mình sẽ nhắc sau mỗi vài giây") instead of pretending it is instant.

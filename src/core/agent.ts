@@ -136,6 +136,10 @@ export class Agent {
 
   /** Swap the LLM provider live (used by the REPL's /provider command to switch endpoint+key between turns,
    * no restart). Safe because commands run between turns, never mid-complete(). */
+  /** The live provider. Exposed so a side-channel look (the live camera coach) can reuse the WARM
+   * connection instead of standing up a second one per glance. */
+  currentProvider(): Provider { return this.provider; }
+
   setProvider(provider: Provider): void {
     const previous = this.provider;
     this.provider = provider;

@@ -30,10 +30,15 @@ export async function describeImage(
   signal?: AbortSignal,
   providerOverride?: Provider, // tests inject a double; production resolves from config
   prompt: string = IMAGE_READ_PROMPT, // callers with a different job (the live pose coach) bring their own eyes-instruction
+  effort?: string, // "low" for latency-bound looks (the live coach); undefined keeps the route's default
 ): Promise<string> {
+  // A pre-pass model is needed only when the MAIN model is blind. On a vision-capable route
+  // (`vision: true` - e.g. the ChatGPT/GPT-5.6 profile) asking for `vision_model` was a false
+  // requirement: it made the live camera coach silently produce nothing on exactly the profile that
+  // can see best (found by running the real lane end to end, 2026-07-29).
   const vm = cfg.visionModel;
-  if (!vm) throw new Error("no vision_model configured");
-  const provider = providerOverride ?? getProvider(cfg.withModel(vm));
+  if (!vm && !cfg.vision) throw new Error("no vision_model configured, and the active model cannot see");
+  const provider = providerOverride ?? getProvider(vm ? cfg.withModel(vm) : cfg);
   const res = await provider.complete(
     [{
       role: "user",
@@ -45,6 +50,7 @@ export async function describeImage(
     [],
     undefined,
     signal,
+    effort ? { reasoningEffort: effort } : undefined,
   );
   const text = (res.content ?? "").trim();
   if (!text) throw new Error(`vision model ${vm} returned no text`);
