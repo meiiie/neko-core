@@ -6,6 +6,27 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.20.1] — 2026-07-29
+
+### Fixed
+
+- **The camera coach actually speaks now.** Running the whole lane for real (phone → relay → Neko →
+  cue) found it silent on the best profile: the coach demanded a separate `vision_model` even when
+  your main model can already see (GPT-5.6). It now uses the model you are on.
+- **A cue arrives in ~8 seconds instead of ~22.** Phone-sized frames, a glance-level reasoning
+  effort, and reusing the already-running connection (each frame used to spin up a whole new
+  provider: process, login, thread). Set `"vision_model"` to a small vision model for a ~1–2s lane.
+- **Each conversation gets its OWN camera link.** `/relay` now prints
+  `…/camera/<session>#…` beside the session link, and the phone reads the session from the path —
+  a coach link for one conversation can never reach another. (The bare `/camera` page remains inert
+  without pairing keys.)
+- **End-to-end sealing is now strict.** A paired session used to accept UNSEALED payloads, so a
+  bearer token alone — without your E2E secret — could drive Neko. Paired means sealed, period;
+  verified on the wire, not just in tests. Pairing components moved 96 → 128 bits.
+- **Prominent capture disclosure.** While frames are being sent, the phone shows an unmissable live
+  badge, and leaving the tab or locking the phone releases the camera at once.
+
+
 ## [0.20.0] — 2026-07-29
 
 ### Added

@@ -1740,7 +1740,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           const qr = qrMatrix(pair);
           if (qr) addLine("info", qrToText(qr).split("\n").map((l) => "  " + l).join("\n"), undefined, false);
         }
-        addLine("info", `open this session: ${pair}\n  /relay qr: show code  /relay new: rotate${hub ? "" : "  /relay hub: session switcher"}`, undefined, false);
+        const cameraLink = `${base}/camera/${encodeURIComponent(pairing.session)}#t=${pairing.token}&k=${pairing.secret}`;
+        addLine("info", `open this session: ${pair}\n  camera coach (posing cues on the phone): ${cameraLink}\n  /relay qr: show code  /relay new: rotate${hub ? "" : "  /relay hub: session switcher"}`, undefined, false);
       } catch (e) {
         addLine("error", `relay failed to start: ${e instanceof Error ? e.message : String(e)}`);
       }

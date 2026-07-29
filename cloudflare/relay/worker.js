@@ -66,7 +66,9 @@ export default {
     if (url.pathname === "/" || url.pathname === "/client" || /^\/(?:session|hub)\/[^/]+\/?$/.test(url.pathname)) {
       return clientResponse(request);
     }
-    if (url.pathname === "/camera") {
+    // /camera/<session> carries the SAME per-conversation capability as /session/<id>: each Neko
+    // conversation gets its own camera link, so one shared coach link never grants another session.
+    if (url.pathname === "/camera" || /^\/camera\/[^/]+\/?$/.test(url.pathname)) {
       return cameraResponse(request);
     }
     const session = url.searchParams.get("session") || (await peekSession(request));

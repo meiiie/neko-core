@@ -77,7 +77,11 @@
   try {
     const saved = JSON.parse(localStorage.nekoRelayPairings || "{}");
     const h = new URLSearchParams(location.hash.length > 1 ? location.hash.slice(1) : "");
-    session = h.get("s") || localStorage.nekoSession || "";
+    // Per-conversation capability: /camera/<session> names the session in the PATH (same shape as
+    // /session/<id>), the token+secret ride the fragment. localStorage is only the last resort, so a
+    // link for one conversation can never silently coach another.
+    const routed = location.pathname.match(/^\/camera\/([^/]+)\/?$/);
+    session = (routed ? decodeURIComponent(routed[1]) : "") || h.get("s") || localStorage.nekoSession || "";
     token = h.get("t") || (saved[session] && saved[session].token) || localStorage.nekoToken || "";
     secret = h.get("k") || (saved[session] && saved[session].secret) || localStorage.nekoSecret || "";
     hostSel = h.get("h") || localStorage.nekoCoachHost || "";
