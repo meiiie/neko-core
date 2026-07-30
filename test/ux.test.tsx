@@ -579,15 +579,18 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
 
 test("reasoning shows live while busy, clears when done", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Reasoner()} />);
-  await tick();
-  c.stdin.write("go");
-  await tick(20);
-  c.stdin.write("\r");
-  expect(await until(c, (f) => f.includes("let me think hard"))).toBe(true); // shown mid-turn
-  expect(await until(c, (f) => f.includes("the answer"))).toBe(true); // final answer lands
-  expect(strip(c.lastFrame())).not.toContain("let me think hard"); // thinking cleared when done
-  c.unmount();
-});
+  try {
+    await tick();
+    c.stdin.write("go");
+    await tick(20);
+    c.stdin.write("\r");
+    expect(await until(c, (f) => f.includes("let me think hard"))).toBe(true); // shown mid-turn
+    expect(await until(c, (f) => f.includes("the answer"))).toBe(true); // final answer lands
+    expect(strip(c.lastFrame())).not.toContain("let me think hard"); // thinking cleared when done
+  } finally {
+    c.unmount();
+  }
+}, 15_000);
 
 test("post-turn run-time line + placeholder drops after first turn", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
@@ -629,14 +632,16 @@ test("slash menu autocompletes as you type", async () => {
 
 test("/help lists the command set", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
-  await tick();
-  c.stdin.write("/help");
-  await tick(20);
-  c.stdin.write("\r");
-  await tick(60);
-  expect(strip(c.frames.join("\n"))).toContain("Commands:");
-  c.unmount();
-});
+  try {
+    await tick();
+    c.stdin.write("/help");
+    await tick(20);
+    c.stdin.write("\r");
+    expect(await until(c, (f) => f.includes("Commands:"))).toBe(true);
+  } finally {
+    c.unmount();
+  }
+}, 15_000);
 
 test("error lines render with a visible marker (not a dim info line)", () => {
   const f = strip(render(<TranscriptLine line={{ id: 1, kind: "error", text: "HTTP 500" }} cfg={CFG} />).lastFrame());

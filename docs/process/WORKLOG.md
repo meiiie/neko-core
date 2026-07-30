@@ -78,7 +78,11 @@ harness deadline (production connect deadlines are unchanged) and passed 10/10 l
 exact-head pass completed the state policy: workflow/playbook output also stays expanded, while `(no matches)`,
 `(no files)`, and `(empty)` deterministically count as zero instead of one. A seventh exact-head pass found the
 scroll-away jump pill counted expanded `tool_call` failures but skipped folded successful `tool_result` activity.
-One shared counter now treats each semantic activity as exactly one in both representations.
+One shared counter now treats each semantic activity as exactly one in both representations. The following Windows
+full-suite run exposed a cascading harness failure: `reasoning` and `/help` inherited Bun's 5-second ceiling and did
+not unmount on timeout, leaving Ink's renderer to return empty frames to seven later tests. Both root tests now poll
+semantic state, unmount in `finally`, use a 15-second harness ceiling, and passed 10/10 stress rounds; production
+render timing is unchanged.
 
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 
