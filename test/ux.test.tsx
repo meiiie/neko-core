@@ -145,6 +145,30 @@ test("TranscriptViewer opens at the bottom, then type-to-search filters", async 
   c.unmount();
 });
 
+test("TranscriptViewer classifies SGR pointer reports before search text", async () => {
+  const lines: Line[] = [];
+  lines.push({ id: 0, kind: "user", text: "NEEDLE unique marker" });
+  for (let i = 1; i < 80; i++) lines.push({ id: i, kind: i % 2 ? "assistant" : "user", text: `message number ${i}` });
+  const c = render(<TranscriptViewer lines={lines} cols={80} rows={20} onClose={() => {}} />);
+
+  c.stdin.write("\x1b[<64;40;10M");             // wheel up; Ink strips ESC before useInput
+  c.stdin.write("[<35;41;10M");                 // motion already stripped by Ink
+  c.stdin.write("[<66;41;10M[<67;41;10M");     // horizontal wheel is consumed without vertical remapping
+  c.stdin.write("[<0;41;10M[<0;41;10m");       // press + release burst
+  c.stdin.write("[<64;41;10M[<65;41;10M");     // cancelling wheel burst is still pointer input
+
+  await tick(100);
+  const afterPointer = strip(c.lastFrame());
+  expect(afterPointer).toContain("80 entries");
+  expect(afterPointer).not.toContain(" · end");
+  expect(afterPointer).not.toContain("[<");
+  expect(afterPointer).not.toContain("found 0");
+
+  c.stdin.write("NEEDLE");
+  expect(await until(c, (fr) => /found 1/.test(fr) && /NEEDLE unique marker/.test(fr))).toBe(true);
+  c.unmount();
+});
+
 test("/transcript opens the full-thread viewer over the resumed session", async () => {
   const s: any = { id: "t", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [
     { role: "user", content: "first earlier question" },

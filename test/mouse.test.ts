@@ -24,6 +24,8 @@ test("parseWheelAll: SGR wheel up/down with counts, ignoring clicks and modifier
   expect(parseWheelAll("\x1b[<2;10;5M")).toBe(null);   // right click
   expect(parseWheelAll("\x1b[<68;10;5M")).toEqual({ dir: "up", count: 1 });   // wheel-up + shift
   expect(parseWheelAll("\x1b[<81;10;5M")).toEqual({ dir: "down", count: 1 }); // wheel-down + ctrl
+  expect(parseWheelAll("\x1b[<66;10;5M")).toBe(null);                         // horizontal left is not vertical
+  expect(parseWheelAll("\x1b[<83;10;5M")).toBe(null);                         // horizontal right + ctrl
   expect(parseWheelAll("hello")).toBe(null);
   expect(parseWheelAll("\x1b[A")).toBe(null);          // arrow key, not mouse
   expect(parseWheelAll("[<64;10;5M")).toEqual({ dir: "up", count: 1 }); // ESC stripped by Ink

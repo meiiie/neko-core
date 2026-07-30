@@ -45,8 +45,10 @@ export function parseWheelAll(input: string): { dir: "up" | "down"; count: numbe
   let up = 0, down = 0, m: RegExpExecArray | null;
   while ((m = re.exec(input))) {
     const cb = parseInt(m[1], 10);
-    if ((cb & 64) === 0) continue; // bit 6 marks a wheel event; 64 = up, 65 = down (low bit)
-    if ((cb & 1) === 0) up++; else down++;
+    const button = cb & ~(4 | 8 | 16); // remove Shift/Meta/Ctrl, preserve the reported wheel button
+    if (button === 64) up++;
+    else if (button === 65) down++;
+    // 66/67 are horizontal-wheel reports: the pointer guard consumes them without vertical scrolling.
   }
   const net = up - down;
   if (net === 0) return null; // no wheel events, or an exactly-cancelling burst
