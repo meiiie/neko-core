@@ -102,6 +102,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "context", group: "registry", summary: "Show global identity and project context files.", example: "neko context" },
   { name: "sessions", group: "config", summary: "List saved chat sessions.", example: "neko sessions" },
   { name: "skills", group: "registry", summary: "List available skills (~/.neko-core/skills).", example: "neko skills" },
+  { name: "procurement", group: "local", summary: "Run deterministic sourcing helpers bundled in the standalone binary.", example: "neko procurement source-plan 83KY001VVN --category laptop" },
   { name: "recipes", group: "registry", summary: "List runnable recipes (~/.neko-core/recipes).", example: "neko recipes" },
   { name: "mcp", group: "registry", summary: "List configured MCP servers and their tools.", example: "neko mcp" },
   { name: "support", group: "config", summary: "Inspect or manage optional local support packs.", example: "neko support meeting status" },

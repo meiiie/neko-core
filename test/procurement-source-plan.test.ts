@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const modulePath = join(import.meta.dir, "..", "skills", "procurement", "scripts", "source-plan.ts");
+const commandPath = join(import.meta.dir, "..", "src", "adapters", "procurement-cli.ts");
+const nekoCliPath = join(import.meta.dir, "..", "bin", "neko.ts");
 
 test("exact-SKU cascade expands 83KY001VVN across independent laptop sources", async () => {
   // Keep the first RED run an assertion failure for the missing feature instead of a module-loader error.
@@ -93,11 +95,35 @@ test("source-plan CLI formatters are ASCII-safe while parsed JSON preserves Unic
   expect(stderr).toContain("\\u001b");
 });
 
-test("bundled planner usage does not depend on the repo-only rtk wrapper", () => {
+test("source-tree planner usage does not depend on the repo-only rtk wrapper", () => {
   const source = readFileSync(modulePath, "utf8");
   expect(source).toContain("Usage: bun source-plan.ts");
   expect(source).toContain("usage: bun source-plan.ts");
   expect(source).toContain("--kind auto|sku|mpn|gtin");
   expect(source).not.toContain("Usage: rtk bun source-plan.ts");
   expect(source).not.toContain("usage: rtk bun source-plan.ts");
+});
+
+test("standalone Neko exposes the deterministic source planner without Bun", async () => {
+  expect(existsSync(commandPath)).toBe(true);
+  if (!existsSync(commandPath)) return;
+
+  const { procurementSourcePlanCommand } = await import(commandPath);
+  const result = procurementSourcePlanCommand({
+    identifier: "83KY001VVN",
+    category: "laptop",
+    kind: "auto",
+    domains: ["ankhang.vn"],
+  });
+  expect(result.exitCode).toBe(0);
+  expect(JSON.parse(result.stdout ?? "{}").sku).toBe("83KY001VVN");
+  const missing = procurementSourcePlanCommand({});
+  expect(missing.exitCode).toBe(2);
+  expect(missing.stderr).toContain("neko procurement source-plan");
+
+  const { listCommands } = await import(join(import.meta.dir, "..", "src", "adapters", "registry.ts"));
+  expect(listCommands().some((command: { name: string }) => command.name === "procurement")).toBe(true);
+  const cli = readFileSync(nekoCliPath, "utf8");
+  expect(cli).toContain('case "procurement"');
+  expect(cli).toContain("procurementSourcePlanCommand");
 });

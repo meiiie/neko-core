@@ -27,11 +27,14 @@ or stopping condition executable.
   verifies a valid timer handle of `0` is cancelled.
 - Review hardening validates GTIN check digits at all four standard lengths, rejects separator-form GPU/CPU
   labels, exposes qualified highest and lowest claims, keeps CLI bytes ASCII-safe for cp1252 while parsed
-  JSON remains Unicode, keeps installed-skill commands free of the repo-only `rtk` wrapper, and lets sparse
-  one/two-offer results finish. Explicit kinds accept source-labelled numeric/letter-only SKUs and
-  letter-only/`#` MPNs without weakening strict auto-mode rejection of broad descriptions or price-like numbers.
+  JSON remains Unicode, and lets sparse one/two-offer results finish. Explicit kinds accept source-labelled
+  numeric/letter-only SKUs and letter-only/`#` MPNs without weakening strict auto-mode rejection of broad
+  descriptions or price-like numbers.
+- `neko procurement source-plan` now exposes the planner through the standalone binary, without repo-only
+  `rtk` or an unshipped Bun runtime. Image discovery uses the existing platform-neutral
+  `neko run --profile nvidia --image` vision pre-pass instead of POSIX-only environment syntax.
 
-Evidence: current + stable TypeScript clean; **908/908 tests, 4,014 assertions across 97 files**; doctor and policy
+Evidence: current + stable TypeScript clean; **909/909 tests, 4,023 assertions across 97 files**; doctor and policy
 PASS; clean production build + UI/input probes PASS; focused secret scan and `git diff --check` clean.
 
 ## 2026-07-29 - v0.20.0: photography end to end, research-first

@@ -142,8 +142,8 @@ attention to highest/lowest-price claims.
 3. The planner exposes qualified highest and lowest claims, and its Windows CLI output stays ASCII-safe
    while parsed JSON preserves the internal Vietnamese query.
 4. The procurement skill puts the identifier cascade and completion contract before detailed tactics,
-   invokes the bundled planner through the guaranteed Bun runtime rather than a repo-only wrapper, and
-   allows all available exact matches when fewer than three candidates exist.
+   invokes the planner through the standalone `neko procurement source-plan` surface, and allows all
+   available exact matches when fewer than three candidates exist.
 5. Unit tests fail before each planner/contract behavior exists, then pass after implementation.
 6. The repository's typecheck, full test suite, doctor, policy, and build gates pass.
 7. A post-change live run must either find the previously missed exact-SKU sources or explicitly expose
