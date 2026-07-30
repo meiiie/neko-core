@@ -71,7 +71,10 @@ that first audit: screenshot metadata preceding the no-vision diagnostic, and a 
 Both now stay expanded, with independent RED/GREEN regressions built from the runtime's exact output. A fifth
 exact-head pass exposed a broader feature-state case: memory-disabled/no-op text had no durable structured error bit.
 Memory activity is therefore intentionally never folded; its short state/result stays visible whether enabled or off,
-which removes that string-classification ambiguity instead of adding another one-off failure regex.
+which removes that string-classification ambiguity instead of adding another one-off failure regex. The next Windows
+CI run exposed one remaining harness-only ceiling: an MCP fixture cold spawn took 5.28 seconds while two process-
+integration tests still inherited Bun's 5-second default. All MCP process tests now share the existing 60-second
+harness deadline (production connect deadlines are unchanged) and passed 10/10 local stress rounds.
 
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 

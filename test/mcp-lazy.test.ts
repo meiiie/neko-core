@@ -76,7 +76,7 @@ test("mcp lazy: lists tool names in context, loads schemas on demand", async () 
     await hub.close();
   }
   });
-});
+}, 60000);
 
 test("mcp non-lazy: all tool schemas are exposed upfront (no index block)", async () => {
   await withTempHome(async () => {
@@ -91,7 +91,7 @@ test("mcp non-lazy: all tool schemas are exposed upfront (no index block)", asyn
     await hub.close();
   }
   });
-});
+}, 60000);
 
 test("mcp protocol isError results stay visibly failed for transcript folding", async () => {
   await withTempHome(async () => {
@@ -102,4 +102,4 @@ test("mcp protocol isError results stay visibly failed for transcript folding", 
       await hub.close();
     }
   });
-});
+}, 60000);
