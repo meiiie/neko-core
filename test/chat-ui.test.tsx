@@ -130,6 +130,8 @@ test("non-success activity stays expanded instead of folding into false success"
   expect(resultSummary("mcp_load", "No matching MCP tools for: missing. Check the names.", {})).toBeUndefined();
   expect(resultSummary("task", "Sub-agents are not available in this context.", {})).toBeUndefined();
   expect(resultSummary("task", "Sub-agent error: worker crashed", {})).toBeUndefined();
+  expect(resultSummary("write_file", "[interrupted while this tool call was in flight; outcome unknown. Inspect actual state before any retry.]", { path: "x.ts" })).toBeUndefined();
+  expect(resultSummary("edit", "[recovery] That edit FAILED. Don't blindly re-run it; inspect actual state.", { path: "x.ts" })).toBeUndefined();
   expect(resultSummary("write_file", "Tool 'write_file' is disabled (enable with /tools write_file).", { path: "x.ts" })).toBeUndefined();
   expect(resultSummary("computer", "Unknown computer action 'bogus'. Use: list | read.", { action: "bogus" })).toBeUndefined();
   expect(resultSummary("read_file", "[PDF scan.pdf] - no extractable text (needs OCR or a vision model).", { path: "scan.pdf" })).toBeUndefined();

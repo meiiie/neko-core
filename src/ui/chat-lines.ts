@@ -24,6 +24,8 @@ export function isToolFailure(obs: string): boolean {
     || /\(exit \d+ -- command FAILED\)/.test(obs)
     || /^\((?:timed out|interrupted|no skill\b)/i.test(text)
     || /^\[loop guard\]/im.test(text)
+    || /^\[interrupted while this tool call was in flight\b/i.test(text)
+    || /^\[recovery\].*\bFAILED\b/i.test(text)
     || /^The user did NOT approve the plan\b/i.test(text)
     || /^No matching MCP tools\b/i.test(text)
     || /^Sub-agents are not available\b/i.test(text)
