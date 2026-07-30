@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 /**
- * Deterministic exact-SKU query planner.
+ * Deterministic exact-identifier query planner.
  *
  * Broad search discovers candidates; this helper makes the identifier-triggered pivot executable:
- * one exact open-web query, one SKU index URL, and one query per independent retailer domain.
+ * one exact open-web query, one identifier index URL, and one query per independent retailer domain.
  * It deliberately emits no multi-domain OR query because weak fallback engines often return no results.
  *
- * Usage: bun source-plan.ts <sku> [--category laptop|phone|pc|generic] [--domain example.vn ...]
+ * Usage: rtk bun source-plan.ts <identifier> [--category laptop|phone|pc|generic] [--domain example.vn ...]
  */
 
 export type ProcurementCategory = "laptop" | "phone" | "pc" | "generic";
@@ -25,7 +25,10 @@ export interface SkuSourcePlan {
   coverage: {
     requiredChannels: ["index", "open_web", "retailer"];
     receiptFields: ["channel", "target", "status", "evidence"];
-    incompleteClaim: string;
+    incompleteClaims: {
+      highest: string;
+      lowest: string;
+    };
   };
 }
 
@@ -79,11 +82,23 @@ const CATEGORY_DOMAINS: Record<ProcurementCategory, readonly string[]> = {
   ],
 };
 
+function isValidGtin(value: string): boolean {
+  if (!/^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(value)) return false;
+  const digits = [...value].map(Number);
+  const checkDigit = digits.pop()!;
+  let sum = 0;
+  for (let i = digits.length - 1, weight = 3; i >= 0; i--, weight = weight === 3 ? 1 : 3) {
+    sum += digits[i] * weight;
+  }
+  return (10 - (sum % 10)) % 10 === checkDigit;
+}
+
 function normalizeSku(raw: string): string {
   const sku = raw.trim().toUpperCase();
   const alphaNumericId = /^[A-Z0-9][A-Z0-9._/-]{2,63}$/.test(sku) && /[A-Z]/.test(sku) && /\d/.test(sku);
-  const numericGtin = /^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(sku);
-  const componentOnly = /^(?:RTX|GTX|U|CORE|RYZEN)\s*-?\d+[A-Z]*$/i.test(sku);
+  const numericGtin = isValidGtin(sku);
+  const compact = sku.replace(/[._/-]+/g, "");
+  const componentOnly = /^(?:(?:RTX|GTX|U)\d+[A-Z]*|CORE(?:I[3579]|ULTRA)?\d+[A-Z]*|RYZEN[3579]?\d+[A-Z]*)$/.test(compact);
   if (!(alphaNumericId || numericGtin) || componentOnly) {
     throw new Error(`SKU/GTIN không hợp lệ: ${raw || "(trống)"}`);
   }
@@ -131,9 +146,25 @@ export function buildSkuSourcePlan(
     coverage: {
       requiredChannels: ["index", "open_web", "retailer"],
       receiptFields: ["channel", "target", "status", "evidence"],
-      incompleteClaim: "cao nhất đã xác minh trong các nguồn đã khảo sát",
+      incompleteClaims: {
+        highest: "cao nhất đã xác minh trong các nguồn đã khảo sát",
+        lowest: "thấp nhất đã xác minh trong các nguồn đã khảo sát",
+      },
     },
   };
+}
+
+function asciiSafe(value: string, preserveFormatting = false): string {
+  const unsafe = preserveFormatting ? /[^\x09\x0a\x0d\x20-\x7e]/g : /[^\x20-\x7e]/g;
+  return value.replace(unsafe, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
+export function serializePlan(plan: SkuSourcePlan): string {
+  return asciiSafe(JSON.stringify(plan, null, 2), true);
+}
+
+export function formatCliError(error: unknown): string {
+  return asciiSafe(error instanceof Error ? error.message : String(error));
 }
 
 function flag(name: string): string[] {
@@ -147,14 +178,14 @@ function flag(name: string): string[] {
 if (import.meta.main) {
   const sku = process.argv[2];
   if (!sku) {
-    console.error("usage: bun source-plan.ts <sku> [--category laptop|phone|pc|generic] [--domain example.vn ...]");
+    console.error("usage: rtk bun source-plan.ts <identifier> [--category laptop|phone|pc|generic] [--domain example.vn ...]");
     process.exit(2);
   }
   const category = (flag("--category")[0] ?? "generic") as ProcurementCategory;
   try {
-    console.log(JSON.stringify(buildSkuSourcePlan(sku, category, flag("--domain")), null, 2));
+    console.log(serializePlan(buildSkuSourcePlan(sku, category, flag("--domain"))));
   } catch (error) {
-    console.error((error as Error).message);
+    console.error(formatCliError(error));
     process.exit(2);
   }
 }

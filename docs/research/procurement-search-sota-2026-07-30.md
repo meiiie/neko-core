@@ -136,12 +136,16 @@ attention to highest/lowest-price claims.
    - separate FPT Shop and An Khang `site:` queries;
    - no query containing multi-domain `OR`;
    - no coupling to a previously observed merchant unless that merchant is one independent domain row.
-2. Case-variant identifiers and duplicate/case-variant domain inputs are normalized without losing the identifier.
-3. The procurement skill puts the identifier cascade and completion contract before detailed tactics,
-   invokes the bundled planner for top price candidates, and requires a coverage-qualified final claim.
-4. Unit tests fail before the planner exists, then pass after implementation.
-5. The repository's typecheck, full test suite, doctor, policy, and build gates pass.
-6. A post-change live run must either find the previously missed exact-SKU sources or explicitly expose
+2. Case-variant identifiers and duplicate/case-variant domain inputs are normalized without losing the identifier;
+   numeric GTINs require a valid check digit, and component labels are rejected even with separators.
+3. The planner exposes qualified highest and lowest claims, and its Windows CLI output stays ASCII-safe
+   while parsed JSON preserves the internal Vietnamese query.
+4. The procurement skill puts the identifier cascade and completion contract before detailed tactics,
+   invokes the bundled planner through `rtk`, and allows all available exact matches when fewer than
+   three candidates exist.
+5. Unit tests fail before each planner/contract behavior exists, then pass after implementation.
+6. The repository's typecheck, full test suite, doctor, policy, and build gates pass.
+7. A post-change live run must either find the previously missed exact-SKU sources or explicitly expose
    their coverage status and avoid an absolute Vietnam-wide maximum claim.
 
 ## Post-change regression evidence

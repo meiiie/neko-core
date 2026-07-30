@@ -33,7 +33,8 @@ test("exact-SKU cascade expands 83KY001VVN across independent laptop sources", a
   expect(new Set(retailerQueries.map((row: { domain: string }) => row.domain)).size).toBe(retailerQueries.length);
   expect(plan.queries.every((row: { query: string }) => !/\sOR\s/i.test(row.query))).toBe(true);
   expect(plan.coverage.requiredChannels).toEqual(["index", "open_web", "retailer"]);
-  expect(plan.coverage.incompleteClaim).toContain("cao nhất đã xác minh trong các nguồn đã khảo sát");
+  expect(plan.coverage.incompleteClaims.highest).toContain("cao nhất đã xác minh trong các nguồn đã khảo sát");
+  expect(plan.coverage.incompleteClaims.lowest).toContain("thấp nhất đã xác minh trong các nguồn đã khảo sát");
 });
 
 test("exact-identifier cascade accepts a numeric GTIN", async () => {
@@ -41,9 +42,11 @@ test("exact-identifier cascade accepts a numeric GTIN", async () => {
   if (!existsSync(modulePath)) return;
 
   const { buildSkuSourcePlan } = await import(modulePath);
-  const plan = buildSkuSourcePlan("8806098697152", "generic");
-  expect(plan.sku).toBe("8806098697152");
-  expect(plan.indexUrl).toBe("https://websosanh.vn/s/8806098697152.htm");
+  for (const gtin of ["96385074", "036000291452", "4006381333931", "10012345000017"]) {
+    const plan = buildSkuSourcePlan(gtin, "generic");
+    expect(plan.sku).toBe(gtin);
+    expect(plan.indexUrl).toBe(`https://websosanh.vn/s/${gtin}.htm`);
+  }
 });
 
 test("source plan rejects an empty or non-identifier SKU", async () => {
@@ -51,8 +54,20 @@ test("source plan rejects an empty or non-identifier SKU", async () => {
   if (!existsSync(modulePath)) return;
 
   const { buildSkuSourcePlan } = await import(modulePath);
-  for (const value of ["", "   ", "laptop", "RTX5070"]) {
+  for (const value of ["", "   ", "laptop", "RTX5070", "RTX-5070-TI", "CORE-I7-14700K", "12345678", "31990000"]) {
     expect(() => buildSkuSourcePlan(value, "laptop")).toThrow("SKU");
   }
   expect(() => buildSkuSourcePlan("83KY001VVN", "__proto__" as never)).toThrow("Danh mục");
+});
+
+test("source-plan CLI formatters are ASCII-safe while parsed JSON preserves Unicode", async () => {
+  const { buildSkuSourcePlan, formatCliError, serializePlan } = await import(modulePath);
+  const stdout = serializePlan(buildSkuSourcePlan("83KY001VVN", "laptop"));
+  expect([...stdout].every((char) => char.charCodeAt(0) <= 0x7f)).toBe(true);
+  expect(JSON.parse(stdout).queries[0].query).toBe('"83KY001VVN" giá');
+
+  const stderr = formatCliError(new Error("SKU/GTIN không hợp lệ: BAD\u001bSKU"));
+  expect([...stderr].every((char) => char.charCodeAt(0) <= 0x7f)).toBe(true);
+  expect(stderr).not.toContain("\u001b");
+  expect(stderr).toContain("\\u001b");
 });

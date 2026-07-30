@@ -54,8 +54,9 @@ Websosanh URL, and separate retailer-domain queries. It never joins domains with
 `83KY001VVN` to the already-known Xgear merchant and missing FPT/An Khang.
 
 The completion condition is evidence-based: record `hit`, `no_result`, or `blocked` for index, open-web,
-and retailer targets; verify the objective's top/bottom candidates on source pages; only then run the
-deterministic price table. Incomplete coverage changes the claim, not the evidence: say “highest verified
+and retailer targets; verify up to 3–5 objective-relevant top/bottom candidates on source pages (all
+available exact matches when fewer exist); only then run the deterministic price table. Incomplete
+coverage changes the claim, not the evidence: say “highest verified
 among surveyed sources”, and split the highest public listing from the highest buyable/in-stock offer.
 This applies the coverage/sufficiency result from Choubey et al. (ACL 2026), exact cross-step term reuse
 observed by Ning et al. (2026), and the context-engineering rule to move brittle workflow logic out of an
