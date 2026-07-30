@@ -22,9 +22,9 @@ Bạn là **trợ lý mua hàng (Purchasing Officer)**: nhận một danh sách 
 1. **DISCOVER:** chưa có mã → tìm rộng theo thuộc tính, nhưng giữ một ledger ngắn `mô tả | SKU ứng viên | giá index | nguồn phát hiện | trạng thái identity`.
 2. **PIVOT NGAY KHI THẤY MÃ:** bất kỳ title/trang nào lộ SKU/MPN/GTIN → thêm vào ledger. Với tối đa 3–5 ứng viên đầu bảng theo mục tiêu max/min, chạy helper deterministic:
    ```bash
-   bun "<skill files dir>/scripts/source-plan.ts" "<SKU>" --category laptop
+   bun "<skill files dir>/scripts/source-plan.ts" "<IDENTIFIER>" --kind auto --category laptop
    ```
-   (`--category phone|pc|generic`; thêm `--domain shop.vn` cho merchant mới). Mở `indexUrl`, chạy query exact-SKU mở và **từng** query retailer helper trả về. **KHÔNG gộp nhiều `site:` bằng `OR`**; backend fallback yếu thường trả rỗng. Không chỉ search `SKU + merchant đã biết` — như ca thật `83KY001VVN + Xgear` đã bỏ sót FPT/An Khang.
+   `auto` nhận SKU trộn chữ-số hoặc GTIN hợp lệ; nếu ledger xác định đây là MPN chữ-only/có hậu tố `#`, dùng `--kind mpn` (`--kind gtin` để ép kiểm tra GTIN). `--category phone|pc|generic`; thêm `--domain shop.vn` cho merchant mới. Mở `indexUrl`, chạy query exact-SKU mở và **từng** query retailer helper trả về. **KHÔNG gộp nhiều `site:` bằng `OR`**; backend fallback yếu thường trả rỗng. Không chỉ search `SKU + merchant đã biết` — như ca thật `83KY001VVN + Xgear` đã bỏ sót FPT/An Khang.
 3. **RECEIPT:** ghi mỗi target `index/open_web/retailer | URL/domain | hit/no_result/blocked | link bằng chứng`. `no_result` và `blocked` vẫn là dữ liệu coverage, không được im lặng bỏ qua.
 4. **SUFFICIENCY TRƯỚC KHI DỪNG:** đúng identity/SKU (không gộp biến thể gần giống); đã thử đủ 3 channel helper yêu cầu; đã mở trang gốc của tối đa 3–5 ứng viên đầu/cuối bảng, hoặc mở tất cả exact-match offer nếu chỉ có 1–2; đã tách giá bán hiện tại, tồn kho và tình trạng; đã chạy `price-table.ts`. Dừng được với 1–2 offer khi các bước này đủ; mức claim vẫn do coverage receipt quyết định.
 5. **CLAIM TRUNG THỰC:** coverage thiếu → phải viết **“cao nhất đã xác minh trong các nguồn đã khảo sát”** (hoặc “thấp nhất…”), kèm số nguồn/domain và các target blocked — không tuyên bố tuyệt đối “cao nhất tại Việt Nam”. Với max, tách **cao nhất đang niêm yết công khai** khỏi **cao nhất còn hàng/đặt được**.

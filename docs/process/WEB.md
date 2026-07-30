@@ -48,8 +48,10 @@ extract verbatim, compute in code.
 
 A broad product description is a discovery query, not a stable identity. Keep a small candidate ledger;
 when any result reveals a SKU/MPN/GTIN, pivot the top objective-relevant candidates through
-`skills/procurement/scripts/source-plan.ts`. The helper emits an exact lexical query, a SKU-specific
-Websosanh URL, and separate retailer-domain queries. It never joins domains with `OR`: dogfooding on
+`skills/procurement/scripts/source-plan.ts`. The helper emits an exact lexical query, an identifier-specific
+Websosanh URL, and separate retailer-domain queries. Its default `auto` mode accepts strict SKU/GTIN forms;
+pass `--kind mpn` for a source-labelled manufacturer part number such as a letter-only or `#`-suffixed
+MPN. It never joins domains with `OR`: dogfooding on
 2026-07-30 showed DuckDuckGo fallback returning no results for long multi-domain queries, then narrowing
 `83KY001VVN` to the already-known Xgear merchant and missing FPT/An Khang.
 

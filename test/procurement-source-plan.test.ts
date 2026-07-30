@@ -49,6 +49,17 @@ test("exact-identifier cascade accepts a numeric GTIN", async () => {
   }
 });
 
+test("exact-identifier cascade accepts explicitly typed MPN formats", async () => {
+  const { buildSkuSourcePlan } = await import(modulePath);
+  for (const mpn of ["LASERJET", "C9363W#140"]) {
+    const plan = buildSkuSourcePlan(mpn, "generic", [], "mpn");
+    expect(plan.sku).toBe(mpn);
+    expect(plan.identifierKind).toBe("mpn");
+    expect(plan.queries[0].query).toBe(`"${mpn}" giá`);
+  }
+  expect(() => buildSkuSourcePlan("LASERJET", "generic")).toThrow("SKU");
+});
+
 test("source plan rejects an empty or non-identifier SKU", async () => {
   expect(existsSync(modulePath)).toBe(true);
   if (!existsSync(modulePath)) return;
@@ -58,6 +69,8 @@ test("source plan rejects an empty or non-identifier SKU", async () => {
     expect(() => buildSkuSourcePlan(value, "laptop")).toThrow("SKU");
   }
   expect(() => buildSkuSourcePlan("83KY001VVN", "__proto__" as never)).toThrow("Danh mục");
+  expect(() => buildSkuSourcePlan("83KY001VVN", "laptop", [], "__proto__" as never)).toThrow("Loại định danh");
+  expect(() => buildSkuSourcePlan("RTX-5070-TI", "laptop", [], "mpn")).toThrow("SKU/MPN/GTIN");
 });
 
 test("source-plan CLI formatters are ASCII-safe while parsed JSON preserves Unicode", async () => {
@@ -76,6 +89,7 @@ test("bundled planner usage does not depend on the repo-only rtk wrapper", () =>
   const source = readFileSync(modulePath, "utf8");
   expect(source).toContain("Usage: bun source-plan.ts");
   expect(source).toContain("usage: bun source-plan.ts");
+  expect(source).toContain("--kind auto|sku|mpn|gtin");
   expect(source).not.toContain("Usage: rtk bun source-plan.ts");
   expect(source).not.toContain("usage: rtk bun source-plan.ts");
 });

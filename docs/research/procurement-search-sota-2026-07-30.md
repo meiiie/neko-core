@@ -137,7 +137,8 @@ attention to highest/lowest-price claims.
    - no query containing multi-domain `OR`;
    - no coupling to a previously observed merchant unless that merchant is one independent domain row.
 2. Case-variant identifiers and duplicate/case-variant domain inputs are normalized without losing the identifier;
-   numeric GTINs require a valid check digit, and component labels are rejected even with separators.
+   numeric GTINs require a valid check digit, component labels are rejected even with separators, and an explicit
+   MPN kind admits source-labelled letter-only/`#` formats without weakening auto-mode SKU validation.
 3. The planner exposes qualified highest and lowest claims, and its Windows CLI output stays ASCII-safe
    while parsed JSON preserves the internal Vietnamese query.
 4. The procurement skill puts the identifier cascade and completion contract before detailed tactics,

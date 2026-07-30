@@ -42,6 +42,7 @@ test("procurement makes the exact-SKU cascade executable before detailed tactics
   expect(skill.body).toContain("cao nhất đã xác minh trong các nguồn đã khảo sát");
   expect(skill.body).toContain('bun "<skill files dir>/scripts/source-plan.ts"');
   expect(skill.body).not.toContain('rtk bun "<skill files dir>/scripts/source-plan.ts"');
+  expect(skill.body).toContain("--kind mpn");
   expect(skill.body).toContain("env NEKO_MODEL=");
   expect(skill.body).not.toContain("rtk env NEKO_MODEL=");
   expect(skill.body).toContain("tối đa 3–5");
