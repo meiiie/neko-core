@@ -22,7 +22,8 @@ export function isToolFailure(obs: string): boolean {
   const text = obs.trimStart();
   return /^(Error|Blocked|Denied|Refused)/i.test(text)
     || /\(exit \d+ -- command FAILED\)/.test(obs)
-    || /^\((?:timed out|interrupted|no skill\b)/i.test(text);
+    || /^\((?:timed out|interrupted|no skill\b)/i.test(text)
+    || /^\[loop guard\]/im.test(text);
 }
 
 const short = (value: unknown, cap = 80) => {

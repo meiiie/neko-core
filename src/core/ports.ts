@@ -37,7 +37,8 @@ export interface CompleteOptions {
    * You Generate", arXiv 2604.00491). Best-effort: non-streaming responses may never fire it. */
   onToolCallReady?: (call: ToolCall) => void;
   /** Authoritative usage snapshot for the current complete() call, emitted before completion whenever
-   * the provider protocol exposes it. Display-only until ProviderResponse.usage is booked once. */
+   * the provider protocol exposes it. The Agent books ProviderResponse.usage on success, or the final
+   * live snapshot once if the provider rejects after already consuming billable tokens. */
   onUsage?: (usage: Usage) => void;
   /** Bidirectional providers (for example Codex App Server dynamic tools) can pause an in-flight
    * turn and ask the host to execute a tool. The Agent supplies its existing safeExecute boundary,

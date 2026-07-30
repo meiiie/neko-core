@@ -676,6 +676,7 @@ export class Agent {
         return task;
       };
       let response;
+      let latestUsage: Usage | undefined;
       // Before every provider call, publish the already-booked input plus this pending request's
       // context estimate. Providers without live usage still get a monotonic whole-turn meter; when
       // authoritative usage arrives below, it replaces this visibly approximate snapshot.
@@ -691,14 +692,17 @@ export class Agent {
         cached: this.cost.cachedTokens,
         calls: this.cost.calls,
       };
-      const publishUsage = (usage: Usage) => this.emit("usage", {
-        prompt_tokens: usageBase.prompt + (usage.prompt_tokens ?? 0),
-        completion_tokens: usageBase.completion + (usage.completion_tokens ?? 0),
-        total_tokens: usageBase.total + (usage.total_tokens ?? 0),
-        cached_tokens: usageBase.cached + (usage.cached_tokens ?? 0),
-        context_tokens: usage.context_tokens,
-        model_calls: usageBase.calls + Math.max(1, usage.model_calls ?? 1),
-      } satisfies Usage);
+      const publishUsage = (usage: Usage) => {
+        latestUsage = usage;
+        this.emit("usage", {
+          prompt_tokens: usageBase.prompt + (usage.prompt_tokens ?? 0),
+          completion_tokens: usageBase.completion + (usage.completion_tokens ?? 0),
+          total_tokens: usageBase.total + (usage.total_tokens ?? 0),
+          cached_tokens: usageBase.cached + (usage.cached_tokens ?? 0),
+          context_tokens: usage.context_tokens,
+          model_calls: usageBase.calls + Math.max(1, usage.model_calls ?? 1),
+        } satisfies Usage);
+      };
       try {
         response = await this.provider.complete(
           this.messages,
@@ -713,6 +717,9 @@ export class Agent {
           },
         );
       } catch (error) {
+        // A rejected/aborted provider call can still be billed. Its last authoritative live snapshot
+        // never reaches ProviderResponse.usage, so book it once here before the turn returns/throws.
+        this.cost.add(latestUsage);
         if (signal?.aborted) return "[interrupted]";
         throw error;
       }

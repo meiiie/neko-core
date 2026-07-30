@@ -289,7 +289,15 @@ test("an interrupted turn advances the cumulative baseline before the next turn"
     };
   };
   const provider = new ChatGptAppServerProvider(cfg, factory);
-  await expect(provider.complete([{ role: "user", content: "stop this" }])).rejects.toThrow();
+  const interruptedUsage: any[] = [];
+  await expect(provider.complete(
+    [{ role: "user", content: "stop this" }],
+    [],
+    undefined,
+    undefined,
+    { onUsage: (usage) => interruptedUsage.push(usage) },
+  )).rejects.toThrow();
+  expect(interruptedUsage.at(-1)).toMatchObject({ prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 });
   const second = await provider.complete([{ role: "user", content: "try again" }]);
   expect(second.usage).toMatchObject({ prompt_tokens: 40, completion_tokens: 10, total_tokens: 50 });
   provider.dispose();
