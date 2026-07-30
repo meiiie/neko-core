@@ -2,7 +2,7 @@
 /**
  * `neko` command-line entry point (TypeScript / Bun).
  *
- * Commands: config · doctor · profiles · init-user · init · chat · run
+ * Commands: config · doctor · profiles · init-user · init · procurement · chat · run
  * (chat/run are wired in later TS steps; config-first, offline-capable.)
  */
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -33,6 +33,7 @@ import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setA
 import { renderSessions } from "../src/adapters/session.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
 import { loadSkill, matchSkill, renderSkills, skillsContextBlock } from "../src/adapters/skills.ts";
+import { PROCUREMENT_SOURCE_PLAN_USAGE, procurementSourcePlanCommand } from "../src/adapters/procurement-cli.ts";
 import { coreMemoryBlock, memoryIndexBlock } from "../src/core/memory.ts";
 import { matchWorkflow, workflowsContextBlock } from "../src/core/workflows.ts";
 import { playbookContextBlock } from "../src/core/playbook.ts";
@@ -58,6 +59,9 @@ interface Args {
   command?: string;
   positionals: string[];
   profile?: string;
+  procurementCategory?: string;
+  procurementIdentifierKind?: string;
+  procurementDomains?: string[];
   force: boolean;
   yolo: boolean;
   resume: boolean;
@@ -86,6 +90,9 @@ function parseArgs(argv: string[]): Args {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--profile") args.profile = argv[++i];
+    else if (a === "--category") args.procurementCategory = argv[++i];
+    else if (a === "--kind") args.procurementIdentifierKind = argv[++i];
+    else if (a === "--domain") { const domain = argv[++i]; if (domain) (args.procurementDomains ??= []).push(domain); }
     else if (a === "--force") args.force = true;
     else if (a === "--diarize") args.diarize = true;
     else if (a === "--yolo") args.yolo = true;
@@ -255,6 +262,7 @@ Commands:
   resume [id]   reopen the latest session for this folder (or an exact id); /resume inside picks others
   sessions      list saved chat sessions
   skills        list available skills (~/.neko-core/skills)
+  procurement   deterministic sourcing helpers; 'source-plan <identifier>' expands exact-source queries
   recipes       list runnable recipes (~/.neko-core/recipes)
   login         sign in; OpenAI, Google, Kimi, DeepSeek, or another API-key provider
   logout        sign out the active route (other provider sessions/keys stay intact)
@@ -285,8 +293,8 @@ Options:
   --loop             run "run" as a closed loop: work + self-review until done
   --once             force a single-shot run (overrides config "auto_loop": true)
   --no-tools         (run) expose no tools; a pure text completion (e.g. a judgment/review pass)
-  --image <path>     (run) attach an image (repeatable); perception mode, no tools. Use a VISION model,
-                     e.g. NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko run --image pkg.jpg "what is this?"
+  --image <path>     (run) attach an image (repeatable); perception mode, no tools. Use a vision profile,
+                     e.g. neko run --profile nvidia --image pkg.jpg "what is this?"
   --resume [id]      (chat) resume a session by id, or the latest for this directory
   --continue, -c     (chat) resume the latest session for this directory (then /continue to pick up)
   --prompt, -p <q>   (oracle) the question to ask
@@ -823,6 +831,22 @@ function cmdSkills(): number {
   return 0;
 }
 
+function cmdProcurement(args: Args): number {
+  if (args.positionals[0]?.toLowerCase() !== "source-plan") {
+    console.error(PROCUREMENT_SOURCE_PLAN_USAGE);
+    return 2;
+  }
+  const result = procurementSourcePlanCommand({
+    identifier: args.positionals[1],
+    category: args.procurementCategory,
+    kind: args.procurementIdentifierKind,
+    domains: args.procurementDomains,
+  });
+  if (result.stdout) console.log(result.stdout);
+  if (result.stderr) console.error(result.stderr);
+  return result.exitCode;
+}
+
 async function cmdMcp(args: Args): Promise<number> {
   const sub = args.positionals[0];
   if (sub === "add") {
@@ -965,8 +989,8 @@ async function cmdBrowser(args: Args): Promise<number> {
   return 0;
 }
 
-/** Read a local image into a data URL (the form Agent.run consumes). Use a VISION model for image tasks
- *  (gpt-oss is text-only) — e.g. `NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1`. */
+/** Read a local image into a data URL (the form Agent.run consumes). Use a VISION-capable profile for
+ * image tasks (gpt-oss is text-only), e.g. `neko run --profile nvidia --image ...`. */
 function loadImageDataUrl(path: string): string {
   const ext = path.toLowerCase().split(".").pop() || "";
   const mime = ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : ext === "webp" ? "image/webp" : "image/jpeg";
@@ -1225,6 +1249,7 @@ async function main(): Promise<number> {
       case "context": return cmdContext();
       case "sessions": return cmdSessions();
       case "skills": return cmdSkills();
+      case "procurement": return cmdProcurement(args);
       case "recipes": return cmdRecipes();
       case "login": return await cmdLogin(args);
       case "logout": return cmdLogout(args);

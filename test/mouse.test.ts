@@ -64,29 +64,32 @@ test("brandTitle: cat icon when idle; busy = blinking dot, no cat", async () => 
   expect(brandTitle("my session")).toBe("\u{1F431} my session"); // done: the cat returns
 });
 
-test("title driver: blinks the dot while busy, restores + re-asserts the cat when idle", async () => {
-  const { setTabTitle, stopTitleDriver, titleSeq } = await import("../src/ui/title.ts");
+test("title driver: blinks while busy and re-asserts idle without sharing global timers", async () => {
+  const { createTitleDriver } = await import("../src/ui/title.ts");
   const writes: string[] = [];
-  const orig = process.stdout.write, origTTY = (process.stdout as any).isTTY;
-  (process.stdout as any).isTTY = true;
-  (process.stdout as any).write = ((s: any) => { writes.push(String(s)); return true; }) as any;
-  try {
-    setTabTitle("my task", true);                            // busy
-    expect(writes[0]).toBe(titleSeq("● my task"));           // solid dot immediately
-    await new Promise((r) => setTimeout(r, 1150));           // one heartbeat (1s cadence)
-    expect(writes).toContain(titleSeq("○ my task"));         // ...then the hollow-dot pulse
-    writes.length = 0;
-    setTabTitle("my task", false);                           // turn done
-    expect(writes[0]).toBe(titleSeq("\u{1F431} my task"));   // the cat returns at once
-    if (process.platform === "win32") {
-      await new Promise((r) => setTimeout(r, 1150));
-      expect(writes.filter((w) => w === titleSeq("\u{1F431} my task")).length).toBeGreaterThanOrEqual(2); // keeper re-assert
-    }
-  } finally {
-    stopTitleDriver();
-    (process.stdout as any).write = orig; (process.stdout as any).isTTY = origTTY;
-  }
-}, 15000);
+  let heartbeat: (() => void) | undefined;
+  let cancelled = false;
+  const driver = createTitleDriver({
+    write: (title: string) => writes.push(title),
+    keepIdle: true,
+    schedule: (tick: () => void) => { heartbeat = tick; return 0 as never; },
+    cancel: () => { cancelled = true; },
+  });
+
+  driver.set("my task", true);
+  expect(writes).toEqual(["● my task"]);
+  heartbeat!();
+  expect(writes).toEqual(["● my task", "○ my task"]);
+
+  writes.length = 0;
+  driver.set("my task", false);
+  expect(writes).toEqual(["\u{1F431} my task"]);
+  heartbeat!();
+  expect(writes).toEqual(["\u{1F431} my task", "\u{1F431} my task"]);
+
+  driver.stop();
+  expect(cancelled).toBe(true);
+});
 
 test("title stack push is SKIPPED on Windows (its restore reverts the tab mid-session)", async () => {
   const { saveTitle } = await import("../src/ui/title.ts");

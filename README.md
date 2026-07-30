@@ -396,7 +396,7 @@ bun bin/neko.ts doctor         # or run directly via Bun, no build needed
 ### Commands
 
 `neko` (session, default) · `run <task>` · `config` · `doctor` · `profiles` · `init[-user]` · `tools` ·
-`agents` · `commands` · `capabilities` · `policy` · `context` · `sessions` · `mcp` · `login` · `logout` · `update`.
+`agents` · `commands` · `capabilities` · `policy` · `context` · `sessions` · `procurement` · `mcp` · `login` · `logout` · `update`.
 
 Bare `neko` (or `neko core`; legacy `neko code`) starts the interactive session.
 `--profile <name>` selects a runtime profile · `--yolo` auto-approves gated tools ·

@@ -3,6 +3,41 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-30 - procurement search: identifier cascade, measured stopping
+
+A real sourcing miss exposed the failure step: broad discovery found Lenovo SKU `83KY001VVN`, but the
+next query coupled that SKU to the already-known merchant and DuckDuckGo fallback returned nothing for
+long multi-domain `site:` queries. The skill said “search by SKU”, but did not make the state transition
+or stopping condition executable.
+
+- Added `source-plan.ts`: one exact open-web query, one SKU/GTIN Websosanh URL, and one independent query
+  per relevant retailer domain. It normalizes identifiers/domains, rejects component labels such as
+  `RTX5070`, accepts standard numeric GTIN lengths, and never emits multi-domain `OR`.
+- Moved a short identity-cascade/coverage contract ahead of procurement tactics. The agent now keeps a
+  candidate ledger, pivots the objective's top candidates through the helper, records
+  `hit|no_result|blocked`, verifies source pages, separates public listings from buyable stock, and
+  qualifies incomplete coverage instead of claiming an absolute Vietnam-wide maximum.
+- The original live request found both previously missed An Khang and FPT pages, rejected a 117.99M VND
+  RTX 5080 false positive, verified eight offers, and deterministically identified An Khang's 87.99M VND
+  not-in-stock/order-only listing. Research and limits are recorded in
+  `docs/research/procurement-search-sota-2026-07-30.md`.
+- Ubuntu CI then reproduced a pre-existing title test race twice: another UI test replaced module-global
+  title state during a real 1-second sleep. `createTitleDriver` now keeps production's singleton behavior
+  while letting tests inject an isolated writer and scheduler; the regression is synchronous and also
+  verifies a valid timer handle of `0` is cancelled.
+- Review hardening validates GTIN check digits at all four standard lengths, rejects separator-form GPU/CPU
+  labels, exposes qualified highest and lowest claims, keeps CLI bytes ASCII-safe for cp1252 while parsed
+  JSON remains Unicode, and lets sparse one/two-offer results finish. Explicit kinds accept source-labelled
+  numeric/letter-only SKUs and letter-only/`#` MPNs without weakening strict auto-mode rejection of broad
+  descriptions or price-like numbers.
+- `neko procurement source-plan` now exposes the planner through the standalone binary, without repo-only
+  `rtk` or an unshipped Bun runtime. Source-checkout sessions use the equivalent
+  `bun bin/neko.ts procurement source-plan` fallback instead of assuming a global `neko`. Image discovery
+  uses the platform-neutral `--profile nvidia --image` surface through the matching installed/source entry point.
+
+Evidence: current + stable TypeScript clean; **909/909 tests, 4,025 assertions across 97 files**; doctor and policy
+PASS; clean production build + UI/input probes PASS; focused secret scan and `git diff --check` clean.
+
 ## 2026-07-29 - v0.20.0: photography end to end, research-first
 
 One day, five neko-authored studies (docs/research/), each feeding a shipped capability:
