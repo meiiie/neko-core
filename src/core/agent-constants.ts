@@ -176,7 +176,7 @@ export function estimateTokens(messages: any[]): number {
   return tokens;
 }
 
-// onEvent(kind, data): kind in {"tool_call", "tool_result", "final", "max_steps"}.
+// onEvent(kind, data): tool lifecycle + final/max_steps + throttled crash-journal checkpoint events.
 export type EventHook = (kind: string, data: any) => void;
 
 export interface AgentOptions {

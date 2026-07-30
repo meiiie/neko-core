@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
 import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
-import { buildReplayLines, clampToRows, contentToText, recoverTodos, renderTail } from "../src/ui/chat-lines.ts";
+import { buildReplayLines, clampToRows, contentToText, recoverTodos, renderTail, replaySessionLines } from "../src/ui/chat-lines.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { setModel } from "../src/adapters/project.ts";
 import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "../src/adapters/chatgpt-voice.ts";
@@ -41,6 +41,20 @@ test("renderTail bounds live-stream rendering to O(1) so the event loop can't st
   expect(out.startsWith("...")).toBe(true); // truncation marker
   expect(out).toContain("line 99999"); // the latest content is kept (the tail)
   expect(out).not.toContain("line 0\n"); // the old head is dropped
+});
+
+test("resume replay is bounded by wrapped terminal rows, not only logical message count", () => {
+  // Field repro: the real session had only 20 messages, so the old 80-line cap admitted one 45k-char
+  // assistant message and filled hundreds of terminal rows after wrapping.
+  const huge = Array.from({ length: 900 }, (_, i) => `checkpoint ${i}: completed work`).join("\n");
+  const replay = replaySessionLines(
+    [{ role: "assistant", content: huge }],
+    (() => { let id = 1; return () => id++; })(),
+  );
+  const shown = replay.map((line) => line.text).join("\n");
+  expect(shown).toContain("checkpoint 899: completed work"); // keep the useful latest tail
+  expect(shown).toMatch(/earlier.*\/transcript/i); // disclose where the omitted history lives
+  expect(shown.length).toBeLessThan(5000); // never dump the 30k+ source into the terminal
 });
 
 const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));

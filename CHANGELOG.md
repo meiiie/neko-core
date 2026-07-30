@@ -6,6 +6,30 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-07-30
+
+### Added
+
+- **Procurement now locks the product identifier before it prices the market.** `neko procurement
+  source-plan <identifier>` classifies SKU/MPN/GTIN, then emits an independent retrieval cascade for
+  index search, exact open-web search, and retailer domains. Broad Chinese/Vietnamese descriptions can
+  therefore discover a real model once and re-query that exact identifier instead of staying trapped in
+  the original vague wording. Numeric merchant SKUs remain valid only when the source labels them.
+
+### Fixed
+
+- **`/resume` keeps work from a turn that was still running when Wi-Fi or the terminal died.** Streamed
+  assistant progress, provider-managed tool calls, and completed tool results now enter the canonical
+  session journal before the provider turn settles. Tool calls are checkpointed before execution, writes
+  remain atomic, interrupted calls are sealed conservatively on the next turn, and Neko-local in-flight
+  metadata never reaches the model. A real compiled-binary/ConPTY regression test hard-kills `neko
+  --yolo` mid-stream and verifies a fresh `resume <id>` sees the prompt, tool result, and partial progress.
+- **Resuming no longer floods an inline terminal with one enormous old message.** Replay is bounded by
+  wrapped terminal rows rather than message count, keeps the latest useful tail, and points to
+  `/transcript` for the complete saved conversation. Fullscreen retains its virtualized, scrollable
+  history and mounts only the visible viewport.
+
+
 ## [0.21.2] — 2026-07-29
 
 ### Added

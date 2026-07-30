@@ -510,7 +510,11 @@ export class Agent {
         }
         const missing = m.tool_calls.filter((tc: any) => !answered.has(tc.id || tc.function?.name));
         if (missing.length) {
-          const synthetic = missing.map((tc: any) => ({ role: "tool", tool_call_id: tc.id || tc.function?.name, content: "[interrupted before this tool ran]" }));
+          const synthetic = missing.map((tc: any) => ({
+            role: "tool",
+            tool_call_id: tc.id || tc.function?.name,
+            content: "[interrupted while this tool call was in flight; outcome unknown. Inspect actual state before any retry.]",
+          }));
           this.messages.splice(insertAt, 0, ...synthetic);
         }
         return;
@@ -525,6 +529,9 @@ export class Agent {
     if (!this.messages.length) {
       this.messages.push({ role: "system", content: this.systemPrompt });
     }
+    // A crash can leave the last streamed assistant segment marked as in-flight. The text is valid
+    // recovery context, but the marker is Neko-local metadata and must never cross a provider boundary.
+    for (const message of this.messages) if (message?._neko_inflight) delete message._neko_inflight;
     this.sealDanglingToolCalls(); // an interrupted/resumed turn can leave tool_calls unanswered
     this.refreshDynamicContext();
     const content = images && images.length
@@ -596,19 +603,84 @@ export class Agent {
         if (!eagerOk || signal?.aborted || eager.has(eagerKey(call))) return;
         eager.set(eagerKey(call), this.safeExecute(call, signal));
       };
-      const executeTool = async (call: { id: string; name: string; arguments: Record<string, any> }) => {
-        this.emit("tool_call", call);
-        const observation = await this.safeExecute(call, signal);
-        noteTool(call, observation);
-        this.emit("tool_result", { call, observation });
-        return observation;
+      // Crash journal for provider-managed loops (Codex App Server, Gemini CLI) and ordinary streaming.
+      // Their deltas/tool calls arrive while complete() is still pending; without mirroring them into the
+      // canonical message list, every mid-turn save snapshots only the user prompt. Keep one in-flight
+      // assistant message per streamed segment, commit it beside each completed dynamic tool result, and
+      // emit bounded checkpoints so a network loss + killed terminal loses at most a short delta tail.
+      let inflightAssistant: any | null = null;
+      let streamedContent = "";
+      let managedTrace = false;
+      let lastCheckpointAt = 0;
+      const checkpoint = (force = false) => {
+        const now = Date.now();
+        if (!force && lastCheckpointAt && now - lastCheckpointAt < 750) return;
+        lastCheckpointAt = now;
+        this.emit("checkpoint", { reason: "inflight" });
+      };
+      const ensureInflight = () => {
+        if (!inflightAssistant) {
+          inflightAssistant = { role: "assistant", content: "", _neko_inflight: true };
+          this.messages.push(inflightAssistant);
+        }
+        return inflightAssistant;
+      };
+      const streamedDelta: DeltaHook | undefined = this.onDelta
+        ? (text, kind) => {
+            if ((kind ?? "content") === "content" && text) {
+              const first = !inflightAssistant;
+              ensureInflight().content += text;
+              streamedContent += text;
+              checkpoint(first); // first durable byte of every post-tool segment lands immediately
+            }
+            this.onDelta?.(text, kind);
+          }
+        : undefined;
+      const finalizeInflight = (content: string | null, calls: ToolCall[] = [], continuation?: any[]) => {
+        const text = content ?? "";
+        const hadInflight = inflightAssistant !== null;
+        const message = inflightAssistant ?? ensureInflight();
+        // Most streaming adapters return exactly the deltas already journaled. If a provider delivers
+        // an unstreamed suffix, append only that suffix; never duplicate the whole streamed answer. A
+        // brand-new segment after a tool has no in-flight deltas of its own, so its returned text wins.
+        if (!hadInflight || !managedTrace) message.content = text;
+        else if (!streamedContent) message.content = text;
+        else if (text.startsWith(streamedContent)) message.content += text.slice(streamedContent.length);
+        if (calls.length) message.tool_calls = assistantToolMessage(null, calls).tool_calls;
+        if (continuation?.length) message.provider_data = continuation;
+        delete message._neko_inflight;
+        inflightAssistant = null;
+        return message;
+      };
+      let managedToolChain: Promise<void> = Promise.resolve();
+      const executeTool = (call: { id: string; name: string; arguments: Record<string, any> }): Promise<string | any[]> => {
+        managedTrace = true;
+        // Provider callbacks can arrive concurrently. Serialize the canonical trajectory so each
+        // assistant(function_call) is followed by its own tool(function_call_output) before the next
+        // call begins; otherwise completion order can create invalid role ordering on resume.
+        const task = managedToolChain.then(async () => {
+          this.emit("tool_call", call);
+          // Provider-managed calls do not come back in response.tool_calls. Materialize and persist the
+          // assistant function_call BEFORE execution: a mutating tool can finish its external side effect
+          // and then lose the network/terminal before returning. Resume must know that call was attempted;
+          // sealDanglingToolCalls() marks its outcome unknown when no result was journaled.
+          finalizeInflight(null, [call]);
+          checkpoint(true);
+          const observation = await this.safeExecute(call, signal);
+          noteTool(call, observation);
+          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
+          this.emit("tool_result", { call, observation }); // UI persists after the pair is materialized
+          return observation;
+        });
+        managedToolChain = task.then(() => undefined, () => undefined);
+        return task;
       };
       let response;
       try {
         response = await this.provider.complete(
           this.messages,
           this.tools.schemas(),
-          this.onDelta,
+          streamedDelta,
           signal,
           {
             onToolCallReady,
@@ -625,7 +697,13 @@ export class Agent {
 
       if (!toolCalls.length) {
         const final = response.content ?? "";
-        this.messages.push({ role: "assistant", content: final, ...(response.continuation?.length ? { provider_data: response.continuation } : {}) });
+        // A bridge may stream only pre-tool progress, then return its post-tool final from complete()
+        // without an onDelta. When the last durable message is the tool result, append that final as a
+        // new assistant segment instead of dropping it because earlier segments happened to stream.
+        if (inflightAssistant || !managedTrace || !streamedContent
+          || (final && this.messages.at(-1)?.role === "tool")) {
+          finalizeInflight(final, [], response.continuation);
+        }
         // A todo label is not proof, but an OPEN plan is proof that the controller has unfinished work.
         // Give the model one chance to reconcile it before exit: continue, mark verified items done via
         // todo_write, or report a real blocker. One-shot avoids trapping legitimate clarification turns.
@@ -691,7 +769,8 @@ export class Agent {
         return final;
       }
 
-      this.messages.push(assistantToolMessage(response.content, toolCalls, response.continuation));
+      finalizeInflight(response.content, toolCalls, response.continuation);
+      checkpoint(true); // the call itself is durable before a slow or state-changing tool starts
       if (signal?.aborted) return "[interrupted]";
       let stepHadUnproductiveResult = false;
 
@@ -705,8 +784,8 @@ export class Agent {
         toolCalls.forEach((call, i) => {
           noteTool(call, observations[i]);
           if (Agent.isUnproductiveResult(observations[i])) stepHadUnproductiveResult = true;
-          this.emit("tool_result", { call, observation: observations[i] });
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observations[i]) });
+          this.emit("tool_result", { call, observation: observations[i] });
         });
       } else {
         for (const call of toolCalls) {
@@ -733,8 +812,8 @@ export class Agent {
             // probing a heavy/obfuscated page with a DIFFERENT selector each time, every one returning []
             // (the classic Facebook-feed time sink). The result is still fed back; the loop also signals.
             this.consecutiveUnproductive = Agent.isUnproductiveResult(observation) ? this.consecutiveUnproductive + 1 : 0;
-            this.emit("tool_result", { call, observation });
             this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
+            this.emit("tool_result", { call, observation });
             // Tool-error recovery (Self-Harness pattern, arXiv 2606.09498 - the paper's single biggest win
             // was a recovery directive injected AT the point of a tool error): on the FIRST failure of a
             // MUTATING tool, tell the model HOW to recover - models otherwise flail (blind re-runs, deleting

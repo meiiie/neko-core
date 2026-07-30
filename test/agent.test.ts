@@ -156,6 +156,168 @@ test("a bidirectional provider executes tools through the same safe Agent bounda
   expect(await agent.run("go")).toBe("done");
   expect(events).toContain("tool_call");
   expect(events).toContain("tool_result");
+  // Headless callers may omit onDelta; their final answer still belongs in durable history.
+  expect(agent.messages.at(-1)).toEqual({ role: "assistant", content: "done" });
+});
+
+test("a provider-managed turn journals streamed text and tool results before it settles", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-bidi-journal-"));
+  writeFileSync(join(root, "evidence.txt"), "durable evidence");
+  let release!: () => void;
+  let toolFinished!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const observed = new Promise<void>((resolve) => { toolFinished = resolve; });
+  const events: string[] = [];
+  const provider = {
+    async complete(_messages: any[], _tools: any[], onDelta: any, _signal: any, opts: any) {
+      onDelta("Đang kiểm tra dữ liệu.\n", "content");
+      const observation = await opts.executeTool({
+        id: "managed-read-1",
+        name: "read_file",
+        arguments: { path: "evidence.txt" },
+      });
+      expect(observation).toContain("durable evidence");
+      onDelta("Đã xác minh xong.", "content");
+      toolFinished();
+      await gate; // emulate Wi-Fi loss / terminal kill while the provider-owned turn is still active
+      return { content: "Đang kiểm tra dữ liệu.\nĐã xác minh xong.", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({
+    provider,
+    tools: new ToolRegistry(root, "auto", () => true),
+    onDelta: () => {},
+    onEvent: (kind) => events.push(kind),
+  });
+
+  const running = agent.run("kiểm tra");
+  try {
+    await observed;
+
+    // The provider has NOT returned, so a finally-only save cannot help. A crash-safe journal must
+    // already contain the partial assistant text and the completed dynamic tool trajectory.
+    const assistants = agent.messages.filter((message: any) => message.role === "assistant");
+    expect(assistants.map((message: any) => String(message.content ?? "")).join("")).toBe(
+      "Đang kiểm tra dữ liệu.\nĐã xác minh xong.",
+    );
+    expect(assistants.some((message: any) =>
+      message.tool_calls?.some((call: any) => call.id === "managed-read-1"),
+    )).toBe(true);
+    expect(agent.messages).toContainEqual(expect.objectContaining({
+      role: "tool",
+      tool_call_id: "managed-read-1",
+      content: expect.stringContaining("durable evidence"),
+    }));
+    expect(events).toContain("checkpoint");
+  } finally {
+    release();
+  }
+  expect(await running).toBe("Đang kiểm tra dữ liệu.\nĐã xác minh xong.");
+  // Settling finalizes the journal in place; it must not append the full streamed answer a second time.
+  expect(agent.messages.filter((message: any) => message.role === "assistant")
+    .map((message: any) => String(message.content ?? "")).join("")).toBe(
+    "Đang kiểm tra dữ liệu.\nĐã xác minh xong.",
+  );
+  expect(agent.messages.some((message: any) => message._neko_inflight)).toBe(false);
+});
+
+test("a resumed in-flight journal is sealed before the next provider request", async () => {
+  let seen: any[] = [];
+  const provider = {
+    async complete(messages: any[]) {
+      seen = structuredClone(messages);
+      return { content: "continued", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({ provider, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
+  agent.messages = [
+    { role: "system", content: "system" },
+    { role: "user", content: "long task" },
+    { role: "assistant", content: "partial work survived", _neko_inflight: true },
+  ];
+
+  expect(await agent.run("continue")).toBe("continued");
+  expect(seen.some((message: any) => message.content === "partial work survived")).toBe(true);
+  expect(seen.some((message: any) => message._neko_inflight)).toBe(false);
+});
+
+test("a provider-managed call is durable before execution and keeps an unstreamed post-tool final", async () => {
+  let releaseTool!: () => void;
+  let toolStarted!: () => void;
+  const toolGate = new Promise<void>((resolve) => { releaseTool = resolve; });
+  const observed = new Promise<void>((resolve) => { toolStarted = resolve; });
+  const events: string[] = [];
+  const registry = new ToolRegistry(process.cwd(), "auto", () => true);
+  // A tool can mutate real state and then block before returning (lost Wi-Fi, killed terminal). The
+  // assistant call must be in the crash journal before execute() settles, not only beside its result.
+  registry.execute = async () => {
+    toolStarted();
+    await toolGate;
+    return "mutation completed";
+  };
+  const provider = {
+    async complete(_messages: any[], _tools: any[], onDelta: any, _signal: any, opts: any) {
+      onDelta("Đang chuẩn bị thay đổi.", "content");
+      const observation = await opts.executeTool({
+        id: "managed-write-1",
+        name: "write_file",
+        arguments: { path: "evidence.txt", content: "done" },
+      });
+      expect(observation).toBe("mutation completed");
+      // Some bridges stream pre-tool progress but return the final answer only from complete().
+      return { content: "Final sau tool không qua delta.", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({
+    provider,
+    tools: registry,
+    onDelta: () => {},
+    onEvent: (kind) => events.push(kind),
+  });
+
+  const running = agent.run("change it");
+  await observed;
+  expect(agent.messages.some((message: any) =>
+    message.role === "assistant" && message.tool_calls?.some((call: any) => call.id === "managed-write-1"),
+  )).toBe(true);
+  expect(events).toContain("checkpoint");
+
+  releaseTool();
+  expect(await running).toBe("Final sau tool không qua delta.");
+  expect(agent.messages.at(-1)).toEqual({ role: "assistant", content: "Final sau tool không qua delta." });
+});
+
+test("concurrent provider-managed calls are journaled and executed in deterministic order", async () => {
+  let active = 0;
+  let maxActive = 0;
+  const registry = new ToolRegistry(process.cwd(), "auto", () => true);
+  registry.execute = async (_name, args) => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    await Bun.sleep(args.path === "first.txt" ? 20 : 1);
+    active--;
+    return `read ${args.path}`;
+  };
+  const provider = {
+    async complete(_messages: any[], _tools: any[], _onDelta: any, _signal: any, opts: any) {
+      const results = await Promise.all([
+        opts.executeTool({ id: "managed-1", name: "read_file", arguments: { path: "first.txt" } }),
+        opts.executeTool({ id: "managed-2", name: "read_file", arguments: { path: "second.txt" } }),
+      ]);
+      expect(results).toEqual(["read first.txt", "read second.txt"]);
+      return { content: "done", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({ provider, tools: registry, onDelta: () => {} });
+
+  expect(await agent.run("read both")).toBe("done");
+  expect(maxActive).toBe(1); // provider callbacks may arrive together; canonical history stays serial
+  expect(agent.messages.filter((message: any) => message.role !== "system" && message.role !== "user")
+    .map((message: any) => message.role === "assistant"
+      ? (message.tool_calls?.[0]?.id ?? "final")
+      : message.tool_call_id)).toEqual([
+    "managed-1", "managed-1", "managed-2", "managed-2", "final",
+  ]);
 });
 
 test("an external realtime session cannot bypass the Agent approval boundary", async () => {
@@ -1114,7 +1276,11 @@ test("sealDanglingToolCalls: an interrupted turn's unanswered tool_call gets a s
   agent.sealDanglingToolCalls();
   const toolMsgs = agent.messages.filter((m: any) => m.role === "tool");
   expect(toolMsgs.length).toBe(2); // the synthetic result for 'b' was added
-  expect(toolMsgs.find((m: any) => m.tool_call_id === "b")?.content).toMatch(/interrupted/i);
+  const interrupted = String(toolMsgs.find((m: any) => m.tool_call_id === "b")?.content ?? "");
+  expect(interrupted).toMatch(/interrupted/i);
+  expect(interrupted).toMatch(/outcome unknown/i);
+  expect(interrupted).toMatch(/inspect.*before.*retry/i);
+  expect(interrupted).not.toMatch(/before this tool ran/i); // a side effect may already have happened
   // Every tool_call now has a matching tool result -> the provider won't reject the next request.
   const callIds = agent.messages.flatMap((m: any) => (m.tool_calls ?? []).map((tc: any) => tc.id));
   const resultIds = new Set(agent.messages.filter((m: any) => m.role === "tool").map((m: any) => m.tool_call_id));
