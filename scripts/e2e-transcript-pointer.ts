@@ -5,8 +5,8 @@
  * injects the exact XTerm SGR reports seen in the field, and proves they scroll/are consumed rather
  * than becoming search text. It then performs an ordinary text search to verify input still works.
  *
- *   bun scripts/e2e-transcript-pointer.ts [path-to-neko-binary]
- *   NEKO_TRANSCRIPT_E2E_ENTRIES=5000 bun scripts/e2e-transcript-pointer.ts
+ *   rtk bun scripts/e2e-transcript-pointer.ts [path-to-neko-binary]
+ *   NEKO_TRANSCRIPT_E2E_ENTRIES=5000 rtk bun scripts/e2e-transcript-pointer.ts
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,8 +22,8 @@ const exe = isAbsolute(arg) ? arg : resolve(repo, arg);
 if (!existsSync(exe)) throw new Error(`compiled Neko binary not found: ${exe}`);
 
 const entryCount = Number.parseInt(process.env.NEKO_TRANSCRIPT_E2E_ENTRIES ?? "561", 10);
-if (!Number.isSafeInteger(entryCount) || entryCount < 80 || entryCount > 20_000) {
-  throw new Error("NEKO_TRANSCRIPT_E2E_ENTRIES must be an integer from 80 to 20000");
+if (!Number.isSafeInteger(entryCount) || entryCount < 80 || entryCount > 10_000) {
+  throw new Error("NEKO_TRANSCRIPT_E2E_ENTRIES must be an integer from 80 to 10000");
 }
 
 const home = mkdtempSync(join(tmpdir(), "neko-transcript-pointer-e2e-"));
@@ -79,6 +79,11 @@ async function waitFor(label: string, predicate: () => boolean, timeoutMs = 12_0
   throw new Error(`timed out waiting for ${label}`);
 }
 
+function transcriptPosition(): string | null {
+  const header = vt.text().split("\n").find((line) => line.includes(`Conversation  ${entryCount} entries`));
+  return header?.match(/ · (all|end|top|\d+%)/)?.[1] ?? null;
+}
+
 let openMs = 0, wheelMs = 0, searchMs = 0;
 try {
   await waitFor("interactive prompt", () => vt.text().includes("shift+tab to cycle"));
@@ -98,8 +103,17 @@ try {
   await waitFor("pointer scroll", () => vt.text().includes(`Conversation  ${entryCount} entries`) && !vt.text().includes(" · end"));
   wheelMs = performance.now() - wheelStart;
 
+  const verticalPosition = transcriptPosition();
+  if (!verticalPosition) throw new Error("transcript header position was not readable after vertical scroll");
+  term.write("\x1b[<66;80;20M");                            // horizontal left
+  await Bun.sleep(100);
+  if (transcriptPosition() !== verticalPosition) throw new Error("horizontal-left wheel changed vertical offset");
+  term.write("\x1b[<67;80;20M");                            // horizontal right
+  await Bun.sleep(100);
+  if (transcriptPosition() !== verticalPosition) throw new Error("horizontal-right wheel changed vertical offset");
+
   const pointerScreen = vt.text();
-  if (pointerScreen.includes("[<65;86;26M") || pointerScreen.includes("found 0") || pointerScreen.includes("search: [<")) {
+  if (pointerScreen.includes("[<") || pointerScreen.includes("found 0") || pointerScreen.includes("search: [<")) {
     throw new Error("SGR pointer report polluted transcript search");
   }
 

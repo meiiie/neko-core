@@ -153,6 +153,7 @@ test("TranscriptViewer classifies SGR pointer reports before search text", async
 
   c.stdin.write("\x1b[<64;40;10M");             // wheel up; Ink strips ESC before useInput
   c.stdin.write("[<35;41;10M");                 // motion already stripped by Ink
+  c.stdin.write("[<66;41;10M[<67;41;10M");     // horizontal wheel is consumed without vertical remapping
   c.stdin.write("[<0;41;10M[<0;41;10m");       // press + release burst
   c.stdin.write("[<64;41;10M[<65;41;10M");     // cancelling wheel burst is still pointer input
 

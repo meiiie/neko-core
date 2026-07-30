@@ -40,8 +40,9 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
 
 - **Branch:** `main`. **Current release: v0.22.2 (2026-07-30)** - `/transcript` now classifies XTerm
   pointer reports before text input: wheel ticks scroll the bounded viewport and motion/click/release
-  reports cannot leak into search. Across two compiled ConPTY rounds at 561 and 5,000 entries, first
-  pointer response stayed within 50–81 ms and ordinary text search completed within 61–91 ms.
+  reports cannot leak into search. Across three compiled ConPTY rounds (including concurrent load),
+  first pointer response stayed within 49–195 ms and ordinary text search within 50–638 ms through
+  10,000 entries.
   Previous (v0.22.1, 2026-07-30): crash-safe resume restores the canonical model/tool trajectory without
   repainting it as an unbounded terminal dump. The 51.55-second eager rich-render incident became a
   6.2 ms screen projection, a 230 ms real-session mount, viewport-scale hydration, and a per-line circuit

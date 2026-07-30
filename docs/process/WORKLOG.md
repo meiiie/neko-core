@@ -18,9 +18,10 @@ Bun.Terminal/ConPTY reproduced it on v0.22.1. XTerm identifies that payload as S
   burst, proves the viewport moves, rejects raw pointer bytes/`found 0`, then proves ordinary `NEEDLE`
   search still returns one result.
 - Added `scripts/e2e-transcript-pointer.ts`, an isolated compiled-binary ConPTY gate using the exact field
-  payload. Across two rounds, 561 entries measured 179–280 ms open / 51–81 ms pointer / 61–74 ms search;
-  5,000 entries measured 235–333 ms / 50–80 ms / 62–91 ms. Every run preserved the transcript and exposed
-  no pointer bytes.
+  payload. Across three rounds (one concurrent-load run), 561 entries measured 179–280 ms open /
+  49–172 ms pointer / 50–74 ms search; 5,000 entries measured 235–381 ms / 50–195 ms / 62–638 ms.
+  The 10,000-entry ceiling passed twice at 239–255 ms / 49–93 ms / 50–61 ms. Every run preserved the
+  transcript and exposed no pointer bytes.
 - Primary-source comparison with XTerm, Ink, current OpenAI Codex TUI, and Ratatui is recorded in
   `docs/research/transcript-input-sota-2026-07-30.md`. It supports event classification before state
   mutation, but does not justify a “beyond SOTA” claim without independent cross-terminal benchmarks.
@@ -28,8 +29,10 @@ Bun.Terminal/ConPTY reproduced it on v0.22.1. XTerm identifies that payload as S
   Bun budget probing a missing resident helper and launching two real PowerShell processes. The fixture now
   selects its intended one-shot path and has the same 15-second external-process budget as the adjacent
   computer test. Five sequential runs passed in 3.26–4.92 seconds; the slowest would have failed the old cap.
+- Review hardening stopped horizontal wheel buttons 66/67 from being parity-mapped to vertical scrolling,
+  capped the manual E2E below the resume-summary threshold, and made its documented commands `rtk`-correct.
 
-Release evidence: both TypeScript compilers clean; **918/918 tests, 4,074 assertions**; doctor and policy
+Release evidence: both TypeScript compilers clean; **918/918 tests, 4,076 assertions**; doctor and policy
 PASS; production build + UI/input probes PASS; compiled transcript E2E PASS at 561 and 5,000 entries;
 ConPTY ghost/typing 3/3; final scroll bench 14 ms first response / 155 ms settle; changed-file secret scan and
 `git diff --check` clean.

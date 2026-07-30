@@ -106,20 +106,25 @@ Current best model:
 
 ## Implemented decision
 
-- `TranscriptViewer` parses the full wheel burst first and updates `offset` by three rows per net tick.
+- `TranscriptViewer` parses vertical wheel buttons 64/65 first and updates `offset` by three rows per
+  net tick; horizontal wheel buttons 66/67 are consumed without changing the vertical offset.
 - Every other recognized pointer report (press, release, motion, and cancelling wheel bursts) is consumed.
 - Navigation keys and printable search text are processed only after that pointer boundary.
 - Canonical transcript lines remain unchanged; normal type-to-search remains covered by a component test.
 - A reusable `scripts/e2e-transcript-pointer.ts` gate exercises the compiled binary under Bun.Terminal/
   ConPTY with the exact field payload.
 
-Verified on 2026-07-30 across two rounds with the newly built Windows binary:
+Verified on 2026-07-30 across three rounds with the newly built Windows binary; the last round ran
+561, 5,000, and 10,000-entry binaries concurrently:
 
-- 561 entries: open 179–280 ms, first pointer response 51–81 ms, search 61–74 ms;
-- 5,000 entries: open 235–333 ms, first pointer response 50–80 ms, search 62–91 ms;
+- 561 entries: open 179–280 ms, first pointer response 49–172 ms, search 50–74 ms;
+- 5,000 entries: open 235–381 ms, first pointer response 50–195 ms, search 62–638 ms;
+- 10,000-entry advertised ceiling across concurrent and sequential runs: 239–255 ms / 49–93 ms /
+  50–61 ms;
 - no run rendered a raw SGR report or `found 0`; every run found the ordinary `NEEDLE` query.
 
-These ranges are local gate evidence, not an independent product comparison.
+These ranges include the slower concurrent-load evidence and are local gates, not an independent product
+comparison.
 
 ## Open questions
 
