@@ -69,55 +69,68 @@ test("browser capture requires consent, accepts bounded stereo PCM, and never st
   const home = tempHome();
   let opened = "";
   const session = new BrowserMeetingSession({ home, title: "Browser test", openUrl: (url) => { opened = url; } });
-  const started = await session.start();
-  expect(opened).toBe(started.url);
-  const url = new URL(started.url);
-  const page = await fetch(url.origin);
-  expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
-  const pageHtml = await page.text();
-  expect(pageHtml).toContain("video không được đọc, gửi hoặc ghi xuống đĩa");
-  // The pet is one movable node: everything live sits inside #pet so moving it into the
-  // Document Picture-in-Picture window carries its event handlers with it. Verified in a real
-  // browser - see docs/process/MEETINGS.md, "Pet window".
-  const pet = pageHtml.slice(pageHtml.indexOf('id="pet"'), pageHtml.indexOf('id="petBtn"'));
-  for (const id of ["dot", "status", "timer", "micLevel", "sysLevel", "livePanel", "start", "stop"]) {
-    expect(pet).toContain(`id="${id}"`);
-  }
-  // The pet button itself stays on the page, or closing the pet would take its own control with it.
-  expect(pet).not.toContain('id="petBtn"');
-  expect(pageHtml).toContain("documentPictureInPicture.requestWindow");
-  // Live rows are looked up ONCE. A fresh document.getElementById returns null after the node moves,
-  // which silently killed the live transcript the moment the pet opened.
-  expect(pageHtml).toContain("const livePanel=document.getElementById('livePanel')");
-  expect(pageHtml.match(/document\.getElementById\('livePanel'\)/g)?.length).toBe(1);
-  expect(await (await fetch(`${url.origin}/meeting-worklet.js`)).text()).toContain("AudioWorkletProcessor");
+  let socket: WebSocket | null = null;
+  let socketTimer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const started = await session.start();
+    expect(opened).toBe(started.url);
+    const url = new URL(started.url);
+    const page = await fetch(url.origin);
+    expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
+    const pageHtml = await page.text();
+    expect(pageHtml).toContain("video không được đọc, gửi hoặc ghi xuống đĩa");
+    // The pet is one movable node: everything live sits inside #pet so moving it into the
+    // Document Picture-in-Picture window carries its event handlers with it. Verified in a real
+    // browser - see docs/process/MEETINGS.md, "Pet window".
+    const pet = pageHtml.slice(pageHtml.indexOf('id="pet"'), pageHtml.indexOf('id="petBtn"'));
+    for (const id of ["dot", "status", "timer", "micLevel", "sysLevel", "livePanel", "start", "stop"]) {
+      expect(pet).toContain(`id="${id}"`);
+    }
+    // The pet button itself stays on the page, or closing the pet would take its own control with it.
+    expect(pet).not.toContain('id="petBtn"');
+    expect(pageHtml).toContain("documentPictureInPicture.requestWindow");
+    // Live rows are looked up ONCE. A fresh document.getElementById returns null after the node moves,
+    // which silently killed the live transcript the moment the pet opened.
+    expect(pageHtml).toContain("const livePanel=document.getElementById('livePanel')");
+    expect(pageHtml.match(/document\.getElementById\('livePanel'\)/g)?.length).toBe(1);
+    expect(await (await fetch(`${url.origin}/meeting-worklet.js`)).text()).toContain("AudioWorkletProcessor");
 
-  const stopped = new Promise<void>((resolve, reject) => {
-    const socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
-    const timer = setTimeout(() => reject(new Error("meeting websocket timeout")), 5_000);
-    socket.binaryType = "arraybuffer";
-    socket.onopen = () => socket.send(JSON.stringify({ type: "hello", token: url.hash.slice(1) }));
-    socket.onerror = () => reject(new Error("meeting websocket failed"));
-    socket.onmessage = (event) => {
-      const message = JSON.parse(String(event.data));
-      if (message.type === "ready") socket.send(JSON.stringify({ type: "begin", consent: true, sampleRate: 16_000, sources: ["microphone", "system"] }));
-      if (message.type === "recording") {
-        socket.send(Buffer.alloc(16_000 * 2 * 2 / 10)); // 100 ms
-        socket.send(JSON.stringify({ type: "stop" }));
-      }
-      if (message.type === "stop") { clearTimeout(timer); resolve(); }
-    };
-  });
-  const result = await session.waitUntilStopped();
-  await stopped;
-  expect(result?.state).toBe("recorded");
-  expect(result?.consent?.confirmedAt).toBeTruthy();
-  expect(result?.capture?.sources).toEqual(["microphone", "system"]);
-  expect(result?.capture?.videoStored).toBe(false);
-  expect(result?.capture?.durationMs).toBe(100);
-  const wav = readFileSync(join(meetingDir(result!.id, home), "audio.wav"));
-  expect(wav.readUInt16LE(22)).toBe(2);
-});
+    const stopped = new Promise<void>((resolve, reject) => {
+      socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
+      socketTimer = setTimeout(() => reject(new Error("meeting websocket timeout")), 10_000);
+      socket.binaryType = "arraybuffer";
+      socket.onopen = () => socket?.send(JSON.stringify({ type: "hello", token: url.hash.slice(1) }));
+      socket.onerror = () => reject(new Error("meeting websocket failed"));
+      socket.onmessage = (event) => {
+        const message = JSON.parse(String(event.data));
+        if (message.type === "ready") socket?.send(JSON.stringify({ type: "begin", consent: true, sampleRate: 16_000, sources: ["microphone", "system"] }));
+        if (message.type === "recording") {
+          socket?.send(Buffer.alloc(16_000 * 2 * 2 / 10)); // 100 ms
+          socket?.send(JSON.stringify({ type: "stop" }));
+        }
+        if (message.type === "stop") { if (socketTimer) clearTimeout(socketTimer); resolve(); }
+      };
+    });
+    const [result] = await Promise.all([session.waitUntilStopped(), stopped]);
+    expect(result?.state).toBe("recorded");
+    expect(result?.consent?.confirmedAt).toBeTruthy();
+    expect(result?.capture?.sources).toEqual(["microphone", "system"]);
+    expect(result?.capture?.videoStored).toBe(false);
+    expect(result?.capture?.durationMs).toBe(100);
+    const wav = readFileSync(join(meetingDir(result!.id, home), "audio.wav"));
+    expect(wav.readUInt16LE(22)).toBe(2);
+  } finally {
+    if (socketTimer) clearTimeout(socketTimer);
+    const activeSocket = socket as WebSocket | null;
+    if (activeSocket) {
+      activeSocket.onopen = null;
+      activeSocket.onerror = null;
+      activeSocket.onmessage = null;
+      activeSocket.close();
+    }
+    await session.stop("test cleanup").catch(() => null);
+  }
+}, 15_000);
 
 test("live transcript runs during capture and the agent can read it mid-meeting", async () => {
   const home = tempHome();

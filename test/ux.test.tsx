@@ -82,7 +82,7 @@ class MultiStepEstimateGap implements Provider {
   cancelled = false;
   async complete(): Promise<ProviderResponse> {
     if (this.call++ === 0) {
-      await tick(2_000);
+      await tick(180);
       return {
         content: null,
         tool_calls: [{ id: "estimate-gap", name: "ls", arguments: { path: "." } }],
@@ -589,19 +589,22 @@ test("reasoning shows live while busy, clears when done", async () => {
 
 test("post-turn run-time line + placeholder drops after first turn", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
-  await tick();
-  expect(strip(c.lastFrame())).toContain("Try:"); // placeholder before the first turn
-  c.stdin.write("hi");
-  await tick(20);
-  c.stdin.write("\r");
-  expect(await until(c, (f) => /for \d+s/.test(f))).toBe(true); // completion line appears
-  const frames = strip(c.frames.join("\n"));
-  expect(frames).toContain("last context ↑1.0k ↓10");
-  expect(frames).toContain("cache ↑800 (80%)");
-  expect(frames).not.toMatch(/chat\s+fast path/);
-  expect(strip(c.lastFrame())).not.toContain("Try:"); // placeholder gone
-  c.unmount();
-});
+  try {
+    await tick();
+    expect(strip(c.lastFrame())).toContain("Try:"); // placeholder before the first turn
+    c.stdin.write("hi");
+    await tick(20);
+    c.stdin.write("\r");
+    expect(await until(c, (f) => /for \d+s/.test(f))).toBe(true); // completion line appears
+    const frames = strip(c.frames.join("\n"));
+    expect(frames).toContain("last context ↑1.0k ↓10");
+    expect(frames).toContain("cache ↑800 (80%)");
+    expect(frames).not.toMatch(/chat\s+fast path/);
+    expect(strip(c.lastFrame())).not.toContain("Try:"); // placeholder gone
+  } finally {
+    c.unmount();
+  }
+}, 15_000); // keep the 1.5s semantic poll; allow slow Windows full-suite scheduling and always clean up
 
 test("Shift+Tab cycles the permission mode (auto -> default)", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);

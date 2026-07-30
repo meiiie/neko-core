@@ -47,7 +47,15 @@ production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, 
 and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
 settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the
 scroll-under-stream test; its replacement counts distinct stream-tail pumps at the compositor boundary and passed
-10/10 local stress rounds, while still enforcing the 40 ms pinned versus 300 ms reading-mode contract.
+10/10 local stress rounds, while still enforcing the 40 ms pinned versus 300 ms reading-mode contract. A later
+Windows canary run hit `5000.24 ms` on an older post-turn UX test whose semantic poll is only 1.5 seconds; the test
+now always unmounts in `finally`, keeps the 1.5-second assertion, and uses a 15-second harness ceiling. It passed
+10/10 local stress rounds, and the synthetic multi-step provider was shortened from 2 seconds to 180 ms. A loaded
+local full-suite run then exposed two independent fixture ceilings: the meeting WebSocket shared the default five-
+second test budget and leaked its session on early failure, while the WPF/UIA fixture capped its first cold-start
+probe at five seconds even though production allows 90 seconds (measured cold start: 7.32 seconds). The fixtures now
+clean up in `finally`, use a 15-second test ceiling and 30-second initial UIA probe, and passed meeting 10/10, UIA
+3/3, post-turn 10/10, and multi-step token 10/10 stress rounds without changing production behavior.
 
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 
