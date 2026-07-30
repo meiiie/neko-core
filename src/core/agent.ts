@@ -510,7 +510,11 @@ export class Agent {
         }
         const missing = m.tool_calls.filter((tc: any) => !answered.has(tc.id || tc.function?.name));
         if (missing.length) {
-          const synthetic = missing.map((tc: any) => ({ role: "tool", tool_call_id: tc.id || tc.function?.name, content: "[interrupted before this tool ran]" }));
+          const synthetic = missing.map((tc: any) => ({
+            role: "tool",
+            tool_call_id: tc.id || tc.function?.name,
+            content: "[interrupted while this tool call was in flight; outcome unknown. Inspect actual state before any retry.]",
+          }));
           this.messages.splice(insertAt, 0, ...synthetic);
         }
         return;
@@ -608,12 +612,10 @@ export class Agent {
       let streamedContent = "";
       let managedTrace = false;
       let lastCheckpointAt = 0;
-      let charsSinceCheckpoint = 0;
       const checkpoint = (force = false) => {
         const now = Date.now();
-        if (!force && lastCheckpointAt && now - lastCheckpointAt < 750 && charsSinceCheckpoint < 4096) return;
+        if (!force && lastCheckpointAt && now - lastCheckpointAt < 750) return;
         lastCheckpointAt = now;
-        charsSinceCheckpoint = 0;
         this.emit("checkpoint", { reason: "inflight" });
       };
       const ensureInflight = () => {
@@ -629,7 +631,6 @@ export class Agent {
               const first = !inflightAssistant;
               ensureInflight().content += text;
               streamedContent += text;
-              charsSinceCheckpoint += text.length;
               checkpoint(first); // first durable byte of every post-tool segment lands immediately
             }
             this.onDelta?.(text, kind);
@@ -651,20 +652,28 @@ export class Agent {
         inflightAssistant = null;
         return message;
       };
-      const executeTool = async (call: { id: string; name: string; arguments: Record<string, any> }) => {
+      let managedToolChain: Promise<void> = Promise.resolve();
+      const executeTool = (call: { id: string; name: string; arguments: Record<string, any> }): Promise<string | any[]> => {
         managedTrace = true;
-        this.emit("tool_call", call);
-        // Provider-managed calls do not come back in response.tool_calls. Materialize and persist the
-        // assistant function_call BEFORE execution: a mutating tool can finish its external side effect
-        // and then lose the network/terminal before returning. Resume must know that call was attempted;
-        // sealDanglingToolCalls() will conservatively mark it interrupted when no result was journaled.
-        finalizeInflight(null, [call]);
-        checkpoint(true);
-        const observation = await this.safeExecute(call, signal);
-        noteTool(call, observation);
-        this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
-        this.emit("tool_result", { call, observation }); // UI persists after the pair is materialized
-        return observation;
+        // Provider callbacks can arrive concurrently. Serialize the canonical trajectory so each
+        // assistant(function_call) is followed by its own tool(function_call_output) before the next
+        // call begins; otherwise completion order can create invalid role ordering on resume.
+        const task = managedToolChain.then(async () => {
+          this.emit("tool_call", call);
+          // Provider-managed calls do not come back in response.tool_calls. Materialize and persist the
+          // assistant function_call BEFORE execution: a mutating tool can finish its external side effect
+          // and then lose the network/terminal before returning. Resume must know that call was attempted;
+          // sealDanglingToolCalls() marks its outcome unknown when no result was journaled.
+          finalizeInflight(null, [call]);
+          checkpoint(true);
+          const observation = await this.safeExecute(call, signal);
+          noteTool(call, observation);
+          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
+          this.emit("tool_result", { call, observation }); // UI persists after the pair is materialized
+          return observation;
+        });
+        managedToolChain = task.then(() => undefined, () => undefined);
+        return task;
       };
       let response;
       try {

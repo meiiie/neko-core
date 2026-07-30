@@ -287,6 +287,39 @@ test("a provider-managed call is durable before execution and keeps an unstreame
   expect(agent.messages.at(-1)).toEqual({ role: "assistant", content: "Final sau tool không qua delta." });
 });
 
+test("concurrent provider-managed calls are journaled and executed in deterministic order", async () => {
+  let active = 0;
+  let maxActive = 0;
+  const registry = new ToolRegistry(process.cwd(), "auto", () => true);
+  registry.execute = async (_name, args) => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    await Bun.sleep(args.path === "first.txt" ? 20 : 1);
+    active--;
+    return `read ${args.path}`;
+  };
+  const provider = {
+    async complete(_messages: any[], _tools: any[], _onDelta: any, _signal: any, opts: any) {
+      const results = await Promise.all([
+        opts.executeTool({ id: "managed-1", name: "read_file", arguments: { path: "first.txt" } }),
+        opts.executeTool({ id: "managed-2", name: "read_file", arguments: { path: "second.txt" } }),
+      ]);
+      expect(results).toEqual(["read first.txt", "read second.txt"]);
+      return { content: "done", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({ provider, tools: registry, onDelta: () => {} });
+
+  expect(await agent.run("read both")).toBe("done");
+  expect(maxActive).toBe(1); // provider callbacks may arrive together; canonical history stays serial
+  expect(agent.messages.filter((message: any) => message.role !== "system" && message.role !== "user")
+    .map((message: any) => message.role === "assistant"
+      ? (message.tool_calls?.[0]?.id ?? "final")
+      : message.tool_call_id)).toEqual([
+    "managed-1", "managed-1", "managed-2", "managed-2", "final",
+  ]);
+});
+
 test("an external realtime session cannot bypass the Agent approval boundary", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-external-tool-"));
   const events: string[] = [];
@@ -1243,7 +1276,11 @@ test("sealDanglingToolCalls: an interrupted turn's unanswered tool_call gets a s
   agent.sealDanglingToolCalls();
   const toolMsgs = agent.messages.filter((m: any) => m.role === "tool");
   expect(toolMsgs.length).toBe(2); // the synthetic result for 'b' was added
-  expect(toolMsgs.find((m: any) => m.tool_call_id === "b")?.content).toMatch(/interrupted/i);
+  const interrupted = String(toolMsgs.find((m: any) => m.tool_call_id === "b")?.content ?? "");
+  expect(interrupted).toMatch(/interrupted/i);
+  expect(interrupted).toMatch(/outcome unknown/i);
+  expect(interrupted).toMatch(/inspect.*before.*retry/i);
+  expect(interrupted).not.toMatch(/before this tool ran/i); // a side effect may already have happened
   // Every tool_call now has a matching tool result -> the provider won't reject the next request.
   const callIds = agent.messages.flatMap((m: any) => (m.tool_calls ?? []).map((tc: any) => tc.id));
   const resultIds = new Set(agent.messages.filter((m: any) => m.role === "tool").map((m: any) => m.tool_call_id));

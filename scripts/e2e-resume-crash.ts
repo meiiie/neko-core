@@ -8,7 +8,7 @@
  *
  *   bun scripts/e2e-resume-crash.ts [path-to-neko-binary]
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
@@ -27,8 +27,7 @@ mkdirSync(work, { recursive: true });
 const encoder = new TextEncoder();
 const sse = (value: unknown) => encoder.encode(`data: ${typeof value === "string" ? value : JSON.stringify(value)}\n\n`);
 let requestCount = 0;
-let partialSent!: () => void;
-const sawPartial = new Promise<void>((resolvePartial) => { partialSent = resolvePartial; });
+let partialObserved = false;
 let heldController: ReadableStreamDefaultController<Uint8Array> | null = null;
 
 const server = Bun.serve({
@@ -72,7 +71,7 @@ const server = Bun.serve({
             }, finish_reason: null }],
           }));
           heldController = controller; // intentionally never DONE/close: a dead Wi-Fi link that stalls forever
-          partialSent();
+          partialObserved = true;
           return;
         }
         controller.error(new Error(`unexpected completion request ${requestCount}`));
@@ -85,11 +84,21 @@ const server = Bun.serve({
   },
 });
 
+// Preserve only ordinary process/runtime variables. The child must never inherit a real provider key,
+// token, password, or NEKO_* route that could bypass the loopback fixture.
+const inheritedEnv: Record<string, string> = {};
+for (const [key, value] of Object.entries(process.env)) {
+  if (value === undefined || key.startsWith("NEKO_") || /API_KEY|TOKEN|SECRET|PASSWORD/i.test(key)) continue;
+  inheritedEnv[key] = value;
+}
 const childEnv: Record<string, string> = {
-  ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+  ...inheritedEnv,
   USERPROFILE: home,
   HOME: home,
   NEKO_PROFILE: "local",
+  NEKO_API_KEY: "resume-e2e-fixture-key",
+  OPENAI_API_KEY: "",
+  NVIDIA_API_KEY: "",
   NEKO_BASE_URL: `http://127.0.0.1:${server.port}/v1`,
   NEKO_MODEL: "resume-e2e-model",
   NEKO_FULLSCREEN: "false",
@@ -123,8 +132,11 @@ async function waitFor(label: string, predicate: () => boolean, timeoutMs = 15_0
 function sessionFile(): string | null {
   const dir = join(home, ".neko-core", "sessions");
   if (!existsSync(dir)) return null;
-  const file = readdirSync(dir).find((name) => name.endsWith(".json") && name !== ".index.json");
-  return file ? join(dir, file) : null;
+  const files = readdirSync(dir)
+    .filter((name) => name.endsWith(".json") && name !== ".index.json")
+    .map((name) => join(dir, name));
+  if (!files.length) return null;
+  return files.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
 }
 
 let first: ReturnType<typeof pty> | null = null;
@@ -135,7 +147,7 @@ try {
   first.term.write("hãy tạo bằng chứng để kiểm tra resume");
   await Bun.sleep(100);
   first.term.write("\r");
-  await sawPartial;
+  await waitFor("streamed partial response", () => partialObserved);
 
   await waitFor("durable in-flight checkpoint", () => {
     const file = sessionFile();
@@ -187,5 +199,5 @@ try {
   try { resumed?.proc.kill(); } catch {}
   try { resumed?.term.close(); } catch {}
   try { server.stop(true); } catch {}
-  rmSync(root, { recursive: true, force: true });
+  try { rmSync(root, { recursive: true, force: true }); } catch { /* killed Windows children can retain handles; never mask the real test result */ }
 }
