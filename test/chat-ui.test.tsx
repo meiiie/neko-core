@@ -53,6 +53,15 @@ test("background job summary preserves running state and job id", () => {
     .toBe("Started background job [bg7]: bun dev");
 });
 
+test("prefixed screenshot capability guidance stays expanded", () => {
+  expect(resultSummary("computer", "saved shot.png view=120x40 screen=120x40 scale=1\n[image shot.png] - to view it, set \"vision\": true in config.", { action: "screenshot" }))
+    .toBeUndefined();
+});
+
+test("max-step sub-agent stops stay expanded", () => {
+  expect(resultSummary("task", "[stopped: reached max_steps=20]", { description: "audit" })).toBeUndefined();
+});
+
 test("resume replay preserves mixed parallel tool order and keeps failures expanded", () => {
   let id = 1;
   const lines = buildReplayLines([

@@ -31,7 +31,8 @@ export function isToolFailure(obs: string): boolean {
     || /^Tool '.+' is disabled\b/i.test(text)
     || /^Unknown computer action\b/i.test(text)
     || /^\[PDF [^\]]+\] - (?:text extraction needs|no extractable text)\b/i.test(text)
-    || /^\[[^\]]+\] - to view it, set "vision": true\b/i.test(text)
+    || /^\[[^\]]+\] - to view it, set "vision": true\b/im.test(text)
+    || /^\[stopped: reached max_steps=\d+\]/i.test(text)
     || /^\(offset \d+ is beyond end of file\b/i.test(text);
 }
 
