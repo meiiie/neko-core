@@ -27,8 +27,8 @@ All notable changes to Neko Core are documented here. The format follows
   summaries; background starts say `Started background job [bgN]` instead of implying completion. Failures,
   denials, blocked/disabled actions, missing capabilities (even after screenshot metadata), empty read windows,
   max-step sub-agent stops, and loop-guard warnings stay expanded. Mixed parallel outcomes retain call order. Ctrl+O
-  and `/transcript` retain the full call/result, and todo/plan state remains visible instead of being folded away.
-  MCP protocol-level `isError`, interrupted commands, missing-skill/MCP no-match outcomes, sub-agent failures, and
+  and `/transcript` retain the full call/result; todo/plan and memory state remain visible instead of being folded
+  away. MCP protocol-level `isError`, interrupted commands, missing-skill/MCP no-match outcomes, sub-agent failures, and
   rejected plans remain expanded; search/glob summaries
   name the requested pattern rather than their base directory, including an accurate zero-match count.
 - **Scrolled history keeps the nearest user prompt pinned at the top.** The gray one-row anchor appears only

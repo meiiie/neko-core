@@ -47,7 +47,7 @@ export function resultSummary(
   obs: string,
   args: Record<string, any> = {},
 ): string | undefined {
-  if (!name || isToolFailure(obs) || name === "todo_write" || name === "update_plan") return undefined;
+  if (!name || isToolFailure(obs) || name === "todo_write" || name === "update_plan" || name === "memory") return undefined;
   const background = obs.match(/^Running in background \[([^\]]+)\]:\s*(.+)$/m);
   const n = obs.trim() === "(no matches)" ? 0 : obs.split("\n").filter((line) => line.trim()).length;
   const target = short(args.path ?? args.command ?? args.query ?? args.url ?? args.pattern ?? args.name);

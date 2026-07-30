@@ -42,7 +42,7 @@ scroll band always began on row 1, so a sticky prompt header was overwritten.
   `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
   local design, not a “beyond SOTA” claim.
 
-Release evidence: both TypeScript compilers clean; **941/941 tests, 4,168 assertions**; policy and doctor PASS;
+Release evidence: both TypeScript compilers clean; **942/942 tests, 4,170 assertions**; policy and doctor PASS;
 production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
 and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
 settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the
@@ -68,7 +68,10 @@ ID. The same runtime-state audit also locked unknown computer actions, PDF/image
 and zero-match searches. Background starts now compact to an explicit `Started background job [bgN]` line; every
 non-success/capability result remains expanded. A fourth exact-head pass found two prefixed/native variants outside
 that first audit: screenshot metadata preceding the no-vision diagnostic, and a sub-agent ending at `max_steps`.
-Both now stay expanded, with independent RED/GREEN regressions built from the runtime's exact output.
+Both now stay expanded, with independent RED/GREEN regressions built from the runtime's exact output. A fifth
+exact-head pass exposed a broader feature-state case: memory-disabled/no-op text had no durable structured error bit.
+Memory activity is therefore intentionally never folded; its short state/result stays visible whether enabled or off,
+which removes that string-classification ambiguity instead of adding another one-off failure regex.
 
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 

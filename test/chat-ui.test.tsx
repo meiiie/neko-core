@@ -62,6 +62,11 @@ test("max-step sub-agent stops stay expanded", () => {
   expect(resultSummary("task", "[stopped: reached max_steps=20]", { description: "audit" })).toBeUndefined();
 });
 
+test("memory state remains visible instead of claiming generic completion", () => {
+  expect(resultSummary("memory", "Memory is off. The user can re-enable it with /memory on.", { action: "read", name: "x" })).toBeUndefined();
+  expect(resultSummary("memory", "Saved memory 'x.md'", { action: "write", name: "x" })).toBeUndefined();
+});
+
 test("resume replay preserves mixed parallel tool order and keeps failures expanded", () => {
   let id = 1;
   const lines = buildReplayLines([
