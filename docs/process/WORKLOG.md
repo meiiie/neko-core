@@ -28,10 +28,10 @@ or stopping condition executable.
 - Review hardening validates GTIN check digits at all four standard lengths, rejects separator-form GPU/CPU
   labels, exposes qualified highest and lowest claims, keeps CLI bytes ASCII-safe for cp1252 while parsed
   JSON remains Unicode, keeps installed-skill commands free of the repo-only `rtk` wrapper, and lets sparse
-  one/two-offer results finish. Explicit `--kind mpn` accepts source-labelled letter-only/`#` MPNs without
-  weakening strict auto-mode rejection of broad descriptions.
+  one/two-offer results finish. Explicit kinds accept source-labelled numeric/letter-only SKUs and
+  letter-only/`#` MPNs without weakening strict auto-mode rejection of broad descriptions or price-like numbers.
 
-Evidence: current + stable TypeScript clean; **907/907 tests, 4,010 assertions across 97 files**; doctor and policy
+Evidence: current + stable TypeScript clean; **908/908 tests, 4,014 assertions across 97 files**; doctor and policy
 PASS; clean production build + UI/input probes PASS; focused secret scan and `git diff --check` clean.
 
 ## 2026-07-29 - v0.20.0: photography end to end, research-first

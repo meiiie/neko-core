@@ -113,11 +113,12 @@ function normalizeIdentifier(
   const compact = value.replace(/[ ._/#()+-]+/g, "");
   const componentOnly = /^(?:(?:RTX|GTX|U)\d+[A-Z]*|CORE(?:I[3579]|ULTRA)?\d+[A-Z]*|RYZEN[3579]?\d+[A-Z]*)$/.test(compact);
 
+  const skuShape = /^[A-Z0-9][A-Z0-9._/-]{2,63}$/.test(value);
   const valid = kind === "gtin"
     ? isValidGtin(value)
     : kind === "mpn"
       ? /^[A-Z0-9][A-Z0-9 ._/#()+-]{0,63}$/.test(value)
-      : /^[A-Z0-9][A-Z0-9._/-]{2,63}$/.test(value) && /[A-Z]/.test(value) && /\d/.test(value);
+      : skuShape && (requestedKind === "sku" || (/[A-Z]/.test(value) && /\d/.test(value)));
   if (!valid || (kind !== "gtin" && componentOnly)) {
     throw new Error(`SKU/MPN/GTIN không hợp lệ: ${raw || "(trống)"}`);
   }

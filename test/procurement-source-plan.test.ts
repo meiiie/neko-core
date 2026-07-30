@@ -49,6 +49,14 @@ test("exact-identifier cascade accepts a numeric GTIN", async () => {
   }
 });
 
+test("exact-identifier cascade accepts an explicitly typed numeric SKU", async () => {
+  const { buildSkuSourcePlan } = await import(modulePath);
+  const plan = buildSkuSourcePlan("123456", "generic", [], "sku");
+  expect(plan.sku).toBe("123456");
+  expect(plan.identifierKind).toBe("sku");
+  expect(() => buildSkuSourcePlan("123456", "generic")).toThrow("SKU/MPN/GTIN");
+});
+
 test("exact-identifier cascade accepts explicitly typed MPN formats", async () => {
   const { buildSkuSourcePlan } = await import(modulePath);
   for (const mpn of ["LASERJET", "C9363W#140"]) {
