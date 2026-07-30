@@ -6,6 +6,19 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.22.2] — 2026-07-30
+
+### Fixed
+
+- **`/transcript` no longer turns mouse movement or wheel input into a broken search query.** XTerm SGR
+  pointer reports are classified before printable text: wheel ticks scroll the transcript viewport, while
+  motion, press, and release reports are consumed instead of appearing as strings such as
+  `[<65;86;26M`. Keyboard scrolling and type-to-search remain intact.
+- A compiled-binary ConPTY regression gate now injects the exact field payload, verifies ordinary text
+  search afterward, and records response time. Across two release-machine rounds, 561 entries measured
+  179–280 ms open / 51–81 ms pointer / 61–74 ms search; 5,000 entries measured 235–333 ms /
+  50–80 ms / 62–91 ms.
+
 ## [0.22.1] — 2026-07-30
 
 ### Fixed

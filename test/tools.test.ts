@@ -68,6 +68,9 @@ test("computer screenshot embeds vision bytes, while text-only mode keeps the he
   ].join("\n"));
   const tools = new ToolRegistry(root, "auto", () => true);
   tools.loadSkill = () => ({ body: "", dir: skill });
+  // This fixture exercises the deterministic one-shot screenshot adapter. Resident-host startup and
+  // fallback have dedicated tests; probing a missing resident-uia.ps1 twice made this 5s test timing-flaky.
+  tools.residentUia = false;
   const textOnly = String(await tools.execute("computer", { action: "screenshot" }));
   const fallbackPath = textOnly.match(/^saved\s+(.+?)\s+view=/)?.[1];
   expect(fallbackPath).toBeTruthy();
@@ -84,7 +87,7 @@ test("computer screenshot embeds vision bytes, while text-only mode keeps the he
   expect(stalePath).toBeUndefined(); // dead temp paths are not advertised to the model
   const capturePath = readFileSync(join(scripts, "capture-path.txt"), "utf8");
   expect(existsSync(capturePath)).toBe(false); // bytes are embedded before finally removes the file
-});
+}, 15_000); // two real no-profile PowerShell launches; Bun's 5s default has no process-startup headroom
 
 test("describeToolCall uses Claude-style labels + primary arg", () => {
   expect(describeToolCall("read_file", { path: "src/a.ts" })).toBe("Read(src/a.ts)");

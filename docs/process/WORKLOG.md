@@ -3,6 +3,37 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
+
+The field screenshot showed `/transcript` filling its search line with repeated `[<65;86;26M` strings as
+soon as the mouse moved or the wheel turned. Component injection and a real `dist/neko.exe` under
+Bun.Terminal/ConPTY reproduced it on v0.22.1. XTerm identifies that payload as SGR mouse mode 1006
+(wheel down at x=86, y=26). Ink 7.1.x strips the leading ESC but does not expose a typed mouse event, and
+`TranscriptViewer` then appended the remaining CSI body through its printable-text fallback.
+
+- Added the missing event boundary at the active overlay: net wheel bursts move the bounded viewport by
+  three rows per tick; press, release, motion, and cancelling wheel bursts are consumed before Escape,
+  navigation, or search handling. Canonical transcript data is untouched.
+- Added a component regression that covers ESC-stripped input, motion, press/release, and a cancelling
+  burst, proves the viewport moves, rejects raw pointer bytes/`found 0`, then proves ordinary `NEEDLE`
+  search still returns one result.
+- Added `scripts/e2e-transcript-pointer.ts`, an isolated compiled-binary ConPTY gate using the exact field
+  payload. Across two rounds, 561 entries measured 179–280 ms open / 51–81 ms pointer / 61–74 ms search;
+  5,000 entries measured 235–333 ms / 50–80 ms / 62–91 ms. Every run preserved the transcript and exposed
+  no pointer bytes.
+- Primary-source comparison with XTerm, Ink, current OpenAI Codex TUI, and Ratatui is recorded in
+  `docs/research/transcript-input-sota-2026-07-30.md`. It supports event classification before state
+  mutation, but does not justify a “beyond SOTA” claim without independent cross-terminal benchmarks.
+- Release soak exposed a pre-existing Windows timing flake in the screenshot fixture: it spent one 5-second
+  Bun budget probing a missing resident helper and launching two real PowerShell processes. The fixture now
+  selects its intended one-shot path and has the same 15-second external-process budget as the adjacent
+  computer test. Five sequential runs passed in 3.26–4.92 seconds; the slowest would have failed the old cap.
+
+Release evidence: both TypeScript compilers clean; **918/918 tests, 4,074 assertions**; doctor and policy
+PASS; production build + UI/input probes PASS; compiled transcript E2E PASS at 561 and 5,000 entries;
+ConPTY ghost/typing 3/3; final scroll bench 14 ms first response / 155 ms settle; changed-file secret scan and
+`git diff --check` clean.
+
 ## 2026-07-30 - v0.22.1: resume is durable state plus a viewport, not a transcript dump
 
 The field report had two symptoms that looked related: choosing a session felt frozen, and the restored

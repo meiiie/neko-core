@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { Line } from "./transcript.tsx";
 import { flattenLines } from "./scroll.tsx";
+import { parseLastPointer, parseWheelAll } from "./mouse.ts";
 
 export function TranscriptViewer({ lines, cols, rows: termRows, onClose }: { lines: Line[]; cols: number; rows: number; onClose: () => void }) {
   const [query, setQuery] = useState("");
@@ -33,6 +34,15 @@ export function TranscriptViewer({ lines, cols, rows: termRows, onClose }: { lin
   const pos = maxOffset === 0 ? "all" : atBottom ? "end" : off === 0 ? "top" : `${Math.round((100 * off) / maxOffset)}%`;
 
   useInput((input, key) => {
+    // Ink exposes SGR mouse reports as input strings (usually after stripping ESC). Classify them
+    // before the printable-text fallback so pointer bytes can never become a search query.
+    const wheel = parseWheelAll(input);
+    if (wheel) {
+      const delta = wheel.count * 3;
+      setOffset((o) => Math.min(maxOffset, Math.max(0, o + (wheel.dir === "up" ? -delta : delta))));
+      return;
+    }
+    if (parseLastPointer(input)) return; // consume clicks, releases, motion, and cancelling wheel bursts
     if (key.escape) { if (q) return setQuery(""); return onClose(); }
     if (key.upArrow) return setOffset((o) => Math.max(0, Math.min(o, maxOffset) - 1));
     if (key.downArrow) return setOffset((o) => Math.min(maxOffset, o + 1));
