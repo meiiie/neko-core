@@ -27,6 +27,7 @@ test("successful tool activity folds to one past-tense line while preserving ful
   expect(resultSummary("bash", "(exit 0)\nok", { command: "bun test" })).toBe("Ran shell command: bun test");
   expect(resultSummary("search", "one match", { path: "src", pattern: "needle" })).toBe("Searched for needle (1 match)");
   expect(resultSummary("glob", "a.ts\nb.ts", { path: "src", pattern: "**/*.ts" })).toBe("Found 2 files for **/*.ts");
+  expect(resultSummary("search", "(no matches)", { pattern: "missing" })).toBe("Searched for missing (0 matches)");
   const longSummary = resultSummary("bash", "(exit 0)\nok", { command: "x".repeat(200) }) ?? "";
   expect(longSummary).not.toContain("…"); // supported legacy Windows consoles need an ASCII-only suffix
   expect(longSummary).toContain("...");
@@ -45,6 +46,11 @@ test("successful tool activity folds to one past-tense line while preserving ful
   expect(lines[0].summary).toBe("Ran shell command: bun test");
   expect(lines[0].text).toContain("Bash(bun test)");
   expect(lines[0].text).toContain("27 pass");
+});
+
+test("background job summary preserves running state and job id", () => {
+  expect(resultSummary("bash", "Running in background [bg7]: bun dev\nCheck output with /bashes.", { command: "bun dev" }))
+    .toBe("Started background job [bg7]: bun dev");
 });
 
 test("resume replay preserves mixed parallel tool order and keeps failures expanded", () => {
@@ -94,6 +100,11 @@ test("non-success activity stays expanded instead of folding into false success"
   expect(resultSummary("mcp_load", "No matching MCP tools for: missing. Check the names.", {})).toBeUndefined();
   expect(resultSummary("task", "Sub-agents are not available in this context.", {})).toBeUndefined();
   expect(resultSummary("task", "Sub-agent error: worker crashed", {})).toBeUndefined();
+  expect(resultSummary("write_file", "Tool 'write_file' is disabled (enable with /tools write_file).", { path: "x.ts" })).toBeUndefined();
+  expect(resultSummary("computer", "Unknown computer action 'bogus'. Use: list | read.", { action: "bogus" })).toBeUndefined();
+  expect(resultSummary("read_file", "[PDF scan.pdf] - no extractable text (needs OCR or a vision model).", { path: "scan.pdf" })).toBeUndefined();
+  expect(resultSummary("read_file", "[image photo.png] - to view it, set \"vision\": true in config.", { path: "photo.png" })).toBeUndefined();
+  expect(resultSummary("read_file", "(offset 90 is beyond end of file at line 12)", { path: "short.txt" })).toBeUndefined();
   let id = 1;
   const lines = buildReplayLines([
     {

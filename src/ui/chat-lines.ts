@@ -27,7 +27,12 @@ export function isToolFailure(obs: string): boolean {
     || /^The user did NOT approve the plan\b/i.test(text)
     || /^No matching MCP tools\b/i.test(text)
     || /^Sub-agents are not available\b/i.test(text)
-    || /^Sub-agent error:/i.test(text);
+    || /^Sub-agent error:/i.test(text)
+    || /^Tool '.+' is disabled\b/i.test(text)
+    || /^Unknown computer action\b/i.test(text)
+    || /^\[PDF [^\]]+\] - (?:text extraction needs|no extractable text)\b/i.test(text)
+    || /^\[[^\]]+\] - to view it, set "vision": true\b/i.test(text)
+    || /^\(offset \d+ is beyond end of file\b/i.test(text);
 }
 
 const short = (value: unknown, cap = 80) => {
@@ -42,8 +47,12 @@ export function resultSummary(
   args: Record<string, any> = {},
 ): string | undefined {
   if (!name || isToolFailure(obs) || name === "todo_write" || name === "update_plan") return undefined;
-  const n = obs.split("\n").filter((line) => line.trim()).length;
+  const background = obs.match(/^Running in background \[([^\]]+)\]:\s*(.+)$/m);
+  const n = obs.trim() === "(no matches)" ? 0 : obs.split("\n").filter((line) => line.trim()).length;
   const target = short(args.path ?? args.command ?? args.query ?? args.url ?? args.pattern ?? args.name);
+  if ((name === "bash" || name === "shell_command") && background) {
+    return `Started background job [${short(background[1], 24)}]: ${target || short(background[2])}`;
+  }
   switch (name) {
     case "read_file": return target ? `Read ${target} (${n} line${n === 1 ? "" : "s"})` : `Read ${n} line${n === 1 ? "" : "s"}`;
     case "search": {

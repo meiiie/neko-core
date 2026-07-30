@@ -42,7 +42,7 @@ scroll band always began on row 1, so a sticky prompt header was overwritten.
   `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
   local design, not a “beyond SOTA” claim.
 
-Release evidence: both TypeScript compilers clean; **938/938 tests, 4,159 assertions**; policy and doctor PASS;
+Release evidence: both TypeScript compilers clean; **939/939 tests, 4,166 assertions**; policy and doctor PASS;
 production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
 and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
 settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the
@@ -63,6 +63,10 @@ no-match results expanded. The next exact-head pass caught the remaining sub-age
 anchor boundary where mounting the one-row header changed which prompt was actually visible. Both now have focused
 RED/GREEN coverage; anchor selection computes against the reduced band height before it decides to mount, and the
 streaming anchor E2E passed 10/10 stress rounds after its fixture was moved beyond the intentional suppression row.
+A third exact-head pass found disabled tools folding into success and background jobs losing their running state/job
+ID. The same runtime-state audit also locked unknown computer actions, PDF/image capability gaps, beyond-EOF reads,
+and zero-match searches. Background starts now compact to an explicit `Started background job [bgN]` line; every
+non-success/capability result remains expanded.
 
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 
