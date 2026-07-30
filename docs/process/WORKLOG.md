@@ -30,10 +30,12 @@ scroll band always began on row 1, so a sticky prompt header was overwritten.
   `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
   local design, not a “beyond SOTA” claim.
 
-Release evidence: both TypeScript compilers clean; **929/929 tests, 4,118 assertions**; policy and doctor PASS;
+Release evidence: both TypeScript compilers clean; **929/929 tests, 4,119 assertions**; policy and doctor PASS;
 production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
 and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
-settle; secret scan and `git diff --check` clean.
+settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the
+scroll-under-stream test; its replacement counts distinct stream-tail pumps at the compositor boundary and passed
+10/10 local stress rounds, while still enforcing the 40 ms pinned versus 300 ms reading-mode contract.
 
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 
