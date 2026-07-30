@@ -40,8 +40,10 @@ test("procurement makes the exact-SKU cascade executable before detailed tactics
   expect(skill.body).toContain("83KY001VVN");
   expect(skill.body).toContain("KHÔNG gộp nhiều `site:` bằng `OR`");
   expect(skill.body).toContain("cao nhất đã xác minh trong các nguồn đã khảo sát");
-  expect(skill.body).toContain('rtk bun "<skill files dir>/scripts/source-plan.ts"');
-  expect(skill.body).toContain("rtk env NEKO_MODEL=");
+  expect(skill.body).toContain('bun "<skill files dir>/scripts/source-plan.ts"');
+  expect(skill.body).not.toContain('rtk bun "<skill files dir>/scripts/source-plan.ts"');
+  expect(skill.body).toContain("env NEKO_MODEL=");
+  expect(skill.body).not.toContain("rtk env NEKO_MODEL=");
   expect(skill.body).toContain("tối đa 3–5");
   expect(skill.body).toContain("nếu chỉ có 1–2");
   expect(existsSync(join(skill.dir, "scripts", "source-plan.ts"))).toBe(true);

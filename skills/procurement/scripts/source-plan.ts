@@ -6,7 +6,7 @@
  * one exact open-web query, one identifier index URL, and one query per independent retailer domain.
  * It deliberately emits no multi-domain OR query because weak fallback engines often return no results.
  *
- * Usage: rtk bun source-plan.ts <identifier> [--category laptop|phone|pc|generic] [--domain example.vn ...]
+ * Usage: bun source-plan.ts <identifier> [--category laptop|phone|pc|generic] [--domain example.vn ...]
  */
 
 export type ProcurementCategory = "laptop" | "phone" | "pc" | "generic";
@@ -178,7 +178,7 @@ function flag(name: string): string[] {
 if (import.meta.main) {
   const sku = process.argv[2];
   if (!sku) {
-    console.error("usage: rtk bun source-plan.ts <identifier> [--category laptop|phone|pc|generic] [--domain example.vn ...]");
+    console.error("usage: bun source-plan.ts <identifier> [--category laptop|phone|pc|generic] [--domain example.vn ...]");
     process.exit(2);
   }
   const category = (flag("--category")[0] ?? "generic") as ProcurementCategory;

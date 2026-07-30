@@ -22,7 +22,7 @@ Bạn là **trợ lý mua hàng (Purchasing Officer)**: nhận một danh sách 
 1. **DISCOVER:** chưa có mã → tìm rộng theo thuộc tính, nhưng giữ một ledger ngắn `mô tả | SKU ứng viên | giá index | nguồn phát hiện | trạng thái identity`.
 2. **PIVOT NGAY KHI THẤY MÃ:** bất kỳ title/trang nào lộ SKU/MPN/GTIN → thêm vào ledger. Với tối đa 3–5 ứng viên đầu bảng theo mục tiêu max/min, chạy helper deterministic:
    ```bash
-   rtk bun "<skill files dir>/scripts/source-plan.ts" "<SKU>" --category laptop
+   bun "<skill files dir>/scripts/source-plan.ts" "<SKU>" --category laptop
    ```
    (`--category phone|pc|generic`; thêm `--domain shop.vn` cho merchant mới). Mở `indexUrl`, chạy query exact-SKU mở và **từng** query retailer helper trả về. **KHÔNG gộp nhiều `site:` bằng `OR`**; backend fallback yếu thường trả rỗng. Không chỉ search `SKU + merchant đã biết` — như ca thật `83KY001VVN + Xgear` đã bỏ sót FPT/An Khang.
 3. **RECEIPT:** ghi mỗi target `index/open_web/retailer | URL/domain | hit/no_result/blocked | link bằng chứng`. `no_result` và `blocked` vẫn là dữ liệu coverage, không được im lặng bỏ qua.
@@ -51,7 +51,7 @@ Script in: **bảng đã sắp thấp→cao + cao→thấp**, **THẤP NHẤT / 
 ## Thu nhận product identity (chi tiết hỗ trợ contract)
 
 - **Người dùng/link đã cho mã:** coi là exact-identity candidate, nhưng vẫn đối chiếu mã + cấu hình trên trang hãng hoặc hai trang bán độc lập trước khi gộp offer.
-- **Có ảnh:** đọc dòng/dung lượng/mã trên bao bì bằng vision (`rtk env NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko run --image <ảnh> "Sản phẩm gì?"`). Resize/crop ảnh; mã đầy đủ thường ở mặt sau. Vision chưa đọc được mã thì giữ là candidate, không tự bịa SKU.
+- **Có ảnh:** đọc dòng/dung lượng/mã trên bao bì bằng vision (`env NEKO_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1 neko run --image <ảnh> "Sản phẩm gì?"`). Resize/crop ảnh; mã đầy đủ thường ở mặt sau. Vision chưa đọc được mã thì giữ là candidate, không tự bịa SKU.
 - **Chỉ có mô tả:** bắt đầu broad discovery và ghi **“chưa chốt SKU, giá tham khảo theo dòng”**. Ngay khi bất kỳ kết quả nào lộ mã, quay lại bước PIVOT của contract; không được tiếp tục coi identity là mơ hồ.
 
 ## ⭐⭐ KIẾN TRÚC 2 TẦNG cho MỌI khảo giá: INDEX (aggregator) → VERIFY (trang shop)

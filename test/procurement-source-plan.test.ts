@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const modulePath = join(import.meta.dir, "..", "skills", "procurement", "scripts", "source-plan.ts");
@@ -70,4 +70,12 @@ test("source-plan CLI formatters are ASCII-safe while parsed JSON preserves Unic
   expect([...stderr].every((char) => char.charCodeAt(0) <= 0x7f)).toBe(true);
   expect(stderr).not.toContain("\u001b");
   expect(stderr).toContain("\\u001b");
+});
+
+test("bundled planner usage does not depend on the repo-only rtk wrapper", () => {
+  const source = readFileSync(modulePath, "utf8");
+  expect(source).toContain("Usage: bun source-plan.ts");
+  expect(source).toContain("usage: bun source-plan.ts");
+  expect(source).not.toContain("Usage: rtk bun source-plan.ts");
+  expect(source).not.toContain("usage: rtk bun source-plan.ts");
 });
