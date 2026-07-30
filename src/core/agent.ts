@@ -9,7 +9,7 @@
  * The maxSteps cap is load-bearing: an agent without one can loop forever and burn money.
  * Tool observations (errors + denials) are fed back so the model adapts rather than crash.
  */
-import { CostTracker } from "./cost.ts";
+import { CostTracker, type Usage } from "./cost.ts";
 import type { DeltaHook, Provider, ToolCall } from "./ports.ts";
 import { todosContextBlock, type ToolRegistry } from "./tool-runtime.ts";
 import {
@@ -676,6 +676,23 @@ export class Agent {
         return task;
       };
       let response;
+      // Provider live-usage callbacks describe THIS complete() call. Rebase them onto the Agent's
+      // already-booked totals so the UI sees one monotonic absolute counter across a multi-step turn.
+      const usageBase = {
+        prompt: this.cost.promptTokens,
+        completion: this.cost.completionTokens,
+        total: this.cost.totalTokens,
+        cached: this.cost.cachedTokens,
+        calls: this.cost.calls,
+      };
+      const publishUsage = (usage: Usage) => this.emit("usage", {
+        prompt_tokens: usageBase.prompt + (usage.prompt_tokens ?? 0),
+        completion_tokens: usageBase.completion + (usage.completion_tokens ?? 0),
+        total_tokens: usageBase.total + (usage.total_tokens ?? 0),
+        cached_tokens: usageBase.cached + (usage.cached_tokens ?? 0),
+        context_tokens: usage.context_tokens,
+        model_calls: usageBase.calls + Math.max(1, usage.model_calls ?? 1),
+      } satisfies Usage);
       try {
         response = await this.provider.complete(
           this.messages,
@@ -685,6 +702,7 @@ export class Agent {
           {
             onToolCallReady,
             executeTool,
+            onUsage: publishUsage,
             ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : {}),
           },
         );

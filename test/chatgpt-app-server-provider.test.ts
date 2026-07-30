@@ -70,6 +70,7 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
   };
   const provider = new ChatGptAppServerProvider(cfg, factory);
   const deltas: string[] = [];
+  const liveUsage: any[] = [];
   let executions = 0;
   const response = await provider.complete(
     [
@@ -82,7 +83,10 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
     [{ type: "function", function: { name: "read_file", description: "Read", parameters: { type: "object", properties: { path: { type: "string" } } } } }],
     (delta, kind) => { if (kind === "content") deltas.push(delta); },
     undefined,
-    { executeTool: async () => { executions++; return "file contents"; } },
+    {
+      executeTool: async () => { executions++; return "file contents"; },
+      onUsage: (usage: any) => { liveUsage.push(usage); },
+    },
   );
 
   expect(requests.find((request) => request.method === "account/login/start")?.params.type).toBe("chatgptAuthTokens");
@@ -99,6 +103,14 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
   expect(toolResult).toEqual({ contentItems: [{ type: "inputText", text: "file contents" }], success: true });
   expect(executions).toBe(1);
   expect(deltas).toEqual(["BRIDGE_", "OK"]);
+  expect(liveUsage).toEqual([{
+    prompt_tokens: 12,
+    completion_tokens: 3,
+    total_tokens: 15,
+    cached_tokens: 4,
+    context_tokens: 12,
+    model_calls: 1,
+  }]);
   expect(response).toMatchObject({
     content: "BRIDGE_OK",
     tool_calls: [],

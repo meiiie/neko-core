@@ -209,6 +209,12 @@ export function TextInput(props: {
     /** Highlighted codepoint range, rendered in reverse video. ChatApp owns it because the drag that
      * produces it is a pointer gesture and pointer events arrive there. */
     selection?: { from: number; to: number } | null;
+    /** Prompt history is a boundary fallback, not the first owner of Up/Down. The editor invokes these
+     * only when no visual row exists in that direction. */
+    onHistoryUp?: () => void;
+    onHistoryDown?: () => void;
+    /** A slash menu can temporarily own Up/Down without moving the caret underneath it. */
+    verticalNavigation?: boolean;
   }) {
     const { value, onChange, onSubmit, placeholder, mask, width = 9999, pastedContents, nextPasteId, onCommitPastes, onPasteImage, caretGlyph = "thin-block" } = props;
   const ref = useRef(value);
@@ -271,6 +277,16 @@ export function TextInput(props: {
         ref.current = chars.join("");
         onChange(ref.current);
       }
+      return;
+    }
+    if ((key.upArrow || key.downArrow) && !key.ctrl && !key.meta && props.verticalNavigation !== false) {
+      const next = caretIndexForClick(ref.current, cur.current, visibleCols, key.upArrow ? -1 : 1, 0);
+      if (next !== cur.current) {
+        cur.current = next;
+        return rerender();
+      }
+      if (key.upArrow) props.onHistoryUp?.();
+      else props.onHistoryDown?.();
       return;
     }
     if (key.leftArrow) { cur.current = Math.max(0, cur.current - 1); return rerender(); }
@@ -369,24 +385,10 @@ export function TextInput(props: {
           </Text>
         );
       }
-      // Multiline value (a small paste kept its newlines): skip horizontal windowing — Ink renders
-      // the \n as real line breaks and wraps naturally, so the box shows the 2-3 lines as typed.
-      // Big pastes collapse to a single-line placeholder (no \n), so they stay under windowing.
-      // The caret is INSERTED before char i, so `after` starts AT i (char i renders normally).
-      if (value.includes("\n")) {
-        return (
-          <Text>
-            {seg(0, i, "a")}
-            {CARET}
-            {seg(i, cps.length, "b")}
-          </Text>
-        );
-      }
-      // Wrap path: a long single-line value (no \n) that would overflow the width is wrapped into
-      // multiple visual lines (display-width aware) rather than horizontal window-scroll. Each visual
-      // line is ONE <Text> of plain string; the line holding the caret splits into before/caret/after
-      // (the caret is INSERTED between cells, char i renders normally). Keeping each line a flat string
-      // (not a per-codepoint <Text> fan-out) preserves Ink's yoga height measurement after a resize-down.
+      // One shared viewport for hard newlines and soft wraps. The old hard-newline branch handed the
+      // entire value to Ink and bypassed MAX_INPUT_LINES. Each display-width-aware visual line is one
+      // flat <Text>; only the caret line splits before/caret/after. Avoiding a per-codepoint fan-out
+      // preserves Ink's yoga height measurement after a resize-down.
       // Reserve ONE column (visibleCols - 1) so the inserted caret never pushes a full line to overflow.
         const wrapped = wrapInput(cps, cur.current, Math.max(1, visibleCols - 1));
         if (wrapped.lines.length > 1) {

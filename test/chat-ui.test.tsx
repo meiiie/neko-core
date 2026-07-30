@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
 import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
-import { buildReplayLines, clampToRows, contentToText, recoverTodos, renderTail, replaySessionLines } from "../src/ui/chat-lines.ts";
+import { buildReplayLines, clampToRows, contentToText, recoverTodos, renderTail, replaySessionLines, resultSummary } from "../src/ui/chat-lines.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { setModel } from "../src/adapters/project.ts";
 import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "../src/adapters/chatgpt-voice.ts";
@@ -21,6 +21,56 @@ test("multimodal tool observations render as metadata + [image], never object co
   const lines = buildReplayLines([{ role: "tool", tool_call_id: "shot", content }], () => 1);
   expect(lines[0].text).toBe("captured screen\n[image]");
   expect(lines[0].text).not.toContain("[object Object]");
+});
+
+test("successful tool activity folds to one past-tense line while preserving full Ctrl+O detail", () => {
+  expect(resultSummary("bash", "(exit 0)\nok", { command: "bun test" })).toBe("Ran shell command: bun test");
+  expect(resultSummary("todo_write", "plan updated", {})).toBeUndefined(); // stateful plan stays visible
+  let id = 1;
+  const lines = buildReplayLines([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call-1", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "bun test" }) } }],
+    },
+    { role: "tool", tool_call_id: "call-1", content: "(exit 0)\n27 pass" },
+  ], () => id++, { mode: "resume" });
+  expect(lines).toHaveLength(1);
+  expect(lines[0].kind).toBe("tool_result");
+  expect(lines[0].summary).toBe("Ran shell command: bun test");
+  expect(lines[0].text).toContain("Bash(bun test)");
+  expect(lines[0].text).toContain("27 pass");
+});
+
+test("full transcript keeps successful call and output expanded", () => {
+  let id = 1;
+  const lines = buildReplayLines([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call-1", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "bun test" }) } }],
+    },
+    { role: "tool", tool_call_id: "call-1", content: "(exit 0)\n27 pass" },
+  ], () => id++, { mode: "full" });
+  expect(lines.map((line) => line.kind)).toEqual(["tool_call", "tool_result"]);
+  expect(lines[1].summary).toBeUndefined();
+  expect(lines[1].text).toContain("27 pass");
+});
+
+test("failed, blocked, and denied tool activity stays expanded", () => {
+  expect(resultSummary("bash", "(exit 1 -- command FAILED)\nboom", { command: "bun test" })).toBeUndefined();
+  let id = 1;
+  const lines = buildReplayLines([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call-1", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "bun test" }) } }],
+    },
+    { role: "tool", tool_call_id: "call-1", content: "(exit 1 -- command FAILED)\nboom" },
+  ], () => id++);
+  expect(lines.map((line) => line.kind)).toEqual(["tool_call", "tool_result"]);
+  expect(lines[1].summary).toBeUndefined();
+  expect(lines[1].text).toContain("boom");
 });
 
 test("clampToRows bounds the live stream to the viewport height (fixes streaming scroll-jump)", () => {
@@ -431,7 +481,7 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
     expect(await until(() => (lastFrame() ?? "").includes("Approve bash?"))).toBe(true); // approval box appeared
     expect(lastFrame() ?? "").toContain("$ echo hi"); // command preview
     stdin.write("y"); // approve
-    expect(await until(() => seen("(exit 0)"))).toBe(true); // tool ran after approval (git-bash spawn can be slow)
+    expect(await until(() => seen("Ran shell command: echo hi"))).toBe(true); // compact result appears only after the tool ran
     expect(await until(() => seen("Finished"))).toBe(true); // final answer
     expect(lastFrame() ?? "").not.toMatch(/^\s*>\s*y\s*$/m); // approval key must not leak into the prompt
     unmount();

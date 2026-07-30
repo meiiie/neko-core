@@ -37,6 +37,7 @@ interface ActiveTurn {
   cumulative?: { prompt: number; completion: number; total: number; cached: number };
   modelCalls: number;
   onDelta?: DeltaHook;
+  onUsage?: CompleteOptions["onUsage"];
   executeTool?: CompleteOptions["executeTool"];
   toolResults: Map<string, Promise<{ contentItems: any[]; success: boolean }>>;
   resolve: () => void;
@@ -131,7 +132,7 @@ export class ChatGptAppServerProvider implements Provider {
     }
 
     const threadId = this.threadId;
-    const active = makeActiveTurn(threadId, onDelta, opts.executeTool);
+    const active = makeActiveTurn(threadId, onDelta, opts.onUsage, opts.executeTool);
     this.active = active;
     let abort: (() => void) | undefined;
     try {
@@ -181,7 +182,7 @@ export class ChatGptAppServerProvider implements Provider {
   /** The turn's usage: the delta of the thread-cumulative when available (duplicate-proof), else the
    * sum of per-call reports. Carries the LAST call's prompt as `context_tokens` (the live context for
    * ctx%) and the internal call count, so one multi-call codex turn counts like the N calls it was. */
-  private finishUsage(active: ActiveTurn): Usage | undefined {
+  private usageSnapshot(active: ActiveTurn): Usage | undefined {
     if (!active.modelCalls && !active.cumulative) return undefined;
     let use = active.usageSum;
     if (active.cumulative) {
@@ -193,7 +194,6 @@ export class ChatGptAppServerProvider implements Provider {
       };
       // A cumulative that moved backwards means the server reset behind us; trust the per-call sum.
       if (delta.prompt >= 0 && delta.completion >= 0 && delta.total >= 0 && delta.cached >= 0) use = delta;
-      this.cumulativeBase = active.cumulative;
     }
     return {
       prompt_tokens: use.prompt,
@@ -203,6 +203,12 @@ export class ChatGptAppServerProvider implements Provider {
       context_tokens: active.lastCall?.prompt,
       model_calls: Math.max(1, active.modelCalls),
     };
+  }
+
+  private finishUsage(active: ActiveTurn): Usage | undefined {
+    const usage = this.usageSnapshot(active);
+    if (active.cumulative) this.cumulativeBase = active.cumulative;
+    return usage;
   }
 
   private ensureClient(): Promise<RpcClient> {
@@ -308,6 +314,8 @@ export class ChatGptAppServerProvider implements Provider {
         active.usageSum.cached += last.cached;
       }
       if (total) active.cumulative = total;
+      const usage = this.usageSnapshot(active);
+      if (usage) active.onUsage?.(usage);
       return;
     }
     if (method === "error" && params?.willRetry !== true) {
@@ -323,13 +331,18 @@ export class ChatGptAppServerProvider implements Provider {
   }
 }
 
-function makeActiveTurn(threadId: string, onDelta?: DeltaHook, executeTool?: CompleteOptions["executeTool"]): ActiveTurn {
+function makeActiveTurn(
+  threadId: string,
+  onDelta?: DeltaHook,
+  onUsage?: CompleteOptions["onUsage"],
+  executeTool?: CompleteOptions["executeTool"],
+): ActiveTurn {
   let resolve!: () => void;
   let reject!: (error: Error) => void;
   const done = new Promise<void>((ok, fail) => { resolve = ok; reject = fail; });
   return {
     threadId, answer: "", usageSum: { prompt: 0, completion: 0, total: 0, cached: 0 }, modelCalls: 0,
-    onDelta, executeTool, toolResults: new Map(), resolve, reject, done,
+    onDelta, onUsage, executeTool, toolResults: new Map(), resolve, reject, done,
   };
 }
 

@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-30) — v0.22.2 release
+## Current status (2026-07-30) — v0.22.3 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,11 +38,15 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.22.2 (2026-07-30)** - `/transcript` now classifies XTerm
-  pointer reports before text input: wheel ticks scroll the bounded viewport and motion/click/release
-  reports cannot leak into search. Across three compiled ConPTY rounds (including concurrent load),
-  first pointer response stayed within 49–195 ms and ordinary text search within 50–638 ms through
-  10,000 entries.
+- **Branch:** `main`. **Current release: v0.22.3 (2026-07-30)** - long prompts are a five-row caret-following
+  editor with no scrollbar; running token usage starts with a marked estimate and adopts authoritative live
+  provider totals; successful tool activity folds to one outcome line without deleting detail; and scrolled
+  history pins the nearest user prompt with an exact click/Alt+Up jump. Real compiled checks observed
+  `↑~10.6k` before exact GPT-5.6 usage, an exact FrameDiffer `top 2 → 1` prompt jump, and 6 ms / 154 ms
+  scroll response/settle.
+  Previous (v0.22.2, 2026-07-30): `/transcript` classifies XTerm pointer reports before text input: wheel
+  ticks scroll the bounded viewport and motion/click/release reports cannot leak into search. Compiled
+  ConPTY coverage reached 10,000 entries.
   Previous (v0.22.1, 2026-07-30): crash-safe resume restores the canonical model/tool trajectory without
   repainting it as an unbounded terminal dump. The 51.55-second eager rich-render incident became a
   6.2 ms screen projection, a 230 ms real-session mount, viewport-scale hydration, and a per-line circuit

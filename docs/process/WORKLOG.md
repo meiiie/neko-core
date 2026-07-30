@@ -3,6 +3,38 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-30 - v0.22.3: the composer, usage meter, activity log, and history share one viewport contract
+
+Four field reports exposed four different ownership errors in the fullscreen UI: hard-newline prompts bypassed
+its bounded editor viewport; the App Server parsed live usage but withheld it until completion; successful tool
+calls were persisted correctly but projected as two noisy entries; and the transcript compositor assumed its
+scroll band always began on row 1, so a sticky prompt header was overwritten.
+
+- Unified hard and soft line wrapping in `TextInput`. The editor renders at most five visual rows around the
+  caret, Up/Down moves by rendered row, and history receives the key only at the top/bottom boundary. The real
+  compiled composer E2E typed seven lines, edited line 6 with Up, kept five visible rows, and hid line 7 as the
+  viewport followed the caret. No scrollbar was added.
+- Added a provider-neutral live-usage callback. App Server notifications update the turn display immediately;
+  `finishUsage()` remains the single final accounting path. Estimates carry `~` until authoritative usage
+  arrives. A real GPT-5.6 `neko --yolo` turn showed `↑~10.6k`, later exact non-zero input/output, and never
+  showed the broken `↑0 ↓0` state.
+- Folded only matched successful call/result pairs into one past-tense line. The same `Line` retains full detail
+  for Ctrl+O; `/transcript`, failures, denials, and blocked calls remain expanded. `todo_write`/`update_plan`
+  stay visible because their result is persistent working state, not disposable activity.
+- Projected exact rendered row spans for user prompts and added a conditional one-row sticky header with click
+  and Alt+Up exact jumps. FrameDiffer's latent arbitrary-band contract was fixed end to end (`top - 1` in
+  compose, direct repaint, shift detection, and hardware-scroll emission). Measuring the stable `header + band`
+  wrapper avoids a React height feedback loop, while the jump pill keeps its own row outside that measurement.
+- Clean-room inspection of the local Claude Code checkout informed behavioral contracts only; no implementation
+  text was copied. Primary-source research and refuted hypotheses live in
+  `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
+  local design, not a “beyond SOTA” claim.
+
+Release evidence: both TypeScript compilers clean; **929/929 tests, 4,118 assertions**; policy and doctor PASS;
+production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
+and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
+settle; secret scan and `git diff --check` clean.
+
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 
 The field screenshot showed `/transcript` filling its search line with repeated `[<65;86;26M` strings as

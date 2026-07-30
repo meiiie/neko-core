@@ -17,16 +17,42 @@ export function contentToText(c: any): string {
   return String(c ?? "");
 }
 
-/** A 1-line collapse summary for read-type tool results (Claude-style); full stays under Ctrl+O. */
-export function resultSummary(name: string | undefined, obs: string): string | undefined {
-  if (/^(Error|Blocked|Denied)/.test(obs)) return undefined; // show errors in full
-  const n = obs.split("\n").filter((l) => l.trim()).length;
+/** Failure outcomes stay expanded: compacting them would hide the one thing the user must inspect. */
+export function isToolFailure(obs: string): boolean {
+  return /^(Error|Blocked|Denied|Refused)/i.test(obs.trimStart())
+    || /\(exit \d+ -- command FAILED\)/.test(obs)
+    || /^\(timed out/i.test(obs.trimStart());
+}
+
+const short = (value: unknown, cap = 80) => {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length > cap ? `${text.slice(0, cap)}…` : text;
+};
+
+/** One compact, past-tense outcome for every successful activity; full call + output stays under Ctrl+O. */
+export function resultSummary(
+  name: string | undefined,
+  obs: string,
+  args: Record<string, any> = {},
+): string | undefined {
+  if (!name || isToolFailure(obs) || name === "todo_write" || name === "update_plan") return undefined;
+  const n = obs.split("\n").filter((line) => line.trim()).length;
+  const target = short(args.path ?? args.command ?? args.query ?? args.url ?? args.pattern ?? args.name);
   switch (name) {
-    case "read_file": return `Read ${n} line${n === 1 ? "" : "s"}`;
-    case "search": return `Found ${n} match${n === 1 ? "" : "es"}`;
-    case "glob": return `${n} file${n === 1 ? "" : "s"}`;
-    case "ls": return `${n} item${n === 1 ? "" : "s"}`;
-    default: return undefined; // edit/write diffs, bash output, web_* shown as-is
+    case "read_file": return target ? `Read ${target} (${n} line${n === 1 ? "" : "s"})` : `Read ${n} line${n === 1 ? "" : "s"}`;
+    case "search": return target ? `Searched for ${target} (${n} match${n === 1 ? "" : "es"})` : `Found ${n} match${n === 1 ? "" : "es"}`;
+    case "glob": return target ? `Found ${n} file${n === 1 ? "" : "s"} for ${target}` : `Found ${n} file${n === 1 ? "" : "s"}`;
+    case "ls": return target ? `Listed ${target} (${n} item${n === 1 ? "" : "s"})` : `Listed ${n} item${n === 1 ? "" : "s"}`;
+    case "bash":
+    case "shell_command": return target ? `Ran shell command: ${target}` : "Ran shell command";
+    case "write_file": return target ? `Wrote ${target}` : "Wrote file";
+    case "edit":
+    case "multi_edit":
+    case "apply_patch": return target ? `Edited ${target}` : "Applied file changes";
+    case "web_search": return target ? `Searched web for ${target}` : "Searched the web";
+    case "web_fetch": return target ? `Fetched ${target}` : "Fetched web page";
+    case "skill": return target ? `Loaded ${target} skill` : "Loaded skill";
+    default: return `Completed ${describeToolCall(name, args)}`;
   }
 }
 
@@ -55,7 +81,7 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
   const resume = options.mode === "resume";
   const columns = Math.max(20, Math.floor(options.columns ?? 80));
   const maxMessageRows = Math.max(4, Math.floor(options.maxMessageRows ?? RESUME_MESSAGE_MAX_ROWS));
-  const toolById = new Map<string, string>(); // tool_call_id -> tool name (to summarize its result)
+  const toolById = new Map<string, { name: string; args: Record<string, any>; line: Line }>();
   let hiddenProgress = 0;
   const screenText = (text: string) => resume && wrappedRows(text, columns) > maxMessageRows
     ? tailByRows(text, maxMessageRows, columns)
@@ -76,13 +102,21 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
         let args: Record<string, any> = {};
         try { args = typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments) : (tc.function?.arguments ?? {}); } catch { /* keep {} */ }
         const name = tc.function?.name ?? "";
-        if (tc.id) toolById.set(tc.id, name);
-        out.push({ id: nextId(), kind: "tool_call", text: describeToolCall(name, args) });
+        const line: Line = { id: nextId(), kind: "tool_call", text: describeToolCall(name, args) };
+        if (tc.id) toolById.set(tc.id, { name, args, line });
+        out.push(line);
       }
     } else if (m.role === "tool") {
-      const name = toolById.get(m.tool_call_id);
+      const call = toolById.get(m.tool_call_id);
       const obs = contentToText(m.content).split("\n").slice(0, 400).join("\n");
-      out.push({ id: nextId(), kind: "tool_result", text: obs, summary: resultSummary(name, obs) });
+      const summary = resultSummary(call?.name, obs, call?.args);
+      if (resume && summary && call) {
+        const callIndex = out.indexOf(call.line);
+        if (callIndex >= 0) out.splice(callIndex, 1);
+        out.push({ id: nextId(), kind: "tool_result", text: `${call.line.text}\n${obs}`, summary });
+      } else {
+        out.push({ id: nextId(), kind: "tool_result", text: obs });
+      }
     }
   }
   if (hiddenProgress) out.push({

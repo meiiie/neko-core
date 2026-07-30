@@ -36,6 +36,9 @@ export interface CompleteOptions {
    * Lets the agent overlap read-only tool execution with the rest of the generation ("Executing as
    * You Generate", arXiv 2604.00491). Best-effort: non-streaming responses may never fire it. */
   onToolCallReady?: (call: ToolCall) => void;
+  /** Authoritative usage snapshot for the current complete() call, emitted before completion whenever
+   * the provider protocol exposes it. Display-only until ProviderResponse.usage is booked once. */
+  onUsage?: (usage: Usage) => void;
   /** Bidirectional providers (for example Codex App Server dynamic tools) can pause an in-flight
    * turn and ask the host to execute a tool. The Agent supplies its existing safeExecute boundary,
    * so approvals and path/sandbox rules stay authoritative in Neko rather than the sidecar. */

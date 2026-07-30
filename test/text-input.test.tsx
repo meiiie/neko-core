@@ -237,6 +237,63 @@ test("wrap renders multiple visual lines in the frame (integration)", async () =
   c.unmount();
 });
 
+test("multiline viewport shows at most five rows and follows Up/Down caret movement", async () => {
+  let submitted = "";
+  function Multiline() {
+    const [v, setV] = useState("line1\nline2\nline3\nline4\nline5\nline6\nline7");
+    return <TextInput value={v} onChange={setV} onSubmit={(x) => { submitted = x; }} width={40} {...usePasteProps()} />;
+  }
+  const c = render(<Multiline />);
+  await tick();
+  const initial = strip(c.lastFrame());
+  expect(initial.split("\n")).toHaveLength(5);
+  expect(initial).not.toContain("line1");
+  expect(initial).toContain("line7");
+
+  c.stdin.write("\x1b[A"); // end of line7 -> same column on line6
+  await tick();
+  c.stdin.write("X");
+  await tick();
+  c.stdin.write("\r");
+  await tick();
+  expect(submitted).toBe("line1\nline2\nline3\nline4\nline5\nline6X\nline7");
+  c.unmount();
+});
+
+test("Up/Down navigate input rows before falling back to conversation history", async () => {
+  let historyUp = 0;
+  let historyDown = 0;
+  function Multiline() {
+    const [v, setV] = useState("one\ntwo");
+    return (
+      <TextInput
+        value={v}
+        onChange={setV}
+        onSubmit={() => {}}
+        onHistoryUp={() => { historyUp++; }}
+        onHistoryDown={() => { historyDown++; }}
+        width={40}
+        {...usePasteProps()}
+      />
+    );
+  }
+  const c = render(<Multiline />);
+  await tick();
+  c.stdin.write("\x1b[A");
+  await tick();
+  expect(historyUp).toBe(0);
+  c.stdin.write("\x1b[A");
+  await tick();
+  expect(historyUp).toBe(1);
+  c.stdin.write("\x1b[B");
+  await tick();
+  expect(historyDown).toBe(0);
+  c.stdin.write("\x1b[B");
+  await tick();
+  expect(historyDown).toBe(1);
+  c.unmount();
+});
+
 test("mask renders bullets and stays single-line (no wrap fan-out)", async () => {
   function H5() {
     const [v, setV] = useState("secret123");

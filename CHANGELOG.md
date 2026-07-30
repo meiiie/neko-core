@@ -6,6 +6,25 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.22.3] — 2026-07-30
+
+### Fixed
+
+- **Long prompts now behave like a small editor instead of growing off-screen.** Hard line breaks and soft
+  wrapping share one five-row viewport; Up/Down moves the caret through visual rows before falling back to
+  prompt history, and the viewport follows the caret without adding a scrollbar.
+- **The running token counter no longer starts at `↑0 ↓0`.** It shows an immediate input estimate with `~`,
+  consumes authoritative provider usage as it arrives, and replaces the estimate with exact totals without
+  double-booking cost. A real GPT-5.6 `neko --yolo` turn showed `↑~10.6k` at start and exact non-zero usage
+  before completion.
+- **Completed tool activity collapses to one useful outcome line.** Successful calls use compact past-tense
+  summaries; failures, denials, and blocked actions stay expanded. Ctrl+O and `/transcript` retain the full
+  call/result, and todo/plan state remains visible instead of being folded away.
+- **Scrolled history keeps the nearest user prompt pinned at the top.** The gray one-row anchor appears only
+  while reading older content; click or Alt+Up jumps to that prompt's exact rendered row. The compositor now
+  supports a scroll band below row 1 without overwriting the anchor. Compiled ConPTY verification measured
+  6 ms first scroll response / 154 ms settle and an exact `band top 2 → 1` prompt jump.
+
 ## [0.22.2] — 2026-07-30
 
 ### Fixed

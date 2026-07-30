@@ -26,6 +26,49 @@ export function styleFor(kind: LineKind): { glyph: string; color?: string; backg
 
 export interface Row { text: string; color?: string; background?: string; dim: boolean }
 
+export interface LineRowSpan {
+  line: Line;
+  start: number;
+  end: number; // exclusive
+}
+
+/** Project Lines and record exact row spans in the SAME pass. Sticky navigation must never estimate a
+ * prompt position from character count because rich markdown, Unicode width, and cached rows can differ. */
+export function projectLineRows<T>(
+  lines: Line[],
+  rowsFor: (line: Line) => T[],
+): { rows: T[]; spans: LineRowSpan[] } {
+  const rows: T[] = [];
+  const spans: LineRowSpan[] = [];
+  for (const line of lines) {
+    const start = rows.length;
+    const part = rowsFor(line);
+    rows.push(...part);
+    spans.push({ line, start, end: rows.length });
+  }
+  return { rows, spans };
+}
+
+/** Nearest completed user prompt above the visible window. If the prompt itself is still visible at the
+ * top, return null so the fixed header does not duplicate it. dist=0 is live-tail mode: no sticky row. */
+export function stickyPromptAnchor(
+  spans: LineRowSpan[],
+  totalRows: number,
+  viewH: number,
+  dist: number,
+): LineRowSpan | null {
+  if (dist <= 0 || viewH <= 0) return null;
+  const start = Math.max(0, totalRows - dist - viewH);
+  const overlapping = spans.some((span) => span.line.kind === "user" && span.start <= start && start < span.end);
+  if (overlapping) return null;
+  let best: LineRowSpan | null = null;
+  for (const span of spans) {
+    if (span.line.kind === "user" && span.end <= start) best = span;
+    if (span.start > start) break;
+  }
+  return best;
+}
+
 /** Flatten Lines into fixed-width display rows: wrap long lines, clip a noisy entry to a few rows with a
  * "+N more" marker, blank separator between entries. Uniform rows -> trivial windowed scroll. */
 export function flattenLines(lines: Line[], width: number): Row[] {
@@ -100,6 +143,8 @@ export interface RowScrollApi {
    * queueing a render per tick (the render-backlog "chasing the wheel" jank). */
   by: (n: number) => void;
   top: () => void;
+  /** Put an exact content row at the viewport top (clamped near the tail). */
+  toRow: (row: number) => void;
   toBottom: () => void;
 }
 
@@ -178,6 +223,11 @@ export function useRowScroll(totalRows: number, viewH: number, onHop?: (dist: nu
       kick();
     },
     top: () => { st.current.target = maxRef.current; kick(); },
+    toRow: (row) => {
+      const top = Math.max(0, Math.min(maxRef.current, Math.floor(row)));
+      st.current.target = maxRef.current - top;
+      kick();
+    },
     toBottom: () => { st.current.target = 0; kick(); },
   };
 }

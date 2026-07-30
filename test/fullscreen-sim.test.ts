@@ -152,7 +152,53 @@ test("STARTUP-fullscreen sim: alt entered BEFORE the first render - content visi
   await tick(50);
 }, 30000);
 
-test("web tool results cannot create a blank gutter between the call and its content", async () => {
+test("sticky prompt survives FrameDiffer composition and its first-row click jumps to the exact turn", async () => {
+  const vt = new VirtualTerminal(118, 30);
+  const out = new FakeTtyOut(118, 30, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  const messages: any[] = [];
+  for (let i = 0; i < 50; i++) {
+    messages.push({ role: "user", content: `ANCHOR PROMPT ${i}` });
+    messages.push({ role: "assistant", content: `answer ${i}` });
+  }
+  const session: any = { id: "anchor", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages };
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = renderFS(
+    React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "", tool_calls: [] }) }, resumedSession: session, sessionId: "anchor", frameDiffer: differ, preAltDispose }),
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  try {
+    for (let waited = 0; waited < 3000 && !vt.text().includes("answer 49"); waited += 25) await tick(25);
+      stdin.push("\x1b[5~");
+      let anchor = "";
+      for (let step = 0; step < 8; step++) {
+        for (let waited = 0; waited < 500; waited += 25) {
+          anchor = vt.lines()[0]?.trim() ?? "";
+          if ((differ as any).band?.top === 2 && /^> ANCHOR PROMPT \d+$/.test(anchor)) break;
+          await tick(25);
+        }
+        if ((differ as any).band?.top === 2 && /^> ANCHOR PROMPT \d+$/.test(anchor)) break;
+        stdin.push("\x1b[1;5A"); // move one content row older until the current prompt is fully above the band
+      }
+      expect(anchor).toMatch(/^> ANCHOR PROMPT \d+$/);
+      expect((differ as any).band?.top).toBe(2); // row 1 belongs to the sticky header, band begins below it
+
+    stdin.push("\x1b[<0;5;1M");
+    let jumped = false;
+    for (let waited = 0; waited < 3000; waited += 25) {
+      const rows = vt.lines();
+      if ((differ as any).band?.top === 1 && rows.slice(0, 4).some((row) => row.trim() === anchor)) { jumped = true; break; }
+      await tick(25);
+    }
+    expect(jumped).toBe(true); // header unmounted; the exact prompt now belongs to the transcript band
+  } finally {
+    app.unmount();
+    await tick(50);
+  }
+}, 30000);
+
+test("successful web tool replay is one compact line with full output hidden by default", async () => {
   const vt = new VirtualTerminal(100, 30);
   const out = new FakeTtyOut(100, 30, vt);
   const stdin = new FakeStdin();
@@ -171,11 +217,9 @@ test("web tool results cannot create a blank gutter between the call and its con
   );
   await tick(650);
   const rows = vt.lines();
-  const callAt = rows.findIndex((line) => line.includes("Fetch("));
-  const resultAt = rows.findIndex((line) => line.includes("FETCH RESULT"));
-  expect(callAt).toBeGreaterThanOrEqual(0);
-  expect(resultAt).toBeGreaterThan(callAt);
-  expect(resultAt - callAt).toBeLessThanOrEqual(3);
+  const summaryRows = rows.filter((line) => line.includes("Fetched https://example.com/advisory"));
+  expect(summaryRows).toHaveLength(1);
+  expect(vt.text()).not.toContain("FETCH RESULT"); // Ctrl+O and /transcript retain it; default history does not dump it
   app.unmount();
   await tick(50);
 }, 30000);
@@ -195,7 +239,7 @@ test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "sel", frameDiffer: differ, preAltDispose }),
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
-  await tick(500);
+  for (let waited = 0; waited < 2000 && !vt.text().includes("SELECTME"); waited += 25) await tick(25);
   const ls = vt.lines();
   const y = ls.findIndex((l) => l.includes("SELECTME")) + 1; // 1-based screen row of the line
   expect(y).toBeGreaterThan(0);
@@ -247,7 +291,8 @@ test("todo flow shows the current plan once while the next step is running", asy
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await tick(300);
-  stdin.push("make a plan"); await tick(30); stdin.push("\r"); await tick(450);
+  stdin.push("make a plan"); await tick(30); stdin.push("\r");
+  for (let waited = 0; waited < 2000 && !vt.text().includes("UNIQUE PENDING TODO"); waited += 25) await tick(25);
   const occurrences = vt.text().split("UNIQUE PENDING TODO").length - 1;
   expect(occurrences).toBe(1); // one plan, not a committed result plus a duplicate live copy
   finish();
@@ -347,8 +392,9 @@ test("voice panel mouse controls mute and stop the active session", async () => 
   expect(row).toBeGreaterThanOrEqual(0);
   let col = rows[row].indexOf("Mute") + 2; // 1-based, one cell inside the visible control
   stdin.push(`\x1b[<0;${col};${row + 1}M`);
-  await tick(150);
+  for (let waited = 0; waited < 1000 && muteCalls === 0; waited += 25) await tick(25);
   expect(muteCalls).toBe(1);
+  for (let waited = 0; waited < 1000 && !vt.text().includes("Unmute"); waited += 25) await tick(25);
   expect(vt.text()).toContain("Unmute");
 
   stdin.push("\x1bm"); // Alt+M is the keyboard-equivalent control
@@ -360,8 +406,9 @@ test("voice panel mouse controls mute and stop the active session", async () => 
   row = rows.findIndex((line) => line.includes("Mute") && line.includes("Stop"));
   col = rows[row].indexOf("Stop") + 2;
   stdin.push(`\x1b[<0;${col};${row + 1}M`);
-  await tick(200);
+  for (let waited = 0; waited < 1000 && stopCalls === 0; waited += 25) await tick(25);
   expect(stopCalls).toBe(1);
+  for (let waited = 0; waited < 1000 && vt.text().includes("speak naturally to interrupt"); waited += 25) await tick(25);
   expect(vt.text()).not.toContain("speak naturally to interrupt");
   app.unmount();
   await tick(50);

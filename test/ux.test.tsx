@@ -99,6 +99,22 @@ test("ThinkingLine shows effort + per-turn tokens split input/output", () => {
   expect(f).toContain("esc to interrupt");
 });
 
+test("ThinkingLine labels estimates with ~ and authoritative usage without it", () => {
+  const f = strip(render(
+    <ThinkingLine
+      verb="Thinking"
+      elapsed={2}
+      liveIn={() => ({ value: 34_300, approximate: true })}
+      liveOut={() => ({ value: 6100, approximate: false })}
+      step={1}
+      queued={0}
+    />,
+  ).lastFrame());
+  expect(f).toContain("↑~34.3k");
+  expect(f).toContain("↓6.1k");
+  expect(f).not.toContain("↓~6.1k");
+});
+
 test("CompactingLine shows the progress bar, percent, and a tip", () => {
   const f = strip(render(<CompactingLine start={1_000_000} />).lastFrame());
   expect(f).toContain("Compacting conversation");
@@ -317,6 +333,39 @@ test("fullscreen history: PgUp shows the jump pill; a new turn counts; End retur
     c.unmount();
   }
 });
+
+test("fullscreen history pins the nearest prompt and clicking it jumps to that exact row", async () => {
+  const msgs: any[] = [];
+  for (let i = 0; i < 30; i++) {
+    msgs.push({ role: "user", content: `anchor prompt ${i}` });
+    msgs.push({ role: "assistant", content: `answer ${i}` });
+  }
+  const s: any = { id: "anchors", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
+  const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
+  try {
+    expect(await until(c, (frames) => frames.includes("answer 29"), 3000)).toBe(true); // hydrate before sending navigation
+    c.stdin.write("\x1b[5~"); // PageUp: leave the live tail so the fixed navigation row becomes active
+
+    let anchor = "";
+    for (let waited = 0; waited < 3000; waited += 25) {
+      anchor = strip(c.lastFrame()).split("\n")[0]?.trim() ?? "";
+      if (/^> anchor prompt \d+$/.test(anchor)) break;
+      await tick(25);
+    }
+    expect(anchor).toMatch(/^> anchor prompt \d+$/);
+
+    c.stdin.write("\x1b[<0;5;1M"); // left press on the fixed first row
+    let jumped = false;
+    for (let waited = 0; waited < 3000; waited += 25) {
+      const rows = strip(c.lastFrame()).split("\n");
+      if ((rows[0]?.trim() ?? "") === anchor) { jumped = true; break; }
+      await tick(25);
+    }
+    expect(jumped).toBe(true); // header unmounted; the exact prompt is now the first transcript row
+  } finally {
+    c.unmount();
+  }
+}, 15000);
 
 test("input footer: the prompt is BOXED by a rule above AND below, status beneath", () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);

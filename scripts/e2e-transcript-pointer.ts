@@ -84,14 +84,32 @@ function transcriptPosition(): string | null {
   return header?.match(/ · (all|end|top|\d+%)/)?.[1] ?? null;
 }
 
+async function stableTranscriptPosition(stableMs = 150, timeoutMs = 3000): Promise<string | null> {
+  const deadline = performance.now() + timeoutMs;
+  let last = transcriptPosition();
+  let unchangedSince = performance.now();
+  while (performance.now() < deadline) {
+    await Bun.sleep(10);
+    const current = transcriptPosition();
+    if (current !== last) { last = current; unchangedSince = performance.now(); }
+    if (current && performance.now() - unchangedSince >= stableMs) return current;
+  }
+  return null;
+}
+
 let openMs = 0, wheelMs = 0, searchMs = 0;
 try {
   await waitFor("interactive prompt", () => vt.text().includes("shift+tab to cycle"));
 
   const openStart = performance.now();
   term.write("/transcript");
-  await Bun.sleep(50);
+  await waitFor("transcript command echo", () => vt.text().includes("> /transcript"), 3_000);
+  await Bun.sleep(120);
   term.write("\r");
+  // A slow ANSI/menu frame can consume the first Enter as autocomplete. Retry once only when the viewer
+  // has not opened; this keeps the probe deterministic without hiding a real viewer-start failure.
+  await Bun.sleep(800);
+  if (!vt.text().includes(`Conversation  ${entryCount} entries`)) term.write("\r");
   await waitFor("transcript viewer", () => vt.text().includes(`Conversation  ${entryCount} entries`) && vt.text().includes(" · end"));
   openMs = performance.now() - openStart;
 
@@ -103,8 +121,8 @@ try {
   await waitFor("pointer scroll", () => vt.text().includes(`Conversation  ${entryCount} entries`) && !vt.text().includes(" · end"));
   wheelMs = performance.now() - wheelStart;
 
-  const verticalPosition = transcriptPosition();
-  if (!verticalPosition) throw new Error("transcript header position was not readable after vertical scroll");
+  const verticalPosition = await stableTranscriptPosition();
+  if (!verticalPosition) throw new Error("transcript header position did not settle after vertical scroll");
   term.write("\x1b[<66;80;20M");                            // horizontal left
   await Bun.sleep(100);
   if (transcriptPosition() !== verticalPosition) throw new Error("horizontal-left wheel changed vertical offset");
