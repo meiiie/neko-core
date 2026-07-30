@@ -6,6 +6,26 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.22.1] — 2026-07-30
+
+### Fixed
+
+- **`/resume` no longer freezes while repainting a large saved session.** A real 2.04 MB session now
+  builds its screen projection in 6.2 ms and mounts fullscreen in 230 ms; the old eager rich-render pass
+  took 51.55 seconds on the same incident class. Rich hydration is limited to the viewport neighborhood,
+  yields between chunks, and sends any individual block above 8,000 display characters through a bounded
+  plain-text path.
+- **Resume no longer looks like it dumped private thinking.** Provider reasoning remains stored as opaque
+  continuation state when required, but is never a transcript source. Public assistant progress attached
+  to tool calls is hidden in the default resume projection, oversized legacy prose is reduced to its useful
+  tail, and `/transcript` remains the explicit full-history surface. Canonical messages are untouched, so
+  model continuation and crash recovery keep their complete context.
+- **The session picker scans metadata once instead of twice.** Its snapshot is also reused when Ctrl+A
+  switches project scope. In the 1,501-session regression bench, picker display measured 347 ms and
+  selecting the 400-message session showed its tail in 139 ms; typing remained responsive at 20–25 ms.
+- The real compiled-binary PTY test still streams a tool result, simulates a dead network response,
+  hard-kills Neko, and proves a fresh process recovers the prompt, tool result, and partial assistant stream.
+
 ## [0.22.0] — 2026-07-30
 
 ### Added

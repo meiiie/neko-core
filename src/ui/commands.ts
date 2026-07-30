@@ -148,10 +148,11 @@ function folderTail(cwd: string): string {
  *   reads as the per-folder list, while TYPING searches across every project (titles + folders).
  * - "cwd": strictly this folder (Ctrl+A from smart).
  * - "all": flat every-project list, newest first (/resume all). */
-function openResumePicker(ctx: CommandCtx, scope: "smart" | "cwd" | "all"): void {
+function openResumePicker(ctx: CommandCtx, scope: "smart" | "cwd" | "all", all = listSessionMetas()): void {
   // Metadata only (no full transcript parse) - listing 2860 sessions this way is ~50ms of stat calls
-  // vs ~600ms of JSON parsing, which is what made the picker lag ~1s to open.
-  const all = listSessionMetas();
+  // vs ~600ms of JSON parsing, which is what made the picker lag ~1s to open. Reuse this snapshot while
+  // switching scope so Ctrl+A never re-stats the entire store on the UI thread.
+
   const here = process.cwd();
   const mine = all.filter((s) => s.cwd === here);
   const list = scope === "cwd" ? mine : scope === "all" ? all : [...mine, ...all.filter((s) => s.cwd !== here)];
@@ -159,7 +160,7 @@ function openResumePicker(ctx: CommandCtx, scope: "smart" | "cwd" | "all"): void
     // This scope has no sessions. If OTHER projects do, open the all-projects picker directly
     // (don't dead-end on a "Ctrl+A" hint when there's no picker on screen to press it on - which read
     // as a freeze). Only when nothing exists anywhere is an info line the right answer.
-    if (scope !== "all" && all.length) return openResumePicker(ctx, "all");
+    if (scope !== "all" && all.length) return openResumePicker(ctx, "all", all);
     return ctx.addLine("info", "no saved sessions yet");
   }
   ctx.setOverlay({
@@ -167,7 +168,7 @@ function openResumePicker(ctx: CommandCtx, scope: "smart" | "cwd" | "all"): void
       : scope === "cwd" ? "Resume session (this folder only)" : "Resume session",
     description: scope === "smart" ? "this folder first · typing searches every project" : undefined,
     ctrlAHint: scope === "smart" ? "this folder only" : scope === "cwd" ? "all projects" : "this folder first",
-    onCtrlA: () => openResumePicker(ctx, scope === "smart" ? "cwd" : scope === "cwd" ? "all" : "smart"),
+    onCtrlA: () => openResumePicker(ctx, scope === "smart" ? "cwd" : scope === "cwd" ? "all" : "smart", all),
     onRename: (it, name) => {
       renameSession(it.id, name);
       openResumePicker(ctx, scope); // refresh the list with the new title
@@ -1112,7 +1113,6 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         else ctx.resumeInto(target);
         return;
       }
-      if (!listSessionMetas().length) return addLine("info", "no saved sessions yet");
       return openResumePicker(ctx, arg ? "all" : "smart");
     }
     case "/continue": {

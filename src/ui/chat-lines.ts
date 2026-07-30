@@ -30,26 +30,49 @@ export function resultSummary(name: string | undefined, obs: string): string | u
   }
 }
 
-/** Rebuild the FULL transcript from saved messages - including tool CALLS and RESULTS, not just user +
+/** Rebuild the transcript from saved messages - including tool CALLS and RESULTS, not just user +
  * assistant text. An interrupted coding turn is almost all tool_calls + tool results with no final
  * assistant text, so skipping them made a resumed session look empty ("the work is gone") even though
- * the agent context was intact. This reconstructs it exactly as it looked live. */
+ * the agent context was intact. */
 export const REPLAY_MAX_LINES = 80; // secondary logical-line guard; wrapped terminal rows are the primary cap
 export const REPLAY_MAX_ROWS = 20; // a resume should leave room for the prompt/status, never refill the whole terminal
+export const RESUME_MESSAGE_MAX_ROWS = 12; // rich rendering stays proportional to the viewport, never message bytes
 export const RESUME_SUMMARY_AT = 0.6; // offer resume-from-summary once a session would fill >60% of the window
-/** Reconstruct the FULL transcript (every message -> a Line) with NO display bound. Used both by the
- * bounded resume replay below and by the /transcript viewer, which shows the whole thread on demand. */
-export function buildReplayLines(messages: any[], nextId: () => number): Line[] {
+
+export interface BuildReplayOptions {
+  /** `full` is the source-faithful /transcript view; `resume` is a bounded screen projection. */
+  mode?: "full" | "resume";
+  columns?: number;
+  maxMessageRows?: number;
+}
+
+/** Reconstruct saved messages as display Lines. The canonical messages are never changed: resume mode
+ * only changes their screen projection. It omits assistant commentary attached to a tool call (the
+ * persisted progress stream that looked like leaked "think" after a crash), and row-bounds oversized
+ * user/final-assistant prose. Opaque reasoning/provider_data is deliberately never a display source. */
+export function buildReplayLines(messages: any[], nextId: () => number, options: BuildReplayOptions = {}): Line[] {
   const out: Line[] = [];
+  const resume = options.mode === "resume";
+  const columns = Math.max(20, Math.floor(options.columns ?? 80));
+  const maxMessageRows = Math.max(4, Math.floor(options.maxMessageRows ?? RESUME_MESSAGE_MAX_ROWS));
   const toolById = new Map<string, string>(); // tool_call_id -> tool name (to summarize its result)
+  let hiddenProgress = 0;
+  const screenText = (text: string) => resume && wrappedRows(text, columns) > maxMessageRows
+    ? tailByRows(text, maxMessageRows, columns)
+    : text;
+
   for (const m of messages) {
     if (m.role === "user") {
       const t = contentToText(m.content);
-      if (t.trim()) out.push({ id: nextId(), kind: "user", text: t });
+      if (t.trim()) out.push({ id: nextId(), kind: "user", text: screenText(t) });
     } else if (m.role === "assistant") {
+      const calls = m.tool_calls ?? [];
       const t = contentToText(m.content);
-      if (t.trim()) out.push({ id: nextId(), kind: "assistant", text: t });
-      for (const tc of m.tool_calls ?? []) {
+      if (t.trim()) {
+        if (resume && calls.length) hiddenProgress++;
+        else out.push({ id: nextId(), kind: "assistant", text: screenText(t) });
+      }
+      for (const tc of calls) {
         let args: Record<string, any> = {};
         try { args = typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments) : (tc.function?.arguments ?? {}); } catch { /* keep {} */ }
         const name = tc.function?.name ?? "";
@@ -62,6 +85,11 @@ export function buildReplayLines(messages: any[], nextId: () => number): Line[] 
       out.push({ id: nextId(), kind: "tool_result", text: obs, summary: resultSummary(name, obs) });
     }
   }
+  if (hiddenProgress) out.push({
+    id: nextId(),
+    kind: "info",
+    text: `... ${hiddenProgress} intermediate progress update${hiddenProgress === 1 ? "" : "s"} hidden on resume - /transcript to view the full thread ...`,
+  });
   return out;
 }
 
@@ -103,9 +131,13 @@ function tailByRows(text: string, rows: number, columns: number): string {
 }
 
 export function replaySessionLines(messages: any[], nextId: () => number, options: ReplayOptions = {}): Line[] {
-  const out = buildReplayLines(messages, nextId);
   const columns = Math.max(20, Math.floor(options.columns ?? 80));
   const maxRows = Math.max(6, Math.floor(options.maxRows ?? REPLAY_MAX_ROWS));
+  const out = buildReplayLines(messages, nextId, {
+    mode: "resume",
+    columns,
+    maxMessageRows: Math.min(RESUME_MESSAGE_MAX_ROWS, maxRows),
+  });
   const kept: Line[] = [];
   let remaining = maxRows;
   let hidden = false;

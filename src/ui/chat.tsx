@@ -194,10 +194,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [lines, setLines] = useState<Line[]>(() => {
     const out: Line[] = [{ id: idRef.current++, kind: "welcome", text: "" }];
     if (resumedRef.current && !startupNeedsChoiceRef.current) {
-      // Replay the prior conversation so it looks exactly like before you quit (Claude-style) - the
-      // FULL thread incl. tool calls/results, so an interrupted coding task's work isn't lost from view.
+      // Project the prior conversation back onto the screen. Keep tool calls/results so interrupted
+      // work remains visible, but leave the canonical full messages untouched for model continuation.
       out.push(...(initialFullscreen
-        ? buildReplayLines(resumedRef.current.messages, () => idRef.current++)
+        ? buildReplayLines(resumedRef.current.messages, () => idRef.current++, { mode: "resume", columns: cols })
         : replaySessionLines(resumedRef.current.messages, () => idRef.current++, {
             columns: cols,
             maxRows: Math.max(8, Math.min(20, rows - 10)),
@@ -684,10 +684,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } else {
       setLines((prev) => [...prev, { id: idRef.current++, kind: "info", text: `-- resumed ${target.id} (${target.messages.length} messages) --` }]);
     }
-    // Replay from the CURRENT agent messages (post-compaction if summarized), so what's on screen
-    // matches what's in context. Reconstruct the FULL thread (tool calls + results) too.
+    // Replay from the CURRENT agent messages (post-compaction if summarized). This is a bounded screen
+    // projection with tool calls/results; agent.messages remains the full continuation source.
     const replay: Line[] = fullscreen
-      ? buildReplayLines(agentRef.current!.messages, () => idRef.current++)
+      ? buildReplayLines(agentRef.current!.messages, () => idRef.current++, { mode: "resume", columns: cols })
       : replaySessionLines(agentRef.current!.messages, () => idRef.current++, {
           columns: cols,
           maxRows: Math.max(8, Math.min(20, rows - 10)),

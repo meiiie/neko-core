@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-29) — v0.21.2 release
+## Current status (2026-07-30) — v0.22.1 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,10 +38,13 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.21.1 (2026-07-29)** - the photo shoot gets its own command:
-  `/coach` prints a QR + the filming phone's link and explains the three phone buttons, instead of
-  hiding behind a line in `/relay` output (a different job: driving Neko from the phone); `/coach stop`
-  releases the phone's camera and mic at once.
+- **Branch:** `main`. **Current release: v0.22.1 (2026-07-30)** - crash-safe resume now restores the
+  canonical model/tool trajectory without repainting it as an unbounded terminal dump. The 51.55-second
+  eager rich-render incident is replaced by a 6.2 ms screen projection, a 230 ms real-session fullscreen
+  mount, viewport-scale hydration, and a per-line circuit breaker; provider reasoning remains opaque
+  continuation state and never becomes transcript text.
+  Previous (v0.22.0, 2026-07-30): exact-identifier procurement sourcing plus incremental, atomic
+  in-flight turn journaling across lost Wi-Fi or a killed terminal.
   Previous (v0.21.0, 2026-07-29): Neko's OWN voice at the scene: the
   phone can now hold a real GPT-Live session (it becomes the WebRTC endpoint; audio flows phone <->
   OpenAI, the terminal never carries it), so the camera coach speaks in Neko's warm natively-Vietnamese

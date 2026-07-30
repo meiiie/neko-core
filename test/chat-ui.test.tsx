@@ -57,6 +57,39 @@ test("resume replay is bounded by wrapped terminal rows, not only logical messag
   expect(shown.length).toBeLessThan(5000); // never dump the 30k+ source into the terminal
 });
 
+test("fullscreen resume hides intermediate progress and bounds legacy prose without losing the final tail", () => {
+  const hugeFinal = [
+    ...Array.from({ length: 500 }, (_, i) => `legacy checkpoint ${i}: ${"x".repeat(40)}`),
+    "FINAL RESULT survives",
+  ].join("\n");
+  let id = 1;
+  const replay = buildReplayLines([
+    {
+      role: "assistant",
+      content: "THINK-LIKE INTERMEDIATE PROGRESS",
+      reasoning: "PRIVATE REASONING",
+      reasoning_content: "PRIVATE REASONING CONTENT",
+      provider_data: [{ type: "reasoning", summary: [{ text: "PRIVATE SUMMARY" }] }],
+      tool_calls: [{
+        id: "call-1",
+        type: "function",
+        function: { name: "bash", arguments: JSON.stringify({ command: "echo ok" }) },
+      }],
+    },
+    { role: "tool", tool_call_id: "call-1", content: "ok" },
+    { role: "assistant", content: hugeFinal },
+  ], () => id++, { mode: "resume", columns: 40, maxMessageRows: 8 });
+  const shown = replay.map((line) => line.text).join("\n");
+
+  expect(shown).not.toContain("THINK-LIKE INTERMEDIATE PROGRESS");
+  expect(shown).not.toContain("PRIVATE REASONING");
+  expect(shown).not.toContain("PRIVATE REASONING CONTENT");
+  expect(shown).not.toContain("PRIVATE SUMMARY");
+  expect(shown).toContain("FINAL RESULT survives");
+  expect(shown).toMatch(/hidden.*\/transcript/i);
+  expect(shown.length).toBeLessThan(3000);
+});
+
 const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));
 // Poll until a predicate holds (or the budget runs out). Async tool tests must NOT hinge on a fixed
 // tick: git-bash spawn + the follow-up provider call vary a lot with machine load, so a fixed wait
