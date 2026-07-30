@@ -21,8 +21,12 @@ or stopping condition executable.
   RTX 5080 false positive, verified eight offers, and deterministically identified An Khang's 87.99M VND
   not-in-stock/order-only listing. Research and limits are recorded in
   `docs/research/procurement-search-sota-2026-07-30.md`.
+- Ubuntu CI then reproduced a pre-existing title test race twice: another UI test replaced module-global
+  title state during a real 1-second sleep. `createTitleDriver` now keeps production's singleton behavior
+  while letting tests inject an isolated writer and scheduler; the regression is synchronous and also
+  verifies a valid timer handle of `0` is cancelled.
 
-Evidence: TypeScript 5.9 clean; **904/904 tests, 3,972 assertions across 97 files**; doctor and policy
+Evidence: TypeScript 5.9 clean; **904/904 tests, 3,973 assertions across 97 files**; doctor and policy
 PASS; clean production build + UI/input probes PASS; focused secret scan and `git diff --check` clean.
 
 ## 2026-07-29 - v0.20.0: photography end to end, research-first

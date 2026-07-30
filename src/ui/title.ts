@@ -57,8 +57,8 @@ export function setTerminalTitle(title: string): void {
 
 /**
  * The tab-title DRIVER: one state (name + busy) and one 1s heartbeat that renders it.
- *  - busy: alternates "● <name>" / "<name>" each beat - a BLINKING dot, the terminal-title equivalent of a
- *    spinner (a tab can't animate any other way: each blink is just an OSC 2 rewrite).
+ *  - busy: alternates "● <name>" / "○ <name>" each beat - a pulsing dot, the terminal-title equivalent of a
+ *    spinner (a tab can't animate any other way: each pulse is just an OSC 2 rewrite).
  *  - idle: "🐱 <name>", re-asserted every beat ON WINDOWS ONLY. There the console title is SHARED,
  *    writable-by-API state: any child attached to our console (a powershell probe, a user-configured MCP
  *    stdio server) can clobber it via SetConsoleTitle and ConPTY syncs that to the tab, silently wiping our
@@ -66,23 +66,51 @@ export function setTerminalTitle(title: string): void {
  *    so the driver self-heals the tab. ~30 bytes/s, unref'd; elsewhere idle beats write nothing.
  * setTabTitle re-renders immediately (blink reset ON so the dot appears the instant a turn starts).
  */
-let tabName = "", tabBusy = false, blinkOn = true;
-let driver: ReturnType<typeof setInterval> | null = null;
+type IntervalHandle = ReturnType<typeof setInterval>;
+
+export interface TitleDriverOptions {
+  write?: (title: string) => void;
+  keepIdle?: boolean;
+  schedule?: (tick: () => void, intervalMs: number) => IntervalHandle;
+  cancel?: (handle: IntervalHandle) => void;
+}
+
+/** Create an isolated driver. Dependency injection keeps timer tests deterministic across parallel files. */
+export function createTitleDriver(options: TitleDriverOptions = {}) {
+  const write = options.write ?? setTerminalTitle;
+  const keepIdle = options.keepIdle ?? process.platform === "win32";
+  const schedule = options.schedule ?? ((tick, intervalMs) => setInterval(tick, intervalMs));
+  const cancel = options.cancel ?? ((handle) => clearInterval(handle));
+  let tabName = "", tabBusy = false, blinkOn = true;
+  let driver: IntervalHandle | null = null;
+
+  const set = (name: string, busy: boolean): void => {
+    tabName = name;
+    tabBusy = busy;
+    blinkOn = true;
+    write(brandTitle(tabName, tabBusy, blinkOn));
+    if (driver === null) {
+      driver = schedule(() => {
+        if (!tabName) return;
+        if (tabBusy) { blinkOn = !blinkOn; write(brandTitle(tabName, true, blinkOn)); }
+        else if (keepIdle) write(brandTitle(tabName));
+      }, 1000);
+      (driver as any).unref?.();
+    }
+  };
+
+  const stop = (): void => {
+    if (driver !== null) { cancel(driver); driver = null; }
+  };
+
+  return { set, stop };
+}
+
+const sharedTitleDriver = createTitleDriver();
 export function setTabTitle(name: string, busy: boolean): void {
-  tabName = name;
-  tabBusy = busy;
-  blinkOn = true;
-  setTerminalTitle(brandTitle(tabName, tabBusy, blinkOn));
-  if (!driver) {
-    driver = setInterval(() => {
-      if (!tabName) return;
-      if (tabBusy) { blinkOn = !blinkOn; setTerminalTitle(brandTitle(tabName, true, blinkOn)); }
-      else if (process.platform === "win32") setTerminalTitle(brandTitle(tabName)); // keeper re-assert
-    }, 1000);
-    (driver as any).unref?.();
-  }
+  sharedTitleDriver.set(name, busy);
 }
 /** Stop the heartbeat (unmount/exit). Idempotent. */
 export function stopTitleDriver(): void {
-  if (driver) { clearInterval(driver); driver = null; }
+  sharedTitleDriver.stop();
 }
