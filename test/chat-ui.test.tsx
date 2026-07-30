@@ -81,6 +81,7 @@ test("durable state tools remain visible instead of claiming generic completion"
   expect(resultSummary("workflow", "Saved workflow 'resume.md'", { action: "write", name: "resume" })).toBeUndefined();
   expect(resultSummary("playbook", "(a similar bullet already exists - revise it instead of adding a duplicate)", { action: "add" })).toBeUndefined();
   expect(resultSummary("playbook", "Added playbook lesson", { action: "add" })).toBeUndefined();
+  expect(resultSummary("mcp__neko_meeting__stop", JSON.stringify({ success: true, state: "idle", detail: "No meeting capture was active." }, null, 2), {})).toBeUndefined();
 });
 
 test("resume replay preserves mixed parallel tool order and keeps failures expanded", () => {

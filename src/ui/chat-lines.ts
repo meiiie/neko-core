@@ -43,7 +43,10 @@ const short = (value: unknown, cap = 80) => {
   return text.length > cap ? `${text.slice(0, Math.max(0, cap - 3))}...` : text;
 };
 
-const ALWAYS_EXPANDED_TOOLS = new Set(["todo_write", "update_plan", "memory", "workflow", "playbook"]);
+const ALWAYS_EXPANDED_TOOLS = new Set([
+  "todo_write", "update_plan", "memory", "workflow", "playbook",
+  "mcp__neko_meeting__stop",
+]);
 const EMPTY_RESULT_SENTINELS = new Set(["(no matches)", "(no files)", "(empty)"]);
 
 /** Count user-visible activity once: folded success is one result; expanded failure is one call. */

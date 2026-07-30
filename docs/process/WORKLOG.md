@@ -42,7 +42,7 @@ scroll band always began on row 1, so a sticky prompt header was overwritten.
   `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
   local design, not a “beyond SOTA” claim.
 
-Release evidence: both TypeScript compilers clean; **943/943 tests, 4,179 assertions**; policy and doctor PASS;
+Release evidence: both TypeScript compilers clean; **943/943 tests, 4,180 assertions**; policy and doctor PASS;
 production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
 and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
 settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the
@@ -86,7 +86,10 @@ render timing is unchanged. An eighth exact-head pass found that crash sealing a
 synthetic plain-text sentinels rather than structured failure bits; both could therefore be summarized as a
 successful write/edit after resume. Exact RED/GREEN fixtures now preserve unknown in-flight outcomes and failed
 recovery directives as expanded evidence, so the operator sees the uncertainty before deciding whether a retry is
-safe.
+safe. A ninth exact-head pass found the emergency meeting-stop tool's structured idle result could still collapse to
+a generic completion. That stateful safety action is now always expanded; its exact `success: true`, `state: idle`,
+`No meeting capture was active` payload drove the RED fixture, and the focused UI/meeting suite plus the full suite
+passed after the policy change.
 
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 

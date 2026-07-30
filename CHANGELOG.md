@@ -31,7 +31,8 @@ All notable changes to Neko Core are documented here. The format follows
   of being folded away. MCP protocol-level `isError`, interrupted commands, missing-skill/MCP no-match outcomes,
   sub-agent failures, rejected plans, synthetic unknown-outcome interruptions, and failed recovery directives remain
   expanded; search/glob/list summaries name the requested target rather than its base directory and count native
-  empty-result sentinels as zero. While reading older history, the jump pill counts folded successes and expanded
+  empty-result sentinels as zero. Emergency meeting-stop results also retain their actual stopped/idle state instead
+  of becoming a generic completion. While reading older history, the jump pill counts folded successes and expanded
   failures as one new activity each.
 - **Scrolled history keeps the nearest user prompt pinned at the top.** The gray one-row anchor appears only
   while reading older content; click or Alt+Up jumps to that prompt's exact rendered row, including while a live
