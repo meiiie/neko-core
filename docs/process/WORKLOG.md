@@ -42,7 +42,7 @@ scroll band always began on row 1, so a sticky prompt header was overwritten.
   `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
   local design, not a “beyond SOTA” claim.
 
-Release evidence: both TypeScript compilers clean; **942/942 tests, 4,176 assertions**; policy and doctor PASS;
+Release evidence: both TypeScript compilers clean; **943/943 tests, 4,177 assertions**; policy and doctor PASS;
 production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
 and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
 settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the
@@ -76,7 +76,9 @@ CI run exposed one remaining harness-only ceiling: an MCP fixture cold spawn too
 integration tests still inherited Bun's 5-second default. All MCP process tests now share the existing 60-second
 harness deadline (production connect deadlines are unchanged) and passed 10/10 local stress rounds. A sixth
 exact-head pass completed the state policy: workflow/playbook output also stays expanded, while `(no matches)`,
-`(no files)`, and `(empty)` deterministically count as zero instead of one.
+`(no files)`, and `(empty)` deterministically count as zero instead of one. A seventh exact-head pass found the
+scroll-away jump pill counted expanded `tool_call` failures but skipped folded successful `tool_result` activity.
+One shared counter now treats each semantic activity as exactly one in both representations.
 
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 

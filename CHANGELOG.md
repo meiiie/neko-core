@@ -30,7 +30,8 @@ All notable changes to Neko Core are documented here. The format follows
   and `/transcript` retain the full call/result; todo/plan, memory, workflow, and playbook state remain visible instead
   of being folded away. MCP protocol-level `isError`, interrupted commands, missing-skill/MCP no-match outcomes,
   sub-agent failures, and rejected plans remain expanded; search/glob/list summaries name the requested target rather
-  than its base directory and count native empty-result sentinels as zero.
+  than its base directory and count native empty-result sentinels as zero. While reading older history, the jump pill
+  counts folded successes and expanded failures as one new activity each.
 - **Scrolled history keeps the nearest user prompt pinned at the top.** The gray one-row anchor appears only
   while reading older content; click or Alt+Up jumps to that prompt's exact rendered row, including while a live
   reply is still streaming. Anchor selection reserves its own row before checking which prompt is visible,

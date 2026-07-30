@@ -44,6 +44,16 @@ const short = (value: unknown, cap = 80) => {
 const ALWAYS_EXPANDED_TOOLS = new Set(["todo_write", "update_plan", "memory", "workflow", "playbook"]);
 const EMPTY_RESULT_SENTINELS = new Set(["(no matches)", "(no files)", "(empty)"]);
 
+/** Count user-visible activity once: folded success is one result; expanded failure is one call. */
+export function countNewActivities(lines: Line[], from = 0): number {
+  return lines.slice(Math.max(0, from)).filter((line) =>
+    line.kind === "user"
+    || line.kind === "assistant"
+    || line.kind === "tool_call"
+    || (line.kind === "tool_result" && Boolean(line.summary))
+  ).length;
+}
+
 /** One compact, past-tense outcome for every successful activity; full call + output stays under Ctrl+O. */
 export function resultSummary(
   name: string | undefined,

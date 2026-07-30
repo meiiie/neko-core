@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
 import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
-import { buildReplayLines, clampToRows, contentToText, recoverTodos, renderTail, replaySessionLines, resultSummary } from "../src/ui/chat-lines.ts";
+import { buildReplayLines, clampToRows, contentToText, countNewActivities, recoverTodos, renderTail, replaySessionLines, resultSummary } from "../src/ui/chat-lines.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { setModel } from "../src/adapters/project.ts";
 import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "../src/adapters/chatgpt-voice.ts";
@@ -53,6 +53,16 @@ test("successful tool activity folds to one past-tense line while preserving ful
 test("background job summary preserves running state and job id", () => {
   expect(resultSummary("bash", "Running in background [bg7]: bun dev\nCheck output with /bashes.", { command: "bun dev" }))
     .toBe("Started background job [bg7]: bun dev");
+});
+
+test("new-message count treats folded success and expanded failure as one activity each", () => {
+  const activity: any[] = [
+    { id: 1, kind: "info", text: "before scroll" },
+    { id: 2, kind: "tool_result", text: "Read(a.ts)\none line", summary: "Read a.ts (1 line)" },
+    { id: 3, kind: "tool_call", text: "Bash(exit 1)" },
+    { id: 4, kind: "tool_result", text: "Error: failed" },
+  ];
+  expect(countNewActivities(activity, 1)).toBe(2);
 });
 
 test("prefixed screenshot capability guidance stays expanded", () => {

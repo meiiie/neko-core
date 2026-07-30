@@ -87,6 +87,7 @@ import {
   recoverTodos,
   renderTail,
   clampToRows,
+  countNewActivities,
   REPLAY_MAX_LINES,
   RESUME_SUMMARY_AT,
 } from "./chat-lines.ts";
@@ -2620,9 +2621,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     if (rowScroll.scrolled) scrollAwayLenRef.current = lines.length;
   }, [rowScroll.scrolled]);
-  const newSince = rowScroll.scrolled
-    ? lines.slice(scrollAwayLenRef.current).filter((l) => l.kind === "user" || l.kind === "assistant" || l.kind === "tool_call").length
-    : 0;
+  const newSince = rowScroll.scrolled ? countNewActivities(lines, scrollAwayLenRef.current) : 0;
   // The jump pill's label + screen hit-box (row below the viewport, centered): shared by the hover
   // highlight and the click handler so what LIGHTS UP is exactly what's CLICKABLE.
   const [pillHover, setPillHover] = useState(false);
