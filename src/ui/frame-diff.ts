@@ -24,6 +24,7 @@ import { appendFileSync } from "node:fs";
 import { setHitTargets } from "./hit-targets.ts";
 
 export interface ScrollBand { top: number; height: number } // 1-based absolute top row of the scrollable band
+const bandBase = (band: ScrollBand): number => Math.max(0, band.top - 1); // frame-array index
 
 const ESC = "\x1b[";
 const EL = `${ESC}K`; // erase to end of line
@@ -356,7 +357,7 @@ export class FrameDiffer {
     const win = this.windowRows();
     if (!win || !this.band) return lines;
     const out = lines.slice();
-    const base = Math.max(0, this.band.top - 1);
+    const base = bandBase(this.band);
     for (let i = 0; i < this.band.height && base + i < out.length; i++) out[base + i] = win[i];
     return out;
   }
@@ -384,7 +385,7 @@ export class FrameDiffer {
     if (!this.writer || !this.prev || !this.band) return;
     const win = this.windowRows();
     if (!win) return;
-    const base = Math.max(0, this.band.top - 1);
+    const base = bandBase(this.band);
     const H = Math.min(this.band.height, Math.max(0, this.prev.length - base));
     const prevBand = this.prev.slice(base, base + H);
     let anyChange = false;
@@ -487,7 +488,7 @@ export class FrameDiffer {
     // next diffs never repair (the mangled /resume picker, image #60). Chrome changed -> plain line-diff.
     const band = this.band;
     if (band && geomOk && this.hwScrollEnabled() && band.height >= 8 && changed.length > band.height / 2) {
-      const base = Math.max(0, band.top - 1);
+      const base = bandBase(band);
       const end = Math.min(lines.length, base + band.height);
       let chromeUnchanged = true;
       for (let i = 0; i < lines.length; i++) {
@@ -595,7 +596,7 @@ export function detectShift(prev: string[], next: string[], bandH: number): { di
  * Absolute addressing (frame line i = screen row i+1; guaranteed by the band contract). */
 function emitScroll(prev: string[], next: string[], band: ScrollBand, s: { dir: "up" | "down"; k: number }): string {
   const top = band.top;                    // 1-based
-  const base = Math.max(0, top - 1);        // 0-based frame index
+  const base = bandBase(band);              // 0-based frame index
   const bottom = band.top + band.height - 1;
   let out = `${ESC}${top};${bottom}r`;     // DECSTBM: confine scrolling to the band
   out += s.dir === "up" ? `${ESC}${s.k}S` : `${ESC}${s.k}T`; // SU / SD: the terminal shifts the region

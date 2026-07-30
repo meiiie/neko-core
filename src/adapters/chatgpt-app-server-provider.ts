@@ -154,6 +154,7 @@ export class ChatGptAppServerProvider implements Provider {
       return { content: active.answer, tool_calls: [], usage: this.finishUsage(active) };
     } finally {
       if (abort) signal?.removeEventListener("abort", abort);
+      this.syncCumulativeBase(active); // rejected/aborted turns still belong to the thread running total
       if (this.active === active) this.active = null;
       this.armIdleStop();
     }
@@ -164,6 +165,7 @@ export class ChatGptAppServerProvider implements Provider {
     this.clientReady = null;
     this.threadId = null;
     this.threadSignature = "";
+    this.syncCumulativeBase(this.active);
     this.active?.reject(new Error("Codex App Server stopped"));
     this.active = null;
     this.client?.close();
@@ -205,9 +207,13 @@ export class ChatGptAppServerProvider implements Provider {
     };
   }
 
+  private syncCumulativeBase(active: ActiveTurn | null | undefined): void {
+    if (active?.cumulative) this.cumulativeBase = active.cumulative;
+  }
+
   private finishUsage(active: ActiveTurn): Usage | undefined {
     const usage = this.usageSnapshot(active);
-    if (active.cumulative) this.cumulativeBase = active.cumulative;
+    this.syncCumulativeBase(active);
     return usage;
   }
 

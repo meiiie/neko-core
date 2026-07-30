@@ -17,11 +17,13 @@ All notable changes to Neko Core are documented here. The format follows
 - **The running token counter no longer starts at `↑0 ↓0`.** It shows an immediate input estimate with `~`,
   consumes authoritative provider usage as it arrives, and replaces the estimate with exact totals without
   double-booking cost. Output streamed after a provider-managed tool flush remains counted from the last usage
-  snapshot. A real GPT-5.6 `neko --yolo` turn showed `↑~10.6k` at start and exact non-zero usage
-  before completion.
+  snapshot, and interrupted turns advance the thread-cumulative baseline so their usage is not charged again
+  to the next turn. A real GPT-5.6 `neko --yolo` turn showed `↑~10.6k` at start and exact non-zero usage before
+  completion.
 - **Completed tool activity collapses to one useful outcome line.** Successful calls use compact past-tense
-  summaries; failures, denials, and blocked actions stay expanded. Ctrl+O and `/transcript` retain the full
-  call/result, and todo/plan state remains visible instead of being folded away.
+  summaries; failures, denials, and blocked actions stay expanded. Mixed parallel outcomes retain call order.
+  Ctrl+O and `/transcript` retain the full call/result, and todo/plan state remains visible instead of being
+  folded away.
 - **Scrolled history keeps the nearest user prompt pinned at the top.** The gray one-row anchor appears only
   while reading older content; click or Alt+Up jumps to that prompt's exact rendered row, including while a live
   reply is still streaming. The compositor now supports a scroll band below row 1 without overwriting the anchor.

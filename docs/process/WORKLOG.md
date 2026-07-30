@@ -29,12 +29,15 @@ scroll band always began on row 1, so a sticky prompt header was overwritten.
   streaming tail now share one scroll domain, so the label and click target stay exact mid-turn. Measuring the
   stable `header + band` wrapper avoids a React height feedback loop, while the jump pill keeps its own row outside
   that measurement.
+- Closed two data-integrity gaps found during PR review: resume now replaces a collapsible call in place so mixed
+  parallel outcomes keep their original order, and App Server advances its cumulative usage baseline even when a
+  turn rejects, aborts, or is disposed, preventing those tokens from being charged again to the next turn.
 - Clean-room inspection of the local Claude Code checkout informed behavioral contracts only; no implementation
   text was copied. Primary-source research and refuted hypotheses live in
   `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
   local design, not a “beyond SOTA” claim.
 
-Release evidence: both TypeScript compilers clean; **931/931 tests, 4,128 assertions**; policy and doctor PASS;
+Release evidence: both TypeScript compilers clean; **933/933 tests, 4,135 assertions**; policy and doctor PASS;
 production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
 and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
 settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the

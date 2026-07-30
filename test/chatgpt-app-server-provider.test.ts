@@ -259,6 +259,42 @@ test("a multi-call codex turn reports the SUM of its internal model calls, not j
   provider.dispose();
 });
 
+test("an interrupted turn advances the cumulative baseline before the next turn", async () => {
+  const cfg = setup();
+  let handlers!: CodexAppServerHandlers;
+  let turns = 0;
+  const factory: CodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}), close: () => {},
+      request: async (method) => {
+        if (method === "thread/start") return { thread: { id: "t1" } };
+        if (method === "turn/start") {
+          turns++;
+          const first = turns === 1;
+          setTimeout(() => {
+            handlers.onNotification?.("thread/tokenUsage/updated", { threadId: "t1", tokenUsage: {
+              last: { inputTokens: first ? 80 : 40, outputTokens: first ? 20 : 10, totalTokens: first ? 100 : 50, cachedInputTokens: 0 },
+              total: { inputTokens: first ? 80 : 120, outputTokens: first ? 20 : 30, totalTokens: first ? 100 : 150, cachedInputTokens: 0 },
+            } });
+            handlers.onNotification?.("turn/completed", {
+              threadId: "t1",
+              turn: { id: `turn-${turns}`, status: first ? "interrupted" : "completed" },
+            });
+          }, 0);
+          return { turn: { id: `turn-${turns}` } };
+        }
+        return {};
+      },
+    };
+  };
+  const provider = new ChatGptAppServerProvider(cfg, factory);
+  await expect(provider.complete([{ role: "user", content: "stop this" }])).rejects.toThrow();
+  const second = await provider.complete([{ role: "user", content: "try again" }]);
+  expect(second.usage).toMatchObject({ prompt_tokens: 40, completion_tokens: 10, total_tokens: 50 });
+  provider.dispose();
+});
+
 test("a turn RUNNING LONGER than codex_keepalive is not killed mid-flight by the idle timer", async () => {
   const cfg = setup();
   cfg.data.codex_keepalive = 0.0002; // 12ms - far shorter than the second turn below

@@ -45,6 +45,28 @@ test("successful tool activity folds to one past-tense line while preserving ful
   expect(lines[0].text).toContain("27 pass");
 });
 
+test("resume replay preserves mixed parallel tool order and keeps failures expanded", () => {
+  let id = 1;
+  const lines = buildReplayLines([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        { id: "ok", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: "a.ts" }) } },
+        { id: "bad", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "exit 1" }) } },
+      ],
+    },
+    { role: "tool", tool_call_id: "ok", content: "one line" },
+    { role: "tool", tool_call_id: "bad", content: "Error: command failed" },
+  ], () => id++, { mode: "resume" });
+
+  expect(lines.map((line) => line.kind)).toEqual(["tool_result", "tool_call", "tool_result"]);
+  expect(lines[0].summary).toContain("Read a.ts");
+  expect(lines[1].text).toContain("exit 1");
+  expect(lines[2]).toMatchObject({ kind: "tool_result", text: "Error: command failed" });
+  expect(lines[2].summary).toBeUndefined();
+});
+
 test("full transcript keeps successful call and output expanded", () => {
   let id = 1;
   const lines = buildReplayLines([

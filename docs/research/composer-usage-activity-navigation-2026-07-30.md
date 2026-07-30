@@ -161,6 +161,13 @@ Current best model:
 - [verified] Re-wrapping once for every possible caret index is O(n²) and froze a 10,000-character draft for
   9.89 seconds. Recording hard-break/final caret stops in one wrap projection reduced the same move to 4.52 ms.
   confidence: high · RED/GREEN deterministic performance regression · 2026-07-30
+- [verified] Collapsing a completed call by removing it and appending its result reorders mixed parallel tool
+  outcomes. Replacing the call in place preserves the model's original call order while leaving failures expanded.
+  confidence: high · mixed-call resume RED/GREEN test + CodeRabbit review · 2026-07-30
+- [verified] Thread-cumulative usage needs a baseline update on rejected and aborted turns, not only successful
+  returns; otherwise the next turn inherits the failed turn's entire delta. Cleanup and dispose now resynchronize
+  before clearing the active turn.
+  confidence: high · two-turn interrupted-usage RED/GREEN test + CodeRabbit review · 2026-07-30
 
 ## Open questions
 
