@@ -179,6 +179,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const verbRef = useRef(VERBS[0]); // playful "thinking" verb, repicked each turn
   const startRef = useRef(0);
   const resumedRef = useRef<Session | null>(resumedSession ?? (resume ? latestSession(process.cwd()) : null));
+  const initialFullscreen = fullscreenOverride ?? (cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
   const sessionIdRef = useRef(sessionId ?? resumedRef.current?.id ?? newSessionId());
   const createdAtRef = useRef(resumedRef.current?.createdAt ?? new Date().toISOString());
 
@@ -195,7 +196,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (resumedRef.current && !startupNeedsChoiceRef.current) {
       // Replay the prior conversation so it looks exactly like before you quit (Claude-style) - the
       // FULL thread incl. tool calls/results, so an interrupted coding task's work isn't lost from view.
-      out.push(...replaySessionLines(resumedRef.current.messages, () => idRef.current++));
+      out.push(...(initialFullscreen
+        ? buildReplayLines(resumedRef.current.messages, () => idRef.current++)
+        : replaySessionLines(resumedRef.current.messages, () => idRef.current++, {
+            columns: cols,
+            maxRows: Math.max(8, Math.min(20, rows - 10)),
+          })));
       out.push({ id: idRef.current++, kind: "info", text: `(resumed ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)` });
       const left = recoverTodos(resumedRef.current.messages).filter((t) => t.status !== "completed").length;
       if (left) out.push({ id: idRef.current++, kind: "info", text: `Picking up where you left off - ${left} task${left > 1 ? "s" : ""} still open. Just tell me to keep going (in your own words), or /continue.` });
@@ -287,7 +293,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // tiny window degrades to inline rather than corrupting the screen.
   // Fullscreen is the sole interactive mode: on for any capable TTY, off (inline fallback) only when the
   // terminal can't host it (non-TTY / too small). Set once at mount - there is no runtime toggle.
-  const [fullscreen] = useState<boolean>(fullscreenOverride ?? (cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout)));
+  const [fullscreen] = useState<boolean>(initialFullscreen);
   const fullscreenRef = useRef(fullscreen); // for closures that read the mode (resize debounce, mount effect)
   const contentColsRef = useRef(Math.max(20, (stdout?.columns ?? 80) - 4));
   useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
@@ -579,6 +585,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         } else if (kind === "step") {
           setStep(data);
           persistRef.current(); // start of a loop iteration = messages in a clean, resumable state
+        } else if (kind === "checkpoint") {
+          // Agent.messages already contains the partial assistant segment / completed provider-managed
+          // tool trajectory. The Agent throttles these events, so durability never becomes per-token I/O.
+          persistRef.current();
         } else if (kind === "compact") {
           // In-loop safety-net compaction (a single huge turn). Show the same progress bar; the agent
           // emits compact_done when its summarizer call returns.
@@ -676,7 +686,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     // Replay from the CURRENT agent messages (post-compaction if summarized), so what's on screen
     // matches what's in context. Reconstruct the FULL thread (tool calls + results) too.
-    const replay: Line[] = replaySessionLines(agentRef.current!.messages, () => idRef.current++);
+    const replay: Line[] = fullscreen
+      ? buildReplayLines(agentRef.current!.messages, () => idRef.current++)
+      : replaySessionLines(agentRef.current!.messages, () => idRef.current++, {
+          columns: cols,
+          maxRows: Math.max(8, Math.min(20, rows - 10)),
+        });
     const left = todos.filter((t) => t.status !== "completed").length;
     if (left) replay.push({ id: idRef.current++, kind: "info", text: `Picking up where you left off - ${left} task${left > 1 ? "s" : ""} still open. Just tell me to keep going (in your own words), or /continue.` });
     setLines((prev) => [...prev, ...replay]);

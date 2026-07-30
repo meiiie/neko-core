@@ -34,7 +34,8 @@ export function resultSummary(name: string | undefined, obs: string): string | u
  * assistant text. An interrupted coding turn is almost all tool_calls + tool results with no final
  * assistant text, so skipping them made a resumed session look empty ("the work is gone") even though
  * the agent context was intact. This reconstructs it exactly as it looked live. */
-export const REPLAY_MAX_LINES = 80; // display cap on a resumed thread - the agent keeps ALL messages in context
+export const REPLAY_MAX_LINES = 80; // secondary logical-line guard; wrapped terminal rows are the primary cap
+export const REPLAY_MAX_ROWS = 20; // a resume should leave room for the prompt/status, never refill the whole terminal
 export const RESUME_SUMMARY_AT = 0.6; // offer resume-from-summary once a session would fill >60% of the window
 /** Reconstruct the FULL transcript (every message -> a Line) with NO display bound. Used both by the
  * bounded resume replay below and by the /transcript viewer, which shows the whole thread on demand. */
@@ -64,19 +65,75 @@ export function buildReplayLines(messages: any[], nextId: () => number): Line[] 
   return out;
 }
 
-export function replaySessionLines(messages: any[], nextId: () => number): Line[] {
-  const out = buildReplayLines(messages, nextId);
-  // Bound the DISPLAY to the most recent lines: rendering a very long thread's hundreds of <Static>
-  // items at once is what lagged the picker after selecting. The whole conversation is still in the
-  // agent's context (this only trims what's re-printed on screen); /transcript shows all of it, and a
-  // terminal's own scrollback holds whatever WAS printed. (Native scrollback can't be prepended into -
-  // an inline <Static> app never receives scroll events - so "load more above on scroll up" isn't
-  // possible here the way a GUI chat app does it; the viewer is the terminal-native answer.)
-  if (out.length > REPLAY_MAX_LINES) {
-    const hidden = out.length - REPLAY_MAX_LINES;
-    return [{ id: nextId(), kind: "info", text: `... ${hidden} earlier line${hidden > 1 ? "s" : ""} in context (not re-printed) - /transcript to view the full thread ...` }, ...out.slice(-REPLAY_MAX_LINES)];
+export interface ReplayOptions {
+  columns?: number;
+  maxRows?: number;
+}
+
+function wrappedRows(text: string, columns: number): number {
+  return String(text).replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n")
+    .reduce((sum, line) => sum + Math.max(1, Math.ceil([...line].length / columns)), 0);
+}
+
+function replayLineRows(line: Line, columns: number): number {
+  if (line.kind === "tool_result" && line.summary) return 1;
+  // Tool results render at most eight preview lines; assistant/user prose can wrap without a renderer cap.
+  if (line.kind === "tool_result") return Math.min(9, wrappedRows(line.text, columns));
+  const margin = line.kind === "assistant" || line.kind === "user" || line.kind === "tool_call" ? 2 : 0;
+  return margin + wrappedRows(line.text, columns);
+}
+
+function tailByRows(text: string, rows: number, columns: number): string {
+  if (rows <= 1) return "...";
+  const parts = String(text).replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
+  const kept: string[] = [];
+  let remaining = rows - 1; // reserve one row for the omission marker
+  for (let i = parts.length - 1; i >= 0 && remaining > 0; i--) {
+    const chars = [...parts[i]];
+    const height = Math.max(1, Math.ceil(chars.length / columns));
+    if (height <= remaining) {
+      kept.unshift(parts[i]);
+      remaining -= height;
+      continue;
+    }
+    kept.unshift(chars.slice(-remaining * columns).join(""));
+    remaining = 0;
   }
-  return out;
+  return `... [earlier content hidden; /transcript shows the full thread]${kept.length ? `\n${kept.join("\n")}` : ""}`;
+}
+
+export function replaySessionLines(messages: any[], nextId: () => number, options: ReplayOptions = {}): Line[] {
+  const out = buildReplayLines(messages, nextId);
+  const columns = Math.max(20, Math.floor(options.columns ?? 80));
+  const maxRows = Math.max(6, Math.floor(options.maxRows ?? REPLAY_MAX_ROWS));
+  const kept: Line[] = [];
+  let remaining = maxRows;
+  let hidden = false;
+
+  // Bound what is PRINTED by wrapped terminal rows, not message count. A real field session had only
+  // 20 messages but one 45k-char assistant message, so the old 80-line cap still dumped hundreds of
+  // physical rows. Walk backward to retain the useful tail and clip one oversized final line in place.
+  for (let i = out.length - 1; i >= 0 && kept.length < REPLAY_MAX_LINES; i--) {
+    const height = replayLineRows(out[i], columns);
+    if (height <= remaining) {
+      kept.unshift(out[i]);
+      remaining -= height;
+      continue;
+    }
+    hidden = true;
+    if (!kept.length && remaining > 2) {
+      kept.unshift({ ...out[i], text: tailByRows(out[i].text, remaining, columns) });
+    }
+    break;
+  }
+  if (kept.length < out.length) hidden = true;
+  if (!hidden) return kept;
+  const omitted = Math.max(0, out.length - kept.length);
+  return [{
+    id: nextId(),
+    kind: "info",
+    text: `... ${omitted || "some"} earlier line${omitted === 1 ? "" : "s"} in context (not re-printed) - /transcript to view the full thread ...`,
+  }, ...kept];
 }
 
 /** Recover the todo list from saved messages: the last todo_write tool_call carries the plan in its

@@ -565,7 +565,8 @@ test("interrupted turn is PERSISTED incrementally - resume shows the work, not n
   process.env.USERPROFILE = home; process.env.HOME = home;
   let cancelled = false;
   class Hang implements Provider {
-    async complete(): Promise<ProviderResponse> {
+    async complete(_messages: any[], _tools?: any[], onDelta?: any): Promise<ProviderResponse> {
+      onDelta?.("đã thu thập được bằng chứng quan trọng", "content");
       await new Promise<void>((r) => { const t = setInterval(() => { if (cancelled) { clearInterval(t); r(); } }, 20); });
       return { content: "", tool_calls: [] };
     }
@@ -580,12 +581,14 @@ test("interrupted turn is PERSISTED incrementally - resume shows the work, not n
     let s: any = null;
     for (let i = 0; i < 80; i++) {
       s = loadSession("persist-int");
-      if (s?.messages?.some((m: any) => String(m.content).includes("nhiem vu quan trong"))) break;
+      if (s?.messages?.some((m: any) => String(m.content).includes("bằng chứng quan trọng"))) break;
       await tick(25);
     }
-    // The turn is STILL hanging (never reached finally) - yet the user's prompt is already on disk.
+    // The turn is STILL hanging (never reached finally) - both the prompt AND streamed progress are
+    // already on disk. The old checkpoint saved only the prompt because deltas lived in streamRef.
     expect(s).not.toBeNull();
     expect(s.messages.some((m: any) => m.role === "user" && String(m.content).includes("nhiem vu quan trong"))).toBe(true);
+    expect(s.messages.some((m: any) => m.role === "assistant" && String(m.content).includes("bằng chứng quan trọng"))).toBe(true);
     c.unmount();
   } finally {
     cancelled = true;
