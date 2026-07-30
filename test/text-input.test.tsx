@@ -112,7 +112,15 @@ test("caretIndexForClick maps screen deltas to codepoint indexes on the wrap geo
   expect(caretIndexForClick("aa\nbb", 0, 80, 1, 0)).toBe(3);
   // Row deltas clamp to the first/last line.
   expect(caretIndexForClick("aa\nbb", 0, 80, 99, 99)).toBe(5);
-});
+
+  // Regression: vertical navigation must project wrapping once, not re-wrap the full draft for every
+  // candidate caret (the previous O(n²) scan froze on long Ctrl+G/external-editor drafts).
+  const longDraft = "word ".repeat(2_000);
+  const started = performance.now();
+  const moved = caretIndexForClick(longDraft, longDraft.length, 80, -1, 0);
+  expect(moved).toBeLessThan(longDraft.length);
+  expect(performance.now() - started).toBeLessThan(1_000);
+}, 10_000);
 
 test("isEscapeResidue: single sequences AND concatenated bursts; never real text", async () => {
   const { isEscapeResidue } = await import("../src/ui/text-input.tsx");

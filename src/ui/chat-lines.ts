@@ -26,7 +26,7 @@ export function isToolFailure(obs: string): boolean {
 
 const short = (value: unknown, cap = 80) => {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
-  return text.length > cap ? `${text.slice(0, cap)}…` : text;
+  return text.length > cap ? `${text.slice(0, Math.max(0, cap - 3))}...` : text;
 };
 
 /** One compact, past-tense outcome for every successful activity; full call + output stays under Ctrl+O. */

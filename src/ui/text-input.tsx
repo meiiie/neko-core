@@ -64,7 +64,13 @@ export function cellWidth(cp: string): number {
  * width (not codepoint count) so wide chars don't overflow by one cell. Returns lines + the line index
  * the caret (codepoint cursor) sits on. Pure; never touches useInput/refs (Vietnamese-IME-safe). */
 export interface WrapCell { ch: string; index: number; w: number; }
-export interface WrapLine { cells: WrapCell[]; cols: number; }
+export interface WrapLine {
+  cells: WrapCell[];
+  cols: number;
+  /** A caret stop after this line's content: the hard-newline index, or input length on the final line.
+   * Soft wraps omit it because that same logical index belongs at the start of the next visual line. */
+  endIndex?: number;
+}
 export interface WrapResult { lines: WrapLine[]; caretLine: number; }
 export function wrapInput(cps: string[], cur: number, width: number): WrapResult {
   const cols = Math.max(1, Math.floor(width));
@@ -72,12 +78,12 @@ export function wrapInput(cps: string[], cur: number, width: number): WrapResult
   let line: WrapCell[] = [];
   let lineCols = 0;
   let caretLine = 0;
-  const flush = () => { lines.push({ cells: line, cols: lineCols }); line = []; lineCols = 0; };
+  const flush = (endIndex?: number) => { lines.push({ cells: line, cols: lineCols, endIndex }); line = []; lineCols = 0; };
   for (let idx = 0; idx < cps.length; idx++) {
     const cp = cps[idx];
     if (cp === "\n") {
       if (idx === cur) caretLine = lines.length;
-      flush();
+      flush(idx);
       continue;
     }
     const w = cellWidth(cp);
@@ -113,8 +119,8 @@ export function wrapInput(cps: string[], cur: number, width: number): WrapResult
     lineCols += w;
   }
   if (cur >= cps.length) caretLine = lines.length;
-  flush();
-  if (lines.length === 0) lines.push({ cells: [], cols: 0 });
+  flush(cps.length);
+  if (lines.length === 0) lines.push({ cells: [], cols: 0, endIndex: 0 });
   caretLine = Math.min(Math.max(0, caretLine), lines.length - 1);
   return { lines, caretLine };
 }
@@ -128,12 +134,10 @@ export const MAX_INPUT_LINES = 5;
  * also strip the leading ESC, hence the optional prefix. */
 const MODIFIED_ENTER = /^\x1b?\[(?:13;[2-8]u|27;[2-8];13~)$/;
 
-/** Map a mouse click to a caret index. dRow/dCol are the click's offset from the CURRENT caret's
- * screen cell (the FrameDiffer knows where the hardware cursor sits; the layout math lives here,
- * the only module that knows the wrap geometry). Geometry comes from the same wrapInput the
- * renderer uses, so wrap-path clicks are exact; the multiline (\n) path lets Ink wrap naturally,
- * so a click on an overlong logical line lands approximately (clamped). The scan is O(n^2) in
- * the input length - inputs stay short because big pastes collapse to placeholders. */
+/** Map a mouse click or vertical arrow to a caret index. dRow/dCol are offsets from the CURRENT
+ * caret's screen cell. One wrap projection supplies every candidate stop, so this stays O(n) even for
+ * long drafts returned by the external editor; hard newlines, word wraps, wide cells and combining marks
+ * use exactly the same geometry as the renderer. */
 /**
  * Split the half-open range [start, end) at the selection bounds, marking which runs are selected.
  *
@@ -163,18 +167,23 @@ export function caretIndexForClick(value: string, caretIndex: number, width: num
   const cps = [...value];
   const i = Math.min(Math.max(0, caretIndex), cps.length);
   const w = Math.max(1, Math.floor(width) - 1);
-  const colOf = (res: WrapResult, c: number) =>
-    res.lines[res.caretLine].cells.reduce((s, cell) => (cell.index < c ? s + cell.w : s), 0);
-  const base = wrapInput(cps, i, w);
-  const targetLine = Math.min(base.lines.length - 1, Math.max(0, base.caretLine + dRow));
-  const targetCol = Math.max(0, colOf(base, i) + dCol);
-  let best = i;
-  let bestD = Infinity;
-  for (let c = 0; c <= cps.length; c++) {
-    const r = wrapInput(cps, c, w);
-    if (r.caretLine !== targetLine) continue;
-    const d = Math.abs(colOf(r, c) - targetCol);
-    if (d < bestD) { bestD = d; best = c; }
+  const projection = wrapInput(cps, i, w);
+  const current = projection.lines[projection.caretLine];
+  const currentCol = current.cells.reduce((sum, cell) => (cell.index < i ? sum + cell.w : sum), 0);
+  const targetLine = Math.min(projection.lines.length - 1, Math.max(0, projection.caretLine + dRow));
+  const targetCol = Math.max(0, currentCol + dCol);
+  const line = projection.lines[targetLine];
+  let best = line.cells[0]?.index ?? line.endIndex ?? i;
+  let bestDistance = Infinity;
+  let col = 0;
+  for (const cell of line.cells) {
+    const distance = Math.abs(col - targetCol);
+    if (distance < bestDistance) { bestDistance = distance; best = cell.index; }
+    col += cell.w;
+  }
+  if (line.endIndex !== undefined) {
+    const distance = Math.abs(line.cols - targetCol);
+    if (distance < bestDistance) best = line.endIndex;
   }
   return best;
 }

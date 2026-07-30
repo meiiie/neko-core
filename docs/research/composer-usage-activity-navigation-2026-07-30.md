@@ -150,6 +150,17 @@ Current best model:
 - [verified] Successful activity folds without information loss: Ctrl+O and `/transcript` retain full detail;
   failures/denials/blocked calls and current todo/plan state stay expanded.
   confidence: high · projection + fullscreen tests · 2026-07-30
+- [verified] A usage snapshot and its visible stream buffer are not the same lifetime: provider-managed tools can
+  flush the buffer without returning from `complete()`. A monotonic generated-character counter plus a snapshot
+  baseline preserves the exact reported total and estimates only post-snapshot output (`100 → ~120` in RED/GREEN).
+  confidence: high · managed-tool integration test + Codex PR review · 2026-07-30
+- [verified] Sticky navigation must use the compositor's full row domain, including uncommitted stream rows. Using
+  committed rows alone made the label and exact jump disagree mid-turn; a hanging-stream fullscreen test now keeps
+  them aligned.
+  confidence: high · fullscreen integration test + Codex PR review · 2026-07-30
+- [verified] Re-wrapping once for every possible caret index is O(n²) and froze a 10,000-character draft for
+  9.89 seconds. Recording hard-break/final caret stops in one wrap projection reduced the same move to 4.52 ms.
+  confidence: high · RED/GREEN deterministic performance regression · 2026-07-30
 
 ## Open questions
 

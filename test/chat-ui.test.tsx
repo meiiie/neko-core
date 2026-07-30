@@ -25,6 +25,9 @@ test("multimodal tool observations render as metadata + [image], never object co
 
 test("successful tool activity folds to one past-tense line while preserving full Ctrl+O detail", () => {
   expect(resultSummary("bash", "(exit 0)\nok", { command: "bun test" })).toBe("Ran shell command: bun test");
+  const longSummary = resultSummary("bash", "(exit 0)\nok", { command: "x".repeat(200) }) ?? "";
+  expect(longSummary).not.toContain("…"); // supported legacy Windows consoles need an ASCII-only suffix
+  expect(longSummary).toContain("...");
   expect(resultSummary("todo_write", "plan updated", {})).toBeUndefined(); // stateful plan stays visible
   let id = 1;
   const lines = buildReplayLines([

@@ -64,6 +64,27 @@ class MdHang implements Provider {
   }
 }
 
+class ManagedUsageGap implements Provider {
+  cancelled = false;
+  async complete(_m: any[], _t: any[], onDelta?: (t: string, k?: "content" | "reasoning" | "tool") => void, _signal?: AbortSignal, opts?: any): Promise<ProviderResponse> {
+    onDelta?.("x".repeat(400));
+    opts?.onUsage?.({ prompt_tokens: 1_000, completion_tokens: 100, total_tokens: 1_100 });
+    await opts?.executeTool?.({ id: "usage-gap", name: "ls", arguments: { path: "." } });
+    onDelta?.("y".repeat(80)); // 20 estimated tokens after the last authoritative snapshot
+    while (!this.cancelled) await tick(15);
+    return { content: "done", tool_calls: [], usage: { prompt_tokens: 1_000, completion_tokens: 120, total_tokens: 1_120 } };
+  }
+}
+
+class StreamingAnchorHang implements Provider {
+  cancelled = false;
+  async complete(_m: any[], _t: any[], onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
+    onDelta?.(Array.from({ length: 20 }, (_, i) => `LIVE TAIL ROW ${i}`).join("\n"));
+    while (!this.cancelled) await tick(15);
+    return { content: "done", tool_calls: [], usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 } };
+  }
+}
+
 test("status bar shows mode + context %", () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   const f = strip(c.lastFrame());
@@ -114,6 +135,21 @@ test("ThinkingLine labels estimates with ~ and authoritative usage without it", 
   expect(f).toContain("↓6.1k");
   expect(f).not.toContain("↓~6.1k");
 });
+
+test("live token output adds post-snapshot text inside one provider-managed tool turn", async () => {
+  const provider = new ManagedUsageGap();
+  const c = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+  try {
+    c.stdin.write("exercise managed usage");
+    await tick(60);
+    c.stdin.write("\r");
+    expect(await until(c, (frames) => frames.includes("↓~120"), 3000)).toBe(true);
+  } finally {
+    provider.cancelled = true;
+    c.unmount();
+    await tick(40);
+  }
+}, 10_000);
 
 test("CompactingLine shows the progress bar, percent, and a tip", () => {
   const f = strip(render(<CompactingLine start={1_000_000} />).lastFrame());
@@ -364,6 +400,46 @@ test("fullscreen history pins the nearest prompt and clicking it jumps to that e
     expect(jumped).toBe(true); // header unmounted; the exact prompt is now the first transcript row
   } finally {
     c.unmount();
+  }
+}, 15000);
+
+test("sticky prompt click stays exact while an uncommitted streaming tail extends the band", async () => {
+  const msgs: any[] = [];
+  for (let i = 0; i < 30; i++) {
+    msgs.push({ role: "user", content: `stream anchor prompt ${i}` });
+    msgs.push({ role: "assistant", content: `stream answer ${i}` });
+  }
+  const session: any = { id: "stream-anchors", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
+  const provider = new StreamingAnchorHang();
+  const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={provider} resumedSession={session} />);
+  try {
+    expect(await until(c, (frames) => frames.includes("stream answer 29"), 3000)).toBe(true);
+    c.stdin.write("keep streaming");
+    await tick(60);
+    c.stdin.write("\r");
+    expect(await until(c, (frames) => frames.includes("LIVE TAIL ROW 19"), 3000)).toBe(true);
+    c.stdin.write("\x1b[5~");
+
+    let anchor = "";
+    for (let waited = 0; waited < 3000; waited += 25) {
+      anchor = strip(c.lastFrame()).split("\n")[0]?.trim() ?? "";
+      if (/^> stream anchor prompt \d+$/.test(anchor)) break;
+      await tick(25);
+    }
+    expect(anchor).toMatch(/^> stream anchor prompt \d+$/);
+
+    c.stdin.write("\x1b[<0;5;1M");
+    let jumped = false;
+    for (let waited = 0; waited < 3000; waited += 25) {
+      const first = strip(c.lastFrame()).split("\n")[0]?.trim() ?? "";
+      if (first === anchor) { jumped = true; break; }
+      await tick(25);
+    }
+    expect(jumped).toBe(true);
+  } finally {
+    provider.cancelled = true;
+    c.unmount();
+    await tick(40);
   }
 }, 15000);
 

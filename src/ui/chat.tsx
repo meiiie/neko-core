@@ -287,6 +287,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const turnOutStartRef = useRef(0); // cost.completionTokens at turn start -> live OUTPUT (down) counter, this turn's delta
   const turnCallsStartRef = useRef(0); // usage-bearing provider calls; distinguishes a turn sum from one request
   const liveUsageRef = useRef<Usage | null>(null); // authoritative provider snapshot while the turn is still running
+  const turnGeneratedCharsRef = useRef(0); // monotonic across tool-segment flushes inside one provider call
+  const usageSnapshotCharsRef = useRef(0); // generated chars already represented by liveUsageRef
   const turnInputEstimateRef = useRef(0); // immediate context estimate; marked ~ until provider usage arrives
   const turnStartedAtRef = useRef(0);
   // Recover the todo tracker for a session resumed AT STARTUP (--resume/--continue), so its plan shows.
@@ -547,6 +549,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           .filter(Boolean)
           .join("\n\n"),
       onDelta: (t, kind) => {
+        turnGeneratedCharsRef.current += t.length;
         if (kind === "reasoning") {
           reasoningRef.current += t;
           // Reasoning is transient (display-only, only the last lines shown) — keep a bounded tail so
@@ -566,6 +569,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       onEvent: (kind, data) => {
         if (kind === "usage") {
           liveUsageRef.current = data as Usage;
+          usageSnapshotCharsRef.current = turnGeneratedCharsRef.current;
         } else if (kind === "tool_call") {
           flushStream();
           // Defer the commit: show this call LIVE with a blinking dot (RunningLine) while it runs;
@@ -2134,6 +2138,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     turnOutStartRef.current = agentRef.current!.cost.completionTokens;
     turnCallsStartRef.current = agentRef.current!.cost.calls;
     liveUsageRef.current = null;
+    turnGeneratedCharsRef.current = 0;
+    usageSnapshotCharsRef.current = 0;
     const estimatedUser = imgs.length
       ? [{ role: "user", content: [{ type: "text", text: toSend }, ...imgs.map((image) => ({ type: "image_url", image_url: { url: image.url } }))] }]
       : [{ role: "user", content: toSend }];
@@ -2490,13 +2496,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     [lines, contentCols, warmTick],
   );
   const ansiRows = ansiProjection.rows;
+  const [streamRows, setStreamRows] = useState<string[]>([]);
+  const streamRowsRef = useRef<string[]>([]);
+  streamRowsRef.current = streamRows;
+  const bandRowCount = ansiRows.length + streamRows.length;
   // Row scrolling anchored from the END (dist=0 -> pinned): stays put as the warmer swaps rows above.
   // Glide hops repaint the band DIRECTLY through the differ (sub-ms) - React renders only at gesture
   // edges. The refs keep the hop callback reading current values without restarting the animation.
   const paddedRowsRef = useRef<string[]>([]);
   const bandActiveRef = useRef(false);
   const rowScroll = useRowScroll(
-    ansiRows.length,
+    bandRowCount,
     viewH,
     // The glide's fast path exists ONLY with the differ (sub-ms band repaints). Without it (Windows
     // default) pass NO hop callback - useRowScroll then scrolls instantly, one render per gesture.
@@ -2504,7 +2514,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     Math.max(4, Math.round(1000 / fps)), // glide hop follows the resolved fps (live-adjustable via /fps)
   );
   const promptAnchor = fullscreen && !search
-    ? stickyPromptAnchor(ansiProjection.spans, ansiRows.length, viewH, rowScroll.dist)
+    ? stickyPromptAnchor(ansiProjection.spans, bandRowCount, viewH, rowScroll.dist)
     : null;
   const promptAnchorRows = promptAnchor ? PROMPT_ANCHOR_HEIGHT : 0;
   const bandViewH = Math.max(1, viewH - promptAnchorRows);
@@ -2534,9 +2544,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (id == null) return;
     const span = ansiProjection.spans.find((candidate) => candidate.line.id === id);
     if (!span) { promptJumpLineRef.current = null; return; }
-    const visibleStart = Math.max(0, ansiRows.length - rowScroll.dist - viewH);
+    const visibleStart = Math.max(0, bandRowCount - rowScroll.dist - viewH);
     if (visibleStart !== span.start) rowScroll.toRow(span.start);
-  }, [ansiProjection, viewH]);
+  }, [ansiProjection, bandRowCount, viewH]);
   // Reading mode <-> live mode for the stream pump: scrolled away slows the sync (see maybePump);
   // re-pinning to the bottom pumps at once so the tail is current the moment it is visible again.
   useEffect(() => {
@@ -2574,9 +2584,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // (not during render): renderNodeRows drives the hidden Ink instance, which is a nested render that
   // React forbids inside the parent's render phase (the "nested updates from render" warning). The tail
   // is clamped so per-delta cost is O(viewport). `stream` state is already throttled, so is this.
-  const [streamRows, setStreamRows] = useState<string[]>([]);
-  const streamRowsRef = useRef<string[]>([]);
-  streamRowsRef.current = streamRows;
   useEffect(() => {
     if (!fullscreen || !stream) { if (streamRowsRef.current.length) setStreamRows([]); return; }
     const md = clampToRows(renderTail(stream), Math.max(6, viewH - 2), contentCols);
@@ -2934,19 +2941,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
               const booked = Math.max(0, agentRef.current!.cost.promptTokens - turnInStartRef.current);
               return { value: Math.max(booked, turnInputEstimateRef.current), approximate: true };
             }}
-            // Prefer authoritative streamed usage. Between provider snapshots, keep the character estimate
-            // moving; max() prevents counting the same output twice and ~ discloses the estimate.
-            liveOut={() => {
-              const booked = Math.max(0, agentRef.current!.cost.completionTokens - turnOutStartRef.current);
-              const reported = Math.max(
-                0,
-                (liveUsageRef.current?.completion_tokens ?? agentRef.current!.cost.completionTokens) - turnOutStartRef.current,
-              );
-              const estimated = booked + Math.ceil(
-                (streamRef.current.length + reasoningRef.current.length + toolStreamRef.current.length) / 4,
-              );
-              return { value: Math.max(reported, estimated), approximate: estimated > reported };
-            }}
+              // Authoritative usage covers every character through its snapshot. Add only later streamed
+              // characters, which stay monotonic even when a provider-managed tool flushes visible buffers.
+              liveOut={() => {
+                const booked = Math.max(0, agentRef.current!.cost.completionTokens - turnOutStartRef.current);
+                if (liveUsageRef.current) {
+                  const reported = Math.max(0, (liveUsageRef.current.completion_tokens ?? 0) - turnOutStartRef.current);
+                  const postSnapshot = Math.ceil(Math.max(
+                    0,
+                    turnGeneratedCharsRef.current - usageSnapshotCharsRef.current,
+                  ) / 4);
+                  return { value: reported + postSnapshot, approximate: postSnapshot > 0 };
+                }
+                const estimated = booked + Math.ceil(
+                  (streamRef.current.length + reasoningRef.current.length + toolStreamRef.current.length) / 4,
+                );
+                return { value: estimated, approximate: true };
+              }}
             step={step}
             queued={queued}
             effort={cfg.effort}

@@ -13,24 +13,28 @@ scroll band always began on row 1, so a sticky prompt header was overwritten.
 - Unified hard and soft line wrapping in `TextInput`. The editor renders at most five visual rows around the
   caret, Up/Down moves by rendered row, and history receives the key only at the top/bottom boundary. The real
   compiled composer E2E typed seven lines, edited line 6 with Up, kept five visible rows, and hid line 7 as the
-  viewport followed the caret. No scrollbar was added.
+  viewport followed the caret. No scrollbar was added. Caret hit-testing now reuses one wrap projection: a
+  10,000-character vertical move fell from 9.89 seconds in the RED test to 4.52 ms.
 - Added a provider-neutral live-usage callback. App Server notifications update the turn display immediately;
   `finishUsage()` remains the single final accounting path. Estimates carry `~` until authoritative usage
-  arrives. A real GPT-5.6 `neko --yolo` turn showed `↑~10.6k`, later exact non-zero input/output, and never
-  showed the broken `↑0 ↓0` state.
+  arrives. A monotonic generated-character baseline also covers text streamed after an authoritative snapshot
+  when a provider-managed tool flushes the visible buffers. A real GPT-5.6 `neko --yolo` turn showed `↑~10.6k`,
+  later exact non-zero input/output, and never showed the broken `↑0 ↓0` state.
 - Folded only matched successful call/result pairs into one past-tense line. The same `Line` retains full detail
   for Ctrl+O; `/transcript`, failures, denials, and blocked calls remain expanded. `todo_write`/`update_plan`
   stay visible because their result is persistent working state, not disposable activity.
 - Projected exact rendered row spans for user prompts and added a conditional one-row sticky header with click
   and Alt+Up exact jumps. FrameDiffer's latent arbitrary-band contract was fixed end to end (`top - 1` in
-  compose, direct repaint, shift detection, and hardware-scroll emission). Measuring the stable `header + band`
-  wrapper avoids a React height feedback loop, while the jump pill keeps its own row outside that measurement.
+  compose, direct repaint, shift detection, and hardware-scroll emission). Committed rows and an uncommitted
+  streaming tail now share one scroll domain, so the label and click target stay exact mid-turn. Measuring the
+  stable `header + band` wrapper avoids a React height feedback loop, while the jump pill keeps its own row outside
+  that measurement.
 - Clean-room inspection of the local Claude Code checkout informed behavioral contracts only; no implementation
   text was copied. Primary-source research and refuted hypotheses live in
   `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
   local design, not a “beyond SOTA” claim.
 
-Release evidence: both TypeScript compilers clean; **929/929 tests, 4,119 assertions**; policy and doctor PASS;
+Release evidence: both TypeScript compilers clean; **931/931 tests, 4,128 assertions**; policy and doctor PASS;
 production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
 and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
 settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the
