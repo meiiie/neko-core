@@ -3,6 +3,37 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-30 - v0.22.1: resume is durable state plus a viewport, not a transcript dump
+
+The field report had two symptoms that looked related: choosing a session felt frozen, and the restored
+screen printed pages of assistant progress that looked like private thinking. Store forensics separated them.
+Across 5,328 saved messages, opaque provider reasoning existed only in `provider_data`; the replay builder
+never read it. The visible flood came from persisted public assistant commentary, including 45k-character
+legacy blocks. On the 1.63 MB incident session, JSON/token/replay work took about 15 ms, while the hidden Ink
+rich renderer eagerly warmed 144 lines / 1,530 rows for **51,554 ms**. A 12 ms scheduler budget did not help
+because one line render was indivisible.
+
+- Added a resume-only screen projection. Canonical messages and opaque provider continuation items remain
+  untouched for crash recovery/model continuity; the screen omits tool-attached progress, bounds oversized
+  user/final-assistant prose by wrapped rows, and points to `/transcript` for explicit history review.
+- Reduced eager rich hydration from 300 tail lines plus a 160-line scroll span to 48/48. A hard 8,000-character
+  circuit breaker sends one oversized item through a cheap, bounded plain-tail renderer, so no scheduler chunk
+  can hide a tens-of-seconds synchronous render.
+- Removed the duplicate `listSessionMetas()` call before opening `/resume`; Ctrl+A scope changes reuse the same
+  metadata snapshot. The 1,501-session bench now showed the picker in 347 ms, the selected 400-message tail in
+  139 ms, and input echo at 20–25 ms while warming.
+- Clean-room comparison with the local `claude-code` reference found the same architectural separation—durable
+  logs, distinct thinking rows, progressive loading and viewport mounting—without copying implementation.
+  Primary-source findings and refuted hypotheses are recorded in
+  `docs/research/resume-hydration-sota-2026-07-30.md`.
+- The real evolving incident session at 2.04 MB builds its projection in 6.2 ms and mounts fullscreen in 230 ms.
+  The compiled-binary PTY harness then streamed a real tool result, held the provider response open, hard-killed
+  Neko and proved a new process recovered five durable messages plus the on-disk tool accomplishment.
+
+Release evidence: both TypeScript compilers clean; **917/917 tests, 4,068 assertions**; doctor and policy PASS;
+production build + UI/input probes PASS; crash-resume hard-kill E2E PASS; ConPTY ghost/typing 3/3 and scroll
+bench PASS; secret scan and `git diff --check` clean.
+
 ## 2026-07-30 - procurement search: identifier cascade, measured stopping
 
 A real sourcing miss exposed the failure step: broad discovery found Lenovo SKU `83KY001VVN`, but the
