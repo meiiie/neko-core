@@ -84,8 +84,10 @@ test("full transcript keeps successful call and output expanded", () => {
   expect(lines[1].text).toContain("27 pass");
 });
 
-test("failed, blocked, and denied tool activity stays expanded", () => {
+test("failed, blocked, interrupted, and missing-skill activity stays expanded", () => {
   expect(resultSummary("bash", "(exit 1 -- command FAILED)\nboom", { command: "bun test" })).toBeUndefined();
+  expect(resultSummary("bash", "(interrupted)\npartial output", { command: "bun test" })).toBeUndefined();
+  expect(resultSummary("skill", "(no skill 'missing' - check the skills listed in your context)", { name: "missing" })).toBeUndefined();
   let id = 1;
   const lines = buildReplayLines([
     {

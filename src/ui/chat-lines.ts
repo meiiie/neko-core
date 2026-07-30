@@ -19,9 +19,10 @@ export function contentToText(c: any): string {
 
 /** Failure outcomes stay expanded: compacting them would hide the one thing the user must inspect. */
 export function isToolFailure(obs: string): boolean {
-  return /^(Error|Blocked|Denied|Refused)/i.test(obs.trimStart())
+  const text = obs.trimStart();
+  return /^(Error|Blocked|Denied|Refused)/i.test(text)
     || /\(exit \d+ -- command FAILED\)/.test(obs)
-    || /^\(timed out/i.test(obs.trimStart());
+    || /^\((?:timed out|interrupted|no skill\b)/i.test(text);
 }
 
 const short = (value: unknown, cap = 80) => {

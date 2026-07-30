@@ -30,10 +30,10 @@ scroll band always began on row 1, so a sticky prompt header was overwritten.
   stable `header + band` wrapper avoids a React height feedback loop, while the jump pill keeps its own row outside
   that measurement.
 - Closed the final review edge cases with RED/GREEN coverage: Agent now publishes `booked + pending context`
-  before every provider step so non-live providers do not freeze the input meter at step 1; MCP `isError`
-  survives the string adapter and keeps diagnostics expanded; search/glob summaries name their pattern; and
-  arrows at a one-row Unicode grapheme boundary fall through to prompt history instead of moving inside a
-  variation selector or combining mark.
+  before every provider step so non-live providers do not freeze the input meter at step 1; MCP `isError`,
+  interrupted commands, and missing-skill outcomes keep their diagnostics expanded; search/glob summaries name
+  their pattern; and arrows at a one-row Unicode grapheme boundary fall through to prompt history instead of
+  moving inside a variation selector or combining mark.
 - Closed two data-integrity gaps found during PR review: resume now replaces a collapsible call in place so mixed
   parallel outcomes keep their original order, and App Server advances its cumulative usage baseline even when a
   turn rejects, aborts, or is disposed, preventing those tokens from being charged again to the next turn.
@@ -42,7 +42,7 @@ scroll band always began on row 1, so a sticky prompt header was overwritten.
   `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
   local design, not a “beyond SOTA” claim.
 
-Release evidence: both TypeScript compilers clean; **937/937 tests, 4,145 assertions**; policy and doctor PASS;
+Release evidence: both TypeScript compilers clean; **937/937 tests, 4,147 assertions**; policy and doctor PASS;
 production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
 and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
 settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the

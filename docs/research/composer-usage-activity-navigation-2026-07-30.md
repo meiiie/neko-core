@@ -173,8 +173,9 @@ Current best model:
   `booked + estimate(current messages)` from Agent raised the pending-step meter above 6,000 in the TUI test.
   confidence: high · Agent contract + hanging-provider TUI RED/GREEN tests + Codex PR review · 2026-07-30
 - [verified] External tool failure state must cross string adapters. MCP `isError: true` with ordinary text
-  was folded as success until the adapter preserved it as an `Error:` observation. Fold labels also need
-  tool-semantic arguments: search/glob name `pattern`, not the shared `path` fallback.
+  was folded as success until the adapter preserved it as an `Error:` observation. Neko-native `(interrupted)`
+  and `(no skill ...)` sentinels likewise need explicit failure classification. Fold labels also need tool-semantic
+  arguments: search/glob name `pattern`, not the shared `path` fallback.
   confidence: high · MCP fixture + activity-summary RED/GREEN tests + Codex PR review · 2026-07-30
 - [verified] Boundary ownership must be decided from adjacent visual-row existence, not whether a clamped
   caret lookup returns a different codepoint. Variation selectors and combining marks create equal-column
