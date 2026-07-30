@@ -2522,7 +2522,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     Math.max(4, Math.round(1000 / fps)), // glide hop follows the resolved fps (live-adjustable via /fps)
   );
   const promptAnchor = fullscreen && !search
-    ? stickyPromptAnchor(ansiProjection.spans, bandRowCount, viewH, rowScroll.dist)
+    ? stickyPromptAnchor(ansiProjection.spans, bandRowCount, viewH, rowScroll.dist, PROMPT_ANCHOR_HEIGHT)
     : null;
   const promptAnchorRows = promptAnchor ? PROMPT_ANCHOR_HEIGHT : 0;
   const bandViewH = Math.max(1, viewH - promptAnchorRows);

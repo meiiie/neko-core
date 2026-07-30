@@ -50,15 +50,18 @@ export function projectLineRows<T>(
 }
 
 /** Nearest completed user prompt above the visible window. If the prompt itself is still visible at the
- * top, return null so the fixed header does not duplicate it. dist=0 is live-tail mode: no sticky row. */
+ * top, return null so the fixed header does not duplicate it. `reservedRows` models the header's own
+ * height before deciding whether it can mount; dist=0 is live-tail mode: no sticky row. */
 export function stickyPromptAnchor(
   spans: LineRowSpan[],
   totalRows: number,
   viewH: number,
   dist: number,
+  reservedRows = 0,
 ): LineRowSpan | null {
   if (dist <= 0 || viewH <= 0) return null;
-  const start = Math.max(0, totalRows - dist - viewH);
+  const bandH = Math.max(1, viewH - Math.max(0, Math.floor(reservedRows)));
+  const start = Math.max(0, totalRows - dist - bandH);
   const overlapping = spans.some((span) => span.line.kind === "user" && span.start <= start && start < span.end);
   if (overlapping) return null;
   let best: LineRowSpan | null = null;

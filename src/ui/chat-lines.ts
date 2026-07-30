@@ -25,7 +25,9 @@ export function isToolFailure(obs: string): boolean {
     || /^\((?:timed out|interrupted|no skill\b)/i.test(text)
     || /^\[loop guard\]/im.test(text)
     || /^The user did NOT approve the plan\b/i.test(text)
-    || /^No matching MCP tools\b/i.test(text);
+    || /^No matching MCP tools\b/i.test(text)
+    || /^Sub-agents are not available\b/i.test(text)
+    || /^Sub-agent error:/i.test(text);
 }
 
 const short = (value: unknown, cap = 80) => {

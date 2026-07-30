@@ -457,6 +457,8 @@ test("sticky prompt click stays exact while an uncommitted streaming tail extend
     c.stdin.write("\r");
     expect(await until(c, (frames) => frames.includes("LIVE TAIL ROW 19"), 3000)).toBe(true);
     c.stdin.write("\x1b[5~");
+    await tick(100); // first page lands exactly on a prompt, where the sticky row is correctly suppressed
+    c.stdin.write("\x1b[5~"); // move deeper so the test exercises a real mounted anchor
 
     let anchor = "";
     for (let waited = 0; waited < 3000; waited += 25) {

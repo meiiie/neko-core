@@ -92,6 +92,8 @@ test("non-success activity stays expanded instead of folding into false success"
   expect(resultSummary("edit", "ok\n[loop guard] edit cap reached", { path: "src/a.ts" })).toBeUndefined();
   expect(resultSummary("exit_plan_mode", "The user did NOT approve the plan. Ask what to change.", {})).toBeUndefined();
   expect(resultSummary("mcp_load", "No matching MCP tools for: missing. Check the names.", {})).toBeUndefined();
+  expect(resultSummary("task", "Sub-agents are not available in this context.", {})).toBeUndefined();
+  expect(resultSummary("task", "Sub-agent error: worker crashed", {})).toBeUndefined();
   let id = 1;
   const lines = buildReplayLines([
     {

@@ -18,22 +18,23 @@ All notable changes to Neko Core are documented here. The format follows
 - **The running token counter no longer starts at `↑0 ↓0`.** It shows an immediate input estimate with `~`,
   consumes authoritative provider usage as it arrives, and replaces the estimate with exact totals without
   double-booking cost. Output streamed after a provider-managed tool flush remains counted from the last usage
-   snapshot, and interrupted turns book their last authoritative usage before advancing the thread-cumulative
-   baseline, so billed tokens are neither lost nor charged again to the next turn. Providers without live usage
-   now receive an Agent-side estimate before every model step,
-  adding the pending context to already-booked calls instead of freezing at the first-step value. A real GPT-5.6
-  `neko --yolo` turn showed `↑~10.6k` at start and exact non-zero usage before completion.
+  snapshot, and interrupted turns book their last authoritative usage before advancing the thread-cumulative
+  baseline, so billed tokens are neither lost nor charged again to the next turn. Providers without live usage
+  now receive an Agent-side estimate before every model step, adding the pending context to already-booked calls
+  instead of freezing at the first-step value. A real GPT-5.6 `neko --yolo` turn showed `↑~10.6k` at start and
+  exact non-zero usage before completion.
 - **Completed tool activity collapses to one useful outcome line.** Successful calls use compact past-tense
   summaries; failures, denials, and blocked actions stay expanded. Mixed parallel outcomes retain call order.
   Ctrl+O and `/transcript` retain the full call/result, and todo/plan state remains visible instead of being
-   folded away. MCP protocol-level `isError`, interrupted commands, missing-skill/MCP no-match outcomes, rejected
-   plans, and loop-guard warnings remain expanded; search/glob summaries name the requested pattern rather than
-   their base directory.
+  folded away. MCP protocol-level `isError`, interrupted commands, missing-skill/MCP no-match outcomes, sub-agent
+  failures, rejected plans, and loop-guard warnings remain expanded; search/glob summaries name the requested
+  pattern rather than their base directory.
 - **Scrolled history keeps the nearest user prompt pinned at the top.** The gray one-row anchor appears only
   while reading older content; click or Alt+Up jumps to that prompt's exact rendered row, including while a live
-  reply is still streaming. The compositor now supports a scroll band below row 1 without overwriting the anchor.
-  Compiled ConPTY verification measured
-  6 ms first scroll response / 154 ms settle and an exact `band top 2 → 1` prompt jump.
+  reply is still streaming. Anchor selection reserves its own row before checking which prompt is visible,
+  avoiding a stale or duplicate header at the one-row boundary. The compositor supports a scroll band below row 1
+  without overwriting the anchor. Compiled ConPTY verification measured 6 ms first scroll response / 154 ms settle
+  and an exact `band top 2 → 1` prompt jump.
 
 ## [0.22.2] — 2026-07-30
 

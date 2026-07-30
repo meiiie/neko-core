@@ -94,8 +94,11 @@ test("sticky prompt anchor uses exact row spans, avoids duplicates, and tracks t
   expect(projection.rows).toHaveLength(14);
   // viewport start = 14 - 5 - 8 = 1: first prompt is fully above -> sticky first prompt
   expect(stickyPromptAnchor(projection.spans, 14, 5, 8)?.line.id).toBe(1);
-  // viewport start = 4 lands on the second prompt itself -> no duplicate sticky copy
-  expect(stickyPromptAnchor(projection.spans, 14, 5, 5)).toBeNull();
+  // Without the header, start=3 is one row before the second prompt. Reserving the one-row header
+  // makes the real band start=4 on that prompt, so an older sticky copy must not mount above it.
+  expect(stickyPromptAnchor(projection.spans, 14, 5, 6, 1)).toBeNull();
+  // Effective band start = 5 lands inside the second prompt -> no duplicate sticky copy.
+  expect(stickyPromptAnchor(projection.spans, 14, 5, 5, 1)).toBeNull();
   // viewport start = 6 is below the second prompt -> sticky second prompt
   expect(stickyPromptAnchor(projection.spans, 14, 5, 3)?.line.id).toBe(3);
   expect(stickyPromptAnchor(projection.spans, 14, 5, 0)).toBeNull();
