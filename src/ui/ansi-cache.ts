@@ -74,6 +74,43 @@ export function fallbackRows(line: Line): string[] {
 const cache = new Map<number, { width: number; rows: string[] }>();
 let warmTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** One rich render is synchronous and therefore cannot be pre-empted by the chunk scheduler. A single
+ * 45k legacy assistant line took >50s in a real resumed session. Keep indivisible work bounded; the
+ * canonical message remains untouched and /transcript can still expose it through the plain viewer. */
+export const RICH_RENDER_MAX_CHARS = 8_000;
+
+export function canRichRender(line: Line): boolean {
+  const body = line.kind === "tool_result" && line.summary ? line.summary : line.text;
+  return String(body).length <= RICH_RENDER_MAX_CHARS;
+}
+
+/** Cheap permanent rendering for an oversized line: retain its useful tail in a viewport-sized block.
+ * Unlike the one-row temporary fallback, this is cached and never enters the synchronous rich renderer. */
+function boundedPlainRows(line: Line, width: number): string[] {
+  const { glyph } = styleFor(line.kind);
+  const body = String(line.kind === "tool_result" && line.summary ? line.summary : line.text)
+    .replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+  const wrap = Math.max(8, width - glyph.length);
+  const maxRows = 12;
+  const tail = body.slice(-wrap * (maxRows - 1));
+  const segments: string[] = [];
+  for (const raw of tail.split("\n")) {
+    if (!raw.length) { segments.push(""); continue; }
+    for (let i = 0; i < raw.length; i += wrap) segments.push(raw.slice(i, i + wrap));
+  }
+  const shown = segments.slice(-(maxRows - 1));
+  return [
+    `${glyph}... [earlier content hidden; /transcript shows the full thread]`,
+    ...shown.map((segment) => `${" ".repeat(glyph.length)}${segment}`),
+  ];
+}
+
+function cacheRows(line: Line, width: number, cfg: NekoConfig): string[] {
+  if (!canRichRender(line)) return boundedPlainRows(line, width);
+  try { return renderLineRows(line, width, cfg); }
+  catch { return fallbackRows(line); }
+}
+
 export function getCachedRows(line: Line, width: number): string[] | null {
   const hit = cache.get(line.id);
   return hit && hit.width === width ? hit.rows : null;
@@ -83,8 +120,7 @@ export function getCachedRows(line: Line, width: number): string[] | null {
  * are already shown as formatted Markdown; caching the final assistant line synchronously prevents a
  * one-frame fallback to raw `**markdown**` while the background warmer catches up. */
 export function primeAnsiCache(line: Line, width: number, cfg: NekoConfig): void {
-  try { cache.set(line.id, { width, rows: renderLineRows(line, width, cfg) }); }
-  catch { cache.set(line.id, { width, rows: fallbackRows(line) }); }
+  cache.set(line.id, { width, rows: cacheRows(line, width, cfg) });
 }
 
 export function clearAnsiCache(): void {
@@ -97,7 +133,8 @@ export function clearAnsiCache(): void {
  * EVERYTHING (scroll, typing, streaming) in fullscreen on a long session. The tail window covers the
  * pinned view + normal scrollback; deeper history shows instant plain fallback rows and warms only
  * when scrolled near (the `center` option). */
-export const WARM_WINDOW = 300;
+export const WARM_WINDOW = 48;
+export const WARM_CENTER_RADIUS = 24;
 
 /** Rows this line contributes right now (cached rich rows, else the 1-row fallback). */
 export function rowsCountFor(line: Line, width: number): number {
@@ -116,7 +153,7 @@ export function warmAnsiCache(lines: Line[], width: number, cfg: NekoConfig, onP
   const wanted = new Set<number>();
   for (let i = Math.max(0, lines.length - WARM_WINDOW); i < lines.length; i++) wanted.add(i);
   if (center !== undefined) {
-    for (let i = Math.max(0, center - 80); i < Math.min(lines.length, center + 80); i++) wanted.add(i);
+    for (let i = Math.max(0, center - WARM_CENTER_RADIUS); i < Math.min(lines.length, center + WARM_CENTER_RADIUS); i++) wanted.add(i);
   }
   const missing = [...wanted].sort((a, b) => b - a).map((i) => lines[i]).filter((l) => l && !getCachedRows(l, width));
   if (!missing.length) return;
@@ -127,7 +164,7 @@ export function warmAnsiCache(lines: Line[], width: number, cfg: NekoConfig, onP
     const t0 = performance.now();
     do {
       const l = missing[i++];
-      try { cache.set(l.id, { width, rows: renderLineRows(l, width, cfg) }); } catch { cache.set(l.id, { width, rows: fallbackRows(l) }); }
+      cache.set(l.id, { width, rows: cacheRows(l, width, cfg) });
     } while (i < missing.length && performance.now() - t0 < BUDGET_MS);
     onProgress();
     if (i < missing.length) warmTimer = setTimeout(step, 16);

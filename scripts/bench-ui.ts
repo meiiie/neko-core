@@ -9,7 +9,8 @@ import React from "react";
 
 import { loadSession } from "../src/adapters/session.ts";
 import { estimateTokens } from "../src/core/agent.ts";
-import { ChatApp, buildReplayLines } from "../src/ui/chat.tsx";
+import { ChatApp } from "../src/ui/chat.tsx";
+import { buildReplayLines } from "../src/ui/chat-lines.ts";
 import { flattenLines } from "../src/ui/scroll.tsx";
 import { RichView } from "../src/ui/rich-transcript.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
@@ -29,20 +30,32 @@ console.log(`estimateTokens: ${ms(t0)} (=${tok} tok)  <- runs EVERY render until
 
 let nextId = 0;
 t0 = performance.now();
-const lines = buildReplayLines(s.messages, () => nextId++);
-console.log(`buildReplayLines: ${ms(t0)} (${lines.length} lines)`);
+const fullLines = buildReplayLines(s.messages, () => nextId++);
+console.log(`buildReplayLines full: ${ms(t0)} (${fullLines.length} lines)`);
+nextId = 0;
+t0 = performance.now();
+const resumeLines = buildReplayLines(s.messages, () => nextId++, { mode: "resume", columns: 100 });
+console.log(`buildReplayLines resume projection: ${ms(t0)} (${resumeLines.length} lines)`);
 
 t0 = performance.now();
-const flat = flattenLines(lines, 100);
+const flat = flattenLines(fullLines, 100);
 console.log(`flattenLines: ${ms(t0)} (${flat.length} rows)`);
 
-// --- ANSI cache: warm cost (once) + RichView paste cost (per frame) ---
+// --- ANSI cache: viewport-scale warm cost + RichView paste cost (per frame) ---
 const CFG = new NekoConfig({}, null, {}, "");
-const { renderLineRows } = await import("../src/ui/ansi-cache.ts");
+const { warmAnsiCache, getCachedRows, fallbackRows, clearAnsiCache, WARM_WINDOW } = await import("../src/ui/ansi-cache.ts");
+clearAnsiCache();
 t0 = performance.now();
-const allRows: string[] = [];
-for (const l of lines) allRows.push(...renderLineRows(l, 100, CFG));
-console.log(`warm ALL ${lines.length} lines to ANSI rows: ${ms(t0)} (${allRows.length} rows) <- paid ONCE, in background chunks`);
+await new Promise<void>((resolve) => {
+  if (!resumeLines.length) { resolve(); return; }
+  const deadline = Date.now() + 10_000;
+  warmAnsiCache(resumeLines, 100, CFG, () => {
+    const tail = resumeLines.slice(-Math.min(WARM_WINDOW, resumeLines.length));
+    if (tail.every((line) => getCachedRows(line, 100)) || Date.now() >= deadline) resolve();
+  });
+});
+const allRows = resumeLines.flatMap((line) => getCachedRows(line, 100) ?? fallbackRows(line));
+console.log(`warm resume viewport (${Math.min(WARM_WINDOW, resumeLines.length)}/${resumeLines.length} lines): ${ms(t0)} (${allRows.length} current rows)`);
 t0 = performance.now();
 const rv = render(React.createElement(RichView, { rows: allRows, dist: 0, viewH: 30, width: 100 }) as any);
 console.log(`RichView mount (viewH=30, cached rows): ${ms(t0)}`);

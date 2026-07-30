@@ -97,12 +97,16 @@ const snap = (label: string) => {
   const rows = vt.lines().filter((l: string) => l.trim());
   console.log(`--- ${label}: ${rows.length} nonblank rows; tail3: ${rows.slice(-6, -3).map((r: string) => JSON.stringify(r.slice(0, 60))).join(" | ")}`);
 };
-await tick(100); snap("+100ms");
-await tick(400); snap("+500ms");
-await tick(500); snap("+1s");
-await tick(2000); snap("+3s");
-for (let i = 0; i < 400 && !vt.text().includes("Tra loi 399"); i++) await tick(10);
-console.log(`pick -> the TAIL of the 400-message replay visible: ${ms(t0)}`);
+  let tailVisibleMs: number | null = null;
+  const noteTail = () => {
+    if (tailVisibleMs === null && vt.text().includes("Tra loi 399")) tailVisibleMs = performance.now() - t0;
+  };
+  await tick(100); noteTail(); snap("+100ms");
+  await tick(400); noteTail(); snap("+500ms");
+  await tick(500); noteTail(); snap("+1s");
+  await tick(2000); noteTail(); snap("+3s");
+  for (let i = 0; i < 400 && tailVisibleMs === null; i++) { await tick(10); noteTail(); }
+  console.log(`pick -> the TAIL of the 400-message replay visible: ${tailVisibleMs === null ? ">7s" : `${tailVisibleMs.toFixed(0)}ms`}`);
 
 // Post-resume typing latency while the warmer runs.
 await tick(50);
