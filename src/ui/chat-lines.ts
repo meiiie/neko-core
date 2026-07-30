@@ -41,15 +41,18 @@ const short = (value: unknown, cap = 80) => {
   return text.length > cap ? `${text.slice(0, Math.max(0, cap - 3))}...` : text;
 };
 
+const ALWAYS_EXPANDED_TOOLS = new Set(["todo_write", "update_plan", "memory", "workflow", "playbook"]);
+const EMPTY_RESULT_SENTINELS = new Set(["(no matches)", "(no files)", "(empty)"]);
+
 /** One compact, past-tense outcome for every successful activity; full call + output stays under Ctrl+O. */
 export function resultSummary(
   name: string | undefined,
   obs: string,
   args: Record<string, any> = {},
 ): string | undefined {
-  if (!name || isToolFailure(obs) || name === "todo_write" || name === "update_plan" || name === "memory") return undefined;
+  if (!name || isToolFailure(obs) || ALWAYS_EXPANDED_TOOLS.has(name)) return undefined;
   const background = obs.match(/^Running in background \[([^\]]+)\]:\s*(.+)$/m);
-  const n = obs.trim() === "(no matches)" ? 0 : obs.split("\n").filter((line) => line.trim()).length;
+  const n = EMPTY_RESULT_SENTINELS.has(obs.trim()) ? 0 : obs.split("\n").filter((line) => line.trim()).length;
   const target = short(args.path ?? args.command ?? args.query ?? args.url ?? args.pattern ?? args.name);
   if ((name === "bash" || name === "shell_command") && background) {
     return `Started background job [${short(background[1], 24)}]: ${target || short(background[2])}`;

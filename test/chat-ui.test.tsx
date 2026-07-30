@@ -28,6 +28,8 @@ test("successful tool activity folds to one past-tense line while preserving ful
   expect(resultSummary("search", "one match", { path: "src", pattern: "needle" })).toBe("Searched for needle (1 match)");
   expect(resultSummary("glob", "a.ts\nb.ts", { path: "src", pattern: "**/*.ts" })).toBe("Found 2 files for **/*.ts");
   expect(resultSummary("search", "(no matches)", { pattern: "missing" })).toBe("Searched for missing (0 matches)");
+  expect(resultSummary("glob", "(no files)", { pattern: "**/*.missing" })).toBe("Found 0 files for **/*.missing");
+  expect(resultSummary("ls", "(empty)", { path: "empty-dir" })).toBe("Listed empty-dir (0 items)");
   const longSummary = resultSummary("bash", "(exit 0)\nok", { command: "x".repeat(200) }) ?? "";
   expect(longSummary).not.toContain("…"); // supported legacy Windows consoles need an ASCII-only suffix
   expect(longSummary).toContain("...");
@@ -62,9 +64,13 @@ test("max-step sub-agent stops stay expanded", () => {
   expect(resultSummary("task", "[stopped: reached max_steps=20]", { description: "audit" })).toBeUndefined();
 });
 
-test("memory state remains visible instead of claiming generic completion", () => {
+test("durable state tools remain visible instead of claiming generic completion", () => {
   expect(resultSummary("memory", "Memory is off. The user can re-enable it with /memory on.", { action: "read", name: "x" })).toBeUndefined();
   expect(resultSummary("memory", "Saved memory 'x.md'", { action: "write", name: "x" })).toBeUndefined();
+  expect(resultSummary("workflow", "(no workflow 'missing')", { action: "read", name: "missing" })).toBeUndefined();
+  expect(resultSummary("workflow", "Saved workflow 'resume.md'", { action: "write", name: "resume" })).toBeUndefined();
+  expect(resultSummary("playbook", "(a similar bullet already exists - revise it instead of adding a duplicate)", { action: "add" })).toBeUndefined();
+  expect(resultSummary("playbook", "Added playbook lesson", { action: "add" })).toBeUndefined();
 });
 
 test("resume replay preserves mixed parallel tool order and keeps failures expanded", () => {
