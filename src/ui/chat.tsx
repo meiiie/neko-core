@@ -570,6 +570,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (kind === "usage") {
           liveUsageRef.current = data as Usage;
           usageSnapshotCharsRef.current = turnGeneratedCharsRef.current;
+        } else if (kind === "usage_estimate") {
+          // A new Agent step is pending. Its current context has not been booked yet, so replace the
+          // prior step's exact snapshot with the Agent's whole-turn estimate until the provider reports.
+          liveUsageRef.current = null;
+          turnInputEstimateRef.current = Math.max(
+            0,
+            Number(data?.prompt_tokens ?? turnInStartRef.current) - turnInStartRef.current,
+          );
         } else if (kind === "tool_call") {
           flushStream();
           // Defer the commit: show this call LIVE with a blinking dot (RunningLine) while it runs;

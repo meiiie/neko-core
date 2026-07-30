@@ -25,6 +25,8 @@ test("multimodal tool observations render as metadata + [image], never object co
 
 test("successful tool activity folds to one past-tense line while preserving full Ctrl+O detail", () => {
   expect(resultSummary("bash", "(exit 0)\nok", { command: "bun test" })).toBe("Ran shell command: bun test");
+  expect(resultSummary("search", "one match", { path: "src", pattern: "needle" })).toBe("Searched for needle (1 match)");
+  expect(resultSummary("glob", "a.ts\nb.ts", { path: "src", pattern: "**/*.ts" })).toBe("Found 2 files for **/*.ts");
   const longSummary = resultSummary("bash", "(exit 0)\nok", { command: "x".repeat(200) }) ?? "";
   expect(longSummary).not.toContain("…"); // supported legacy Windows consoles need an ASCII-only suffix
   expect(longSummary).toContain("...");

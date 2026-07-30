@@ -12,8 +12,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     { name: "toolC", description: "does C", inputSchema: { type: "object", properties: {} } },
   ],
 }));
-server.setRequestHandler(CallToolRequestSchema, async (req) => ({
-  content: [{ type: "text", text: `ran ${req.params.name}` }],
-}));
+server.setRequestHandler(CallToolRequestSchema, async (req) => req.params.name === "toolC"
+  ? {
+      content: [{ type: "text", text: "Invalid selector" }],
+      isError: true,
+    }
+  : {
+      content: [{ type: "text", text: `ran ${req.params.name}` }],
+    });
 
 await server.connect(new StdioServerTransport());

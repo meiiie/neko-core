@@ -13,17 +13,20 @@ All notable changes to Neko Core are documented here. The format follows
 - **Long prompts now behave like a small editor instead of growing off-screen.** Hard line breaks and soft
   wrapping share one five-row viewport; Up/Down moves the caret through visual rows before falling back to
   prompt history, and the viewport follows the caret without adding a scrollbar. Vertical navigation now reuses
-  one wrap projection, avoiding quadratic pauses on long external-editor drafts.
+  one wrap projection, avoiding quadratic pauses on long external-editor drafts. At the first/last row,
+  variation selectors and combining marks no longer consume the history key by moving inside a grapheme.
 - **The running token counter no longer starts at `↑0 ↓0`.** It shows an immediate input estimate with `~`,
   consumes authoritative provider usage as it arrives, and replaces the estimate with exact totals without
   double-booking cost. Output streamed after a provider-managed tool flush remains counted from the last usage
   snapshot, and interrupted turns advance the thread-cumulative baseline so their usage is not charged again
-  to the next turn. A real GPT-5.6 `neko --yolo` turn showed `↑~10.6k` at start and exact non-zero usage before
-  completion.
+  to the next turn. Providers without live usage now receive an Agent-side estimate before every model step,
+  adding the pending context to already-booked calls instead of freezing at the first-step value. A real GPT-5.6
+  `neko --yolo` turn showed `↑~10.6k` at start and exact non-zero usage before completion.
 - **Completed tool activity collapses to one useful outcome line.** Successful calls use compact past-tense
   summaries; failures, denials, and blocked actions stay expanded. Mixed parallel outcomes retain call order.
   Ctrl+O and `/transcript` retain the full call/result, and todo/plan state remains visible instead of being
-  folded away.
+  folded away. MCP protocol-level `isError` results remain expanded, and search/glob summaries name the
+  requested pattern rather than their base directory.
 - **Scrolled history keeps the nearest user prompt pinned at the top.** The gray one-row anchor appears only
   while reading older content; click or Alt+Up jumps to that prompt's exact rendered row, including while a live
   reply is still streaming. The compositor now supports a scroll band below row 1 without overwriting the anchor.

@@ -168,6 +168,18 @@ Current best model:
   returns; otherwise the next turn inherits the failed turn's entire delta. Cleanup and dispose now resynchronize
   before clearing the active turn.
   confidence: high · two-turn interrupted-usage RED/GREEN test + CodeRabbit review · 2026-07-30
+- [verified] A provider without live usage still needs a fresh estimate for every tool-loop step. Reusing the
+  first request's context and taking `max(booked, initial)` froze a second step at 5,000 tokens; publishing
+  `booked + estimate(current messages)` from Agent raised the pending-step meter above 6,000 in the TUI test.
+  confidence: high · Agent contract + hanging-provider TUI RED/GREEN tests + Codex PR review · 2026-07-30
+- [verified] External tool failure state must cross string adapters. MCP `isError: true` with ordinary text
+  was folded as success until the adapter preserved it as an `Error:` observation. Fold labels also need
+  tool-semantic arguments: search/glob name `pattern`, not the shared `path` fallback.
+  confidence: high · MCP fixture + activity-summary RED/GREEN tests + Codex PR review · 2026-07-30
+- [verified] Boundary ownership must be decided from adjacent visual-row existence, not whether a clamped
+  caret lookup returns a different codepoint. Variation selectors and combining marks create equal-column
+  logical stops that otherwise consume Up/Down inside a one-row grapheme.
+  confidence: high · Ink input RED/GREEN test with U+FE0F and U+0301 + Codex PR review · 2026-07-30
 
 ## Open questions
 

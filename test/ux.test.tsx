@@ -76,6 +76,25 @@ class ManagedUsageGap implements Provider {
   }
 }
 
+class MultiStepEstimateGap implements Provider {
+  call = 0;
+  secondStarted = false;
+  cancelled = false;
+  async complete(): Promise<ProviderResponse> {
+    if (this.call++ === 0) {
+      await tick(2_000);
+      return {
+        content: null,
+        tool_calls: [{ id: "estimate-gap", name: "ls", arguments: { path: "." } }],
+        usage: { prompt_tokens: 5_000, completion_tokens: 10, total_tokens: 5_010 },
+      };
+    }
+    this.secondStarted = true;
+    while (!this.cancelled) await tick(15);
+    return { content: "done", tool_calls: [], usage: { prompt_tokens: 5_100, completion_tokens: 5, total_tokens: 5_105 } };
+  }
+}
+
 class StreamingAnchorHang implements Provider {
   cancelled = false;
   async complete(_m: any[], _t: any[], onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
@@ -144,6 +163,25 @@ test("live token output adds post-snapshot text inside one provider-managed tool
     await tick(60);
     c.stdin.write("\r");
     expect(await until(c, (frames) => frames.includes("↓~120"), 3000)).toBe(true);
+  } finally {
+    provider.cancelled = true;
+    c.unmount();
+    await tick(40);
+  }
+}, 10_000);
+
+test("multi-step input estimate adds the pending context to already-booked usage", async () => {
+  const provider = new MultiStepEstimateGap();
+  const c = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+  const values = () => [...strip(c.frames.join("\n")).matchAll(/↑~([\d.]+)(k?)/g)]
+    .map((match) => Number(match[1]) * (match[2] ? 1_000 : 1));
+  try {
+    c.stdin.write("exercise multi-step estimate");
+    await tick(60);
+    c.stdin.write("\r");
+    expect(await until(c, () => values().length > 0, 1000)).toBe(true);
+    expect(await until(c, () => provider.secondStarted, 4000)).toBe(true);
+    expect(await until(c, () => Math.max(...values()) > 6_000, 2000)).toBe(true);
   } finally {
     provider.cancelled = true;
     c.unmount();

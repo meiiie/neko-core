@@ -302,6 +302,50 @@ test("Up/Down navigate input rows before falling back to conversation history", 
   c.unmount();
 });
 
+test("Up/Down at a one-row Unicode caret boundary falls through to history", async () => {
+  let historyUp = 0;
+  function OneRow() {
+    const [v, setV] = useState("\u2764\uFE0F");
+    return (
+      <TextInput
+        value={v}
+        onChange={setV}
+        onSubmit={() => {}}
+        onHistoryUp={() => { historyUp++; }}
+        width={40}
+        {...usePasteProps()}
+      />
+    );
+  }
+  const c = render(<OneRow />);
+  await tick();
+  c.stdin.write("\x1b[A");
+  await tick();
+  expect(historyUp).toBe(1);
+  c.unmount();
+
+  let historyDown = 0;
+  function OneRowDown() {
+    const [v, setV] = useState("a\u0301");
+    return (
+      <TextInput
+        value={v}
+        onChange={setV}
+        onSubmit={() => {}}
+        onHistoryDown={() => { historyDown++; }}
+        width={40}
+        {...usePasteProps()}
+      />
+    );
+  }
+  const d = render(<OneRowDown />);
+  await tick();
+  d.stdin.write("\x1b[B");
+  await tick();
+  expect(historyDown).toBe(1);
+  d.unmount();
+});
+
 test("mask renders bullets and stays single-line (no wrap fan-out)", async () => {
   function H5() {
     const [v, setV] = useState("secret123");

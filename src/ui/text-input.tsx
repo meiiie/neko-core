@@ -163,29 +163,55 @@ export function selectionRuns(
   return runs;
 }
 
+function caretColumn(line: WrapLine, index: number): number {
+  return line.cells.reduce((sum, cell) => (cell.index < index ? sum + cell.w : sum), 0);
+}
+
+function closestCaretIndex(line: WrapLine, targetCol: number, fallback: number): number {
+  let best = line.cells[0]?.index ?? line.endIndex ?? fallback;
+  let bestDistance = Infinity;
+  let col = 0;
+  for (const cell of line.cells) {
+    const distance = Math.abs(col - targetCol);
+    // Equal-column zero-width stops belong to one grapheme; prefer the later logical stop so a
+    // variation selector/combining mark cannot pull the caret backwards.
+    if (distance <= bestDistance) { bestDistance = distance; best = cell.index; }
+    col += cell.w;
+  }
+  if (line.endIndex !== undefined) {
+    const distance = Math.abs(line.cols - targetCol);
+    if (distance <= bestDistance) best = line.endIndex;
+  }
+  return best;
+}
+
 export function caretIndexForClick(value: string, caretIndex: number, width: number, dRow: number, dCol: number): number {
   const cps = [...value];
   const i = Math.min(Math.max(0, caretIndex), cps.length);
   const w = Math.max(1, Math.floor(width) - 1);
   const projection = wrapInput(cps, i, w);
-  const current = projection.lines[projection.caretLine];
-  const currentCol = current.cells.reduce((sum, cell) => (cell.index < i ? sum + cell.w : sum), 0);
+  const currentCol = caretColumn(projection.lines[projection.caretLine], i);
   const targetLine = Math.min(projection.lines.length - 1, Math.max(0, projection.caretLine + dRow));
-  const targetCol = Math.max(0, currentCol + dCol);
-  const line = projection.lines[targetLine];
-  let best = line.cells[0]?.index ?? line.endIndex ?? i;
-  let bestDistance = Infinity;
-  let col = 0;
-  for (const cell of line.cells) {
-    const distance = Math.abs(col - targetCol);
-    if (distance < bestDistance) { bestDistance = distance; best = cell.index; }
-    col += cell.w;
-  }
-  if (line.endIndex !== undefined) {
-    const distance = Math.abs(line.cols - targetCol);
-    if (distance < bestDistance) best = line.endIndex;
-  }
-  return best;
+  return closestCaretIndex(projection.lines[targetLine], Math.max(0, currentCol + dCol), i);
+}
+
+/** Move to one adjacent visual row. A null result means that row does not exist, so the caller may
+ * hand the key to prompt history. Unlike clamping a pointer click, an arrow at the top/bottom must not
+ * remap within the current row, especially around zero-width Unicode caret stops. */
+export function caretIndexForVerticalMove(
+  value: string,
+  caretIndex: number,
+  width: number,
+  dRow: -1 | 1,
+): number | null {
+  const cps = [...value];
+  const i = Math.min(Math.max(0, caretIndex), cps.length);
+  const w = Math.max(1, Math.floor(width) - 1);
+  const projection = wrapInput(cps, i, w);
+  const targetLine = projection.caretLine + dRow;
+  if (targetLine < 0 || targetLine >= projection.lines.length) return null;
+  const currentCol = caretColumn(projection.lines[projection.caretLine], i);
+  return closestCaretIndex(projection.lines[targetLine], currentCol, i);
 }
 
 export function TextInput(props: {
@@ -289,10 +315,13 @@ export function TextInput(props: {
       return;
     }
     if ((key.upArrow || key.downArrow) && !key.ctrl && !key.meta && props.verticalNavigation !== false) {
-      const next = caretIndexForClick(ref.current, cur.current, visibleCols, key.upArrow ? -1 : 1, 0);
-      if (next !== cur.current) {
-        cur.current = next;
-        return rerender();
+      const next = caretIndexForVerticalMove(ref.current, cur.current, visibleCols, key.upArrow ? -1 : 1);
+      if (next !== null) {
+        if (next !== cur.current) {
+          cur.current = next;
+          rerender();
+        }
+        return;
       }
       if (key.upArrow) props.onHistoryUp?.();
       else props.onHistoryDown?.();

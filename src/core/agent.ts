@@ -676,6 +676,12 @@ export class Agent {
         return task;
       };
       let response;
+      // Before every provider call, publish the already-booked input plus this pending request's
+      // context estimate. Providers without live usage still get a monotonic whole-turn meter; when
+      // authoritative usage arrives below, it replaces this visibly approximate snapshot.
+      this.emit("usage_estimate", {
+        prompt_tokens: this.cost.promptTokens + estimateTokens(this.messages),
+      });
       // Provider live-usage callbacks describe THIS complete() call. Rebase them onto the Agent's
       // already-booked totals so the UI sees one monotonic absolute counter across a multi-step turn.
       const usageBase = {

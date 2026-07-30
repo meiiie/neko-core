@@ -40,8 +40,14 @@ export function resultSummary(
   const target = short(args.path ?? args.command ?? args.query ?? args.url ?? args.pattern ?? args.name);
   switch (name) {
     case "read_file": return target ? `Read ${target} (${n} line${n === 1 ? "" : "s"})` : `Read ${n} line${n === 1 ? "" : "s"}`;
-    case "search": return target ? `Searched for ${target} (${n} match${n === 1 ? "" : "es"})` : `Found ${n} match${n === 1 ? "" : "es"}`;
-    case "glob": return target ? `Found ${n} file${n === 1 ? "" : "s"} for ${target}` : `Found ${n} file${n === 1 ? "" : "s"}`;
+    case "search": {
+      const needle = short(args.pattern ?? args.query ?? args.path);
+      return needle ? `Searched for ${needle} (${n} match${n === 1 ? "" : "es"})` : `Found ${n} match${n === 1 ? "" : "es"}`;
+    }
+    case "glob": {
+      const pattern = short(args.pattern ?? args.path);
+      return pattern ? `Found ${n} file${n === 1 ? "" : "s"} for ${pattern}` : `Found ${n} file${n === 1 ? "" : "s"}`;
+    }
     case "ls": return target ? `Listed ${target} (${n} item${n === 1 ? "" : "s"})` : `Listed ${n} item${n === 1 ? "" : "s"}`;
     case "bash":
     case "shell_command": return target ? `Ran shell command: ${target}` : "Ran shell command";

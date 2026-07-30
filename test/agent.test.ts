@@ -103,6 +103,43 @@ test("social turns keep full context, tools, reasoning preference, and conversat
   expect(DEFAULT_SYSTEM_PROMPT).toContain("repeated greetings");
 });
 
+test("multi-step turns publish booked plus current-step input estimates", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-usage-est-"));
+  writeFileSync(join(root, "a.txt"), "orig");
+  const seen: any[][] = [];
+  let call = 0;
+  const provider = {
+    async complete(messages: any[]) {
+      seen.push(structuredClone(messages));
+      if (call++ === 0) {
+        return {
+          content: null,
+          tool_calls: [{ id: "read", name: "read_file", arguments: { path: "a.txt" } }],
+          usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 },
+        };
+      }
+      return {
+        content: "finished",
+        tool_calls: [],
+        usage: { prompt_tokens: 150, completion_tokens: 5, total_tokens: 155 },
+      };
+    },
+  };
+  const estimates: number[] = [];
+  const agent = new Agent({
+    provider: provider as any,
+    tools: new ToolRegistry(root, "auto", () => true),
+    onEvent: (kind, data) => {
+      if (kind === "usage_estimate") estimates.push(data.prompt_tokens);
+    },
+  });
+  expect(await agent.run("go")).toBe("finished");
+  expect(estimates).toEqual([
+    estimateTokens(seen[0]),
+    100 + estimateTokens(seen[1]),
+  ]);
+});
+
 test("loop runs tools then finishes", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ag-"));
   writeFileSync(join(root, "a.txt"), "orig");
