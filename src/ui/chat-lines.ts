@@ -23,7 +23,9 @@ export function isToolFailure(obs: string): boolean {
   return /^(Error|Blocked|Denied|Refused)/i.test(text)
     || /\(exit \d+ -- command FAILED\)/.test(obs)
     || /^\((?:timed out|interrupted|no skill\b)/i.test(text)
-    || /^\[loop guard\]/im.test(text);
+    || /^\[loop guard\]/im.test(text)
+    || /^The user did NOT approve the plan\b/i.test(text)
+    || /^No matching MCP tools\b/i.test(text);
 }
 
 const short = (value: unknown, cap = 80) => {

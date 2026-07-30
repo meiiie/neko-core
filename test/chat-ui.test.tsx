@@ -84,12 +84,14 @@ test("full transcript keeps successful call and output expanded", () => {
   expect(lines[1].text).toContain("27 pass");
 });
 
-test("failed, blocked, interrupted, missing-skill, and loop-guard activity stays expanded", () => {
+test("non-success activity stays expanded instead of folding into false success", () => {
   expect(resultSummary("bash", "(exit 1 -- command FAILED)\nboom", { command: "bun test" })).toBeUndefined();
   expect(resultSummary("bash", "(interrupted)\npartial output", { command: "bun test" })).toBeUndefined();
   expect(resultSummary("skill", "(no skill 'missing' - check the skills listed in your context)", { name: "missing" })).toBeUndefined();
   expect(resultSummary("bash", "[loop guard] repeated call skipped", { command: "bun test" })).toBeUndefined();
   expect(resultSummary("edit", "ok\n[loop guard] edit cap reached", { path: "src/a.ts" })).toBeUndefined();
+  expect(resultSummary("exit_plan_mode", "The user did NOT approve the plan. Ask what to change.", {})).toBeUndefined();
+  expect(resultSummary("mcp_load", "No matching MCP tools for: missing. Check the names.", {})).toBeUndefined();
   let id = 1;
   const lines = buildReplayLines([
     {

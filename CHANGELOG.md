@@ -26,8 +26,9 @@ All notable changes to Neko Core are documented here. The format follows
 - **Completed tool activity collapses to one useful outcome line.** Successful calls use compact past-tense
   summaries; failures, denials, and blocked actions stay expanded. Mixed parallel outcomes retain call order.
   Ctrl+O and `/transcript` retain the full call/result, and todo/plan state remains visible instead of being
-   folded away. MCP protocol-level `isError`, interrupted commands, missing-skill outcomes, and loop-guard
-   warnings remain expanded, and search/glob summaries name the requested pattern rather than their base directory.
+   folded away. MCP protocol-level `isError`, interrupted commands, missing-skill/MCP no-match outcomes, rejected
+   plans, and loop-guard warnings remain expanded; search/glob summaries name the requested pattern rather than
+   their base directory.
 - **Scrolled history keeps the nearest user prompt pinned at the top.** The gray one-row anchor appears only
   while reading older content; click or Alt+Up jumps to that prompt's exact rendered row, including while a live
   reply is still streaming. The compositor now supports a scroll band below row 1 without overwriting the anchor.

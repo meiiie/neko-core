@@ -42,7 +42,7 @@ scroll band always began on row 1, so a sticky prompt header was overwritten.
   `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
   local design, not a “beyond SOTA” claim.
 
-Release evidence: both TypeScript compilers clean; **938/938 tests, 4,154 assertions**; policy and doctor PASS;
+Release evidence: both TypeScript compilers clean; **938/938 tests, 4,156 assertions**; policy and doctor PASS;
 production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
 and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
 settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the
@@ -57,8 +57,9 @@ probe at five seconds even though production allows 90 seconds (measured cold st
 clean up in `finally`, use a 15-second test ceiling and 30-second initial UIA probe, and passed meeting 10/10, UIA
 3/3, post-turn 10/10, and multi-step token 10/10 stress rounds without changing production behavior. Final Codex
 review then found two outcome-integrity gaps: an interrupted provider snapshot was displayed but never booked into
-`CostTracker`, and `[loop guard]` observations could fold into false success text. Focused RED/GREEN tests now book
-that final interrupted snapshot exactly once and keep both standalone and appended loop-guard warnings expanded.
+`CostTracker`, and non-success observations could fold into false success text. Focused RED/GREEN tests now book
+that final interrupted snapshot exactly once and keep standalone/appended loop guards, rejected plans, and MCP
+no-match results expanded.
 
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 
