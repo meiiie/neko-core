@@ -44,6 +44,24 @@ run it. Because it's deterministic, it's unit-tested (`test/price-table.test.ts`
 The same principle is the right shape for any future numeric extraction (specs, dates, quantities):
 extract verbatim, compute in code.
 
+### Procurement retrieval: identifier cascade + evidence-aware stopping
+
+A broad product description is a discovery query, not a stable identity. Keep a small candidate ledger;
+when any result reveals a SKU/MPN/GTIN, pivot the top objective-relevant candidates through
+`skills/procurement/scripts/source-plan.ts`. The helper emits an exact lexical query, a SKU-specific
+Websosanh URL, and separate retailer-domain queries. It never joins domains with `OR`: dogfooding on
+2026-07-30 showed DuckDuckGo fallback returning no results for long multi-domain queries, then narrowing
+`83KY001VVN` to the already-known Xgear merchant and missing FPT/An Khang.
+
+The completion condition is evidence-based: record `hit`, `no_result`, or `blocked` for index, open-web,
+and retailer targets; verify the objective's top/bottom candidates on source pages; only then run the
+deterministic price table. Incomplete coverage changes the claim, not the evidence: say “highest verified
+among surveyed sources”, and split the highest public listing from the highest buyable/in-stock offer.
+This applies the coverage/sufficiency result from Choubey et al. (ACL 2026), exact cross-step term reuse
+observed by Ning et al. (2026), and the context-engineering rule to move brittle workflow logic out of an
+expanding prompt and into a small executable helper. Research checkpoint:
+`docs/research/procurement-search-sota-2026-07-30.md`.
+
 ### One command: `neko setup web`
 Stands up the whole SOTA web stack and wires it into config (idempotent, key-safe):
 SearXNG in Docker (JSON API on) + the browser MCP (headed real-Chrome). Verifies the JSON

@@ -30,6 +30,19 @@ test("matchSkill auto-loads the procurement skill for a clear sourcing task (dia
   expect(m?.name).toBe("procurement");
 });
 
+test("procurement makes the exact-SKU cascade executable before detailed tactics", () => {
+  const skill = loadSkill("procurement")!;
+  const contract = skill.body.indexOf("## HỢP ĐỒNG THỰC THI");
+  const tactics = skill.body.indexOf("## Nguyên tắc CỐT LÕI");
+  expect(contract).toBeGreaterThan(-1);
+  expect(contract).toBeLessThan(tactics);
+  expect(skill.body).toContain("scripts/source-plan.ts");
+  expect(skill.body).toContain("83KY001VVN");
+  expect(skill.body).toContain("KHÔNG gộp nhiều `site:` bằng `OR`");
+  expect(skill.body).toContain("cao nhất đã xác minh trong các nguồn đã khảo sát");
+  expect(existsSync(join(skill.dir, "scripts", "source-plan.ts"))).toBe(true);
+});
+
 test("matchSkill returns null for unrelated work (no false trigger)", () => {
   expect(matchSkill("fix the typescript compile error in the build pipeline")).toBeNull();
   expect(matchSkill("hello")).toBeNull(); // too short to match anything
