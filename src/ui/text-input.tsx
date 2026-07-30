@@ -64,7 +64,13 @@ export function cellWidth(cp: string): number {
  * width (not codepoint count) so wide chars don't overflow by one cell. Returns lines + the line index
  * the caret (codepoint cursor) sits on. Pure; never touches useInput/refs (Vietnamese-IME-safe). */
 export interface WrapCell { ch: string; index: number; w: number; }
-export interface WrapLine { cells: WrapCell[]; cols: number; }
+export interface WrapLine {
+  cells: WrapCell[];
+  cols: number;
+  /** A caret stop after this line's content: the hard-newline index, or input length on the final line.
+   * Soft wraps omit it because that same logical index belongs at the start of the next visual line. */
+  endIndex?: number;
+}
 export interface WrapResult { lines: WrapLine[]; caretLine: number; }
 export function wrapInput(cps: string[], cur: number, width: number): WrapResult {
   const cols = Math.max(1, Math.floor(width));
@@ -72,12 +78,12 @@ export function wrapInput(cps: string[], cur: number, width: number): WrapResult
   let line: WrapCell[] = [];
   let lineCols = 0;
   let caretLine = 0;
-  const flush = () => { lines.push({ cells: line, cols: lineCols }); line = []; lineCols = 0; };
+  const flush = (endIndex?: number) => { lines.push({ cells: line, cols: lineCols, endIndex }); line = []; lineCols = 0; };
   for (let idx = 0; idx < cps.length; idx++) {
     const cp = cps[idx];
     if (cp === "\n") {
       if (idx === cur) caretLine = lines.length;
-      flush();
+      flush(idx);
       continue;
     }
     const w = cellWidth(cp);
@@ -113,8 +119,8 @@ export function wrapInput(cps: string[], cur: number, width: number): WrapResult
     lineCols += w;
   }
   if (cur >= cps.length) caretLine = lines.length;
-  flush();
-  if (lines.length === 0) lines.push({ cells: [], cols: 0 });
+  flush(cps.length);
+  if (lines.length === 0) lines.push({ cells: [], cols: 0, endIndex: 0 });
   caretLine = Math.min(Math.max(0, caretLine), lines.length - 1);
   return { lines, caretLine };
 }
@@ -128,12 +134,10 @@ export const MAX_INPUT_LINES = 5;
  * also strip the leading ESC, hence the optional prefix. */
 const MODIFIED_ENTER = /^\x1b?\[(?:13;[2-8]u|27;[2-8];13~)$/;
 
-/** Map a mouse click to a caret index. dRow/dCol are the click's offset from the CURRENT caret's
- * screen cell (the FrameDiffer knows where the hardware cursor sits; the layout math lives here,
- * the only module that knows the wrap geometry). Geometry comes from the same wrapInput the
- * renderer uses, so wrap-path clicks are exact; the multiline (\n) path lets Ink wrap naturally,
- * so a click on an overlong logical line lands approximately (clamped). The scan is O(n^2) in
- * the input length - inputs stay short because big pastes collapse to placeholders. */
+/** Map a mouse click or vertical arrow to a caret index. dRow/dCol are offsets from the CURRENT
+ * caret's screen cell. One wrap projection supplies every candidate stop, so this stays O(n) even for
+ * long drafts returned by the external editor; hard newlines, word wraps, wide cells and combining marks
+ * use exactly the same geometry as the renderer. */
 /**
  * Split the half-open range [start, end) at the selection bounds, marking which runs are selected.
  *
@@ -159,24 +163,55 @@ export function selectionRuns(
   return runs;
 }
 
+function caretColumn(line: WrapLine, index: number): number {
+  return line.cells.reduce((sum, cell) => (cell.index < index ? sum + cell.w : sum), 0);
+}
+
+function closestCaretIndex(line: WrapLine, targetCol: number, fallback: number): number {
+  let best = line.cells[0]?.index ?? line.endIndex ?? fallback;
+  let bestDistance = Infinity;
+  let col = 0;
+  for (const cell of line.cells) {
+    const distance = Math.abs(col - targetCol);
+    // Equal-column zero-width stops belong to one grapheme; prefer the later logical stop so a
+    // variation selector/combining mark cannot pull the caret backwards.
+    if (distance <= bestDistance) { bestDistance = distance; best = cell.index; }
+    col += cell.w;
+  }
+  if (line.endIndex !== undefined) {
+    const distance = Math.abs(line.cols - targetCol);
+    if (distance <= bestDistance) best = line.endIndex;
+  }
+  return best;
+}
+
 export function caretIndexForClick(value: string, caretIndex: number, width: number, dRow: number, dCol: number): number {
   const cps = [...value];
   const i = Math.min(Math.max(0, caretIndex), cps.length);
   const w = Math.max(1, Math.floor(width) - 1);
-  const colOf = (res: WrapResult, c: number) =>
-    res.lines[res.caretLine].cells.reduce((s, cell) => (cell.index < c ? s + cell.w : s), 0);
-  const base = wrapInput(cps, i, w);
-  const targetLine = Math.min(base.lines.length - 1, Math.max(0, base.caretLine + dRow));
-  const targetCol = Math.max(0, colOf(base, i) + dCol);
-  let best = i;
-  let bestD = Infinity;
-  for (let c = 0; c <= cps.length; c++) {
-    const r = wrapInput(cps, c, w);
-    if (r.caretLine !== targetLine) continue;
-    const d = Math.abs(colOf(r, c) - targetCol);
-    if (d < bestD) { bestD = d; best = c; }
-  }
-  return best;
+  const projection = wrapInput(cps, i, w);
+  const currentCol = caretColumn(projection.lines[projection.caretLine], i);
+  const targetLine = Math.min(projection.lines.length - 1, Math.max(0, projection.caretLine + dRow));
+  return closestCaretIndex(projection.lines[targetLine], Math.max(0, currentCol + dCol), i);
+}
+
+/** Move to one adjacent visual row. A null result means that row does not exist, so the caller may
+ * hand the key to prompt history. Unlike clamping a pointer click, an arrow at the top/bottom must not
+ * remap within the current row, especially around zero-width Unicode caret stops. */
+export function caretIndexForVerticalMove(
+  value: string,
+  caretIndex: number,
+  width: number,
+  dRow: -1 | 1,
+): number | null {
+  const cps = [...value];
+  const i = Math.min(Math.max(0, caretIndex), cps.length);
+  const w = Math.max(1, Math.floor(width) - 1);
+  const projection = wrapInput(cps, i, w);
+  const targetLine = projection.caretLine + dRow;
+  if (targetLine < 0 || targetLine >= projection.lines.length) return null;
+  const currentCol = caretColumn(projection.lines[projection.caretLine], i);
+  return closestCaretIndex(projection.lines[targetLine], currentCol, i);
 }
 
 export function TextInput(props: {
@@ -209,6 +244,12 @@ export function TextInput(props: {
     /** Highlighted codepoint range, rendered in reverse video. ChatApp owns it because the drag that
      * produces it is a pointer gesture and pointer events arrive there. */
     selection?: { from: number; to: number } | null;
+    /** Prompt history is a boundary fallback, not the first owner of Up/Down. The editor invokes these
+     * only when no visual row exists in that direction. */
+    onHistoryUp?: () => void;
+    onHistoryDown?: () => void;
+    /** A slash menu can temporarily own Up/Down without moving the caret underneath it. */
+    verticalNavigation?: boolean;
   }) {
     const { value, onChange, onSubmit, placeholder, mask, width = 9999, pastedContents, nextPasteId, onCommitPastes, onPasteImage, caretGlyph = "thin-block" } = props;
   const ref = useRef(value);
@@ -271,6 +312,19 @@ export function TextInput(props: {
         ref.current = chars.join("");
         onChange(ref.current);
       }
+      return;
+    }
+    if ((key.upArrow || key.downArrow) && !key.ctrl && !key.meta && props.verticalNavigation !== false) {
+      const next = caretIndexForVerticalMove(ref.current, cur.current, visibleCols, key.upArrow ? -1 : 1);
+      if (next !== null) {
+        if (next !== cur.current) {
+          cur.current = next;
+          rerender();
+        }
+        return;
+      }
+      if (key.upArrow) props.onHistoryUp?.();
+      else props.onHistoryDown?.();
       return;
     }
     if (key.leftArrow) { cur.current = Math.max(0, cur.current - 1); return rerender(); }
@@ -369,24 +423,10 @@ export function TextInput(props: {
           </Text>
         );
       }
-      // Multiline value (a small paste kept its newlines): skip horizontal windowing — Ink renders
-      // the \n as real line breaks and wraps naturally, so the box shows the 2-3 lines as typed.
-      // Big pastes collapse to a single-line placeholder (no \n), so they stay under windowing.
-      // The caret is INSERTED before char i, so `after` starts AT i (char i renders normally).
-      if (value.includes("\n")) {
-        return (
-          <Text>
-            {seg(0, i, "a")}
-            {CARET}
-            {seg(i, cps.length, "b")}
-          </Text>
-        );
-      }
-      // Wrap path: a long single-line value (no \n) that would overflow the width is wrapped into
-      // multiple visual lines (display-width aware) rather than horizontal window-scroll. Each visual
-      // line is ONE <Text> of plain string; the line holding the caret splits into before/caret/after
-      // (the caret is INSERTED between cells, char i renders normally). Keeping each line a flat string
-      // (not a per-codepoint <Text> fan-out) preserves Ink's yoga height measurement after a resize-down.
+      // One shared viewport for hard newlines and soft wraps. The old hard-newline branch handed the
+      // entire value to Ink and bypassed MAX_INPUT_LINES. Each display-width-aware visual line is one
+      // flat <Text>; only the caret line splits before/caret/after. Avoiding a per-codepoint fan-out
+      // preserves Ink's yoga height measurement after a resize-down.
       // Reserve ONE column (visibleCols - 1) so the inserted caret never pushes a full line to overflow.
         const wrapped = wrapInput(cps, cur.current, Math.max(1, visibleCols - 1));
         if (wrapped.lines.length > 1) {

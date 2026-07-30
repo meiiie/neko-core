@@ -95,10 +95,14 @@ export function CompactingLine({ start, expectedMs = 15000 }: { start: number; e
 
 /** A pulsing star (fixed-width, no text shift) + a verb with a shimmer band sweeping across it,
  * then dim meta in parens. Self-animated (own 80ms clock; unmounts when idle). */
-export function ThinkingLine(props: { verb: string; elapsed: number; step: number; queued: number; effort?: string; liveIn: () => number; liveOut: () => number }) {
+export interface LiveTokenCount { value: number; approximate?: boolean }
+const tokenCount = (value: number | LiveTokenCount): LiveTokenCount =>
+  typeof value === "number" ? { value, approximate: false } : value;
+
+export function ThinkingLine(props: { verb: string; elapsed: number; step: number; queued: number; effort?: string; liveIn: () => number | LiveTokenCount; liveOut: () => number | LiveTokenCount }) {
   const { verb, elapsed, step, queued, effort } = props;
-  const inTok = props.liveIn();   // input (context sent) this turn - re-read each 80ms frame, counts up live
-  const outTok = props.liveOut(); // output (generated) this turn
+  const inTok = tokenCount(props.liveIn());   // re-read each 80ms frame: estimated until provider usage arrives
+  const outTok = tokenCount(props.liveOut());
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setFrame((f) => (f + 1) % 100000), 80);
@@ -113,7 +117,7 @@ export function ThinkingLine(props: { verb: string; elapsed: number; step: numbe
     `${fmtElapsed(elapsed)}` +
     (effort ? ` · ${effort} effort` : "") +
     (step > 1 ? ` · step ${step}` : "") +
-    ` · turn total ${UP}${fmtTok(inTok)} ${DOWN}${fmtTok(outTok)}` +
+    ` · turn total ${UP}${inTok.approximate ? "~" : ""}${fmtTok(inTok.value)} ${DOWN}${outTok.approximate ? "~" : ""}${fmtTok(outTok.value)}` +
     (queued > 0 ? ` · ${queued} queued` : "") +
     " · esc to interrupt";
 

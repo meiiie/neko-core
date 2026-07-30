@@ -6,6 +6,41 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.22.3] — 2026-07-30
+
+### Fixed
+
+- **Long prompts now behave like a small editor instead of growing off-screen.** Hard line breaks and soft
+  wrapping share one five-row viewport; Up/Down moves the caret through visual rows before falling back to
+  prompt history, and the viewport follows the caret without adding a scrollbar. Vertical navigation now reuses
+  one wrap projection, avoiding quadratic pauses on long external-editor drafts. At the first/last row,
+  variation selectors and combining marks no longer consume the history key by moving inside a grapheme.
+- **The running token counter no longer starts at `↑0 ↓0`.** It shows an immediate input estimate with `~`,
+  consumes authoritative provider usage as it arrives, and replaces the estimate with exact totals without
+  double-booking cost. Output streamed after a provider-managed tool flush remains counted from the last usage
+  snapshot, and interrupted turns book their last authoritative usage before advancing the thread-cumulative
+  baseline, so billed tokens are neither lost nor charged again to the next turn. Providers without live usage
+  now receive an Agent-side estimate before every model step, adding the pending context to already-booked calls
+  instead of freezing at the first-step value. A real GPT-5.6 `neko --yolo` turn showed `↑~10.6k` at start and
+  exact non-zero usage before completion.
+- **Completed tool activity collapses to one useful outcome line.** Successful calls use compact past-tense
+  summaries; background starts say `Started background job [bgN]` instead of implying completion. Failures,
+  denials, blocked/disabled actions, missing capabilities (even after screenshot metadata), empty read windows,
+  max-step sub-agent stops, and loop-guard warnings stay expanded. Mixed parallel outcomes retain call order. Ctrl+O
+  and `/transcript` retain the full call/result; todo/plan, memory, workflow, and playbook state remain visible instead
+  of being folded away. MCP protocol-level `isError`, interrupted commands, missing-skill/MCP no-match outcomes,
+  sub-agent failures, rejected plans, synthetic unknown-outcome interruptions, and failed recovery directives remain
+  expanded; search/glob/list summaries name the requested target rather than its base directory and count native
+  empty-result sentinels as zero. Emergency meeting-stop results also retain their actual stopped/idle state instead
+  of becoming a generic completion. While reading older history, the jump pill counts folded successes and expanded
+  failures as one new activity each.
+- **Scrolled history keeps the nearest user prompt pinned at the top.** The gray one-row anchor appears only
+  while reading older content; click or Alt+Up jumps to that prompt's exact rendered row, including while a live
+  reply is still streaming. Anchor selection reserves its own row before checking which prompt is visible,
+  avoiding a stale or duplicate header at the one-row boundary. The compositor supports a scroll band below row 1
+  without overwriting the anchor. Compiled ConPTY verification measured 6 ms first scroll response / 154 ms settle
+  and an exact `band top 2 → 1` prompt jump.
+
 ## [0.22.2] — 2026-07-30
 
 ### Fixed

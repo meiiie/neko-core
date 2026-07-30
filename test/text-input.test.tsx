@@ -112,7 +112,15 @@ test("caretIndexForClick maps screen deltas to codepoint indexes on the wrap geo
   expect(caretIndexForClick("aa\nbb", 0, 80, 1, 0)).toBe(3);
   // Row deltas clamp to the first/last line.
   expect(caretIndexForClick("aa\nbb", 0, 80, 99, 99)).toBe(5);
-});
+
+  // Regression: vertical navigation must project wrapping once, not re-wrap the full draft for every
+  // candidate caret (the previous O(n²) scan froze on long Ctrl+G/external-editor drafts).
+  const longDraft = "word ".repeat(2_000);
+  const started = performance.now();
+  const moved = caretIndexForClick(longDraft, longDraft.length, 80, -1, 0);
+  expect(moved).toBeLessThan(longDraft.length);
+  expect(performance.now() - started).toBeLessThan(1_000);
+}, 10_000);
 
 test("isEscapeResidue: single sequences AND concatenated bursts; never real text", async () => {
   const { isEscapeResidue } = await import("../src/ui/text-input.tsx");
@@ -235,6 +243,107 @@ test("wrap renders multiple visual lines in the frame (integration)", async () =
   expect(lines.length).toBeGreaterThan(1);    // wrapped to 2+ visual lines
   expect(frame).toContain("the quick brown"); // first visual line present
   c.unmount();
+});
+
+test("multiline viewport shows at most five rows and follows Up/Down caret movement", async () => {
+  let submitted = "";
+  function Multiline() {
+    const [v, setV] = useState("line1\nline2\nline3\nline4\nline5\nline6\nline7");
+    return <TextInput value={v} onChange={setV} onSubmit={(x) => { submitted = x; }} width={40} {...usePasteProps()} />;
+  }
+  const c = render(<Multiline />);
+  await tick();
+  const initial = strip(c.lastFrame());
+  expect(initial.split("\n")).toHaveLength(5);
+  expect(initial).not.toContain("line1");
+  expect(initial).toContain("line7");
+
+  c.stdin.write("\x1b[A"); // end of line7 -> same column on line6
+  await tick();
+  c.stdin.write("X");
+  await tick();
+  c.stdin.write("\r");
+  await tick();
+  expect(submitted).toBe("line1\nline2\nline3\nline4\nline5\nline6X\nline7");
+  c.unmount();
+});
+
+test("Up/Down navigate input rows before falling back to conversation history", async () => {
+  let historyUp = 0;
+  let historyDown = 0;
+  function Multiline() {
+    const [v, setV] = useState("one\ntwo");
+    return (
+      <TextInput
+        value={v}
+        onChange={setV}
+        onSubmit={() => {}}
+        onHistoryUp={() => { historyUp++; }}
+        onHistoryDown={() => { historyDown++; }}
+        width={40}
+        {...usePasteProps()}
+      />
+    );
+  }
+  const c = render(<Multiline />);
+  await tick();
+  c.stdin.write("\x1b[A");
+  await tick();
+  expect(historyUp).toBe(0);
+  c.stdin.write("\x1b[A");
+  await tick();
+  expect(historyUp).toBe(1);
+  c.stdin.write("\x1b[B");
+  await tick();
+  expect(historyDown).toBe(0);
+  c.stdin.write("\x1b[B");
+  await tick();
+  expect(historyDown).toBe(1);
+  c.unmount();
+});
+
+test("Up/Down at a one-row Unicode caret boundary falls through to history", async () => {
+  let historyUp = 0;
+  function OneRow() {
+    const [v, setV] = useState("\u2764\uFE0F");
+    return (
+      <TextInput
+        value={v}
+        onChange={setV}
+        onSubmit={() => {}}
+        onHistoryUp={() => { historyUp++; }}
+        width={40}
+        {...usePasteProps()}
+      />
+    );
+  }
+  const c = render(<OneRow />);
+  await tick();
+  c.stdin.write("\x1b[A");
+  await tick();
+  expect(historyUp).toBe(1);
+  c.unmount();
+
+  let historyDown = 0;
+  function OneRowDown() {
+    const [v, setV] = useState("a\u0301");
+    return (
+      <TextInput
+        value={v}
+        onChange={setV}
+        onSubmit={() => {}}
+        onHistoryDown={() => { historyDown++; }}
+        width={40}
+        {...usePasteProps()}
+      />
+    );
+  }
+  const d = render(<OneRowDown />);
+  await tick();
+  d.stdin.write("\x1b[B");
+  await tick();
+  expect(historyDown).toBe(1);
+  d.unmount();
 });
 
 test("mask renders bullets and stays single-line (no wrap fan-out)", async () => {

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
 import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
-import { buildReplayLines, clampToRows, contentToText, recoverTodos, renderTail, replaySessionLines } from "../src/ui/chat-lines.ts";
+import { buildReplayLines, clampToRows, contentToText, countNewActivities, recoverTodos, renderTail, replaySessionLines, resultSummary } from "../src/ui/chat-lines.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { setModel } from "../src/adapters/project.ts";
 import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "../src/adapters/chatgpt-voice.ts";
@@ -21,6 +21,135 @@ test("multimodal tool observations render as metadata + [image], never object co
   const lines = buildReplayLines([{ role: "tool", tool_call_id: "shot", content }], () => 1);
   expect(lines[0].text).toBe("captured screen\n[image]");
   expect(lines[0].text).not.toContain("[object Object]");
+});
+
+test("successful tool activity folds to one past-tense line while preserving full Ctrl+O detail", () => {
+  expect(resultSummary("bash", "(exit 0)\nok", { command: "bun test" })).toBe("Ran shell command: bun test");
+  expect(resultSummary("search", "one match", { path: "src", pattern: "needle" })).toBe("Searched for needle (1 match)");
+  expect(resultSummary("glob", "a.ts\nb.ts", { path: "src", pattern: "**/*.ts" })).toBe("Found 2 files for **/*.ts");
+  expect(resultSummary("search", "(no matches)", { pattern: "missing" })).toBe("Searched for missing (0 matches)");
+  expect(resultSummary("glob", "(no files)", { pattern: "**/*.missing" })).toBe("Found 0 files for **/*.missing");
+  expect(resultSummary("ls", "(empty)", { path: "empty-dir" })).toBe("Listed empty-dir (0 items)");
+  const longSummary = resultSummary("bash", "(exit 0)\nok", { command: "x".repeat(200) }) ?? "";
+  expect(longSummary).not.toContain("…"); // supported legacy Windows consoles need an ASCII-only suffix
+  expect(longSummary).toContain("...");
+  expect(resultSummary("todo_write", "plan updated", {})).toBeUndefined(); // stateful plan stays visible
+  let id = 1;
+  const lines = buildReplayLines([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call-1", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "bun test" }) } }],
+    },
+    { role: "tool", tool_call_id: "call-1", content: "(exit 0)\n27 pass" },
+  ], () => id++, { mode: "resume" });
+  expect(lines).toHaveLength(1);
+  expect(lines[0].kind).toBe("tool_result");
+  expect(lines[0].summary).toBe("Ran shell command: bun test");
+  expect(lines[0].text).toContain("Bash(bun test)");
+  expect(lines[0].text).toContain("27 pass");
+});
+
+test("background job summary preserves running state and job id", () => {
+  expect(resultSummary("bash", "Running in background [bg7]: bun dev\nCheck output with /bashes.", { command: "bun dev" }))
+    .toBe("Started background job [bg7]: bun dev");
+});
+
+test("new-message count treats folded success and expanded failure as one activity each", () => {
+  const activity: any[] = [
+    { id: 1, kind: "info", text: "before scroll" },
+    { id: 2, kind: "tool_result", text: "Read(a.ts)\none line", summary: "Read a.ts (1 line)" },
+    { id: 3, kind: "tool_call", text: "Bash(exit 1)" },
+    { id: 4, kind: "tool_result", text: "Error: failed" },
+  ];
+  expect(countNewActivities(activity, 1)).toBe(2);
+});
+
+test("prefixed screenshot capability guidance stays expanded", () => {
+  expect(resultSummary("computer", "saved shot.png view=120x40 screen=120x40 scale=1\n[image shot.png] - to view it, set \"vision\": true in config.", { action: "screenshot" }))
+    .toBeUndefined();
+});
+
+test("max-step sub-agent stops stay expanded", () => {
+  expect(resultSummary("task", "[stopped: reached max_steps=20]", { description: "audit" })).toBeUndefined();
+});
+
+test("durable state tools remain visible instead of claiming generic completion", () => {
+  expect(resultSummary("memory", "Memory is off. The user can re-enable it with /memory on.", { action: "read", name: "x" })).toBeUndefined();
+  expect(resultSummary("memory", "Saved memory 'x.md'", { action: "write", name: "x" })).toBeUndefined();
+  expect(resultSummary("workflow", "(no workflow 'missing')", { action: "read", name: "missing" })).toBeUndefined();
+  expect(resultSummary("workflow", "Saved workflow 'resume.md'", { action: "write", name: "resume" })).toBeUndefined();
+  expect(resultSummary("playbook", "(a similar bullet already exists - revise it instead of adding a duplicate)", { action: "add" })).toBeUndefined();
+  expect(resultSummary("playbook", "Added playbook lesson", { action: "add" })).toBeUndefined();
+  expect(resultSummary("mcp__neko_meeting__stop", JSON.stringify({ success: true, state: "idle", detail: "No meeting capture was active." }, null, 2), {})).toBeUndefined();
+});
+
+test("resume replay preserves mixed parallel tool order and keeps failures expanded", () => {
+  let id = 1;
+  const lines = buildReplayLines([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        { id: "ok", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: "a.ts" }) } },
+        { id: "bad", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "exit 1" }) } },
+      ],
+    },
+    { role: "tool", tool_call_id: "ok", content: "one line" },
+    { role: "tool", tool_call_id: "bad", content: "Error: command failed" },
+  ], () => id++, { mode: "resume" });
+
+  expect(lines.map((line) => line.kind)).toEqual(["tool_result", "tool_call", "tool_result"]);
+  expect(lines[0].summary).toContain("Read a.ts");
+  expect(lines[1].text).toContain("exit 1");
+  expect(lines[2]).toMatchObject({ kind: "tool_result", text: "Error: command failed" });
+  expect(lines[2].summary).toBeUndefined();
+});
+
+test("full transcript keeps successful call and output expanded", () => {
+  let id = 1;
+  const lines = buildReplayLines([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call-1", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "bun test" }) } }],
+    },
+    { role: "tool", tool_call_id: "call-1", content: "(exit 0)\n27 pass" },
+  ], () => id++, { mode: "full" });
+  expect(lines.map((line) => line.kind)).toEqual(["tool_call", "tool_result"]);
+  expect(lines[1].summary).toBeUndefined();
+  expect(lines[1].text).toContain("27 pass");
+});
+
+test("non-success activity stays expanded instead of folding into false success", () => {
+  expect(resultSummary("bash", "(exit 1 -- command FAILED)\nboom", { command: "bun test" })).toBeUndefined();
+  expect(resultSummary("bash", "(interrupted)\npartial output", { command: "bun test" })).toBeUndefined();
+  expect(resultSummary("skill", "(no skill 'missing' - check the skills listed in your context)", { name: "missing" })).toBeUndefined();
+  expect(resultSummary("bash", "[loop guard] repeated call skipped", { command: "bun test" })).toBeUndefined();
+  expect(resultSummary("edit", "ok\n[loop guard] edit cap reached", { path: "src/a.ts" })).toBeUndefined();
+  expect(resultSummary("exit_plan_mode", "The user did NOT approve the plan. Ask what to change.", {})).toBeUndefined();
+  expect(resultSummary("mcp_load", "No matching MCP tools for: missing. Check the names.", {})).toBeUndefined();
+  expect(resultSummary("task", "Sub-agents are not available in this context.", {})).toBeUndefined();
+  expect(resultSummary("task", "Sub-agent error: worker crashed", {})).toBeUndefined();
+  expect(resultSummary("write_file", "[interrupted while this tool call was in flight; outcome unknown. Inspect actual state before any retry.]", { path: "x.ts" })).toBeUndefined();
+  expect(resultSummary("edit", "[recovery] That edit FAILED. Don't blindly re-run it; inspect actual state.", { path: "x.ts" })).toBeUndefined();
+  expect(resultSummary("write_file", "Tool 'write_file' is disabled (enable with /tools write_file).", { path: "x.ts" })).toBeUndefined();
+  expect(resultSummary("computer", "Unknown computer action 'bogus'. Use: list | read.", { action: "bogus" })).toBeUndefined();
+  expect(resultSummary("read_file", "[PDF scan.pdf] - no extractable text (needs OCR or a vision model).", { path: "scan.pdf" })).toBeUndefined();
+  expect(resultSummary("read_file", "[image photo.png] - to view it, set \"vision\": true in config.", { path: "photo.png" })).toBeUndefined();
+  expect(resultSummary("read_file", "(offset 90 is beyond end of file at line 12)", { path: "short.txt" })).toBeUndefined();
+  let id = 1;
+  const lines = buildReplayLines([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call-1", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "bun test" }) } }],
+    },
+    { role: "tool", tool_call_id: "call-1", content: "(exit 1 -- command FAILED)\nboom" },
+  ], () => id++);
+  expect(lines.map((line) => line.kind)).toEqual(["tool_call", "tool_result"]);
+  expect(lines[1].summary).toBeUndefined();
+  expect(lines[1].text).toContain("boom");
 });
 
 test("clampToRows bounds the live stream to the viewport height (fixes streaming scroll-jump)", () => {
@@ -431,7 +560,7 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
     expect(await until(() => (lastFrame() ?? "").includes("Approve bash?"))).toBe(true); // approval box appeared
     expect(lastFrame() ?? "").toContain("$ echo hi"); // command preview
     stdin.write("y"); // approve
-    expect(await until(() => seen("(exit 0)"))).toBe(true); // tool ran after approval (git-bash spawn can be slow)
+    expect(await until(() => seen("Ran shell command: echo hi"))).toBe(true); // compact result appears only after the tool ran
     expect(await until(() => seen("Finished"))).toBe(true); // final answer
     expect(lastFrame() ?? "").not.toMatch(/^\s*>\s*y\s*$/m); // approval key must not leak into the prompt
     unmount();

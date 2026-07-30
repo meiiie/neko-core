@@ -64,6 +64,46 @@ class MdHang implements Provider {
   }
 }
 
+class ManagedUsageGap implements Provider {
+  cancelled = false;
+  async complete(_m: any[], _t: any[], onDelta?: (t: string, k?: "content" | "reasoning" | "tool") => void, _signal?: AbortSignal, opts?: any): Promise<ProviderResponse> {
+    onDelta?.("x".repeat(400));
+    opts?.onUsage?.({ prompt_tokens: 1_000, completion_tokens: 100, total_tokens: 1_100 });
+    await opts?.executeTool?.({ id: "usage-gap", name: "ls", arguments: { path: "." } });
+    onDelta?.("y".repeat(80)); // 20 estimated tokens after the last authoritative snapshot
+    while (!this.cancelled) await tick(15);
+    return { content: "done", tool_calls: [], usage: { prompt_tokens: 1_000, completion_tokens: 120, total_tokens: 1_120 } };
+  }
+}
+
+class MultiStepEstimateGap implements Provider {
+  call = 0;
+  secondStarted = false;
+  cancelled = false;
+  async complete(): Promise<ProviderResponse> {
+    if (this.call++ === 0) {
+      await tick(180);
+      return {
+        content: null,
+        tool_calls: [{ id: "estimate-gap", name: "ls", arguments: { path: "." } }],
+        usage: { prompt_tokens: 5_000, completion_tokens: 10, total_tokens: 5_010 },
+      };
+    }
+    this.secondStarted = true;
+    while (!this.cancelled) await tick(15);
+    return { content: "done", tool_calls: [], usage: { prompt_tokens: 5_100, completion_tokens: 5, total_tokens: 5_105 } };
+  }
+}
+
+class StreamingAnchorHang implements Provider {
+  cancelled = false;
+  async complete(_m: any[], _t: any[], onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
+    onDelta?.(Array.from({ length: 20 }, (_, i) => `LIVE TAIL ROW ${i}`).join("\n"));
+    while (!this.cancelled) await tick(15);
+    return { content: "done", tool_calls: [], usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 } };
+  }
+}
+
 test("status bar shows mode + context %", () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   const f = strip(c.lastFrame());
@@ -98,6 +138,56 @@ test("ThinkingLine shows effort + per-turn tokens split input/output", () => {
   expect(f).toContain("↓340");    // output (generated)
   expect(f).toContain("esc to interrupt");
 });
+
+test("ThinkingLine labels estimates with ~ and authoritative usage without it", () => {
+  const f = strip(render(
+    <ThinkingLine
+      verb="Thinking"
+      elapsed={2}
+      liveIn={() => ({ value: 34_300, approximate: true })}
+      liveOut={() => ({ value: 6100, approximate: false })}
+      step={1}
+      queued={0}
+    />,
+  ).lastFrame());
+  expect(f).toContain("↑~34.3k");
+  expect(f).toContain("↓6.1k");
+  expect(f).not.toContain("↓~6.1k");
+});
+
+test("live token output adds post-snapshot text inside one provider-managed tool turn", async () => {
+  const provider = new ManagedUsageGap();
+  const c = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+  try {
+    c.stdin.write("exercise managed usage");
+    await tick(60);
+    c.stdin.write("\r");
+    expect(await until(c, (frames) => frames.includes("↓~120"), 3000)).toBe(true);
+  } finally {
+    provider.cancelled = true;
+    c.unmount();
+    await tick(40);
+  }
+}, 10_000);
+
+test("multi-step input estimate adds the pending context to already-booked usage", async () => {
+  const provider = new MultiStepEstimateGap();
+  const c = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+  const values = () => [...strip(c.frames.join("\n")).matchAll(/↑~([\d.]+)(k?)/g)]
+    .map((match) => Number(match[1]) * (match[2] ? 1_000 : 1));
+  try {
+    c.stdin.write("exercise multi-step estimate");
+    await tick(60);
+    c.stdin.write("\r");
+    expect(await until(c, () => values().length > 0, 1000)).toBe(true);
+    expect(await until(c, () => provider.secondStarted, 4000)).toBe(true);
+    expect(await until(c, () => Math.max(...values()) > 6_000, 2000)).toBe(true);
+  } finally {
+    provider.cancelled = true;
+    c.unmount();
+    await tick(40);
+  }
+}, 10_000);
 
 test("CompactingLine shows the progress bar, percent, and a tip", () => {
   const f = strip(render(<CompactingLine start={1_000_000} />).lastFrame());
@@ -318,6 +408,81 @@ test("fullscreen history: PgUp shows the jump pill; a new turn counts; End retur
   }
 });
 
+test("fullscreen history pins the nearest prompt and clicking it jumps to that exact row", async () => {
+  const msgs: any[] = [];
+  for (let i = 0; i < 30; i++) {
+    msgs.push({ role: "user", content: `anchor prompt ${i}` });
+    msgs.push({ role: "assistant", content: `answer ${i}` });
+  }
+  const s: any = { id: "anchors", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
+  const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
+  try {
+    expect(await until(c, (frames) => frames.includes("answer 29"), 3000)).toBe(true); // hydrate before sending navigation
+    c.stdin.write("\x1b[5~"); // PageUp: leave the live tail so the fixed navigation row becomes active
+
+    let anchor = "";
+    for (let waited = 0; waited < 3000; waited += 25) {
+      anchor = strip(c.lastFrame()).split("\n")[0]?.trim() ?? "";
+      if (/^> anchor prompt \d+$/.test(anchor)) break;
+      await tick(25);
+    }
+    expect(anchor).toMatch(/^> anchor prompt \d+$/);
+
+    c.stdin.write("\x1b[<0;5;1M"); // left press on the fixed first row
+    let jumped = false;
+    for (let waited = 0; waited < 3000; waited += 25) {
+      const rows = strip(c.lastFrame()).split("\n");
+      if ((rows[0]?.trim() ?? "") === anchor) { jumped = true; break; }
+      await tick(25);
+    }
+    expect(jumped).toBe(true); // header unmounted; the exact prompt is now the first transcript row
+  } finally {
+    c.unmount();
+  }
+}, 15000);
+
+test("sticky prompt click stays exact while an uncommitted streaming tail extends the band", async () => {
+  const msgs: any[] = [];
+  for (let i = 0; i < 30; i++) {
+    msgs.push({ role: "user", content: `stream anchor prompt ${i}` });
+    msgs.push({ role: "assistant", content: `stream answer ${i}` });
+  }
+  const session: any = { id: "stream-anchors", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
+  const provider = new StreamingAnchorHang();
+  const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={provider} resumedSession={session} />);
+  try {
+    expect(await until(c, (frames) => frames.includes("stream answer 29"), 3000)).toBe(true);
+    c.stdin.write("keep streaming");
+    await tick(60);
+    c.stdin.write("\r");
+    expect(await until(c, (frames) => frames.includes("LIVE TAIL ROW 19"), 3000)).toBe(true);
+    c.stdin.write("\x1b[5~");
+    await tick(100); // first page lands exactly on a prompt, where the sticky row is correctly suppressed
+    c.stdin.write("\x1b[5~"); // move deeper so the test exercises a real mounted anchor
+
+    let anchor = "";
+    for (let waited = 0; waited < 3000; waited += 25) {
+      anchor = strip(c.lastFrame()).split("\n")[0]?.trim() ?? "";
+      if (/^> stream anchor prompt \d+$/.test(anchor)) break;
+      await tick(25);
+    }
+    expect(anchor).toMatch(/^> stream anchor prompt \d+$/);
+
+    c.stdin.write("\x1b[<0;5;1M");
+    let jumped = false;
+    for (let waited = 0; waited < 3000; waited += 25) {
+      const first = strip(c.lastFrame()).split("\n")[0]?.trim() ?? "";
+      if (first === anchor) { jumped = true; break; }
+      await tick(25);
+    }
+    expect(jumped).toBe(true);
+  } finally {
+    provider.cancelled = true;
+    c.unmount();
+    await tick(40);
+  }
+}, 15000);
+
 test("input footer: the prompt is BOXED by a rule above AND below, status beneath", () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   const lines = strip(c.lastFrame()).split("\n");
@@ -414,31 +579,37 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
 
 test("reasoning shows live while busy, clears when done", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Reasoner()} />);
-  await tick();
-  c.stdin.write("go");
-  await tick(20);
-  c.stdin.write("\r");
-  expect(await until(c, (f) => f.includes("let me think hard"))).toBe(true); // shown mid-turn
-  expect(await until(c, (f) => f.includes("the answer"))).toBe(true); // final answer lands
-  expect(strip(c.lastFrame())).not.toContain("let me think hard"); // thinking cleared when done
-  c.unmount();
-});
+  try {
+    await tick();
+    c.stdin.write("go");
+    await tick(20);
+    c.stdin.write("\r");
+    expect(await until(c, (f) => f.includes("let me think hard"))).toBe(true); // shown mid-turn
+    expect(await until(c, (f) => f.includes("the answer"))).toBe(true); // final answer lands
+    expect(strip(c.lastFrame())).not.toContain("let me think hard"); // thinking cleared when done
+  } finally {
+    c.unmount();
+  }
+}, 15_000);
 
 test("post-turn run-time line + placeholder drops after first turn", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
-  await tick();
-  expect(strip(c.lastFrame())).toContain("Try:"); // placeholder before the first turn
-  c.stdin.write("hi");
-  await tick(20);
-  c.stdin.write("\r");
-  expect(await until(c, (f) => /for \d+s/.test(f))).toBe(true); // completion line appears
-  const frames = strip(c.frames.join("\n"));
-  expect(frames).toContain("last context ↑1.0k ↓10");
-  expect(frames).toContain("cache ↑800 (80%)");
-  expect(frames).not.toMatch(/chat\s+fast path/);
-  expect(strip(c.lastFrame())).not.toContain("Try:"); // placeholder gone
-  c.unmount();
-});
+  try {
+    await tick();
+    expect(strip(c.lastFrame())).toContain("Try:"); // placeholder before the first turn
+    c.stdin.write("hi");
+    await tick(20);
+    c.stdin.write("\r");
+    expect(await until(c, (f) => /for \d+s/.test(f))).toBe(true); // completion line appears
+    const frames = strip(c.frames.join("\n"));
+    expect(frames).toContain("last context ↑1.0k ↓10");
+    expect(frames).toContain("cache ↑800 (80%)");
+    expect(frames).not.toMatch(/chat\s+fast path/);
+    expect(strip(c.lastFrame())).not.toContain("Try:"); // placeholder gone
+  } finally {
+    c.unmount();
+  }
+}, 15_000); // keep the 1.5s semantic poll; allow slow Windows full-suite scheduling and always clean up
 
 test("Shift+Tab cycles the permission mode (auto -> default)", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
@@ -461,14 +632,16 @@ test("slash menu autocompletes as you type", async () => {
 
 test("/help lists the command set", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
-  await tick();
-  c.stdin.write("/help");
-  await tick(20);
-  c.stdin.write("\r");
-  await tick(60);
-  expect(strip(c.frames.join("\n"))).toContain("Commands:");
-  c.unmount();
-});
+  try {
+    await tick();
+    c.stdin.write("/help");
+    await tick(20);
+    c.stdin.write("\r");
+    expect(await until(c, (f) => f.includes("Commands:"))).toBe(true);
+  } finally {
+    c.unmount();
+  }
+}, 15_000);
 
 test("error lines render with a visible marker (not a dim info line)", () => {
   const f = strip(render(<TranscriptLine line={{ id: 1, kind: "error", text: "HTTP 500" }} cfg={CFG} />).lastFrame());

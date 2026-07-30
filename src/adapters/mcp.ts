@@ -318,7 +318,9 @@ export class McpHub {
     const client = await this.ensureClient(server); // connects on demand when registered from cache
     const res: any = await client.callTool({ name: tool, arguments: args });
     const parts = (res.content ?? []).map((c: any) => (c?.type === "text" ? c.text : JSON.stringify(c)));
-    return parts.join("\n") || "(no content)";
+    const text = parts.join("\n") || "(no content)";
+    if (!res.isError || /^Error(?:\s|:|$)/i.test(text.trimStart())) return text;
+    return `Error: ${text}`;
   }
 
   promptList(): { server: string; name: string }[] {

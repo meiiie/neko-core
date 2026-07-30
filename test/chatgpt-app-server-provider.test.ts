@@ -70,6 +70,7 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
   };
   const provider = new ChatGptAppServerProvider(cfg, factory);
   const deltas: string[] = [];
+  const liveUsage: any[] = [];
   let executions = 0;
   const response = await provider.complete(
     [
@@ -82,7 +83,10 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
     [{ type: "function", function: { name: "read_file", description: "Read", parameters: { type: "object", properties: { path: { type: "string" } } } } }],
     (delta, kind) => { if (kind === "content") deltas.push(delta); },
     undefined,
-    { executeTool: async () => { executions++; return "file contents"; } },
+    {
+      executeTool: async () => { executions++; return "file contents"; },
+      onUsage: (usage: any) => { liveUsage.push(usage); },
+    },
   );
 
   expect(requests.find((request) => request.method === "account/login/start")?.params.type).toBe("chatgptAuthTokens");
@@ -99,6 +103,14 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
   expect(toolResult).toEqual({ contentItems: [{ type: "inputText", text: "file contents" }], success: true });
   expect(executions).toBe(1);
   expect(deltas).toEqual(["BRIDGE_", "OK"]);
+  expect(liveUsage).toEqual([{
+    prompt_tokens: 12,
+    completion_tokens: 3,
+    total_tokens: 15,
+    cached_tokens: 4,
+    context_tokens: 12,
+    model_calls: 1,
+  }]);
   expect(response).toMatchObject({
     content: "BRIDGE_OK",
     tool_calls: [],
@@ -244,6 +256,50 @@ test("a multi-call codex turn reports the SUM of its internal model calls, not j
   // Turn 2 on the same thread: only ITS delta is reported, not the thread-cumulative again.
   const second = await provider.complete([{ role: "user", content: "more" }]);
   expect(second.usage).toMatchObject({ prompt_tokens: 360, completion_tokens: 45, total_tokens: 405, cached_tokens: 200, model_calls: 3 });
+  provider.dispose();
+});
+
+test("an interrupted turn advances the cumulative baseline before the next turn", async () => {
+  const cfg = setup();
+  let handlers!: CodexAppServerHandlers;
+  let turns = 0;
+  const factory: CodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}), close: () => {},
+      request: async (method) => {
+        if (method === "thread/start") return { thread: { id: "t1" } };
+        if (method === "turn/start") {
+          turns++;
+          const first = turns === 1;
+          setTimeout(() => {
+            handlers.onNotification?.("thread/tokenUsage/updated", { threadId: "t1", tokenUsage: {
+              last: { inputTokens: first ? 80 : 40, outputTokens: first ? 20 : 10, totalTokens: first ? 100 : 50, cachedInputTokens: 0 },
+              total: { inputTokens: first ? 80 : 120, outputTokens: first ? 20 : 30, totalTokens: first ? 100 : 150, cachedInputTokens: 0 },
+            } });
+            handlers.onNotification?.("turn/completed", {
+              threadId: "t1",
+              turn: { id: `turn-${turns}`, status: first ? "interrupted" : "completed" },
+            });
+          }, 0);
+          return { turn: { id: `turn-${turns}` } };
+        }
+        return {};
+      },
+    };
+  };
+  const provider = new ChatGptAppServerProvider(cfg, factory);
+  const interruptedUsage: any[] = [];
+  await expect(provider.complete(
+    [{ role: "user", content: "stop this" }],
+    [],
+    undefined,
+    undefined,
+    { onUsage: (usage) => interruptedUsage.push(usage) },
+  )).rejects.toThrow();
+  expect(interruptedUsage.at(-1)).toMatchObject({ prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 });
+  const second = await provider.complete([{ role: "user", content: "try again" }]);
+  expect(second.usage).toMatchObject({ prompt_tokens: 40, completion_tokens: 10, total_tokens: 50 });
   provider.dispose();
 });
 

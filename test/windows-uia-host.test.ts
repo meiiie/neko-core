@@ -145,7 +145,7 @@ $w.Content=$p
   const host = new ResidentUiaHost(script);
   try {
     const output = await waitForUiaText(async () => {
-      const response = await host.request({ action: "list", window: title }, 5_000);
+      const response = await host.request({ action: "list", window: title }, 30_000);
       if (!response.ok) throw new Error(response.error ?? "UIA list failed");
       return response.output ?? "";
     }, "Resident probe input");

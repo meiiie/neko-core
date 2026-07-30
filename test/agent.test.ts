@@ -103,6 +103,71 @@ test("social turns keep full context, tools, reasoning preference, and conversat
   expect(DEFAULT_SYSTEM_PROMPT).toContain("repeated greetings");
 });
 
+test("multi-step turns publish booked plus current-step input estimates", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-usage-est-"));
+  writeFileSync(join(root, "a.txt"), "orig");
+  const seen: any[][] = [];
+  let call = 0;
+  const provider = {
+    async complete(messages: any[]) {
+      seen.push(structuredClone(messages));
+      if (call++ === 0) {
+        return {
+          content: null,
+          tool_calls: [{ id: "read", name: "read_file", arguments: { path: "a.txt" } }],
+          usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 },
+        };
+      }
+      return {
+        content: "finished",
+        tool_calls: [],
+        usage: { prompt_tokens: 150, completion_tokens: 5, total_tokens: 155 },
+      };
+    },
+  };
+  const estimates: number[] = [];
+  const agent = new Agent({
+    provider: provider as any,
+    tools: new ToolRegistry(root, "auto", () => true),
+    onEvent: (kind, data) => {
+      if (kind === "usage_estimate") estimates.push(data.prompt_tokens);
+    },
+  });
+  expect(await agent.run("go")).toBe("finished");
+  expect(estimates).toEqual([
+    estimateTokens(seen[0]),
+    100 + estimateTokens(seen[1]),
+  ]);
+});
+
+test("interrupted provider usage is booked once before the run returns", async () => {
+  const abort = new AbortController();
+  let call = 0;
+  const provider = {
+    async complete(_messages: any[], _tools: any[], _delta: any, _signal: any, opts: any) {
+      if (call++ === 0) {
+        opts.onUsage({ prompt_tokens: 80, completion_tokens: 20, total_tokens: 100, model_calls: 1 });
+        abort.abort();
+        throw new Error("turn interrupted");
+      }
+      return {
+        content: "recovered",
+        tool_calls: [],
+        usage: { prompt_tokens: 40, completion_tokens: 10, total_tokens: 50, model_calls: 1 },
+      };
+    },
+  };
+  const agent = new Agent({
+    provider: provider as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+
+  expect(await agent.run("stop this", abort.signal)).toBe("[interrupted]");
+  expect(agent.cost).toMatchObject({ promptTokens: 80, completionTokens: 20, totalTokens: 100, calls: 1 });
+  expect(await agent.run("try again")).toBe("recovered");
+  expect(agent.cost).toMatchObject({ promptTokens: 120, completionTokens: 30, totalTokens: 150, calls: 2 });
+});
+
 test("loop runs tools then finishes", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ag-"));
   writeFileSync(join(root, "a.txt"), "orig");

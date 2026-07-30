@@ -28,13 +28,26 @@ class FakeStdin extends EventEmitter {
   read(): string | null { const d = this.data; this.data = null; return d; }
   push(s: string): void { this.data = s; this.emit("readable"); this.emit("data", s); }
 }
+class PumpCountingDiffer extends FrameDiffer {
+  streamPumps = 0;
+  private lastTail = "";
+
+  override setBandContent(rows: string[] | null, dist: number, tail: string[] = []): void {
+    const nextTail = tail.join("\n");
+    if (nextTail && nextTail !== this.lastTail) this.streamPumps++;
+    this.lastTail = nextTail;
+    super.setBandContent(rows, dist, tail);
+  }
+
+  resetPumps(): void { this.streamPumps = 0; }
+}
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-test("streaming while SCROLLED AWAY writes far less than streaming at the bottom", async () => {
+test("streaming while SCROLLED AWAY pumps far less than streaming at the bottom", async () => {
   const vt = new VirtualTerminal(100, 30);
   const out = new FakeTtyOut(100, 30, vt);
   const stdin = new FakeStdin();
-  const differ = new FrameDiffer();
+  const differ = new PumpCountingDiffer();
   // A provider that streams a delta every 10ms for ~2.4s - long enough to sample both phases.
   const provider: any = {
     complete: async (_m: any[], _t: any[], onDelta?: (t: string, k?: string) => void) => {
@@ -57,21 +70,23 @@ test("streaming while SCROLLED AWAY writes far less than streaming at the bottom
     await tick(80);
     stdin.push("\r"); // ...and start the streaming turn
     await tick(300); // the stream is flowing, pinned at the bottom
-    out.writes = 0; out.bytes = 0;
-    await tick(600); // SAMPLE A: pinned - every pump paints the moving tail
-    const pinnedWrites = out.writes;
+    differ.resetPumps();
+    await tick(600); // SAMPLE A: pinned - every pump updates the moving tail
+    const pinnedPumps = differ.streamPumps;
     // Scroll up into history (wheel), then let the glide fully settle.
     stdin.push("\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M");
     await tick(300);
-    out.writes = 0; out.bytes = 0;
+    differ.resetPumps();
     await tick(600); // SAMPLE B: scrolled away - the tail is off-screen, pumps are slowed
-    const scrolledWrites = out.writes;
-    // Both phases share fixed chrome animation (the 80ms thinking-line spinner), so the assertion
-    // targets the MECHANISM: the per-pump work (up to ~15 pumps/600ms at 40ms) must collapse to the
-    // slow cadence (~2 at 300ms) once scrolled. Measured locally: pinned=49, scrolled=26.
+    const scrolledPumps = differ.streamPumps;
+    // Count stream-tail updates at the compositor boundary, not all terminal writes. Spinner/cursor writes
+    // share neither cadence nor scheduler priority across OSes and made the old wall-clock delta flaky.
+    // The product contract is 40ms pinned versus 300ms while reading: in this window pinned must produce
+    // several frames, while the scrolled path remains bounded to a handful even on a slow runner.
     expect(vt.text()).toContain("Jump to bottom"); // the scroll really engaged (reading mode)
-    expect(pinnedWrites).toBeGreaterThan(scrolledWrites + 5); // the pump savings, with slow-CI margin
-    expect(scrolledWrites).toBeLessThan(pinnedWrites); // and never the other way around
+    expect(pinnedPumps).toBeGreaterThanOrEqual(5);
+    expect(scrolledPumps).toBeLessThanOrEqual(4);
+    expect(pinnedPumps).toBeGreaterThan(scrolledPumps);
   } finally {
     app.unmount();
     await tick(80);

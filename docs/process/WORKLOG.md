@@ -3,6 +3,94 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-07-30 - v0.22.3: the composer, usage meter, activity log, and history share one viewport contract
+
+Four field reports exposed four different ownership errors in the fullscreen UI: hard-newline prompts bypassed
+its bounded editor viewport; the App Server parsed live usage but withheld it until completion; successful tool
+calls were persisted correctly but projected as two noisy entries; and the transcript compositor assumed its
+scroll band always began on row 1, so a sticky prompt header was overwritten.
+
+- Unified hard and soft line wrapping in `TextInput`. The editor renders at most five visual rows around the
+  caret, Up/Down moves by rendered row, and history receives the key only at the top/bottom boundary. The real
+  compiled composer E2E typed seven lines, edited line 6 with Up, kept five visible rows, and hid line 7 as the
+  viewport followed the caret. No scrollbar was added. Caret hit-testing now reuses one wrap projection: a
+  10,000-character vertical move fell from 9.89 seconds in the RED test to 4.52 ms.
+- Added a provider-neutral live-usage callback. App Server notifications update the turn display immediately;
+  `finishUsage()` remains the single final accounting path. Estimates carry `~` until authoritative usage
+  arrives. A monotonic generated-character baseline also covers text streamed after an authoritative snapshot
+  when a provider-managed tool flushes the visible buffers. A real GPT-5.6 `neko --yolo` turn showed `↑~10.6k`,
+  later exact non-zero input/output, and never showed the broken `↑0 ↓0` state.
+- Folded only matched successful call/result pairs into one past-tense line. The same `Line` retains full detail
+  for Ctrl+O; `/transcript`, failures, denials, and blocked calls remain expanded. `todo_write`/`update_plan`
+  stay visible because their result is persistent working state, not disposable activity.
+- Projected exact rendered row spans for user prompts and added a conditional one-row sticky header with click
+  and Alt+Up exact jumps. FrameDiffer's latent arbitrary-band contract was fixed end to end (`top - 1` in
+  compose, direct repaint, shift detection, and hardware-scroll emission). Committed rows and an uncommitted
+  streaming tail now share one scroll domain, so the label and click target stay exact mid-turn. Measuring the
+  stable `header + band` wrapper avoids a React height feedback loop, while the jump pill keeps its own row outside
+  that measurement.
+- Closed the final review edge cases with RED/GREEN coverage: Agent now publishes `booked + pending context`
+  before every provider step so non-live providers do not freeze the input meter at step 1; MCP `isError`,
+  interrupted commands, and missing-skill outcomes keep their diagnostics expanded; search/glob summaries name
+  their pattern; and arrows at a one-row Unicode grapheme boundary fall through to prompt history instead of
+  moving inside a variation selector or combining mark.
+- Closed two data-integrity gaps found during PR review: resume now replaces a collapsible call in place so mixed
+  parallel outcomes keep their original order, and App Server advances its cumulative usage baseline even when a
+  turn rejects, aborts, or is disposed, preventing those tokens from being charged again to the next turn.
+- Clean-room inspection of the local Claude Code checkout informed behavioral contracts only; no implementation
+  text was copied. Primary-source research and refuted hypotheses live in
+  `docs/research/composer-usage-activity-navigation-2026-07-30.md`; the evidence supports a production-grade
+  local design, not a “beyond SOTA” claim.
+
+Release evidence: both TypeScript compilers clean; **943/943 tests, 4,180 assertions**; policy and doctor PASS;
+production build + UI/input probes PASS; real GPT-5.6 usage E2E PASS; composer, prompt-anchor, transcript-pointer,
+and crash-resume compiled ConPTY E2Es PASS; ghost/typing 3/3; final scroll bench 6 ms first response / 154 ms
+settle; secret scan and `git diff --check` clean. A macOS CI run exposed a one-write scheduler flake in the
+scroll-under-stream test; its replacement counts distinct stream-tail pumps at the compositor boundary and passed
+10/10 local stress rounds, while still enforcing the 40 ms pinned versus 300 ms reading-mode contract. A later
+Windows canary run hit `5000.24 ms` on an older post-turn UX test whose semantic poll is only 1.5 seconds; the test
+now always unmounts in `finally`, keeps the 1.5-second assertion, and uses a 15-second harness ceiling. It passed
+10/10 local stress rounds, and the synthetic multi-step provider was shortened from 2 seconds to 180 ms. A loaded
+local full-suite run then exposed two independent fixture ceilings: the meeting WebSocket shared the default five-
+second test budget and leaked its session on early failure, while the WPF/UIA fixture capped its first cold-start
+probe at five seconds even though production allows 90 seconds (measured cold start: 7.32 seconds). The fixtures now
+clean up in `finally`, use a 15-second test ceiling and 30-second initial UIA probe, and passed meeting 10/10, UIA
+3/3, post-turn 10/10, and multi-step token 10/10 stress rounds without changing production behavior. Final Codex
+review then found two outcome-integrity gaps: an interrupted provider snapshot was displayed but never booked into
+`CostTracker`, and non-success observations could fold into false success text. Focused RED/GREEN tests now book
+that final interrupted snapshot exactly once and keep standalone/appended loop guards, rejected plans, and MCP
+no-match results expanded. The next exact-head pass caught the remaining sub-agent failure sentinels and a sticky-
+anchor boundary where mounting the one-row header changed which prompt was actually visible. Both now have focused
+RED/GREEN coverage; anchor selection computes against the reduced band height before it decides to mount, and the
+streaming anchor E2E passed 10/10 stress rounds after its fixture was moved beyond the intentional suppression row.
+A third exact-head pass found disabled tools folding into success and background jobs losing their running state/job
+ID. The same runtime-state audit also locked unknown computer actions, PDF/image capability gaps, beyond-EOF reads,
+and zero-match searches. Background starts now compact to an explicit `Started background job [bgN]` line; every
+non-success/capability result remains expanded. A fourth exact-head pass found two prefixed/native variants outside
+that first audit: screenshot metadata preceding the no-vision diagnostic, and a sub-agent ending at `max_steps`.
+Both now stay expanded, with independent RED/GREEN regressions built from the runtime's exact output. A fifth
+exact-head pass exposed a broader feature-state case: memory-disabled/no-op text had no durable structured error bit.
+Memory activity is therefore intentionally never folded; its short state/result stays visible whether enabled or off,
+which removes that string-classification ambiguity instead of adding another one-off failure regex. The next Windows
+CI run exposed one remaining harness-only ceiling: an MCP fixture cold spawn took 5.28 seconds while two process-
+integration tests still inherited Bun's 5-second default. All MCP process tests now share the existing 60-second
+harness deadline (production connect deadlines are unchanged) and passed 10/10 local stress rounds. A sixth
+exact-head pass completed the state policy: workflow/playbook output also stays expanded, while `(no matches)`,
+`(no files)`, and `(empty)` deterministically count as zero instead of one. A seventh exact-head pass found the
+scroll-away jump pill counted expanded `tool_call` failures but skipped folded successful `tool_result` activity.
+One shared counter now treats each semantic activity as exactly one in both representations. The following Windows
+full-suite run exposed a cascading harness failure: `reasoning` and `/help` inherited Bun's 5-second ceiling and did
+not unmount on timeout, leaving Ink's renderer to return empty frames to seven later tests. Both root tests now poll
+semantic state, unmount in `finally`, use a 15-second harness ceiling, and passed 10/10 stress rounds; production
+render timing is unchanged. An eighth exact-head pass found that crash sealing and tool-error recovery emit
+synthetic plain-text sentinels rather than structured failure bits; both could therefore be summarized as a
+successful write/edit after resume. Exact RED/GREEN fixtures now preserve unknown in-flight outcomes and failed
+recovery directives as expanded evidence, so the operator sees the uncertainty before deciding whether a retry is
+safe. A ninth exact-head pass found the emergency meeting-stop tool's structured idle result could still collapse to
+a generic completion. That stateful safety action is now always expanded; its exact `success: true`, `state: idle`,
+`No meeting capture was active` payload drove the RED fixture, and the focused UI/meeting suite plus the full suite
+passed after the policy change.
+
 ## 2026-07-30 - v0.22.2: transcript pointer reports are events, never search text
 
 The field screenshot showed `/transcript` filling its search line with repeated `[<65;86;26M` strings as

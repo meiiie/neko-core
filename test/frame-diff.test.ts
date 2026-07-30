@@ -288,6 +288,40 @@ test("compose-at-write-layer: blank Ink band gets the real rows; scroll repaints
   expect(scr.r).toBe(7); // cursor restored to Ink's assumed row
 });
 
+test("a band beginning below row 1 preserves the sticky header during compose and scroll", () => {
+  const d = new FrameDiffer();
+  const emitted: string[] = [];
+  d.setWriter((s) => emitted.push(s));
+  d.setBand({ top: 2, height: 3 });
+  const rows = Array.from({ length: 8 }, (_, i) => `content-${i}`);
+  d.setBandContent(rows, 0);
+  const frame = ["STICKY HEADER", "", "", "", "chrome", "> input"];
+  const seeded = d.process(frame.join("\n"))!;
+  const scr = new Screen(8);
+  scr.write(seeded);
+  expect(scr.lines(6)).toEqual([
+    "STICKY HEADER",
+    "content-5",
+    "content-6",
+    "content-7",
+    "chrome",
+    "> input",
+  ]);
+
+  emitted.length = 0;
+  d.setBandContent(rows, 2);
+  expect(emitted).toHaveLength(1);
+  scr.write(emitted[0]);
+  expect(scr.lines(6)).toEqual([
+    "STICKY HEADER",
+    "content-3",
+    "content-4",
+    "content-5",
+    "chrome",
+    "> input",
+  ]);
+});
+
 test("short band content is TOP-anchored (fresh session welcome at the top, not floating at the bottom)", () => {
   const d = new FrameDiffer();
   d.setBand({ top: 1, height: 6 });

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import { Text } from "ink";
 import { useEffect } from "react";
-import { flattenLines, ScrollRegion, useRowScroll, useScroll, type RowScrollApi, type ScrollApi } from "../src/ui/scroll.tsx";
+import { flattenLines, projectLineRows, ScrollRegion, stickyPromptAnchor, useRowScroll, useScroll, type RowScrollApi, type ScrollApi } from "../src/ui/scroll.tsx";
 import type { Line } from "../src/ui/transcript.tsx";
 
 const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
@@ -66,6 +66,42 @@ test("useRowScroll glides toward the target (ease-out) instead of jumping", asyn
   expect(hops[hops.length - 1]).toBe(0);  // glided back to the tail
   expect(strip(c.lastFrame())).toContain("dist=0;scrolled=false");
   c.unmount();
+});
+
+test("useRowScroll jumps an exact content row to the viewport top", async () => {
+  let api: RowScrollApi | null = null;
+  const c = render(<RowProbe total={100} viewH={10} grab={(a) => (api = a)} />);
+  await tick();
+  api!.toRow(30);
+  await tick(80);
+  expect(strip(c.lastFrame())).toContain("dist=60;scrolled=true"); // maxOffset 90 - row 30
+  c.unmount();
+});
+
+test("sticky prompt anchor uses exact row spans, avoids duplicates, and tracks the nearest prompt", () => {
+  const lines: Line[] = [
+    { id: 1, kind: "user", text: "first prompt" },
+    { id: 2, kind: "assistant", text: "answer one" },
+    { id: 3, kind: "user", text: "second prompt\nwith detail" },
+    { id: 4, kind: "assistant", text: "answer two" },
+  ];
+  const projection = projectLineRows(lines, (line) => {
+    if (line.id === 1) return ["u1"];
+    if (line.id === 2) return ["a1", "a2", "a3"];
+    if (line.id === 3) return ["u2", "u2-detail"];
+    return Array.from({ length: 8 }, (_, i) => `tail-${i}`);
+  });
+  expect(projection.rows).toHaveLength(14);
+  // viewport start = 14 - 5 - 8 = 1: first prompt is fully above -> sticky first prompt
+  expect(stickyPromptAnchor(projection.spans, 14, 5, 8)?.line.id).toBe(1);
+  // Without the header, start=3 is one row before the second prompt. Reserving the one-row header
+  // makes the real band start=4 on that prompt, so an older sticky copy must not mount above it.
+  expect(stickyPromptAnchor(projection.spans, 14, 5, 6, 1)).toBeNull();
+  // Effective band start = 5 lands inside the second prompt -> no duplicate sticky copy.
+  expect(stickyPromptAnchor(projection.spans, 14, 5, 5, 1)).toBeNull();
+  // viewport start = 6 is below the second prompt -> sticky second prompt
+  expect(stickyPromptAnchor(projection.spans, 14, 5, 3)?.line.id).toBe(3);
+  expect(stickyPromptAnchor(projection.spans, 14, 5, 0)).toBeNull();
 });
 
 test("flattenLines: glyphs, wrapping, entry clip", () => {

@@ -17,16 +17,82 @@ export function contentToText(c: any): string {
   return String(c ?? "");
 }
 
-/** A 1-line collapse summary for read-type tool results (Claude-style); full stays under Ctrl+O. */
-export function resultSummary(name: string | undefined, obs: string): string | undefined {
-  if (/^(Error|Blocked|Denied)/.test(obs)) return undefined; // show errors in full
-  const n = obs.split("\n").filter((l) => l.trim()).length;
+/** Failure outcomes stay expanded: compacting them would hide the one thing the user must inspect. */
+export function isToolFailure(obs: string): boolean {
+  const text = obs.trimStart();
+  return /^(Error|Blocked|Denied|Refused)/i.test(text)
+    || /\(exit \d+ -- command FAILED\)/.test(obs)
+    || /^\((?:timed out|interrupted|no skill\b)/i.test(text)
+    || /^\[loop guard\]/im.test(text)
+    || /^\[interrupted while this tool call was in flight\b/i.test(text)
+    || /^\[recovery\].*\bFAILED\b/i.test(text)
+    || /^The user did NOT approve the plan\b/i.test(text)
+    || /^No matching MCP tools\b/i.test(text)
+    || /^Sub-agents are not available\b/i.test(text)
+    || /^Sub-agent error:/i.test(text)
+    || /^Tool '.+' is disabled\b/i.test(text)
+    || /^Unknown computer action\b/i.test(text)
+    || /^\[PDF [^\]]+\] - (?:text extraction needs|no extractable text)\b/i.test(text)
+    || /^\[[^\]]+\] - to view it, set "vision": true\b/im.test(text)
+    || /^\[stopped: reached max_steps=\d+\]/i.test(text)
+    || /^\(offset \d+ is beyond end of file\b/i.test(text);
+}
+
+const short = (value: unknown, cap = 80) => {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length > cap ? `${text.slice(0, Math.max(0, cap - 3))}...` : text;
+};
+
+const ALWAYS_EXPANDED_TOOLS = new Set([
+  "todo_write", "update_plan", "memory", "workflow", "playbook",
+  "mcp__neko_meeting__stop",
+]);
+const EMPTY_RESULT_SENTINELS = new Set(["(no matches)", "(no files)", "(empty)"]);
+
+/** Count user-visible activity once: folded success is one result; expanded failure is one call. */
+export function countNewActivities(lines: Line[], from = 0): number {
+  return lines.slice(Math.max(0, from)).filter((line) =>
+    line.kind === "user"
+    || line.kind === "assistant"
+    || line.kind === "tool_call"
+    || (line.kind === "tool_result" && Boolean(line.summary))
+  ).length;
+}
+
+/** One compact, past-tense outcome for every successful activity; full call + output stays under Ctrl+O. */
+export function resultSummary(
+  name: string | undefined,
+  obs: string,
+  args: Record<string, any> = {},
+): string | undefined {
+  if (!name || isToolFailure(obs) || ALWAYS_EXPANDED_TOOLS.has(name)) return undefined;
+  const background = obs.match(/^Running in background \[([^\]]+)\]:\s*(.+)$/m);
+  const n = EMPTY_RESULT_SENTINELS.has(obs.trim()) ? 0 : obs.split("\n").filter((line) => line.trim()).length;
+  const target = short(args.path ?? args.command ?? args.query ?? args.url ?? args.pattern ?? args.name);
+  if ((name === "bash" || name === "shell_command") && background) {
+    return `Started background job [${short(background[1], 24)}]: ${target || short(background[2])}`;
+  }
   switch (name) {
-    case "read_file": return `Read ${n} line${n === 1 ? "" : "s"}`;
-    case "search": return `Found ${n} match${n === 1 ? "" : "es"}`;
-    case "glob": return `${n} file${n === 1 ? "" : "s"}`;
-    case "ls": return `${n} item${n === 1 ? "" : "s"}`;
-    default: return undefined; // edit/write diffs, bash output, web_* shown as-is
+    case "read_file": return target ? `Read ${target} (${n} line${n === 1 ? "" : "s"})` : `Read ${n} line${n === 1 ? "" : "s"}`;
+    case "search": {
+      const needle = short(args.pattern ?? args.query ?? args.path);
+      return needle ? `Searched for ${needle} (${n} match${n === 1 ? "" : "es"})` : `Found ${n} match${n === 1 ? "" : "es"}`;
+    }
+    case "glob": {
+      const pattern = short(args.pattern ?? args.path);
+      return pattern ? `Found ${n} file${n === 1 ? "" : "s"} for ${pattern}` : `Found ${n} file${n === 1 ? "" : "s"}`;
+    }
+    case "ls": return target ? `Listed ${target} (${n} item${n === 1 ? "" : "s"})` : `Listed ${n} item${n === 1 ? "" : "s"}`;
+    case "bash":
+    case "shell_command": return target ? `Ran shell command: ${target}` : "Ran shell command";
+    case "write_file": return target ? `Wrote ${target}` : "Wrote file";
+    case "edit":
+    case "multi_edit":
+    case "apply_patch": return target ? `Edited ${target}` : "Applied file changes";
+    case "web_search": return target ? `Searched web for ${target}` : "Searched the web";
+    case "web_fetch": return target ? `Fetched ${target}` : "Fetched web page";
+    case "skill": return target ? `Loaded ${target} skill` : "Loaded skill";
+    default: return `Completed ${describeToolCall(name, args)}`;
   }
 }
 
@@ -55,7 +121,7 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
   const resume = options.mode === "resume";
   const columns = Math.max(20, Math.floor(options.columns ?? 80));
   const maxMessageRows = Math.max(4, Math.floor(options.maxMessageRows ?? RESUME_MESSAGE_MAX_ROWS));
-  const toolById = new Map<string, string>(); // tool_call_id -> tool name (to summarize its result)
+  const toolById = new Map<string, { name: string; args: Record<string, any>; line: Line }>();
   let hiddenProgress = 0;
   const screenText = (text: string) => resume && wrappedRows(text, columns) > maxMessageRows
     ? tailByRows(text, maxMessageRows, columns)
@@ -76,13 +142,22 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
         let args: Record<string, any> = {};
         try { args = typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments) : (tc.function?.arguments ?? {}); } catch { /* keep {} */ }
         const name = tc.function?.name ?? "";
-        if (tc.id) toolById.set(tc.id, name);
-        out.push({ id: nextId(), kind: "tool_call", text: describeToolCall(name, args) });
+        const line: Line = { id: nextId(), kind: "tool_call", text: describeToolCall(name, args) };
+        if (tc.id) toolById.set(tc.id, { name, args, line });
+        out.push(line);
       }
     } else if (m.role === "tool") {
-      const name = toolById.get(m.tool_call_id);
+      const call = toolById.get(m.tool_call_id);
       const obs = contentToText(m.content).split("\n").slice(0, 400).join("\n");
-      out.push({ id: nextId(), kind: "tool_result", text: obs, summary: resultSummary(name, obs) });
+      const summary = resultSummary(call?.name, obs, call?.args);
+      if (resume && summary && call) {
+        const combined: Line = { id: nextId(), kind: "tool_result", text: `${call.line.text}\n${obs}`, summary };
+        const callIndex = out.indexOf(call.line);
+        if (callIndex >= 0) out.splice(callIndex, 1, combined);
+        else out.push(combined);
+      } else {
+        out.push({ id: nextId(), kind: "tool_result", text: obs });
+      }
     }
   }
   if (hiddenProgress) out.push({

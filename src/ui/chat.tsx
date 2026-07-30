@@ -25,7 +25,7 @@ import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./th
 import { probeSyncOutput, syncOutputDecision, wrapStdoutForSync } from "./sync-stdout.ts";
 import { FrameDiffer, HIT_SENTINEL } from "./frame-diff.ts";
 import { canFullscreen, emergencyRestore, installAltScreenGuard } from "./altscreen.ts";
-import { flattenLines, ScrollRegion, useRowScroll, useScroll } from "./scroll.tsx";
+import { flattenLines, projectLineRows, ScrollRegion, stickyPromptAnchor, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, primeAnsiCache, renderNodeRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
 import { DISABLE_MOUSE, isMouseEnabled, parseLastPointer, parseWheelAll } from "./mouse.ts";
@@ -34,6 +34,7 @@ import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { toolResultDisplayLines, TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateTokens } from "../core/agent.ts";
+import type { Usage } from "../core/cost.ts";
 import { loadConfig } from "../adapters/config.ts";
 import { agentsContextBlock, loadAgent } from "../adapters/agents.ts";
 import { ensureNekoHome, environmentBlock, projectContextBlock, rememberNote } from "../adapters/context.ts";
@@ -86,12 +87,15 @@ import {
   recoverTodos,
   renderTail,
   clampToRows,
+  countNewActivities,
   REPLAY_MAX_LINES,
   RESUME_SUMMARY_AT,
 } from "./chat-lines.ts";
 import { describeToolCall } from "../core/tools.ts";
 
 export { ApprovalBox, type Approval }; // re-exported for tests
+
+const PROMPT_ANCHOR_HEIGHT = 1; // mounted only while scrolling; live-tail height stays untouched
 
 const MODE_COLOR: Record<PermissionMode, string> = {
   default: "gray",
@@ -283,6 +287,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const turnInStartRef = useRef(0); // cost.promptTokens at turn start  -> live INPUT (up) counter, this turn's delta
   const turnOutStartRef = useRef(0); // cost.completionTokens at turn start -> live OUTPUT (down) counter, this turn's delta
   const turnCallsStartRef = useRef(0); // usage-bearing provider calls; distinguishes a turn sum from one request
+  const liveUsageRef = useRef<Usage | null>(null); // authoritative provider snapshot while the turn is still running
+  const turnGeneratedCharsRef = useRef(0); // monotonic across tool-segment flushes inside one provider call
+  const usageSnapshotCharsRef = useRef(0); // generated chars already represented by liveUsageRef
+  const turnInputEstimateRef = useRef(0); // immediate context estimate; marked ~ until provider usage arrives
   const turnStartedAtRef = useRef(0);
   // Recover the todo tracker for a session resumed AT STARTUP (--resume/--continue), so its plan shows.
   const [todos, setTodos] = useState<{ content: string; status: string }[]>(() =>
@@ -323,8 +331,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
     }).catch(() => {});
   }, []);
-  const [viewH, setViewH] = useState(Math.max(3, (stdout?.rows ?? 24) - 8)); // measured transcript viewport height
-  const scrollBoxRef = useRef<any>(null); // the flexGrow transcript box, measured for viewH
+  const [viewH, setViewH] = useState(Math.max(3, (stdout?.rows ?? 24) - 8)); // stable outer transcript height (anchor + band)
+  const transcriptBoxRef = useRef<any>(null); // measure the outer flex region so a conditional anchor cannot resize its own input
   const scrollAwayLenRef = useRef(0); // lines.length when the user scrolled away -> "N new messages" pill count
   const estCacheRef = useRef({ len: -1, val: 0 }); // footer ctx% estimate, recomputed only when messages count changes
   // Tab title = the session NAME (stable), not the per-turn prompt. A resumed session keeps its name: its
@@ -542,6 +550,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           .filter(Boolean)
           .join("\n\n"),
       onDelta: (t, kind) => {
+        turnGeneratedCharsRef.current += t.length;
         if (kind === "reasoning") {
           reasoningRef.current += t;
           // Reasoning is transient (display-only, only the last lines shown) — keep a bounded tail so
@@ -559,7 +568,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         maybePump();
       },
       onEvent: (kind, data) => {
-        if (kind === "tool_call") {
+        if (kind === "usage") {
+          liveUsageRef.current = data as Usage;
+          usageSnapshotCharsRef.current = turnGeneratedCharsRef.current;
+        } else if (kind === "usage_estimate") {
+          // A new Agent step is pending. Its current context has not been booked yet, so replace the
+          // prior step's exact snapshot with the Agent's whole-turn estimate until the provider reports.
+          liveUsageRef.current = null;
+          turnInputEstimateRef.current = Math.max(
+            0,
+            Number(data?.prompt_tokens ?? turnInStartRef.current) - turnInStartRef.current,
+          );
+        } else if (kind === "tool_call") {
           flushStream();
           // Defer the commit: show this call LIVE with a blinking dot (RunningLine) while it runs;
           // it commits to <Static> paired with its result below. Keyed by call id so parallel calls pair up.
@@ -575,11 +595,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           const idx = inflightRef.current.findIndex((x) => x.key === k);
           const done = idx >= 0 ? inflightRef.current.splice(idx, 1)[0] : { text: describeToolCall(data.call?.name, data.call?.arguments) };
           syncInflight();
-          addLine("tool_call", done.text);
-          // Store the full result (capped) for Ctrl+O; read-type tools get a 1-line summary
-          // (Claude-style), keeping the full output one keystroke away.
+          // Successful activity becomes one past-tense line. The same Line retains call + output for
+          // Ctrl+O; failures remain expanded as a call followed by its diagnostic.
           const obs = contentToText(data.observation).split("\n").slice(0, 400).join("\n");
-          addLine("tool_result", obs, resultSummary(data.call?.name, obs));
+          const summary = resultSummary(data.call?.name, obs, data.call?.arguments);
+          if (summary) addLine("tool_result", `${done.text}\n${obs}`, summary);
+          else {
+            addLine("tool_call", done.text);
+            addLine("tool_result", obs);
+          }
           setTodos([...registryRef.current!.todos]); // reflect todo_write changes
           persistRef.current(); // a tool finished + its result is in messages -> checkpoint (survives a kill)
         } else if (kind === "step") {
@@ -778,14 +802,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }, 140);
     return true;
   };
-  // The total band content + the top CONTENT row currently visible (matches FrameDiffer.windowRows:
-  // start = max(0, total - dist - viewH)). Maps a screen row y (1..viewH) to a content row index.
+  // The total band content + the top CONTENT row currently visible (matches FrameDiffer.windowRows).
+  // bandViewH is one row shorter only while the sticky prompt owns screen row 1.
   const bandTotal = () => paddedRowsRef.current.length + streamRowsRef.current.length;
-  const bandStart = () => Math.max(0, bandTotal() - rowScroll.dist - viewH);
-  const contentRowAt = (y: number) => {
+  const bandStart = () => Math.max(0, bandTotal() - rowScroll.dist - bandViewH);
+  const contentRowAt = (screenY: number) => {
     const total = bandTotal();
     if (total === 0) return 0;
-    return Math.max(0, Math.min(total - 1, bandStart() + Math.max(1, Math.min(viewH, y)) - 1));
+    const bandY = screenY - (promptAnchor ? PROMPT_ANCHOR_HEIGHT : 0);
+    return Math.max(0, Math.min(total - 1, bandStart() + Math.max(1, Math.min(bandViewH, bandY)) - 1));
   };
   // Normalize anchor+focus (CONTENT rows) into a reading-order selection {r0,c0 <= r1,c1}.
   const selFrom = (a: { x: number; row: number }, b: { x: number; row: number }) => {
@@ -914,15 +939,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     if (startupNeedsChoiceRef.current && resumedRef.current) resumeInto(resumedRef.current);
   }, []);
-  // Tell the frame differ where the scrollable band is: in fullscreen the Ink frame starts at screen
-  // row 1 (alt-screen + clear + home), so the viewport occupies absolute rows 1..viewH and a scroll can
-  // be emitted as a DECSTBM hardware shift. Inline: no band, plain line-diff only.
-  // Set IN THE RENDER BODY, not an effect: Ink writes the frame at COMMIT, before effects run - an
-  // effect-set band means every geometry change (viewH shrinking when a picker opens) composes that
-  // frame with the STALE height, and if the next frame is byte-identical the diff skips it and the
-  // mis-composed screen FREEZES (stale transcript rows over the /resume picker, image #60). A field
-  // write on a plain object - idempotent, no render loop. The effect below only clears on unmount.
-  frameDiffer?.setBand(fullscreen ? { top: 1, height: viewH } : null);
+  // Band geometry is set later in the render body, after the sticky prompt is known. Keep teardown here.
   useEffect(() => () => frameDiffer?.setBand(null), []);
   // (Leaving fullscreen no longer reprints the thread; see toggleFullscreen + inlineBaseline. The
   // terminal's alt-screen restore owns the primary, so there's nothing to wipe or re-emit here.)
@@ -946,14 +963,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     return () => { if (altDisposeRef.current) { altDisposeRef.current(); altDisposeRef.current = null; } };
   }, []);
-  // Keep the transcript viewport height in sync with the flex-grown scroll box's ACTUAL height (it fills
-  // whatever the live region + input leave). Runs every render; the !== guard makes it converge in a
-  // frame or two without looping. Only meaningful in fullscreen (the box only mounts then).
+  // Measure the OUTER transcript region (sticky anchor + scroll band), whose height does not change when
+  // the anchor mounts. Measuring the inner band made viewH shrink by one row, which changed the chosen
+  // anchor, unmounted it, grew viewH again, and created a maximum-update-depth loop.
   useEffect(() => {
-    if (!fullscreen || !scrollBoxRef.current) return;
-    const h = measureElement(scrollBoxRef.current).height;
+    if (!fullscreen || !transcriptBoxRef.current) return;
+    const h = measureElement(transcriptBoxRef.current).height;
     if (h > 0 && h !== viewH) setViewH(h); // absolute line-diff (frame-diff.ts) makes the row-shift ghost-free
-
   });
 
   // Re-layout on terminal resize - and after the drag settles, do a FULL repaint. Why the full reset is
@@ -1129,7 +1145,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       } else if (c === "n" || key.escape) {
         kind = "no";
       }
-      if (kind) settleApproval(kind);
+      if (kind) {
+        const draftBeforeDecision = promptRef.current;
+        settleApproval(kind);
+        // The approval hook is always mounted so it cannot miss a fast key, while the previous TextInput
+        // listener is removed in a passive effect. During that tiny overlap the same y/a/n can reach both.
+        // Restore the pre-decision draft after all listeners for this input chunk have run: the decision
+        // never leaks into the composer and an existing queued draft is preserved verbatim.
+        queueMicrotask(() => { if (approvalFlashRef.current) setInput(draftBeforeDecision); });
+      }
       return;
     }
     if (overlay || viewer || search) return; // let the overlay / viewer / find bar own the rest of the keys (Ctrl+C above still works)
@@ -1206,19 +1230,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
       }
-      const h = historyRef.current;
-      if (key.upArrow && historyPos.current > 0) {
-        historyPos.current -= 1;
-        setInput(h[historyPos.current]);
-      } else if (key.downArrow) {
-        if (historyPos.current < h.length - 1) {
-          historyPos.current += 1;
-          setInput(h[historyPos.current]);
-        } else {
-          historyPos.current = h.length;
-          setInput("");
-        }
-      }
+      // Ordinary Up/Down belongs to TextInput. It invokes history only at the first/last visual row.
     },
     // Not while a find bar or the /transcript viewer owns Up/Down (their nav would double with history).
     { isActive: !busy && approval === null && overlay === null && viewer === null && search === null },
@@ -2134,6 +2146,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     turnInStartRef.current = agentRef.current!.cost.promptTokens;
     turnOutStartRef.current = agentRef.current!.cost.completionTokens;
     turnCallsStartRef.current = agentRef.current!.cost.calls;
+    liveUsageRef.current = null;
+    turnGeneratedCharsRef.current = 0;
+    usageSnapshotCharsRef.current = 0;
+    const estimatedUser = imgs.length
+      ? [{ role: "user", content: [{ type: "text", text: toSend }, ...imgs.map((image) => ({ type: "image_url", image_url: { url: image.url } }))] }]
+      : [{ role: "user", content: toSend }];
+    turnInputEstimateRef.current = estimateTokens([...agentRef.current!.messages, ...estimatedUser]);
     turnStartedAtRef.current = turnStart;
     busyRef.current = true; // sync now so a keystroke landing this instant queues (not just after render)
     setBusy(true);
@@ -2481,24 +2500,62 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [warmTick, setWarmTick] = useState(0); // bumped per warm chunk -> rows rebuild with upgrades
   // Computed ALWAYS (cheap: cached rows, else plain fallback - no markdown work), so the band content is
   // READY for the very first fullscreen frame instead of being empty until the next render.
-  const ansiRows = useMemo(() => {
-    const out: string[] = [];
-    for (const l of lines) out.push(...(getCachedRows(l, contentCols) ?? fallbackRows(l)));
-    return out;
-  }, [lines, contentCols, warmTick]);
+  const ansiProjection = useMemo(
+    () => projectLineRows(lines, (line) => getCachedRows(line, contentCols) ?? fallbackRows(line)),
+    [lines, contentCols, warmTick],
+  );
+  const ansiRows = ansiProjection.rows;
+  const [streamRows, setStreamRows] = useState<string[]>([]);
+  const streamRowsRef = useRef<string[]>([]);
+  streamRowsRef.current = streamRows;
+  const bandRowCount = ansiRows.length + streamRows.length;
   // Row scrolling anchored from the END (dist=0 -> pinned): stays put as the warmer swaps rows above.
   // Glide hops repaint the band DIRECTLY through the differ (sub-ms) - React renders only at gesture
   // edges. The refs keep the hop callback reading current values without restarting the animation.
   const paddedRowsRef = useRef<string[]>([]);
   const bandActiveRef = useRef(false);
   const rowScroll = useRowScroll(
-    ansiRows.length,
+    bandRowCount,
     viewH,
     // The glide's fast path exists ONLY with the differ (sub-ms band repaints). Without it (Windows
     // default) pass NO hop callback - useRowScroll then scrolls instantly, one render per gesture.
     frameDiffer ? (dist) => { if (bandActiveRef.current) frameDiffer.setBandContent(paddedRowsRef.current, dist, streamRowsRef.current); } : undefined,
     Math.max(4, Math.round(1000 / fps)), // glide hop follows the resolved fps (live-adjustable via /fps)
   );
+  const promptAnchor = fullscreen && !search
+    ? stickyPromptAnchor(ansiProjection.spans, bandRowCount, viewH, rowScroll.dist, PROMPT_ANCHOR_HEIGHT)
+    : null;
+  const promptAnchorRows = promptAnchor ? PROMPT_ANCHOR_HEIGHT : 0;
+  const bandViewH = Math.max(1, viewH - promptAnchorRows);
+  // Set this IN THE RENDER BODY, before Ink commits. The sticky header owns row 1 while reading;
+  // FrameDiffer must start the transcript band on row 2 or its compose pass overwrites the visible
+  // prompt and makes the SGR click target lie. At the live tail there is no header and the band keeps
+  // the full screen from row 1. A plain-object write is idempotent and creates no React render loop.
+  frameDiffer?.setBand(fullscreen ? { top: 1 + promptAnchorRows, height: bandViewH } : null);
+  const promptAnchorText = promptAnchor
+    ? trunc(promptAnchor.line.text.split(/\n\s*\n/, 1)[0].replace(/\s+/g, " ").trim(), Math.max(4, contentCols - 4))
+    : "";
+  const [promptAnchorHover, setPromptAnchorHover] = useState(false);
+  const promptJumpLineRef = useRef<number | null>(null);
+  const jumpToPrompt = (anchor: NonNullable<typeof promptAnchor>) => {
+    promptJumpLineRef.current = anchor.line.id;
+    rowScroll.toRow(anchor.start);
+  };
+  const scrollRows = (delta: number) => { promptJumpLineRef.current = null; rowScroll.by(delta); };
+  const scrollTop = () => { promptJumpLineRef.current = null; rowScroll.top(); };
+  const scrollBottom = () => { promptJumpLineRef.current = null; rowScroll.toBottom(); };
+  useEffect(() => { if (!promptAnchor) setPromptAnchorHover(false); }, [promptAnchor?.line.id]);
+  // A rich-cache upgrade can change row counts below the viewport after a click. Keep the requested
+  // PROMPT anchored by semantic line id until the user deliberately scrolls again; a raw row index would
+  // silently drift to a different turn while the background warmer is still working.
+  useEffect(() => {
+    const id = promptJumpLineRef.current;
+    if (id == null) return;
+    const span = ansiProjection.spans.find((candidate) => candidate.line.id === id);
+    if (!span) { promptJumpLineRef.current = null; return; }
+    const visibleStart = Math.max(0, bandRowCount - rowScroll.dist - viewH);
+    if (visibleStart !== span.start) rowScroll.toRow(span.start);
+  }, [ansiProjection, bandRowCount, viewH]);
   // Reading mode <-> live mode for the stream pump: scrolled away slows the sync (see maybePump);
   // re-pinning to the bottom pumps at once so the tail is current the moment it is visible again.
   useEffect(() => {
@@ -2536,9 +2593,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // (not during render): renderNodeRows drives the hidden Ink instance, which is a nested render that
   // React forbids inside the parent's render phase (the "nested updates from render" warning). The tail
   // is clamped so per-delta cost is O(viewport). `stream` state is already throttled, so is this.
-  const [streamRows, setStreamRows] = useState<string[]>([]);
-  const streamRowsRef = useRef<string[]>([]);
-  streamRowsRef.current = streamRows;
   useEffect(() => {
     if (!fullscreen || !stream) { if (streamRowsRef.current.length) setStreamRows([]); return; }
     const md = clampToRows(renderTail(stream), Math.max(6, viewH - 2), contentCols);
@@ -2555,7 +2609,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   }, [fullscreen, stream, contentCols, viewH]);
   useEffect(() => {
     frameDiffer?.setBandContent(bandActiveRef.current ? paddedRows : null, rowScroll.dist, streamRows);
-  }, [fullscreen, search !== null, paddedRows, rowScroll.dist, viewH, streamRows]);
+  }, [fullscreen, search !== null, paddedRows, rowScroll.dist, bandViewH, streamRows]);
   useEffect(() => () => clearAnsiCache(), []); // free on unmount; resize re-keys by width mismatch
   // Flat rows exist ONLY for the find bar (in-place match highlighting needs row positions).
   const flat = useMemo(
@@ -2567,16 +2621,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     if (rowScroll.scrolled) scrollAwayLenRef.current = lines.length;
   }, [rowScroll.scrolled]);
-  const newSince = rowScroll.scrolled
-    ? lines.slice(scrollAwayLenRef.current).filter((l) => l.kind === "user" || l.kind === "assistant" || l.kind === "tool_call").length
-    : 0;
+  const newSince = rowScroll.scrolled ? countNewActivities(lines, scrollAwayLenRef.current) : 0;
   // The jump pill's label + screen hit-box (row below the viewport, centered): shared by the hover
   // highlight and the click handler so what LIGHTS UP is exactly what's CLICKABLE.
   const [pillHover, setPillHover] = useState(false);
   const pillShown = fullscreen && rowScroll.scrolled && !search;
   const pillLabel = newSince > 0 ? ` ↓ ${newSince} new message${newSince > 1 ? "s" : ""} · click or ctrl+End ` : ` Jump to bottom (ctrl+End) ↓ `;
   const pillX1 = 2 + Math.max(0, Math.floor((contentCols - pillLabel.length) / 2)) + 1; // 1-based col
-  const pillHit = (x: number, y: number) => pillShown && y === viewH + 1 && x >= pillX1 - 2 && x <= pillX1 + pillLabel.length + 1;
+  const bandTopRow = promptAnchorRows + 1;
+  const bandBottomRow = promptAnchorRows + bandViewH;
+  const pillRow = bandBottomRow + 1;
+  const pillHit = (x: number, y: number) => pillShown && y === pillRow && x >= pillX1 - 2 && x <= pillX1 + pillLabel.length + 1;
   const inputPrompt = awaitingKey ? "key> " : pendingMulti ? "... " : "> ";
   const inputCols = Math.max(1, contentCols - inputPrompt.length);
   useEffect(() => { if (!pillShown) setPillHover(false); }, [pillShown]);
@@ -2603,6 +2658,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       // are consumed here; clicks/wheels fall through to their handlers below.
       const ptr = parseLastPointer(input);
       if (ptr) {
+        const anchorHit = Boolean(promptAnchor && ptr.y === 1);
+        setPromptAnchorHover(anchorHit);
+        if (anchorHit && ptr.kind === "press" && ptr.left && promptAnchor) {
+          clearSelection();
+          setInputSel(null);
+          jumpToPrompt(promptAnchor);
+          return;
+        }
         // Voice controls use the last PAINTED frame's hit targets, so terminal padding, wrapping,
         // resize, and Windows display scaling cannot desync the visible button from its click.
         const voiceControls = Boolean(voiceSnapshot
@@ -2634,8 +2697,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (!search && ptr.kind === "press" && ptr.left) {
           clearSelection();                                                       // a fresh drag drops any old selection
           setInputSel(null);                                                      // ...including one over the prompt
-          if (pillHit(ptr.x, ptr.y)) return rowScroll.toBottom();                 // the pill is a click target
-          if (ptr.y > viewH) {
+          if (pillHit(ptr.x, ptr.y)) return scrollBottom();                       // the pill is a click target
+          if (ptr.y > bandBottomRow) {
             // Click in the input area: move the caret to the clicked cell (Claude Code parity).
             // The differ knows the hardware cursor's screen cell; TextInput owns the layout math,
             // so only the (dRow, dCol) delta crosses the boundary. The MAX_INPUT_LINES window
@@ -2653,7 +2716,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             selAnchor.current = null; // a press in the input never starts a TRANSCRIPT selection
             return;
           }
-          selAnchor.current = ptr.y >= 1 && ptr.y <= viewH ? { x: ptr.x, row: contentRowAt(ptr.y) } : null; // begin in the band only
+          selAnchor.current = ptr.y >= bandTopRow && ptr.y <= bandBottomRow ? { x: ptr.x, row: contentRowAt(ptr.y) } : null; // begin in the band only
           return;
         }
         if (ptr.kind === "move") {
@@ -2670,8 +2733,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           if (selAnchor.current && ptr.left) {
             // Auto-scroll when the drag reaches an edge, so a selection can run PAST the fold: dragging
             // at/above the top row scrolls up (revealing earlier text); at/below the bottom scrolls down.
-            if (ptr.y <= 1) rowScroll.by(-EDGE_SCROLL);
-            else if (ptr.y >= viewH) rowScroll.by(EDGE_SCROLL);
+            if (ptr.y <= bandTopRow) scrollRows(-EDGE_SCROLL);
+            else if (ptr.y >= bandBottomRow) scrollRows(EDGE_SCROLL);
             const focus = { x: ptr.x, row: contentRowAt(ptr.y) };
             frameDiffer?.setSelection(selFrom(selAnchor.current, focus), gutter + contentCols); // extend the drag
           }
@@ -2714,7 +2777,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const w = parseWheelAll(input); // wheel still scrolls the flat window while finding
         if (w) return w.dir === "up" ? scroll.up(3 * w.count) : scroll.down(3 * w.count);
         // Esc: close find and return to the live rich tail (predictable; row domains differ).
-        if (key.escape) { setSearch(null); rowScroll.toBottom(); return; }
+        if (key.escape) { setSearch(null); scrollBottom(); return; }
         if (key.return || key.downArrow) { // next match
           const idx = search.matches.length ? (search.idx + 1) % search.matches.length : 0;
           jumpToMatch(search.matches, idx); return setSearch({ ...search, idx });
@@ -2738,14 +2801,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       if (key.ctrl && input === "f") return setSearch({ q: "", matches: [], idx: 0 }); // open find
       const wheel = parseWheelAll(input);
-      if (wheel) return rowScroll.by((wheel.dir === "up" ? -1 : 1) * ROWS_PER_NOTCH * wheel.count); // content-anchored selection follows the scroll
+      if (wheel) return scrollRows((wheel.dir === "up" ? -1 : 1) * ROWS_PER_NOTCH * wheel.count); // content-anchored selection follows the scroll
       const page = Math.max(1, viewH - 1); // one viewport of rows, minus a row of overlap for context
-      if (key.pageUp) return rowScroll.by(-page);
-      if (key.pageDown) return rowScroll.by(page);
-      if (key.ctrl && key.upArrow) return rowScroll.by(-1);
-      if (key.ctrl && key.downArrow) return rowScroll.by(1);
-      if (key.home) return rowScroll.top();
-      if (key.end) return rowScroll.toBottom(); // plain End AND ctrl+End (the advertised chord) both jump
+      if (key.meta && key.upArrow && promptAnchor) return jumpToPrompt(promptAnchor);
+      if (key.pageUp) return scrollRows(-page);
+      if (key.pageDown) return scrollRows(page);
+      if (key.ctrl && key.upArrow) return scrollRows(-1);
+      if (key.ctrl && key.downArrow) return scrollRows(1);
+      if (key.home) return scrollTop();
+      if (key.end) return scrollBottom(); // plain End AND ctrl+End (the advertised chord) both jump
     },
     { isActive: fullscreen && !overlay && !viewer && approval === null },
   );
@@ -2764,13 +2828,31 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // leave; measureElement feeds that height back as viewH. overflow:hidden guards a 1-frame height
         // lag from spilling into the input. A footer strip shows the scroll position + keys.
         <Box flexDirection="column" flexGrow={1} minHeight={0}>
-          <Box ref={scrollBoxRef} flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
+          <Box ref={transcriptBoxRef} flexDirection="column" flexGrow={1} minHeight={0}>
+          {/* The navigation row exists only while reading history. Keeping it out of the live tail
+              preserves one scarce row for the composer, todo panel, and voice controls. */}
+          {promptAnchor ? (
+            <Box
+              height={PROMPT_ANCHOR_HEIGHT}
+              flexShrink={0}
+              width={contentCols}
+              paddingLeft={1}
+              paddingRight={1}
+              backgroundColor={promptAnchorHover ? "#5a5a5a" : "#3d3d3d"}
+            >
+              <Text wrap="truncate-end">
+                <Text color="cyan">{"> "}</Text>
+                <Text color="white">{promptAnchorText}</Text>
+              </Text>
+            </Box>
+          ) : null}
+          <Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
             {search ? (
               // Find mode: flat rows so matches can be highlighted in place + jumped to.
               <ScrollRegion
                 rows={flat}
                 offset={scroll.offset}
-                height={viewH}
+                height={bandViewH}
                 width={contentCols}
                 highlight={search.q}
                 currentRow={search.matches.length ? search.matches[search.idx] : undefined}
@@ -2779,11 +2861,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
               // Compose-at-the-write-layer: Ink renders the band BLANK (zero squash/wrap/measure/output
               // cost for the viewport on every keystroke - the typing path costs the same as inline);
               // the differ splices the real rows into each frame and repaints scrolls itself.
-              <Box height={viewH} width={contentCols} />
+              <Box height={bandViewH} width={contentCols} />
             ) : (
               // No differ (NEKO_INCR=0 / tests): render the viewport in-tree as before.
-              <RichView rows={streamRows.length ? [...ansiRows, ...streamRows] : ansiRows} dist={rowScroll.dist} viewH={viewH} width={contentCols} />
+              <RichView rows={streamRows.length ? [...ansiRows, ...streamRows] : ansiRows} dist={rowScroll.dist} viewH={bandViewH} width={contentCols} />
             )}
+          </Box>
           </Box>
           {pillShown ? (
             // Claude-style jump pill: clickable, with a REAL hover state (any-motion tracking) - the
@@ -2857,13 +2940,31 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             elapsed={elapsed}
             // Both re-read every 80ms frame so the meters count up live.
             // liveIn: cumulative input billed this turn — grows each step as history is re-sent.
-            liveIn={() => Math.max(0, agentRef.current!.cost.promptTokens - turnInStartRef.current)}
-            // liveOut: output tokens counted this turn + a ~4-chars/token estimate of whatever is
-            // streaming NOW (content, reasoning, or a big tool-call's args) — so it climbs even mid-write.
-            liveOut={() =>
-              Math.max(0, agentRef.current!.cost.completionTokens - turnOutStartRef.current) +
-              Math.ceil((streamRef.current.length + reasoningRef.current.length + toolStreamRef.current.length) / 4)
-            }
+            liveIn={() => {
+              if (liveUsageRef.current) return {
+                value: Math.max(0, (liveUsageRef.current.prompt_tokens ?? 0) - turnInStartRef.current),
+                approximate: false,
+              };
+              const booked = Math.max(0, agentRef.current!.cost.promptTokens - turnInStartRef.current);
+              return { value: Math.max(booked, turnInputEstimateRef.current), approximate: true };
+            }}
+              // Authoritative usage covers every character through its snapshot. Add only later streamed
+              // characters, which stay monotonic even when a provider-managed tool flushes visible buffers.
+              liveOut={() => {
+                const booked = Math.max(0, agentRef.current!.cost.completionTokens - turnOutStartRef.current);
+                if (liveUsageRef.current) {
+                  const reported = Math.max(0, (liveUsageRef.current.completion_tokens ?? 0) - turnOutStartRef.current);
+                  const postSnapshot = Math.ceil(Math.max(
+                    0,
+                    turnGeneratedCharsRef.current - usageSnapshotCharsRef.current,
+                  ) / 4);
+                  return { value: reported + postSnapshot, approximate: postSnapshot > 0 };
+                }
+                const estimated = booked + Math.ceil(
+                  (streamRef.current.length + reasoningRef.current.length + toolStreamRef.current.length) / 4,
+                );
+                return { value: estimated, approximate: true };
+              }}
             step={step}
             queued={queued}
             effort={cfg.effort}
@@ -3002,6 +3103,24 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                   value={input}
                   onChange={setInput}
                   onSubmit={onSubmit}
+                  onHistoryUp={!busy ? () => {
+                    const h = historyRef.current;
+                    if (historyPos.current > 0) {
+                      historyPos.current -= 1;
+                      setInput(h[historyPos.current]);
+                    }
+                  } : undefined}
+                  onHistoryDown={!busy ? () => {
+                    const h = historyRef.current;
+                    if (historyPos.current < h.length - 1) {
+                      historyPos.current += 1;
+                      setInput(h[historyPos.current]);
+                    } else {
+                      historyPos.current = h.length;
+                      setInput("");
+                    }
+                  } : undefined}
+                  verticalNavigation={!(slashOpen && slashMatches.length)}
                   mask={awaitingKey}
                   width={inputCols}
                   pastedContents={pastedContentsRef.current}

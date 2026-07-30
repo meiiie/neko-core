@@ -24,6 +24,7 @@ import { appendFileSync } from "node:fs";
 import { setHitTargets } from "./hit-targets.ts";
 
 export interface ScrollBand { top: number; height: number } // 1-based absolute top row of the scrollable band
+const bandBase = (band: ScrollBand): number => Math.max(0, band.top - 1); // frame-array index
 
 const ESC = "\x1b[";
 const EL = `${ESC}K`; // erase to end of line
@@ -356,7 +357,8 @@ export class FrameDiffer {
     const win = this.windowRows();
     if (!win || !this.band) return lines;
     const out = lines.slice();
-    for (let i = 0; i < this.band.height && i < out.length; i++) out[i] = win[i];
+    const base = bandBase(this.band);
+    for (let i = 0; i < this.band.height && base + i < out.length; i++) out[base + i] = win[i];
     return out;
   }
 
@@ -383,8 +385,9 @@ export class FrameDiffer {
     if (!this.writer || !this.prev || !this.band) return;
     const win = this.windowRows();
     if (!win) return;
-    const H = Math.min(this.band.height, this.prev.length);
-    const prevBand = this.prev.slice(0, H);
+    const base = bandBase(this.band);
+    const H = Math.min(this.band.height, Math.max(0, this.prev.length - base));
+    const prevBand = this.prev.slice(base, base + H);
     let anyChange = false;
     for (let i = 0; i < H; i++) if (win[i] !== prevBand[i]) { anyChange = true; break; }
     if (!anyChange) return;
@@ -404,7 +407,7 @@ export class FrameDiffer {
     } else {
       for (let i = 0; i < H; i++) if (win[i] !== prevBand[i]) out += `${ESC}${top + i};1H` + win[i] + EL;
     }
-    for (let i = 0; i < H; i++) this.prev[i] = win[i];
+    for (let i = 0; i < H; i++) this.prev[base + i] = win[i];
     // Sustained activity (a long scroll, streaming) never goes quiet enough for the trailing heal -
     // fold a full repaint in at least every ~2s so displacement can't accumulate mid-gesture.
     if (this.healEnabled() && Date.now() - this.lastResyncAt > 2000) out = this.paintAll();
@@ -485,10 +488,14 @@ export class FrameDiffer {
     // next diffs never repair (the mangled /resume picker, image #60). Chrome changed -> plain line-diff.
     const band = this.band;
     if (band && geomOk && this.hwScrollEnabled() && band.height >= 8 && changed.length > band.height / 2) {
+      const base = bandBase(band);
+      const end = Math.min(lines.length, base + band.height);
       let chromeUnchanged = true;
-      for (let i = band.height; i < lines.length; i++) if (lines[i] !== prev[i]) { chromeUnchanged = false; break; }
+      for (let i = 0; i < lines.length; i++) {
+        if ((i < base || i >= end) && lines[i] !== prev[i]) { chromeUnchanged = false; break; }
+      }
       if (chromeUnchanged) {
-        const scroll = detectShift(prev, lines, band.height);
+        const scroll = detectShift(prev.slice(base, end), lines.slice(base, end), end - base);
         if (scroll) { trace({ ev: "hw-scroll", dir: scroll.dir, k: scroll.k, bandH: band.height, n: lines.length }); return emitScroll(prev, lines, band, scroll); }
       }
     }
@@ -589,6 +596,7 @@ export function detectShift(prev: string[], next: string[], bandH: number): { di
  * Absolute addressing (frame line i = screen row i+1; guaranteed by the band contract). */
 function emitScroll(prev: string[], next: string[], band: ScrollBand, s: { dir: "up" | "down"; k: number }): string {
   const top = band.top;                    // 1-based
+  const base = bandBase(band);              // 0-based frame index
   const bottom = band.top + band.height - 1;
   let out = `${ESC}${top};${bottom}r`;     // DECSTBM: confine scrolling to the band
   out += s.dir === "up" ? `${ESC}${s.k}S` : `${ESC}${s.k}T`; // SU / SD: the terminal shifts the region
@@ -598,15 +606,15 @@ function emitScroll(prev: string[], next: string[], band: ScrollBand, s: { dir: 
   const shifted: (string | null)[] = [];
   for (let i = 0; i < band.height; i++) {
     shifted[i] = s.dir === "up"
-      ? (i < band.height - s.k ? prev[i + s.k] : null)   // null = blank revealed row
-      : (i >= s.k ? prev[i - s.k] : null);
+      ? (i < band.height - s.k ? prev[base + i + s.k] : null)   // null = blank revealed row
+      : (i >= s.k ? prev[base + i - s.k] : null);
   }
   for (let i = 0; i < band.height; i++) {
-    if (shifted[i] !== next[i]) out += `${ESC}${top + i};1H` + next[i] + EL;
+    if (shifted[i] !== next[base + i]) out += `${ESC}${top + i};1H` + next[base + i] + EL;
   }
-  // Chrome below the band: plain per-line diff, absolute rows.
-  for (let i = band.height; i < next.length; i++) {
-    if (next[i] !== prev[i]) out += `${ESC}${i + 1};1H` + next[i] + EL;
+  // Chrome above and below the band: plain per-line diff, absolute rows.
+  for (let i = 0; i < next.length; i++) {
+    if ((i < base || i >= base + band.height) && next[i] !== prev[i]) out += `${ESC}${i + 1};1H` + next[i] + EL;
   }
   out += `${ESC}${next.length};1H`;        // end on the last frame line, as Ink expects
   return out;
