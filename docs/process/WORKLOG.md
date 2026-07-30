@@ -31,10 +31,11 @@ or stopping condition executable.
   numeric/letter-only SKUs and letter-only/`#` MPNs without weakening strict auto-mode rejection of broad
   descriptions or price-like numbers.
 - `neko procurement source-plan` now exposes the planner through the standalone binary, without repo-only
-  `rtk` or an unshipped Bun runtime. Image discovery uses the existing platform-neutral
-  `neko run --profile nvidia --image` vision pre-pass instead of POSIX-only environment syntax.
+  `rtk` or an unshipped Bun runtime. Source-checkout sessions use the equivalent
+  `bun bin/neko.ts procurement source-plan` fallback instead of assuming a global `neko`. Image discovery
+  uses the platform-neutral `--profile nvidia --image` surface through the matching installed/source entry point.
 
-Evidence: current + stable TypeScript clean; **909/909 tests, 4,023 assertions across 97 files**; doctor and policy
+Evidence: current + stable TypeScript clean; **909/909 tests, 4,025 assertions across 97 files**; doctor and policy
 PASS; clean production build + UI/input probes PASS; focused secret scan and `git diff --check` clean.
 
 ## 2026-07-29 - v0.20.0: photography end to end, research-first

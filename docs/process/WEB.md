@@ -47,8 +47,9 @@ extract verbatim, compute in code.
 ### Procurement retrieval: identifier cascade + evidence-aware stopping
 
 A broad product description is a discovery query, not a stable identity. Keep a small candidate ledger;
-when any result reveals a SKU/MPN/GTIN, pivot the top objective-relevant candidates through the standalone
-`neko procurement source-plan` command. The helper emits an exact lexical query, an identifier-specific
+when any result reveals a SKU/MPN/GTIN, pivot the top objective-relevant candidates through the installed
+`neko procurement source-plan` command, or `bun bin/neko.ts procurement source-plan` when the current
+session itself runs from a source checkout without a global `neko`. The helper emits an exact lexical query, an identifier-specific
 Websosanh URL, and separate retailer-domain queries. Its default `auto` mode accepts strict SKU/GTIN forms;
 pass `--kind sku` for a source-labelled numeric/letter-only SKU, or `--kind mpn` for a manufacturer part
 number such as a letter-only or `#`-suffixed MPN. It never joins domains with `OR`: dogfooding on

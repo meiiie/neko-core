@@ -77,8 +77,10 @@ The hands it uses: `web_search` + `web_fetch` today; a **browser MCP** (Playwrig
 (Shopee/Tiki) and, later, a **voice-call MCP** to phone vendors for stock/quotes (ask only, never buy).
 
 A skill can ship more than a SKILL.md — the procurement skill bundles:
-- **Standalone helpers** — required runtime paths belong behind `neko`; for example,
+- **Standalone helpers** — required installed-runtime paths belong behind `neko`; for example,
   `neko procurement source-plan` exposes exact-identifier planning without requiring a source tree or Bun.
+  Contributor docs and skills must also show `bun bin/neko.ts ...` when the same command can run from a
+  source checkout without a global `neko`.
 - **`scripts/`** — source/development helpers. `make-sheet.ts` turns a normalized offer table into a real
   `.xlsx` with clickable hyperlinks + auto-filter (zero-dependency, runs under `bun`).
 - **`evals/`** — a deterministic check (`run-evals.ts`): fixed input (no network), `--trials N` ->

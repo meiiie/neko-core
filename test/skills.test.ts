@@ -40,10 +40,12 @@ test("procurement makes the exact-SKU cascade executable before detailed tactics
   expect(skill.body).toContain("KHÔNG gộp nhiều `site:` bằng `OR`");
   expect(skill.body).toContain("cao nhất đã xác minh trong các nguồn đã khảo sát");
   expect(skill.body).toContain('neko procurement source-plan "<IDENTIFIER>"');
+  expect(skill.body).toContain('bun bin/neko.ts procurement source-plan "<IDENTIFIER>"');
   expect(skill.body).not.toContain('bun "<skill files dir>/scripts/source-plan.ts"');
   expect(skill.body).toContain("--kind sku");
   expect(skill.body).toContain("--kind mpn");
   expect(skill.body).toContain("neko run --profile nvidia --image");
+  expect(skill.body).toContain("bun bin/neko.ts run --profile nvidia --image");
   expect(skill.body).not.toContain("env NEKO_MODEL=");
   expect(skill.body).toContain("tối đa 3–5");
   expect(skill.body).toContain("nếu chỉ có 1–2");
