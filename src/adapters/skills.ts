@@ -30,16 +30,28 @@ function frontmatterDescription(frontmatter: string): string {
   const index = lines.findIndex((line) => /^description:\s*/.test(line));
   if (index < 0) return "";
   const value = lines[index].replace(/^description:\s*/, "").trim();
-  if (!/^[>|](?:(?:[1-9][+-]?)|(?:[+-][1-9]?))?(?:\s+#.*)?$/.test(value)) return value;
+  const header = value.replace(/\s+#.*$/, "");
+  if (!/^[>|](?:(?:[1-9][+-]?)|(?:[+-][1-9]?))?$/.test(header)) return value;
 
   const block: string[] = [];
+  let contentIndent = Number(header.match(/[1-9]/)?.[0] ?? 0);
   for (const line of lines.slice(index + 1)) {
     if (line.trim() === "") {
       if (block.length) block.push("");
       continue;
     }
-    if (!/^\s/.test(line)) break;
-    block.push(line.trim());
+    const leading = line.match(/^ */)?.[0].length ?? 0;
+    const isComment = line.slice(leading).startsWith("#");
+    if (!contentIndent) {
+      if (isComment) continue;
+      if (!leading) break;
+      contentIndent = leading;
+    }
+    if (leading < contentIndent) {
+      if (isComment) continue;
+      break;
+    }
+    block.push(line.slice(contentIndent).trimEnd());
   }
   return block.join(" ");
 }

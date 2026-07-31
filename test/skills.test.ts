@@ -65,7 +65,16 @@ test("YAML block scalar descriptions accept indentation indicators and trailing 
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, "SKILL.md"),
-      ["---", `name: ${name}`, `description: ${header}`, "  Complete YAML header.", "---", "", "Body."].join("\n"),
+      [
+        "---",
+        `name: ${name}`,
+        `description: ${header}`,
+        "  Complete YAML header.",
+        " # maintainer-only note outside the scalar",
+        "---",
+        "",
+        "Body.",
+      ].join("\n"),
       "utf-8",
     );
   }
