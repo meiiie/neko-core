@@ -31,10 +31,11 @@ function frontmatterDescription(frontmatter: string): string {
   if (index < 0) return "";
   const value = lines[index].replace(/^description:\s*/, "").trim();
   const header = value.replace(/\s+#.*$/, "");
-  if (!/^[>|](?:(?:[1-9][+-]?)|(?:[+-][1-9]?))?$/.test(header)) return value;
+  const scalarHeader = header.replace(/^(?:(?:!\S+|&\S+)\s+)*/, "");
+  if (!/^[>|](?:(?:[1-9][+-]?)|(?:[+-][1-9]?))?$/.test(scalarHeader)) return value;
 
   const block: string[] = [];
-  let contentIndent = Number(header.match(/[1-9]/)?.[0] ?? 0);
+  let contentIndent = Number(scalarHeader.match(/[1-9]/)?.[0] ?? 0);
   for (const line of lines.slice(index + 1)) {
     if (line.trim() === "") {
       if (block.length) block.push("");

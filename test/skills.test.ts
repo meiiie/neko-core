@@ -58,6 +58,8 @@ test("YAML block scalar descriptions accept indentation indicators and trailing 
   const cases = [
     ["folded-comment", ">2- # folded"],
     ["literal-comment", "|-2 # literal"],
+    ["tagged-folded", "!!str >-"],
+    ["anchored-folded", "&summary >-"],
   ] as const;
 
   for (const [name, header] of cases) {
