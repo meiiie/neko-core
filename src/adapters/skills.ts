@@ -94,7 +94,9 @@ export function skillsContextBlock(): string {
   return (
     "Available skills (on-demand domain capabilities). IMPORTANT: if the user's task matches a skill's " +
     "description below, you MUST call the `skill` tool to load it BEFORE planning or acting — the skill " +
-    "carries required domain rules and bundled tools you otherwise lack. Don't hand-roll a task a skill covers.\n" +
+    "carries required domain rules and bundled tools you otherwise lack. The `skill` tool loads only names " +
+    "from this Neko catalog. If a separate provider skill catalog gives a name a file/resource locator, follow " +
+    "that catalog's loader instructions instead. Don't hand-roll a task a skill covers.\n" +
     lines.join("\n")
   );
 }
