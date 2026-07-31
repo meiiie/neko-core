@@ -25,6 +25,25 @@ function skillDirs(): string[] {
   ];
 }
 
+function frontmatterDescription(frontmatter: string): string {
+  const lines = frontmatter.split(/\r?\n/);
+  const index = lines.findIndex((line) => /^description:\s*/.test(line));
+  if (index < 0) return "";
+  const value = lines[index].replace(/^description:\s*/, "").trim();
+  if (!/^[>|][+-]?$/.test(value)) return value;
+
+  const block: string[] = [];
+  for (const line of lines.slice(index + 1)) {
+    if (line.trim() === "") {
+      if (block.length) block.push("");
+      continue;
+    }
+    if (!/^\s/.test(line)) break;
+    block.push(line.trim());
+  }
+  return block.join(" ");
+}
+
 function parse(file: string): Skill | null {
   let text: string;
   try {
@@ -44,12 +63,10 @@ function parse(file: string): Skill | null {
     body = fm[2];
     const n = fm[1].match(/^name:\s*(.+)$/m);
     if (n) name = n[1].trim();
-    const d = fm[1].match(/^description:\s*(.+)$/m);
-    if (d) description = d[1].trim();
+    description = frontmatterDescription(fm[1]);
     const m = fm[1].match(/^match:\s*(.+)$/m);
     if (m) match = m[1].trim();
   }
-  if (description === ">" || description === "|") description = ""; // YAML block scalar marker
   return { name, description: description.replace(/\s+/g, " ").slice(0, 120), body: body.trim(), dir: dirname(file), match };
 }
 

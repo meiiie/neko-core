@@ -24,6 +24,33 @@ test("a CRLF-authored skill (Windows Notepad) still parses its frontmatter name 
   expect(s?.description).toContain("Builds widgets"); // lost (empty) before the CRLF-tolerant frontmatter fix
 });
 
+test("a folded YAML block scalar becomes the skill description instead of its marker", () => {
+  const home = mkdtempSync(join(tmpdir(), "nk-skills-"));
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  const dir = join(home, ".neko-core", "skills", "prose-editor");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "SKILL.md"),
+    [
+      "---",
+      "name: prose-editor",
+      "description: >-",
+      "  Write or edit prose that does not",
+      "  read like generated filler.",
+      "match: prose",
+      "---",
+      "",
+      "# Prose editor",
+      "Body.",
+    ].join("\n"),
+    "utf-8",
+  );
+
+  const skill = loadSkill("prose-editor");
+  expect(skill?.description).toBe("Write or edit prose that does not read like generated filler.");
+});
+
 test("skills context distinguishes Neko skills from provider-located skills", () => {
   const context = skillsContextBlock();
   expect(context).toContain("MUST call the `skill` tool to load it BEFORE planning or acting");
