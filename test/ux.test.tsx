@@ -57,9 +57,13 @@ class Reasoner implements Provider {
 const MD_REPLY = "Đây là **tổng hợp** hôm nay:\n\n## Nga - Ukraine\n\n- Cuộc gọi **Trump - Putin**\n\nBạn muốn đi sâu?";
 class MdHang implements Provider {
   cancelled = false;
+  streamedAll = false;
+  completed = false;
   async complete(_m: any, _t: any, onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
     for (const tok of MD_REPLY.match(/\S+\s*|\n/g) ?? []) { if (this.cancelled) break; onDelta?.(tok); await tick(6); }
+    this.streamedAll = true;
     while (!this.cancelled) await tick(15); // remain live until the test explicitly cancels it
+    this.completed = true;
     return { content: MD_REPLY, tool_calls: [], usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 } };
   }
 }
@@ -772,13 +776,20 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     c.stdin.write("go");
     await tick(20);
     c.stdin.write("\r");
-    // Wait for the WHOLE reply to reach the live band (last line present) - provider is still hanging,
-    // nothing committed. Assert against lastFrame (current screen), so mid-stream partial markers don't leak.
-    for (let i = 0; i < 320 && !/Bạn muốn đi sâu/.test(strip(c.lastFrame())); i++) await tick(25);
+    // Wait until the complete Markdown-bearing prefix reaches the live band while the provider is still
+    // hanging. The trailing plain-text sentence is irrelevant to this regression and may render later on
+    // a loaded runner even after all deltas were emitted, so it must not be the readiness signal.
+    for (let i = 0; i < 320; i++) {
+      const frame = strip(c.lastFrame());
+      if (provider.streamedAll && frame.includes("Trump - Putin") && !frame.includes("**")) break;
+      await tick(25);
+    }
     const f = strip(c.lastFrame());
-    expect(f).toContain("Bạn muốn đi sâu"); // never judge an intentionally partial Markdown chunk
+    expect(provider.streamedAll).toBe(true);
+    expect(provider.completed).toBe(false); // proves the assertions observe the LIVE band, not committed output
     expect(f).toContain("Nga - Ukraine"); // ## header rendered live (not blank, not committed)
     expect(f).toContain("tổng hợp");       // earlier **bold** rendered live
+    expect(f).toContain("Trump - Putin"); // later **bold** pair is closed and rendered too
     expect(f).not.toContain("## ");        // header marker consumed - it is FORMATTED, not raw
     expect(f).not.toContain("**");         // all bold markers closed and rendered
     c.unmount();
