@@ -71,24 +71,24 @@ test("streaming while SCROLLED AWAY pumps far less than streaming at the bottom"
     await tick(80);
     stdin.push("\r"); // ...and start the streaming turn
     await tick(300); // the stream is flowing, pinned at the bottom
+    const SAMPLE_MS = 1_200;
     differ.resetPumps();
-    // SAMPLE A: wait for observable pinned activity with a deadline instead of measuring runner scheduling.
-    for (let waited = 0; waited < 2_500 && differ.streamPumps < 5; waited += 25) await tick(25);
+    await tick(SAMPLE_MS); // SAMPLE A: pinned - every pump updates the moving tail
     const pinnedPumps = differ.streamPumps;
     // Scroll up into history (wheel), then let the glide fully settle.
     stdin.push("\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M");
     await tick(300);
     differ.resetPumps();
-    await tick(600); // SAMPLE B: scrolled away - the tail is off-screen, pumps are slowed
+    await tick(SAMPLE_MS); // SAMPLE B: same window, scrolled away - pumps are slowed
     const scrolledPumps = differ.streamPumps;
-    // Count stream-tail updates at the compositor boundary, not all terminal writes. Spinner/cursor writes
-    // share neither cadence nor scheduler priority across OSes and made the old wall-clock delta flaky.
-    // The product contract is 40ms pinned versus 300ms while reading: in this window pinned must produce
-    // several frames, while the scrolled path remains bounded to a handful even on a slow runner.
+    // Count stream-tail updates at the compositor boundary, not all terminal writes. Both modes get the
+    // same observation window, so a regression to one shared cadence cannot pass through unequal sampling.
+    // The product contract is 40ms pinned versus 300ms while reading: pinned must remain materially faster.
     expect(vt.text()).toContain("Jump to bottom"); // the scroll really engaged (reading mode)
     expect(pinnedPumps).toBeGreaterThanOrEqual(5);
-    expect(scrolledPumps).toBeLessThanOrEqual(4);
-    expect(pinnedPumps).toBeGreaterThan(scrolledPumps);
+    expect(scrolledPumps).toBeGreaterThanOrEqual(1);
+    expect(scrolledPumps).toBeLessThanOrEqual(6);
+    expect(pinnedPumps).toBeGreaterThanOrEqual(scrolledPumps * 2);
   } finally {
     cancelled = true;
     app.unmount();
