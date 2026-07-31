@@ -1,4 +1,4 @@
-import { expect, setDefaultTimeout, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,8 +14,6 @@ import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "..
 import type { BrowserVoiceOptions } from "../src/adapters/browser-voice.ts";
 import { ensureBrowserCapability } from "../src/adapters/browser-bridge.ts";
 import { isInteractiveBrowserRequest } from "../src/ui/commands.ts";
-
-setDefaultTimeout(30_000); // async Ink flows use bounded 8s polls; Bun's 5s default preempts useful assertions on loaded Windows runners
 
 test("multimodal tool observations render as metadata + [image], never object coercion", () => {
   const content = [{ type: "text", text: "captured screen\n" }, { type: "image_url", image_url: { url: "data:image/gif;base64,AA" } }];
