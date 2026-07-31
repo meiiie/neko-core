@@ -30,7 +30,7 @@ function frontmatterDescription(frontmatter: string): string {
   const index = lines.findIndex((line) => /^description:\s*/.test(line));
   if (index < 0) return "";
   const value = lines[index].replace(/^description:\s*/, "").trim();
-  if (!/^[>|][+-]?$/.test(value)) return value;
+  if (!/^[>|](?:(?:[1-9][+-]?)|(?:[+-][1-9]?))?(?:\s+#.*)?$/.test(value)) return value;
 
   const block: string[] = [];
   for (const line of lines.slice(index + 1)) {

@@ -51,6 +51,28 @@ test("a folded YAML block scalar becomes the skill description instead of its ma
   expect(skill?.description).toBe("Write or edit prose that does not read like generated filler.");
 });
 
+test("YAML block scalar descriptions accept indentation indicators and trailing comments", () => {
+  const home = mkdtempSync(join(tmpdir(), "nk-skills-"));
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  const cases = [
+    ["folded-comment", ">2- # folded"],
+    ["literal-comment", "|-2 # literal"],
+  ] as const;
+
+  for (const [name, header] of cases) {
+    const dir = join(home, ".neko-core", "skills", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "SKILL.md"),
+      ["---", `name: ${name}`, `description: ${header}`, "  Complete YAML header.", "---", "", "Body."].join("\n"),
+      "utf-8",
+    );
+  }
+
+  for (const [name] of cases) expect(loadSkill(name)?.description).toBe("Complete YAML header.");
+});
+
 test("skills context distinguishes Neko skills from provider-located skills", () => {
   const context = skillsContextBlock();
   expect(context).toContain("MUST call the `skill` tool to load it BEFORE planning or acting");
