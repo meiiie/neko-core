@@ -32,6 +32,25 @@ test("skills context distinguishes Neko skills from provider-located skills", ()
   expect(context).toContain("follow that catalog's loader instructions");
 });
 
+test("the bundled web-app skill points to resources that resolve from its own directory", () => {
+  const skill = loadSkill("web-app")!;
+  const references = [
+    "../hackathon-engine/references/golden-stacks.md",
+    "../hackathon-engine/references/design-engine.md",
+    "../hackathon-engine/references/motion.md",
+    "../hackathon-engine/references/backend.md",
+    "../hackathon-engine/references/mobile.md",
+    "../hackathon-engine/references/testing-strategy.md",
+    "../hackathon-engine/references/security.md",
+    "../hackathon-engine/references/devops.md",
+    "../hackathon-engine/references/seo.md",
+  ];
+  for (const reference of references) {
+    expect(skill.body).toContain(`\`${reference}\``);
+    expect(existsSync(join(skill.dir, reference))).toBe(true);
+  }
+});
+
 // The bundled `procurement` skill ships in the repo's skills/ dir, so it's discoverable here.
 test("matchSkill auto-loads the procurement skill for a clear sourcing task (diacritics handled)", () => {
   const m = matchSkill("Tìm mua Google Pixel giá rẻ, so sánh nguồn bán, sắp xếp giá, ship Bắc Giang, xuất Excel");
