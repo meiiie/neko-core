@@ -276,6 +276,7 @@ test("skill tool loads a skill body on demand via the injected hook (progressive
   expect(missing).toContain("no skill");
   expect(missing).toContain("Neko's catalog");
   expect(missing).toContain("file/resource locator");
+  expect(missing).toContain("follow that catalog's loader instructions");
 });
 
 test("read_file streams a bounded, resumable page of a huge file (no whole-file slurp -> OOM)", async () => {

@@ -26,6 +26,7 @@ test("a CRLF-authored skill (Windows Notepad) still parses its frontmatter name 
 
 test("skills context distinguishes Neko skills from provider-located skills", () => {
   const context = skillsContextBlock();
+  expect(context).toContain("MUST call the `skill` tool to load it BEFORE planning or acting");
   expect(context).toContain("only names from this Neko catalog");
   expect(context).toContain("file/resource locator");
   expect(context).toContain("follow that catalog's loader instructions");
