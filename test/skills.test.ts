@@ -82,6 +82,21 @@ test("YAML block scalar descriptions accept indentation indicators and trailing 
   for (const [name] of cases) expect(loadSkill(name)?.description).toBe("Complete YAML header.");
 });
 
+test("inferred block indentation preserves an indented leading hash line as content", () => {
+  const home = mkdtempSync(join(tmpdir(), "nk-skills-"));
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  const dir = join(home, ".neko-core", "skills", "cpp-tools");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "SKILL.md"),
+    ["---", "name: cpp-tools", "description: |-", "  # C++ development", "  Build native tools.", "---", "", "Body."].join("\n"),
+    "utf-8",
+  );
+
+  expect(loadSkill("cpp-tools")?.description).toBe("# C++ development Build native tools.");
+});
+
 test("skills context distinguishes Neko skills from provider-located skills", () => {
   const context = skillsContextBlock();
   expect(context).toContain("MUST call the `skill` tool to load it BEFORE planning or acting");

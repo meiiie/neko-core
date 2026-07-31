@@ -43,8 +43,10 @@ function frontmatterDescription(frontmatter: string): string {
     const leading = line.match(/^ */)?.[0].length ?? 0;
     const isComment = line.slice(leading).startsWith("#");
     if (!contentIndent) {
-      if (isComment) continue;
-      if (!leading) break;
+      if (!leading) {
+        if (isComment) continue;
+        break;
+      }
       contentIndent = leading;
     }
     if (leading < contentIndent) {
