@@ -774,8 +774,9 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     c.stdin.write("\r");
     // Wait for the WHOLE reply to reach the live band (last line present) - provider is still hanging,
     // nothing committed. Assert against lastFrame (current screen), so mid-stream partial markers don't leak.
-    for (let i = 0; i < 120 && !/Bạn muốn đi sâu/.test(strip(c.lastFrame())); i++) await tick(25);
+    for (let i = 0; i < 320 && !/Bạn muốn đi sâu/.test(strip(c.lastFrame())); i++) await tick(25);
     const f = strip(c.lastFrame());
+    expect(f).toContain("Bạn muốn đi sâu"); // never judge an intentionally partial Markdown chunk
     expect(f).toContain("Nga - Ukraine"); // ## header rendered live (not blank, not committed)
     expect(f).toContain("tổng hợp");       // earlier **bold** rendered live
     expect(f).not.toContain("## ");        // header marker consumed - it is FORMATTED, not raw
