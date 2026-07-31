@@ -770,8 +770,8 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
   // so its "synchronous" frame comes back EMPTY - the band stayed blank until the reply committed (the
   // "stream shows nothing / raw ** until done" bug). The fix renders it on a macrotask, off the flush.
   const provider = new MdHang();
+  const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={provider} />);
   try {
-    const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={provider} />);
     await tick(60);
     c.stdin.write("go");
     await tick(20);
@@ -792,9 +792,9 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     expect(f).toContain("Trump - Putin"); // later **bold** pair is closed and rendered too
     expect(f).not.toContain("## ");        // header marker consumed - it is FORMATTED, not raw
     expect(f).not.toContain("**");         // all bold markers closed and rendered
-    c.unmount();
   } finally {
     provider.cancelled = true;
+    c.unmount();
     await tick(20); // let the provider leave its hang so no timer outlives the test
   }
 }, 15000); // generous wall-clock: streaming + per-delta hidden-instance renders can run slow under suite load

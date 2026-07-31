@@ -52,22 +52,22 @@ test("computer action validates inputs deterministically (no NaN/garbage reaches
 test("computer wait and display dispatch through deterministic one-shot helpers", async () => {
   if (process.platform !== "win32") return;
   const root = mkdtempSync(join(tmpdir(), "nk-computer-root-"));
-  const skill = join(root, "computer-use");
-  const scripts = join(skill, "scripts");
-  mkdirSync(scripts, { recursive: true });
-  writeFileSync(join(scripts, "input.ps1"), [
-    "param([string]$action, [string]$unused, [string]$duration)",
-    'if ($action -eq "wait") { Write-Output ("waited {0} ms" -f $duration) }',
-  ].join("\n"));
-  writeFileSync(
-    join(scripts, "display.ps1"),
-    'Write-Output "screen=1920x1080 coordinate_space=physical_px dpi_awareness=per-monitor-v2"',
-  );
-
-  const tools = new ToolRegistry(root, "auto", () => true);
-  tools.loadSkill = () => ({ body: "", dir: skill });
-  tools.residentUia = false;
   try {
+    const skill = join(root, "computer-use");
+    const scripts = join(skill, "scripts");
+    mkdirSync(scripts, { recursive: true });
+    writeFileSync(join(scripts, "input.ps1"), [
+      "param([string]$action, [string]$unused, [string]$duration)",
+      'if ($action -eq "wait") { Write-Output ("waited {0} ms" -f $duration) }',
+    ].join("\n"));
+    writeFileSync(
+      join(scripts, "display.ps1"),
+      'Write-Output "screen=1920x1080 coordinate_space=physical_px dpi_awareness=per-monitor-v2"',
+    );
+
+    const tools = new ToolRegistry(root, "auto", () => true);
+    tools.loadSkill = () => ({ body: "", dir: skill });
+    tools.residentUia = false;
     expect(String(await tools.execute("computer", { action: "wait", duration_ms: 1 }))).toContain("waited 1 ms");
     expect(String(await tools.execute("computer", { action: "display" }))).toMatch(/coordinate_space=physical_px.*per-monitor-v2/);
   } finally {
