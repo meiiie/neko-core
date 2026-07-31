@@ -48,10 +48,11 @@ test("streaming while SCROLLED AWAY pumps far less than streaming at the bottom"
   const out = new FakeTtyOut(100, 30, vt);
   const stdin = new FakeStdin();
   const differ = new PumpCountingDiffer();
-  // A provider that streams a delta every 10ms for ~2.4s - long enough to sample both phases.
+  // Keep the stream alive across both samples even on a loaded runner; finally cancels it deterministically.
+  let cancelled = false;
   const provider: any = {
     complete: async (_m: any[], _t: any[], onDelta?: (t: string, k?: string) => void) => {
-      for (let i = 0; i < 240; i++) { onDelta?.(`chunk ${i} `, "content"); await tick(10); }
+      for (let i = 0; i < 800 && !cancelled; i++) { onDelta?.(`chunk ${i} `, "content"); await tick(10); }
       return { content: "", tool_calls: [] };
     },
   };
@@ -70,24 +71,26 @@ test("streaming while SCROLLED AWAY pumps far less than streaming at the bottom"
     await tick(80);
     stdin.push("\r"); // ...and start the streaming turn
     await tick(300); // the stream is flowing, pinned at the bottom
+    const SAMPLE_MS = 1_200;
     differ.resetPumps();
-    await tick(600); // SAMPLE A: pinned - every pump updates the moving tail
+    await tick(SAMPLE_MS); // SAMPLE A: pinned - every pump updates the moving tail
     const pinnedPumps = differ.streamPumps;
     // Scroll up into history (wheel), then let the glide fully settle.
     stdin.push("\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M");
     await tick(300);
     differ.resetPumps();
-    await tick(600); // SAMPLE B: scrolled away - the tail is off-screen, pumps are slowed
+    await tick(SAMPLE_MS); // SAMPLE B: same window, scrolled away - pumps are slowed
     const scrolledPumps = differ.streamPumps;
-    // Count stream-tail updates at the compositor boundary, not all terminal writes. Spinner/cursor writes
-    // share neither cadence nor scheduler priority across OSes and made the old wall-clock delta flaky.
-    // The product contract is 40ms pinned versus 300ms while reading: in this window pinned must produce
-    // several frames, while the scrolled path remains bounded to a handful even on a slow runner.
+    // Count stream-tail updates at the compositor boundary, not all terminal writes. Both modes get the
+    // same observation window, so a regression to one shared cadence cannot pass through unequal sampling.
+    // The product contract is 40ms pinned versus 300ms while reading: pinned must remain materially faster.
     expect(vt.text()).toContain("Jump to bottom"); // the scroll really engaged (reading mode)
     expect(pinnedPumps).toBeGreaterThanOrEqual(5);
-    expect(scrolledPumps).toBeLessThanOrEqual(4);
-    expect(pinnedPumps).toBeGreaterThan(scrolledPumps);
+    expect(scrolledPumps).toBeGreaterThanOrEqual(1);
+    expect(scrolledPumps).toBeLessThanOrEqual(6);
+    expect(pinnedPumps).toBeGreaterThanOrEqual(scrolledPumps * 2);
   } finally {
+    cancelled = true;
     app.unmount();
     await tick(80);
   }
