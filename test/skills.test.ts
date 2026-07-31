@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadSkill, matchesSkill, matchSkill, matchSkills } from "../src/adapters/skills.ts";
+import { loadSkill, matchesSkill, matchSkill, matchSkills, skillsContextBlock } from "../src/adapters/skills.ts";
 
 const ORIG = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
 afterEach(() => {
@@ -22,6 +22,14 @@ test("a CRLF-authored skill (Windows Notepad) still parses its frontmatter name 
   const s = loadSkill("widget-maker");
   expect(s?.name).toBe("widget-maker");
   expect(s?.description).toContain("Builds widgets"); // lost (empty) before the CRLF-tolerant frontmatter fix
+});
+
+test("skills context distinguishes Neko skills from provider-located skills", () => {
+  const context = skillsContextBlock();
+  expect(context).toContain("MUST call the `skill` tool to load it BEFORE planning or acting");
+  expect(context).toContain("only names from this Neko catalog");
+  expect(context).toContain("file/resource locator");
+  expect(context).toContain("follow that catalog's loader instructions");
 });
 
 // The bundled `procurement` skill ships in the repo's skills/ dir, so it's discoverable here.

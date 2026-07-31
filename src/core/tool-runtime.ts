@@ -274,7 +274,7 @@ export class ToolRegistry {
   private runSkill(args: Record<string, any>): string {
     const name = String(requireArg(args, "name"));
     const s = this.loadSkill?.(name);
-    if (!s) return `(no skill '${name}' - check the skills listed in your context)`;
+    if (!s) return `(no skill '${name}' in Neko's catalog - if a separate provider catalog gives it a file/resource locator, follow that catalog's loader instructions)`;
     return `# Skill: ${name}\n(skill files dir: ${s.dir} - run any bundled scripts from here by absolute path)\n${s.body}`;
   }
 
