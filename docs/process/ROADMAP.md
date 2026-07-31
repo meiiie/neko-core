@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-07-30) — v0.22.3 release
+## Current status (2026-07-31) — v0.22.4 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,7 +38,11 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.22.3 (2026-07-30)** - long prompts are a five-row caret-following
+- **Branch:** `main`. **Current release: v0.22.4 (2026-07-31)** - skill loading now routes Neko-catalog and
+  provider-owned skills through their respective loaders; YAML block-scalar descriptions and all bundled
+  `web-app` references resolve correctly; and slower cross-platform runners use deterministic, bounded test
+  fixtures. CI and release workflows use `actions/checkout@v7`.
+  Previous (v0.22.3, 2026-07-30): long prompts are a five-row caret-following
   editor with no scrollbar; running token usage starts with a marked estimate and adopts authoritative live
   provider totals; successful tool activity folds to one outcome line without deleting detail; and scrolled
   history pins the nearest user prompt with an exact click/Alt+Up jump. Real compiled checks observed

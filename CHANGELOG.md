@@ -6,6 +6,25 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.22.4] — 2026-07-31
+
+### Fixed
+
+- **Skill loading now distinguishes Neko's dynamic catalog from provider-owned catalogs.** The system prompt and
+  missing-skill result direct names exposed by Neko through the `skill` tool, while skills injected with a file or
+  resource locator follow their provider's loader instructions instead of being retried against the wrong catalog.
+- **User and project skill descriptions support YAML block scalars.** Folded and literal descriptions are parsed
+  into readable catalog text rather than exposing markers such as `>-`; the bounded fallback preserves existing
+  tag and anchor handling. All bundled `web-app` cross-skill references now resolve to their real sibling files.
+- **Cross-platform UI checks are deterministic under slower runners.** Process-heavy tests receive a bounded
+  30-second harness budget, Windows computer fixtures no longer depend on the runner desktop, and streaming
+  Markdown assertions wait for the documented completion condition. Production timeouts and behavior are unchanged.
+
+### Changed
+
+- GitHub CI and release jobs now use `actions/checkout@v7`, eliminating the Node 20 runner deprecation warning and
+  adopting the current supported checkout runtime.
+
 ## [0.22.3] — 2026-07-30
 
 ### Fixed
