@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { builtinSkillsDir } from "../src/adapters/builtin-skills.ts";
 import { loadSkill, matchesSkill, matchSkill, matchSkills, skillsContextBlock } from "../src/adapters/skills.ts";
 
 const ORIG = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
@@ -105,6 +106,26 @@ test("skills context distinguishes Neko skills from provider-located skills", ()
   expect(context).toContain("only names from this Neko catalog");
   expect(context).toContain("file/resource locator");
   expect(context).toContain("follow that catalog's loader instructions");
+});
+
+test("the bundled web-app skill points to resources that resolve from its own directory", () => {
+  const dir = join(builtinSkillsDir(), "web-app");
+  const body = readFileSync(join(dir, "SKILL.md"), "utf8");
+  const references = [
+    "../hackathon-engine/references/golden-stacks.md",
+    "../hackathon-engine/references/design-engine.md",
+    "../hackathon-engine/references/motion.md",
+    "../hackathon-engine/references/backend.md",
+    "../hackathon-engine/references/mobile.md",
+    "../hackathon-engine/references/testing-strategy.md",
+    "../hackathon-engine/references/security.md",
+    "../hackathon-engine/references/devops.md",
+    "../hackathon-engine/references/seo.md",
+  ];
+  for (const reference of references) {
+    expect(body).toContain(`\`${reference}\``);
+    expect(existsSync(join(dir, reference))).toBe(true);
+  }
 });
 
 // The bundled `procurement` skill ships in the repo's skills/ dir, so it's discoverable here.
