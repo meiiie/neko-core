@@ -19,7 +19,7 @@ jobs:
     name: create release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: create the GitHub release for the tag (idempotent for re-runs)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -61,7 +61,7 @@ jobs:
           - { os: macos-latest,     target: bun-darwin-x64,   asset: neko-macos-x64,       smoke: false, bun: latest }
           - { os: windows-latest,   target: bun-windows-x64,  asset: neko-windows-x64.exe, smoke: true }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           # PINNED TO CANARY (temporarily - revert to `latest` at the first stable AFTER 1.3.14):
