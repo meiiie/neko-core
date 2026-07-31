@@ -48,10 +48,11 @@ test("streaming while SCROLLED AWAY pumps far less than streaming at the bottom"
   const out = new FakeTtyOut(100, 30, vt);
   const stdin = new FakeStdin();
   const differ = new PumpCountingDiffer();
-  // A provider that streams a delta every 10ms for ~2.4s - long enough to sample both phases.
+  // Keep the stream alive across both samples even on a loaded runner; finally cancels it deterministically.
+  let cancelled = false;
   const provider: any = {
     complete: async (_m: any[], _t: any[], onDelta?: (t: string, k?: string) => void) => {
-      for (let i = 0; i < 240; i++) { onDelta?.(`chunk ${i} `, "content"); await tick(10); }
+      for (let i = 0; i < 800 && !cancelled; i++) { onDelta?.(`chunk ${i} `, "content"); await tick(10); }
       return { content: "", tool_calls: [] };
     },
   };
@@ -71,7 +72,8 @@ test("streaming while SCROLLED AWAY pumps far less than streaming at the bottom"
     stdin.push("\r"); // ...and start the streaming turn
     await tick(300); // the stream is flowing, pinned at the bottom
     differ.resetPumps();
-    await tick(600); // SAMPLE A: pinned - every pump updates the moving tail
+    // SAMPLE A: wait for observable pinned activity with a deadline instead of measuring runner scheduling.
+    for (let waited = 0; waited < 2_500 && differ.streamPumps < 5; waited += 25) await tick(25);
     const pinnedPumps = differ.streamPumps;
     // Scroll up into history (wheel), then let the glide fully settle.
     stdin.push("\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M");
@@ -88,6 +90,7 @@ test("streaming while SCROLLED AWAY pumps far less than streaming at the bottom"
     expect(scrolledPumps).toBeLessThanOrEqual(4);
     expect(pinnedPumps).toBeGreaterThan(scrolledPumps);
   } finally {
+    cancelled = true;
     app.unmount();
     await tick(80);
   }

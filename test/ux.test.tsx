@@ -59,7 +59,7 @@ class MdHang implements Provider {
   cancelled = false;
   async complete(_m: any, _t: any, onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
     for (const tok of MD_REPLY.match(/\S+\s*|\n/g) ?? []) { if (this.cancelled) break; onDelta?.(tok); await tick(6); }
-    for (let i = 0; i < 200 && !this.cancelled; i++) await tick(15); // hang until the test cancels it
+    while (!this.cancelled) await tick(15); // remain live until the test explicitly cancels it
     return { content: MD_REPLY, tool_calls: [], usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 } };
   }
 }
@@ -783,7 +783,8 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     expect(f).not.toContain("**");         // all bold markers closed and rendered
     c.unmount();
   } finally {
-    provider.cancelled = true; // stop the hang so no timer outlives the test
+    provider.cancelled = true;
+    await tick(20); // let the provider leave its hang so no timer outlives the test
   }
 }, 15000); // generous wall-clock: streaming + per-delta hidden-instance renders can run slow under suite load
 
