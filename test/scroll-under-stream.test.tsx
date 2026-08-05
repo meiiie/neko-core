@@ -2,8 +2,15 @@
  * Reading while Neko works: with the transcript scrolled away, the streaming tail is BELOW the
  * viewport, so per-delta UI syncs are invisible work - and at 25fps they saturated the event loop
  * and wheel input queued behind them ("scrolling lags while Neko is working", field report
- * 2026-07-28). The pump now drops to ~3fps while scrolled and snaps current on re-pin. This sim
- * locks the mechanism by measuring terminal WRITES during identical streaming windows.
+ * 2026-07-28). The pump drops to ~3fps while scrolled and snaps current on re-pin.
+ *
+ * This sim verifies the INTEGRATION end-to-end: scrolling up during a live stream engages reading
+ * mode ("Jump to bottom") and the pump is throttled (scrolledPumps stays bounded by the ~300ms cap).
+ * The 40ms/300ms CADENCE CONTRACT itself is NOT asserted here - under CPU load the observed pinned
+ * cadence varies 3-6x (40-433ms) and even pinnedPumps>scrolledPumps inverts when the event loop
+ * starves, so any wall-clock comparison flakes. The contract lives in the deterministic
+ * stream-pump-cadence.test.ts (shouldStreamPump). This test only proves the throttle is wired to the
+ * scroll state in the real component.
  */
 import { EventEmitter } from "node:events";
 import { expect, test } from "bun:test";
@@ -43,12 +50,12 @@ class PumpCountingDiffer extends FrameDiffer {
 }
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-test("streaming while SCROLLED AWAY pumps far less than streaming at the bottom", async () => {
+test("streaming while SCROLLED AWAY throttles the pump and engages reading mode", async () => {
   const vt = new VirtualTerminal(100, 30);
   const out = new FakeTtyOut(100, 30, vt);
   const stdin = new FakeStdin();
   const differ = new PumpCountingDiffer();
-  // Keep the stream alive across both samples even on a loaded runner; finally cancels it deterministically.
+  // Keep the stream alive across the sample even on a loaded runner; finally cancels it deterministically.
   let cancelled = false;
   const provider: any = {
     complete: async (_m: any[], _t: any[], onDelta?: (t: string, k?: string) => void) => {
@@ -71,24 +78,19 @@ test("streaming while SCROLLED AWAY pumps far less than streaming at the bottom"
     await tick(80);
     stdin.push("\r"); // ...and start the streaming turn
     await tick(300); // the stream is flowing, pinned at the bottom
-    const SAMPLE_MS = 1_200;
-    differ.resetPumps();
-    await tick(SAMPLE_MS); // SAMPLE A: pinned - every pump updates the moving tail
-    const pinnedPumps = differ.streamPumps;
-    // Scroll up into history (wheel), then let the glide fully settle.
+    // Scroll up into history (wheel), then let the glide fully settle into reading mode.
     stdin.push("\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M");
     await tick(300);
+    // Sample the scrolled-away window: the throttle must keep the pump bounded (~300ms floor; ~4 unloaded).
+    // No pinned comparison - pinned cadence is unobservable under CPU load (see header); the contract is
+    // verified deterministically in stream-pump-cadence.test.ts (shouldStreamPump).
+    const SAMPLE_MS = 1_200;
     differ.resetPumps();
-    await tick(SAMPLE_MS); // SAMPLE B: same window, scrolled away - pumps are slowed
+    await tick(SAMPLE_MS);
     const scrolledPumps = differ.streamPumps;
-    // Count stream-tail updates at the compositor boundary, not all terminal writes. Both modes get the
-    // same observation window, so a regression to one shared cadence cannot pass through unequal sampling.
-    // The product contract is 40ms pinned versus 300ms while reading: pinned must remain materially faster.
-    expect(vt.text()).toContain("Jump to bottom"); // the scroll really engaged (reading mode)
-    expect(pinnedPumps).toBeGreaterThanOrEqual(5);
-    expect(scrolledPumps).toBeGreaterThanOrEqual(1);
-    expect(scrolledPumps).toBeLessThanOrEqual(6);
-    expect(pinnedPumps).toBeGreaterThanOrEqual(scrolledPumps * 2);
+    expect(vt.text()).toContain("Jump to bottom"); // reading-mode UI engaged (the scroll really took)
+    expect(scrolledPumps).toBeGreaterThanOrEqual(1); // we actually sampled the live stream
+    expect(scrolledPumps).toBeLessThanOrEqual(8); // scrolled throttle active (300ms floor; ~4 unloaded, 8 = load headroom)
   } finally {
     cancelled = true;
     app.unmount();
