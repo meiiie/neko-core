@@ -134,6 +134,23 @@ interface ChatProps {
   };
 }
 
+/** Live-tail pump cadence: deltas accumulate in refs and the screen syncs at most every STREAM_PUMP_MS
+ *  (~25fps, leading-edge, no timer). Streaming re-parses markdown a few times a second instead of once
+ *  per token - smooth, no flicker, far less CPU. Final tokens within the last window land when
+ *  flushStream commits the assistant line, so nothing is lost. */
+export const STREAM_PUMP_MS = 40;
+/** Scrolled-away cadence: the live tail sits BELOW the viewport, so each pump costs a full React render
+ *  plus the streamed-markdown re-render for rows nobody can see. At 25fps that saturated the event loop
+ *  and queued wheel input behind it ("scrolling lags while Neko is working", field report 2026-07-28).
+ *  Reading mode drops to ~3fps (refs keep accumulating; the relay pushes from the same pump, still live at
+ *  300ms); re-pinning to the bottom pumps immediately. */
+export const STREAM_PUMP_SCROLLED_MS = 300;
+/** Leading-edge pump gate: allow when at least the cadence has elapsed since the last pump. Extracted as a
+ *  pure function so the 40ms/300ms contract is verified by a deterministic unit test - a wall-clock
+ *  simulation cannot, because under CPU load the OBSERVED pump cadence varies 3-6x (40-433ms measured). */
+export const shouldStreamPump = (now: number, lastPump: number, scrolledAway: boolean): boolean =>
+  now - lastPump >= (scrolledAway ? STREAM_PUMP_SCROLLED_MS : STREAM_PUMP_MS);
+
 export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, bridgeHolder }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
@@ -427,20 +444,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setResizeKey((k) => k + 1);
   }, [lines.length]);
 
-  // Throttle live re-renders to ~25fps (leading-edge, no timer): deltas accumulate in refs, the
-  // screen syncs at most every ~40ms. Streaming a long reply re-parses markdown a few times a second
-  // instead of once per token — smooth, no flicker, far less CPU. Any final tokens within the last
-  // window land when flushStream commits the assistant line, so nothing is lost.
-  const STREAM_MS = 40;
-  // Scrolled away, the live tail sits BELOW the viewport - each pump still costs a full React render
-  // plus the streamed-markdown re-render, for rows nobody can see. At 25fps that saturated the event
-  // loop and wheel input queued behind it: "scrolling lags while Neko is working" (field report).
-  // Reading mode drops the sync to ~3fps (refs keep accumulating; the phone relay is pushed from the
-  // same pump, and 300ms is still live there); re-pinning to the bottom pumps immediately.
-  const STREAM_SCROLLED_MS = 300;
   const scrolledAwayRef = useRef(false);
   const maybePump = (force = false) => {
-    if (!force && Date.now() - lastPumpRef.current < (scrolledAwayRef.current ? STREAM_SCROLLED_MS : STREAM_MS)) return;
+    // Pump gate is the module-scope shouldStreamPump() (STREAM_PUMP_MS / STREAM_PUMP_SCROLLED_MS), so the
+    // 40ms/300ms cadence contract is unit-tested deterministically instead of via a flaky wall-clock sim.
+    if (!force && !shouldStreamPump(Date.now(), lastPumpRef.current, scrolledAwayRef.current)) return;
     lastPumpRef.current = Date.now();
     // Progressive commit: the terminal auto-follows output, so a live region TALLER than the viewport
     // makes it redraw from the top every frame -- the "streaming keeps jumping to the top" bug. Once the
