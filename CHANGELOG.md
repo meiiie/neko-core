@@ -2,7 +2,7 @@
 
 All notable changes to Neko Core are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
-[semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes).
+[semantic versioning](https://semver.org/) (pre-1.0: minor versions may include breaking changes; patch covers non-breaking fixes and additive features).
 
 ## [Unreleased]
 
