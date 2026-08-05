@@ -6,6 +6,24 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.22.5] — 2026-08-05
+
+### Added
+
+- **Review/verify/code-review/security-review ship as built-in recipes.** Neko's verify-first review workflow is now
+  available out of the box: `/recipes` lists `review`, `verify`, `code-review`, and `security-review` immediately on
+  every install, instead of only after manually dropping `*.md` files into `~/.neko-core/recipes/`. They layer at the
+  lowest priority, so a user or project recipe of the same name still overrides the default, and home-directory recipes
+  keep precedence over current-directory ones. Descriptions stay ASCII so the cp1252 Windows console renders them cleanly.
+
+### Fixed
+
+- **The `scroll-under-stream` test no longer flakes under CPU load.** The live-tail pump gate (`STREAM_PUMP_MS` 40ms /
+  `STREAM_PUMP_SCROLLED_MS` 300ms) is extracted as a module-scope pure function `shouldStreamPump(now, lastPump,
+  scrolledAway)` and verified by a deterministic unit test (`test/stream-pump-cadence.test.ts`) instead of a wall-clock
+  simulation. A flaky simulation could not catch the contract: under load the observed pump cadence varied 3-6x
+  (40-433ms measured over twelve runs). Production throttle behavior and timeouts are unchanged.
+
 ## [0.22.4] — 2026-07-31
 
 ### Fixed
