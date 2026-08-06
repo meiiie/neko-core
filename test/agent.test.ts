@@ -747,12 +747,39 @@ test("temporal watchers may repeat without tripping the loop guard or completion
   });
   expect(await agent.run("watch this conversation")).toBe("watch complete");
   expect(execs).toBe(6);
-  expect(efforts).toEqual([undefined, "low", "low", "low", "low", "low", "low"]);
+    expect(efforts).toEqual([undefined, undefined, "low", "low", "low", "low", "low"]); // conservative: 2 reads before first "low"
   expect(agent.messages.some((message: any) => String(message.content).includes("loop guard"))).toBe(false);
   expect(agent.messages.some((message: any) => String(message.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(false);
-});
+  });
 
-test("BROAD loop guard WARNS (does not block) on many DISTINCT edits to ONE path", async () => {
+  test("adaptive effort does NOT lower after a single read — the next step may synthesize it", async () => {
+    const efforts: Array<string | undefined> = [];
+    const script: any[] = [
+      { content: null, tool_calls: [{ id: "r1", name: "read_file", arguments: { path: "a.ts" } }] },
+      { content: null, tool_calls: [{ id: "w1", name: "write_file", arguments: { path: "a.ts", content: "x" } }] },
+      { content: "done", tool_calls: [] },
+    ];
+    const provider = { async complete(_m: any[], _t: any[], _d: any, _s: any, opts: any = {}) { efforts.push(opts.reasoningEffort); return script.shift(); } };
+    const tools = { schemas: () => [], execute: async () => "ok" };
+    const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 6, adaptiveEffort: true, verifyStateChangesBeforeExit: false });
+    await agent.run("read then edit");
+    // Step0 read => streak=1 (< 2, no lower). Step1 is a write => streak resets to 0. No "low" ever fires.
+    expect(efforts).toEqual([undefined, undefined, undefined]);
+  });
+
+  test("adaptive effort lowers only after a SUSTAINED (2+) all-read pattern", async () => {
+    const efforts: Array<string | undefined> = [];
+    const reads = Array.from({ length: 4 }, (_, i) => ({ content: null, tool_calls: [{ id: `r${i}`, name: "read_file", arguments: { path: `f${i}.ts` } }] }));
+    const script: any[] = [...reads, { content: "done", tool_calls: [] }];
+    const provider = { async complete(_m: any[], _t: any[], _d: any, _s: any, opts: any = {}) { efforts.push(opts.reasoningEffort); return script.shift(); } };
+    const tools = { schemas: () => [], execute: async () => "contents" };
+    const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 8, adaptiveEffort: true, verifyStateChangesBeforeExit: false });
+    await agent.run("read several files");
+    // 4 distinct-path reads (no loop guard) + final. Lowering begins on the 3rd provider call.
+    expect(efforts).toEqual([undefined, undefined, "low", "low", "low"]);
+  });
+
+  test("BROAD loop guard WARNS (does not block) on many DISTINCT edits to ONE path", async () => {
   // The doom-loop SIGNAL: editing the SAME file with DIFFERENT args many times chasing a build error.
   // Every call signature differs, so the exact-repeat guard (lastSig/repeats) NEVER trips. The broad
   // guard counts edits-per-path and, at the cap (6), appends a ONE-TIME nudge -- but the edit still RUNS,
@@ -1235,7 +1262,7 @@ test("bash redirection stays state-changing and still requires independent evide
   expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(true);
 });
 
-test("adaptive effort is opt-in and lowers only the follow-up after a productive mechanical read", async () => {
+test("adaptive effort is opt-in and keeps full effort after a single read-then-mutate (the synthesis step is protected)", async () => {
   const efforts: Array<string | undefined> = [];
   const script = [
     { content: null, tool_calls: [{ id: "read", name: "read_file", arguments: { path: "a.ts" } }] },
@@ -1255,7 +1282,9 @@ test("adaptive effort is opt-in and lowers only the follow-up after a productive
     adaptiveEffort: true,
   });
   expect(await agent.run("inspect, then fix")).toBe("done");
-  expect(efforts).toEqual([undefined, "low", undefined]);
+  // Conservative: a single read (streak=1) is NOT enough to lower — the following edit must
+  // synthesize what was just read at full effort. Only a sustained 2+ read pattern lowers.
+  expect(efforts).toEqual([undefined, undefined, undefined]);
 });
 
 test("fresh inspection after the last mutation satisfies the gate without a redundant model round", async () => {

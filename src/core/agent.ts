@@ -548,6 +548,7 @@ export class Agent {
     let stateVerificationRequested = false;
     let stateVerificationEvidence = false;
     let nextReasoningEffort: string | undefined;
+    let consecutiveReadSteps = 0; // adaptive effort: only lower reasoning on a SUSTAINED all-read pattern
     const noteTool = (call: { name: string; arguments?: Record<string, any> }, observation: unknown) => {
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
@@ -878,11 +879,14 @@ export class Agent {
             }
           }
       }
-      nextReasoningEffort = this.adaptiveEffort
-        && !stepHadUnproductiveResult
-        && toolCalls.every((call) => this.isMechanicalReadCall(call))
-        ? "low"
-        : undefined;
+      // Adaptive effort, conservative variant: lower reasoning only on a SUSTAINED all-read pattern
+      // (2+ consecutive steps), never after a single read whose result the next step must still
+      // synthesize. That "lagged proxy" risk is exactly why this stays off by default pending an eval;
+      // this gate makes a future enablement strictly safer — it can only fire less, in narrower cases.
+      const allReads = toolCalls.length > 0 && !stepHadUnproductiveResult
+        && toolCalls.every((call) => this.isMechanicalReadCall(call));
+      consecutiveReadSteps = allReads ? consecutiveReadSteps + 1 : 0;
+      nextReasoningEffort = this.adaptiveEffort && consecutiveReadSteps >= 2 ? "low" : undefined;
 
       // Budget-aware COMPLETION nudge (2026 SOTA: agents fail not from inability but because "nobody told
       // it when the work is over" - a completion signal near the budget edge is what changes behavior).
