@@ -47,9 +47,9 @@ enforced by `test/architecture.test.ts`).
 ```bash
 rtk bun run typecheck          # tsc --noEmit
 rtk bun test                   # the test suite
-bun bin/neko.ts doctor         # resolved provider/model/key (no model call)
-bun bin/neko.ts policy         # safe/gated boundary audit
-bun run build                  # bun build --compile -> dist/neko (single binary)
+rtk node bin/neko-source.cjs doctor # resolved provider/model/key (no model call)
+rtk node bin/neko-source.cjs policy # safe/gated boundary audit
+rtk bun run build                  # bun build --compile -> dist/neko (single binary)
 ```
 
 (Prefix shell commands with `rtk` per the global RTK rule.)

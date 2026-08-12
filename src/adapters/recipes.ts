@@ -10,6 +10,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
+import { inspectProjectTrust } from "./project-trust.ts";
 
 export interface Recipe {
   name: string;
@@ -89,17 +90,11 @@ export function mergeRecipes(filesystemRecipes: Recipe[]): Recipe[] {
   return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function recipeDirs(): string[] {
-  return [join(homeDir(), ".neko-core", "recipes"), join(process.cwd(), ".neko-core", "recipes")];
-}
-
-function parse(file: string): Recipe | null {
+function parse(file: string, suppliedText?: string): Recipe | null {
   let text: string;
-  try {
-    text = readFileSync(file, "utf-8");
-  } catch {
-    return null;
-  }
+  if (suppliedText !== undefined) text = suppliedText;
+  else try { text = readFileSync(file, "utf-8"); }
+  catch { return null; }
   const name = file.replace(/\\/g, "/").split("/").pop()!.replace(/\.md$/, "");
   let description = "";
   let body = text;
@@ -112,15 +107,15 @@ function parse(file: string): Recipe | null {
   return { name, description: description.replace(/\s+/g, " ").slice(0, 120), body: body.trim() };
 }
 
-export function listRecipes(): Recipe[] {
+export function listRecipes(cwd = process.cwd(), home = homeDir()): Recipe[] {
   // Load filesystem recipes in dir order ([home, cwd]); mergeRecipes keeps the first occurrence
   // of a name (home overrides cwd) and layers the bundled defaults underneath.
   const filesystem: Recipe[] = [];
-  for (const dir of recipeDirs()) {
-    if (!existsSync(dir)) continue;
-    for (const entry of readdirSync(dir)) {
+  const userDir = join(home, ".neko-core", "recipes");
+  if (existsSync(userDir)) {
+    for (const entry of readdirSync(userDir)) {
       if (!entry.endsWith(".md")) continue;
-      const p = join(dir, entry);
+      const p = join(userDir, entry);
       try {
         if (!statSync(p).isFile()) continue;
       } catch {
@@ -130,11 +125,22 @@ export function listRecipes(): Recipe[] {
       if (r) filesystem.push(r);
     }
   }
+  const project = inspectProjectTrust(cwd, home);
+  if (project.state === "trusted") {
+    const prefix = ".neko-core/recipes/";
+    for (const file of Object.values(project.projectFiles)) {
+      if (!file.relative.startsWith(prefix)) continue;
+      const suffix = file.relative.slice(prefix.length);
+      if (!/^[^/]+\.md$/.test(suffix)) continue;
+      const recipe = parse(file.path, file.bytes.toString("utf-8"));
+      if (recipe) filesystem.push(recipe);
+    }
+  }
   return mergeRecipes(filesystem);
 }
 
-export function loadRecipe(name: string): Recipe | null {
-  return listRecipes().find((r) => r.name === name) ?? null;
+export function loadRecipe(name: string, cwd = process.cwd(), home = homeDir()): Recipe | null {
+  return listRecipes(cwd, home).find((r) => r.name === name) ?? null;
 }
 
 /** Substitute $ARGUMENTS (all args) and $1..$n (positional) into a recipe body. */
@@ -144,8 +150,8 @@ export function fillRecipe(body: string, args: string): string {
   return body.replace(/\$ARGUMENTS\b/g, all).replace(/\$(\d+)/g, (_, n) => argv[Number(n) - 1] ?? "");
 }
 
-export function renderRecipes(): string {
-  const list = listRecipes();
+export function renderRecipes(cwd = process.cwd(), home = homeDir()): string {
+  const list = listRecipes(cwd, home);
   if (!list.length) {
     return "No recipes. Add *.md to ~/.neko-core/recipes/ or ./.neko-core/recipes/ (body = the prompt; use $ARGUMENTS).";
   }

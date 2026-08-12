@@ -32,7 +32,7 @@ Drive the actual Neko TUI in a real console and read a screenshot with vision. T
 see what the user's terminal FONT and colors actually produce (e.g. a glyph that the font lacks).
 
 1. **Launch fresh** (a fresh window is reliably foreground):
-   `Start-Process -FilePath cmd -ArgumentList '/k','bun bin/neko.ts' -WorkingDirectory '<repo>'`
+   `Start-Process -FilePath cmd -ArgumentList '/k','node bin/neko-source.cjs' -WorkingDirectory '<repo>'`
 2. **Screenshot the screen** (PowerShell, validated):
    ```powershell
    Add-Type -AssemblyName System.Windows.Forms,System.Drawing

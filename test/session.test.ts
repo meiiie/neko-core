@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { latestSession, listSessionMetas, listSessions, loadSession, newSessionId, saveSession, setSessionsDir } from "../src/adapters/session.ts";
+import { isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, setSessionsDir } from "../src/adapters/session.ts";
 
 // Isolate from the user's real ~/.neko-core: these tests WRITE session files. Pointing HOME at a
 // temp dir was the old way, but env mutation across bun test files is racy (see bun-test-env-races)
@@ -50,6 +50,179 @@ test("save / load / list round-trip", () => {
   }
 });
 
+test("save refuses an oversized UTF-8 session without replacing its last readable checkpoint", () => {
+  const id = newSessionId();
+  const path = join(TEST_DIR, `${id}.json`);
+  const baseline = {
+    id,
+    createdAt: new Date().toISOString(),
+    updatedAt: "",
+    cwd: "/tmp/neko-session-size-test",
+    model: "m",
+    messages: [{ role: "user", content: "readable checkpoint" }],
+  };
+  saveSession(baseline);
+  const original = readFileSync(path, "utf8");
+  try {
+    // 33 MiB of two-byte UTF-8 characters is below the old character-count boundary but above the
+    // 64 MiB on-disk boundary. This proves the writer uses the same byte unit as the reader.
+    const oversized = {
+      ...baseline,
+      messages: [{ role: "user", content: "é".repeat(33 * 1024 * 1024) }],
+    };
+    expect(() => saveSession(oversized)).toThrow("exceeds 64 MiB");
+    expect(readFileSync(path, "utf8")).toBe(original);
+    expect(loadSession(id)?.messages[0]?.content).toBe("readable checkpoint");
+  } finally {
+    rmSync(path, { force: true });
+  }
+}, { timeout: 30_000 });
+
+test("session round-trip preserves validated local message markers", () => {
+  const id = newSessionId();
+  saveSession({
+    id,
+    createdAt: new Date().toISOString(),
+    updatedAt: "",
+    cwd: "/tmp/neko-internal-marker-test",
+    model: "m",
+    messages: [
+      { role: "user", content: "human", _neko_internal: false },
+      { role: "user", content: "VERIFY BEFORE FINISHING: inspect", _neko_internal: true },
+    ],
+  });
+  try {
+    expect(loadSession(id)?.messages.map((message) => message._neko_internal)).toEqual([false, true]);
+    expect(() => saveSession({
+      id: `${id}-invalid`,
+      createdAt: new Date().toISOString(), updatedAt: "", cwd: "/tmp", model: "m",
+      messages: [{ role: "user", content: "bad marker", _neko_internal: "true" }],
+    } as any)).toThrow("Invalid session");
+  } finally {
+    rmSync(join(TEST_DIR, `${id}.json`), { force: true });
+  }
+});
+
+test("session IDs are unique, leaf-only, and reject Windows device names", () => {
+  const ids = Array.from({ length: 1000 }, () => newSessionId());
+  expect(new Set(ids).size).toBe(ids.length);
+  for (const id of ids) expect(isValidSessionId(id)).toBe(true);
+  for (const id of ["../outside", "..\\outside", "C:escape", "NUL", "con.json", "name.", "a/b", "a\\b", ""]) {
+    expect(isValidSessionId(id)).toBe(false);
+  }
+});
+
+test("load/save/rename cannot traverse the session store", () => {
+  const escaped = join(TEST_DIR, "..", "neko-session-escaped.json");
+  rmSync(escaped, { force: true });
+  const invalid = {
+    id: "../neko-session-escaped",
+    createdAt: new Date().toISOString(), updatedAt: "", cwd: "/tmp", model: "m",
+    messages: [{ role: "user", content: "do not write" }],
+  };
+  expect(() => saveSession(invalid)).toThrow("Invalid session");
+  expect(loadSession(invalid.id)).toBeNull();
+  renameSession(invalid.id, "escaped");
+  expect(existsSync(escaped)).toBe(false);
+});
+
+test("session payload shape and embedded ID must match the filename", () => {
+  const wrongId = `${newSessionId()}-wrong`;
+  const malformedId = `${newSessionId()}-malformed`;
+  writeFileSync(join(TEST_DIR, `${wrongId}.json`), JSON.stringify({
+    id: "different", createdAt: "x", updatedAt: "x", cwd: "/tmp", model: "m",
+    messages: [{ role: "user", content: "x" }],
+  }));
+  writeFileSync(join(TEST_DIR, `${malformedId}.json`), JSON.stringify({
+    id: malformedId, createdAt: "x", updatedAt: "x", cwd: "/tmp", model: "m", messages: "not-an-array",
+  }));
+  try {
+    expect(loadSession(wrongId)).toBeNull();
+    expect(loadSession(malformedId)).toBeNull();
+    expect(listSessions().some((session) => session.id === wrongId || session.id === malformedId)).toBe(false);
+    expect(listSessionMetas().some((meta) => meta.id === wrongId || meta.id === malformedId)).toBe(false);
+  } finally {
+    rmSync(join(TEST_DIR, `${wrongId}.json`), { force: true });
+    rmSync(join(TEST_DIR, `${malformedId}.json`), { force: true });
+  }
+});
+
+test("session metadata rejects terminal controls while printable Unicode remains listable", () => {
+  const unsafeId = `${newSessionId()}-controls`;
+  const safeId = `${newSessionId()}-unicode`;
+  const unsafePath = join(TEST_DIR, `${unsafeId}.json`);
+  const safePath = join(TEST_DIR, `${safeId}.json`);
+  writeFileSync(unsafePath, JSON.stringify({
+    id: unsafeId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    cwd: "/tmp/safe\u001b]2;PWN\u0007",
+    model: "m",
+    title: "title\u001b]52;c;UE9JU09O\u0007",
+    messages: [{ role: "user", content: "x" }],
+  }));
+  try {
+    expect(loadSession(unsafeId)).toBeNull();
+    expect(() => saveSession({
+      id: `${unsafeId}-save`, createdAt: new Date().toISOString(), updatedAt: "",
+      cwd: "/tmp/safe", model: "m", title: "bad\u001btitle", messages: [],
+    })).toThrow("Invalid session");
+
+    saveSession({
+      id: safeId, createdAt: new Date().toISOString(), updatedAt: "",
+      cwd: "/tmp/du-an", model: "mo-hinh", title: "Phiên tiếng Việt", messages: [],
+    });
+    const rendered = renderSessions();
+    expect(rendered).toContain("Phiên tiếng Việt");
+    expect(rendered).not.toContain("PWN");
+    expect(rendered).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/);
+  } finally {
+    rmSync(unsafePath, { force: true });
+    rmSync(safePath, { force: true });
+    rmSync(join(TEST_DIR, `${unsafeId}-save.json`), { force: true });
+  }
+});
+
+test("rename enforces metadata controls and the 64 MiB atomic publish boundary", () => {
+  const id = `${newSessionId()}-rename-boundary`;
+  const path = join(TEST_DIR, `${id}.json`);
+  const limit = 64 * 1024 * 1024;
+  const targetBytes = limit - 512;
+  const session: any = {
+    id,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    cwd: "/tmp/neko-rename-boundary",
+    model: "m",
+    messages: [{ role: "user", content: "x".repeat(limit - 4096) }],
+    branch: "",
+    bytes: 0,
+  };
+  // Tune a readable fixture close enough to the reader ceiling that a valid 4 KiB title crosses it.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    session.bytes = JSON.stringify(session.messages).length;
+    const current = Buffer.byteLength(JSON.stringify(session, null, 2), "utf8");
+    const delta = targetBytes - current;
+    const content = session.messages[0].content as string;
+    session.messages[0].content = delta >= 0 ? content + "x".repeat(delta) : content.slice(0, delta);
+  }
+  session.bytes = JSON.stringify(session.messages).length;
+  const original = JSON.stringify(session, null, 2);
+  expect(Buffer.byteLength(original, "utf8")).toBeLessThanOrEqual(limit);
+  expect(Buffer.byteLength(original, "utf8")).toBeGreaterThan(limit - 4096);
+  writeFileSync(path, original);
+  try {
+    expect(loadSession(id)?.messages[0]?.content).toBeTruthy();
+    expect(() => renameSession(id, "bad\u001btitle")).toThrow("Invalid session title");
+    expect(readFileSync(path, "utf8")).toBe(original);
+    expect(() => renameSession(id, "t".repeat(4096))).toThrow("exceeds 64 MiB");
+    expect(readFileSync(path, "utf8")).toBe(original);
+    expect(loadSession(id)?.id).toBe(id);
+  } finally {
+    rmSync(path, { force: true });
+  }
+}, { timeout: 30_000 });
+
 test("listSessionMetas: lightweight metadata, mtime-cached index, self-heals on change", () => {
   const id = newSessionId();
   const sess = { id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
@@ -66,6 +239,13 @@ test("listSessionMetas: lightweight metadata, mtime-cached index, self-heals on 
     // The index file was written; a 2nd call reads it (mtime cache) and still returns the entry.
     expect(existsSync(join(TEST_DIR, ".index.json"))).toBe(true);
     expect(listSessionMetas().find((x) => x.id === id)?.msgCount).toBe(2);
+
+    // A poisoned cache ID must not be trusted even when mtime/size still match; reparse the source.
+    const poisonedPath = join(TEST_DIR, ".index.json");
+    const poisoned = JSON.parse(readFileSync(poisonedPath, "utf-8"));
+    poisoned.metas[id].id = "../poisoned";
+    writeFileSync(poisonedPath, JSON.stringify(poisoned));
+    expect(listSessionMetas().find((x) => x.id === id)?.id).toBe(id);
 
     // Change the session (more messages, new mtime) -> the meta re-parses, not stale.
     saveSession({ ...sess, messages: [...sess.messages, { role: "user", content: "more" }] });

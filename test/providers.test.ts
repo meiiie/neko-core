@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { NekoConfig } from "../src/adapters/config.ts";
-import { clampEffort, getProvider, listModelOptions, makeThinkSplitter, normalizeToolResultImages, OpenAICompatProvider, parseOpenAIMessage, toImgTagMessages } from "../src/adapters/providers.ts";
+import { clampEffort, getProvider, listModelOptions, makeThinkSplitter, normalizeToolResultImages, OPENAI_STREAM_LIMITS, OpenAICompatProvider, parseOpenAIMessage, toImgTagMessages } from "../src/adapters/providers.ts";
 import { ResponsesProvider } from "../src/adapters/responses-provider.ts";
 import { SESSION_CONTEXT_MARK } from "../src/core/agent-constants.ts";
 
@@ -143,6 +143,7 @@ test("idle timeout resets per chunk: a slow-but-active stream is NOT aborted (lo
           await new Promise((r) => setTimeout(r, 120));
           controller.enqueue(enc.encode(sse(p)));
         }
+        controller.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`));
         controller.enqueue(enc.encode("data: [DONE]\n\n"));
         controller.close();
       },
@@ -396,15 +397,158 @@ test("parse error object throws with message", () => {
   expect(() => parseOpenAIMessage({ error: { message: "boom" } })).toThrow(/boom/);
 });
 
+test("non-stream responses reject truncation and missing assistant messages", () => {
+  expect(() => parseOpenAIMessage({ choices: [{}] })).toThrow("missing assistant message");
+  for (const finish_reason of ["length", "content_filter", "unknown_vendor_reason"]) {
+    expect(() => parseOpenAIMessage({ choices: [{ message: { content: "partial" }, finish_reason }] }))
+      .toThrow(`non-success finish_reason: ${finish_reason}`);
+  }
+  expect(parseOpenAIMessage({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }] }).content).toBe("ok");
+});
+
 test("parse captures usage", () => {
   const out = parseOpenAIMessage({ choices: [{ message: { content: "x" } }], usage: { total_tokens: 5 } });
   expect(out.usage?.total_tokens).toBe(5);
 });
 
+async function completeOpenAIResponse(response: Response, onToolCallReady?: (call: any) => void) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => response) as any;
+  try {
+    const config = new NekoConfig({ provider: "openai_compat", base_url: "http://x/v1", model: "m", reasoning_effort: "off" }, null, {}, "k");
+    return await new OpenAICompatProvider(config).complete(
+      [{ role: "user", content: "hi" }], undefined, () => {}, undefined, { onToolCallReady },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+async function completeOpenAIStream(body: string, onToolCallReady?: (call: any) => void) {
+  return completeOpenAIResponse(new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }), onToolCallReady);
+}
+
+test("openai stream holds a later ready read until an earlier write is complete", async () => {
+  const chunks = [
+    { choices: [{ delta: { tool_calls: [{ index: 0, id: "w", function: { name: "write_file", arguments: '{"path":"x","content":"' } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 1, id: "r", function: { name: "read_file", arguments: '{"path":"x"}' } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'done"}' } }] }, finish_reason: "tool_calls" }] },
+  ];
+  const body = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n";
+  const ready: string[] = [];
+  const result = await completeOpenAIStream(body, (call) => ready.push(call.name));
+  expect(ready).toEqual(["write_file", "read_file"]);
+  expect(result.tool_calls.map((call) => call.name)).toEqual(["write_file", "read_file"]);
+});
+
+test("openai stream does not freeze the normal empty argument announcement", async () => {
+  const chunks = [
+    { choices: [{ delta: { tool_calls: [{ index: 0, id: "r", function: { name: "read_file", arguments: "" } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":"package.json"}' } }] }, finish_reason: "tool_calls" }] },
+  ];
+  const body = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n";
+  const ready: any[] = [];
+  const result = await completeOpenAIStream(body, (call) => ready.push(call));
+
+  expect(ready).toHaveLength(1);
+  expect(ready[0].arguments).toEqual({ path: "package.json" });
+  expect(result.tool_calls[0].arguments).toEqual({ path: "package.json" });
+});
+
+test("openai stream rejects an in-band error envelope", async () => {
+  const body = `data: ${JSON.stringify({ error: { message: "provider stream failed" } })}\n\ndata: [DONE]\n\n`;
+  await expect(completeOpenAIStream(body)).rejects.toThrow("provider stream failed");
+
+  const typed = `data: ${JSON.stringify({ type: "error", message: "provider overloaded" })}\n\ndata: [DONE]\n\n`;
+  await expect(completeOpenAIStream(typed)).rejects.toThrow("provider overloaded");
+});
+
+test("openai stream rejects EOF before the DONE sentinel", async () => {
+  const body = `data: ${JSON.stringify({ choices: [{ delta: { content: "partial" } }] })}\n\n`;
+  await expect(completeOpenAIStream(body)).rejects.toThrow("ended before [DONE]");
+});
+
+test("openai stream rejects non-success finish reasons", async () => {
+  for (const finish_reason of ["length", "content_filter", "unknown_vendor_reason"]) {
+    const body = `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason }] })}\n\ndata: [DONE]\n\n`;
+    await expect(completeOpenAIStream(body)).rejects.toThrow(`non-success finish_reason: ${finish_reason}`);
+  }
+});
+
+test("openai stream accepts compatible success finish reasons", async () => {
+  for (const finish_reason of ["stop", "tool_calls", "function_call"]) {
+    const body = `data: ${JSON.stringify({ choices: [{ delta: { content: "ok" }, finish_reason }] })}\n\ndata: [DONE]\n\n`;
+    expect((await completeOpenAIStream(body)).content).toBe("ok");
+  }
+});
+
+test("openai stream fails closed on malformed, empty, and unfinished data", async () => {
+  await expect(completeOpenAIStream("data: {not-json}\n\ndata: [DONE]\n\n"))
+    .rejects.toThrow("malformed SSE data");
+  await expect(completeOpenAIStream("data: [DONE]\n\n"))
+    .rejects.toThrow("without a valid choice");
+  const unfinished = `data: ${JSON.stringify({ choices: [{ delta: { content: "partial" } }] })}\n\ndata: [DONE]\n\n`;
+  await expect(completeOpenAIStream(unfinished)).rejects.toThrow("without a successful finish reason");
+
+  const withKeepalive = [
+    "data: ping\n\n",
+    `data: ${JSON.stringify({ type: "heartbeat" })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] })}\n\n`,
+    "data: [DONE]\n\n",
+  ].join("");
+  expect((await completeOpenAIStream(withKeepalive)).content).toBe("ok");
+});
+
+test("openai stream rejects sparse, non-integer, and excessive tool call indexes/counts", async () => {
+  for (const index of [-1, 1.5, OPENAI_STREAM_LIMITS.maxToolCalls, 4_294_967_294]) {
+    const chunk = { choices: [{ delta: { tool_calls: [{ index, id: "x", function: { name: "read_file", arguments: "{}" } }] } }] };
+    await expect(completeOpenAIStream(`data: ${JSON.stringify(chunk)}\n\n`)).rejects.toThrow("index out of range");
+  }
+  const calls = Array.from({ length: OPENAI_STREAM_LIMITS.maxToolCalls + 1 }, (_, index) => ({
+    index: index % OPENAI_STREAM_LIMITS.maxToolCalls,
+    id: `x${index}`,
+    function: { name: "read_file", arguments: "{}" },
+  }));
+  await expect(completeOpenAIStream(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: calls } }] })}\n\n`))
+    .rejects.toThrow("call count exceeds safety limit");
+});
+
+test("openai stream caps lines and aggregate bytes and cancels the reader on breach", async () => {
+  const encoder = new TextEncoder();
+  let lineCancelled = false;
+  const longLine = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${"x".repeat(OPENAI_STREAM_LIMITS.maxLineBytes + 1)}`));
+    },
+    cancel() { lineCancelled = true; },
+  });
+  await expect(completeOpenAIResponse(new Response(longLine))).rejects.toThrow("SSE line exceeds safety limit");
+  expect(lineCancelled).toBe(true);
+
+  let aggregateCancelled = false;
+  const comment = encoder.encode(`: ${"x".repeat(1024 * 1024)}\n`);
+  const aggregate = new ReadableStream<Uint8Array>({
+    pull(controller) { controller.enqueue(comment); },
+    cancel() { aggregateCancelled = true; },
+  });
+  await expect(completeOpenAIResponse(new Response(aggregate))).rejects.toThrow("SSE aggregate exceeds safety limit");
+  expect(aggregateCancelled).toBe(true);
+});
+
+test("openai stream caps accumulated tool arguments across otherwise bounded events", async () => {
+  const oneMiB = "a".repeat(1024 * 1024);
+  const chunks = [
+    { index: 0, id: "x", function: { name: "write_file", arguments: `{"content":"${oneMiB}` } },
+    ...Array.from({ length: 4 }, () => ({ index: 0, function: { arguments: oneMiB } })),
+  ];
+  const body = chunks.map((toolCall) => `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [toolCall] } }] })}\n\n`).join("");
+  await expect(completeOpenAIStream(body)).rejects.toThrow("tool arguments exceed safety limit");
+});
+
 test("openai stream finalizes tool call i when the index advances (onToolCallReady mid-stream)", async () => {
   const chunks = [
     { choices: [{ delta: { tool_calls: [{ index: 0, id: "a", function: { name: "read_file", arguments: '{"path":"x"}' } }] } }] },
-    { choices: [{ delta: { tool_calls: [{ index: 1, id: "b", function: { name: "search", arguments: '{"pattern":"y"}' } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 1, id: "b", function: { name: "search", arguments: '{"pattern":"y"}' } }] }, finish_reason: "tool_calls" }] },
   ];
   const body = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n";
   const orig = globalThis.fetch;
@@ -435,7 +579,7 @@ test("openai stream accumulates interleaved parallel tool-call deltas by index",
     { choices: [{ delta: { tool_calls: [
       { index: 0, function: { arguments: 'x"}' } },
       { index: 1, function: { arguments: 'y"}' } },
-    ] } }] },
+    ] }, finish_reason: "tool_calls" }] },
   ];
   const body = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n";
   const orig = globalThis.fetch;
@@ -463,7 +607,7 @@ test("OpenAI-compatible tool metadata replays only to the endpoint and model tha
       type: "function",
       function: { name: "read_file", arguments: '{"path":"package.json"}' },
       extra_content: { google: { thought_signature: "encrypted-signature" } },
-    }] } }],
+    }] }, finish_reason: "tool_calls" }],
   };
   const stream = `data: ${JSON.stringify(firstChunk)}\n\ndata: [DONE]\n\n`;
   const sent: Array<{ url: string; body: any }> = [];

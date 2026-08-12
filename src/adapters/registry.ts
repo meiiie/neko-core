@@ -3,7 +3,7 @@
  * agents / commands / capabilities registries + a policy audit of the safe/gated boundary.
  */
 import type { NekoConfig } from "./config.ts";
-import { sandboxActive } from "../core/sandbox.ts";
+import { detectSandbox, sandboxActive, type SandboxKind } from "../core/sandbox.ts";
 import { GATED, listTools, SAFE } from "../core/tools.ts";
 
 export const READ_ONLY = "read-only";
@@ -88,17 +88,25 @@ export interface CommandSpec {
 
 export const COMMANDS: CommandSpec[] = [
   { name: "chat", group: "agent", summary: "Interactive agentic session (REPL).", example: "neko chat" },
+  { name: "resume", group: "agent", summary: "Resume the latest or an exact saved session.", example: "neko resume <session-id>" },
   { name: "run", group: "agent", summary: "One-shot: run a single instruction.", example: "neko run 'add a test for X'" },
+  { name: "oracle", group: "agent", summary: "Ask a configured stronger model for a second opinion.", example: "neko oracle -p 'review this design'" },
+  { name: "bench", group: "agent", summary: "Run the configured model through Neko's benchmark tiers.", example: "neko bench hard" },
   { name: "config", group: "config", summary: "Show the resolved config-first settings.", example: "neko config" },
   { name: "doctor", group: "config", summary: "Read-only diagnostics (provider/model/key).", example: "neko doctor" },
   { name: "profiles", group: "config", summary: "List the named runtime profiles.", example: "neko profiles" },
   { name: "init-user", group: "config", summary: "Scaffold user config, Neko Core identity, and bounded local memory.", example: "neko init-user" },
   { name: "init", group: "config", summary: "Scaffold ./.neko-core/config.json.", example: "neko init" },
+  { name: "login", group: "config", summary: "Sign in or save a provider API key.", example: "neko login" },
+  { name: "logout", group: "config", summary: "Sign out the active provider route.", example: "neko logout" },
+  { name: "update", group: "config", summary: "Install the latest or an exact Neko release.", example: "neko update" },
   { name: "tools", group: "registry", summary: "List tool contracts (safe/gated).", example: "neko tools write_file" },
   { name: "agents", group: "registry", summary: "List agent roles and boundaries.", example: "neko agents coder" },
   { name: "commands", group: "registry", summary: "List the CLI command surface.", example: "neko commands" },
   { name: "capabilities", group: "registry", summary: "List runtime/CLI capabilities.", example: "neko capabilities" },
   { name: "policy", group: "registry", summary: "Audit the safe/gated permission boundary.", example: "neko policy" },
+  { name: "trust", group: "config", summary: "Manage exact project control-surface trust.", example: "neko trust status" },
+  { name: "handoff", group: "config", summary: "Send or inspect immutable summary-only session handoffs.", example: "neko handoff inbox <session-id>" },
   { name: "context", group: "registry", summary: "Show global identity and project context files.", example: "neko context" },
   { name: "sessions", group: "config", summary: "List saved chat sessions.", example: "neko sessions" },
   { name: "skills", group: "registry", summary: "List available skills (~/.neko-core/skills).", example: "neko skills" },
@@ -109,6 +117,8 @@ export const COMMANDS: CommandSpec[] = [
   { name: "browser", group: "local", summary: "Set up or inspect explicit-tab browser control.", example: "neko browser status" },
   { name: "meeting", group: "local", summary: "Consented local meeting capture, transcription, evidence, and evaluation.", example: "neko meeting status" },
   { name: "setup", group: "config", summary: "Web stack + browser identity (persistent, existing-Chrome attach, or isolated).", example: "neko setup browser persistent" },
+  { name: "version", group: "registry", summary: "Print the Neko Core version.", example: "neko version" },
+  { name: "help", group: "registry", summary: "Show CLI usage and options.", example: "neko help" },
 ];
 
 export function listCommands(): CommandSpec[] {
@@ -146,12 +156,12 @@ export function collectCapabilities(config: NekoConfig): Capability[] {
       // "Gated-but-sandboxed" is a NAMED state like mode=auto: the gate stays in the contract,
       // the prompt is skipped only while confinement is LIVE (primitive + provisioning).
       detail: config.sandbox && config.sandboxAutoApprove && sandboxActive()
-        ? `bash (gated; auto-approved while OS-sandboxed: fs confined to workspace, egress ${config.sandboxNetwork ? "allowlisted" : "blocked"}; sandbox_auto_approve=false to prompt)`
+        ? `bash (gated; explicitly auto-approved while OS-sandboxed: writes confined to workspace/temp, host reads remain available; sandbox_auto_approve=false to prompt)`
         : "bash (gated: needs approval)",
     },
     { name: "permission_modes", klass: "agent", status: "enabled", detail: "default / accept-edits / plan / auto (Shift+Tab to cycle in chat)" },
     { name: "approval_gate", klass: "agent", status: "enabled", detail: `mode=${config.mode}` },
-    { name: "bounded_autopilot", klass: "agent", status: auto ? "enabled" : "disabled", detail: "mode=auto (--yolo): gated tools run without prompting; a named state, not hidden" },
+    { name: "bounded_autopilot", klass: "agent", status: auto ? "enabled" : "disabled", detail: "mode=auto (--yolo): bounded gated tools run without prompting; host computer control still requires explicit consent" },
     { name: "introspection", klass: "cli", status: "enabled", detail: "tools/agents/commands/capabilities/policy registries" },
     { name: "meeting_companion", klass: "tool", status: "enabled", detail: "explicit-consent local capture; optional local transcription; timestamped evidence" },
   ];
@@ -175,7 +185,14 @@ export interface PolicyReport {
   findings: PolicyFinding[];
 }
 
-const MUST_BE_GATED = new Set(["write_file", "edit", "multi_edit", "bash", "computer"]);
+export interface SandboxRuntimeStatus {
+  readonly kind: SandboxKind;
+  readonly live: boolean;
+  readonly provisioned?: boolean;
+  readonly detail?: string;
+}
+
+const MUST_BE_GATED = new Set(["write_file", "edit", "multi_edit", "bash", "computer", "task"]);
 const MUST_BE_SAFE = new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "skill"]);
 const MUST_GATE_ACTIONS: Record<string, string[]> = {
   memory: ["write", "append", "delete"],
@@ -183,11 +200,14 @@ const MUST_GATE_ACTIONS: Record<string, string[]> = {
   playbook: ["add", "revise", "remove"],
 };
 
-export function evaluatePolicy(config: NekoConfig): PolicyReport {
+export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRuntimeStatus): PolicyReport {
   const tools = listTools();
   const agents = listAgents();
   const commands = listCommands();
   const findings: PolicyFinding[] = [];
+  const sandboxKind = sandboxRuntime?.kind ?? detectSandbox();
+  const sandboxLive = config.mode === "auto" && config.sandbox && sandboxKind !== "none" &&
+    (sandboxRuntime?.live ?? sandboxActive());
 
   checkUnique("tool", tools.map((t) => t.name), findings);
   checkUnique("agent", agents.map((a) => a.name), findings);
@@ -229,6 +249,30 @@ export function evaluatePolicy(config: NekoConfig): PolicyReport {
 
   if (config.mode === "auto") {
     findings.push({ severity: "warn", code: "bounded_autonomy_on", subject: "mode", message: "mode=auto (--yolo): gated tools run without prompting. Named state, not hidden." });
+    if (!config.sandbox || sandboxKind === "none") {
+      findings.push({
+        severity: "warn",
+        code: "auto_without_live_sandbox",
+        subject: "mode+sandbox",
+        message: "UNCONFINED AUTO: bash runs without approval and no live OS sandbox contains it. The catastrophic-command seatbelt remains, but it is not confinement.",
+      });
+    } else if (!sandboxLive) {
+      findings.push({
+        severity: "warn",
+        code: "auto_with_unusable_sandbox",
+        subject: "bash+sandbox",
+        message: `BASH FAILS CLOSED: the configured ${sandboxKind} sandbox is present but unusable, so Neko refuses bash execution instead of falling back to the host. Other gated tools remain in auto mode.`,
+      });
+    }
+  }
+
+  if (config.projectTrust.state === "untrusted" || config.projectTrust.state === "changed" || config.projectTrust.state === "error") {
+    findings.push({
+      severity: "warn",
+      code: config.projectTrust.state === "error" ? "project_trust_error" : "project_config_untrusted",
+      subject: "project_trust",
+      message: `Project control surfaces are quarantined (${config.projectTrust.state}) and were not loaded. Run 'neko trust status' before trusting this checkout.`,
+    });
   }
 
   // Reads reaching outside the project is a deliberate default, not a leak: writes stay confined and
@@ -239,7 +283,7 @@ export function evaluatePolicy(config: NekoConfig): PolicyReport {
       severity: "info",
       code: "reads_outside_root",
       subject: "read_outside_root",
-      message: "Reads may resolve outside the project directory; writes, edits and bash may not. Credential paths (SSH, .env, key material, browser stores) stay refused. Set read_outside_root:false for a hard wall.",
+      message: "Reads may resolve outside the project directory. Structured writes and edits stay project-confined; bash confinement requires a live OS sandbox. Credential paths (SSH, .env, key material, browser stores) stay refused. Set read_outside_root:false for a hard read wall.",
     });
   }
 

@@ -18,6 +18,7 @@ import { render } from "ink";
 import { createElement } from "react";
 
 import type { NekoConfig } from "../adapters/config.ts";
+import { terminalSafeText } from "../shared/terminal-text.ts";
 import { Box } from "ink";
 import { TranscriptLine, type Line } from "./transcript.tsx";
 import { styleFor } from "./scroll.tsx";
@@ -68,7 +69,7 @@ export function renderLineRows(line: Line, width: number, cfg: NekoConfig): stri
 export function fallbackRows(line: Line): string[] {
   const { glyph } = styleFor(line.kind);
   const first = String(line.text).split("\n", 1)[0];
-  return [glyph + first];
+  return [glyph + terminalSafeText(first, { maxChars: 512 })];
 }
 
 const cache = new Map<number, { width: number; rows: string[] }>();
@@ -92,7 +93,10 @@ function boundedPlainRows(line: Line, width: number): string[] {
     .replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   const wrap = Math.max(8, width - glyph.length);
   const maxRows = 12;
-  const tail = body.slice(-wrap * (maxRows - 1));
+  const tail = terminalSafeText(body.slice(-wrap * (maxRows - 1)), {
+    maxChars: wrap * (maxRows - 1),
+    preserveLineBreaks: true,
+  });
   const segments: string[] = [];
   for (const raw of tail.split("\n")) {
     if (!raw.length) { segments.push(""); continue; }

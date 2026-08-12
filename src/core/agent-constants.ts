@@ -36,7 +36,7 @@ export const DEFAULT_SYSTEM_PROMPT =
   "- Multi-line code (Python/Node): write it to a FILE and run that (`python build.py`). Don't pack newlines into `python -c`/`bash -c`/heredocs — they break on Windows cmd. Then verify the output file exists.\n\n" +
   "## Working\n" +
   "- Before a tool call/batch, say what you're about to do in one short, natural line in your own words — don't fire tools silently.\n" +
-  "- Multi-step -> todo_write to plan + track (exactly one item in_progress while work remains; none when all are completed). Mark an item completed only after checking the real result; before finishing, update the full plan so every finished item is completed or state the blocker.\n" +
+  "- Use todo_write only for genuinely multi-part or long-horizon work (3+ independent items, multiple files/components, or a task that needs durable tracking). Skip todo_write for a single-file inspect/edit/verify microtask. When used, keep exactly one item in_progress and mark it completed only after checking the real result.\n" +
   "- Use `memory` only for durable facts worth keeping ACROSS sessions. `user.md` is an editable WORKING " +
   "model: record explicit/repeated preferences, goals, and corrections with evidence/confidence/date; never " +
   "infer sensitive traits, diagnoses, emotions, or intent as lasting facts. `self.md` is for VERIFIED " +
@@ -52,11 +52,8 @@ export const DEFAULT_SYSTEM_PROMPT =
   "- Plan mode = read-only: research, then exit_plan_mode with a markdown plan and wait for approval.\n" +
   "- Inspect before editing; smallest change that works.\n" +
   "- Before implementation, extract the exact OBSERVABLE acceptance criteria from the request, supplied source/docs, existing tests, and reference output. Preserve them while working; a self-authored happy-path check is not a substitute.\n" +
-  "- BATCH independent reads: when you need several lookups that don't depend on each other " +
-  "(read_file/search/glob/ls/web_search/web_fetch), emit them TOGETHER in one turn — they run in " +
-  "parallel, so 4 reads cost one round-trip instead of four. Serialize only when a read depends on a " +
-  "prior read's result.\n" +
-  "- VERIFY every command: after bash/tests/builds, READ the exit code and output. If it FAILED (non-zero exit) or shows an error, diagnose the cause, fix it, and re-run to confirm it passes -- never assume success or move on with a broken result.\n" +
+  "- Batch independent reads in one turn; serialize only when one result determines the next. If the request names the exact file or test, inspect it directly; don't inventory it with both ls and glob.\n" +
+  "- Verify every command from its exit code/output; diagnose and rerun failures. For a cheap required full suite, run the full suite once after the last edit; use focused-first only for diagnosis or an expensive suite.\n" +
   "- Verify from a CLEAN state: remove stale generated outputs before a check so they cannot short-circuit it. Afterward leave the intended deliverables, not disposable validation artifacts. When the deliverable is a program and a clean run recreates an output, that runtime output is disposable even if the acceptance behavior names its path.\n\n" +
   "## Accuracy\n" +
   "Time-sensitive or factual questions (today/current/latest/best/a price/who holds an office) -> your training has a CUTOFF; do NOT answer from memory. web_search, then VERIFY before answering: cross-check each key fact across >=2 independent sources; prefer primary/official/known-leaderboard sources over SEO/aggregator/content-farm pages; sanity-check recency (a 'latest/2026' source that lists clearly-old items is stale -- discard it, don't repeat it). If sources conflict or are thin, SAY SO and cite (URL + date) rather than presenting a guess as fact. Conclusions are provisional: keep doubting, re-verify when evidence shifts, and revise or drop stale knowledge instead of trusting a frozen snapshot. For a deeper dive or an ongoing, self-correcting research ledger, load `deep-research` / `research-method`.\n\n" +
@@ -92,13 +89,12 @@ Rules:
 - Preserve durable user preferences only when the user stated or repeatedly confirmed them; never infer sensitive traits or a psychological profile.
 - Omit greetings, filler, superseded output, secrets, and low-value tool logs. Do not invent missing memory. Be concise.`;
 
-// Tools safe to run concurrently in one turn: read-only inspection + sub-agent tasks (the
-// "fleet"). Mutating tools (write_file/edit/bash) are excluded so they stay ordered + gated.
-export const CONCURRENCY_SAFE = new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "task"]);
+// Tools safe to run concurrently in one turn. Named read-only subagents are admitted dynamically
+// by Agent; generic/custom workers may mutate and must remain ordered with every other action.
+export const CONCURRENCY_SAFE = new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch"]);
 // Tools that may start executing WHILE the response is still streaming (stream-eager execution).
-// Read-only only; `task` is excluded - eagerly spawning a sub-agent on a half-streamed turn is too
-// aggressive a bet (its own model calls) for a speculative start.
-export const EAGER_SAFE = new Set([...CONCURRENCY_SAFE].filter((n) => n !== "task"));
+// Subagents stay excluded: spawning another model on a half-streamed turn is too aggressive a bet.
+export const EAGER_SAFE = new Set(CONCURRENCY_SAFE);
 
 // File-mutating tools. The broad doom-loop guard counts repeated edits to the SAME path even
 // when the args differ (the common "chase a build error across N edits" loop the exact-repeat
@@ -109,6 +105,7 @@ export const MUTATING_TOOLS = new Set(["bash", ...EDIT_TOOLS]); // tools whose F
 export const EDIT_PER_PATH_CAP = 6;   // edits to ONE path in a run before a ONE-TIME soft nudge (warns, does NOT
                                       // block -- legitimate coding edits a file several times: write, test, fix, fix)
 export const UNPRODUCTIVE_CAP = 3;    // >= N consecutive EMPTY-or-failed tool results (any tool) -> nudge to change approach
+export const TOOLCHAIN_FAILURE_CAP = 3; // distinct failed Bun/Node/package-manager attempts -> stop the capability spiral
 
 // A single tool result (a giant browser snapshot, a huge file/page read) must not push the prompt past
 // the model's context window -- the server then computes a NEGATIVE max_tokens (window - prompt) and
@@ -176,6 +173,12 @@ export function estimateTokens(messages: any[]): number {
   return tokens;
 }
 
+/** Estimate the rendered provider request, including the separately serialized tool catalog.
+ * `estimateTokens()` intentionally remains message-only for callers measuring transcript deltas. */
+export function estimateRequestTokens(messages: any[], schemas: any[] = []): number {
+  return estimateTokens(messages) + (schemas.length ? estimateTextTokens(schemas) : 0);
+}
+
 // onEvent(kind, data): tool lifecycle + final/max_steps + throttled crash-journal checkpoint events.
 export type EventHook = (kind: string, data: any) => void;
 
@@ -193,8 +196,8 @@ export interface AgentOptions {
   /** Model context window (tokens). The loop compacts IN-LOOP before a request would overflow it,
    * so a single long turn (e.g. many huge browser snapshots) can't blow past the window. */
   maxContextTokens?: number;
-  /** Opt-in pre-completion gate: the FIRST tool-less final answer of a run is intercepted once and
-   * the model is told to re-inspect the ACTUAL state against the goal before finishing - catching
+  /** Opt-in pre-completion gate: the first tool-less final without fresh inspection/test evidence is
+   * intercepted once and the model is told to re-inspect the ACTUAL state against the goal - catching
    * the "declared done without re-running the check" failure mode. (Config: `verify_before_exit`.) */
   verifyBeforeExit?: boolean;
   /** Production safety net for real state changes: reject completion until the model performs a

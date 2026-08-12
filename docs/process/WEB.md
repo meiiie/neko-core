@@ -48,7 +48,7 @@ extract verbatim, compute in code.
 
 A broad product description is a discovery query, not a stable identity. Keep a small candidate ledger;
 when any result reveals a SKU/MPN/GTIN, pivot the top objective-relevant candidates through the installed
-`neko procurement source-plan` command, or `bun bin/neko.ts procurement source-plan` when the current
+`neko procurement source-plan` command, or `node bin/neko-source.cjs procurement source-plan` when the current
 session itself runs from a source checkout without a global `neko`. The helper emits an exact lexical query, an identifier-specific
 Websosanh URL, and separate retailer-domain queries. Its default `auto` mode accepts strict SKU/GTIN forms;
 pass `--kind sku` for a source-labelled numeric/letter-only SKU, or `--kind mpn` for a manufacturer part

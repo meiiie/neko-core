@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { loadConfig, NekoConfig } from "../src/adapters/config.ts";
-import { collectChecks, collectTerminalChecks, terminalName } from "../src/adapters/doctor.ts";
+import { collectChecks, collectTerminalChecks, srtToolchainCheck, terminalName } from "../src/adapters/doctor.ts";
 import { saveKimiCredentials } from "../src/adapters/kimi-auth.ts";
 
 test("terminalName identifies the host from the env, most-specific first", () => {
@@ -123,6 +123,49 @@ test("doctor surfaces the resident UIA fast path and rollback state", () => {
   const off = collectChecks(new NekoConfig({ computer_use_resident: false }, null, {}, "")).find((check) => check.name === "computer_use");
   expect(on?.detail).toContain("resident UIA/input/capture on");
   expect(off?.detail).toContain("fallback");
+});
+
+test("doctor labels auto mode without a live sandbox as unconfined", () => {
+  const checks = collectChecks(new NekoConfig({ mode: "auto", sandbox: false }, null, {}, ""));
+  expect(checks.find((check) => check.name === "mode"))
+    .toMatchObject({ status: "warn", detail: expect.stringContaining("UNCONFINED AUTO") });
+  expect(checks.find((check) => check.name === "bash_sandbox"))
+    .toMatchObject({ status: "warn", detail: expect.stringContaining("UNCONFINED AUTO") });
+});
+
+test("doctor reports present-but-unhealthy SRT as fail-closed rather than unconfined", () => {
+  const checks = collectChecks(
+    new NekoConfig({ mode: "auto", sandbox: true }, null, {}, ""),
+    undefined,
+    undefined,
+    { kind: "srt", live: false, provisioned: true, detail: "state database unavailable" },
+  );
+  const mode = checks.find((check) => check.name === "mode")!;
+  const sandbox = checks.find((check) => check.name === "bash_sandbox")!;
+
+  expect(mode).toMatchObject({ status: "warn", detail: expect.stringContaining("FAILS CLOSED") });
+  expect(sandbox).toMatchObject({ status: "warn", detail: expect.stringContaining("FAILS CLOSED") });
+  expect(`${mode.detail}\n${sandbox.detail}`).not.toContain("UNCONFINED AUTO");
+});
+
+test("doctor calls configured-but-unavailable sandbox unconfined in auto mode", () => {
+  const checks = collectChecks(
+    new NekoConfig({ mode: "auto", sandbox: true }, null, {}, ""),
+    undefined,
+    undefined,
+    { kind: "none", live: false },
+  );
+  expect(checks.find((check) => check.name === "mode")?.detail).toContain("UNCONFINED AUTO");
+  expect(checks.find((check) => check.name === "bash_sandbox")?.detail).toContain("UNCONFINED AUTO");
+});
+
+test("doctor distinguishes a source-run SRT Bun bridge from compiled Neko without an external toolchain", () => {
+  expect(srtToolchainCheck(true, "srt", Object.freeze({ path: "C:\\tools\\bun.exe", source: "runtime" })))
+    .toMatchObject({ status: "ok", detail: expect.stringContaining("source-run Bun") });
+  expect(srtToolchainCheck(true, "srt", null))
+    .toMatchObject({ status: "warn", detail: expect.stringContaining("compiled Neko") });
+  expect(srtToolchainCheck(false, "srt", null)).toBeNull();
+  expect(srtToolchainCheck(true, "bwrap", null)).toBeNull();
 });
 
 test("collectTerminalChecks reports terminal, tty state, ui_fps, and the keys-probe pointer", () => {

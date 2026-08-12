@@ -50,6 +50,13 @@ bot — only the relevant one loads, only when relevant.
 2. `./.neko-core/skills/` — project-local skills (committed with a repo).
 3. `<neko>/skills/` — **bundled** skills shipped with Neko (lowest priority; the two above override).
 
+The one-line installer downloads one verified standalone binary. Every file under the release's repository
+`skills/` tree is embedded at build time, so those bundled skills are available globally from any working
+directory without creating `~/.neko-core/skills`. The user directory is only for personal additions and
+overrides. Neko deliberately does not discover a developer's private `~/.codex/skills`, copy arbitrary local
+skills into a release, or download executable skill assets silently; a skill must be in the release tree or be
+installed explicitly by its user.
+
 ### SKILL.md format
 ```markdown
 ---
@@ -79,8 +86,9 @@ The hands it uses: `web_search` + `web_fetch` today; a **browser MCP** (Playwrig
 A skill can ship more than a SKILL.md — the procurement skill bundles:
 - **Standalone helpers** — required installed-runtime paths belong behind `neko`; for example,
   `neko procurement source-plan` exposes exact-identifier planning without requiring a source tree or Bun.
-  Contributor docs and skills must also show `bun bin/neko.ts ...` when the same command can run from a
-  source checkout without a global `neko`.
+  Contributor docs and skills must show `node bin/neko-source.cjs ...` for a source checkout without a
+  global `neko`. The internal TypeScript entry is never a public launch path because Bun autoloads cwd
+  configuration before Neko can apply project trust.
 - **`scripts/`** — source/development helpers. `make-sheet.ts` turns a normalized offer table into a real
   `.xlsx` with clickable hyperlinks + auto-filter (zero-dependency, runs under `bun`).
 - **`evals/`** — a deterministic check (`run-evals.ts`): fixed input (no network), `--trials N` ->

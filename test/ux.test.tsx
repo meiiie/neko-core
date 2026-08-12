@@ -378,6 +378,28 @@ test("ansi-cache: renderLineRows renders a line rich once; fallback is instant p
   clearAnsiCache();
 });
 
+test("ansi-cache: plain fallbacks escape OSC, CSI, BEL, and C1 controls", async () => {
+  const { fallbackRows, renderLineRows, clearAnsiCache } = await import("../src/ui/ansi-cache.ts");
+  const line: Line = {
+    id: 90004,
+    kind: "assistant",
+    text: `safe\u001b]52;c;clipboard\u0007 then \u001b[31mred\u009b2J`,
+  };
+  const rows = fallbackRows(line);
+  const output = rows.join("\n");
+  expect(output).toContain("\\u001b]52");
+  expect(output).toContain("\\u0007");
+  expect(output).toContain("\\u009b2J");
+  expect(output).not.toContain("\u001b");
+  expect(output).not.toContain("\u0007");
+  expect(output).not.toMatch(/[\u0080-\u009f]/);
+  const richOutput = renderLineRows(line, 60, CFG).join("\n");
+  expect(richOutput).not.toContain("\u001b");
+  expect(richOutput).not.toContain("\u0007");
+  expect(richOutput).not.toMatch(/[\u0080-\u009f]/);
+  clearAnsiCache();
+});
+
 test("ansi-cache: priming a committed assistant skips the raw markdown fallback", async () => {
   const { primeAnsiCache, getCachedRows, clearAnsiCache } = await import("../src/ui/ansi-cache.ts");
   const line = { id: 90003, kind: "assistant" as const, text: "**formatted answer**" };
@@ -779,7 +801,7 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     // Wait until the complete Markdown-bearing prefix reaches the live band while the provider is still
     // hanging. The trailing plain-text sentence is irrelevant to this regression and may render later on
     // a loaded runner even after all deltas were emitted, so it must not be the readiness signal.
-    for (let i = 0; i < 320; i++) {
+    for (let i = 0; i < 600; i++) {
       const frame = strip(c.lastFrame());
       if (provider.streamedAll && frame.includes("Trump - Putin") && !frame.includes("**")) break;
       await tick(25);
@@ -797,7 +819,7 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     c.unmount();
     await tick(20); // let the provider leave its hang so no timer outlives the test
   }
-}, 15000); // generous wall-clock: streaming + per-delta hidden-instance renders can run slow under suite load
+}, 25000); // hidden-instance rendering can exceed 8s under a fully loaded Linux runner
 
 test("interrupted turn is PERSISTED incrementally - resume shows the work, not nothing", async () => {
   // The bug: persist() ran ONLY in the turn's finally block, so killing the process mid-turn (closing

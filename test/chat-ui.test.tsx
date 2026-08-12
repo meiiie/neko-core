@@ -225,6 +225,42 @@ const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));
 // flakes. Budget is per-call; keep (#calls * budget) under each test's jest timeout.
 const until = async (pred: () => boolean, ms = 8000) => { for (let w = 0; w < ms && !pred(); w += 20) await tick(20); return pred(); };
 
+test("Esc and Ctrl+C both abort a busy turn at the UI boundary", async () => {
+  class AbortableProvider implements Provider {
+    starts = 0;
+    aborts = 0;
+    async complete(
+      _messages: any[],
+      _tools: any[],
+      _onDelta: (delta: string) => void,
+      signal?: AbortSignal,
+    ): Promise<ProviderResponse> {
+      this.starts++;
+      return await new Promise<ProviderResponse>((_resolve, reject) => {
+        const stop = () => {
+          this.aborts++;
+          reject(new DOMException("Aborted by user", "AbortError"));
+        };
+        if (signal?.aborted) stop();
+        else signal?.addEventListener("abort", stop, { once: true });
+      });
+    }
+  }
+
+  for (const key of ["\x1b", "\x03"]) {
+    const provider = new AbortableProvider();
+    const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+    stdin.write("start a long task");
+    await tick(20);
+    stdin.write("\r");
+    expect(await until(() => provider.starts === 1)).toBe(true);
+    stdin.write(key);
+    expect(await until(() => provider.aborts === 1)).toBe(true);
+    expect(await until(() => frames.join("\n").toLowerCase().includes("interrupted"))).toBe(true);
+    unmount();
+  }
+}, 30_000);
+
 /** Scripted provider: step responses in order; streams content via onDelta. */
 class MockProvider implements Provider {
   index = 0;

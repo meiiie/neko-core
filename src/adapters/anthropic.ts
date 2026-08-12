@@ -419,6 +419,26 @@ export function parseMessage(data: any, scope = ""): ProviderResponse {
 
 /** Streamed (SSE) Anthropic response: text_delta -> content, thinking_delta -> reasoning, input_json_delta
  * accumulates a tool_use's args. Native blocks and thinking signatures are retained for exact replay. */
+export const ANTHROPIC_STREAM_LIMITS = Object.freeze({
+  maxLineBytes: 2 * 1024 * 1024,
+  maxTotalBytes: 16 * 1024 * 1024,
+  maxContentBytes: 8 * 1024 * 1024,
+  maxReasoningBytes: 8 * 1024 * 1024,
+  maxToolArgumentBytes: 4 * 1024 * 1024,
+  maxToolCalls: 64,
+  maxToolIdBytes: 1024,
+  maxToolNameBytes: 256,
+});
+
+type AnthropicStreamBlock = {
+  type: string;
+  id?: string;
+  name?: string;
+  json: string;
+  argumentBytes: number;
+  raw: Record<string, any>;
+};
+
 async function parseStream(
   res: Response,
   onDelta: DeltaHook,
@@ -428,60 +448,174 @@ async function parseStream(
 ): Promise<ProviderResponse> {
   if (!res.body) throw new Error("anthropic streaming response had no body");
   let content = "", reasoning = "";
-  const blocks: Record<number, { type: string; id?: string; name?: string; json: string; raw: Record<string, any> }> = {};
-  const completedBlocks: Record<number, any> = {};
+  let contentBytes = 0, reasoningBytes = 0, toolCount = 0;
+  const blocks = new Map<number, AnthropicStreamBlock>();
+  const completedBlocks = new Map<number, any>();
   const toolCalls: ToolCall[] = [];
   const usage: Usage = {};
-  let completed = false;
-  for await (const ev of sseEvents(res, onActivity)) {
+  let sawMessageStart = false, completed = false;
+  const addContent = (text: string): void => {
+    contentBytes += Buffer.byteLength(text, "utf8");
+    if (contentBytes > ANTHROPIC_STREAM_LIMITS.maxContentBytes) throw new Error("anthropic streaming content exceeds safety limit");
+    content += text;
+    if (text) onDelta(text);
+  };
+  const addReasoning = (text: string): void => {
+    reasoningBytes += Buffer.byteLength(text, "utf8");
+    if (reasoningBytes > ANTHROPIC_STREAM_LIMITS.maxReasoningBytes) throw new Error("anthropic streaming reasoning exceeds safety limit");
+    reasoning += text;
+    if (text) onDelta(text, "reasoning");
+  };
+
+  stream: for await (const ev of sseEvents(res, onActivity)) {
+    if (!ev || typeof ev !== "object" || Array.isArray(ev) || typeof ev.type !== "string" || !ev.type) {
+      throw new Error("anthropic stream data was not a valid event");
+    }
     switch (ev.type) {
-      case "message_start": { const u = ev.message?.usage ?? {}; const su = usageOf(u); if (u.input_tokens != null) usage.prompt_tokens = su.prompt_tokens; if (u.output_tokens != null) usage.completion_tokens = su.completion_tokens; if (su.cached_tokens) usage.cached_tokens = su.cached_tokens; if (su.cache_write_tokens) usage.cache_write_tokens = su.cache_write_tokens; break; }
+      case "ping":
+        break;
+      case "message_start": {
+        if (sawMessageStart || !ev.message || typeof ev.message !== "object" || Array.isArray(ev.message)) {
+          throw new Error("anthropic stream sent an invalid message_start");
+        }
+        sawMessageStart = true;
+        const u = streamUsage(ev.message.usage);
+        const su = usageOf(u);
+        if (u.input_tokens != null) usage.prompt_tokens = su.prompt_tokens;
+        if (u.output_tokens != null) usage.completion_tokens = su.completion_tokens;
+        if (su.cached_tokens) usage.cached_tokens = su.cached_tokens;
+        if (su.cache_write_tokens) usage.cache_write_tokens = su.cache_write_tokens;
+        break;
+      }
       case "content_block_start": {
-        const raw = structuredClone(ev.content_block ?? {});
-        const block = blocks[ev.index] = { type: raw.type, id: raw.id, name: raw.name, json: "", raw };
-        if (block.type === "text" && raw.text) { content += raw.text; onDelta(raw.text); }
-        else if (block.type === "thinking" && raw.thinking) { reasoning += raw.thinking; onDelta(raw.thinking, "reasoning"); }
+        requireMessageStart(sawMessageStart);
+        const index = streamIndex(ev.index);
+        if (blocks.has(index)) throw new Error(`anthropic stream repeated content block index ${index}`);
+        if (!ev.content_block || typeof ev.content_block !== "object" || Array.isArray(ev.content_block) || typeof ev.content_block.type !== "string" || !ev.content_block.type) {
+          throw new Error("anthropic stream sent an invalid content_block_start");
+        }
+        const raw = structuredClone(ev.content_block) as Record<string, any>;
+        const block: AnthropicStreamBlock = { type: raw.type, json: "", argumentBytes: 0, raw };
+        if (block.type === "tool_use") {
+          if (++toolCount > ANTHROPIC_STREAM_LIMITS.maxToolCalls) throw new Error("anthropic streaming tool call count exceeds safety limit");
+          block.id = boundedToolField(raw.id, "id", ANTHROPIC_STREAM_LIMITS.maxToolIdBytes);
+          block.name = boundedToolField(raw.name, "name", ANTHROPIC_STREAM_LIMITS.maxToolNameBytes);
+          if (raw.input !== undefined) {
+            if (!raw.input || typeof raw.input !== "object" || Array.isArray(raw.input)) throw new Error("anthropic streaming tool input was not an object");
+            const inputBytes = Buffer.byteLength(JSON.stringify(raw.input), "utf8");
+            if (inputBytes > ANTHROPIC_STREAM_LIMITS.maxToolArgumentBytes) throw new Error("anthropic streaming tool arguments exceed safety limit");
+          }
+        }
+        blocks.set(index, block);
+        if (block.type === "text" && raw.text !== undefined) {
+          if (typeof raw.text !== "string") throw new Error("anthropic streaming text block was invalid");
+          addContent(raw.text);
+        } else if (block.type === "thinking" && raw.thinking !== undefined) {
+          if (typeof raw.thinking !== "string") throw new Error("anthropic streaming thinking block was invalid");
+          addReasoning(raw.thinking);
+        }
         break;
       }
       case "content_block_delta": {
+        requireMessageStart(sawMessageStart);
+        const index = streamIndex(ev.index);
         const d = ev.delta;
-        const b = blocks[ev.index];
+        const b = blocks.get(index);
+        if (!b || completedBlocks.has(index) || !d || typeof d !== "object" || Array.isArray(d) || typeof d.type !== "string" || !d.type) {
+          throw new Error("anthropic stream sent an invalid content_block_delta");
+        }
         if (d?.type === "text_delta") {
-          content += d.text; onDelta(d.text);
-          if (b) b.raw.text = `${b.raw.text ?? ""}${d.text ?? ""}`;
+          if (b.type !== "text" || typeof d.text !== "string") throw new Error("anthropic streaming text delta was invalid");
+          addContent(d.text);
+          b.raw.text = `${b.raw.text ?? ""}${d.text}`;
         }
         else if (d?.type === "thinking_delta") {
-          reasoning += d.thinking; onDelta(d.thinking, "reasoning");
-          if (b) b.raw.thinking = `${b.raw.thinking ?? ""}${d.thinking ?? ""}`;
+          if (b.type !== "thinking" || typeof d.thinking !== "string") throw new Error("anthropic streaming thinking delta was invalid");
+          addReasoning(d.thinking);
+          b.raw.thinking = `${b.raw.thinking ?? ""}${d.thinking}`;
         }
-        else if (d?.type === "signature_delta" && b) b.raw.signature = `${b.raw.signature ?? ""}${d.signature ?? ""}`;
-        else if (d?.type === "input_json_delta") { const b = blocks[ev.index]; if (b) { b.json += d.partial_json; onDelta(d.partial_json, "tool"); } }
+        else if (d?.type === "signature_delta") {
+          if (b.type !== "thinking" || typeof d.signature !== "string") throw new Error("anthropic streaming signature delta was invalid");
+          b.raw.signature = `${b.raw.signature ?? ""}${d.signature}`;
+        }
+        else if (d?.type === "input_json_delta") {
+          if (b.type !== "tool_use" || typeof d.partial_json !== "string") throw new Error("anthropic streaming tool arguments delta was invalid");
+          if (d.partial_json) {
+            b.argumentBytes += Buffer.byteLength(d.partial_json, "utf8");
+            if (b.argumentBytes > ANTHROPIC_STREAM_LIMITS.maxToolArgumentBytes) throw new Error("anthropic streaming tool arguments exceed safety limit");
+            b.json += d.partial_json;
+            onDelta(d.partial_json, "tool");
+          }
+        }
+        else if (d?.type === "citations_delta") {
+          if (b.type !== "text" || !d.citation || typeof d.citation !== "object" || Array.isArray(d.citation)) {
+            throw new Error("anthropic streaming citation delta was invalid");
+          }
+          const citations = Array.isArray(b.raw.citations) ? b.raw.citations : [];
+          citations.push(structuredClone(d.citation));
+          b.raw.citations = citations;
+        }
+        // Unknown, structurally valid delta types are ignored for forward compatibility. Their raw
+        // event is still bounded by the per-line and aggregate budgets below.
         break;
       }
       case "content_block_stop": {
-        const b = blocks[ev.index];
+        requireMessageStart(sawMessageStart);
+        const index = streamIndex(ev.index);
+        const b = blocks.get(index);
+        if (!b || completedBlocks.has(index)) throw new Error("anthropic stream sent an invalid content_block_stop");
         if (b?.type === "tool_use") {
           let input: any = {};
-          try { input = b.json ? JSON.parse(b.json) : (b.raw.input ?? {}); } catch { input = { _raw: b.json }; }
+          try {
+            input = b.json ? JSON.parse(b.json) : (b.raw.input ?? {});
+            if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("arguments must be an object");
+          } catch { input = { _raw: b.json }; }
           b.raw.input = input;
-          const call = { id: b.id ?? "", name: b.name ?? "", arguments: input };
+          if (!b.id || !b.name) throw new Error("anthropic streaming tool call was missing an id or name");
+          const call = { id: b.id, name: b.name, arguments: input };
           toolCalls.push(call);
           // The call is complete while the rest of the response still streams - let the agent
           // start a read-only execution NOW (stream-eager execution). Errors must not kill the stream.
           try { onToolCallReady?.(call); } catch { /* an eager-start failure never breaks parsing */ }
         }
-        if (b) completedBlocks[ev.index] = structuredClone(b.raw);
+        completedBlocks.set(index, structuredClone(b.raw));
         break;
       }
-      case "message_delta": { const u = ev.usage ?? {}; if (u.output_tokens != null) usage.completion_tokens = u.output_tokens; if (u.input_tokens != null) usage.prompt_tokens = u.input_tokens; break; }
+      case "message_delta": {
+        requireMessageStart(sawMessageStart);
+        if (ev.delta !== undefined && (!ev.delta || typeof ev.delta !== "object" || Array.isArray(ev.delta))) {
+          throw new Error("anthropic stream sent an invalid message_delta");
+        }
+        const u = streamUsage(ev.usage);
+        if (u.output_tokens != null) usage.completion_tokens = u.output_tokens;
+        if (u.input_tokens != null) {
+          usage.prompt_tokens = u.input_tokens + (usage.cached_tokens ?? 0) + (usage.cache_write_tokens ?? 0);
+        }
+        const stopReason = ev.delta?.stop_reason;
+        if (stopReason != null && (typeof stopReason !== "string" || !["end_turn", "stop_sequence", "tool_use"].includes(stopReason))) {
+          throw new Error(`anthropic stream returned non-success stop reason: ${String(stopReason).slice(0, 100)}`);
+        }
+        break;
+      }
       case "error": throw new Error(`anthropic stream error: ${String(JSON.stringify(ev.error)).slice(0, 200)}`);
-      case "message_stop": completed = true; break;
+      case "message_stop": {
+        requireMessageStart(sawMessageStart);
+        if ([...blocks.keys()].some((index) => !completedBlocks.has(index))) {
+          throw new Error("anthropic stream ended with an incomplete content block");
+        }
+        completed = true;
+        break stream;
+      }
+      // Anthropic may add new event types. Ignore a structurally valid unknown event while still
+      // requiring the documented message_start -> message_stop completion envelope.
+      default:
+        break;
     }
   }
+  if (!sawMessageStart) throw new Error("anthropic stream ended before message_start");
   if (!completed) throw new Error("anthropic stream disconnected before message_stop");
   usage.total_tokens = (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0);
-  for (const [index, block] of Object.entries(blocks)) completedBlocks[Number(index)] ??= structuredClone(block.raw);
-  const nativeBlocks = Object.keys(completedBlocks).map(Number).sort((a, b) => a - b).map((index) => completedBlocks[index]);
+  const nativeBlocks = [...completedBlocks.keys()].sort((a, b) => a - b).map((index) => completedBlocks.get(index));
   return {
     content: content || null,
     tool_calls: toolCalls,
@@ -489,6 +623,37 @@ async function parseStream(
     reasoning: reasoning || undefined,
     continuation: wrappedAnthropicContinuation(scope, nativeBlocks),
   };
+}
+
+function requireMessageStart(started: boolean): void {
+  if (!started) throw new Error("anthropic stream content arrived before message_start");
+}
+
+function streamIndex(value: unknown): number {
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) >= ANTHROPIC_STREAM_LIMITS.maxToolCalls) {
+    throw new Error(`anthropic stream content block index out of range: ${String(value).slice(0, 40)}`);
+  }
+  return value as number;
+}
+
+function boundedToolField(value: unknown, label: "id" | "name", maxBytes: number): string {
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > maxBytes) {
+    throw new Error(`anthropic streaming tool call ${label} was invalid or too large`);
+  }
+  return value;
+}
+
+function streamUsage(value: unknown): Record<string, number> {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error("anthropic stream usage was invalid");
+  const out: Record<string, number> = {};
+  for (const key of ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]) {
+    const count = (value as Record<string, unknown>)[key];
+    if (count === undefined || count === null) continue;
+    if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("anthropic stream usage was invalid");
+    out[key] = count as number;
+  }
+  return out;
 }
 
 function usageOf(u: any): Usage {
@@ -508,22 +673,50 @@ async function* sseEvents(res: Response, onActivity?: () => void): AsyncGenerato
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    onActivity?.(); // bytes arrived -> reset the idle timeout so a healthy long stream never times out
-    buf += decoder.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
-      if (line.startsWith("data:")) {
-        const d = line.slice(5).trim();
-        if (d && d !== "[DONE]") { try { yield JSON.parse(d); } catch { /* skip a partial/non-JSON line */ } }
+  let totalBytes = 0, lineBytes = 0;
+  const parseLine = (line: string): any | undefined => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) return undefined;
+    const data = trimmed.slice(5).trim();
+    if (!data || /^(?:ping|keepalive|\[keepalive\])$/i.test(data)) return undefined;
+    if (data === "[DONE]") return SSE_DONE;
+    try { return JSON.parse(data); }
+    catch { throw new Error("anthropic streaming API sent malformed SSE data"); }
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > ANTHROPIC_STREAM_LIMITS.maxTotalBytes) throw new Error("anthropic streaming SSE aggregate exceeds safety limit");
+      for (const byte of value) {
+        if (byte === 0x0a) lineBytes = 0;
+        else if (++lineBytes > ANTHROPIC_STREAM_LIMITS.maxLineBytes) throw new Error("anthropic streaming SSE line exceeds safety limit");
+      }
+      onActivity?.(); // bytes arrived -> reset the idle timeout so a healthy long stream never times out
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const parsed = parseLine(buf.slice(0, idx));
+        buf = buf.slice(idx + 1);
+        if (parsed === SSE_DONE) return;
+        if (parsed !== undefined) yield parsed;
       }
     }
+    buf += decoder.decode();
+    if (buf) {
+      const parsed = parseLine(buf);
+      if (parsed !== undefined && parsed !== SSE_DONE) yield parsed;
+    }
+  } finally {
+    // message_stop lets parseStream return before a peer closes the socket. Cancel and unlock on
+    // every exit (success, malformed input, callback error, or byte-budget breach).
+    try { await reader.cancel(); } catch { /* already closed/errored */ }
+    try { reader.releaseLock(); } catch { /* already released */ }
   }
 }
+
+const SSE_DONE = Symbol("anthropic-sse-done");
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

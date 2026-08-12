@@ -117,6 +117,10 @@ export async function validChatGptCredentials(fetchImpl: typeof fetch = fetch, i
   const current = loadChatGptCredentials();
   if (!current) throw new Error("ChatGPT is not signed in. Run `neko login chatgpt`.");
   if (!forceRefresh && current.expiresAt > Date.now() + EXPIRY_MARGIN_MS) return current;
+  // A bounded Harbor evaluation receives an access-token-only lease. An empty refresh token is
+  // deliberate there: fail locally instead of sending a refresh request or ever rotating the
+  // user's durable credential from the temporary runner home.
+  if (!current.refreshToken) throw new Error("ChatGPT access lease cannot be refreshed. Start a new evaluation run.");
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       const response = await fetchImpl(`${issuer}/oauth/token`, {

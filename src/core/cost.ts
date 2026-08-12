@@ -21,6 +21,9 @@ export interface Usage {
    * own tool loop), prompt/completion above are the TURN SUM. This is the LAST call's prompt size -
    * the live context - so the ctx% display doesn't read a sum as one giant prompt. */
   context_tokens?: number;
+  /** Cache-read subset of context_tokens for the LAST internal model call. Aggregated providers
+   * must not reuse their whole-turn cached sum here (it can exceed the live context). */
+  context_cached_tokens?: number;
   /** Internal model calls behind this one usage report (default 1). */
   model_calls?: number;
 }
@@ -57,7 +60,9 @@ export class CostTracker {
     this.cacheWriteTokens += cacheWrite;
     if (usage.prompt_tokens !== undefined) this.lastPrompt = count(usage.context_tokens) || prompt;
     if (usage.completion_tokens !== undefined) this.lastCompletion = completion;
-    this.lastCached = cached;
+    this.lastCached = usage.context_cached_tokens !== undefined
+      ? Math.min(this.lastPrompt, count(usage.context_cached_tokens))
+      : Math.min(this.lastPrompt || prompt, cached);
     this.lastCacheWrite = cacheWrite;
     this.calls += Math.max(1, count(usage.model_calls));
   }

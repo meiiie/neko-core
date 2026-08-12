@@ -11,6 +11,22 @@
 export const SAFE = "safe";
 export const GATED = "gated";
 
+const READ_ONLY_SUBAGENT_TOOLS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["reviewer", ["read_file", "search"]],
+  ["explorer", ["read_file", "search", "glob", "ls"]],
+]);
+
+/** Named subagents whose runtime authority is provably read-only. Unknown/custom workers inherit
+ * the parent authority and therefore remain gated like any other potentially mutating action. */
+export function subagentToolAllowlist(type: unknown): readonly string[] | undefined {
+  if (typeof type !== "string") return undefined;
+  return READ_ONLY_SUBAGENT_TOOLS.get(type.trim().toLowerCase());
+}
+
+export function taskDelegatesReadOnly(args: Record<string, any> = {}): boolean {
+  return subagentToolAllowlist(args.subagent_type) !== undefined;
+}
+
 export interface ToolSpec {
   name: string;
   permission: typeof SAFE | typeof GATED;
@@ -95,6 +111,7 @@ export const TOOL_SPECS: ToolSpec[] = [
       path: { type: "string", description: "File path to edit." },
       edits: {
         type: "array",
+        maxItems: 100,
         description: "Edits applied in order; each old_string must occur exactly once at its turn.",
         items: {
           type: "object",
@@ -102,6 +119,8 @@ export const TOOL_SPECS: ToolSpec[] = [
             old_string: { type: "string", description: "Exact text to replace." },
             new_string: { type: "string", description: "Replacement text." },
           },
+          required: ["old_string", "new_string"],
+          additionalProperties: false,
         },
       },
     },
@@ -195,8 +214,8 @@ export const TOOL_SPECS: ToolSpec[] = [
   },
   {
     name: "task",
-    permission: SAFE,
-    summary: "Delegate a self-contained subtask to a fresh sub-agent (isolated context); it returns a result. Use it to research or do focused work without cluttering this conversation.",
+    permission: GATED,
+    summary: "Delegate a self-contained subtask to a fresh sub-agent (isolated context); it returns a result. reviewer/explorer are read-only; generic and custom workers inherit mutating authority and require approval.",
     parameters: {
       description: { type: "string", description: "Short (3-5 word) task label." },
       prompt: { type: "string", description: "The full instruction for the sub-agent." },
@@ -264,8 +283,9 @@ export function listTools(platform: NodeJS.Platform = process.platform): ToolSpe
 
 /** Resolve action-sensitive permission without making read/list operations prompt. */
 export function effectivePermission(spec: ToolSpec, args: Record<string, any> = {}): typeof SAFE | typeof GATED {
+  if (spec.name === "task" && taskDelegatesReadOnly(args)) return SAFE;
   if (spec.permission === GATED) return GATED;
-  return spec.gatedActions?.includes(String(args.action ?? "")) ? GATED : SAFE;
+  return spec.gatedActions?.includes(String(args.action ?? "").toLowerCase()) ? GATED : SAFE;
 }
 
 /** Human-facing verb for each tool in the transcript (Claude-style: Read/Update/Search...). */

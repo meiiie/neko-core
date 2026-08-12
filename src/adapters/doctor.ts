@@ -3,7 +3,7 @@
  * (provider, model, endpoint, key presence) WITHOUT calling the model.
  */
 import type { NekoConfig } from "./config.ts";
-import { detectSandbox, srtProvisioned } from "../core/sandbox.ts";
+import { detectSandbox, resolveSrtBunBridge, sandboxActive, srtHealth, srtProvisioned, type SandboxKind, type SrtBunBridge } from "../core/sandbox.ts";
 import { cachedRefreshRate, resolveUiFps } from "./display.ts";
 import { SearxngSidecar } from "./sidecar.ts";
 import { VERSION } from "../shared/version.ts";
@@ -12,11 +12,41 @@ import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-serve
 import { discoverGeminiCli, hasGeminiCredentials, type GeminiCliStatus } from "./gemini-cli.ts";
 import { hasKimiCredentials } from "./kimi-auth.ts";
 import { browserBridgeStage, readBrowserCapability, readBrowserBridgeStatus } from "./browser-bridge.ts";
+import type { SandboxRuntimeStatus } from "./registry.ts";
 
 export interface Check {
   status: "ok" | "warn";
   name: string;
   detail: string;
+}
+
+/** Static disclosure for the Windows SRT toolchain bridge. The live sandbox check stays separate:
+ * this names whether a bare `bun` command can be made reachable without granting a profile tree. */
+export function srtToolchainCheck(
+  enabled: boolean,
+  kind: SandboxKind,
+  bridge: SrtBunBridge | null,
+): Check | null {
+  if (!enabled || kind !== "srt") return null;
+  if (bridge?.source === "runtime") {
+    return {
+      status: "ok",
+      name: "sandbox_toolchain",
+      detail: "source-run Bun bridged into SRT with a transient exact-file read grant; no directory or user-profile grant",
+    };
+  }
+  if (bridge?.source === "path") {
+    return {
+      status: "ok",
+      name: "sandbox_toolchain",
+      detail: "external Bun on trusted PATH bridged into SRT with a transient exact-file read grant; no directory or user-profile grant",
+    };
+  }
+  return {
+    status: "warn",
+    name: "sandbox_toolchain",
+    detail: "compiled Neko remains self-contained, but SRT has no canonical external bun.exe bridge; sandboxed `bun` commands need a real bun.exe outside the workspace on PATH",
+  };
 }
 
 /** Name the hosting terminal from the env (best-effort - WT/ConPTY doesn't export TERM_PROGRAM). */
@@ -54,7 +84,25 @@ export function collectTerminalChecks(): Check[] {
   ];
 }
 
-export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportStatus, geminiSupport?: GeminiCliStatus): Check[] {
+export function collectChecks(
+  config: NekoConfig,
+  codexSupport?: CodexSupportStatus,
+  geminiSupport?: GeminiCliStatus,
+  sandboxRuntime?: SandboxRuntimeStatus,
+): Check[] {
+  const sandboxKind = sandboxRuntime?.kind ?? detectSandbox();
+  const sandboxLive = config.sandbox && sandboxKind !== "none" &&
+    (sandboxRuntime?.live ?? sandboxActive());
+  const srtIsProvisioned = config.sandbox && sandboxKind === "srt"
+    ? (sandboxRuntime?.provisioned ?? srtProvisioned())
+    : false;
+  const sandboxHealthDetail = config.sandbox && sandboxKind === "srt" && !sandboxLive
+    ? (sandboxRuntime?.detail ?? srtHealth().detail)
+    : "";
+  const srtBunBridge = config.sandbox && sandboxKind === "srt" ? resolveSrtBunBridge(process.cwd()) : null;
+  const sandboxToolchainCheck = srtToolchainCheck(config.sandbox, sandboxKind, srtBunBridge);
+  const unconfinedAuto = config.mode === "auto" && (!config.sandbox || sandboxKind === "none");
+  const failClosedAuto = config.mode === "auto" && config.sandbox && sandboxKind !== "none" && !sandboxLive;
   const needsCodexBridge = config.usesChatGptAuth && config.model.startsWith("gpt-5.6-");
   const bridge = needsCodexBridge ? (codexSupport ?? discoverCodexSupport()) : null;
   const bridgeUnavailable = needsCodexBridge && bridge?.state !== "ready";
@@ -105,7 +153,26 @@ export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportSta
           : config.model || "(unset - set model or pick a --profile)",
     },
     { status: "ok", name: "max_steps", detail: String(config.maxSteps) },
-    { status: "ok", name: "mode", detail: config.mode },
+    {
+      status: config.projectTrust.state === "none" || config.projectTrust.state === "trusted" ? "ok" : "warn",
+      name: "project_trust",
+      detail: config.projectTrust.state === "none"
+        ? "no project control surfaces"
+        : config.projectTrust.state === "trusted"
+          ? `trusted exact snapshot (${config.projectTrust.files.join(", ")})`
+          : `${config.projectTrust.state}; project control surfaces ignored (${config.projectTrust.files.join(", ") || "unreadable"})${config.projectTrust.reason ? ` - ${config.projectTrust.reason}` : ""}`,
+    },
+    {
+      status: config.mode === "auto" ? "warn" : "ok",
+      name: "mode",
+      detail: unconfinedAuto
+        ? "auto - UNCONFINED AUTO: gated tools run without approval and bash has no live OS sandbox"
+        : failClosedAuto
+          ? `auto - other gated tools run without approval; bash FAILS CLOSED because the configured ${sandboxKind} sandbox is unusable`
+        : config.mode === "auto"
+          ? "auto - gated tools run without approval"
+          : config.mode,
+    },
     {
       status: "ok",
       name: "computer_use",
@@ -114,20 +181,27 @@ export function collectChecks(config: NekoConfig, codexSupport?: CodexSupportSta
         : "one-shot PowerShell fallback (resident UIA/input/capture disabled)",
     },
     {
-      status: config.sandbox && (detectSandbox() === "none" || (detectSandbox() === "srt" && !srtProvisioned())) ? "warn" : "ok",
+      status: unconfinedAuto || (config.sandbox && !sandboxLive) ? "warn" : "ok",
       name: "bash_sandbox",
-      detail: config.sandbox
-        ? detectSandbox() === "none"
-          ? "requested but unavailable on this OS - seatbelt + gate still apply"
-          : detectSandbox() === "srt" && !srtProvisioned()
-            ? "on (srt) but not provisioned - run once: srt windows-install (one UAC prompt)"
-            : `on (${detectSandbox()})${config.sandboxAutoApprove ? " - bash auto-approved except workspace-destructive commands, which still confirm (sandbox_auto_approve=false to always prompt)" : ""}`
-        : `off (available: ${detectSandbox()}${
-            detectSandbox() === "none" && process.platform === "win32"
+      detail: unconfinedAuto
+        ? `UNCONFINED AUTO: ${config.sandbox ? "sandbox requested but not live" : "sandbox disabled"}; bash runs without approval. The seatbelt is not confinement.`
+        : config.sandbox
+        ? sandboxKind === "none"
+          ? "requested but unavailable on this OS - seatbelt + approval gate still apply"
+          : sandboxKind === "srt" && !srtIsProvisioned
+            ? "on (srt) but not provisioned - bash FAILS CLOSED; run once: srt windows-install (one UAC prompt)"
+            : sandboxKind === "srt" && !sandboxLive
+              ? `on (srt) but unusable - bash FAILS CLOSED with no host fallback; ${sandboxHealthDetail}`
+            : !sandboxLive
+              ? `on (${sandboxKind}) but unusable - bash FAILS CLOSED with no host fallback`
+            : `on (${sandboxKind})${config.sandboxAutoApprove ? " - bash auto-approved by explicit sandbox_auto_approve=true; host reads remain available; workspace-destructive commands still confirm" : " - bash still requires approval by default"}`
+        : `off (available: ${sandboxKind}${
+            sandboxKind === "none" && process.platform === "win32"
               ? "; for Windows: bun add -g @anthropic-ai/sandbox-runtime, then: srt windows-install"
               : ""
           })`,
     },
+    ...(sandboxToolchainCheck ? [sandboxToolchainCheck] : []),
     {
       status: "ok",
       name: "file_search",

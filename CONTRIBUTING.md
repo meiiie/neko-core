@@ -11,7 +11,7 @@ You need [Bun](https://bun.sh) (the runtime + bundler + test runner).
 git clone https://github.com/meiiie/neko-core
 cd neko-core
 bun install
-bun bin/neko.ts doctor     # run directly via Bun — no build needed for development
+node bin/neko-source.cjs doctor # safe no-build source launcher (requires Node.js)
 ```
 
 ## The verify loop (must stay green)
@@ -21,7 +21,7 @@ Before you open a PR, all of these should pass:
 ```bash
 bun run typecheck          # tsc --noEmit
 bun test                   # the test suite
-bun bin/neko.ts policy     # audits the safe/gated tool boundary
+node bin/neko-source.cjs policy # audits the safe/gated tool boundary
 bun run build              # bun build --compile -> dist/neko (the shipped single binary)
 ```
 
@@ -47,7 +47,7 @@ A **new model or endpoint is a config profile, not code** (`src/adapters/config.
   `OPENAI_API_KEY` / `NVIDIA_API_KEY`) or a gitignored `~/.neko-core/config.json`. Scan before you push.
 - **Clean-room.** Study other agents for *ideas*, never copy proprietary code into this repo.
 - **Safe-by-default.** `write_file` / `edit` / `bash` are approval-gated; keep that boundary
-  (`bun bin/neko.ts policy` must stay PASS).
+  (`node bin/neko-source.cjs policy` must stay PASS).
 - **Windows-friendly output.** Printed (non-TUI) strings should be ASCII — the Windows console is cp1252,
   so an em-dash or fancy quote can mojibake.
 

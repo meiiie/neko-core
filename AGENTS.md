@@ -27,7 +27,7 @@ enforced by `test/architecture.test.ts`).
 | `adapters/mcp-compose.ts` | Composes independent edge-tool sources behind the single `McpTools` port. |
 | **`shared/`** | `version.ts` (leaf). |
 | **`ui/`** | Ink REPL, split by concern: `chat.tsx` (lifecycle + turn loop + render), `commands.ts` (slash commands + `runSlashCommand`), `transcript.tsx` (line renderer), `select-list.tsx` (reusable picker), `thinking-line.tsx`, `approval-box.tsx`, `markdown.tsx`, `highlight.tsx`, `logo.tsx`, `text-input.tsx`, `format.ts`. |
-| `bin/neko.ts` | The `neko` CLI entry point. |
+| `bin/neko-source.cjs` · `bin/neko.ts` | Safe Node source bootstrap · internal Bun CLI entry. |
 | `reference/python/` | The Python **spec/reference** (original port). Not shipped; read it, don't depend on it. |
 
 ## Critical gotchas
@@ -48,9 +48,9 @@ enforced by `test/architecture.test.ts`).
 ```bash
 rtk bun run typecheck          # tsc --noEmit
 rtk bun test                   # the test suite
-bun bin/neko.ts doctor         # resolved provider/model/key (no model call)
-bun bin/neko.ts policy         # safe/gated boundary audit
-bun run build                  # bun build --compile -> dist/neko (single binary)
+rtk node bin/neko-source.cjs doctor # resolved provider/model/key (no model call)
+rtk node bin/neko-source.cjs policy # safe/gated boundary audit
+rtk bun run build                  # bun build --compile -> dist/neko (single binary)
 ```
 
 (Prefix shell commands with `rtk` per the global RTK rule.)

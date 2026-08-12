@@ -11,7 +11,7 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
 |---|---|---|
 | Types (both compilers) | `bun run typecheck` + `bun run typecheck:stable` | tsgo/tsc divergence |
 | Full suite, ship runtime | `bun test` under the pinned runtime | logic + sims (incl. the differ-less fallback sim) |
-| Policy audit | `bun bin/neko.ts policy` | safe/gated boundary drift |
+| Policy audit | `node bin/neko-source.cjs policy` | safe source bootstrap + boundary drift |
 | Build + render smoke | `bun run build` (compiles, then `__uiprobe`) | artifact-only breakage (the jsxDEV class) |
 | Input smoke | part of `bun run build` (`scripts/input-probe.ts`) | a runtime that renders but drops stdin (the Bun-1.3.14 class) |
 | Ghost + typing e2e | `bun scripts/e2e-conpty-ghost.ts dist/neko.exe` ×3 | ConPTY displacement AND dead input, on a REAL terminal (typed-echo asserted — "clean" without input is hollow) |

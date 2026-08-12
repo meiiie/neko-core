@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import {
   ChatGptAppServerProvider,
+  HybridChatGptProvider,
   type CodexClientFactory,
 } from "../src/adapters/chatgpt-app-server-provider.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
@@ -91,8 +92,14 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
 
   expect(requests.find((request) => request.method === "account/login/start")?.params.type).toBe("chatgptAuthTokens");
   expect(requests.find((request) => request.method === "thread/start")?.params).toMatchObject({
-    model: "gpt-5.6-luna", sandbox: "read-only", approvalPolicy: "never", ephemeral: true,
+    model: "gpt-5.6-luna",
+    cwd: join(tempHome, ".neko-core", "codex-home"),
+    sandbox: "read-only",
+    approvalPolicy: "never",
+    ephemeral: true,
   });
+  expect(requests.find((request) => request.method === "thread/start")?.params.environments).toEqual([]);
+  expect(requests.find((request) => request.method === "thread/start")?.params.cwd).not.toBe(process.cwd());
   expect(requests.find((request) => request.method === "thread/start")?.params.dynamicTools[0]).toMatchObject({
     type: "function", name: "read_file",
   });
@@ -109,6 +116,7 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
     total_tokens: 15,
     cached_tokens: 4,
     context_tokens: 12,
+    context_cached_tokens: 4,
     model_calls: 1,
   }]);
   expect(response).toMatchObject({
@@ -117,6 +125,86 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
     usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15, cached_tokens: 4 },
   });
   provider.dispose();
+});
+
+test("GPT-5.6 provider disposal waits for the App Server transport to exit", async () => {
+  const cfg = setup();
+  let handlers!: CodexAppServerHandlers;
+  let release!: () => void;
+  const closed = new Promise<void>((resolve) => { release = resolve; });
+  let legacyCloseCalled = false;
+  let closeAndWaitCalled = false;
+  const factory: CodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}),
+      close: () => { legacyCloseCalled = true; },
+      closeAndWait: async () => { closeAndWaitCalled = true; await closed; },
+      request: async (method) => {
+        if (method === "thread/start") return { thread: { id: "thread-close" } };
+        if (method === "turn/start") {
+          setTimeout(() => {
+            handlers.onNotification?.("turn/completed", {
+              threadId: "thread-close", turn: { id: "turn-close", status: "completed" },
+            });
+          }, 0);
+          return { turn: { id: "turn-close" } };
+        }
+        return {};
+      },
+    };
+  };
+  const provider = new ChatGptAppServerProvider(cfg, factory);
+  await provider.complete([{ role: "user", content: "finish" }]);
+
+  let settled = false;
+  const disposing = Promise.resolve(provider.dispose()).then(() => { settled = true; });
+  await Bun.sleep(1);
+  expect(closeAndWaitCalled).toBe(true);
+  expect(legacyCloseCalled).toBe(false);
+  expect(settled).toBe(false);
+  release();
+  await disposing;
+  expect(settled).toBe(true);
+});
+
+test("Hybrid disposal attempts both providers and preserves the first cleanup error", async () => {
+  const cfg = setup();
+  const calls: string[] = [];
+  const first = new Error("direct cleanup failed");
+  const hybrid = new HybridChatGptProvider(cfg, {
+    async complete() { return { content: "unused", tool_calls: [] }; },
+    dispose() { calls.push("direct"); throw first; },
+  });
+  (hybrid as any).bridge = {
+    async dispose() { calls.push("bridge"); throw new Error("bridge cleanup failed"); },
+  };
+
+  let failure: unknown;
+  try { await Promise.resolve(hybrid.dispose()); } catch (error) { failure = error; }
+  expect(calls).toEqual(["direct", "bridge"]);
+  expect(failure).toBe(first);
+});
+
+test("Hybrid model switch waits for the GPT-5.6 sidecar before using the direct route", async () => {
+  const cfg = setup();
+  const calls: string[] = [];
+  let release!: () => void;
+  const closed = new Promise<void>((resolve) => { release = resolve; });
+  const hybrid = new HybridChatGptProvider(cfg, {
+    async complete() { calls.push("direct"); return { content: "direct", tool_calls: [] }; },
+  });
+  (hybrid as any).bridge = {
+    async dispose() { calls.push("bridge"); await closed; },
+  };
+  cfg.data.model = "gpt-5.5";
+
+  const response = hybrid.complete([{ role: "user", content: "switch" }]);
+  await Bun.sleep(1);
+  expect(calls).toEqual(["bridge"]);
+  release();
+  await expect(response).resolves.toMatchObject({ content: "direct" });
+  expect(calls).toEqual(["bridge", "direct"]);
 });
 
 test("prior conversation is injected as Codex-valid response items with an explicit type", async () => {
@@ -251,6 +339,7 @@ test("a multi-call codex turn reports the SUM of its internal model calls, not j
   expect(first.usage).toMatchObject({
     prompt_tokens: 360, completion_tokens: 45, total_tokens: 405, cached_tokens: 200,
     context_tokens: 140, // the LIVE context is the last call's prompt, not the turn sum
+    context_cached_tokens: 110,
     model_calls: 3,
   });
   // Turn 2 on the same thread: only ITS delta is reported, not the thread-cumulative again.
@@ -368,4 +457,177 @@ test("a missing bridge can be installed and retried without restarting Neko", as
   await Bun.sleep(40);
   expect(closes).toBe(1); // idle expiry releases the optional process
   provider.dispose();
+});
+
+test("turn context or schema profile changes open a fresh App Server thread and stable profiles reuse it", async () => {
+  const cfg = setup();
+  let handlers!: CodexAppServerHandlers;
+  let threadStarts = 0;
+  let turns = 0;
+  const requests: Array<{ method: string; params: any }> = [];
+  const factory: CodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}), close: () => {},
+      request: async (method, params: any) => {
+        requests.push({ method, params });
+        if (method === "thread/start") return { thread: { id: `profile-${++threadStarts}` } };
+        if (method === "turn/start") {
+          const turnId = `turn-${++turns}`;
+          setTimeout(() => {
+            handlers.onNotification?.("item/agentMessage/delta", { threadId: params.threadId, turnId, delta: "ok" });
+            handlers.onNotification?.("turn/completed", { threadId: params.threadId, turn: { id: turnId, status: "completed" } });
+          }, 0);
+          return { turn: { id: turnId } };
+        }
+        return {};
+      },
+    };
+  };
+  const provider = new ChatGptAppServerProvider(cfg, factory);
+  const schema = (name: string) => ({
+    type: "function",
+    function: { name, description: name, parameters: { type: "object", properties: {} } },
+  });
+  const fullTools = [schema("read_file"), schema("task")];
+  const exactTools = [schema("read_file"), schema("edit"), schema("bash")];
+  const run = (context: string, tools: any[]) => provider.complete(
+    [{ role: "system", content: context }, { role: "user", content: "go" }],
+    tools,
+    undefined,
+    undefined,
+    { executeTool: async () => "unused" },
+  );
+
+  await run("FULL TURN CONTEXT", fullTools);
+  await run("EXACT TURN CONTEXT", exactTools);
+  await run("EXACT TURN CONTEXT", exactTools);
+  await run("FULL TURN CONTEXT", fullTools);
+
+  expect(requests.filter((request) => request.method === "thread/start")).toHaveLength(3);
+  expect(requests.filter((request) => request.method === "thread/unsubscribe")).toHaveLength(2);
+  expect(requests.filter((request) => request.method === "turn/start").map((request) => request.params.threadId))
+    .toEqual(["profile-1", "profile-2", "profile-2", "profile-3"]);
+  provider.dispose();
+});
+
+test("Esc abort escalates to bounded App Server teardown when turn/interrupt is ignored", async () => {
+  const cfg = setup();
+  let started!: () => void;
+  const turnStarted = new Promise<void>((resolve) => { started = resolve; });
+  let interrupts = 0;
+  let closes = 0;
+  const factory: CodexClientFactory = () => ({
+    initialize: async () => ({}),
+    close: () => {},
+    closeAndWait: async () => { closes++; },
+    request: async (method) => {
+      if (method === "thread/start") return { thread: { id: "stuck-thread" } };
+      if (method === "turn/start") { started(); return { turn: { id: "stuck-turn" } }; }
+      if (method === "turn/interrupt") { interrupts++; return {}; }
+      return {};
+    },
+  });
+  const provider = new ChatGptAppServerProvider(cfg, factory, 10);
+  const controller = new AbortController();
+  const running = provider.complete([{ role: "user", content: "long task" }], [], undefined, controller.signal);
+  await turnStarted;
+  controller.abort();
+  await expect(running).rejects.toMatchObject({ name: "AbortError" });
+  expect(interrupts).toBe(1);
+  expect(closes).toBe(1);
+});
+
+test("Ctrl+C abort also tears down a sidecar stuck during startup", async () => {
+  const cfg = setup();
+  let rejectInitialize!: (error: Error) => void;
+  const initializing = new Promise<never>((_resolve, reject) => { rejectInitialize = reject; });
+  let closeAndWait = 0;
+  const provider = new ChatGptAppServerProvider(cfg, () => ({
+    initialize: () => initializing,
+    request: async () => ({}),
+    close: () => {},
+    closeAndWait: async (reason) => { closeAndWait++; rejectInitialize(reason ?? new Error("closed")); },
+  }), 10);
+  const controller = new AbortController();
+  const running = provider.complete([{ role: "user", content: "start" }], [], undefined, controller.signal);
+  await Bun.sleep(1);
+  controller.abort();
+  await expect(running).rejects.toMatchObject({ name: "AbortError" });
+  expect(closeAndWait).toBe(1);
+});
+
+test("App Server watchdog is idle-based and transport activity keeps a long turn alive", async () => {
+  const cfg = setup();
+  cfg.data.timeout_seconds = 0.02;
+  let handlers!: CodexAppServerHandlers;
+  const factory: CodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}), close: () => {},
+      request: async (method) => {
+        if (method === "thread/start") return { thread: { id: "heartbeat-thread" } };
+        if (method === "turn/start") {
+          for (const delay of [10, 25, 40]) {
+            setTimeout(() => handlers.onNotification?.("item/agentMessage/delta", {
+              threadId: "heartbeat-thread", turnId: "heartbeat-turn", delta: ".",
+            }), delay);
+          }
+          setTimeout(() => handlers.onNotification?.("turn/completed", {
+            threadId: "heartbeat-thread", turn: { id: "heartbeat-turn", status: "completed" },
+          }), 55);
+          return { turn: { id: "heartbeat-turn" } };
+        }
+        return {};
+      },
+    };
+  };
+  const provider = new ChatGptAppServerProvider(cfg, factory);
+  expect((await provider.complete([{ role: "user", content: "keep working" }])).content).toBe("...");
+  await provider.dispose();
+});
+
+test("App Server watchdog terminates genuine silence but pauses while a bounded tool is active", async () => {
+  const cfg = setup();
+  cfg.data.timeout_seconds = 0.015;
+  let handlers!: CodexAppServerHandlers;
+  let closes = 0;
+  let turns = 0;
+  const factory: CodexClientFactory = (nextHandlers) => {
+    handlers = nextHandlers;
+    return {
+      initialize: async () => ({}), close: () => {},
+      closeAndWait: async () => { closes++; },
+      request: async (method) => {
+        if (method === "thread/start") return { thread: { id: "tool-thread" } };
+        if (method === "turn/start") {
+          turns++;
+          if (turns > 1) return { turn: { id: "silent-turn" } };
+          setTimeout(async () => {
+            await handlers.onRequest?.("item/tool/call", {
+              threadId: "tool-thread", callId: "slow-read", tool: "read_file", arguments: { path: "README.md" },
+            });
+            handlers.onNotification?.("turn/completed", {
+              threadId: "tool-thread", turn: { id: "tool-turn", status: "completed" },
+            });
+          }, 5);
+          return { turn: { id: "tool-turn" } };
+        }
+        return {};
+      },
+    };
+  };
+  const provider = new ChatGptAppServerProvider(cfg, factory);
+  await expect(provider.complete(
+    [{ role: "user", content: "read slowly" }],
+    [{ type: "function", function: { name: "read_file", description: "Read", parameters: { type: "object", properties: {} } } }],
+    undefined,
+    undefined,
+    { executeTool: async () => { await Bun.sleep(45); return "ok"; } },
+  )).resolves.toMatchObject({ tool_calls: [] });
+  expect(closes).toBe(0);
+
+  await expect(provider.complete([{ role: "user", content: "now go silent" }]))
+    .rejects.toThrow("produced no activity");
+  expect(closes).toBe(1);
 });

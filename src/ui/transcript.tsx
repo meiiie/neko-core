@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { Box, Text } from "ink";
 
 import type { NekoConfig } from "../adapters/config.ts";
+import { terminalSafeText } from "../shared/terminal-text.ts";
 import { VERSION } from "../shared/version.ts";
 import { highlightLine } from "./highlight.tsx";
 import { fileUri, linkSegments, osc8 } from "./links.ts";
@@ -114,6 +115,14 @@ function HeaderCounts({ text }: { text: string }) {
 
 /** Render one transcript line. The `key` is set by the caller's <Static> map. */
 export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfig; cols?: number }) {
+  // Escape untrusted transcript bytes before Markdown, link, diff, or Ink parsing. The renderer may
+  // subsequently add its own trusted SGR/OSC-8 sequences, but persisted/provider text can no longer
+  // smuggle OSC, CSI, BEL, or C1 controls into that output.
+  line = {
+    ...line,
+    text: terminalSafeText(line.text, { preserveLineBreaks: true }),
+    summary: line.summary === undefined ? undefined : terminalSafeText(line.summary),
+  };
   switch (line.kind) {
     case "welcome":
       return (
@@ -124,11 +133,11 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
               <Text bold color="white">Neko Core</Text> <Text color="#9a9a9a">v{VERSION}</Text>
             </Text>
             <Text color="#9a9a9a">
-              <Text color="white">{(cfg.model || "no model").split("/").pop()}</Text>
-              {" · "}{cfg.provider}{" · "}{cfg.profile ?? "no profile"}
-              {cfg.effort ? ` · ${cfg.effort} effort` : ""}
+              <Text color="white">{terminalSafeText((cfg.model || "no model").split("/").pop())}</Text>
+              {" · "}{terminalSafeText(cfg.provider)}{" · "}{terminalSafeText(cfg.profile ?? "no profile")}
+              {cfg.effort ? ` · ${terminalSafeText(cfg.effort)} effort` : ""}
             </Text>
-            <Text color="#9a9a9a">{process.cwd()}</Text>
+            <Text color="#9a9a9a">{terminalSafeText(process.cwd(), { maxChars: 512 })}</Text>
           </Box>
         </Box>
       );

@@ -15,7 +15,10 @@ rtk bun scripts/perf-idle-churn.ts      # proves an idle TUI writes zero bytes
 rtk bun run build                        # binary + production UI + real PTY keyboard probes
 rtk bun scripts/bench-scroll-conpty.ts worktree  # compiled TUI under a real PTY/ConPTY
 rtk bash scripts/selftest.sh            # LIVE end-to-end (drives `neko run`; uses real API tokens)
-rtk bun bin/neko.ts policy              # safe/gated tool-boundary audit
+rtk node bin/neko-source.cjs policy     # safe source launch + tool-boundary audit
+rtk node bin/neko-source.cjs bench --trials 3       # OPT-IN model cost: deterministic coding tasks
+rtk node bin/neko-source.cjs bench eval --trials 3  # OPT-IN model cost: multidimensional repeated report
+rtk node bin/neko-source.cjs bench eval frontier --trials 3  # OPT-IN: multi-file calibration tier
 rtk bun run eval:office                 # OPT-IN network: official support pack + real Office artifacts
 ```
 
@@ -26,15 +29,77 @@ rtk bun run eval:office                 # OPT-IN network: official support pack 
 | Architecture | architecture.test | core never imports adapters/ui/ink (deps point inward) |
 | Agent loop | agent.test | loop, max_steps cap, **loop guard** (3x-repeat), graceful finish, compact (keep-tail), runUntilDone, parallel fan-out, vision images, /rewind, dynamicContext |
 | Tools | tools.test | tool list/order, schema, describeToolCall, SAFE/GATED |
-| Tool runtime | tool-runtime.test (26) | read/write/edit (+whitespace fallback +diff), **multi_edit** (atomic), bash (exit + **Ctrl+B background**), **checkpoint/restore**, seatbelt, disabled, hooks, todo, **adversarial check** (native + MCP), **task subagent_type** |
+| Tool runtime | tool-runtime.test | read/write/edit (+whitespace fallback +diff), **multi_edit** (atomic), bash (exit + **Ctrl+B background**), **checkpoint/restore**, seatbelt, disabled, hooks, todo, **adversarial check** (native + MCP), **task subagent_type** |
 | Permissions | permissions.test | default/accept-edits/plan/auto decisions |
-| Config | config.test (13) | overlay precedence, profiles, per-model context window, isLocalEndpoint, **mcp_allow/deny**, defaults |
+| Config | config.test | overlay precedence, profiles, per-model context window, isLocalEndpoint, **mcp_allow/deny**, defaults |
 | Providers | providers.test | OpenAI-compat parse, stream, retry/abort |
 | Sessions | session.test | per-cwd isolation, save/load |
 | Context | context.test | NEKO.md, @import, environmentBlock, rememberNote |
 | MCP | mcp-oauth, remote-control | OAuth provider storage; /rc token-gated round-trip |
 | Office | office-support-pack, office-tools | official asset/digest contract, atomic ownership, safe/gated tools, workspace/symlink bounds, transaction rollback, hash precondition, render evidence |
 | Recipes/registry | recipes, registry | $ARGUMENTS fill; capability/policy audit |
+
+### Benchmark contract (opt-in provider cost)
+
+`bench` and `bench eval` use a fresh provider and trial directory for every task/repeat, plus the production
+registry, turn planner, context, and completion gate. To reduce host-global variation the registry is
+intersected with a fixed local-only coding ceiling (`read_file/search/glob/ls/todo_write/write_file/edit/multi_edit/bash`):
+no task delegation, web, MCP, computer, provider-native environment, or host-global skill catalog. Bash is
+sandboxed as foreground validator-only with the fixture read-only and network disabled; structured reads cannot
+leave the per-trial fixture root. Each trial also uses an empty isolated home and disables user executable hooks,
+so global identity/core-memory text and local automation cannot alter the prompt or tool results. The sandbox masks the known source, reference, and built benchmark
+implementation files from candidate commands. Frontier implementations are contractually pure modules (relative
+imports only; no process termination or host/runtime inspection); a bounded static check rejects direct violations,
+while harness-owned terminal attestation, not that textual contract, proves verifier completion. Post-turn assertions
+are streamed by the harness rather than attached to the model prompt or materialized beside candidate modules.
+These are reproducibility and contamination controls, not cryptographic secrecy for an open-source benchmark.
+The assertion module and candidate still execute in one Bun process, so runtime/stack introspection is not a sealed
+held-out boundary even though early exit cannot forge terminal attestation. The private `frontier-v2` design therefore
+requires the verdict producer and candidate executor to be separate processes and trust domains.
+A pass requires the deterministic verifier, all immutable seeded-file
+constraints, and `Agent.completionStatus.ok`.
+
+The JavaScript oracle requires a live OS sandbox and runs the candidate with the original trial workspace
+read-only, network disabled, a positive environment allowlist, canonical Bun, and `.env`/bunfig/install
+autoload disabled. Its toolchain preflight is separate from candidate execution. Candidate exit/signal/
+timeout/output overflow is a model failure; launcher/sandbox failure is `infra_error`. A normal close is accepted
+directly only when the OS primitive certifies descendant containment; abnormal close, timeout, output overflow,
+and spawn failure use bounded process-tree termination. Unconfirmed cleanup is infrastructure failure rather
+than a score. Infrastructure remains in the denominator, marks the whole
+report `NOT COMPARABLE`, and makes the CLI exit non-zero. Never compare or publish a report with an
+infrastructure error. Every bench/eval/lift report records a SHA-256 fingerprint over the current source tree or
+compiled executable, task seeds/contracts/verifier identities, step budget, runtime version, platform/architecture,
+effective sandbox kind/live state, and the canonical redacted resolved configuration plus selected profile. Eval fingerprints also
+bind the SLA used by the scorecard. The run fails if that identity changes before completion. The external verifier
+Bun binary is not yet independently hashed, and injected closure state is represented only by function source text.
+Matching fingerprints are therefore a necessary comparison gate, not proof of identical machines, toolchains, or
+captured verifier state. A private pack must provide explicit manifest/verifier digests. Never merge trials with
+different fingerprints.
+
+`bench eval` also returns a bounded `neko.eval.trajectory.v1` artifact and, for ordinary production runs,
+appends it to `~/.neko-core/bench-log.jsonl` after the final fingerprint check. It retains only structural
+metadata: trial/outcome, token and call counts, verifier/completion verdicts, allowlisted tool names, opaque
+trial-local target references, result classes, redundancy flags, and explicit truncation counts. Raw paths,
+commands, arguments, observations, error bodies, final answers, and environment values are not persisted.
+The persisted v1 envelope is a fixed allowlist capped at 128 tool events and 32 constraint references per trial,
+512 trajectories, 64 latencies per task, and 4 MiB after explicit fitting. Failure to append leaves the in-memory
+report intact but makes `artifactPersisted=false` and emits a warning.
+
+CI sets `NEKO_REQUIRE_SANDBOX_TESTS=1` for the dedicated Linux/macOS oracle test. Ubuntu installs
+Bubblewrap and temporarily enables unprivileged user namespaces for that isolated runner; macOS uses the
+built-in Seatbelt primitive. The ordinary test remains skippable on a developer machine without a primitive,
+but the required CI invocation fails closed. GitHub-hosted Windows is not auto-provisioned because SRT's
+one-time setup is elevated and mutates host account/WFP state; Windows release evidence therefore comes from
+an explicitly provisioned runner/host.
+
+The `easy` and `hard` tiers are regression/cost rulers: recorded glm-5.2 runs saturated at 16/16 and 12/12.
+`frontier` is a three-task calibration tier for config-context isolation, rejected in-flight recovery, and
+atomic batch publication. It uses immutable public contracts plus post-turn hidden edge cases copied into a
+fresh read-only verifier workspace. A one-trial-per-task Luna/max calibration passed 3/3, so this tier is now
+regression/calibration coverage and not a frontier discriminator or reliability estimate. The proposed private,
+release-scale successor and its admission/promotion gates are specified in
+[`frontier-v2-design-2026-08-10.md`](../research/frontier-v2-design-2026-08-10.md). Do not publish either fixture
+design or a single-trial result as frontier/SOTA evidence.
 
 ## Layer 2 — UX/UI (headless Ink snapshots)
 
@@ -95,7 +160,7 @@ Tiered, with deterministic checks where possible (file contents, grep on output)
 **2026-06-23** (profile: nvidia / qwen3-next-80b-a3b-instruct)
 - `bun run typecheck` — clean.
 - `bun test` — **110 passed, 0 failed** (19 files); re-run ×3, stable (de-flaked the async-bash approval test).
-- `bun bin/neko.ts policy` — PASS.
+- `node bin/neko-source.cjs policy` — PASS.
 - `bash scripts/selftest.sh` — **7/7 passed** (easy → hard → edge).
 - `bash scripts/stresstest.sh` — **3/3 passed** (loop endurance; **prompt-injection resisted, no PWNED.txt**; 100k-line file handled). Note: the endurance task finished in ~6 calls because the model batched the file writes via the parallel fan-out — coherent, not stalled.
 

@@ -12,6 +12,8 @@
 import { CostTracker, type Usage } from "./cost.ts";
 import type { DeltaHook, Provider, ToolCall } from "./ports.ts";
 import { todosContextBlock, type ToolRegistry } from "./tool-runtime.ts";
+import { taskDelegatesReadOnly } from "./tools.ts";
+import { hasAuthoritativeValidatorExit, isValidationBashCommand } from "./validation-command.ts";
 import {
   DEFAULT_SYSTEM_PROMPT,
   COMPACTION_PROMPT,
@@ -21,11 +23,13 @@ import {
   MUTATING_TOOLS,
   EDIT_PER_PATH_CAP,
   UNPRODUCTIVE_CAP,
+  TOOLCHAIN_FAILURE_CAP,
   MAX_OBS_CHARS,
   LEAN_TAIL_CHARS,
   COMPACT_AT,
   COMPACT_SAFETY_AT,
   clampObservation,
+  estimateRequestTokens,
   estimateTokens,
   SESSION_CONTEXT_MARK,
   type EventHook,
@@ -40,9 +44,44 @@ export {
   COMPACT_AT,
   COMPACT_SAFETY_AT,
   clampObservation,
+  estimateRequestTokens,
   estimateTokens,
 };
+export { isValidationBashCommand } from "./validation-command.ts";
 export type { EventHook, AgentOptions };
+
+/** Controller turns saved before `_neko_internal` existed. An explicit marker always wins, so a
+ * current user can still begin a real message with one of these strings without being hidden. */
+const LEGACY_INTERNAL_USER_PREFIXES = [
+  "[Summary of earlier conversation]",
+  "CLOSED-LOOP REVIEW (",
+  "PLAN NOT COMPLETE:",
+  "VALIDATION FAILED:",
+  "VALIDATION REQUIRED:",
+  "OUTCOME VERIFICATION REQUIRED:",
+  "NO VERIFICATION EVIDENCE YET:",
+  "VERIFY BEFORE FINISHING:",
+  "[budget]",
+  "Step limit (",
+  "Continue the task from where it was interrupted.",
+];
+
+function isInternalUserMessage(message: any): boolean {
+  if (message?._neko_internal === true) return true;
+  if (message?._neko_internal === false || message?.role !== "user" || typeof message.content !== "string") return false;
+  const content = message.content.trimStart();
+  return LEGACY_INTERNAL_USER_PREFIXES.some((prefix) => content.startsWith(prefix));
+}
+
+/** Neko-local durability metadata belongs in the session file, never an LLM wire payload. */
+function cleanProviderMessages(messages: any[]): any[] {
+  return messages.map((message) => {
+    const clean = { ...message };
+    delete clean._neko_internal;
+    delete clean._neko_inflight;
+    return clean;
+  });
+}
 
 /** Give every old message a fair share of the summarizer input. This prevents one giant early tool
  * result from consuming the fixed budget and erasing later corrections/decisions. Keep both ends
@@ -67,6 +106,33 @@ function compactionSource(messages: any[], budget = 40_000): string {
 
 export interface NumberedImageAttachment { id: number; url: string }
 export type ImageAttachment = string | NumberedImageAttachment;
+
+export interface AgentCompletionStatus {
+  ok: boolean;
+  reason?: "validation_failed" | "validation_missing";
+  command?: string;
+  detail?: string;
+}
+
+export type ToolObservationClass = "productive" | "empty" | "failed";
+
+/** Classify a tool observation without retaining its payload. This is shared by the loop guards and
+ * benchmark telemetry so an eval cannot report a failed/empty call as productive. */
+export function classifyToolObservation(obs: unknown): ToolObservationClass {
+  if (typeof obs !== "string") return "productive";
+  if (/\(exit \d+ -- command FAILED\)/.test(obs)
+    || /^\(timed out/.test(obs)
+    || /^(?:Error(?: running [^:]+)?:|Blocked(?::| by)|Denied by user:|Refused:|The user did NOT approve\b|Tool '[^']+' is (?:disabled|not available)|Sub-agents? (?:are|is) not available\b|Sub-agent error:|\[denied\]|\[capability circuit\]|\[loop guard\]|\(interrupted\))/mi.test(obs)) {
+    return "failed";
+  }
+  const match = obs.match(/###\s*Result\s*\r?\n([\s\S]*?)(?:\r?\n###|$)/i);
+  const value = (match ? match[1] : obs).trim();
+  return value === "" || value === "[]" || value === "{}" || value === "null"
+    || value === "undefined" || value === '""' || value === "0"
+    || value === "(no matches)" || value === "(no files)" || value === "(empty)"
+    ? "empty"
+    : "productive";
+}
 
 /** Build one multimodal user turn without losing the semantic position of numbered pasted images.
  * Plain string attachments are CLI `--image` inputs and keep the legacy text-then-images layout. */
@@ -107,6 +173,10 @@ export class Agent {
   private readonly verifyBeforeExit: boolean;
   private readonly verifyStateChangesBeforeExit: boolean;
   private readonly adaptiveEffort: boolean;
+  /** Host-owned instructions for the active outer turn. They are projected onto provider requests,
+   * never written into `messages`, so automatic skill/workflow routing cannot leak into a later turn
+   * or a saved session. `runUntilDone` keeps the same projection across its internal review passes. */
+  private turnSystemContext = "";
   readonly cost = new CostTracker();
   messages: any[] = [];
   /** The single system message is `<base prompt>` + SESSION_CONTEXT_MARK + `<live session context>`.
@@ -118,7 +188,13 @@ export class Agent {
     //     and nudge once the cap is hit. (b) consecutive failing bash runs: re-running a failing
     //     command 3x with tiny tweaks is the other classic budget sink.
     private readonly editsPerPath = new Map<string, number>();
-    private consecutiveUnproductive = 0;
+  private consecutiveUnproductive = 0;
+  /** Validation debt belongs to one OUTER user goal. `runUntilDone` controller reviews use
+   * `internal=true`, so they deliberately share this state until a validator passes after the latest
+   * successful mutation. Ordinary later user turns reset it. */
+  private mutationEpoch = 0;
+  private validationExpected = false;
+  private validationResult?: { epoch: number; command: string; ok: boolean; authoritative: boolean; detail?: string };
 
   constructor(opts: AgentOptions) {
     this.provider = opts.provider;
@@ -132,6 +208,28 @@ export class Agent {
     this.verifyBeforeExit = Boolean(opts.verifyBeforeExit);
     this.verifyStateChangesBeforeExit = Boolean(opts.verifyStateChangesBeforeExit);
     this.adaptiveEffort = Boolean(opts.adaptiveEffort);
+  }
+
+  /** Deterministic controller verdict for automation. It says only whether known validation debt is
+   * resolved; it never pretends to judge the semantic quality of the model's prose. */
+  get completionStatus(): AgentCompletionStatus {
+    if (!this.validationExpected || this.mutationEpoch === 0) return { ok: true };
+    const current = this.validationResult?.epoch === this.mutationEpoch ? this.validationResult : undefined;
+    if (current?.ok) return { ok: true };
+    if (current?.authoritative) {
+      return {
+        ok: false,
+        reason: "validation_failed",
+        command: current.command,
+        ...(current.detail ? { detail: current.detail } : {}),
+      };
+    }
+    return {
+      ok: false,
+      reason: "validation_missing",
+      ...(this.validationResult?.command ? { command: this.validationResult.command } : {}),
+      ...(this.validationResult?.detail ? { detail: this.validationResult.detail } : {}),
+    };
   }
 
   /** Swap the LLM provider live (used by the REPL's /provider command to switch endpoint+key between turns,
@@ -190,10 +288,10 @@ export class Agent {
     // next call just overflows again and the turn is stuck. The recent tail is kept verbatim regardless.
     let summary: string;
     try {
-      const res = await this.provider.complete([
+      const res = await this.provider.complete(cleanProviderMessages([
         { role: "system", content: COMPACTION_PROMPT },
-        { role: "user", content: text },
-      ]);
+        { role: "user", content: text, _neko_internal: true },
+      ]));
       this.cost.add(res.usage);
       summary = res.content ?? "";
     } catch {
@@ -223,7 +321,7 @@ export class Agent {
     const plan = todosContextBlock(this.tools.todos);
     this.messages = [
       ...sys,
-      { role: "user", content: `[Summary of earlier conversation]\n${task ? `ORIGINAL TASK (verbatim): ${task}\n\n` : ""}${plan ? `${plan}\n\n` : ""}${summary}` },
+      { role: "user", content: `[Summary of earlier conversation]\n${task ? `ORIGINAL TASK (verbatim): ${task}\n\n` : ""}${plan ? `${plan}\n\n` : ""}${summary}`, _neko_internal: true },
       ...leanTail,
     ];
     return summary;
@@ -287,11 +385,42 @@ export class Agent {
     return shrank;
   }
 
-  /** Conversation undo: drop the last user turn (and the assistant response after it) from context.
+  /** The latest real human turn. Controller prompts are skipped; old sessions use prefix fallback. */
+  lastUserMessage(): any | undefined {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const message = this.messages[i];
+      if (message?.role === "user" && !isInternalUserMessage(message)) return message;
+    }
+    return undefined;
+  }
+
+  /** A provider-safe history projection. Local durability/control markers remain in `messages`. */
+  providerHistory(): any[] {
+    const clean = cleanProviderMessages(this.messages);
+    if (!this.turnSystemContext) return clean;
+    const system = clean.find((message) => message?.role === "system" && typeof message.content === "string");
+    if (system) system.content = `${system.content}\n\n${this.turnSystemContext}`;
+    return clean;
+  }
+
+  /** Replace the provider-only system tail for one outer host turn. Automatic routing uses this;
+   * manual `/skill` continues to call appendSystem() and therefore remains deliberately persistent. */
+  setTurnSystemContext(text: string): void {
+    this.turnSystemContext = String(text ?? "").trim();
+  }
+
+  /** End the outer host turn. Refresh after the host closes its tool lease so the durable system
+   * message is recomputed from the ordinary configured surface before the session is persisted. */
+  clearTurnSystemContext(): void {
+    this.turnSystemContext = "";
+    this.refreshDynamicContext();
+  }
+
+  /** Conversation undo: drop the last human user turn (and every response/controller turn after it).
    * Returns false if there's nothing to rewind. Note: this restores CONTEXT, not files on disk. */
   rewind(): boolean {
     for (let i = this.messages.length - 1; i >= 0; i--) {
-      if (this.messages[i].role === "user") {
+      if (this.messages[i].role === "user" && !isInternalUserMessage(this.messages[i])) {
         this.messages.splice(i);
         return true;
       }
@@ -300,14 +429,37 @@ export class Agent {
   }
 
   /** Closed-loop runner (agent-looping, "closed" variant): do the goal, then self-review against
-   * a high bar and fix gaps, repeating until the model replies DONE or maxIters is hit. Bounded +
-   * an eval each pass = autonomous without becoming a slop machine. Honors the abort signal. */
-  async runUntilDone(goal: string, opts: { maxIters?: number; signal?: AbortSignal } = {}): Promise<string> {
+   * a high bar and fix gaps, repeating until the model replies DONE or maxIters is hit. A provider
+   * inactivity timeout resumes from the durable trajectory with bounded retries; this is not a total
+   * wall-clock deadline, and an explicit user abort is never retried. */
+  async runUntilDone(
+    goal: string,
+    opts: { maxIters?: number; signal?: AbortSignal; maxStallRecoveries?: number } = {},
+  ): Promise<string> {
     const maxIters = Math.max(1, Math.min(opts.maxIters ?? 6, 20));
-    let out = await this.run(goal, opts.signal);
+    const maxStallRecoveries = Math.max(0, Math.min(opts.maxStallRecoveries ?? 2, 5));
+    let stallRecoveries = 0;
+    const runResumable = async (instruction: string, internal = false): Promise<string> => {
+      let next = instruction;
+      let nextInternal = internal;
+      while (true) {
+        try { return await this.run(next, opts.signal, undefined, nextInternal); }
+        catch (error) {
+          if (opts.signal?.aborted || !isRecoverableProviderStall(error) || stallRecoveries >= maxStallRecoveries) throw error;
+          stallRecoveries++;
+          this.emit("recovery", { attempt: stallRecoveries, max: maxStallRecoveries, reason: "provider idle timeout" });
+          next = `AUTONOMY RECOVERY (${stallRecoveries}/${maxStallRecoveries}). Goal: "${goal}". ` +
+            "The provider stopped making progress and Neko restarted its transport. Resume from the durable " +
+            "conversation/tool checkpoint. Inspect actual state before repeating any mutation, continue the " +
+            "next concrete step, and verify the final result.";
+          nextInternal = true;
+        }
+      }
+    };
+    let out = await runResumable(goal);
     for (let i = 1; i < maxIters; i++) {
       if (opts.signal?.aborted || out === "[interrupted]") return out;
-      out = await this.run(
+      out = await runResumable(
         `CLOSED-LOOP REVIEW (pass ${i + 1}/${maxIters}). Goal: "${goal}".\n` +
           `First RE-INSPECT the ACTUAL current state (re-run the check / re-read the file / re-screenshot ` +
           `or re-read the UI) — judge what IS, not your memory of what you intended. Then compare against ` +
@@ -317,9 +469,11 @@ export class Agent {
           `is a program, an output recreated by a clean run is disposable even when the goal names its path. Compare against ` +
           `the goal and a high quality bar. If it is FULLY met, reply with exactly "DONE" and nothing else. ` +
           `Otherwise, keep working: do the next concrete step now (don't stop until the goal is achieved).`,
-        opts.signal,
+        true,
       );
-      if (/^\s*done[.!]?\s*$/i.test(out)) break;
+      // A model word is not stronger than controller-observed evidence. Validation debt survives
+      // these internal reviews, so bare DONE cannot turn a failed/unavailable test into exit success.
+      if (/^\s*done[.!]?\s*$/i.test(out) && this.completionStatus.ok) break;
     }
     return out;
   }
@@ -408,8 +562,7 @@ export class Agent {
     /** A bash/test result "failed" if it carries a non-zero exit tag (see tool-runtime.ts: `(exit N -- command FAILED)`),
      * a timeout, or an explicit error. Used to count CONSECUTIVE failing runs for the broad guard. */
     private static isFailedRunResult(obs: unknown): boolean {
-      if (typeof obs !== "string") return false;
-      return /\(exit \d+ -- command FAILED\)/.test(obs) || /^\(timed out/.test(obs) || /^Error:/m.test(obs);
+      return classifyToolObservation(obs) === "failed";
     }
 
     /** A tool result that moved NOTHING forward: a failed run, or an EMPTY value ([], {}, "", null, 0). Empty
@@ -417,15 +570,26 @@ export class Agent {
      * Facebook feed) - the exact-repeat guard misses it because every selector differs. Handles the MCP
      * "### Result\n[]" wrapper as well as a bare value. */
     private static isUnproductiveResult(obs: unknown): boolean {
-      if (typeof obs !== "string") return false;
-      if (Agent.isFailedRunResult(obs)) return true;
-      const m = obs.match(/###\s*Result\s*\r?\n([\s\S]*?)(?:\r?\n###|$)/i);
-      const val = (m ? m[1] : obs).trim();
-      return val === "" || val === "[]" || val === "{}" || val === "null" || val === "undefined" || val === '""' || val === "0";
+      return classifyToolObservation(obs) !== "productive";
+    }
+
+    private static isToolchainCommand(call: { name: string; arguments?: Record<string, any> }): boolean {
+      if (call.name.toLowerCase() !== "bash") return false;
+      return /\b(?:bun|node|npm|npx|pnpm|yarn|deno)(?:\.exe)?\b/i.test(String(call.arguments?.command ?? ""));
+    }
+
+    private static isToolchainCapabilityFailure(
+      call: { name: string; arguments?: Record<string, any> },
+      observation: unknown,
+    ): boolean {
+      if (!Agent.isToolchainCommand(call) || typeof observation !== "string" || !Agent.isFailedRunResult(observation)) return false;
+      return /(command not found|not recognized as|no such file|cannot find|permission denied|access is denied|operation not permitted|network (?:is )?(?:blocked|denied)|\b403\b)/i
+        .test(observation);
     }
 
     private static isStateChangingCall(call: { name: string; arguments?: Record<string, any> }): boolean {
       const name = call.name.toLowerCase();
+      if (name === "task") return !taskDelegatesReadOnly(call.arguments);
       if (name === "bash") return !Agent.isClearlyReadOnlyBash(call.arguments);
       if (MUTATING_TOOLS.has(name)) return true;
       // Meeting capture is an adapter-owned state machine. Keep the core free of adapter
@@ -453,7 +617,7 @@ export class Agent {
       const words = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
       const executable = String(words[0] ?? "").toLowerCase();
       if (new Set([
-        ":", "echo", "printf", "pwd", "whoami", "hostname", "date", "true", "false",
+        ":", "echo", "printf", "pwd", "whoami", "hostname", "uname", "date", "true", "false",
         "ls", "dir", "cat", "head", "tail", "wc", "stat", "file", "readlink", "realpath",
         "rg", "grep",
       ]).has(executable)) return true;
@@ -525,7 +689,17 @@ export class Agent {
   /** Run the loop until the model is done or maxSteps is hit. Returns the final text.
    * Pass an AbortSignal to support Esc-to-interrupt (stops cleanly between/within steps).
    * `images` (data: URLs) attach as OpenAI vision content — used by paste-image (needs a vision model). */
-  async run(instruction: string, signal?: AbortSignal, images?: ImageAttachment[]): Promise<string> {
+  // `internal` is local provenance for controller-generated turns; providerHistory() removes it.
+  async run(instruction: string, signal?: AbortSignal, images?: ImageAttachment[], internal = false): Promise<string> {
+    // These guards are scoped to one human turn. Carrying them across independent Agent.run calls
+    // makes a later task inherit an unrelated failure/edit streak from an earlier conversation turn.
+    this.editsPerPath.clear();
+    this.consecutiveUnproductive = 0;
+    if (!internal) {
+      this.mutationEpoch = 0;
+      this.validationExpected = false;
+      this.validationResult = undefined;
+    }
     if (!this.messages.length) {
       this.messages.push({ role: "system", content: this.systemPrompt });
     }
@@ -537,27 +711,57 @@ export class Agent {
     const content = images && images.length
       ? imageContent(instruction, images)
       : instruction;
-    this.messages.push({ role: "user", content });
+    this.messages.push({ role: "user", content, _neko_internal: internal });
 
     let lastSig = ""; // loop guard: detect the model repeating the same tool call (a stuck loop)
     let repeats = 0;
     let mutErrored = false; // tool-error recovery is EDGE-triggered: re-armed by a mutating-tool success
     let verifiedExit = false; // the pre-completion verify gate fires at most once per run
     let planExitChecked = false; // an unfinished todo plan gets one persistence nudge before exit
+    let validationExitChecked = false; // unresolved validator debt gets one targeted recovery round
     let changedRealState = false;
     let stateVerificationRequested = false;
     let stateVerificationEvidence = false;
+    let completionVerificationEvidence = false;
     let nextReasoningEffort: string | undefined;
+    let consecutiveReadSteps = 0; // adaptive effort: only lower reasoning on a SUSTAINED all-read pattern
+    let toolchainCapabilityFailures = 0;
+    let toolchainCircuitOpen = false;
     const noteTool = (call: { name: string; arguments?: Record<string, any> }, observation: unknown) => {
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
-      if (changesState) {
+      const failed = observation == null || Agent.isUnproductiveResult(observation);
+      const validationCommand = call.name.toLowerCase() === "bash"
+        && isValidationBashCommand(String(call.arguments?.command ?? ""));
+      if (validationCommand) {
+        const syntaxPreservesExit = hasAuthoritativeValidatorExit(String(call.arguments?.command ?? ""), call.arguments);
+        const foregroundCompleted = typeof observation === "string" && /^\(exit 0\)(?:\r?\n|$)/.test(observation);
+        const authoritative = syntaxPreservesExit && (failed || foregroundCompleted);
+        this.validationExpected = true;
+        this.validationResult = {
+          epoch: this.mutationEpoch,
+          command: String(call.arguments?.command ?? "").trim(),
+          ok: authoritative && foregroundCompleted && !failed,
+          authoritative,
+          ...((failed || !authoritative) && typeof observation === "string"
+            ? { detail: observation.replace(/\s+/g, " ").trim().slice(0, 500) }
+            : {}),
+        };
+      }
+      // Only a SUCCESSFUL state-changing call advances the epoch. A rejected edit or a sandbox
+      // dependency error changed no known state and must not manufacture verification work.
+      if (changesState && !failed) {
         // A later bash can be the verifier for an earlier write/bash (tests, exact-byte checks), but the
         // first state-changing call cannot verify itself. Other mutations invalidate older evidence.
         stateVerificationEvidence = changedRealState && call.name.toLowerCase() === "bash" && verifiesState;
+        completionVerificationEvidence = stateVerificationEvidence;
         changedRealState = true;
-      } else if (changedRealState && verifiesState) {
-        stateVerificationEvidence = true;
+        // Validators may create caches/build output, but they observe the current source epoch rather
+        // than defining a new source state that would immediately invalidate their own result.
+        if (!validationCommand) this.mutationEpoch++;
+      } else if (verifiesState) {
+        completionVerificationEvidence = true;
+        if (changedRealState) stateVerificationEvidence = true;
       }
     };
     let budgetNudges = 0; // SOTA "completion predicate": remind the model to LAND the deliverable near the budget edge
@@ -567,13 +771,14 @@ export class Agent {
       // In-loop overflow guard: within ONE turn (e.g. many huge browser snapshots) context can grow
       // past the window with no chance for the between-turn UI compaction to run. Compact here BEFORE a
       // request would overflow -- otherwise the server computes a negative max_tokens and 400s the turn.
-      let estimatedTokens = estimateTokens(this.messages);
+      const toolSchemas = this.tools.schemas();
+      let estimatedTokens = estimateRequestTokens(this.providerHistory(), toolSchemas);
       // Cost guard, before the hard overflow guard: once a tool-heavy turn is substantial, clear old
       // results only when doing so saves >=8k estimated tokens. Keep five recent observations. This
       // mirrors provider context-editing guidance without churning the prompt cache for tiny wins.
       const editAt = Math.min(50_000, 0.5 * this.maxContextTokens);
       if (step > 0 && estimatedTokens > editAt && this.shrinkOldObservations(5, 32_000)) {
-        estimatedTokens = estimateTokens(this.messages);
+        estimatedTokens = estimateRequestTokens(this.providerHistory(), toolSchemas);
       }
       if (estimatedTokens > COMPACT_SAFETY_AT * this.maxContextTokens) {
         // One long turn has a single user message, so compact()'s snap-to-user boundary frees nothing;
@@ -681,7 +886,7 @@ export class Agent {
       // context estimate. Providers without live usage still get a monotonic whole-turn meter; when
       // authoritative usage arrives below, it replaces this visibly approximate snapshot.
       this.emit("usage_estimate", {
-        prompt_tokens: this.cost.promptTokens + estimateTokens(this.messages),
+        prompt_tokens: this.cost.promptTokens + estimateRequestTokens(this.providerHistory(), toolSchemas),
       });
       // Provider live-usage callbacks describe THIS complete() call. Rebase them onto the Agent's
       // already-booked totals so the UI sees one monotonic absolute counter across a multi-step turn.
@@ -700,13 +905,14 @@ export class Agent {
           total_tokens: usageBase.total + (usage.total_tokens ?? 0),
           cached_tokens: usageBase.cached + (usage.cached_tokens ?? 0),
           context_tokens: usage.context_tokens,
+          context_cached_tokens: usage.context_cached_tokens,
           model_calls: usageBase.calls + Math.max(1, usage.model_calls ?? 1),
         } satisfies Usage);
       };
       try {
         response = await this.provider.complete(
-          this.messages,
-          this.tools.schemas(),
+          this.providerHistory(),
+          toolSchemas,
           streamedDelta,
           signal,
           {
@@ -746,9 +952,26 @@ export class Agent {
           verifiedExit = true; // this nudge already asks for real-state verification; do not stack gates
           this.messages.push({
             role: "user",
+            _neko_internal: true,
             content: `PLAN NOT COMPLETE: ${openTodos.length} todo item(s) are still open. Re-check the actual state, ` +
               "continue the work, and call todo_write with the full updated plan before finishing. Mark items " +
               "completed only when verified. If progress is genuinely blocked, state the blocker clearly instead of claiming completion.",
+          });
+          continue;
+        }
+        const validation = this.completionStatus;
+        if (!validation.ok && !validationExitChecked && step < this.maxSteps - 1) {
+          validationExitChecked = true;
+          verifiedExit = true; // this is stronger than the generic inspection-only gate
+          const command = validation.command ? ` The validator was: ${JSON.stringify(validation.command)}.` : "";
+          this.messages.push({
+            role: "user",
+            _neko_internal: true,
+            content: `${validation.reason === "validation_failed" ? "VALIDATION FAILED" : "VALIDATION REQUIRED"}: ` +
+              "the project changed, but no recognized validator has passed after the latest successful mutation." +
+              command + " A read/search/diff is useful inspection, but it cannot replace this failed or stale " +
+              "test/typecheck/lint/build result. Re-run a recognized validator now. If the capability is " +
+              "unavailable, report the blocker plainly; do not claim the task is verified.",
           });
           continue;
         }
@@ -763,6 +986,7 @@ export class Agent {
             verifiedExit = true; // stronger than the generic opt-in gate; do not stack both
             this.messages.push({
               role: "user",
+              _neko_internal: true,
               content: "OUTCOME VERIFICATION REQUIRED: you changed real machine/project state. Do not trust " +
                 "the action's success message or the coordinates you intended. Use a tool NOW to inspect the " +
                 "result independently, then compare the observed end state with every user-visible requirement " +
@@ -775,20 +999,23 @@ export class Agent {
           if (!stateVerificationEvidence) {
             this.messages.push({
               role: "user",
+              _neko_internal: true,
               content: "NO VERIFICATION EVIDENCE YET: your last reply used no fresh successful inspection tool. " +
                 "Observe the actual end state now; otherwise report that completion is unverified, not done.",
             });
             continue;
           }
         }
-        // Pre-completion gate (opt-in): intercept the FIRST tool-less final once and force a
+        // Pre-completion gate (opt-in): intercept the FIRST unsupported tool-less final and force a
         // re-inspection of the ACTUAL state - the "declared done without re-running the check"
-        // failure mode (LangChain PreCompletionChecklist; ACE reflection-before-exit). Fires at
-        // most once per run, and never on the last step (the wrap-up must be able to finish).
-        if (this.verifyBeforeExit && !verifiedExit && step < this.maxSteps - 1) {
+        // failure mode (LangChain PreCompletionChecklist; ACE reflection-before-exit). Productive
+        // inspection/test evidence already gathered in this run satisfies it; a later mutation clears
+        // that evidence. Fires at most once, and never on the last step so wrap-up can finish.
+        if (this.verifyBeforeExit && !verifiedExit && !completionVerificationEvidence && step < this.maxSteps - 1) {
           verifiedExit = true;
           this.messages.push({
             role: "user",
+            _neko_internal: true,
             content: "VERIFY BEFORE FINISHING: re-inspect the ACTUAL current state against the original goal " +
               "(re-run the failing check / re-read the changed file / re-test the command) - judge what IS, " +
               "not your memory of what you intended. If the goal is fully met, restate the final answer. " +
@@ -805,10 +1032,13 @@ export class Agent {
       if (signal?.aborted) return "[interrupted]";
       let stepHadUnproductiveResult = false;
 
-      // Fleet fan-out: if every call in this batch is concurrency-safe (read-only or a sub-agent
-      // task), run them in parallel; results are recorded in call order. Anything that mutates
-      // the workspace (write/edit/bash) stays sequential to preserve order + approval prompts.
-      if (toolCalls.length > 1 && toolCalls.every((c) => CONCURRENCY_SAFE.has(c.name))) {
+      // Fleet fan-out: static read tools and capability-restricted reviewer/explorer tasks may run
+      // in parallel. Generic/custom workers can mutate, so one such call serializes the whole batch.
+      // Executable hooks are trusted but may have side effects, so their calls remain serialized.
+      const hooksMayHaveEffects = Boolean(this.tools.hooks?.preToolUse || this.tools.hooks?.postToolUse);
+      const concurrencySafe = (call: ToolCall) => !hooksMayHaveEffects && (CONCURRENCY_SAFE.has(call.name)
+        || (call.name === "task" && taskDelegatesReadOnly(call.arguments)));
+      if (toolCalls.length > 1 && toolCalls.every(concurrencySafe)) {
         lastSig = ""; // a parallel fan-out breaks any single-call repeat chain
         toolCalls.forEach((call) => this.emit("tool_call", call));
         const observations = await Promise.all(toolCalls.map((call) => eager.get(eagerKey(call)) ?? this.safeExecute(call, signal)));
@@ -833,10 +1063,27 @@ export class Agent {
             // below after the edit runs), so a legitimate multi-edit is never blocked; only an EXACT
             // 3x-identical repeat is blocked here (that one is unambiguously stuck).
             const broad = this.broadLoopNudge(call);
-            const observation = repeats >= 2
+            const circuitBlocked = toolchainCircuitOpen && Agent.isToolchainCommand(call);
+            let observation = circuitBlocked
+              ? "[capability circuit] The sandbox/runtime already failed three independent Bun/Node/package-manager attempts. " +
+                "Stop trying alternate paths, installers, shells, or host computer control. Use structured file tools for work " +
+                "that remains possible, and report test execution as blocked by the unavailable toolchain."
+              : repeats >= 2
               ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
               : await (eager.get(eagerKey(call)) ?? this.safeExecute(call, signal));
             noteTool(call, observation);
+            if (Agent.isToolchainCommand(call) && !circuitBlocked) {
+              if (Agent.isToolchainCapabilityFailure(call, observation)) {
+                toolchainCapabilityFailures++;
+                if (toolchainCapabilityFailures >= TOOLCHAIN_FAILURE_CAP) {
+                  toolchainCircuitOpen = true;
+                  observation += "\n[capability circuit opened] Further Bun/Node/package-manager commands in this turn will not run. " +
+                    "Do not escape through computer control; continue with allowed structured tools and state the verification blocker.";
+                }
+              } else if (!Agent.isFailedRunResult(observation)) {
+                toolchainCapabilityFailures = 0;
+              }
+            }
             if (Agent.isUnproductiveResult(observation)) stepHadUnproductiveResult = true;
             // Track consecutive UNPRODUCTIVE results (failed OR empty) from ANY tool; a productive result
             // resets the streak. Catches the doom-loop the exact-repeat + edit guards structurally miss:
@@ -878,11 +1125,14 @@ export class Agent {
             }
           }
       }
-      nextReasoningEffort = this.adaptiveEffort
-        && !stepHadUnproductiveResult
-        && toolCalls.every((call) => this.isMechanicalReadCall(call))
-        ? "low"
-        : undefined;
+      // Adaptive effort, conservative variant: lower reasoning only on a SUSTAINED all-read pattern
+      // (2+ consecutive steps), never after a single read whose result the next step must still
+      // synthesize. That "lagged proxy" risk is exactly why this stays off by default pending an eval;
+      // this gate makes a future enablement strictly safer — it can only fire less, in narrower cases.
+      const allReads = toolCalls.length > 0 && !stepHadUnproductiveResult
+        && toolCalls.every((call) => this.isMechanicalReadCall(call));
+      consecutiveReadSteps = allReads ? consecutiveReadSteps + 1 : 0;
+      nextReasoningEffort = this.adaptiveEffort && consecutiveReadSteps >= 2 ? "low" : undefined;
 
       // Budget-aware COMPLETION nudge (2026 SOTA: agents fail not from inability but because "nobody told
       // it when the work is over" - a completion signal near the budget edge is what changes behavior).
@@ -895,7 +1145,7 @@ export class Agent {
         if (frac >= threshold) {
           budgetNudges++;
           const left = this.maxSteps - (step + 1);
-          this.messages.push({ role: "user", content:
+          this.messages.push({ role: "user", _neko_internal: true, content:
             `[budget] ~${left} of ${this.maxSteps} steps left (${Math.round(frac * 100)}% used). If this task ` +
             "has a concrete deliverable - a file to write, code, a config, a plan - PRODUCE and finish it NOW; " +
             "don't spend the remaining budget exploring. A delivered result with its open risks named honestly " +
@@ -909,7 +1159,7 @@ export class Agent {
     this.emit("max_steps", this.maxSteps);
     try {
       const wrap = await this.provider.complete(
-        [...this.messages, { role: "user", content: `Step limit (${this.maxSteps}) reached. Stop calling tools and concisely summarize what you did and what's left.` }],
+        cleanProviderMessages([...this.providerHistory(), { role: "user", content: `Step limit (${this.maxSteps}) reached. Stop calling tools and concisely summarize what you did and what's left.`, _neko_internal: true }]),
         undefined,
         this.onDelta,
         signal,
@@ -927,6 +1177,15 @@ export class Agent {
   private emit(kind: string, data: any): void {
     this.onEvent?.(kind, data);
   }
+}
+
+/** Only silence/stall failures are safe to resume automatically. Authentication, validation, policy,
+ * and ordinary provider errors still surface immediately instead of being hidden behind retries. */
+function isRecoverableProviderStall(error: unknown): boolean {
+  return error instanceof Error && (
+    error.name === "TimeoutError"
+    || /\b(?:idle timeout|produced no activity)\b/i.test(error.message)
+  );
 }
 
 /** Rebuild the OpenAI-format assistant turn so the next request carries the tool_calls

@@ -7,6 +7,15 @@ SOTA + papers) and appends findings here, then turns the most promising into BAC
 
 > Snapshot date of the seed entries below: **2026-06-30**. Re-research regularly; the field moves fast.
 
+## 2026-08-09 frontier refresh
+
+The latest primary-source review, direct `neko --yolo` measurements, security/reliability audit,
+and ordered architecture/evaluation proposal live in
+[`docs/research/harness-sota-2026-08-09.md`](../research/harness-sota-2026-08-09.md).
+It covers LongHorizon-Harness, OneDayAgent, SWE-Touch, reversible context work, current lab guidance,
+and the claim gate. Its main correction to the older ledger is: prefer evidence-backed verification,
+recoverable event state, and bounded capabilities before adding generic reflection or mutating teams.
+
 ## Self-improving agents (the north star)
 - **Darwin Gödel Machine (DGM)** — Zhang et al., ICLR 2026 ([arXiv 2505.22954](https://arxiv.org/abs/2505.22954)).
   An agent that **modifies its own code** and **empirically validates** each change on a coding benchmark

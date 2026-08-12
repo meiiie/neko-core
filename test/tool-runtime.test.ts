@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
-import { type ApprovalGate, ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
+import { __formatBashExitForTest, __taskkillResultSucceededForTest, __windowsDescendantSnapshotForTest, type ApprovalGate, ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
 import type { PermissionMode } from "../src/core/permissions.ts";
 
 function makeReg(mode: PermissionMode = "auto", prompt: ApprovalGate = () => true) {
@@ -69,6 +69,19 @@ test("multi_edit applies several edits atomically", async () => {
   });
   expect(fail).toContain("not found");
   expect(await reg.execute("read_file", { path: "n.ts" })).toContain("x = 1;"); // unchanged
+});
+
+test("multi_edit refuses a missing new_string without deleting content", async () => {
+  const { root, reg } = makeReg();
+  const path = join(root, "missing-new.ts");
+  writeFileSync(path, "const keep = true;\n");
+  const before = readFileSync(path, "utf-8");
+  const out = await reg.execute("multi_edit", {
+    path: "missing-new.ts",
+    edits: [{ old_string: "keep = true" }],
+  });
+  expect(out).toContain("needs string new_string");
+  expect(readFileSync(path, "utf-8")).toBe(before);
 });
 
 test("edit reports an ambiguous whitespace match instead of guessing", async () => {
@@ -154,6 +167,30 @@ test("accept-edits auto-approves edits but prompts bash", async () => {
   expect(await reg.execute("bash", { command: "echo no" })).toContain("Denied");
 });
 
+test("auto mode refuses unsandboxed host-daemon commands without an explicit override", async () => {
+  const { reg } = makeReg("auto", () => true);
+  const out = await reg.execute("bash", { command: "docker ps" });
+  expect(out).toContain("host daemon outside Neko's OS sandbox");
+  expect(out).toContain("allow_dangerous_bash");
+});
+
+test("auto mode cannot silently cross the computer host boundary", async () => {
+  let prompts = 0;
+  let executions = 0;
+  const { reg } = makeReg("auto", () => { prompts++; return false; });
+  reg.computerHandler = () => { executions++; return "host action ran"; };
+
+  expect(await reg.execute("computer", { action: "read" })).toContain("Denied by user");
+  expect(prompts).toBe(1);
+  expect(executions).toBe(0);
+
+  // An affirmative approval is separate, explicit authority; auto mode alone was insufficient.
+  reg.prompt = () => { prompts++; return true; };
+  expect(await reg.execute("computer", { action: "read" })).toBe("host action ran");
+  expect(prompts).toBe(2);
+  expect(executions).toBe(1);
+});
+
 test("disabled tool is hidden from schemas and blocked on execute", async () => {
   const { reg } = makeReg();
   reg.disabled.add("bash");
@@ -166,6 +203,17 @@ test("task delegates to the subagent callback (and reports when unavailable)", a
   expect(await reg.execute("task", { description: "x", prompt: "do y" })).toContain("not available");
   reg.subagent = async (prompt) => `sub did: ${prompt}`;
   expect(await reg.execute("task", { description: "x", prompt: "do y" })).toBe("sub did: do y");
+});
+
+test("generic task is approval-gated while reviewer remains safe and read-only", async () => {
+  let calls = 0;
+  const { reg } = makeReg("default", () => false);
+  reg.subagent = async () => { calls++; return "review complete"; };
+
+  expect(await reg.execute("task", { description: "worker", prompt: "change it" })).toContain("Denied by user");
+  expect(calls).toBe(0);
+  expect(await reg.execute("task", { description: "review", prompt: "inspect it", subagent_type: "reviewer" })).toBe("review complete");
+  expect(calls).toBe(1);
 });
 
 test("adversarial check blocks an auto-approved mutating tool when it flags unsafe", async () => {
@@ -225,6 +273,140 @@ test("checkpoint/restore reverts this turn's file edits (and deletes new files)"
   expect(reverted).toBe(2);
   expect(await reg.execute("read_file", { path: "keep.ts" })).toContain("original"); // restored
   expect(await reg.execute("read_file", { path: "new.ts" })).toContain("no such file"); // deleted
+  expect(reg.consumeRestoreConflicts()).toEqual([]);
+});
+
+test("checkpoint ignores a failed mutation instead of later clobbering user bytes", async () => {
+  const { root, reg } = makeReg("auto", () => true);
+  const path = join(root, "keep.ts");
+  writeFileSync(path, "original\n");
+  reg.clearCheckpoint();
+  expect(await reg.execute("edit", { path: "keep.ts", old_string: "missing", new_string: "agent" })).toContain("not found");
+
+  writeFileSync(path, "user after failed edit\n");
+  expect(reg.restoreCheckpoint()).toBe(0);
+  expect(reg.consumeRestoreConflicts()).toEqual([]);
+  expect(readFileSync(path, "utf8")).toBe("user after failed edit\n");
+
+  reg.clearCheckpoint();
+  expect(await reg.execute("write_file", { path: "keep.ts" })).toContain("missing required argument: content");
+  writeFileSync(path, "user after thrown write\n");
+  expect(await reg.execute("write_file", { path: "keep.ts", content: "agent after retry\n" })).toContain("Wrote");
+  expect(reg.restoreCheckpoint()).toBe(1);
+  expect(reg.consumeRestoreConflicts()).toEqual([]);
+  expect(readFileSync(path, "utf8")).toBe("user after thrown write\n");
+});
+
+test("checkpoint preserves newer user edits and adopted new files as bounded conflicts", async () => {
+  const { root, reg } = makeReg("auto", () => true);
+  const keep = join(root, "keep.ts");
+  const created = join(root, "new.ts");
+  writeFileSync(keep, "original\n");
+  reg.clearCheckpoint();
+  expect(await reg.execute("edit", { path: "keep.ts", old_string: "original", new_string: "agent" })).toContain("Edited");
+  expect(await reg.execute("write_file", { path: "new.ts", content: "agent" })).toContain("Wrote");
+
+  writeFileSync(keep, "user after agent\n");
+  writeFileSync(created, "user adopted file\n");
+  expect(reg.restoreCheckpoint()).toBe(0);
+  expect(reg.consumeRestoreConflicts()).toEqual(["keep.ts", "new.ts"]);
+  expect(reg.consumeRestoreConflicts()).toEqual([]);
+  expect(readFileSync(keep, "utf8")).toBe("user after agent\n");
+  expect(readFileSync(created, "utf8")).toBe("user adopted file\n");
+});
+
+test("checkpoint never erases a user edit interleaved between two structured mutations", async () => {
+  const { root, reg } = makeReg("auto", () => true);
+  const path = join(root, "interleaved.ts");
+  writeFileSync(path, "const a = 1;\nconst b = 1;\n");
+  reg.clearCheckpoint();
+  expect(await reg.execute("edit", { path: "interleaved.ts", old_string: "a = 1", new_string: "a = 2" })).toContain("Edited");
+  writeFileSync(path, "const a = 2;\nconst b = 1;\n// human between edits\n");
+  const hook = join(root, "conflict-hook.cjs");
+  writeFileSync(hook, "require('node:fs').writeFileSync('conflict-hook-ran', 'yes');\n");
+  reg.hooks = { preToolUse: `\"${process.execPath}\" \"${hook}\"`, postToolUse: `\"${process.execPath}\" \"${hook}\"` };
+  expect(await reg.execute("edit", { path: "interleaved.ts", old_string: "b = 1", new_string: "b = 2" })).toContain("no further structured mutation was applied");
+  expect(existsSync(join(root, "conflict-hook-ran"))).toBe(false);
+
+  expect(reg.restoreCheckpoint()).toBe(0);
+  expect(reg.consumeRestoreConflicts()).toEqual(["interleaved.ts"]);
+  expect(readFileSync(path, "utf8")).toBe("const a = 2;\nconst b = 1;\n// human between edits\n");
+
+  reg.clearCheckpoint();
+  reg.hooks = undefined;
+  expect(await reg.execute("edit", { path: "interleaved.ts", old_string: "a = 2", new_string: "a = 3" })).toContain("Edited");
+  writeFileSync(path, "const a = 3;\nconst b = 2;\n// human after first write\n");
+  expect(await reg.execute("edit", { path: "interleaved.ts", old_string: "missing", new_string: "never" })).toContain("no further structured mutation was applied");
+  expect(reg.restoreCheckpoint()).toBe(0);
+  expect(reg.consumeRestoreConflicts()).toEqual(["interleaved.ts"]);
+  expect(readFileSync(path, "utf8")).toContain("human after first write");
+});
+
+test("structured writes refuse existing multiply-linked regular files", async () => {
+  let approvals = 0;
+  let checks = 0;
+  const { root, reg } = makeReg("default", () => { approvals++; return true; });
+  reg.checkAction = async () => { checks++; return { ok: true, reason: "safe" }; };
+  const hook = join(root, "hardlink-hook.cjs");
+  writeFileSync(hook, "require('node:fs').writeFileSync('hardlink-hook-ran', 'yes');\n");
+  reg.hooks = { preToolUse: `\"${process.execPath}\" \"${hook}\"`, postToolUse: `\"${process.execPath}\" \"${hook}\"` };
+  const outside = mkdtempSync(join(dirname(root), "neko-hardlink-outside-"));
+  try {
+    const cases = [
+      ["write_file", { path: "write.ts", content: "changed\n" }],
+      ["edit", { path: "edit.ts", old_string: "original", new_string: "changed" }],
+      ["multi_edit", { path: "multi.ts", edits: [{ old_string: "original", new_string: "changed" }] }],
+    ] as const;
+    for (let index = 0; index < cases.length; index++) {
+      const [tool, args] = cases[index]!;
+      if (index === 1) reg.mode = "auto";
+      const external = join(outside, `${tool}.ts`);
+      const linked = join(root, String((args as any).path));
+      writeFileSync(external, "original\n");
+      try {
+        linkSync(external, linked);
+      } catch (error: any) {
+        if (["EPERM", "EACCES", "EXDEV", "ENOTSUP", "ENOSYS"].includes(String(error?.code))) return;
+        throw error;
+      }
+      const result = String(await reg.execute(tool, args as any));
+      expect(result).toContain("multiply-linked structured-write target");
+      expect(readFileSync(external, "utf8")).toBe("original\n");
+    }
+    expect({ approvals, checks }).toEqual({ approvals: 0, checks: 0 });
+    expect(existsSync(join(root, "hardlink-hook-ran"))).toBe(false);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("approval-free read surfaces never expose multiply-linked file bytes", async () => {
+  const { root, reg } = makeReg();
+  const outside = mkdtempSync(join(dirname(root), "neko-read-hardlink-outside-"));
+  const secret = "HARDLINK_CREDENTIAL_SENTINEL";
+  try {
+    const external = join(outside, "credential.txt");
+    const alias = join(root, "innocent.txt");
+    writeFileSync(external, secret);
+    try {
+      linkSync(external, alias);
+    } catch (error: any) {
+      if (["EPERM", "EACCES", "EXDEV", "ENOTSUP", "ENOSYS"].includes(String(error?.code))) return;
+      throw error;
+    }
+    for (const [tool, args] of [
+      ["read_file", { path: "innocent.txt" }],
+      ["search", { pattern: secret }],
+      ["glob", { pattern: "*.txt" }],
+      ["ls", {}],
+    ] as const) {
+      const result = String(await reg.execute(tool, args));
+      expect(result).not.toContain(secret);
+      if (tool === "glob" || tool === "ls") expect(result).not.toContain("innocent.txt");
+    }
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test("task forwards subagent_type to the sub-agent", async () => {
@@ -236,11 +418,78 @@ test("task forwards subagent_type to the sub-agent", async () => {
   expect(gotType).toBe("reviewer");
 });
 
+test("task forwards the parent abort signal and never starts when already aborted", async () => {
+  const { reg } = makeReg("auto", () => true);
+  let calls = 0;
+  let receivedSignal: AbortSignal | undefined;
+  reg.subagent = async (_prompt, _type, signal) => {
+    calls++;
+    receivedSignal = signal;
+    return await new Promise<string>((resolve) => {
+      if (signal?.aborted) return resolve("child interrupted");
+      signal?.addEventListener("abort", () => resolve("child interrupted"), { once: true });
+    });
+  };
+
+  const active = new AbortController();
+  const running = reg.execute("task", { description: "wait", prompt: "wait" }, active.signal);
+  active.abort();
+  expect(await running).toBe("child interrupted");
+  expect(receivedSignal).toBe(active.signal);
+
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort();
+  expect(await reg.execute("task", { description: "wait", prompt: "wait" }, alreadyAborted.signal)).toBe("(interrupted)");
+  expect(calls).toBe(1);
+});
+
+test("task does not spawn a child when the parent aborts during approval", async () => {
+  let releaseApproval!: (approved: boolean) => void;
+  const { reg } = makeReg("default", () => new Promise<boolean>((resolve) => { releaseApproval = resolve; }));
+  let starts = 0;
+  reg.subagent = async () => { starts++; return "should not start"; };
+  const parent = new AbortController();
+
+  const running = reg.execute("task", { description: "worker", prompt: "mutate" }, parent.signal);
+  await Promise.resolve();
+  parent.abort();
+  releaseApproval(true);
+
+  expect(await running).toBe("(interrupted)");
+  expect(starts).toBe(0);
+});
+
 test("bash returns exit code + output", async () => {
   const { reg } = makeReg("auto", () => true);
   const out = await reg.execute("bash", { command: "echo hello" });
   expect(out).toContain("hello");
   expect(out).toContain("exit 0");
+});
+
+test("a signal-terminated bash close is never formatted as exit 0", () => {
+  const out = __formatBashExitForTest(null, "partial output", "SIGTERM");
+  expect(out).toStartWith("Error:");
+  expect(out).toContain("SIGTERM");
+  expect(out).not.toContain("exit 0");
+});
+
+test("Windows taskkill is effective only after a successful exit status", () => {
+  expect(__taskkillResultSucceededForTest({ status: 0 })).toBe(true);
+  expect(__taskkillResultSucceededForTest({ status: 1 })).toBe(false);
+  expect(__taskkillResultSucceededForTest({ status: null, error: new Error("timed out") })).toBe(false);
+  expect(__taskkillResultSucceededForTest({ status: 0, error: new Error("reported error") })).toBe(false);
+});
+
+test("Windows force cleanup retains descendant PIDs before their leader exits", () => {
+  expect(__windowsDescendantSnapshotForTest([
+    { pid: 20, parentPid: 10 },
+    { pid: 30, parentPid: 20 },
+    { pid: 99, parentPid: 1 },
+  ], 10)).toEqual({ pids: [10, 20, 30], complete: true });
+  expect(__windowsDescendantSnapshotForTest([
+    { pid: 20, parentPid: 10 },
+    { pid: 30, parentPid: 20 },
+  ], 10, 2)).toEqual({ pids: [10, 20], complete: false });
 });
 
 test("Ctrl+B moves a running bash command to the background", async () => {
@@ -257,13 +506,88 @@ test("Ctrl+B moves a running bash command to the background", async () => {
 test("bash is interrupted at once when the abort signal fires (no long wait, no orphan)", async () => {
   const { reg } = makeReg("auto", () => true);
   const ctrl = new AbortController();
-  const p = reg.execute("bash", { command: "sleep 5" }, ctrl.signal);
+  const p = reg.execute("bash", { command: "sleep 10" }, ctrl.signal);
   setTimeout(() => ctrl.abort(), 150);
   const start = Date.now();
   const out = await p;
   expect(out).toContain("interrupted");
-  expect(Date.now() - start).toBeLessThan(3000); // returned promptly, not after the 5s command
+  expect(out).not.toContain("could not be confirmed");
+  expect(Date.now() - start).toBeLessThan(6000); // bounded snapshot + tree kill, not the 10s command
 });
+
+function writeBashTreeFixture(root: string, marker: string): string {
+  const grandchild = join(root, `grandchild-${marker}.ts`);
+  const parent = join(root, `parent-${marker}.ts`);
+  const trigger = join(root, `${marker}.trigger`);
+  const childReady = join(root, `${marker}.child-ready`);
+  writeFileSync(grandchild, [
+    'import { existsSync, writeFileSync } from "node:fs";',
+    `writeFileSync(${JSON.stringify(childReady)}, "ready");`,
+    `while (!existsSync(${JSON.stringify(trigger)})) await Bun.sleep(20);`,
+    `writeFileSync(${JSON.stringify(join(root, marker))}, "orphan survived cancellation");`,
+  ].join("\n"));
+  writeFileSync(parent, [
+    'import { spawn } from "node:child_process";',
+    'import { existsSync, writeFileSync } from "node:fs";',
+    `spawn(process.execPath, [${JSON.stringify(grandchild)}], { stdio: "ignore" });`,
+    `writeFileSync(${JSON.stringify(join(root, `${marker}.ready`))}, "ready");`,
+    `while (!existsSync(${JSON.stringify(trigger)})) await Bun.sleep(20);`,
+  ].join("\n"));
+  return parent.replaceAll("\\", "/");
+}
+
+async function waitForFile(path: string, timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(path) && Date.now() < deadline) await Bun.sleep(20);
+  expect(existsSync(path)).toBe(true);
+}
+
+test("aborting bash kills grandchildren before returning", async () => {
+  const { root, reg } = makeReg("auto", () => true);
+  const marker = "abort-orphan.txt";
+  const parent = writeBashTreeFixture(root, marker);
+  const trigger = join(root, `${marker}.trigger`);
+  const ctrl = new AbortController();
+  try {
+    const running = reg.execute("bash", { command: `bun ${JSON.stringify(parent)}` }, ctrl.signal);
+    await waitForFile(join(root, `${marker}.ready`));
+    await waitForFile(join(root, `${marker}.child-ready`));
+    ctrl.abort();
+    const out = String(await running);
+    writeFileSync(trigger, "prove any surviving grandchild can still act");
+    expect(out).toContain("interrupted");
+    expect(out).not.toContain("could not be confirmed");
+    await Bun.sleep(750);
+    expect(existsSync(join(root, marker))).toBe(false);
+  } finally {
+    try { writeFileSync(trigger, "release any surviving fixture process"); } catch {}
+    await Bun.sleep(100);
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 15_000);
+
+test("timing out bash kills grandchildren before returning", async () => {
+  const { root, reg } = makeReg("auto", () => true);
+  const marker = "timeout-orphan.txt";
+  const parent = writeBashTreeFixture(root, marker);
+  const trigger = join(root, `${marker}.trigger`);
+  reg.bashTimeoutCapMs = 1000;
+  try {
+    const running = reg.execute("bash", { command: `bun ${JSON.stringify(parent)}`, timeout: 1000 });
+    await waitForFile(join(root, `${marker}.ready`));
+    await waitForFile(join(root, `${marker}.child-ready`));
+    const out = String(await running);
+    writeFileSync(trigger, "prove any surviving grandchild can still act");
+    expect(out).toContain("timed out after 1000ms");
+    expect(out).not.toContain("could not be confirmed");
+    await Bun.sleep(750);
+    expect(existsSync(join(root, marker))).toBe(false);
+  } finally {
+    try { writeFileSync(trigger, "release any surviving fixture process"); } catch {}
+    await Bun.sleep(100);
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 15_000);
 
 test("skill tool loads a skill body on demand via the injected hook (progressive disclosure)", async () => {
   const { reg } = makeReg("auto", () => true);
@@ -275,8 +599,9 @@ test("skill tool loads a skill body on demand via the injected hook (progressive
   const missing = await reg.execute("skill", { name: "nope" });
   expect(missing).toContain("no skill");
   expect(missing).toContain("Neko's catalog");
-  expect(missing).toContain("file/resource locator");
-  expect(missing).toContain("follow that catalog's loader instructions");
+  expect(missing).toContain("do not search for or read a provider-native skill path");
+  expect(missing).toContain("continue with the available Neko tools");
+  expect(missing).not.toContain("follow that catalog's loader instructions");
 });
 
 test("read_file streams a bounded, resumable page of a huge file (no whole-file slurp -> OOM)", async () => {
@@ -316,6 +641,23 @@ test("pre_tool_use hook blocks a tool on non-zero exit, allows on zero", async (
   const allowed = makeReg("auto", () => true).reg;
   allowed.hooks = { preToolUse: "exit 0" };
   expect(await allowed.execute("ls", {})).not.toContain("Blocked");
+});
+
+test("read-only task skips parent hooks and denied generic task runs no hook", async () => {
+  const { root, reg } = makeReg("default", () => false);
+  const marker = join(root, "parent-hook.txt");
+  reg.hooks = { preToolUse: `echo hook>"${marker}"` };
+  reg.subagent = async () => "child result";
+
+  expect(await reg.execute("task", { prompt: "review", subagent_type: "reviewer" })).toBe("child result");
+  expect(Bun.file(marker).size).toBe(0);
+
+  expect(await reg.execute("task", { prompt: "mutate", subagent_type: "custom" })).toContain("Denied by user");
+  expect(Bun.file(marker).size).toBe(0);
+
+  reg.prompt = () => true;
+  expect(await reg.execute("task", { prompt: "mutate", subagent_type: "custom" })).toBe("child result");
+  expect(Bun.file(marker).size).toBeGreaterThan(0);
 });
 
 test("todo_write records the list on the registry and renders a checklist", async () => {
@@ -433,6 +775,15 @@ test("bash run_in_background returns at once and records the job", async () => {
   expect(reg.backgrounds.length).toBe(1);
 });
 
+test("a pre-aborted background bash call spawns no job", async () => {
+  const { reg } = makeReg("auto", () => true);
+  const ctrl = new AbortController();
+  ctrl.abort();
+  const out = await reg.execute("bash", { command: "sleep 9", run_in_background: true }, ctrl.signal);
+  expect(out).toBe("(interrupted)");
+  expect(reg.backgrounds).toHaveLength(0);
+});
+
 test("read_file: image returns metadata by default, vision content (data URL) when enabled", async () => {
   const { root, reg } = makeReg();
   const png = Buffer.alloc(24); // minimal PNG header carrying parseable dimensions
@@ -457,6 +808,33 @@ test("read_file: a PDF is routed to text extraction and degrades gracefully", as
   const out = await reg.execute("read_file", { path: "doc.pdf" });
   expect(typeof out).toBe("string");
   expect(out as string).toMatch(/PDF|extract|text/i); // never a thrown crash
+});
+
+test("safe PDF reads never execute a workspace-local pdftotext", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "document.pdf"), "%PDF-1.4\n%%EOF\n");
+  writeFileSync(join(root, process.platform === "win32" ? "pdftotext.exe" : "pdftotext"), "workspace poison");
+  const previousPath = process.env.PATH;
+  process.env.PATH = root;
+  try {
+    const out = String(await reg.execute("read_file", { path: "document.pdf" }));
+    expect(out).toContain("not found");
+    expect(out).not.toContain("Error extracting PDF");
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+});
+
+test("read_file refuses non-regular paths and bounds media before reading bytes", async () => {
+  const { root, reg } = makeReg();
+  expect(String(await reg.execute("read_file", { path: "." }))).toContain("not a regular file");
+
+  const oversized = join(root, "oversized.png");
+  writeFileSync(oversized, "x");
+  truncateSync(oversized, 20 * 1024 * 1024 + 1);
+  const out = String(await reg.execute("read_file", { path: "oversized.png" }));
+  expect(out).toContain("20 MiB read limit");
 });
 
 test("mcp_load routes to the hub loader as a safe meta-tool (no approval)", async () => {

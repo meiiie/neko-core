@@ -3,7 +3,7 @@
 # results. NOTE: makes real provider calls -> consumes API tokens. Run from the repo root:
 #   bash scripts/selftest.sh
 set -uo pipefail
-NEKO="bun bin/neko.ts"
+NEKO="node bin/neko-source.cjs"
 pass=0; fail=0
 ok() { echo "  PASS - $1"; pass=$((pass+1)); }
 no() { echo "  FAIL - $1"; fail=$((fail+1)); }

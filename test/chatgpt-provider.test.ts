@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { HybridChatGptProvider } from "../src/adapters/chatgpt-app-server-provider.ts";
-import { CHATGPT_CODEX_COMPAT_VERSION, ChatGptProvider, getChatGptUsage, isDirectChatGptModel, listChatGptModelCatalog, listChatGptModels, parseResponsesStream, resolveChatGptEffort, toResponsesInput, toResponsesTools } from "../src/adapters/chatgpt-provider.ts";
+import { CHATGPT_CODEX_COMPAT_VERSION, ChatGptProvider, getChatGptUsage, isDirectChatGptModel, listChatGptModelCatalog, listChatGptModels, parseResponsesStream, RESPONSES_STREAM_LIMITS, resolveChatGptEffort, toResponsesInput, toResponsesTools } from "../src/adapters/chatgpt-provider.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
 import { getProvider, listModelOptions, listModels } from "../src/adapters/providers.ts";
 
@@ -110,6 +110,129 @@ test("Responses parser preserves finalized tool arguments across sparse completi
 test("Responses parser rejects a disconnected stream instead of accepting a partial answer", async () => {
   const response = new Response(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: "partial" })}\n\n`);
   await expect(parseResponsesStream(response)).rejects.toThrow("before response.completed");
+});
+
+test("Responses parser fails closed on malformed, empty, and unfinished SSE", async () => {
+  await expect(parseResponsesStream(new Response("data: {not-json}\n\n")))
+    .rejects.toThrow("malformed SSE data");
+  await expect(parseResponsesStream(new Response('data: {"hello":"world"}\n\n')))
+    .rejects.toThrow("valid Responses event");
+  await expect(parseResponsesStream(new Response(`data: ${JSON.stringify({ type: "response.output_item.done", item: "bad" })}\n\n`)))
+    .rejects.toThrow("invalid output item event");
+  await expect(parseResponsesStream(new Response("")))
+    .rejects.toThrow("without a valid event");
+  await expect(parseResponsesStream(new Response("data: [DONE]\n\n")))
+    .rejects.toThrow("without a valid event");
+
+  const unfinished = [
+    `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "partial" })}\n\n`,
+    "data: [DONE]\n\n",
+  ].join("");
+  await expect(parseResponsesStream(new Response(unfinished)))
+    .rejects.toThrow("before response.completed");
+
+  const missingDone = `data: ${JSON.stringify({ type: "response.completed", response: { output: [], usage: {} } })}\n\n`;
+  await expect(parseResponsesStream(new Response(missingDone)))
+    .rejects.toThrow("before [DONE]");
+
+  const keepalives = [
+    "data: ping\n\n",
+    `data: ${JSON.stringify({ type: "heartbeat" })}\n\n`,
+    `data: ${JSON.stringify({ type: "response.completed", response: { output: [], usage: {} } })}\n\n`,
+    "data: [DONE]\n\n",
+  ].join("");
+  expect((await parseResponsesStream(new Response(keepalives))).content).toBeNull();
+});
+
+test("Responses parser caps SSE line and aggregate bytes and releases the reader", async () => {
+  const encoder = new TextEncoder();
+  let lineCanceled = false;
+  const longLine = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${"x".repeat(RESPONSES_STREAM_LIMITS.maxLineBytes + 1)}`));
+    },
+    cancel() { lineCanceled = true; },
+  });
+  await expect(parseResponsesStream(new Response(longLine))).rejects.toThrow("SSE line exceeds safety limit");
+  expect(lineCanceled).toBe(true);
+  expect(longLine.locked).toBe(false);
+
+  let aggregateCanceled = false;
+  const comment = encoder.encode(`: ${"x".repeat(1024 * 1024)}\n`);
+  const aggregate = new ReadableStream<Uint8Array>({
+    pull(controller) { controller.enqueue(comment.slice()); },
+    cancel() { aggregateCanceled = true; },
+  });
+  await expect(parseResponsesStream(new Response(aggregate))).rejects.toThrow("SSE aggregate exceeds safety limit");
+  expect(aggregateCanceled).toBe(true);
+  expect(aggregate.locked).toBe(false);
+});
+
+test("Responses parser caps accumulated output, reasoning, and continuation bytes", async () => {
+  const oneMiB = "x".repeat(1024 * 1024);
+  const output = Array.from({ length: 9 }, () =>
+    `data: ${JSON.stringify({ type: "response.output_text.delta", delta: oneMiB })}\n\n`).join("");
+  await expect(parseResponsesStream(new Response(output))).rejects.toThrow("output exceeds safety limit");
+
+  const reasoning = Array.from({ length: 9 }, () =>
+    `data: ${JSON.stringify({ type: "response.reasoning_text.delta", delta: oneMiB })}\n\n`).join("");
+  await expect(parseResponsesStream(new Response(reasoning))).rejects.toThrow("reasoning exceeds safety limit");
+
+  const continuation = Array.from({ length: 9 }, (_, index) => `data: ${JSON.stringify({
+    type: "response.output_item.done",
+    output_index: index,
+    item: { type: "reasoning", id: `r-${index}`, encrypted_content: oneMiB, summary: [] },
+  })}\n\n`).join("");
+  await expect(parseResponsesStream(new Response(continuation))).rejects.toThrow("continuation exceeds safety limit");
+});
+
+test("Responses parser caps tool arguments, call count, indexes, ids, and names", async () => {
+  const oneMiB = "x".repeat(1024 * 1024);
+  const added = `data: ${JSON.stringify({
+    type: "response.output_item.added", output_index: 0,
+    item: { type: "function_call", id: "fc-1", call_id: "call-1", name: "write_file", arguments: "" },
+  })}\n\n`;
+  const argumentDelta = `data: ${JSON.stringify({
+    type: "response.function_call_arguments.delta", output_index: 0, item_id: "fc-1", delta: oneMiB,
+  })}\n\n`;
+  await expect(parseResponsesStream(new Response(added + argumentDelta.repeat(5))))
+    .rejects.toThrow("tool arguments exceed safety limit");
+
+  for (const output_index of [-1, 1.5, RESPONSES_STREAM_LIMITS.maxToolCalls, 4_294_967_294]) {
+    const event = {
+      type: "response.output_item.added", output_index,
+      item: { type: "function_call", id: "fc", call_id: "call", name: "read_file", arguments: "{}" },
+    };
+    await expect(parseResponsesStream(new Response(`data: ${JSON.stringify(event)}\n\n`)))
+      .rejects.toThrow("index out of range");
+  }
+
+  const tooMany = Array.from({ length: RESPONSES_STREAM_LIMITS.maxToolCalls + 1 }, (_, index) => `data: ${JSON.stringify({
+    type: "response.output_item.added",
+    item: { type: "function_call", id: `fc-${index}`, call_id: `call-${index}`, name: "read_file", arguments: "{}" },
+  })}\n\n`).join("");
+  await expect(parseResponsesStream(new Response(tooMany))).rejects.toThrow("call count exceeds safety limit");
+
+  for (const [field, value, message] of [
+    ["call_id", "i".repeat(RESPONSES_STREAM_LIMITS.maxToolIdBytes + 1), "id was invalid or too large"],
+    ["name", "n".repeat(RESPONSES_STREAM_LIMITS.maxToolNameBytes + 1), "name was invalid or too large"],
+  ] as const) {
+    const item = { type: "function_call", id: "fc", call_id: "call", name: "read_file", arguments: "{}", [field]: value };
+    const event = { type: "response.output_item.added", output_index: 0, item };
+    await expect(parseResponsesStream(new Response(`data: ${JSON.stringify(event)}\n\n`))).rejects.toThrow(message);
+  }
+});
+
+test("Responses parser always cancels and releases its reader on malformed data", async () => {
+  const encoder = new TextEncoder();
+  let canceled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(encoder.encode("data: {not-json}\n\n")); },
+    cancel() { canceled = true; },
+  });
+  await expect(parseResponsesStream(new Response(body))).rejects.toThrow("malformed SSE data");
+  expect(canceled).toBe(true);
+  expect(body.locked).toBe(false);
 });
 
 test("a backend 401 forces one token refresh and retries with the new bearer", async () => {

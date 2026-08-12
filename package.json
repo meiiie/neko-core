@@ -1,10 +1,20 @@
 {
   "name": "neko-core",
-  "version": "0.22.5",
+  "version": "0.23.0",
   "description": "Mot chu meo trong terminal, chi muon meo meo - va lam viec. Local-first, config-first, offline-capable.",
   "type": "module",
   "license": "MIT",
   "author": "The Wiii Lab",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
   "keywords": [
     "llm",
     "agent",
@@ -14,11 +24,11 @@
     "coding-agent"
   ],
   "bin": {
-    "neko": "bin/neko.ts",
-    "neko-core": "bin/neko.ts"
+    "neko": "bin/neko-source.cjs",
+    "neko-core": "bin/neko-source.cjs"
   },
   "scripts": {
-    "neko": "bun bin/neko.ts",
+    "neko": "node bin/neko-source.cjs",
     "eval:terminal": "bun scripts/harbor-eval.ts",
     "lab:antigravity-contract": "bun scripts/antigravity-contract-lab.ts",
     "build": "bun scripts/build.ts && dist/neko __uiprobe && bun scripts/input-probe.ts",

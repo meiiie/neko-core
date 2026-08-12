@@ -73,13 +73,35 @@ test("expired ChatGPT credentials refresh and retain the old refresh token when 
   const mockFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
     sent = String(init?.body ?? "");
     return Response.json({ access_token: jwt({ chatgpt_account_id: "acct-new" }), expires_in: 3600 });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   const refreshed = await validChatGptCredentials(mockFetch, "https://issuer.test");
   expect(sent).toContain("grant_type=refresh_token");
   expect(sent).toContain("refresh_token=refresh-old");
   expect(refreshed.refreshToken).toBe("refresh-old");
   expect(refreshed.accountId).toBe("acct-new");
   expect(loadChatGptCredentials()?.accessToken).toBe(refreshed.accessToken);
+});
+
+test("an access-only Harbor lease refuses refresh locally without changing its bytes", async () => {
+  const home = isolatedHome();
+  saveChatGptCredentials({
+    accessToken: "bounded-access",
+    refreshToken: "",
+    expiresAt: Date.now() + 60 * 60 * 1000,
+    accountId: "acct-lease",
+  });
+  const path = join(home, ".neko-core", "chatgpt-auth.json");
+  const before = readFileSync(path);
+  let fetchCalls = 0;
+  const mockFetch = (async () => {
+    fetchCalls++;
+    throw new Error("must not fetch");
+  }) as unknown as typeof fetch;
+  expect((await validChatGptCredentials(mockFetch)).accessToken).toBe("bounded-access");
+  expect(fetchCalls).toBe(0);
+  await expect(validChatGptCredentials(mockFetch, "https://issuer.test", true)).rejects.toThrow("cannot be refreshed");
+  expect(fetchCalls).toBe(0);
+  expect(readFileSync(path)).toEqual(before);
 });
 
 test("device sign-in polls, exchanges the code, and persists the account", async () => {

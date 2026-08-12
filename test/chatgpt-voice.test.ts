@@ -128,6 +128,7 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
   expect(requests.find((request) => request.method === "thread/start")?.params).toMatchObject({
     model: "gpt-5.6-terra", sandbox: "read-only", approvalPolicy: "never", ephemeral: true,
   });
+  expect(requests.find((request) => request.method === "thread/start")?.params.environments).toEqual([]);
   expect(requests.find((request) => request.method === "thread/start")?.params.dynamicTools[0].name).toBe("read_file");
   const browserTool = requests.find((request) => request.method === "thread/start")?.params.dynamicTools
     .find((tool: any) => tool.description === "Browser status");

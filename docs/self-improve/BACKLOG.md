@@ -6,12 +6,45 @@ metric, typecheck). Mark `[x]` when committed (with the commit hash). Keep items
 one never blocks another.
 
 ## Now (high value, low risk)
+- [ ] **Trusted-project + child-secret boundary (P0 before `--yolo` claims).** Fingerprint project
+  config/hooks/MCP before allowing execution or security/provider overrides; scrub provider/harness secrets
+  from bash, hook, and MCP child environments unless explicitly allowlisted. The exact-snapshot gate and
+  environment scrubber are implemented and tested in the current uncommitted 2026-08-09 worktree; leave this
+  unchecked until the owner intentionally commits it. Residual: trust records control bytes, not referenced
+  executable content. Research/audit: `docs/research/harness-sota-2026-08-09.md`.
+- [ ] **Truthful fail-closed auto mode (P0).** Apply CLI `--yolo` overrides to `doctor`/`policy`, and require
+  a live sandbox or hard, named unsafe confirmation for bash/host-daemon access. Verify unavailable-sandbox,
+  fake workspace `srt.exe`, Docker, and child-capability fixtures. Behavioral SRT reporting, fake-cwd defense,
+  and the auto-mode Docker/Podman refusal are implemented in the current worktree; portable fail-closure when
+  no sandbox is live and continued Windows-alpha validation remain.
+- [ ] **Recoverable event/effect journal.** Preserve raw session and external-effect lifecycle before making
+  context a compact projection. Never retry an outcome-unknown mutating MCP call. Verify crash injection at
+  intent/effect/settlement/output boundaries and byte-exact recall after compaction. MCP unknown outcomes are
+  no longer replayed in the current worktree; durable lifecycle records and raw pre-compaction storage remain.
+- [ ] **Finish cross-session handoff acceptance.** Build explicit receiver consent plus CAS/exactly-once
+  acknowledge/consume semantics and paginated inbox traversal over the current immutable summary-only spool.
+  Never auto-inject transcripts/files/permissions. Verify duplicate receivers, crash points, 1,024+ hostile
+  entries, changed/deleted source sessions, and malformed/link attacks.
+- [ ] **Close remaining MCP lifecycle/output edges.** Tear down connect/list attempts on deadline, cap result
+  materialization before it reaches the model, and cover hard-kill process trees. The current worktree already
+  forwards cancellation, bounds calls to 60 seconds, avoids unknown-outcome replay, and rejects duplicate names.
+- [ ] **Hash-aware workspace concurrency (SWE-Touch).** Return a digest/generation from reads, accept
+  `expected_hash` on edits, and reconcile on mismatch. Verify a concurrent counter-edit is preserved and
+  finish evidence uses the current workspace generation. Partial current-worktree protection now compares
+  bytes before a second Neko structured mutation, taints divergence, refuses the mutation, and makes `/rewind`
+  preserve/report the conflict. This is not read-returned digest/generation CAS and does not close identity
+  swap races, so the item remains unchecked.
 - [ ] **Failure-aware compaction (ACON-style).** `compact()`/`shrinkOldObservations` clip statically. When a
   later turn re-reads a clipped observation or errors right after compaction, record what was clipped and
   avoid clipping that shape next time. Verify: a unit test for the "don't re-clip a just-referenced
   observation" rule; bench tokens not worse.
-- [ ] **Token audit of the system prompt + tool schemas.** Measure the fixed prompt/schema token cost; remove
-  redundancy/dedup without losing guidance. Verify: bench `in` tokens drop, pass-rate unchanged.
+- [ ] **Count tool schemas in request/context estimates.** The native catalog measured 14,369 JSON chars
+  (~3,593 estimated tokens) and could consume a 16k model's whole safety reserve while remaining invisible.
+  The in-loop guard, usage estimate, resume decision, `/context`, remote status, and footer now include it;
+  synthetic near-limit coverage proves relief happens before the provider request. Implemented/tested in the
+  current 2026-08-09 worktree; leave unchecked until the owner intentionally commits it. The exact-file lease's
+  deterministic no-model audit measured three schemas at 2,090 bytes and the complete model-facing surface at
+  34,105 versus 73,255 bytes (-53.44%, about 9,788 fewer tokens/call at the coarse four-byte estimate).
 - [ ] **Peer-review before self-commit (DGM).** In `scripts/self-improve.ts`, before committing a self-change,
   a second model pass reviews the diff ("is this a real improvement, any regression risk?"); only commit if
   it agrees. Verify: the loop still commits clean changes; logs the review verdict.
@@ -60,8 +93,11 @@ one never blocks another.
   relay web client pointed at localhost -> "find/summarize documents on the phone" works with ZERO new
   code. Phase 2: termux-api + adb-wireless-loopback as a `phone` skill/MCP (config-first). Phase 3 (big):
   an AccessibilityService companion app exposing ui-snapshot/tap/type as MCP tools — the mobile leg of
-  the structure-grounded computer-use strategy (a11y tree = the phone's DOM). iOS: relay client only;
-  full third-party phone control is blocked by platform policy (Shortcuts bridge at most — be honest).
+  the structure-grounded computer-use strategy (a11y tree = the phone's DOM). iOS: the relay remains
+  the shipped surface. A macOS-only iPhone Mirroring experiment is possible on supported hardware only
+  after the typed adapter, consent, and effect-integrity gate in the
+  [mobile-agent safety audit](../research/mobile-agent-safety-2026-08-09.md); never embed the audited raw
+  Python/Quartz execution surface.
 
 - [ ] **Long-horizon benchmark tier (the real capability discriminator).** Found 2026-07-03: BOTH the easy
   (16/16) and the new hard (12/12) bench tiers saturate at 100% for glm-5.2 — bounded coding pass-rate no
@@ -70,6 +106,29 @@ one never blocks another.
   with interacting parts + a full test suite (15-25 steps), a migration across N call sites, a bug that
   only surfaces after a refactor. Build 3-5 such tasks (deterministic verifiers) where even a strong model
   fails ~30-60% — THEN harness improvements (TDD/debugging skills, verify gate) show measurable lift.
+  *(2026-08-09 ruler hardening landed: production-parity trial composition, fresh providers, hard immutable
+  seed constraints, explicit pass/model-failure/infra outcomes, conservative denominators, and a read-only
+  sandboxed verifier with bounded process-tree cleanup. At that checkpoint no fresh paid multi-task baseline
+  had run; the later frontier calibration below supersedes that statement but does not close this item. Linux
+  and macOS CI now install/use their native primitive and set
+  `NEKO_REQUIRE_SANDBOX_TESTS=1`, so a missing live oracle sandbox fails instead of silently skipping.
+  Windows hosted CI remains the explicit gap: SRT is alpha and needs one-time elevated provisioning, so CI must
+  not auto-install it through a UAC/host-mutation shortcut. Keep release evidence from a separately provisioned
+  Windows runner until a safe disposable setup contract exists.)*
+  *(2026-08-09 suite checkpoint: a three-task `frontier` calibration tier now covers config-context cache
+  isolation, rejected in-flight recovery, and atomic batch publication. Public contracts/tests are immutable;
+  post-turn edge cases and canonical single-link candidate sources are copied into a fresh external read-only
+  verifier workspace. The solver gets a fixed local-only/no-network tool ceiling and a 25-step default. Seeded
+  failures and reviewed reference repairs pass the live oracle regression. A source-frozen one-trial-per-task
+  calibration at the effective `gpt-5.6-luna` / `max` configuration then passed 3/3 (103k-191k tokens and
+  104-315 seconds per task; 47% aggregate step efficiency). That sample is too small for reliability, but it is
+  sufficient to reject the tier as the next discriminator. Keep it as a regression tier and build a longer,
+  multi-surface successor before another paid run. The successor must retain bounded per-trial trajectories,
+  estimate human task time, use multiple independently verified acceptance channels, and pass a proposed
+  20-80% pilot transition band on a frontier configuration. Its executor and verdict producer must not share
+  the current same-process assertion boundary. See
+  [`frontier-v2-design-2026-08-10.md`](../research/frontier-v2-design-2026-08-10.md). Also bind or record the
+  external verifier Bun identity rather than assuming runtime-version parity.)*
   Complementary: wire skill-context into the bench so `test-driven-development`/`systematic-debugging` lift
   is measurable (bench currently runs skill-less). Verify: a task set where glm-5.2 is <100% and a harness
   change moves it. *(2026-07-10: the COMPUTER-USE half of this landed AND is live-calibrated — `neko bench
@@ -192,11 +251,13 @@ one never blocks another.
   still emits well-formed calls); (3) bench pass-rate flat (catches the TOON-style cascade failure).
     Bench `in` tokens should drop on every tool-bearing step.
 - [ ] **Lazy built-in tool-schema gating (the "Tools Tax").** Neko already loads *MCP* tool schemas on
-  demand via the `mcp_load` meta-tool (`adapters/mcp.ts`), but the **built-in** tools are still injected
-  in full every turn via `tools.schemas()` (`tool-runtime.ts`) — `read_file/search/glob/ls/todo_write/
-  write_file/edit/bash/web_search/web_fetch/skill/computer/...` plus the large `browser_*` family. Each
-  schema's structural overhead (`type`/`properties`/`required`/long descriptions) is re-fed and re-cached
-  on *every* step even when unused — a fixed per-turn tax that grows with every tool added. Borrow Tool
+  demand via the `mcp_load` meta-tool (`adapters/mcp.ts`). Proof-grade exact-file turns now expose only
+  `read_file`, target-bound `edit`, and validator-bound `bash`, but every other turn still injects its
+  configured built-in catalog via `tools.schemas()` (`tool-runtime.ts`) — `read_file/search/glob/ls/todo_write/
+  write_file/edit/bash/web_search/web_fetch/skill/computer/...` plus the large `browser_*` family. That partial
+  default-on lease cut the canonical exact fixture's full no-model surface 73,255 -> 34,105 bytes (-53.44%),
+  but it does not solve arbitrary tool discovery. Each remaining schema's structural overhead
+  (`type`/`properties`/`required`/long descriptions) is re-fed and re-cached on generic steps. Borrow Tool
   Attention's two-phase loader (arXiv 2604.21816, cut per-turn tool tokens 47.3k->2.4k, -95%): expose a
   compact **name + one-line-description "summary pool"** for all built-ins upfront, and a safe
   `tools_load` meta-tool that promotes the full JSON schema of only the ones a turn needs, mirroring the

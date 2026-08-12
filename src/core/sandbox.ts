@@ -14,29 +14,68 @@
  * otherwise write anywhere. Pure + node-only (no adapter imports) so it stays in core.
  */
 import { spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { minimalWindowsSystemEnv, resolveWindowsSystemExecutable } from "../shared/windows-system.ts";
 
 export type SandboxKind = "bwrap" | "sandbox-exec" | "srt" | "none";
 export interface SpawnTarget {
   file: string;
   args: string[];
   shell: boolean;
+  /** Host-owned environment overrides required by this confinement profile. */
+  env?: Record<string, string>;
   /** Remove per-launch material after the child closes. Must be safe to call more than once. */
   cleanup?: () => void;
+  /** The primitive itself guarantees that a normal launcher close cannot leave descendants alive. */
+  treeContainedOnClose?: boolean;
 }
 
 let cached: SandboxKind | undefined;
+let cachedPrimitive: string | null | undefined;
 
-function onPath(cmd: string): boolean {
-  try {
-    const probe = process.platform === "win32" ? "where" : "which";
-    return spawnSync(probe, [cmd], { encoding: "utf-8", timeout: 3000 }).status === 0;
-  } catch {
-    return false;
+/** Resolve a security-relevant executable from explicit PATH entries only. Windows `where` searches
+ * cwd first, which lets an untrusted checkout replace `srt.exe`, `git.exe`, or another primitive. */
+export function executableOnPath(
+  cmd: string,
+  pathValue = process.env.PATH ?? "",
+  workspace = process.cwd(),
+  platform = process.platform,
+): string | null {
+  const requestedWorkspace = resolve(workspace);
+  const workspaceRoot = (() => {
+    try { return realpathSync(requestedWorkspace); } catch { return requestedWorkspace; }
+  })();
+  const withinWorkspace = (candidate: string): boolean => {
+    const normalized = resolve(candidate);
+    const base = platform === "win32" ? workspaceRoot.toLowerCase() : workspaceRoot;
+    const value = platform === "win32" ? normalized.toLowerCase() : normalized;
+    return value === base || value.startsWith(base + sep);
+  };
+  const names = platform === "win32" && !/\.exe$/i.test(cmd) ? [`${cmd}.exe`, cmd] : [cmd];
+  for (const rawDir of pathValue.split(delimiter)) {
+    const trimmed = rawDir.trim().replace(/^"|"$/g, "");
+    if (!trimmed) continue;
+    const requestedDir = resolve(trimmed);
+    const dir = (() => {
+      try { return realpathSync(requestedDir); } catch { return requestedDir; }
+    })();
+    // A repo may deliberately add itself to PATH. That must not make it a source of confinement.
+    if (withinWorkspace(dir)) continue;
+    for (const name of names) {
+      const candidate = join(dir, name);
+      if (!existsSync(candidate)) continue;
+      try {
+        const real = realpathSync(candidate);
+        if (withinWorkspace(real)) continue;
+        const stat = statSync(real);
+        if (stat.isFile() && (platform === "win32" || (stat.mode & 0o111) !== 0)) return real;
+      } catch { /* reject missing, linked-away, or non-regular candidates */ }
+    }
   }
+  return null;
 }
 
 let winBashCached: string | null | undefined;
@@ -47,8 +86,16 @@ let winBashCached: string | null | undefined;
  * workspace uses). Prefers NEKO_BASH, then a Git install, then a git-derived path. null if none. */
 export function findWindowsBash(): string | null {
   if (winBashCached !== undefined) return winBashCached;
+  const trusted = (candidate: string | undefined): string | null => {
+    if (!candidate || !isAbsolute(candidate)) return null;
+    // Reuse the canonical regular-file/workspace exclusion used for every security primitive. The
+    // explicit env knob is authority to choose an external Bash, not authority for a checkout-local
+    // symlink/junction to become the shell enforcing confinement.
+    return executableOnPath(basename(candidate), dirname(candidate), process.cwd(), "win32");
+  };
   const env = process.env.NEKO_BASH;
-  if (env && existsSync(env)) return (winBashCached = env);
+  const configured = trusted(env);
+  if (configured) return (winBashCached = configured);
   const roots = [
     process.env.ProgramW6432,
     process.env.ProgramFiles,
@@ -59,23 +106,17 @@ export function findWindowsBash(): string | null {
     if (!r) continue;
     for (const sub of ["Git\\bin\\bash.exe", "Git\\usr\\bin\\bash.exe"]) {
       const p = join(r, sub);
-      if (existsSync(p)) return (winBashCached = p);
+      const accepted = trusted(p);
+      if (accepted) return (winBashCached = accepted);
     }
   }
   // Derive from git on PATH: <gitroot>\cmd\git.exe (or \bin\git.exe) -> <gitroot>\bin\bash.exe.
   // Deliberately ignore System32\bash.exe (WSL) by only trusting a git-relative bash.
-  try {
-    const r = spawnSync("where", ["git"], { encoding: "utf-8", timeout: 3000 });
-    if (r.status === 0) {
-      for (const line of r.stdout.split(/\r?\n/)) {
-        const g = line.trim();
-        if (!g || /\\System32\\/i.test(g)) continue;
-        const p = join(dirname(dirname(g)), "bin", "bash.exe");
-        if (existsSync(p)) return (winBashCached = p);
-      }
-    }
-  } catch {
-    /* fall through to null */
+  const git = executableOnPath("git.exe");
+  if (git && !/\\System32\\/i.test(git)) {
+    const p = join(dirname(dirname(git)), "bin", "bash.exe");
+    const accepted = trusted(p);
+    if (accepted) return (winBashCached = accepted);
   }
   return (winBashCached = null);
 }
@@ -88,31 +129,106 @@ let srtCached: string | null | undefined;
  * installs the .exe shim. null if none. */
 export function findSrt(): string | null {
   if (srtCached !== undefined) return srtCached;
-  try {
-    const r = spawnSync("where", ["srt"], { encoding: "utf-8", timeout: 3000 });
-    if (r.status === 0) {
-      for (const line of r.stdout.split(/\r?\n/)) {
-        const p = line.trim();
-        if (p && /\.exe$/i.test(p) && existsSync(p)) return (srtCached = p);
-      }
-    }
-  } catch {
-    /* fall through to null */
-  }
-  return (srtCached = null);
+  // Bun's global bin directory is not automatically added to PATH on every Windows installation.
+  // It is still a stable user-owned install root, unlike cwd/the checked-out repository.
+  const installRoots = [
+    process.env.BUN_INSTALL && join(process.env.BUN_INSTALL, "bin"),
+    join(homedir(), ".bun", "bin"),
+  ].filter((value): value is string => Boolean(value));
+  const installed = executableOnPath("srt.exe", installRoots.join(delimiter));
+  if (installed) return (srtCached = installed);
+  return (srtCached = executableOnPath("srt.exe"));
 }
 
 let srtProvisionedCached: boolean | undefined;
+let srtHealthCached: { ok: boolean; detail: string } | undefined;
+const WINDOWS_NET = process.platform === "win32" ? resolveWindowsSystemExecutable("net.exe") : null;
+const WINDOWS_ICACLS = process.platform === "win32" ? resolveWindowsSystemExecutable("icacls.exe") : null;
+
+export interface SrtBunBridge {
+  readonly path: string;
+  readonly source: "runtime" | "path";
+}
+
+/** Select one exact Bun executable for Windows SRT. Per-user tool installs are invisible to the
+ * sandbox account unless SRT grants them explicitly, but granting a package/profile directory is
+ * unnecessarily broad. The running Bun is the strongest source-run identity; a real bun.exe on a
+ * trusted PATH is the compiled-Neko fallback. Workspace candidates are never promoted. */
+export function resolveSrtBunBridge(
+  workspace = process.cwd(),
+  runtimeExecutable = process.execPath,
+  pathValue = process.env.PATH ?? "",
+  platform = process.platform,
+): SrtBunBridge | null {
+  if (platform !== "win32") return null;
+  let workspaceRoot: string;
+  try { workspaceRoot = realpathSync(resolve(workspace)); } catch { workspaceRoot = resolve(workspace); }
+  const rootFolded = workspaceRoot.toLowerCase();
+  const rootPrefix = rootFolded.endsWith(sep) ? rootFolded : rootFolded + sep;
+  const candidates: Array<{ path: string; source: SrtBunBridge["source"] }> = [];
+  if (basename(runtimeExecutable).toLowerCase() === "bun.exe") {
+    candidates.push({ path: runtimeExecutable, source: "runtime" });
+  }
+  const onPath = executableOnPath("bun.exe", pathValue, workspace, platform);
+  if (onPath) candidates.push({ path: onPath, source: "path" });
+
+  for (const candidate of candidates) {
+    try {
+      // SRT/Git-Bash bridging below intentionally supports only a local drive path. UNC/device
+      // spellings have different parsing and ACL semantics, so they fail closed.
+      if (!isAbsolute(candidate.path) || !/^[A-Za-z]:[\\/]/.test(candidate.path)) continue;
+      const canonical = realpathSync(candidate.path);
+      if (basename(canonical).toLowerCase() !== "bun.exe" || !statSync(canonical).isFile()) continue;
+      const folded = canonical.toLowerCase();
+      if (folded === rootFolded || folded.startsWith(rootPrefix)) continue;
+      return Object.freeze({ path: canonical, source: candidate.source });
+    } catch { /* missing, linked-away, non-regular, or otherwise unreadable -> reject */ }
+  }
+  return null;
+}
 
 /** Whether the one-time `srt windows-install` provisioning (the srt-sandbox account) has run.
  * Without it srt refuses to launch, so bash under sandbox fails closed with srt's own message.
  * Cached per process (an account appearing mid-session is a re-run-doctor event, not a hot path). */
 export function srtProvisioned(): boolean {
   if (srtProvisionedCached !== undefined) return srtProvisionedCached;
+  if (!WINDOWS_NET) return (srtProvisionedCached = false);
   try {
-    return (srtProvisionedCached = spawnSync("net", ["user", "srt-sandbox"], { encoding: "utf-8", timeout: 3000 }).status === 0);
+    return (srtProvisionedCached = spawnSync(WINDOWS_NET, ["user", "srt-sandbox"], {
+      encoding: "utf-8",
+      timeout: 3000,
+      windowsHide: true,
+      env: minimalWindowsSystemEnv(),
+    }).status === 0);
   } catch {
     return (srtProvisionedCached = false);
+  }
+}
+
+/** Behavioral Windows health check. Account existence alone is insufficient: package ACL drift,
+ * WFP setup, Secondary Logon, or the credential store can still make every sandbox launch fail. */
+export function srtHealth(): { ok: boolean; detail: string } {
+  if (srtHealthCached) return srtHealthCached;
+  const exe = findSrt();
+  if (!exe) return (srtHealthCached = { ok: false, detail: "srt.exe not found" });
+  if (!srtProvisioned()) return (srtHealthCached = { ok: false, detail: "sandbox account is not provisioned" });
+  let settings: ReturnType<typeof writeEphemeralSrtSettings> | undefined;
+  try {
+    settings = writeEphemeralSrtSettings(tmpdir(), process.cwd(), false, []);
+    const probe = spawnSync(exe, ["--settings", settings.path, "-c", "exit /b 0"], {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+      timeout: 20_000,
+      windowsHide: true,
+    });
+    if (probe.status === 0) return (srtHealthCached = { ok: true, detail: "behavioral sandbox launch passed (egress policy not probed here)" });
+    const detail = String(probe.stderr || probe.stdout || `exit ${probe.status ?? "?"}`)
+      .replace(/\s+/g, " ").trim().slice(0, 300);
+    return (srtHealthCached = { ok: false, detail: detail || "behavioral probe failed" });
+  } catch (error) {
+    return (srtHealthCached = { ok: false, detail: `behavioral probe failed: ${String(error)}`.slice(0, 300) });
+  } finally {
+    settings?.cleanup();
   }
 }
 
@@ -122,7 +238,31 @@ export function srtProvisioned(): boolean {
 export function sandboxActive(): boolean {
   const kind = detectSandbox();
   if (kind === "none") return false;
-  return kind !== "srt" || srtProvisioned();
+  return kind !== "srt" || srtHealth().ok;
+}
+
+/** Refuse a configured-but-unhealthy Windows sandbox BEFORE launching the user's command. Presence
+ * and health have different jobs: an absent primitive retains Neko's documented unconfined fallback,
+ * while a present SRT whose behavioral probe failed must never be bypassed implicitly. */
+export function srtLaunchRefusal(
+  enabled: boolean,
+  kind: SandboxKind,
+  health: { ok: boolean; detail: string },
+): string | null {
+  if (!enabled || kind !== "srt" || health.ok) return null;
+  const raw = String(health.detail || "behavioral health check failed").replace(/\s+/g, " ").trim().slice(0, 500);
+  return withSrtStateVolumeGuidance(
+    `Error: configured SRT sandbox is unusable; bash was not executed: ${raw}`,
+  );
+}
+
+/** SRT can pass its cached health probe and then fail opening SQLite shared memory at launch time.
+ * Keep the recovery bounded and safe: no database surgery, state relocation, or reinstall advice. */
+export function withSrtStateVolumeGuidance(raw: string): string {
+  const value = String(raw).trimEnd();
+  if (!/(?:\b4874\b|xShmMap|SQLITE_IOERR_SHMSIZE)/i.test(value)
+    || /%LOCALAPPDATA% may be full/i.test(value)) return value;
+  return `${value}\nThe volume containing %LOCALAPPDATA% may be full; free disk space there, then re-run \`neko doctor\`.`;
 }
 
 /** Detect a command that IRREVERSIBLY destroys data INSIDE the workspace. The OS sandbox already
@@ -153,22 +293,54 @@ export function destructiveInWorkspace(command: string): string | null {
  * design, same as Claude Code/Codex) -- so allowNetwork=true exposes only the configured
  * sandbox_domains, and allowNetwork=false hard-blocks (deniedDomains "*" wins over everything).
  * All four fs/network keys are schema-required in srt >= 0.0.66. Pure. */
-export function srtSettings(root: string, allowNetwork: boolean, domains: string[] = []): string {
+export function srtSettings(
+  root: string,
+  allowNetwork: boolean,
+  domains: string[] = [],
+  allowRead: readonly string[] = [],
+  allowWrite: readonly string[] = [root],
+  denyWrite: readonly string[] = [],
+  denyRead: readonly string[] = [],
+): string {
   return JSON.stringify({
     network: allowNetwork
       ? { allowedDomains: domains, deniedDomains: [], strictAllowlist: true }
       : { allowedDomains: [], deniedDomains: ["*"] },
-    filesystem: { denyRead: [], allowWrite: [root], denyWrite: [] },
+    filesystem: { denyRead: [...denyRead], allowRead: [...allowRead], allowWrite: [...allowWrite], denyWrite: [...denyWrite] },
   });
 }
 
-/** Write the settings file srt reads. Content-addressed in tmp: same root+network -> same path,
- * already-written files are reused, and no clock/randomness is involved. */
-function writeSrtSettings(root: string, allowNetwork: boolean, domains: string[]): string {
-  const json = srtSettings(root, allowNetwork, domains);
-  const path = join(tmpdir(), `neko-srt-${createHash("sha256").update(json).digest("hex").slice(0, 12)}.json`);
-  if (!existsSync(path)) writeFileSync(path, json);
-  return path;
+/** Write one launch's settings with exclusive creation at an unpredictable path. Reusing a
+ * content-addressed temp filename lets an untrusted local process pre-create poisoned JSON (or a
+ * link) before Neko starts. `wx` makes creation atomic, while the UUID prevents useful guessing.
+ * The caller owns the short-lived file and must run cleanup after the child closes. */
+export function writeEphemeralSrtSettings(
+  dir: string,
+  root: string,
+  allowNetwork: boolean,
+  domains: string[] = [],
+  allowRead: readonly string[] = [],
+  allowWrite: readonly string[] = [root],
+  denyWrite: readonly string[] = [],
+  denyRead: readonly string[] = [],
+): { path: string; cleanup: () => void } {
+  const json = srtSettings(root, allowNetwork, domains, allowRead, allowWrite, denyWrite, denyRead);
+  const path = join(dir, `neko-srt-settings-${process.pid}-${randomUUID()}.json`);
+  writeFileSync(path, json, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  const written = statSync(path);
+  if (!written.isFile() || written.size !== Buffer.byteLength(json)) {
+    try { rmSync(path, { force: true }); } catch { /* best-effort cleanup of rejected material */ }
+    throw new Error("refusing non-regular or truncated srt settings file");
+  }
+  let removed = false;
+  return {
+    path,
+    cleanup: () => {
+      if (removed) return;
+      removed = true;
+      try { rmSync(path, { force: true }); } catch { /* cleanup must never crash the agent */ }
+    },
+  };
 }
 
 /** The bash script srt runs inside the sandbox. srt's CLI re-parses its command line through
@@ -176,12 +348,20 @@ function writeSrtSettings(root: string, allowNetwork: boolean, domains: string[]
  * (cmd quoting is escapable -- the same reason findSrt refuses .cmd shims). The command bytes
  * go in a script FILE instead; only two quoted paths ever reach the command line. The cd
  * preamble restores the workspace cwd, which the two-hop user switch does not preserve. Pure. */
-export function srtScript(root: string, command: string): string {
+export function srtScript(root: string, command: string, bunPath: string | null = null): string {
   const q = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
-  return `cd ${q(root)} || exit 1\n${command}\n`;
+  const bunForBash = bunPath
+    ? bunPath.replace(/^([A-Za-z]):[\\/]/, (_all, drive: string) => `/${drive.toLowerCase()}/`).replace(/\\/g, "/")
+    : null;
+  const bridge = bunForBash
+    ? `bun() { ${q(bunForBash)} "$@"; }\nexport -f bun\n` +
+      // SRT preserves PATH but filters arbitrary parent variables. Export the launch-owned values
+      // from the protected script so npm's child cmd.exe receives them without batch interpolation.
+      `export NEKO_SRT_BUN_EXE=${q(bunPath!)}\n` +
+      "export NoDefaultCurrentDirectoryInExePath=1\n"
+    : "";
+  return `cd ${q(root)} || exit 1\n${bridge}${command}\n`;
 }
-
-let srtScriptDirCached: string | null | undefined;
 
 /** Remove scripts left by the old persistent implementation and crash-orphaned ephemeral scripts. */
 export function purgeStaleSrtScripts(dir: string, now = Date.now()): void {
@@ -199,43 +379,99 @@ export function purgeStaleSrtScripts(dir: string, now = Date.now()): void {
   } catch { /* best-effort hygiene; launch still has per-process cleanup */ }
 }
 
-/** Temp dir holding the per-command scripts, readable by the sandbox account. TEMP lives in
- * the caller's profile, which other local users cannot read -- one additive read+execute ACE
- * for `srt-sandbox` on this subdir (owner-set, no elevation) makes just the scripts visible. */
-function srtScriptDir(): string | null {
-  if (srtScriptDirCached !== undefined) return srtScriptDirCached;
+/** Create one unpredictable per-launch script directory. A shared readable directory lets another
+ * concurrent job under the same sandbox account enumerate credential-bearing command files. */
+function createSrtScriptDir(): string | null {
+  if (!WINDOWS_ICACLS) return null;
+  let dir = "";
   try {
-    const dir = join(tmpdir(), "neko-srt");
-    mkdirSync(dir, { recursive: true });
-    purgeStaleSrtScripts(dir);
-    const r = spawnSync("icacls", [dir, "/grant", "srt-sandbox:(OI)(CI)(RX)"], { timeout: 10000 });
-    return (srtScriptDirCached = r.status === 0 ? dir : null);
+    dir = join(tmpdir(), `neko-srt-${process.pid}-${randomUUID()}`);
+    mkdirSync(dir, { mode: 0o700 });
+    const r = spawnSync(WINDOWS_ICACLS, [dir, "/grant", "srt-sandbox:(OI)(CI)(RX)"], {
+      timeout: 10000,
+      windowsHide: true,
+      env: minimalWindowsSystemEnv(),
+    });
+    if (r.status !== 0) throw new Error("could not grant the sandbox account access to its launch directory");
+    return dir;
   } catch {
-    return (srtScriptDirCached = null);
+    if (dir) try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    return null;
   }
 }
 
 /** Create a unique, short-lived command script. Commands can contain credentials, so scripts are
  * never content-addressed/reused and their cleanup is tied to the spawned child's lifecycle. */
-export function writeEphemeralSrtScript(dir: string, root: string, command: string): { path: string; cleanup: () => void } {
+export function writeEphemeralSrtScript(
+  dir: string,
+  root: string,
+  command: string,
+  bunPath: string | null = null,
+): { path: string; cleanup: () => void } {
   const path = join(dir, `cmd-${process.pid}-${randomUUID()}.sh`);
-  writeFileSync(path, srtScript(root, command), { encoding: "utf8", mode: 0o600 });
+  writeFileSync(path, srtScript(root, command, bunPath), { encoding: "utf8", flag: "wx", mode: 0o600 });
   let removed = false;
   return {
     path,
     cleanup: () => {
       if (removed) return;
       removed = true;
-      rmSync(path, { force: true });
+      try { rmSync(path, { force: true }); } catch { /* cleanup must never crash the agent */ }
+    },
+  };
+}
+
+/** A fixed Windows child-process bridge for package scripts. The canonical Bun path stays in a
+ * host-owned launch environment variable instead of being interpolated into batch syntax. */
+export function writeEphemeralSrtBunShim(dir: string): { path: string; cleanup: () => void } {
+  const path = join(dir, "bun.cmd");
+  const body = '@"%NEKO_SRT_BUN_EXE%" %*\r\n';
+  writeFileSync(path, body, { encoding: "utf8", flag: "wx", mode: 0o500 });
+  const written = statSync(path);
+  if (!written.isFile() || written.size !== Buffer.byteLength(body)) {
+    try { rmSync(path, { force: true }); } catch { /* best-effort cleanup of rejected material */ }
+    throw new Error("refusing non-regular or truncated SRT Bun shim");
+  }
+  let removed = false;
+  return {
+    path,
+    cleanup: () => {
+      if (removed) return;
+      removed = true;
+      try { rmSync(path, { force: true }); } catch { /* cleanup must never crash the agent */ }
     },
   };
 }
 
 /** null -> no readable script dir; caller falls back to srt's own -c (idioms degraded). */
-function writeSrtScript(root: string, command: string): { path: string; cleanup: () => void } | null {
-  const dir = srtScriptDir();
+function writeSrtScript(root: string, command: string, bunPath: string | null): {
+  path: string;
+  toolchainDir: string | null;
+  cleanup: () => void;
+} | null {
+  const dir = createSrtScriptDir();
   if (!dir) return null;
-  return writeEphemeralSrtScript(dir, root, command);
+  let shim: ReturnType<typeof writeEphemeralSrtBunShim> | null = null;
+  try {
+    shim = bunPath ? writeEphemeralSrtBunShim(dir) : null;
+    const script = writeEphemeralSrtScript(dir, root, command, bunPath);
+    let cleaned = false;
+    return {
+      path: script.path,
+      toolchainDir: shim ? dir : null,
+      cleanup: () => {
+        if (cleaned) return;
+        cleaned = true;
+        script.cleanup();
+        shim?.cleanup();
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      },
+    };
+  } catch (error) {
+    shim?.cleanup();
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    throw error;
+  }
 }
 
 /** Unsandboxed spawn target. On Windows, run through real git-bash if available (so Unix idioms
@@ -253,10 +489,19 @@ function noneTarget(command: string): SpawnTarget {
 /** Which sandbox primitive this machine offers (cached). */
 export function detectSandbox(): SandboxKind {
   if (cached !== undefined) return cached;
-  if (process.platform === "linux" && onPath("bwrap")) cached = "bwrap";
-  else if (process.platform === "darwin" && onPath("sandbox-exec")) cached = "sandbox-exec";
-  else if (process.platform === "win32" && findSrt()) cached = "srt";
-  else cached = "none";
+  if (process.platform === "linux") {
+    cachedPrimitive = executableOnPath("bwrap");
+    cached = cachedPrimitive ? "bwrap" : "none";
+  } else if (process.platform === "darwin") {
+    cachedPrimitive = executableOnPath("sandbox-exec");
+    cached = cachedPrimitive ? "sandbox-exec" : "none";
+  } else if (process.platform === "win32") {
+    cachedPrimitive = findSrt();
+    cached = cachedPrimitive ? "srt" : "none";
+  } else {
+    cachedPrimitive = null;
+    cached = "none";
+  }
   return cached;
 }
 
@@ -269,31 +514,83 @@ export interface SrtLaunch {
   cleanup?: () => void;
 }
 
+export interface SandboxBuildOptions {
+  /** Validator-only turns keep the original project read-only. */
+  readOnlyWorkspace?: boolean;
+  /** The sole ordinary writable directory for a read-only workspace launch. */
+  writableTemp?: string;
+  /** Canonical host shell selected outside the untrusted workspace/PATH prefix. */
+  shellExe?: string;
+  /** Oracle-only profile: the shell must `exec` its target; target forks are denied. */
+  denyChildProcesses?: boolean;
+  /** Trusted host implementation files hidden from benchmark candidates. */
+  denyReadFiles?: readonly string[];
+}
+
 /** Build the spawn target for running `command` under the given sandbox kind. Pure (testable). */
-export function buildSandbox(kind: SandboxKind, command: string, root: string, allowNetwork: boolean, srt?: SrtLaunch): SpawnTarget {
+export function buildSandbox(
+  kind: SandboxKind,
+  command: string,
+  root: string,
+  allowNetwork: boolean,
+  srt?: SrtLaunch,
+  primitiveExe?: string,
+  options: SandboxBuildOptions = {},
+): SpawnTarget {
   if (kind === "bwrap") {
+    if (options.readOnlyWorkspace && !options.writableTemp) throw new Error("read-only sandbox requires a writable temp directory");
     return {
-      file: "bwrap",
+      file: primitiveExe ?? "bwrap",
       args: [
+        // A timed-out validator must not leave detached descendants. Run the command itself as
+        // PID 1: when it exits, Linux tears down every process left in that PID namespace. The
+        // parent-death contract also closes abrupt harness exits.
+        "--unshare-pid",
+        "--as-pid-1",
+        "--die-with-parent",
         "--ro-bind", "/", "/", // whole fs read-only...
+        "--tmpfs", "/run", // hide Docker/Podman/rootless daemon sockets from the sandbox
         "--dev-bind", "/dev", "/dev",
         "--proc", "/proc",
-        "--bind", "/tmp", "/tmp",
-        "--bind", root, root, // ...except the workspace (read-write)
+        ...(options.readOnlyWorkspace
+          ? [
+              // An isolated tmpfs prevents hardlink aliases back into the read-only project.
+              "--tmpfs", options.writableTemp!,
+              // Re-assert the project after the temp mount: a checkout below /tmp must stay read-only.
+              "--ro-bind", root, root,
+            ]
+          : ["--bind", "/tmp", "/tmp", "--bind", root, root]), // full turns keep the workspace writable
+        ...(options.denyReadFiles ?? []).flatMap((path) => ["--ro-bind", "/dev/null", path]),
         "--chdir", root,
         ...(allowNetwork ? [] : ["--unshare-net"]),
-        "--", "bash", "-c", command,
+        "--", options.shellExe ?? "bash", "-c", command,
       ],
       shell: false,
+      treeContainedOnClose: true,
     };
   }
   if (kind === "sandbox-exec") {
     const esc = (p: string) => p.replace(/"/g, '\\"');
+    if (options.readOnlyWorkspace && !options.writableTemp) throw new Error("read-only sandbox requires a writable temp directory");
+    const writes = options.readOnlyWorkspace
+      ? `(allow file-write* (subpath "${esc(options.writableTemp!)}") (subpath "/dev"))` +
+        `(deny file-write* (subpath "${esc(root)}"))`
+      : `(allow file-write* (subpath "${esc(root)}") (subpath "/tmp") (subpath "/private/tmp") (subpath "/dev"))`;
     const profile =
       "(version 1)(allow default)(deny file-write*)" +
-      `(allow file-write* (subpath "${esc(root)}") (subpath "/tmp") (subpath "/private/tmp") (subpath "/dev"))` +
+      writes +
+      (options.denyChildProcesses
+        ? "(deny process-fork)(deny signal)(allow signal (target same-sandbox))"
+        : "") +
+      (options.denyReadFiles ?? []).map((path) => `(deny file-read* (literal "${esc(path)}"))`).join("") +
+      `(deny file-read* (literal "/var/run/docker.sock") (literal "${esc(join(homedir(), ".docker", "run", "docker.sock"))}"))` +
       (allowNetwork ? "" : "(deny network*)");
-    return { file: "sandbox-exec", args: ["-p", profile, "bash", "-c", command], shell: false };
+    return {
+      file: primitiveExe ?? "sandbox-exec",
+      args: ["-p", profile, options.shellExe ?? "bash", "-c", command],
+      shell: false,
+      ...(options.denyChildProcesses ? { treeContainedOnClose: true } : {}),
+    };
   }
   if (kind === "srt" && srt) {
     // `srt -c` hands the string to the sandbox account's platform shell. With git-bash, that
@@ -305,6 +602,7 @@ export function buildSandbox(kind: SandboxKind, command: string, root: string, a
       file: srt.exe,
       args: ["--settings", srt.settingsPath, "-c", inner],
       shell: false,
+      treeContainedOnClose: true,
       ...(srt.cleanup ? { cleanup: srt.cleanup } : {}),
     };
   }
@@ -312,29 +610,174 @@ export function buildSandbox(kind: SandboxKind, command: string, root: string, a
 }
 
 /** Spawn target for a bash command, sandboxed if enabled + available. */
-/** Docker/podman talk to a local daemon over a socket/pipe the srt sandbox user can't reach, and a
- * container has host-level power anyway - so sandboxing the CLI just breaks it (the "cannot connect to
- * the Docker daemon" failure). Detect it so it runs unsandboxed (still approval-gated in default mode;
- * smooth in auto/yolo, like Claude Code / Codex). Tolerates leading env assignments and `sudo`. */
+/** Detect common direct and shell-wrapped Docker/Podman CLI invocations. This is a policy signal,
+ * not the confinement boundary: commands that evade the heuristic still stay sandboxed, and Linux/
+ * macOS sandbox profiles hide the standard daemon sockets. */
 export function isDockerCommand(command: string): boolean {
-  return /^(?:[A-Za-z_]\w*=\S*\s+)*(?:sudo\s+)?(?:docker-compose|docker|podman)(?:\s|$)/.test(command.trim());
+  const wrappers = new Set(["env", "sudo", "command", "nohup", "time", "bash", "sh", "zsh", "fish", "cmd", "powershell", "pwsh"]);
+  const daemon = (raw: string): boolean => {
+    const token = raw.replace(/^["']+|["']+$/g, "").replace(/\\/g, "/");
+    const leaf = token.slice(token.lastIndexOf("/") + 1).replace(/\.exe$/i, "").toLowerCase();
+    return leaf === "docker" || leaf === "docker-compose" || leaf === "podman";
+  };
+  for (const segment of String(command).split(/\r?\n|&&|\|\||[;|]/)) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) continue;
+    if (daemon(tokens[0])) return true;
+    const first = tokens[0].replace(/^["']+|["']+$/g, "").replace(/\.exe$/i, "").toLowerCase();
+    if (wrappers.has(first) && tokens.slice(1, 9).some(daemon)) return true;
+    if (/^[A-Za-z_]\w*=/.test(tokens[0]) && tokens.slice(1, 9).some(daemon)) return true;
+  }
+  return false;
 }
 
-export function wrapBash(command: string, root: string, opts: { enabled: boolean; allowNetwork: boolean; domains?: string[] }): SpawnTarget {
-  if (!opts.enabled) return noneTarget(command);
-  if (isDockerCommand(command)) return noneTarget(command); // docker needs the host daemon; never sandbox it
+export function wrapBash(command: string, root: string, opts: { enabled: boolean; allowNetwork: boolean; domains?: string[]; allowHostDaemon?: boolean; readOnlyWorkspace?: boolean; denyChildProcesses?: boolean; denyReadFiles?: readonly string[]; stdinSource?: string }): SpawnTarget {
+  const requiresLiveSandbox = opts.readOnlyWorkspace || Boolean(opts.denyReadFiles?.length);
+  if (!opts.enabled) {
+    if (requiresLiveSandbox) throw new Error("restricted bash profile requires a live OS sandbox");
+    return noneTarget(command);
+  }
+  // Host-daemon access is an explicit capability, not a side effect of recognizing a CLI name.
+  // Without the override even an obfuscated/missed invocation remains inside the OS sandbox.
+  if (!opts.readOnlyWorkspace && opts.allowHostDaemon && isDockerCommand(command)) return noneTarget(command);
   const kind = detectSandbox();
+  if (requiresLiveSandbox && kind === "none") throw new Error("restricted bash profile requires a live OS sandbox");
   const exe = kind === "srt" ? findSrt() : null;
+  // Use the exact primitive that detection already canonicalized. Spawning a bare name would ask
+  // the OS to search PATH again and could select a workspace-local binary that detection rejected.
+  const primitiveExe = kind === "srt" ? exe : cachedPrimitive;
   const bash = exe ? findWindowsBash() : null;
-  const script = bash ? writeSrtScript(root, command) : null;
-  return buildSandbox(kind, command, root, opts.allowNetwork,
-    exe
-      ? {
-          exe,
-          settingsPath: writeSrtSettings(root, opts.allowNetwork, opts.domains ?? []),
-          bash,
-          scriptPath: script?.path ?? null,
-          cleanup: script?.cleanup,
+  const sandboxShell = kind === "bwrap" || kind === "sandbox-exec"
+    ? executableOnPath("bash", process.env.PATH ?? "", root)
+    : null;
+  if ((kind === "bwrap" || kind === "sandbox-exec") && !sandboxShell) {
+    throw new Error("sandbox primitive is present but no trusted bash executable exists outside the workspace");
+  }
+  // Resolve this once: the exact same immutable value controls both SRT's transient read ACE and
+  // the Git-Bash alias. No directory or user-profile grant is ever inferred from it.
+  const bunBridge = exe ? resolveSrtBunBridge(root) : null;
+  const bunPath = bunBridge?.path ?? null;
+  let validationTemp: { path: string; cleanup: () => void } | null = null;
+  let script: ReturnType<typeof writeSrtScript> = null;
+  let settings: ReturnType<typeof writeEphemeralSrtSettings> | null = null;
+  try {
+    if (opts.readOnlyWorkspace) validationTemp = createValidationTemp(root);
+    let sandboxCommand = command;
+    if (opts.stdinSource !== undefined) {
+      if (kind !== "srt" || !validationTemp) {
+        throw new Error("protected stdin source requires the Windows SRT read-only profile");
+      }
+      const bytes = Buffer.byteLength(opts.stdinSource);
+      if (bytes > 8 * 1024 * 1024 || opts.stdinSource.includes("\0")) {
+        throw new Error("protected stdin source exceeded its bounded text contract");
+      }
+      const inputPath = join(validationTemp.path, `stdin-${process.pid}-${randomUUID()}.mjs`);
+      writeFileSync(inputPath, opts.stdinSource, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      const written = statSync(inputPath);
+      if (!written.isFile() || written.size !== bytes) throw new Error("protected stdin source was not written atomically");
+      const shellPath = inputPath
+        .replace(/^([A-Za-z]):[\\/]/, (_all, drive: string) => `/${drive.toLowerCase()}/`)
+        .replace(/\\/g, "/");
+      const quoted = `'${shellPath.replace(/'/g, "'\\''")}'`;
+      // SRT's broker does not forward the parent stdin pipe. Open and unlink the launch-private file,
+      // then copy it through Git's fixed cat into a pipe. A direct fd redirect stays seekable on
+      // Windows and Bun.stdin could reread the runner after module initialization.
+      sandboxCommand = `exec 3<${quoted} || exit 97\nrm -- ${quoted} || exit 98\n/usr/bin/cat <&3 | ${command}`;
+    }
+    script = bash ? writeSrtScript(root, sandboxCommand, bunPath) : null;
+    settings = exe
+      ? writeEphemeralSrtSettings(
+          tmpdir(),
+          root,
+          opts.allowNetwork,
+          opts.domains ?? [],
+          opts.readOnlyWorkspace ? [root, ...(bunPath ? [bunPath] : [])] : (bunPath ? [bunPath] : []),
+          opts.readOnlyWorkspace ? [validationTemp!.path] : [root],
+          opts.readOnlyWorkspace ? [root] : [],
+          opts.denyReadFiles ?? [],
+        )
+      : null;
+    let cleaned = false;
+    const cleanup = settings || script || validationTemp
+      ? () => {
+          if (cleaned) return;
+          cleaned = true;
+          script?.cleanup();
+          settings?.cleanup();
+          validationTemp?.cleanup();
         }
-      : undefined);
+      : undefined;
+    const target = buildSandbox(kind, sandboxCommand, root, opts.allowNetwork,
+      exe
+        ? {
+            exe,
+            settingsPath: settings!.path,
+            bash,
+            scriptPath: script?.path ?? null,
+            cleanup,
+          }
+        : undefined,
+      primitiveExe ?? undefined,
+      {
+        readOnlyWorkspace: opts.readOnlyWorkspace,
+        writableTemp: validationTemp?.path,
+        shellExe: sandboxShell ?? undefined,
+        denyChildProcesses: opts.denyChildProcesses,
+        denyReadFiles: opts.denyReadFiles,
+      });
+    const srtBridgeEnv: Record<string, string> = kind === "srt" && bunPath && script?.toolchainDir
+      ? {
+          // npm runs package scripts in a child cmd.exe, where Bash functions do not exist. The
+          // launch-owned RX-only shim wins bare-name lookup without granting Bun's parent/profile
+          // directory; disabling cwd lookup also rejects a root bun.cmd.
+          PATH: `${script.toolchainDir}${delimiter}${process.env.PATH ?? ""}`,
+          NEKO_SRT_BUN_EXE: bunPath,
+          NoDefaultCurrentDirectoryInExePath: "1",
+        }
+      : {};
+    return opts.readOnlyWorkspace
+      ? {
+          ...target,
+          env: {
+            ...srtBridgeEnv,
+            TEMP: validationTemp!.path,
+            TMP: validationTemp!.path,
+            TMPDIR: validationTemp!.path,
+          },
+          cleanup,
+        }
+      : Object.keys(srtBridgeEnv).length
+        ? { ...target, env: srtBridgeEnv }
+        : target;
+  } catch (error) {
+    script?.cleanup();
+    settings?.cleanup();
+    validationTemp?.cleanup();
+    throw error;
+  }
+}
+
+/** Create an unpredictable writable scratch directory that is provably outside the project. */
+function createValidationTemp(root: string): { path: string; cleanup: () => void } {
+  const created = mkdtempSync(join(tmpdir(), "neko-validator-"));
+  try {
+    const rootReal = realpathSync(resolve(root));
+    const tempReal = realpathSync(created);
+    const rel = relative(rootReal, tempReal);
+    if (rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))) {
+      throw new Error("writable validation temp resolved inside the project");
+    }
+    let removed = false;
+    return {
+      path: tempReal,
+      cleanup: () => {
+        if (removed) return;
+        removed = true;
+        try { rmSync(tempReal, { recursive: true, force: true }); } catch { /* cleanup must not mask tool output */ }
+      },
+    };
+  } catch (error) {
+    try { rmSync(created, { recursive: true, force: true }); } catch { /* best effort */ }
+    throw error;
+  }
 }

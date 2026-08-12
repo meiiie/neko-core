@@ -8,12 +8,13 @@
  */
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, extname, posix, win32 } from "node:path";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
+import { extname, posix, win32 } from "node:path";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 
 import { homeDir } from "../shared/home.ts";
+import { scrubChildEnv } from "../shared/child-env.ts";
 import { VERSION } from "../shared/version.ts";
 
 export const CODEX_APP_SERVER_MIN_VERSION = "0.144.0";
@@ -80,9 +81,112 @@ export interface DiscoveryOptions {
   env?: NodeJS.ProcessEnv;
   home?: string;
   platform?: NodeJS.Platform;
+  cwd?: string;
   pathExists?: (path: string) => boolean;
+  realpath?: (path: string) => string;
+  isRegularFile?: (path: string) => boolean;
   readText?: (path: string) => string;
   runVersion?: (executable: CodexExecutable) => string | null;
+}
+
+interface ExecutableChecks {
+  platform: NodeJS.Platform;
+  cwd: string;
+  realpath: (path: string) => string;
+  isRegularFile: (path: string) => boolean;
+  readPrefix?: (path: string) => string;
+}
+
+interface LaunchCommand {
+  command: string;
+  args: string[];
+}
+
+function realPath(path: string): string {
+  return realpathSync.native(path);
+}
+
+/** Canonicalize the nearest existing ancestor, then reattach the missing tail. This catches a
+ * not-yet-created transport directory whose parent is a symlink/junction into the workspace. */
+function canonicalNearestPath(path: string, platform: NodeJS.Platform): string {
+  const paths = platform === "win32" ? win32 : posix;
+  let probe = paths.resolve(path);
+  const tail: string[] = [];
+  while (!existsSync(probe)) {
+    const parent = paths.dirname(probe);
+    if (parent === probe) throw new Error(`no existing ancestor for ${path}`);
+    tail.unshift(paths.basename(probe));
+    probe = parent;
+  }
+  return paths.join(realPath(probe), ...tail);
+}
+
+function isRegularFile(path: string): boolean {
+  try { return statSync(path).isFile(); }
+  catch { return false; }
+}
+
+function readPrefix(path: string): string {
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(256);
+    const bytes = readSync(fd, buffer, 0, buffer.length, 0);
+    return buffer.toString("utf8", 0, bytes);
+  } finally { closeSync(fd); }
+}
+
+function withinPath(root: string, candidate: string, platform: NodeJS.Platform): boolean {
+  const paths = platform === "win32" ? win32 : posix;
+  const relative = paths.relative(root, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${paths.sep}`) && !paths.isAbsolute(relative));
+}
+
+function transportHomeInsideWorkspace(candidate: string, cwd: string, platform: NodeJS.Platform): boolean {
+  const paths = platform === "win32" ? win32 : posix;
+  if (withinPath(paths.resolve(cwd), paths.resolve(candidate), platform)) return true;
+  if (platform !== process.platform) return false;
+  try {
+    return withinPath(canonicalNearestPath(cwd, platform), canonicalNearestPath(candidate, platform), platform);
+  } catch {
+    return true; // an isolation boundary that cannot be proved stays outside fails closed
+  }
+}
+
+function canonicalExecutable(path: string, allowWorkspace: boolean, checks: ExecutableChecks): string | null {
+  const paths = checks.platform === "win32" ? win32 : posix;
+  if (!paths.isAbsolute(path) || path.includes("\0")) return null;
+  let canonical: string;
+  let workspace: string;
+  try {
+    canonical = checks.realpath(path);
+    workspace = checks.realpath(checks.cwd);
+  } catch {
+    return null;
+  }
+  if (!paths.isAbsolute(canonical) || !checks.isRegularFile(canonical)) return null;
+  if (!allowWorkspace && withinPath(workspace, canonical, checks.platform)) return null;
+  return canonical;
+}
+
+function safeChildPath(value: string | undefined, checks: ExecutableChecks): string {
+  const paths = checks.platform === "win32" ? win32 : posix;
+  const delimiter = checks.platform === "win32" ? ";" : ":";
+  let workspace: string;
+  try { workspace = checks.realpath(checks.cwd); }
+  catch { return ""; }
+  const seen = new Set<string>();
+  const safe: string[] = [];
+  for (const directory of String(value ?? "").split(delimiter).filter(Boolean)) {
+    const unquoted = directory.trim().replace(/^"(.*)"$/, "$1");
+    if (!unquoted || !paths.isAbsolute(unquoted)) continue;
+    let canonical: string;
+    try { canonical = checks.realpath(unquoted); }
+    catch { continue; }
+    if (!paths.isAbsolute(canonical) || withinPath(workspace, canonical, checks.platform)) continue;
+    const key = checks.platform === "win32" ? canonical.toLowerCase() : canonical;
+    if (!seen.has(key)) { seen.add(key); safe.push(canonical); }
+  }
+  return safe.join(delimiter);
 }
 
 /** Numeric semver comparison for the stable x.y.z part. Prerelease labels do not grant a newer API. */
@@ -122,18 +226,33 @@ function managedExecutable(
   }
 }
 
-function systemCandidates(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string[] {
+function systemCandidates(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): Array<{ path: string; source: "environment" | "path" }> {
   const explicit = String(env.NEKO_CODEX_PATH ?? "").trim();
-  const out = explicit ? [explicit] : [];
+  const paths = platform === "win32" ? win32 : posix;
+  const out: Array<{ path: string; source: "environment" | "path" }> = [];
+  // NEKO_CODEX_PATH is an explicit user grant. It may point into the workspace, but it must still
+  // name an absolute regular file. Ordinary PATH discovery never receives that exception.
+  if (explicit && paths.isAbsolute(explicit)) out.push({ path: explicit, source: "environment" });
   const names = platform === "win32"
     ? ["codex.exe", "codex.cmd", "codex.bat", "codex.ps1"]
     : ["codex"];
   const pathDelimiter = platform === "win32" ? ";" : ":";
-  const paths = platform === "win32" ? win32 : posix;
   for (const directory of String(env.PATH ?? "").split(pathDelimiter).filter(Boolean)) {
-    for (const name of names) out.push(paths.join(directory.replace(/^"|"$/g, ""), name));
+    const unquoted = directory.trim().replace(/^"(.*)"$/, "$1");
+    if (!unquoted || !paths.isAbsolute(unquoted)) continue;
+    const root = unquoted;
+    for (const name of names) out.push({ path: paths.join(root, name), source: "path" });
   }
-  return [...new Set(out)];
+  const seen = new Set<string>();
+  return out.filter((candidate) => {
+    const key = platform === "win32" ? candidate.path.toLowerCase() : candidate.path;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function executableKind(path: string): CodexExecutable["kind"] {
@@ -144,33 +263,130 @@ function parseVersion(output: string): string | null {
   return output.match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/)?.[1] ?? null;
 }
 
+function trustedNode(env: NodeJS.ProcessEnv, cwd: string, checks?: ExecutableChecks): string | null {
+  const activeChecks: ExecutableChecks = checks ?? {
+    platform: process.platform,
+    cwd,
+    realpath: realPath,
+    isRegularFile,
+  };
+  const paths = activeChecks.platform === "win32" ? win32 : posix;
+  const delimiter = activeChecks.platform === "win32" ? ";" : ":";
+  const name = activeChecks.platform === "win32" ? "node.exe" : "node";
+  for (const directory of String(env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    const unquoted = directory.trim().replace(/^"(.*)"$/, "$1");
+    if (!unquoted || !paths.isAbsolute(unquoted)) continue;
+    const root = unquoted;
+    const nodePath = paths.join(root, name);
+    const canonical = canonicalExecutable(nodePath, false, activeChecks);
+    if (canonical) return canonical;
+  }
+  return null;
+}
+
 function commandFor(
   executable: CodexExecutable,
   args: string[],
   platform = process.platform,
-): { command: string; args: string[]; shell?: boolean } {
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
+  checks?: ExecutableChecks,
+): LaunchCommand | null {
   const extension = extname(executable.path).toLowerCase();
-  if (platform === "win32" && (extension === ".cmd" || extension === ".bat")) {
-    const npmEntry = win32.join(dirname(executable.path), "node_modules", "@openai", "codex", "bin", "codex.js");
-    if (existsSync(npmEntry)) return { command: "node.exe", args: [npmEntry, ...args] };
-    // Node/Bun cannot CreateProcess a batch file directly. shell=true delegates the fixed, locally
-    // discovered path and fixed App Server flags to cmd.exe; no user prompt/model text enters it.
-    return { command: executable.path, args, shell: true };
+  if (platform === "win32" && (extension === ".cmd" || extension === ".bat" || extension === ".ps1")) {
+    const activeChecks: ExecutableChecks = checks ?? {
+      platform,
+      cwd,
+      realpath: realPath,
+      isRegularFile,
+    };
+    const rawEntry = win32.join(win32.dirname(executable.path), "node_modules", "@openai", "codex", "bin", "codex.js");
+    const npmEntry = canonicalExecutable(rawEntry, executable.source === "environment", activeChecks);
+    const node = trustedNode(env, cwd, activeChecks);
+    if (npmEntry && node) return { command: node, args: [npmEntry, ...args] };
+    return null;
   }
-  if (platform === "win32" && extension === ".ps1") {
-    return { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", executable.path, ...args] };
+  if (platform !== "win32" && (extension === ".js" || extension === ".mjs" || extension === ".cjs")) {
+    const activeChecks: ExecutableChecks = checks ?? { platform, cwd, realpath: realPath, isRegularFile };
+    const node = trustedNode(env, cwd, activeChecks);
+    return node ? { command: node, args: [executable.path, ...args] } : null;
+  }
+  if (platform !== "win32" && !extension) {
+    const activeChecks: ExecutableChecks = checks ?? { platform, cwd, realpath: realPath, isRegularFile, readPrefix };
+    let prefix = "";
+    try { prefix = (activeChecks.readPrefix ?? readPrefix)(executable.path); }
+    catch { return null; }
+    if (/^#![^\r\n]*\bnode(?:\s|$)/.test(prefix)) {
+      const node = trustedNode(env, cwd, activeChecks);
+      return node ? { command: node, args: [executable.path, ...args] } : null;
+    }
   }
   return { command: executable.path, args };
 }
 
-function realVersion(executable: CodexExecutable): string | null {
+export function __codexLaunchForTest(
+  executable: CodexExecutable,
+  args: string[],
+  options: {
+    platform: NodeJS.Platform;
+    env: NodeJS.ProcessEnv;
+    cwd: string;
+    realpath: (path: string) => string;
+    isRegularFile: (path: string) => boolean;
+    readPrefix?: (path: string) => string;
+  },
+): { command: string; args: string[] } | null {
+  return commandFor(executable, args, options.platform, options.env, options.cwd, {
+    platform: options.platform,
+    cwd: options.cwd,
+    realpath: options.realpath,
+    isRegularFile: options.isRegularFile,
+    readPrefix: options.readPrefix,
+  });
+}
+
+const PROVIDER_CHILD_ENV_ALLOWLIST = new Set([
+  "ALL_PROXY", "CODEX_HOME", "COLORTERM", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY",
+  "FORCE_COLOR", "HOME", "HTTPS_PROXY", "HTTP_PROXY", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE",
+  "NODE_EXTRA_CA_CERTS", "NO_COLOR", "NO_PROXY", "PATH", "PATHEXT", "REQUESTS_CA_BUNDLE", "RUST_LOG",
+  "SSL_CERT_DIR", "SSL_CERT_FILE", "SYSTEMROOT", "TEMP", "TERM", "TMP", "TMPDIR", "TZ", "USERPROFILE",
+  "WAYLAND_DISPLAY", "WINDIR", "WSL_DISTRO_NAME", "WSL_INTEROP", "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE",
+]);
+
+function providerChildEnv(source: NodeJS.ProcessEnv, overrides: NodeJS.ProcessEnv = {}, checks?: ExecutableChecks): NodeJS.ProcessEnv {
+  const allowed = Object.fromEntries(Object.entries(source).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined && PROVIDER_CHILD_ENV_ALLOWLIST.has(entry[0].toUpperCase()),
+  ));
+  if (checks) {
+    const pathKey = Object.keys(allowed).find((name) => name.toUpperCase() === "PATH") ?? "PATH";
+    const path = safeChildPath(source[pathKey] ?? source.PATH, checks);
+    for (const name of Object.keys(allowed)) if (name.toUpperCase() === "PATH") delete allowed[name];
+    if (path) allowed[pathKey] = path;
+  }
+  return { ...scrubChildEnv(allowed), ...overrides };
+}
+
+/** Test seam for proving provider credentials are not ambient sidecar capabilities. */
+export function __codexChildEnvForTest(source: NodeJS.ProcessEnv, checks?: ExecutableChecks): NodeJS.ProcessEnv {
+  return providerChildEnv(source, {}, checks);
+}
+
+function realVersion(
+  executable: CodexExecutable,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  cwd: string,
+  checks: ExecutableChecks,
+): string | null {
   if (executable.source === "managed" && executable.version) return executable.version;
-  const command = commandFor(executable, ["--version"]);
+  const command = commandFor(executable, ["--version"], platform, env, cwd, checks);
+  if (!command) return null;
   const result = spawnSync(command.command, command.args, {
     encoding: "utf8",
     timeout: 5000,
     windowsHide: true,
-    shell: command.shell,
+    env: providerChildEnv(env, {}, checks),
+    cwd: (platform === "win32" ? win32 : posix).dirname(executable.path),
   });
   if (result.status !== 0) return null;
   return parseVersion(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
@@ -197,18 +413,30 @@ function discoverCodexSupportUncached(options: DiscoveryOptions): CodexSupportSt
   const env = options.env ?? process.env;
   const home = options.home ?? homeDir();
   const platform = options.platform ?? process.platform;
+  const cwd = options.cwd ?? process.cwd();
   const pathExists = options.pathExists ?? existsSync;
+  const checks: ExecutableChecks = {
+    platform,
+    cwd,
+    realpath: options.realpath ?? realPath,
+    isRegularFile: options.isRegularFile ?? isRegularFile,
+  };
   const readText = options.readText ?? ((path) => readFileSync(path, "utf8"));
-  const runVersion = options.runVersion ?? realVersion;
+  const runVersion = options.runVersion ?? ((executable) => realVersion(executable, env, platform, cwd, checks));
 
   const managed = managedExecutable(home, platform, pathExists, readText);
-  const candidates: CodexExecutable[] = managed ? [managed] : [];
-  for (const path of systemCandidates(env, platform)) {
-    if (!pathExists(path)) continue;
+  const candidates: CodexExecutable[] = [];
+  if (managed) {
+    const path = canonicalExecutable(managed.path, true, checks);
+    if (path) candidates.push({ ...managed, path });
+  }
+  for (const candidate of systemCandidates(env, platform)) {
+    const path = canonicalExecutable(candidate.path, candidate.source === "environment", checks);
+    if (!path) continue;
     candidates.push({
       path,
       kind: executableKind(path),
-      source: String(env.NEKO_CODEX_PATH ?? "").trim() === path ? "environment" : "path",
+      source: candidate.source,
     });
   }
   if (!candidates.length) {
@@ -381,17 +609,63 @@ export class CodexAppServerClient {
 /** Spawn one hidden, persistent stdio App Server. Call client.close() when the provider is disposed. */
 export interface StartCodexAppServerOptions {
   codexHome?: string;
-  /** Subscription-only callers remove API credentials so no upstream fallback can create API charges. */
+  /** Retained for compatibility. Ambient API credentials are always scrubbed before the sidecar starts. */
   forbidApiBilling?: boolean;
   /** Voice is an App Server feature flag; experimentalApi alone does not enable it. */
   enableRealtimeConversation?: boolean;
+  /** The dedicated image adapter needs Codex's native image tool; text/voice agents do not. */
+  allowImageGeneration?: boolean;
 }
+
+/** Native Codex is a transport process, not a second project agent. Keep its home/cwd outside the
+ * repository so it cannot independently load project instructions, skills, hooks, or executables
+ * around Neko's project-trust and permission boundaries. */
+export function codexIsolationHome(
+  home: string = homeDir(),
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  cwd: string = process.cwd(),
+): string {
+  const paths = platform === "win32" ? win32 : posix;
+  const explicit = String(env.NEKO_CODEX_HOME ?? "").trim();
+  if (explicit && paths.isAbsolute(explicit)) {
+    const candidate = paths.normalize(explicit);
+    if (!transportHomeInsideWorkspace(candidate, cwd, platform)) return candidate;
+  }
+  const fallback = joinForPlatform(home, platform, ".neko-core", "codex-home");
+  if (!transportHomeInsideWorkspace(fallback, cwd, platform)) return fallback;
+  throw new Error("Codex transport home must stay outside the workspace; set NEKO_CODEX_HOME to an absolute outside path");
+}
+
+/** Capabilities owned by Codex itself would create a second, ungoverned execution/catalog surface.
+ * Neko supplies the real tools dynamically, so keep only the App Server transport and code-mode host
+ * needed to dispatch those dynamic calls. Every key exists at the supported 0.144.0 boundary. */
+const DISABLED_NATIVE_FEATURES = [
+  "apps", "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use",
+  "goals", "hooks", "image_generation", "in_app_browser", "multi_agent", "plugins",
+  "plugin_sharing", "remote_plugin", "shell_tool", "skill_mcp_dependency_install", "tool_suggest",
+  "workspace_dependencies",
+] as const;
 
 export function codexAppServerArguments(
   executable: CodexExecutable,
   options: StartCodexAppServerOptions,
 ): string[] {
   const args = executable.kind === "cli" ? ["app-server"] : [];
+  for (const feature of DISABLED_NATIVE_FEATURES) {
+    if (feature === "image_generation" && options.allowImageGeneration) continue;
+    if (executable.kind === "cli") args.push("--disable", feature);
+    else args.push("-c", `features.${feature}=false`);
+  }
+  // Neko exposes its own progressive skill catalog through developer context and the dynamic
+  // `skill` tool. Do not also inject Codex's ambient ~/.codex or ~/.agents catalog: it duplicates
+  // instructions and gives the model host paths that bypass Neko's catalog boundary when a skill
+  // is missing. This config key exists at the supported Codex 0.144.0 boundary.
+  args.push("-c", "skills.include_instructions=false");
+  // Project instructions are supplied only by Neko after its exact-snapshot trust check. Codex's
+  // own AGENTS.md walk would be a second, unsnapshotted control plane; these keys are supported at
+  // the same 0.144.0 boundary (`0` returns no project doc, `[]` disables ancestor traversal).
+  args.push("-c", "project_doc_max_bytes=0", "-c", "project_root_markers=[]");
   if (options.enableRealtimeConversation) {
     if (executable.kind === "cli") args.push("--enable", "realtime_conversation");
     else args.push("-c", "features.realtime_conversation=true");
@@ -405,23 +679,34 @@ export function startCodexAppServer(
   handlers: CodexAppServerHandlers = {},
   options: StartCodexAppServerOptions = {},
 ): CodexAppServerClient {
-  const appArgs = codexAppServerArguments(executable, options);
-  const launch = commandFor(executable, appArgs);
+  const checks: ExecutableChecks = {
+    platform: process.platform,
+    cwd: process.cwd(),
+    realpath: realPath,
+    isRegularFile,
+  };
+  const path = canonicalExecutable(executable.path, executable.source !== "path", checks);
+  if (!path) throw new Error("Codex executable is not a trusted absolute regular file");
+  const verifiedExecutable = { ...executable, path };
+  const appArgs = codexAppServerArguments(verifiedExecutable, options);
+  const launch = commandFor(verifiedExecutable, appArgs, process.platform, process.env, process.cwd(), checks);
+  if (!launch) throw new Error("Codex executable needs a trusted absolute Windows runtime");
   // Neko supplies auth and tools over stdio. An isolated home prevents the user's Codex MCP/plugins
   // from slowing startup or gaining an unexpected second execution path beside Neko's approval gate.
-  const codexHome = options.codexHome ?? (process.env.NEKO_CODEX_HOME || joinForPlatform(homeDir(), process.platform, ".neko-core", "codex-home"));
+  const codexHome = options.codexHome ?? codexIsolationHome();
   mkdirSync(codexHome, { recursive: true, mode: 0o700 });
   try { chmodSync(codexHome, 0o700); } catch { /* Windows ACLs do not implement POSIX modes. */ }
-  const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: codexHome, RUST_LOG: process.env.RUST_LOG ?? "warn" };
-  if (options.forbidApiBilling) {
-    delete env.OPENAI_API_KEY;
-    delete env.NEKO_API_KEY;
-  }
+  const env = providerChildEnv(process.env, {
+    CODEX_HOME: codexHome,
+    HOME: codexHome,
+    USERPROFILE: codexHome,
+    RUST_LOG: process.env.RUST_LOG ?? "warn",
+  }, checks);
   const child: ChildProcessWithoutNullStreams = spawn(launch.command, launch.args, {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
-    shell: launch.shell,
     env,
+    cwd: codexHome,
   });
   const closed = new Promise<void>((resolve) => {
     child.once("close", () => resolve());
@@ -442,9 +727,7 @@ export function startCodexAppServer(
     if (stopped) return;
     stopped = true;
     if (child.killed) return;
-    if (process.platform === "win32" && child.pid) {
-      spawnSync("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
-    } else child.kill();
+    child.kill();
   };
   const exitCleanup = () => stop();
   process.once("exit", exitCleanup);

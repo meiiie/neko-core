@@ -3,16 +3,16 @@
 // (the port interface) but core never imports this file. Web content acquisition (fetch / parse /
 // search) is an EDGE concern — it talks the outside world — so it lives here, not in src/core.
 
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { debug, messageOf } from "../shared/debug.ts";
 import type { WebPort } from "../core/ports.ts";
 import { MAX_OBS_PAGE_CHARS } from "../core/agent-constants.ts";
+import { assertPublicHttpUrl, publicHttpFetch, readBoundedResponseText } from "./public-http.ts";
 import { dockerAvailable, SearxngSidecar } from "./sidecar.ts";
 
 const WEB_HEADERS = { "User-Agent": "Mozilla/5.0 (NekoCore)" };
+let fetchPublic = publicHttpFetch;
+export function __setPublicHttpForTest(fetcher?: typeof publicHttpFetch): void {
+  fetchPublic = fetcher ?? publicHttpFetch;
+}
 
 /** Page below core's 48k observation guard, with room for the continuation footer. If this were
  * larger, Agent would head/tail-clamp the result and silently make the middle unreachable. */
@@ -104,7 +104,7 @@ async function searxngSearch(query: string, base: string): Promise<SearchResult[
   const url = base.replace(/\/+$/, "") + "/search?format=json&q=" + encodeURIComponent(query);
   const res = await fetch(url, { headers: WEB_HEADERS, signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data: any = await res.json();
+  const data: any = JSON.parse(await readBoundedResponseText(res));
   return (data.results ?? []).map((r: any) => ({ title: String(r.title ?? ""), url: String(r.url ?? ""), snippet: stripTags(String(r.content ?? "")) }));
 }
 
@@ -117,7 +117,7 @@ async function tavilySearch(query: string, key: string): Promise<SearchResult[]>
     signal: AbortSignal.timeout(20000),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data: any = await res.json();
+  const data: any = JSON.parse(await readBoundedResponseText(res));
   return (data.results ?? []).map((r: any) => ({ title: String(r.title ?? ""), url: String(r.url ?? ""), snippet: stripTags(String(r.content ?? "")) }));
 }
 
@@ -166,7 +166,7 @@ async function ddgSearch(query: string): Promise<SearchResult[]> {
     headers: WEB_HEADERS,
     signal: AbortSignal.timeout(15000),
   });
-  const html = await res.text();
+  const html = await readBoundedResponseText(res);
   const titles = [...html.matchAll(/class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
   const snippets = [...html.matchAll(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g)].map((m) => stripTags(m[1]));
   return titles.slice(0, 8).map((t, i) => {
@@ -179,7 +179,18 @@ async function ddgSearch(query: string): Promise<SearchResult[]> {
 
 const webCache = new Map<string, { md: string; ts: number }>();
 const WEB_CACHE_TTL = 5 * 60_000; // 5 min - so paginating a large page doesn't re-download/re-convert it
+const WEB_CACHE_MAX_ENTRIES = 8;
 const WEB_SMALL_PAGE = 5_000; // <= this many chars: the markdown IS the answer, skip the model (fast + cheap)
+
+function cacheWeb(url: string, md: string): void {
+  const now = Date.now();
+  for (const [key, value] of webCache) if (now - value.ts >= WEB_CACHE_TTL) webCache.delete(key);
+  if (!webCache.has(url) && webCache.size >= WEB_CACHE_MAX_ENTRIES) {
+    const oldest = webCache.keys().next().value;
+    if (oldest !== undefined) webCache.delete(oldest);
+  }
+  webCache.set(url, { md, ts: now });
+}
 
 /** Fetch a URL and return its FULL content as compact Markdown (HTML) or text. Cached briefly so pagination
  * (page 2, 3...) serves from memory. NOT truncated here - the caller paginates on demand (save locally +
@@ -189,11 +200,6 @@ async function toolWebFetch(_root: string, args: Record<string, any>, backend = 
   if (!/^https?:\/\//i.test(url)) return "Error: url must start with http:// or https://";
   const hit = webCache.get(url);
   if (hit && Date.now() - hit.ts < WEB_CACHE_TTL) return hit.md;
-  // Deterministic platform routes: send a known platform URL to the RIGHT free backend (CODE, not a skill
-  // the model can ignore) - a YouTube transcript via yt-dlp, a GitHub repo/issue/PR via gh. Falls back to a
-  // normal fetch when the tool is missing/unauthenticated or it's not a routable URL.
-  const routed = platformRoute(url);
-  if (routed) { webCache.set(url, { md: routed, ts: Date.now() }); return routed; }
   // Opt-in hosted scrape backend: Jina Reader (r.jina.ai) renders JS/SPAs and returns markdown in one call
   // (free + keyless for light use; JINA_API_KEY lifts the rate limit). PUBLIC pages only (anonymous bot -
   // no login/session; use the browser MCP for authenticated / hardest SPAs).
@@ -201,12 +207,20 @@ async function toolWebFetch(_root: string, args: Record<string, any>, backend = 
   let text: string;
   let contentType: string;
   try {
+    const signal = AbortSignal.timeout(jina ? 45000 : 20000);
     const headers: Record<string, string> = { ...WEB_HEADERS };
     if (jina && process.env.JINA_API_KEY) headers["Authorization"] = "Bearer " + process.env.JINA_API_KEY;
     if (jina) headers["X-Return-Format"] = "markdown";
-    const res = await fetch(jina ? "https://r.jina.ai/" + url : url, { headers, signal: AbortSignal.timeout(jina ? 45000 : 20000) });
+    let fetchUrl = url;
+    if (jina) {
+      await assertPublicHttpUrl(url, { signal });
+      const target = new URL(url);
+      target.hash = "";
+      fetchUrl = "https://r.jina.ai/" + target.href;
+    }
+    const res = await fetchPublic(fetchUrl, { headers, signal });
     contentType = res.headers.get("content-type") ?? "";
-    text = await res.text();
+    text = res.text;
   } catch (error) {
     return `Error: fetch failed: ${(error as Error).message}`;
   }
@@ -224,7 +238,7 @@ async function toolWebFetch(_root: string, args: Record<string, any>, backend = 
       text = wss ?? htmlToMarkdown(text); // our deterministic HTML -> markdown
     }
   }
-  webCache.set(url, { md: text, ts: Date.now() });
+  cacheWeb(url, text);
   return text;
 }
 
@@ -259,29 +273,35 @@ export function wssOffersTable(html: string): string | null {
   ].join("\n");
 }
 
-/** Route a URL to the best free backend if it's a known platform; else null (caller does a normal fetch). */
-function platformRoute(url: string): string | null {
-  if (/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)[\w-]{11}/i.test(url)) return ytTranscript(url);
-  const gh = url.match(/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\/(issues|pull)\/(\d+))?(?:[/?#]|$)/i);
-  const RESERVED = new Set(["orgs", "sponsors", "topics", "search", "marketplace", "settings", "notifications", "features", "about", "pricing"]);
-  if (gh && gh[1] && gh[2] && !RESERVED.has(gh[1].toLowerCase())) return ghRead(gh[1], gh[2].replace(/\.git$/, ""), gh[3], gh[4]);
-  return null;
-}
+export type PlatformRoute =
+  | { kind: "youtube" }
+  | { kind: "github"; owner: string; repo: string; section?: "issues" | "pull"; number?: string };
 
-/** A GitHub repo / issue / PR via the gh CLI (authenticated, clean). null if gh is missing/unauth/not found. */
-function ghRead(owner: string, repo: string, kind?: string, num?: string): string | null {
-  try {
-    const target = `${owner}/${repo}`;
-    const args = kind === "issues" && num ? ["issue", "view", num, "-R", target, "--comments"]
-      : kind === "pull" && num ? ["pr", "view", num, "-R", target, "--comments"]
-      : ["repo", "view", target]; // README + about
-    const r = spawnSync("gh", args, { encoding: "utf8", timeout: 30_000, maxBuffer: 32 * 1024 * 1024 });
-    if (r.error || r.status !== 0 || !r.stdout?.trim()) return null; // gh missing / not authed / not found -> fall back
-    return `# GitHub: ${target}${kind ? ` (${kind} #${num})` : ""}\n\n${r.stdout.trim()}`;
-    } catch (e) {
-      debug("web", () => `ghRead failed for ${owner}/${repo}: ${messageOf(e)}`);
-      return null;
-    }
+/** Parse only exact first-party platform hosts. URL substrings never select a privileged CLI route. */
+export function classifyPlatformUrl(input: string): PlatformRoute | null {
+  let url: URL;
+  try { url = new URL(input); } catch { return null; }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (url.username || url.password) return null;
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const youtubeHosts = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"]);
+  let videoId = "";
+  if (youtubeHosts.has(host)) {
+    if (url.pathname === "/watch") videoId = url.searchParams.get("v") ?? "";
+    else videoId = /^\/(?:shorts|embed)\/([\w-]{11})(?:\/|$)/.exec(url.pathname)?.[1] ?? "";
+  } else if (host === "youtu.be") {
+    videoId = /^\/([\w-]{11})(?:\/|$)/.exec(url.pathname)?.[1] ?? "";
+  }
+  if (/^[\w-]{11}$/.test(videoId)) return { kind: "youtube" };
+
+  if (host !== "github.com" && host !== "www.github.com") return null;
+  const gh = /^\/([A-Za-z0-9.-]+)\/([A-Za-z0-9_.-]+?)(?:\/(issues|pull)\/(\d+))?(?:\/|$)/.exec(url.pathname);
+  const RESERVED = new Set(["orgs", "sponsors", "topics", "search", "marketplace", "settings", "notifications", "features", "about", "pricing"]);
+  if (gh && !RESERVED.has(gh[1].toLowerCase())) {
+    const repo = gh[2].replace(/\.git$/, "");
+    if (repo) return { kind: "github", owner: gh[1], repo, section: gh[3] as "issues" | "pull" | undefined, number: gh[4] };
+  }
+  return null;
 }
 
 /** RSS/Atom XML -> a compact Markdown item list (title, link, short summary). Regex-level (no DOM), like the
@@ -319,33 +339,6 @@ export function paginateWeb(md: string, page: number): string {
   const body = md.slice((p - 1) * WEB_MAX_CHARS, p * WEB_MAX_CHARS);
   const more = p < pages ? `call web_fetch again with the same url and page:${p + 1} for the next page` : "this is the last page";
   return `${body}\n\n... (page ${p}/${pages}, ${md.length} chars total; ${more})`;
-}
-
-/** A YouTube video's transcript via yt-dlp (captions only, NO video download). Returns null - so the caller
- * falls back to a normal fetch - if yt-dlp isn't installed (ENOENT) or the video has no captions. */
-function ytTranscript(url: string): string | null {
-  let dir = "";
-  try {
-    dir = mkdtempSync(join(tmpdir(), "neko-yt-"));
-    // Narrow to en/en-orig: a wildcard like en.* pulls en-ar/en-US too and trips YouTube's 429 rate limit
-    // (yt-dlp then exits non-zero even though the en track downloaded). So don't gate on the exit status -
-    // gate on whether a .vtt actually landed.
-    const r = spawnSync(
-      "yt-dlp",
-      ["--skip-download", "--write-auto-subs", "--write-subs", "--sub-langs", "en,en-orig", "--sub-format", "vtt/best", "--no-warnings", "-o", join(dir, "s.%(ext)s"), url],
-      { encoding: "utf8", timeout: 90_000, maxBuffer: 64 * 1024 * 1024 },
-    );
-    if (r.error) return null; // yt-dlp not installed (ENOENT) -> caller falls back to a normal fetch
-    const vtt = readdirSync(dir).find((f) => f.endsWith(".vtt"));
-    if (!vtt) return null; // no captions produced (a real failure) -> fall back
-    const text = vttToText(readFileSync(join(dir, vtt), "utf8"));
-      return text ? `# YouTube transcript\n${url}\n\n${text}` : null;
-    } catch (e) {
-      debug("web", () => `ytTranscript failed for ${url}: ${messageOf(e)}`);
-      return null;
-    } finally {
-      if (dir) try { rmSync(dir, { recursive: true, force: true }); } catch (e) { debug("web", () => `ytTranscript cleanup: ${messageOf(e)}`); }
-    }
 }
 
 /** VTT captions -> plain deduped text. Auto-subs repeat each line as the caption rolls, so drop cue numbers,
@@ -412,7 +405,8 @@ export const webPort: WebPort = {
     // over clean markdown rather than raw HTML.
     if ((prompt || schema) && summarize && md.length > WEB_SMALL_PAGE) {
       try {
-        return await summarize(prompt || "Extract the requested structured data from the page.", md, schema);
+        const page = Math.max(1, Number(args.page ?? 1) || 1);
+        return await summarize(prompt || "Extract the requested structured data from the page.", paginateWeb(md, page), schema);
       } catch {
         /* fall through to the paginated markdown */
       }

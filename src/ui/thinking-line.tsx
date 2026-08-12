@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 
+import { terminalSafeText } from "../shared/terminal-text.ts";
 import { fmtTok } from "./format.ts";
 
 /** Playful "thinking" verbs (one picked per turn), Claude-style. */
@@ -40,7 +41,7 @@ export function RunningLine({ text }: { text: string }) {
   return (
     <Text>
       <Text color={RUN_BLUE}>{on ? "● " : "  "}</Text>
-      <Text color="gray">{text}</Text>
+      <Text color="gray">{terminalSafeText(text, { maxChars: 512 })}</Text>
     </Text>
   );
 }

@@ -1,9 +1,27 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
-import { buildSandbox, destructiveInWorkspace, findWindowsBash, isDockerCommand, plainTarget, purgeStaleSrtScripts, srtScript, srtSettings, wrapBash, writeEphemeralSrtScript } from "../src/core/sandbox.ts";
+import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, isDockerCommand, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtLaunchRefusal, srtScript, srtSettings, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
+
+test("security executables are resolved from PATH without trusting the workspace", () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-path-primitive-"));
+  const workspace = join(root, "repo");
+  const trusted = join(root, "tools");
+  try {
+    mkdirSync(workspace, { recursive: true });
+    mkdirSync(trusted, { recursive: true });
+    writeFileSync(join(workspace, "srt.exe"), "fake-workspace");
+    writeFileSync(join(trusted, "srt.exe"), "trusted-path");
+    expect(executableOnPath("srt.exe", [workspace, trusted].join(delimiter), workspace, "win32"))
+      .toBe(realpathSync(join(trusted, "srt.exe")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("bwrap confines fs to the workspace + blocks network by default", () => {
   const t = buildSandbox("bwrap", "echo hi", "/work", false);
@@ -11,20 +29,96 @@ test("bwrap confines fs to the workspace + blocks network by default", () => {
   expect(t.shell).toBe(false);
   expect(t.args).toContain("--ro-bind"); // whole fs read-only
   expect(t.args.join(" ")).toContain("--bind /work /work"); // workspace read-write
+  expect(t.args.join(" ")).toContain("--tmpfs /run"); // host daemon sockets are hidden
   expect(t.args).toContain("--unshare-net"); // no network
+  expect(t.args).toContain("--unshare-pid"); // descendants die with the PID namespace
+  expect(t.args).toContain("--as-pid-1");
+  expect(t.args).toContain("--die-with-parent");
+  expect(t.treeContainedOnClose).toBe(true);
   expect(t.args.slice(-3)).toEqual(["bash", "-c", "echo hi"]);
+});
+
+test("sandbox launch uses the exact primitive certified during discovery", () => {
+  const certified = process.platform === "win32" ? "C:\\trusted\\bwrap.exe" : "/trusted/bin/bwrap";
+  const target = buildSandbox("bwrap", "echo hi", "/work", false, undefined, certified, { shellExe: "/trusted/bin/bash" });
+  expect(target.file).toBe(certified);
+  expect(target.args.slice(-3)).toEqual(["/trusted/bin/bash", "-c", "echo hi"]);
 });
 
 test("bwrap keeps network when explicitly allowed", () => {
   expect(buildSandbox("bwrap", "x", "/w", true).args).not.toContain("--unshare-net");
 });
 
+test("read-only bwrap uses isolated tmpfs and re-asserts a root nested below /tmp", () => {
+  const t = buildSandbox("bwrap", "bun test", "/tmp/repo", false, undefined, "/usr/bin/bwrap", {
+    readOnlyWorkspace: true,
+    writableTemp: "/tmp/neko-validator-1",
+  });
+  const joined = t.args.join(" ");
+  expect(joined).toContain("--tmpfs /tmp/neko-validator-1");
+  expect(joined).toContain("--ro-bind /tmp/repo /tmp/repo");
+  expect(joined).not.toContain("--bind /tmp /tmp");
+  expect(joined).not.toContain("--bind /tmp/repo /tmp/repo");
+});
+
+test("sandbox profiles hide trusted benchmark implementation files", () => {
+  const hidden = process.platform === "win32" ? "C:\\host\\neko-core\\frontier-bench.ts" : "/host/neko-core/frontier-bench.ts";
+  const bwrap = buildSandbox("bwrap", "bun test", "/tmp/trial", false, undefined, "/usr/bin/bwrap", {
+    shellExe: "/bin/bash",
+    denyReadFiles: [hidden],
+  });
+  expect(bwrap.args.join(" ")).toContain(`--ro-bind /dev/null ${hidden}`);
+
+  const seatbelt = buildSandbox("sandbox-exec", "bun test", "/tmp/trial", false, undefined, "/usr/bin/sandbox-exec", {
+    shellExe: "/bin/bash",
+    denyReadFiles: [hidden],
+  });
+  expect(seatbelt.args[1]).toContain(`(deny file-read* (literal "${hidden}"))`);
+
+  const srt = JSON.parse(srtSettings("C:\\trial", false, [], [], ["C:\\trial"], [], [hidden]));
+  expect(srt.filesystem.denyRead).toEqual([hidden]);
+});
+
 test("sandbox-exec profile confines writes + denies network", () => {
-  const t = buildSandbox("sandbox-exec", "echo hi", "/work", false);
+  const t = buildSandbox("sandbox-exec", "echo hi", "/work", false, undefined, undefined, { shellExe: "/bin/bash" });
   expect(t.file).toBe("sandbox-exec");
   expect(t.args[1]).toContain("deny file-write*");
   expect(t.args[1]).toContain('(subpath "/work")');
+  expect(t.args[1]).toContain("/var/run/docker.sock");
   expect(t.args[1]).toContain("deny network*");
+  expect(t.args.slice(-3)).toEqual(["/bin/bash", "-c", "echo hi"]);
+});
+
+test("read-only Seatbelt allows only unique temp writes and explicitly denies a root below /tmp", () => {
+  const t = buildSandbox("sandbox-exec", "bun test", "/tmp/repo", false, undefined, "/usr/bin/sandbox-exec", {
+    readOnlyWorkspace: true,
+    writableTemp: "/tmp/neko-validator-1",
+  });
+  const profile = t.args[1];
+  expect(profile).toContain('(allow file-write* (subpath "/tmp/neko-validator-1")');
+  expect(profile).toContain('(deny file-write* (subpath "/tmp/repo"))');
+  expect(profile).not.toContain('(subpath "/private/tmp")');
+});
+
+test("oracle Seatbelt profile can deny target forks while ordinary validators retain subprocesses", () => {
+  const ordinary = buildSandbox("sandbox-exec", "bun test", "/tmp/repo", false, undefined, "/usr/bin/sandbox-exec", {
+    readOnlyWorkspace: true,
+    writableTemp: "/tmp/neko-validator-1",
+    shellExe: "/bin/bash",
+  });
+  const oracle = buildSandbox("sandbox-exec", "exec /usr/bin/bun test.mjs", "/tmp/repo", false, undefined, "/usr/bin/sandbox-exec", {
+    readOnlyWorkspace: true,
+    writableTemp: "/tmp/neko-validator-2",
+    shellExe: "/bin/bash",
+    denyChildProcesses: true,
+  });
+  expect(ordinary.args[1]).not.toContain("deny process-fork");
+  expect(ordinary.args[1]).not.toContain("deny signal");
+  expect(ordinary.treeContainedOnClose).toBeUndefined();
+  expect(oracle.args[1]).toContain("(deny process-fork)");
+  expect(oracle.args[1]).toContain("(deny signal)");
+  expect(oracle.args[1]).toContain("(allow signal (target same-sandbox))");
+  expect(oracle.treeContainedOnClose).toBe(true);
 });
 
 test("srt runs bash via a script file + confines writes + hard-blocks network by default", () => {
@@ -34,11 +128,81 @@ test("srt runs bash via a script file + confines writes + hard-blocks network by
     // Command bytes live in the script FILE; the -c line carries only two quoted paths.
     args: ["--settings", "C:\\tmp\\s.json", "-c", '"C:\\Git\\bin\\bash.exe" "C:\\tmp\\cmd-1.sh"'],
     shell: false,
+    treeContainedOnClose: true,
   });
   const s = JSON.parse(srtSettings("C:\\work", false));
-  expect(s.filesystem).toEqual({ denyRead: [], allowWrite: ["C:\\work"], denyWrite: [] }); // all 4 keys schema-required
+  expect(s.filesystem).toEqual({ denyRead: [], allowRead: [], allowWrite: ["C:\\work"], denyWrite: [] });
   expect(s.network).toEqual({ allowedDomains: [], deniedDomains: ["*"] }); // hard block, denied checked first
 });
+
+test("read-only SRT explicitly denies the project and permits only unique temp writes", () => {
+  const root = "E:\\tmp\\repo";
+  const temp = "E:\\tmp\\neko-validator-1";
+  const bun = "C:\\tools\\bun.exe";
+  const s = JSON.parse(srtSettings(root, false, [], [root, bun], [temp], [root]));
+  expect(s.filesystem).toEqual({
+    denyRead: [],
+    allowRead: [root, bun],
+    allowWrite: [temp],
+    denyWrite: [root],
+  });
+});
+
+test("srt grants only the exact trusted Bun file and derives its Git-Bash bridge from that path", () => {
+  const bun = "C:\\Users\\O'Brien\\tools\\bun.exe";
+  const settings = JSON.parse(srtSettings("C:\\work", false, [], [bun]));
+  expect(settings.filesystem.allowRead).toEqual([bun]);
+  expect(settings.filesystem.allowRead).not.toContain("C:\\Users\\O'Brien\\tools");
+
+  const script = srtScript("C:\\work", "bun --version", bun);
+  expect(script).toContain("bun() { '/c/Users/O'\\''Brien/tools/bun.exe' \"$@\"; }");
+  expect(script).toContain("export -f bun");
+  expect(script).toContain("export NEKO_SRT_BUN_EXE='C:\\Users\\O'\\''Brien\\tools\\bun.exe'");
+  expect(script).toContain("export NoDefaultCurrentDirectoryInExePath=1");
+  expect(script.endsWith("bun --version\n")).toBe(true);
+});
+
+test.skipIf(process.platform !== "win32")("the SRT Bun bridge rejects workspace spoofing and freezes the accepted external identity", () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-srt-bun-resolve-"));
+  const workspace = join(root, "repo");
+  const trusted = join(root, "trusted");
+  try {
+    mkdirSync(workspace, { recursive: true });
+    mkdirSync(trusted, { recursive: true });
+    const spoof = join(workspace, "bun.exe");
+    const external = join(trusted, "bun.exe");
+    writeFileSync(spoof, "spoof");
+    writeFileSync(external, "trusted");
+    expect(resolveSrtBunBridge(workspace, spoof, "", "win32")).toBeNull();
+    const bridge = resolveSrtBunBridge(workspace, external, "", "win32");
+    expect(bridge?.path).toBe(external);
+    expect(bridge?.source).toBe("runtime");
+    expect(Object.isFrozen(bridge)).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a live Windows SRT exposes its exact Bun bridge and cleans all launch material", () => {
+  const bridge = process.platform === "win32" ? resolveSrtBunBridge(process.cwd()) : null;
+  if (process.platform !== "win32" || detectSandbox() !== "srt" || !sandboxActive() || !bridge) return;
+  const target = wrapBash("bun --version", process.cwd(), { enabled: true, allowNetwork: false });
+  const launchDir = target.env?.PATH?.split(delimiter)[0] ?? "";
+  try {
+    expect(target.env?.NEKO_SRT_BUN_EXE).toBe(bridge.path);
+    expect(target.env?.NoDefaultCurrentDirectoryInExePath).toBe("1");
+    expect(readFileSync(join(launchDir, "bun.cmd"), "utf8")).toBe('@"%NEKO_SRT_BUN_EXE%" %*\r\n');
+    const result = spawnSync(target.file, target.args, {
+      cwd: process.cwd(), encoding: "utf8", timeout: 20_000, windowsHide: true,
+      env: { ...process.env, ...target.env },
+    });
+    expect(result.status).toBe(0);
+    expect(String(result.stdout).trim()).toBe(Bun.version);
+  } finally {
+    target.cleanup?.();
+  }
+  expect(existsSync(launchDir)).toBe(false);
+}, 25_000);
 
 test("srt network allow = the sandbox_domains allowlist (no allow-all in srt) + -c without git-bash", () => {
   expect(JSON.parse(srtSettings("C:\\w", true, ["github.com", "*.npmjs.org"])).network).toEqual({
@@ -50,8 +214,60 @@ test("srt network allow = the sandbox_domains allowlist (no allow-all in srt) + 
   expect(t.args).toEqual(["--settings", "s.json", "-c", "x"]);
 });
 
+test("an enabled but unhealthy SRT is refused before launch, while other postures are not", () => {
+  expect(srtLaunchRefusal(true, "srt", { ok: false, detail: "state DB unavailable" }))
+    .toBe("Error: configured SRT sandbox is unusable; bash was not executed: state DB unavailable");
+  expect(srtLaunchRefusal(true, "srt", { ok: true, detail: "healthy" })).toBeNull();
+  expect(srtLaunchRefusal(false, "srt", { ok: false, detail: "down" })).toBeNull();
+  expect(srtLaunchRefusal(true, "none", { ok: false, detail: "absent" })).toBeNull();
+});
+
+test("an SRT SQLite shared-memory failure gives safe disk-space recovery guidance", () => {
+  const out = srtLaunchRefusal(true, "srt", {
+    ok: false,
+    detail: "disk I/O error: Error code 4874: I/O error within the xShmMap method",
+  })!;
+  expect(out).toContain("%LOCALAPPDATA%");
+  expect(out).toContain("may be full");
+  expect(out).toContain("free disk space");
+  expect(out).toContain("re-run `neko doctor`");
+  expect(out).not.toMatch(/move LOCALAPPDATA|copy.*state\.db|acl recover|reinstall|delete/i);
+
+  const launchFailure = withSrtStateVolumeGuidance(
+    "(exit 1 -- command FAILED)\nSQLite error 4874 in xShmMap (SQLITE_IOERR_SHMSIZE)",
+  );
+  expect(launchFailure).toContain("%LOCALAPPDATA%");
+  expect(withSrtStateVolumeGuidance(launchFailure)).toBe(launchFailure);
+});
+
 test("srtScript restores the workspace cwd and single-quote-escapes the root path", () => {
   expect(srtScript("C:\\wo'rk", "echo hi")).toBe("cd 'C:\\wo'\\''rk' || exit 1\necho hi\n");
+});
+
+test("srt settings ignore a poisoned deterministic temp file and clean up unique atomic material", () => {
+  const dir = mkdtempSync(join(tmpdir(), "neko-srt-settings-"));
+  try {
+    const json = srtSettings("C:\\work", false, []);
+    // Regression: the old content-addressed writer reused this predictable path without checking it.
+    const poisoned = join(dir, `neko-srt-${createHash("sha256").update(json).digest("hex").slice(0, 12)}.json`);
+    writeFileSync(poisoned, '{"network":"attacker-controlled"}', "utf8");
+
+    const first = writeEphemeralSrtSettings(dir, "C:\\work", false, []);
+    const second = writeEphemeralSrtSettings(dir, "C:\\work", false, []);
+    expect(first.path).not.toBe(poisoned);
+    expect(first.path).not.toBe(second.path);
+    expect(lstatSync(first.path).isFile()).toBe(true);
+    expect(readFileSync(first.path, "utf8")).toBe(json);
+    expect(readFileSync(poisoned, "utf8")).toContain("attacker-controlled");
+
+    first.cleanup();
+    first.cleanup(); // close/error races are idempotent
+    second.cleanup();
+    expect(existsSync(first.path)).toBe(false);
+    expect(existsSync(second.path)).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("srt command scripts are unique and removed after their launch lifecycle", () => {
@@ -67,6 +283,22 @@ test("srt command scripts are unique and removed after their launch lifecycle", 
     second.cleanup();
     expect(existsSync(first.path)).toBe(false);
     expect(existsSync(second.path)).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the SRT child-process Bun shim is fixed, launch-local, and removed idempotently", () => {
+  const dir = mkdtempSync(join(tmpdir(), "neko-srt-bun-shim-"));
+  try {
+    const shim = writeEphemeralSrtBunShim(dir);
+    const body = readFileSync(shim.path, "utf8");
+    expect(shim.path).toBe(join(dir, "bun.cmd"));
+    expect(body).toBe('@"%NEKO_SRT_BUN_EXE%" %*\r\n');
+    expect(body).not.toContain("Users");
+    shim.cleanup();
+    shim.cleanup();
+    expect(existsSync(shim.path)).toBe(false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -121,19 +353,24 @@ test("plainTarget: git-bash runs `bash -c cmd`, else the raw command via the pla
   expect(plainTarget("echo hi", null)).toEqual({ file: "echo hi", args: [], shell: true });
 });
 
-test("isDockerCommand detects docker/compose/podman (incl. sudo + env prefix), not lookalikes", () => {
+test("isDockerCommand detects direct and common shell-wrapped host-daemon CLIs", () => {
   for (const cmd of ["docker build -t x .", "docker compose up", "docker-compose up -d", "podman run x",
-                     "sudo docker ps", "DOCKER_BUILDKIT=1 docker build .", "  docker   run  x"]) {
+                     "sudo docker ps", "DOCKER_BUILDKIT=1 docker build .", "  docker   run  x",
+                     "env FOO=1 docker ps", "bash -lc 'docker ps'", "cmd /c docker ps",
+                     "powershell -Command docker ps", "ls && docker ps", "/usr/bin/podman ps"]) {
     expect(isDockerCommand(cmd)).toBe(true);
   }
-  for (const cmd of ["dockerize x", "echo docker", "ls && docker ps", "mydocker run", "git commit -m docker"]) {
+  for (const cmd of ["dockerize x", "echo docker", "mydocker run", "git commit -m docker"]) {
     expect(isDockerCommand(cmd)).toBe(false);
   }
 });
 
-test("wrapBash never sandboxes a docker command, even when the sandbox is enabled", () => {
-  // docker must reach the host daemon; sandboxing it just breaks it, so it runs unconfined.
-  const t = wrapBash("docker build -t x .", "/w", { enabled: true, allowNetwork: false });
+test("wrapBash only exposes a host daemon after the explicit capability override", () => {
+  const contained = wrapBash("docker build -t x .", "/w", { enabled: true, allowNetwork: false });
+  if (detectSandbox() !== "none") expect(contained.file.toLowerCase()).not.toContain("bash");
+  contained.cleanup?.();
+
+  const t = wrapBash("docker build -t x .", "/w", { enabled: true, allowNetwork: false, allowHostDaemon: true });
   if (process.platform === "win32" && findWindowsBash()) {
     expect(t.args).toEqual(["-c", "docker build -t x ."]);
   } else {

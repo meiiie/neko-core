@@ -6,7 +6,9 @@ to NVIDIA or a local server, to a terminal or a pipe. That keeps the core testab
 edges swappable as the project grows. Enforced by `test/architecture.test.ts`.
 
 ```
-   bin/neko.ts                              ← entry: parse argv, build adapters, dispatch
+   dist/neko or bin/neko-source.cjs         ← compiled runtime or safe Node source bootstrap
+        │
+   bin/neko.ts                              ← internal entry: parse argv, build adapters, dispatch
         │
    src/ui/  (+ one-shot run printer)        ← drivers (presentation, Ink)
         │
@@ -33,10 +35,10 @@ or a UI framework (Ink/React). Adapters import `core/` (ports) + `shared/`, neve
 
 | Layer | Folder | May import |
 |---|---|---|
-| **Entry** | `bin/neko.ts` | everything |
+| **Entry** | `bin/neko-source.cjs`, `bin/neko.ts` | everything |
 | **UI (drivers)** | `src/ui/` | core, adapters, shared |
 | **Core (domain)** | `src/core/` — `agent` `tools` `tool-runtime` `permissions` `cost` `ports` | core + shared only |
-| **Adapters** | `src/adapters/` — `providers` `mcp` `config` `session` `context` `skills` `project` `doctor` `registry` | core (ports) + shared + SDKs |
+| **Adapters** | `src/adapters/` — `providers` `mcp` `config` `session` `session-handoff` `context` `skills` `project-trust` `public-http` `doctor` `registry` | core (ports) + shared + SDKs |
 | **Shared** | `src/shared/` — `version` | nothing |
 
 **Ports** (`src/core/ports.ts` — interfaces owned by the core, implemented by adapters):
@@ -60,6 +62,92 @@ child-boundary inheritance; CLI, TUI, and depth-one subagents must use it to avo
   genuinely new protocol = a new `Provider` adapter in `adapters/providers.ts`.
 - **Add a slash command** → a `case` in `ui/chat.tsx`'s `handle()` + an entry in `SLASH`.
 - **Add a skill** → drop a `*.md` in `~/.neko-core/skills/`; no code.
+
+## Project control trust boundary
+
+Project-local config, `NEKO.md`/`AGENTS.md`/`CLAUDE.md`, and the `.neko-core/{skills,agents,recipes}`
+trees are quarantined as one bounded snapshot. `neko trust add` records the canonical exact-cwd root,
+file hashes, directory markers, and imported context dependencies in one atomic record under
+`~/.neko-core/trusted-projects.d`. Loaders consume the verified descriptor bytes rather than reopening
+project files. Any add, edit, delete, empty-directory change, symlink/junction, malformed store, or
+bound violation fails closed until the exact cwd is trusted again. Ancestor instructions never inherit
+implicitly. `neko trust status` is read-only; `neko trust revoke` removes that project's record.
+`neko trust add` rejects ordinary non-TTY automation as defense-in-depth friction. TTY presence is not
+proof of a human: a pseudo-terminal can be synthesized. `--yolo` itself never changes project trust,
+and a live sandbox protects the user policy directory; however, unconfined same-user code can invoke the
+CLI through a pseudo-TTY or edit policy state directly. Project trust is not a containment boundary for
+arbitrary host code.
+
+Project trust authorizes recorded declarative data and prompt text, not referenced executable code.
+Project-local hooks and MCP servers are rejected even after trust; configure executable extensions in
+the user-global config. Project skill assets are prompt-only and cannot replace the trusted
+`computer-use` support pack. User-global configuration remains powerful user policy. Child processes
+receive a scrubbed environment: provider/harness credentials do not flow to bash, hooks, computer
+helpers, or MCP by inheritance; an MCP server receives only its explicitly configured environment.
+
+## Execution and delegation boundary
+
+`adapters/tool-registry.ts` emits one authoritative `NEKO DYNAMIC-TOOL RUNTIME` block from the
+effective registry. It names Neko's permission mode, actual shell, live sandbox result, and network
+policy, while explicitly separating provider-native tools, approvals, sandbox, and skills. The Neko
+skill catalog contains only skills the wired Neko `skill` tool can load.
+
+Sandbox availability is behavioral, not inferred from config or an executable name. Windows SRT is
+accepted only from explicit/PATH or Bun-global locations and must pass a bounded launch probe after its
+dedicated account is provisioned. It remains an upstream alpha boundary. Docker and Podman reach a
+host daemon outside that OS sandbox; auto mode refuses those direct commands unless
+`allow_dangerous_bash` is explicitly enabled.
+
+The `task` tool is gated by default. Built-in reviewer/explorer roles receive explicit read-only
+allowlists and may run concurrently; generic/custom tasks retain only inherited authority and are
+serialized because they can mutate the shared worktree. Cancellation propagates into the child agent,
+and providers owned by a one-shot helper or child are disposed when that operation ends. This is
+capability-bounded delegation, not an isolated multi-writer workspace.
+
+## Provider, web, and MCP effect integrity
+
+OpenAI-compatible, Anthropic, and Responses streams bound SSE lines, aggregate bytes, output/reasoning,
+and tool-call fields/counts. They release the reader and accept a turn only after the protocol's complete
+success terminator. Tool callbacks preserve emission order; malformed events, API errors, truncation,
+content filtering, and unknown finish states reject rather than becoming a partial success.
+
+Public HTTP goes through `adapters/public-http.ts`: every DNS A/AAAA answer must be public, the selected
+address is pinned for the connection, every redirect is revalidated, cross-origin credentials are
+stripped, and headers/body/redirects/time are bounded. GitHub and YouTube URLs use the same bounded public
+HTTP path. There is no automatic SAFE `gh`/`yt-dlp` route: PATH resolution, ambient CLI credentials,
+and authenticated private-repository visibility cannot silently widen `web_fetch`. These checks prevent
+loopback/private-address SSRF and unbounded materialization; they do not make an allowed public origin
+trustworthy.
+
+Global stdio MCP launch resolves one canonical executable outside the untrusted workspace, starts from a
+private trusted runtime directory, and receives a minimal OS bootstrap plus only explicitly configured
+environment entries. Relative server arguments therefore resolve under that runtime directory; configure
+an absolute `cwd` (and preferably absolute file arguments) when a server intentionally owns local files.
+MCP calls carry the turn's abort signal and a 60-second total deadline. Once a tool call may have started,
+transport failure returns `outcome unknown` and is never automatically replayed; a later explicit call may
+reconnect. Per-server connection is single-flight and failed connection surfaces are replaced transactionally.
+Composition rejects duplicate tool and prompt identities and routes lazy loads to their sole owner. Bounding
+SDK result materialization before it reaches adapter-side formatting remains open edge work.
+
+## Cross-session handoff boundary
+
+`adapters/session-handoff.ts` provides an immutable, summary-only pending spool for saved local sessions:
+
+```text
+neko handoff send <source-session-id> <target-session-id> <summary...>
+neko handoff inbox <target-session-id>
+/handoff send <target-session-id> <summary...>
+/handoff inbox
+```
+
+The envelope is strictly shaped, size-bounded, published without replacement, and labeled
+`local-unverified`. Source metadata is derived from a validated session, but the target must verify the
+summary against its own workspace. No transcript, file, secret, permission, or executable context is
+attached automatically; sender-authored summary text may itself contain sensitive data and remains
+untrusted. Inbox listing never injects into Agent history and does not acknowledge, consume, or delete.
+The TUI send path first persists the current session and uses it as the source; the inbox targets the
+current session and displays at most 10 entries/2,048 summary characters. It does not poll. Exactly-once
+acceptance/CAS and pagination require a separate design.
 
 ## Browser Bridge boundary
 
@@ -311,8 +399,8 @@ Alt+M and Alt+X remain keyboard-equivalent controls.
 ```
 bun run typecheck      # tsc --noEmit
 bun test               # unit + UI (ink-testing-library) + architecture rule
-bun bin/neko.ts doctor # resolved provider/model/key (no model call)
-bun bin/neko.ts policy # safe/gated boundary audit
+node bin/neko-source.cjs doctor # safe source launch; resolved provider/model/key
+node bin/neko-source.cjs policy # safe/gated boundary audit
 bun run build          # single binary -> dist/neko
 ```
 
