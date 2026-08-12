@@ -273,6 +273,9 @@ export function hardenPrivateHarborRoot(root: string): string {
   const identity = runAclTool(whoami, ["/user", "/fo", "csv", "/nh"]);
   const sid = identity.stdout.trim().match(/,\s*"(S-\d+(?:-\d+)+)"\s*$/i)?.[1];
   if (identity.exitCode !== 0 || !sid) throw new Error("Could not identify the Windows account for Harbor private staging.");
+  // A runner may create the empty temp directory with extra explicit ACEs. Reset it while it is still
+  // credential-free, then remove inheritance and grant only the two principals verified below.
+  const reset = runAclTool(icacls, [canonical, "/reset", "/Q"]);
   const restricted = runAclTool(icacls, [
     canonical,
     "/inheritance:r",
@@ -282,7 +285,7 @@ export function hardenPrivateHarborRoot(root: string): string {
     "/Q",
   ]);
   const verified = runAclTool(icacls, [canonical, "/verify", "/Q"]);
-  if (restricted.exitCode !== 0 || verified.exitCode !== 0) {
+  if (reset.exitCode !== 0 || restricted.exitCode !== 0 || verified.exitCode !== 0) {
     throw new Error("Could not restrict Harbor private staging.");
   }
   const aclScript = [
