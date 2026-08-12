@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,7 +10,7 @@ import { Agent } from "../src/core/agent.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 test("production turn context follows registry root/home and restores full catalogs after an exact lease", () => {
-  const base = mkdtempSync(join(tmpdir(), "neko-turn-context-"));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-turn-context-")));
   const root = join(base, "fixture-project");
   const home = join(base, "fixture-home");
   try {

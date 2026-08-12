@@ -818,7 +818,7 @@ export const __runBenchJsPassesForTest = runJsPasses;
 
 async function runHiddenJsPasses(dir: string, program: HiddenBenchProgram, sourceFiles: readonly string[]): Promise<boolean> {
   const root = realpathSync(resolve(dir));
-  const hiddenDir = mkdtempSync(join(tmpdir(), "neko-bench-hidden-"));
+  const hiddenDir = realpathSync(mkdtempSync(join(tmpdir(), "neko-bench-hidden-")));
   try {
     let totalBytes = 0;
     const seen = new Set<string>();
@@ -851,9 +851,9 @@ async function runHiddenJsPasses(dir: string, program: HiddenBenchProgram, sourc
     // are never a data-URL or file path in a candidate-visible stack; only the harness can emit the
     // unpredictable completion suffix after every assertion has returned.
     const sourcePath = join(hiddenDir, "oracle.mjs");
-    const runner = attestedHiddenVerifierRunner(program, realpathSync(hiddenDir), sourcePath);
+    const runner = attestedHiddenVerifierRunner(program, hiddenDir, sourcePath);
     const result = await runVerifierSource(
-      realpathSync(hiddenDir), "", sourcePath, { runner },
+      hiddenDir, "", sourcePath, { runner },
     );
     return result.ok && result.out.includes("ok");
   } finally {
@@ -1254,7 +1254,7 @@ function buildBenchTrialAgent(
   maxSteps: number,
   onEvent?: (kind: string, data: any) => void,
 ): BenchTrialAgent {
-  const home = mkdtempSync(join(tmpdir(), "neko-bench-home-"));
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "neko-bench-home-")));
   let lease: ToolTurnLease | undefined;
   try {
     const registry = configureToolRegistry(new ToolRegistry(root, "auto", async () => true), cfg);
@@ -1337,7 +1337,7 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number; tasks?:
   const providerFactory = opts.providerFactory ?? (() => getProvider(cfg));
   const seenProviders = new Set<Provider>();
   const t0 = Date.now();
-  const root = mkdtempSync(join(tmpdir(), "neko-bench-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "neko-bench-")));
   const results: BenchResult[] = [];
   try {
     for (const task of tasks) {
@@ -1902,7 +1902,7 @@ export async function runEval(
   // cap at ~25-30; this forces efficiency and bounds wall-clock + token spend. Tasks that can't finish
   // in this budget are marked failed (which is itself a meaningful benchmark signal).
   const fingerprint = benchmarkRunFingerprint(cfg, tasks, maxSteps, undefined, { slaMs });
-  const root = mkdtempSync(join(tmpdir(), "neko-eval-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "neko-eval-")));
   const specs: TaskSpec[] = [];
   const trajectories: EvalTrialTrajectory[] = [];
   let omittedTrajectories = 0;
@@ -2146,7 +2146,7 @@ export async function runHarnessLift(
   opts: { tasks?: BenchTask[]; providerFactory?: BenchProviderFactory } = {},
 ): Promise<LiftReport> {
   const t0 = Date.now();
-  const root = mkdtempSync(join(tmpdir(), "neko-lift-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "neko-lift-")));
   const rows: LiftRow[] = [];
   const tasks = opts.tasks ?? TASKS;
   const maxSteps = cfg.maxSteps;

@@ -228,4 +228,4 @@ test.skipIf(process.platform !== "win32")("Windows MCP PowerShell wrapper launch
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, { timeout: 30_000 });

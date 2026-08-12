@@ -1655,7 +1655,7 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
     expect(statSync(runnerA).nlink).toBe(1);
     expect(statSync(runnerB).nlink).toBe(1);
     expect(await sha256(runnerA)).toBe(await sha256(runnerB));
-    expect(realpathSync(runnerA)).toBe(runnerA);
+    expect(realpathSync(runnerA)).toBe(realpathSync(join(buildA, artifactName)));
 
     child = spawn(runnerA, [], {
       cwd: tempHome,

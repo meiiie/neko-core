@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -19,7 +19,7 @@ function requiredFrontierSandboxAvailable(
 const frontierSandboxAvailable = requiredFrontierSandboxAvailable();
 
 function stage(task: BenchTask): string {
-  const root = mkdtempSync(join(tmpdir(), `neko-frontier-${task.id}-`));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), `neko-frontier-${task.id}-`)));
   for (const [name, content] of Object.entries(task.files)) {
     const path = join(root, name);
     mkdirSync(dirname(path), { recursive: true });

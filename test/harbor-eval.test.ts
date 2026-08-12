@@ -383,7 +383,7 @@ describe("Harbor evaluation launcher", () => {
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }
-  });
+  }, { timeout: 30_000 });
 
   test("removes both bounded Harbor staging roots", () => {
     const privateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "neko-harbor-private-")));

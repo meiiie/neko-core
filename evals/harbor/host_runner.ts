@@ -1176,7 +1176,8 @@ function sameFileIdentity(left: Stats, right: Stats): boolean {
 function stableFileSha256(path: string): string {
   try {
     const canonical = realpathSync.native(path);
-    if (canonical !== path) throw new Error("non-canonical executable");
+    // Windows can expose the same ordinary file through long and 8.3 spellings. Discovery already
+    // returned the canonical target; identity below is bound to the opened object, not its spelling.
     const fd = openSync(canonical, "r");
     let before: Stats;
     let after: Stats;

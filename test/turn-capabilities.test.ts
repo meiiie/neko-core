@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -21,8 +21,8 @@ afterEach(() => {
 });
 
 function fixture(): { root: string; home: string; prompt: string } {
-  const root = mkdtempSync(join(tmpdir(), "neko-turn-root-"));
-  const home = mkdtempSync(join(tmpdir(), "neko-turn-home-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "neko-turn-root-")));
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "neko-turn-home-")));
   tempDirs.push(root, home);
   mkdirSync(join(root, "src"), { recursive: true });
   writeFileSync(join(root, "src", "target.ts"), "export const answer = 41;\n", "utf8");

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   renameSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   truncateSync,
@@ -347,7 +348,7 @@ test("rejects hard-linked referenced files", () => {
 });
 
 function makePack(taskCount = 12): PackFixture {
-  const base = mkdtempSync(join(tmpdir(), "neko-frontier-pack-"));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-frontier-pack-")));
   tempDirs.push(base);
   const root = join(base, "pack");
   mkdirSync(root);

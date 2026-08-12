@@ -175,7 +175,8 @@ test("Neko and Codex auth/control stores stay hidden across every safe filesyste
     expect(search).toContain("public.txt");
     expect(search).toContain("fixtures/auth.json");
     expect(search).not.toContain("hidden in");
-    for (const rel of hidden) expect(search).not.toContain(rel.replace(/\\/g, "/"));
+    const searchedPaths = search.split(/\r?\n/).map((line) => line.split(":", 1)[0]);
+    for (const rel of hidden) expect(searchedPaths).not.toContain(rel.replace(/\\/g, "/"));
     const stateSearch = String(await registry.execute("search", {
       path: ".neko-core",
       pattern: "NEKO_AUTH_CONTROL_SENTINEL",
@@ -191,7 +192,8 @@ test("Neko and Codex auth/control stores stay hidden across every safe filesyste
 
     const glob = String(await registry.execute("glob", { pattern: "**/*" }));
     expect(glob).toContain("fixtures/auth.json");
-    for (const rel of hidden) expect(glob).not.toContain(rel.replace(/\\/g, "/"));
+    const globbedPaths = glob.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    for (const rel of hidden) expect(globbedPaths).not.toContain(rel.replace(/\\/g, "/"));
     const stateGlob = String(await registry.execute("glob", { path: ".neko-core", pattern: "**/*" }));
     expect(stateGlob).toContain(".neko-core/remote.jsonschema");
     const stateGlobPaths = new Set(stateGlob.split(/\r?\n/));

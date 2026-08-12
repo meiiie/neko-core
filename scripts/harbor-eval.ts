@@ -491,7 +491,9 @@ export function buildTrustedExecutablePath(
   executables: readonly string[],
   platform: NodeJS.Platform = process.platform,
 ): string {
-  const paths = platform === "win32" ? win32 : posix;
+  // The values are current-host filesystem paths. `platform` controls lookup/case behavior in
+  // tests; it must not make a POSIX runner parse its real temp paths with win32.resolve.
+  const paths = process.platform === "win32" ? win32 : posix;
   const pathDelimiter = platform === "win32" ? ";" : ":";
   const workspace = realpathSync.native(resolve(root));
   const directories: string[] = [];

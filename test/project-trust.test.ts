@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,7 +20,7 @@ const tempDirs: string[] = [];
 let savedNekoEnv: Record<string, string | undefined> = {};
 
 function fixture(): { root: string; home: string } {
-  const base = mkdtempSync(join(tmpdir(), "neko-project-trust-"));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-project-trust-")));
   tempDirs.push(base);
   const root = join(base, "project");
   const home = join(base, "home");
@@ -489,7 +489,8 @@ test("concurrent trust additions and revocation cannot lose or resurrect records
   expect(inspectProjectTrust(first, home).state).toBe("untrusted");
   expect(inspectProjectTrust(second, home).state).toBe("trusted");
   expect(inspectProjectTrust(third, home).state).toBe("trusted");
-  expect(listTrustedProjects(home).map((project) => project.root).sort()).toEqual([second, third].sort());
+  expect(listTrustedProjects(home).map((project) => project.root).sort())
+    .toEqual([second, third].map((project) => realpathSync.native(project)).sort());
 }, { timeout: 30_000 });
 
 test("concurrent additions at trust-store capacity remain readable and bounded", async () => {

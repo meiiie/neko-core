@@ -44,7 +44,10 @@ export function executableOnPath(
   workspace = process.cwd(),
   platform = process.platform,
 ): string | null {
-  const workspaceRoot = resolve(workspace);
+  const requestedWorkspace = resolve(workspace);
+  const workspaceRoot = (() => {
+    try { return realpathSync(requestedWorkspace); } catch { return requestedWorkspace; }
+  })();
   const withinWorkspace = (candidate: string): boolean => {
     const normalized = resolve(candidate);
     const base = platform === "win32" ? workspaceRoot.toLowerCase() : workspaceRoot;
@@ -55,7 +58,10 @@ export function executableOnPath(
   for (const rawDir of pathValue.split(delimiter)) {
     const trimmed = rawDir.trim().replace(/^"|"$/g, "");
     if (!trimmed) continue;
-    const dir = resolve(trimmed);
+    const requestedDir = resolve(trimmed);
+    const dir = (() => {
+      try { return realpathSync(requestedDir); } catch { return requestedDir; }
+    })();
     // A repo may deliberately add itself to PATH. That must not make it a source of confinement.
     if (withinWorkspace(dir)) continue;
     for (const name of names) {

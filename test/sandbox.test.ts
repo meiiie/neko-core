@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -17,7 +17,7 @@ test("security executables are resolved from PATH without trusting the workspace
     writeFileSync(join(workspace, "srt.exe"), "fake-workspace");
     writeFileSync(join(trusted, "srt.exe"), "trusted-path");
     expect(executableOnPath("srt.exe", [workspace, trusted].join(delimiter), workspace, "win32"))
-      .toBe(join(trusted, "srt.exe"));
+      .toBe(realpathSync(join(trusted, "srt.exe")));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

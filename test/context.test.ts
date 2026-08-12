@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -75,7 +75,7 @@ test("cross-project memory stays separate from the global life story", () => {
 });
 
 test("loads NEKO.md from the project root", () => {
-  const base = mkdtempSync(join(tmpdir(), "neko-ctx-"));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-ctx-")));
   const root = join(base, "project");
   const home = join(base, "home");
   try {
@@ -90,7 +90,7 @@ test("loads NEKO.md from the project root", () => {
 });
 
 test("loads AGENTS.md project instructions for Codex-compatible repositories", () => {
-  const base = mkdtempSync(join(tmpdir(), "neko-agents-"));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-agents-")));
   const root = join(base, "project");
   const home = join(base, "home");
   try {
@@ -110,7 +110,7 @@ test("context source contains no literal NUL byte (keeps text tools working)", (
 });
 
 test("expands @import references inline", () => {
-  const base = mkdtempSync(join(tmpdir(), "neko-imp-"));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-imp-")));
   const root = join(base, "project");
   const home = join(base, "home");
   try {
@@ -126,7 +126,7 @@ test("expands @import references inline", () => {
 });
 
 test("context imports cannot escape their instruction directory or inline credentials", () => {
-  const base = mkdtempSync(join(tmpdir(), "neko-context-boundary-"));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-context-boundary-")));
   const root = join(base, "project");
   const home = join(base, "home");
   try {
