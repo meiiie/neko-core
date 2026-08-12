@@ -80,3 +80,23 @@ test("CostTracker reports cache writes separately without inflating context toke
   expect(t.totalTokens).toBe(105);
   expect(t.summary()).toContain("80 cache-written");
 });
+
+test("CostTracker never reports an aggregated cache sum as larger than the live last request", () => {
+  const t = new CostTracker();
+  t.add({
+    prompt_tokens: 360,
+    completion_tokens: 45,
+    cached_tokens: 200,
+    context_tokens: 140,
+    context_cached_tokens: 110,
+    model_calls: 3,
+  });
+  expect(t.cachedTokens).toBe(200);
+  expect(t.lastPrompt).toBe(140);
+  expect(t.lastCached).toBe(110);
+  expect(t.summary()).toContain("last request: 140 input / 45 output (110 input cached)");
+
+  const legacy = new CostTracker();
+  legacy.add({ prompt_tokens: 360, cached_tokens: 200, context_tokens: 140, model_calls: 3 });
+  expect(legacy.lastCached).toBe(140); // old aggregate shape is clamped, never displayed as impossible
+});

@@ -25,9 +25,9 @@ Bạn là **trợ lý mua hàng (Purchasing Officer)**: nhận một danh sách 
    # Bản đã cài / binary standalone
    neko procurement source-plan "<IDENTIFIER>" --kind auto --category laptop
    # Source checkout, khi `neko` chưa có trên PATH
-   bun bin/neko.ts procurement source-plan "<IDENTIFIER>" --kind auto --category laptop
+   node bin/neko-source.cjs procurement source-plan "<IDENTIFIER>" --kind auto --category laptop
    ```
-   Không được giả định có global `neko` khi session đang chạy bằng `bun bin/neko.ts run`; trong source mode dùng dòng fallback ngay trên. `auto` nhận SKU trộn chữ-số hoặc GTIN hợp lệ; nếu nguồn gắn nhãn SKU chỉ-số/chỉ-chữ, dùng `--kind sku`; MPN chữ-only/có hậu tố `#` dùng `--kind mpn` (`--kind gtin` để ép kiểm tra GTIN). `--category phone|pc|generic`; thêm `--domain shop.vn` cho merchant mới. Mở `indexUrl`, chạy query exact-SKU mở và **từng** query retailer helper trả về. **KHÔNG gộp nhiều `site:` bằng `OR`**; backend fallback yếu thường trả rỗng. Không chỉ search `SKU + merchant đã biết` — như ca thật `83KY001VVN + Xgear` đã bỏ sót FPT/An Khang.
+   Không được giả định có global `neko` khi session đang chạy từ source; dùng Node bootstrap ở dòng fallback ngay trên. `auto` nhận SKU trộn chữ-số hoặc GTIN hợp lệ; nếu nguồn gắn nhãn SKU chỉ-số/chỉ-chữ, dùng `--kind sku`; MPN chữ-only/có hậu tố `#` dùng `--kind mpn` (`--kind gtin` để ép kiểm tra GTIN). `--category phone|pc|generic`; thêm `--domain shop.vn` cho merchant mới. Mở `indexUrl`, chạy query exact-SKU mở và **từng** query retailer helper trả về. **KHÔNG gộp nhiều `site:` bằng `OR`**; backend fallback yếu thường trả rỗng. Không chỉ search `SKU + merchant đã biết` — như ca thật `83KY001VVN + Xgear` đã bỏ sót FPT/An Khang.
 3. **RECEIPT:** ghi mỗi target `index/open_web/retailer | URL/domain | hit/no_result/blocked | link bằng chứng`. `no_result` và `blocked` vẫn là dữ liệu coverage, không được im lặng bỏ qua.
 4. **SUFFICIENCY TRƯỚC KHI DỪNG:** đúng identity/SKU (không gộp biến thể gần giống); đã thử đủ 3 channel helper yêu cầu; đã mở trang gốc của tối đa 3–5 ứng viên đầu/cuối bảng, hoặc mở tất cả exact-match offer nếu chỉ có 1–2; đã tách giá bán hiện tại, tồn kho và tình trạng; đã chạy `price-table.ts`. Dừng được với 1–2 offer khi các bước này đủ; mức claim vẫn do coverage receipt quyết định.
 5. **CLAIM TRUNG THỰC:** coverage thiếu → phải viết **“cao nhất đã xác minh trong các nguồn đã khảo sát”** (hoặc “thấp nhất…”), kèm số nguồn/domain và các target blocked — không tuyên bố tuyệt đối “cao nhất tại Việt Nam”. Với max, tách **cao nhất đang niêm yết công khai** khỏi **cao nhất còn hàng/đặt được**.
@@ -54,7 +54,7 @@ Script in: **bảng đã sắp thấp→cao + cao→thấp**, **THẤP NHẤT / 
 ## Thu nhận product identity (chi tiết hỗ trợ contract)
 
 - **Người dùng/link đã cho mã:** coi là exact-identity candidate, nhưng vẫn đối chiếu mã + cấu hình trên trang hãng hoặc hai trang bán độc lập trước khi gộp offer.
-- **Có ảnh:** đọc dòng/dung lượng/mã trên bao bì bằng vision (`neko run --profile nvidia --image <ảnh> "Sản phẩm gì?"`; source-mode fallback: `bun bin/neko.ts run --profile nvidia --image <ảnh> "Sản phẩm gì?"`). Resize/crop ảnh; mã đầy đủ thường ở mặt sau. Vision chưa đọc được mã thì giữ là candidate, không tự bịa SKU.
+- **Có ảnh:** đọc dòng/dung lượng/mã trên bao bì bằng vision (`neko run --profile nvidia --image <ảnh> "Sản phẩm gì?"`; source-mode fallback: `node bin/neko-source.cjs run --profile nvidia --image <ảnh> "Sản phẩm gì?"`). Resize/crop ảnh; mã đầy đủ thường ở mặt sau. Vision chưa đọc được mã thì giữ là candidate, không tự bịa SKU.
 - **Chỉ có mô tả:** bắt đầu broad discovery và ghi **“chưa chốt SKU, giá tham khảo theo dòng”**. Ngay khi bất kỳ kết quả nào lộ mã, quay lại bước PIVOT của contract; không được tiếp tục coi identity là mơ hồ.
 
 ## ⭐⭐ KIẾN TRÚC 2 TẦNG cho MỌI khảo giá: INDEX (aggregator) → VERIFY (trang shop)

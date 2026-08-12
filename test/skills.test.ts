@@ -3,7 +3,17 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { builtinSkillsDir } from "../src/adapters/builtin-skills.ts";
-import { loadSkill, matchesSkill, matchSkill, matchSkills, skillsContextBlock } from "../src/adapters/skills.ts";
+import { Agent } from "../src/core/agent.ts";
+import { ToolRegistry } from "../src/core/tool-runtime.ts";
+import {
+  applySkillPolicyForTurn,
+  isSingleFileMicrotask,
+  loadSkill,
+  matchesSkill,
+  matchSkill,
+  matchSkills,
+  skillsContextBlock,
+} from "../src/adapters/skills.ts";
 
 const ORIG = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
 afterEach(() => {
@@ -102,10 +112,156 @@ test("inferred block indentation preserves an indented leading hash line as cont
 
 test("skills context distinguishes Neko skills from provider-located skills", () => {
   const context = skillsContextBlock();
+  expect(context).toContain("# NEKO SKILL CATALOG");
   expect(context).toContain("MUST call the `skill` tool to load it BEFORE planning or acting");
-  expect(context).toContain("only names from this Neko catalog");
-  expect(context).toContain("file/resource locator");
-  expect(context).toContain("follow that catalog's loader instructions");
+  expect(context).toContain("single-file microtask");
+  expect(context).toContain("skip generic debugging/TDD skills");
+  expect(context).toContain("Provider-native skill names are a separate catalog");
+  expect(context).toContain("not callable through this tool");
+});
+
+test("an exact single-file microtask skips generic process skills through Agent and ToolRegistry", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nk-skill-turn-"));
+  const home = mkdtempSync(join(tmpdir(), "nk-skill-home-"));
+  mkdirSync(join(root, "src"), { recursive: true });
+  mkdirSync(join(root, "test"), { recursive: true });
+  writeFileSync(join(root, "src", "chunk.ts"), "export const chunk = () => 'WRONG';\n", "utf8");
+  writeFileSync(
+    join(root, "test", "chunk.test.ts"),
+    "import { expect, test } from 'bun:test'; import { chunk } from '../src/chunk'; test('chunk', () => expect(chunk()).toBe('RIGHT'));\n",
+    "utf8",
+  );
+
+  const instruction =
+    "Fix the bug in src/chunk.ts so all existing tests pass. Make the smallest correct change. " +
+    "Run the tests. Do not change tests or add dependencies. When done, briefly report the changed file and test result.";
+  expect(isSingleFileMicrotask(instruction)).toBe(true);
+
+  const registry = new ToolRegistry(root, "auto", () => true);
+  registry.loadSkill = (name) => {
+    const skill = loadSkill(name, root, home);
+    return skill ? { body: skill.body, dir: skill.dir } : null;
+  };
+  applySkillPolicyForTurn(registry, instruction, root, home);
+
+  const calls: string[] = [];
+  let firstSchemas: string[] = [];
+  let firstContext = "";
+  let phase = 0;
+  const provider = {
+    async complete(messages: any[], schemas: any[]) {
+      if (phase === 0) {
+        firstContext = messages
+          .filter((message) => message.role === "system")
+          .map((message) => String(message.content))
+          .join("\n");
+        firstSchemas = schemas.map((schema) => schema.function.name);
+        if (firstSchemas.includes("skill") || firstContext.includes("# NEKO SKILL CATALOG")) {
+          phase = 1;
+          calls.push("skill");
+          return { content: null, tool_calls: [{ id: "s1", name: "skill", arguments: { name: "systematic-debugging" } }] };
+        }
+        phase = 2;
+        calls.push("read_file");
+        return { content: null, tool_calls: [{ id: "r1", name: "read_file", arguments: { path: "src/chunk.ts" } }] };
+      }
+      if (phase === 1) {
+        phase = 2;
+        calls.push("read_file");
+        return { content: null, tool_calls: [{ id: "r1", name: "read_file", arguments: { path: "src/chunk.ts" } }] };
+      }
+      if (phase === 2) {
+        phase = 3;
+        calls.push("edit");
+        return { content: null, tool_calls: [{ id: "e1", name: "edit", arguments: { path: "src/chunk.ts", old: "WRONG", new: "RIGHT" } }] };
+      }
+      if (phase === 3) {
+        phase = 4;
+        calls.push("bash");
+        return { content: null, tool_calls: [{ id: "b1", name: "bash", arguments: { command: "bun test" } }] };
+      }
+      return { content: "Changed src/chunk.ts; bun test passed.", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({
+    provider: provider as any,
+    tools: registry,
+    dynamicContext: () => skillsContextBlock(registry, root, home),
+    maxSteps: 8,
+  });
+
+  expect(await agent.run(instruction)).toContain("bun test passed");
+  expect(firstSchemas).not.toContain("skill");
+  expect(firstContext).not.toContain("# NEKO SKILL CATALOG");
+  expect(calls).toEqual(["read_file", "edit", "bash"]);
+  expect(String(await registry.execute("skill", { name: "systematic-debugging" }))).toContain("unavailable for this turn");
+}, { timeout: 15_000 });
+
+test("explicit and domain work keep the skill tool, catalog, and direct loader available", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nk-skill-domain-"));
+  const home = mkdtempSync(join(tmpdir(), "nk-skill-domain-home-"));
+  const registry = new ToolRegistry(root, "auto", () => true);
+  registry.loadSkill = (name) => {
+    const skill = loadSkill(name, root, home);
+    return skill ? { body: skill.body, dir: skill.dir } : null;
+  };
+  const suffix =
+    "Fix the bug in src/chunk.ts so tests pass. Make the smallest correct change and run the tests.";
+  const prompts = [
+    `Use the systematic-debugging skill. ${suffix}`,
+    `Use systematic-debugging. ${suffix}`,
+    `Load test-driven-development. ${suffix}`,
+    `Audit the security vulnerability carefully. ${suffix}`,
+    "Fix the authentication bypass in src/auth.ts with the smallest correct change and run tests.",
+    `Fix the SQL database query. ${suffix}`,
+    `Verify the browser GUI visually with a screenshot. ${suffix}`,
+    "Fix the UI rendering bug in src/view.tsx with the smallest correct change and run tests.",
+    `Fix the Word document artifact generation. ${suffix}`,
+    "Fix CSV artifact generation in src/export.ts with the smallest correct change and run tests.",
+    `Research the latest approach before changing code. ${suffix}`,
+    "Look up authoritative docs, then fix src/client.ts with the smallest correct change and run tests.",
+  ];
+
+  for (const prompt of prompts) {
+    expect(isSingleFileMicrotask(prompt)).toBe(false);
+    applySkillPolicyForTurn(registry, prompt, root, home);
+    expect(registry.schemas().map((schema) => schema.function.name)).toContain("skill");
+    expect(skillsContextBlock(registry, root, home)).toContain("# NEKO SKILL CATALOG");
+  }
+  expect(isSingleFileMicrotask(`Do not load the systematic-debugging skill. ${suffix}`)).toBe(true);
+  for (const ambiguous of [
+    "Fix src/one.ts and src/two.ts, make the smallest changes, then run tests.",
+    "Fix the bug in src/one.ts with the smallest change.",
+    "Run the tests for src/one.ts.",
+    "Refactor src/one.ts and run tests.",
+  ]) expect(isSingleFileMicrotask(ambiguous)).toBe(false);
+  expect(String(await registry.execute("skill", { name: "systematic-debugging" }))).toContain("# Skill: systematic-debugging");
+
+  applySkillPolicyForTurn(registry, suffix, root, home);
+  expect(registry.schemas().map((schema) => schema.function.name)).not.toContain("skill");
+  applySkillPolicyForTurn(registry, "Refactor the whole codebase without changing behavior.", root, home);
+  expect(registry.schemas().map((schema) => schema.function.name)).toContain("skill");
+
+  const custom = join(home, ".neko-core", "skills", "custom-chunk-domain");
+  mkdirSync(custom, { recursive: true });
+  writeFileSync(
+    join(custom, "SKILL.md"),
+    "---\nname: custom-chunk-domain\ndescription: Required custom rules for chunk work\nmatch: src/chunk\\.ts\n---\nCustom domain instructions.\n",
+    "utf8",
+  );
+  applySkillPolicyForTurn(registry, suffix, root, home);
+  expect(registry.schemas().map((schema) => schema.function.name)).toContain("skill");
+  expect(skillsContextBlock(registry, root, home)).toContain("custom-chunk-domain");
+
+  const customExplicit = join(home, ".neko-core", "skills", "custom-process");
+  mkdirSync(customExplicit, { recursive: true });
+  writeFileSync(
+    join(customExplicit, "SKILL.md"),
+    "---\nname: custom-process\ndescription: Private procedure with unrelated words\n---\nCustom process instructions.\n",
+    "utf8",
+  );
+  applySkillPolicyForTurn(registry, `Use custom-process. ${suffix}`, root, home);
+  expect(registry.schemas().map((schema) => schema.function.name)).toContain("skill");
 });
 
 test("the bundled web-app skill points to resources that resolve from its own directory", () => {
@@ -144,12 +300,12 @@ test("procurement makes the exact-SKU cascade executable before detailed tactics
   expect(skill.body).toContain("KHÔNG gộp nhiều `site:` bằng `OR`");
   expect(skill.body).toContain("cao nhất đã xác minh trong các nguồn đã khảo sát");
   expect(skill.body).toContain('neko procurement source-plan "<IDENTIFIER>"');
-  expect(skill.body).toContain('bun bin/neko.ts procurement source-plan "<IDENTIFIER>"');
+  expect(skill.body).toContain('node bin/neko-source.cjs procurement source-plan "<IDENTIFIER>"');
   expect(skill.body).not.toContain('bun "<skill files dir>/scripts/source-plan.ts"');
   expect(skill.body).toContain("--kind sku");
   expect(skill.body).toContain("--kind mpn");
   expect(skill.body).toContain("neko run --profile nvidia --image");
-  expect(skill.body).toContain("bun bin/neko.ts run --profile nvidia --image");
+  expect(skill.body).toContain("node bin/neko-source.cjs run --profile nvidia --image");
   expect(skill.body).not.toContain("env NEKO_MODEL=");
   expect(skill.body).toContain("tối đa 3–5");
   expect(skill.body).toContain("nếu chỉ có 1–2");

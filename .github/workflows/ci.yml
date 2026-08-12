@@ -22,11 +22,41 @@ jobs:
           # see the comment there). Revert BOTH to `latest` at the first stable after 1.3.14.
           bun-version: canary
       - run: bun install --frozen-lockfile
+      - name: prepare the Linux sandbox primitive
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            original_userns="$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)"
+            echo "NEKO_CI_APPARMOR_USERNS_ORIGINAL=$original_userns" >> "$GITHUB_ENV"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - run: bun run typecheck
       - name: cross-check with stable 5.9 (typecheck runs 7.0-rc; drop this step at 7.0 GA)
         run: bun run typecheck:stable
       - run: bun test
+      - name: require a live benchmark-oracle sandbox
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          NEKO_REQUIRE_SANDBOX_TESTS: "1"
+        run: bun test test/bench-eval-e2e.test.ts
+      - name: restore the Linux sandbox host policy
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          if [ -n "${NEKO_CI_APPARMOR_USERNS_ORIGINAL:-}" ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns="$NEKO_CI_APPARMOR_USERNS_ORIGINAL"
+          fi
       - name: policy audit (safe/gated boundary)
-        run: bun bin/neko.ts policy
+        run: node bin/neko-source.cjs policy
       - name: build the single binary (bakes NODE_ENV=production - see package.json)
         run: bun run build
+      - name: verify the prebuilt binary ignores cwd autoload files
+        shell: pwsh
+        run: |
+          $name = if ($env:RUNNER_OS -eq 'Windows') { 'neko.exe' } else { 'neko' }
+          $env:NEKO_TEST_PREBUILT = Join-Path $env:GITHUB_WORKSPACE (Join-Path 'dist' $name)
+          bun test test/bun-autoload-safety.test.ts

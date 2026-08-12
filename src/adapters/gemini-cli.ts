@@ -1,11 +1,12 @@
 /** Official Gemini CLI ACP discovery, authentication, and newline-delimited JSON-RPC transport. */
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
 import { dirname, extname, join, posix, win32 } from "node:path";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 
 import { atomicWriteFileSync } from "../shared/atomic.ts";
+import { scrubChildEnv } from "../shared/child-env.ts";
 import { homeDir } from "../shared/home.ts";
 import { VERSION } from "../shared/version.ts";
 
@@ -46,13 +47,90 @@ export interface GeminiUsageSnapshot {
   models: Array<{ model: string; inputTokens: number; outputTokens: number }>;
 }
 
-interface DiscoveryOptions {
+export interface DiscoveryOptions {
   env?: NodeJS.ProcessEnv;
   home?: string;
   platform?: NodeJS.Platform;
+  cwd?: string;
   pathExists?: (path: string) => boolean;
+  realpath?: (path: string) => string;
+  isRegularFile?: (path: string) => boolean;
   readText?: (path: string) => string;
   runVersion?: (executable: GeminiExecutable) => string | null;
+}
+
+interface ExecutableChecks {
+  platform: NodeJS.Platform;
+  cwd: string;
+  realpath: (path: string) => string;
+  isRegularFile: (path: string) => boolean;
+  readPrefix?: (path: string) => string;
+}
+
+interface LaunchCommand {
+  command: string;
+  args: string[];
+}
+
+function realPath(path: string): string {
+  return realpathSync.native(path);
+}
+
+function isRegularFile(path: string): boolean {
+  try { return statSync(path).isFile(); }
+  catch { return false; }
+}
+
+function readPrefix(path: string): string {
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(256);
+    const bytes = readSync(fd, buffer, 0, buffer.length, 0);
+    return buffer.toString("utf8", 0, bytes);
+  } finally { closeSync(fd); }
+}
+
+function withinPath(root: string, candidate: string, platform: NodeJS.Platform): boolean {
+  const paths = platform === "win32" ? win32 : posix;
+  const relative = paths.relative(root, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${paths.sep}`) && !paths.isAbsolute(relative));
+}
+
+function canonicalExecutable(path: string, allowWorkspace: boolean, checks: ExecutableChecks): string | null {
+  const paths = checks.platform === "win32" ? win32 : posix;
+  if (!paths.isAbsolute(path) || path.includes("\0")) return null;
+  let canonical: string;
+  let workspace: string;
+  try {
+    canonical = checks.realpath(path);
+    workspace = checks.realpath(checks.cwd);
+  } catch {
+    return null;
+  }
+  if (!paths.isAbsolute(canonical) || !checks.isRegularFile(canonical)) return null;
+  if (!allowWorkspace && withinPath(workspace, canonical, checks.platform)) return null;
+  return canonical;
+}
+
+function safeChildPath(value: string | undefined, checks: ExecutableChecks): string {
+  const paths = checks.platform === "win32" ? win32 : posix;
+  const delimiter = checks.platform === "win32" ? ";" : ":";
+  let workspace: string;
+  try { workspace = checks.realpath(checks.cwd); }
+  catch { return ""; }
+  const seen = new Set<string>();
+  const safe: string[] = [];
+  for (const directory of String(value ?? "").split(delimiter).filter(Boolean)) {
+    const unquoted = directory.trim().replace(/^"(.*)"$/, "$1");
+    if (!unquoted || !paths.isAbsolute(unquoted)) continue;
+    let canonical: string;
+    try { canonical = checks.realpath(unquoted); }
+    catch { continue; }
+    if (!paths.isAbsolute(canonical) || withinPath(workspace, canonical, checks.platform)) continue;
+    const key = checks.platform === "win32" ? canonical.toLowerCase() : canonical;
+    if (!seen.has(key)) { seen.add(key); safe.push(canonical); }
+  }
+  return safe.join(delimiter);
 }
 
 interface ManagedManifest {
@@ -204,44 +282,165 @@ export function compareGeminiVersions(left: string, right: string): number {
   return 0;
 }
 
-function systemCandidates(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string[] {
+function systemCandidates(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): Array<{ path: string; source: "environment" | "path" }> {
   const explicit = String(env.NEKO_GEMINI_PATH ?? "").trim();
-  const out = explicit ? [explicit] : [];
+  const paths = platform === "win32" ? win32 : posix;
+  const out: Array<{ path: string; source: "environment" | "path" }> = [];
+  // NEKO_GEMINI_PATH is an explicit user grant. It may point into the workspace, but it must still
+  // name an absolute regular file. Ordinary PATH discovery never receives that exception.
+  if (explicit && paths.isAbsolute(explicit)) out.push({ path: explicit, source: "environment" });
   const names = platform === "win32" ? ["gemini.cmd", "gemini.exe", "gemini.ps1", "gemini.bat"] : ["gemini"];
   const delimiter = platform === "win32" ? ";" : ":";
-  const paths = platform === "win32" ? win32 : posix;
   for (const directory of String(env.PATH ?? "").split(delimiter).filter(Boolean)) {
-    for (const name of names) out.push(paths.join(directory.replace(/^"|"$/g, ""), name));
+    const unquoted = directory.trim().replace(/^"(.*)"$/, "$1");
+    if (!unquoted || !paths.isAbsolute(unquoted)) continue;
+    const root = unquoted;
+    for (const name of names) out.push({ path: paths.join(root, name), source: "path" });
   }
-  return [...new Set(out)];
+  const seen = new Set<string>();
+  return out.filter((candidate) => {
+    const key = platform === "win32" ? candidate.path.toLowerCase() : candidate.path;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
-function commandFor(executable: GeminiExecutable, args: string[], platform = process.platform): { command: string; args: string[]; shell?: boolean } {
+function trustedNode(env: NodeJS.ProcessEnv, cwd: string, checks?: ExecutableChecks): string | null {
+  const activeChecks: ExecutableChecks = checks ?? {
+    platform: process.platform,
+    cwd,
+    realpath: realPath,
+    isRegularFile,
+  };
+  const paths = activeChecks.platform === "win32" ? win32 : posix;
+  const delimiter = activeChecks.platform === "win32" ? ";" : ":";
+  const name = activeChecks.platform === "win32" ? "node.exe" : "node";
+  for (const directory of String(env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    const unquoted = directory.trim().replace(/^"(.*)"$/, "$1");
+    if (!unquoted || !paths.isAbsolute(unquoted)) continue;
+    const root = unquoted;
+    const nodePath = paths.join(root, name);
+    const canonical = canonicalExecutable(nodePath, false, activeChecks);
+    if (canonical) return canonical;
+  }
+  return null;
+}
+
+function commandFor(
+  executable: GeminiExecutable,
+  args: string[],
+  platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
+  checks?: ExecutableChecks,
+): LaunchCommand | null {
   if (executable.runtime) return { command: executable.runtime, args: [executable.path, ...args] };
   const extension = extname(executable.path).toLowerCase();
-  if (platform === "win32" && (extension === ".cmd" || extension === ".bat")) {
-    const root = dirname(executable.path);
-    const bundle = win32.join(root, "node_modules", "@google", "gemini-cli", "bundle", "gemini.js");
-    if (existsSync(bundle)) {
-      const localNode = win32.join(root, "node.exe");
-      return { command: existsSync(localNode) ? localNode : "node.exe", args: [bundle, ...args] };
-    }
-    return { command: executable.path, args, shell: true };
+  if (platform === "win32" && (extension === ".cmd" || extension === ".bat" || extension === ".ps1")) {
+    const activeChecks: ExecutableChecks = checks ?? {
+      platform,
+      cwd,
+      realpath: realPath,
+      isRegularFile,
+    };
+    const root = win32.dirname(executable.path);
+    const rawBundle = win32.join(root, "node_modules", "@google", "gemini-cli", "bundle", "gemini.js");
+    const bundle = canonicalExecutable(rawBundle, executable.source === "environment", activeChecks);
+    const node = trustedNode(env, cwd, activeChecks);
+    if (bundle && node) return { command: node, args: [bundle, ...args] };
+    return null;
   }
-  if (platform === "win32" && extension === ".ps1") {
-    return { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", executable.path, ...args] };
+  if (platform !== "win32" && (extension === ".js" || extension === ".mjs" || extension === ".cjs")) {
+    const activeChecks: ExecutableChecks = checks ?? { platform, cwd, realpath: realPath, isRegularFile };
+    const node = trustedNode(env, cwd, activeChecks);
+    return node ? { command: node, args: [executable.path, ...args] } : null;
+  }
+  if (platform !== "win32" && !extension) {
+    const activeChecks: ExecutableChecks = checks ?? { platform, cwd, realpath: realPath, isRegularFile, readPrefix };
+    let prefix = "";
+    try { prefix = (activeChecks.readPrefix ?? readPrefix)(executable.path); }
+    catch { return null; }
+    if (/^#![^\r\n]*\bnode(?:\s|$)/.test(prefix)) {
+      const node = trustedNode(env, cwd, activeChecks);
+      return node ? { command: node, args: [executable.path, ...args] } : null;
+    }
   }
   return { command: executable.path, args };
+}
+
+export function __geminiLaunchForTest(
+  executable: GeminiExecutable,
+  args: string[],
+  options: {
+    platform: NodeJS.Platform;
+    env: NodeJS.ProcessEnv;
+    cwd: string;
+    realpath: (path: string) => string;
+    isRegularFile: (path: string) => boolean;
+    readPrefix?: (path: string) => string;
+  },
+): { command: string; args: string[] } | null {
+  return commandFor(executable, args, options.platform, options.env, options.cwd, {
+    platform: options.platform,
+    cwd: options.cwd,
+    realpath: options.realpath,
+    isRegularFile: options.isRegularFile,
+    readPrefix: options.readPrefix,
+  });
 }
 
 function parseVersion(output: string): string | null {
   return output.match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/)?.[1] ?? null;
 }
 
-function realVersion(executable: GeminiExecutable): string | null {
+const PROVIDER_CHILD_ENV_ALLOWLIST = new Set([
+  "ALL_PROXY", "COLORTERM", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "FORCE_COLOR", "GEMINI_CLI_HOME",
+  "GEMINI_CLI_SYSTEM_SETTINGS_PATH", "GOOGLE_CLOUD_LOCATION", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_QUOTA_PROJECT",
+  "HOME", "HTTPS_PROXY", "HTTP_PROXY", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS",
+  "NO_COLOR", "NO_PROXY", "PATH", "PATHEXT", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE",
+  "SYSTEMROOT", "TEMP", "TERM", "TMP", "TMPDIR", "TZ", "USERPROFILE", "WAYLAND_DISPLAY", "WINDIR",
+  "WSL_DISTRO_NAME", "WSL_INTEROP", "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE",
+]);
+
+function providerChildEnv(source: NodeJS.ProcessEnv, overrides: NodeJS.ProcessEnv = {}, checks?: ExecutableChecks): NodeJS.ProcessEnv {
+  const allowed = Object.fromEntries(Object.entries(source).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined && PROVIDER_CHILD_ENV_ALLOWLIST.has(entry[0].toUpperCase()),
+  ));
+  if (checks) {
+    const pathKey = Object.keys(allowed).find((name) => name.toUpperCase() === "PATH") ?? "PATH";
+    const path = safeChildPath(source[pathKey] ?? source.PATH, checks);
+    for (const name of Object.keys(allowed)) if (name.toUpperCase() === "PATH") delete allowed[name];
+    if (path) allowed[pathKey] = path;
+  }
+  return { ...scrubChildEnv(allowed), ...overrides };
+}
+
+/** Test seam for proving provider credentials are not ambient sidecar capabilities. */
+export function __geminiChildEnvForTest(source: NodeJS.ProcessEnv, checks?: ExecutableChecks): NodeJS.ProcessEnv {
+  return providerChildEnv(source, {}, checks);
+}
+
+function realVersion(
+  executable: GeminiExecutable,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  cwd: string,
+  checks: ExecutableChecks,
+): string | null {
   if (executable.source === "managed" && executable.version) return executable.version;
-  const launch = commandFor(executable, ["--version"]);
-  const result = spawnSync(launch.command, launch.args, { encoding: "utf8", timeout: 8000, windowsHide: true, shell: launch.shell });
+  const launch = commandFor(executable, ["--version"], platform, env, cwd, checks);
+  if (!launch) return null;
+  const result = spawnSync(launch.command, launch.args, {
+    encoding: "utf8",
+    timeout: 8000,
+    windowsHide: true,
+    env: providerChildEnv(env, {}, checks),
+    cwd: (platform === "win32" ? win32 : posix).dirname(executable.path),
+  });
   return result.status === 0 ? parseVersion(`${result.stdout ?? ""}\n${result.stderr ?? ""}`) : null;
 }
 
@@ -254,17 +453,27 @@ export function discoverGeminiCli(options: DiscoveryOptions = {}): GeminiCliStat
   const env = options.env ?? process.env;
   const home = options.home ?? homeDir();
   const platform = options.platform ?? process.platform;
+  const cwd = options.cwd ?? process.cwd();
   const pathExists = options.pathExists ?? existsSync;
+  const checks: ExecutableChecks = {
+    platform,
+    cwd,
+    realpath: options.realpath ?? realPath,
+    isRegularFile: options.isRegularFile ?? isRegularFile,
+  };
   const readText = options.readText ?? ((path: string) => readFileSync(path, "utf8"));
-  const runVersion = options.runVersion ?? realVersion;
+  const runVersion = options.runVersion ?? ((executable) => realVersion(executable, env, platform, cwd, checks));
   const managed = managedExecutable(home, platform, pathExists, readText);
-  const candidates: GeminiExecutable[] = [
-    ...(managed ? [managed] : []),
-    ...systemCandidates(env, platform).filter(pathExists).map((path) => ({
-    path,
-    source: String(env.NEKO_GEMINI_PATH ?? "").trim() === path ? "environment" as const : "path" as const,
-    })),
-  ];
+  const candidates: GeminiExecutable[] = [];
+  if (managed) {
+    const path = canonicalExecutable(managed.path, true, checks);
+    const runtime = managed.runtime ? canonicalExecutable(managed.runtime, true, checks) : null;
+    if (path && runtime) candidates.push({ ...managed, path, runtime });
+  }
+  for (const candidate of systemCandidates(env, platform)) {
+    const path = canonicalExecutable(candidate.path, candidate.source === "environment", checks);
+    if (path) candidates.push({ path, source: candidate.source });
+  }
   if (!candidates.length) return { state: "missing", detail: "optional Gemini Support Pack is not installed" };
 
   let outdated: GeminiExecutable | undefined;
@@ -359,16 +568,31 @@ export function startGeminiAcp(
   handlers: GeminiAcpHandlers = {},
   options: { geminiHome?: string } = {},
 ): GeminiAcpClient {
-  const launch = commandFor(executable, ["--acp", "-e", "none"]);
+  const checks: ExecutableChecks = {
+    platform: process.platform,
+    cwd: process.cwd(),
+    realpath: realPath,
+    isRegularFile,
+  };
+  const path = canonicalExecutable(executable.path, executable.source !== "path", checks);
+  const runtime = executable.runtime ? canonicalExecutable(executable.runtime, executable.source !== "path", checks) : undefined;
+  if (!path || (executable.runtime && !runtime)) throw new Error("Gemini executable is not a trusted absolute regular file");
+  const verifiedExecutable: GeminiExecutable = { ...executable, path, runtime: runtime ?? undefined };
+  const launch = commandFor(verifiedExecutable, ["--acp", "-e", "none"], process.platform, process.env, process.cwd(), checks);
+  if (!launch) throw new Error("Gemini executable needs a trusted absolute Windows runtime");
+  const geminiHome = options.geminiHome ?? geminiStateRoot();
+  mkdirSync(geminiHome, { recursive: true, mode: 0o700 });
+  const env = providerChildEnv(process.env, {
+    GEMINI_CLI_HOME: geminiHome,
+    GEMINI_CLI_SYSTEM_SETTINGS_PATH: managedSystemSettingsPath(),
+    HOME: geminiHome,
+    USERPROFILE: geminiHome,
+  }, checks);
   const child: ChildProcessWithoutNullStreams = spawn(launch.command, launch.args, {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
-    shell: launch.shell,
-    env: {
-      ...process.env,
-      GEMINI_CLI_HOME: options.geminiHome ?? geminiStateRoot(),
-      GEMINI_CLI_SYSTEM_SETTINGS_PATH: managedSystemSettingsPath(),
-    },
+    env,
+    cwd: geminiHome,
   });
   let stderr = "";
   child.stderr.setEncoding("utf8");
@@ -380,8 +604,7 @@ export function startGeminiAcp(
     if (stopped) return;
     stopped = true;
     if (child.killed) return;
-    if (process.platform === "win32" && child.pid) spawnSync("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
-    else child.kill();
+    child.kill();
   };
   const exitCleanup = () => stop();
   process.once("exit", exitCleanup);

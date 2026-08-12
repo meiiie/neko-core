@@ -410,6 +410,20 @@ function textContent(content: any): string {
   return Array.isArray(content) ? content.filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? "")).join("\n") : "";
 }
 
+export const RESPONSES_STREAM_LIMITS = Object.freeze({
+  maxLineBytes: 2 * 1024 * 1024,
+  maxTotalBytes: 16 * 1024 * 1024,
+  maxOutputBytes: 8 * 1024 * 1024,
+  maxReasoningBytes: 8 * 1024 * 1024,
+  maxContinuationBytes: 8 * 1024 * 1024,
+  maxToolArgumentBytes: 4 * 1024 * 1024,
+  maxToolCalls: 64,
+  maxToolIdBytes: 1024,
+  maxToolNameBytes: 256,
+});
+
+const RESPONSES_STREAM_DONE = Symbol("responses-stream-done");
+
 /** Parse standard Responses SSE events (OpenAI Codex, xAI, and compatible APIs). */
 export async function parseResponsesStream(
   response: Response,
@@ -423,12 +437,32 @@ export async function parseResponsesStream(
   let reasoning = "";
   let usage: Usage | undefined;
   let completed = false;
-  const continuation = new Map<string, any>();
-  const calls = new Map<string, { id: string; name: string; arguments: string }>();
+  let sawDone = false;
+  let sawValidEvent = false;
+  let outputBytes = 0;
+  let reasoningBytes = 0;
+  let continuationBytes = 0;
+  const continuation = new Map<string, { item: any; bytes: number }>();
+  const calls = new Map<string, { id: string; name: string; arguments: string; argumentBytes: number }>();
+  const callKeysByIndex = new Map<number, string>();
   const emitted = new Set<string>();
-  const mergeArguments = (current: string, incoming: unknown): string => {
-    if (incoming == null) return current;
-    const next = String(incoming);
+  const appendOutput = (delta: unknown, emit: boolean): void => {
+    if (typeof delta !== "string") throw new Error("Responses streaming output delta was not text");
+    if (!delta) return;
+    outputBytes += Buffer.byteLength(delta, "utf8");
+    if (outputBytes > RESPONSES_STREAM_LIMITS.maxOutputBytes) throw new Error("Responses streaming output exceeds safety limit");
+    content += delta;
+    if (emit) onDelta?.(delta, "content");
+  };
+  const appendReasoning = (delta: unknown): void => {
+    if (typeof delta !== "string") throw new Error("Responses streaming reasoning delta was not text");
+    if (!delta) return;
+    reasoningBytes += Buffer.byteLength(delta, "utf8");
+    if (reasoningBytes > RESPONSES_STREAM_LIMITS.maxReasoningBytes) throw new Error("Responses streaming reasoning exceeds safety limit");
+    reasoning += delta;
+    onDelta?.(delta, "reasoning");
+  };
+  const mergeArguments = (current: string, next: string): string => {
     if (!next) return current;
     if (!current) return next;
     try {
@@ -441,9 +475,49 @@ export async function parseResponsesStream(
       return next;
     }
   };
-  const emitCall = (key: string, force = false): ToolCall | null => {
-    const item = calls.get(key);
-    if (!item || emitted.has(key)) return null;
+  const setArguments = (item: { arguments: string; argumentBytes: number }, incoming: unknown, append = false): void => {
+    if (incoming == null) return;
+    if (typeof incoming !== "string") throw new Error("Responses streaming tool arguments were not text");
+    const next = append ? item.arguments + incoming : mergeArguments(item.arguments, incoming);
+    const bytes = append ? item.argumentBytes + Buffer.byteLength(incoming, "utf8") : Buffer.byteLength(next, "utf8");
+    if (bytes > RESPONSES_STREAM_LIMITS.maxToolArgumentBytes) throw new Error("Responses streaming tool arguments exceed safety limit");
+    item.arguments = next;
+    item.argumentBytes = bytes;
+  };
+  const resolveCallKey = (rawId: unknown, rawIndex: unknown): string => {
+    const itemId = boundedResponsesToolField(rawId, "id", RESPONSES_STREAM_LIMITS.maxToolIdBytes);
+    const index = responsesToolIndex(rawIndex);
+    if (index !== null) {
+      const existing = callKeysByIndex.get(index);
+      if (existing) {
+        if (itemId && existing.startsWith("id:") && existing !== `id:${itemId}`) {
+          throw new Error("Responses streaming tool call index had conflicting ids");
+        }
+        return existing;
+      }
+      const key = itemId ? `id:${itemId}` : `index:${index}`;
+      callKeysByIndex.set(index, key);
+      return key;
+    }
+    if (itemId) return `id:${itemId}`;
+    throw new Error("Responses streaming tool call was missing an id or index");
+  };
+  const ensureCall = (key: string): { id: string; name: string; arguments: string; argumentBytes: number } => {
+    const existing = calls.get(key);
+    if (existing) return existing;
+    if (calls.size >= RESPONSES_STREAM_LIMITS.maxToolCalls) throw new Error("Responses streaming tool call count exceeds safety limit");
+    const item = { id: "", name: "", arguments: "", argumentBytes: 0 };
+    calls.set(key, item);
+    return item;
+  };
+  const updateCallIdentity = (item: { id: string; name: string }, rawId: unknown, rawName: unknown): void => {
+    const id = boundedResponsesToolField(rawId, "id", RESPONSES_STREAM_LIMITS.maxToolIdBytes);
+    const name = boundedResponsesToolField(rawName, "name", RESPONSES_STREAM_LIMITS.maxToolNameBytes);
+    if (id) item.id = id;
+    if (name) item.name = name;
+  };
+  const materializeCall = (item: { id: string; name: string; arguments: string }, force = false): ToolCall | null => {
+    if (!item.id || !item.name) return null;
     let args: Record<string, any>;
     try {
       args = item.arguments ? JSON.parse(item.arguments) : {};
@@ -452,80 +526,134 @@ export async function parseResponsesStream(
       if (!force) return null;
       args = { _raw: item.arguments };
     }
-    if (!force && (!item.id || !item.name)) return null;
-    const call = { id: item.id, name: item.name, arguments: args };
+    return { id: item.id, name: item.name, arguments: args };
+  };
+  const emitCall = (key: string, force = false): ToolCall | null => {
+    const item = calls.get(key);
+    if (!item || emitted.has(key)) return null;
+    const call = materializeCall(item, force);
+    if (!call) return null;
     emitted.add(key);
     try { onToolCallReady?.(call); } catch { /* eager execution must not break the stream */ }
     return call;
   };
+  const keepContinuation = (raw: unknown, fallbackIndex: unknown): void => {
+    const item = reasoningContinuation(raw);
+    if (!item) return;
+    const key = item.id
+      ? `id:${item.id}`
+      : Number.isInteger(fallbackIndex) && Number(fallbackIndex) >= 0 ? `index:${Number(fallbackIndex)}` : `item:${continuation.size}`;
+    const bytes = Buffer.byteLength(JSON.stringify(item), "utf8");
+    const previous = continuation.get(key)?.bytes ?? 0;
+    const nextTotal = continuationBytes - previous + bytes;
+    if (nextTotal > RESPONSES_STREAM_LIMITS.maxContinuationBytes) throw new Error("Responses streaming continuation exceeds safety limit");
+    continuationBytes = nextTotal;
+    continuation.set(key, { item, bytes });
+  };
 
   for await (const event of responseEvents(response, onActivity)) {
-    const type = String(event?.type ?? "");
+    if (event === RESPONSES_STREAM_DONE) { sawDone = true; break; }
+    if (!event || typeof event !== "object" || Array.isArray(event) || typeof event.type !== "string" || !event.type) {
+      throw new Error("Responses streaming SSE data was not a valid Responses event");
+    }
+    const type = event.type;
+    if (["ping", "keepalive", "heartbeat"].includes(type.toLowerCase())) continue;
+    if (type !== "error" && !type.startsWith("response.")) {
+      throw new Error("Responses streaming SSE data was not a valid Responses event");
+    }
+    sawValidEvent = true;
+    if (event.error != null && type !== "response.failed" && type !== "error") {
+      throw new Error(`Responses request failed: ${String(event.error?.message ?? event.error).slice(0, 300)}`);
+    }
+    if ((type === "response.output_item.added" || type === "response.output_item.done")
+      && (!event.item || typeof event.item !== "object" || Array.isArray(event.item) || typeof event.item.type !== "string" || !event.item.type)) {
+      throw new Error("Responses stream sent an invalid output item event");
+    }
     if (type === "response.output_text.delta") {
-      const delta = String(event.delta ?? ""); content += delta; onDelta?.(delta, "content");
+      appendOutput(event.delta, true);
     } else if (type === "response.reasoning_summary_text.delta" || type === "response.reasoning_text.delta") {
-      const delta = String(event.delta ?? ""); reasoning += delta; onDelta?.(delta, "reasoning");
+      appendReasoning(event.delta);
     } else if (type === "response.output_item.added" && event.item?.type === "function_call") {
-      const key = String(event.item.id ?? event.output_index ?? calls.size);
-      calls.set(key, { id: String(event.item.call_id ?? event.item.id ?? ""), name: String(event.item.name ?? ""), arguments: String(event.item.arguments ?? "") });
-      if (event.item.name) onDelta?.(`preparing ${event.item.name}...`, "reasoning");
+      const key = resolveCallKey(event.item.id, event.output_index);
+      const item = ensureCall(key);
+      updateCallIdentity(item, event.item.call_id ?? event.item.id, event.item.name);
+      setArguments(item, event.item.arguments);
+      if (item.name) onDelta?.(`preparing ${item.name}...`, "reasoning");
     } else if (type === "response.function_call_arguments.delta") {
-      const key = String(event.item_id ?? event.output_index ?? "");
-      const item = calls.get(key) ?? { id: String(event.call_id ?? event.item_id ?? ""), name: String(event.name ?? ""), arguments: "" };
-      item.arguments += String(event.delta ?? ""); calls.set(key, item); onDelta?.(String(event.delta ?? ""), "tool"); emitCall(key);
+      const key = resolveCallKey(event.item_id ?? event.call_id, event.output_index);
+      const item = ensureCall(key);
+      updateCallIdentity(item, event.call_id ?? (!item.id ? event.item_id : null), event.name);
+      setArguments(item, event.delta, true);
+      if (event.delta) onDelta?.(event.delta, "tool");
+      emitCall(key);
     } else if (type === "response.function_call_arguments.done") {
-      const key = String(event.item_id ?? event.output_index ?? "");
-      const item = calls.get(key) ?? { id: String(event.call_id ?? event.item_id ?? ""), name: String(event.name ?? ""), arguments: "" };
-      item.id = String(event.call_id ?? item.id ?? event.item_id ?? "");
-      item.name = String(event.name ?? item.name ?? "");
-      item.arguments = mergeArguments(item.arguments, event.arguments);
-      calls.set(key, item); emitCall(key, true);
+      if (typeof event.arguments !== "string") throw new Error("Responses streaming tool arguments were not text");
+      const key = resolveCallKey(event.item_id ?? event.call_id, event.output_index);
+      const item = ensureCall(key);
+      updateCallIdentity(item, event.call_id ?? (!item.id ? event.item_id : null), event.name);
+      setArguments(item, event.arguments);
+      emitCall(key, true);
     } else if (type === "response.output_item.done" && event.item?.type === "reasoning") {
-      const item = reasoningContinuation(event.item);
-      if (item) continuation.set(item.id || String(event.output_index ?? continuation.size), item);
+      keepContinuation(event.item, event.output_index);
     } else if (type === "response.output_item.done" && event.item?.type === "function_call") {
-      const key = String(event.item.id ?? event.output_index ?? "");
-      const item = calls.get(key) ?? { id: "", name: "", arguments: "" };
-      item.id = String(event.item.call_id ?? item.id ?? event.item.id ?? "");
-      item.name = String(event.item.name ?? item.name ?? "");
-      item.arguments = mergeArguments(item.arguments, event.item.arguments);
-      calls.set(key, item); emitCall(key, true);
+      const key = resolveCallKey(event.item.id ?? event.item.call_id, event.output_index);
+      const item = ensureCall(key);
+      updateCallIdentity(item, event.item.call_id ?? (!item.id ? event.item.id : null), event.item.name);
+      setArguments(item, event.item.arguments);
+      emitCall(key, true);
     } else if (type === "response.completed") {
-      completed = true;
-      usage = responsesUsage(event.response?.usage);
-      for (const item of event.response?.output ?? []) {
+      if (completed) throw new Error("Responses stream sent duplicate response.completed events");
+      if (!event.response || typeof event.response !== "object" || Array.isArray(event.response)) {
+        throw new Error("Responses stream sent an invalid response.completed event");
+      }
+      if (event.response.status != null && event.response.status !== "completed") {
+        throw new Error(`Responses request failed: ${String(event.response.status).slice(0, 100)}`);
+      }
+      if (event.response.output != null && !Array.isArray(event.response.output)) {
+        throw new Error("Responses stream sent an invalid completed output");
+      }
+      usage = responsesUsage(event.response.usage);
+      const output = event.response.output ?? [];
+      for (let outputIndex = 0; outputIndex < output.length; outputIndex++) {
+        const item = output[outputIndex];
+        if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Responses stream sent an invalid completed output item");
         if (item?.type === "reasoning") {
-          const kept = reasoningContinuation(item);
-          if (kept) continuation.set(kept.id || String(continuation.size), kept);
+          keepContinuation(item, outputIndex);
           continue;
         }
-        if (item?.type === "message" && !content) {
-          content = (item.content ?? []).filter((part: any) => part?.type === "output_text").map((part: any) => String(part.text ?? "")).join("");
+        if (item?.type === "message") {
+          if (item.content != null && !Array.isArray(item.content)) throw new Error("Responses stream sent invalid completed message content");
+          if (!content) {
+            for (const part of item.content ?? []) {
+              if (!part || typeof part !== "object" || Array.isArray(part)) throw new Error("Responses stream sent invalid completed message content");
+              if (part.type === "output_text") appendOutput(part.text, false);
+            }
+          }
           continue;
         }
         if (item?.type !== "function_call") continue;
-        const key = String(item.id ?? item.call_id ?? calls.size);
-        const previous = calls.get(key);
-        calls.set(key, {
-          id: String(item.call_id ?? previous?.id ?? item.id ?? ""),
-          name: String(item.name ?? previous?.name ?? ""),
-          arguments: mergeArguments(previous?.arguments ?? "", item.arguments),
-        });
+        const key = resolveCallKey(item.id ?? item.call_id, outputIndex);
+        const call = ensureCall(key);
+        updateCallIdentity(call, item.call_id ?? (!call.id ? item.id : null), item.name);
+        setArguments(call, item.arguments);
         emitCall(key, true);
       }
+      completed = true;
     } else if (type === "response.failed" || type === "response.incomplete" || type === "error") {
       throw new Error(`Responses request failed: ${String(event.response?.error?.message ?? event.response?.incomplete_details?.reason ?? event.error?.message ?? event.message ?? "unknown error").slice(0, 300)}`);
     }
   }
+  if (!sawValidEvent) throw new Error("Responses stream ended without a valid event");
   if (!completed) throw new Error("Responses stream disconnected before response.completed.");
-  for (const key of calls.keys()) emitCall(key, true);
+  if (!sawDone) throw new Error("Responses stream ended before [DONE]");
   const toolCalls = [...calls.keys()].map((key) => {
     const item = calls.get(key)!;
-    let args: Record<string, any>;
-    try { args = JSON.parse(item.arguments || "{}"); } catch { args = { _raw: item.arguments }; }
-    return { id: item.id, name: item.name, arguments: args };
+    const call = materializeCall(item, true);
+    if (!call) throw new Error("Responses streaming tool call was missing an id or name");
+    emitCall(key, true);
+    return call;
   });
-  const continuationItems = [...continuation.values()];
+  const continuationItems = [...continuation.values()].map((entry) => entry.item);
   const keptContinuation = scope && continuationItems.length
     ? [{ type: RESPONSES_CONTINUATION, scope, items: continuationItems }]
     : continuationItems;
@@ -534,29 +662,78 @@ export async function parseResponsesStream(
 
 function reasoningContinuation(item: any): any | null {
   if (!item || item.type !== "reasoning" || !item.encrypted_content) return null;
+  if (typeof item.encrypted_content !== "string") throw new Error("Responses streaming continuation was invalid");
+  const id = boundedResponsesToolField(item.id, "id", RESPONSES_STREAM_LIMITS.maxToolIdBytes);
   return {
     type: "reasoning",
-    ...(item.id ? { id: String(item.id) } : {}),
-    encrypted_content: String(item.encrypted_content),
+    ...(id ? { id } : {}),
+    encrypted_content: item.encrypted_content,
     summary: Array.isArray(item.summary) ? item.summary : [],
   };
 }
 
-async function* responseEvents(response: Response, onActivity?: () => void): AsyncGenerator<any> {
+function boundedResponsesToolField(value: unknown, field: "id" | "name", maxBytes: number): string {
+  if (value == null) return "";
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > maxBytes) {
+    throw new Error(`Responses streaming tool ${field} was invalid or too large`);
+  }
+  return value;
+}
+
+function responsesToolIndex(value: unknown): number | null {
+  if (value == null) return null;
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) >= RESPONSES_STREAM_LIMITS.maxToolCalls) {
+    throw new Error(`Responses streaming tool call index out of range: ${String(value).slice(0, 40)}`);
+  }
+  return value as number;
+}
+
+function parseResponsesSseBlock(block: string): any | typeof RESPONSES_STREAM_DONE | null {
+  const data = block.split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n")
+    .trim();
+  if (!data || /^(?:ping|keepalive|\[keepalive\])$/i.test(data)) return null;
+  if (data === "[DONE]") return RESPONSES_STREAM_DONE;
+  try { return JSON.parse(data); }
+  catch { throw new Error("Responses streaming API sent malformed SSE data"); }
+}
+
+async function* responseEvents(response: Response, onActivity?: () => void): AsyncGenerator<any | typeof RESPONSES_STREAM_DONE> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    onActivity?.();
-    buffer += decoder.decode(value, { stream: true });
-    let match: RegExpExecArray | null;
-    while ((match = /\r?\n\r?\n/.exec(buffer))) {
-      const block = buffer.slice(0, match.index); buffer = buffer.slice(match.index + match[0].length);
-      const data = block.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
-      if (data && data !== "[DONE]") { try { yield JSON.parse(data); } catch { /* ignore malformed event */ } }
+  let totalBytes = 0;
+  let lineBytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > RESPONSES_STREAM_LIMITS.maxTotalBytes) throw new Error("Responses streaming SSE aggregate exceeds safety limit");
+      for (const byte of value) {
+        if (byte === 0x0a) lineBytes = 0;
+        else if (++lineBytes > RESPONSES_STREAM_LIMITS.maxLineBytes) throw new Error("Responses streaming SSE line exceeds safety limit");
+      }
+      onActivity?.();
+      buffer += decoder.decode(value, { stream: true });
+      let match: RegExpExecArray | null;
+      while ((match = /\r?\n\r?\n/.exec(buffer))) {
+        const block = buffer.slice(0, match.index);
+        buffer = buffer.slice(match.index + match[0].length);
+        const event = parseResponsesSseBlock(block);
+        if (event !== null) yield event;
+      }
     }
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      const event = parseResponsesSseBlock(buffer);
+      if (event !== null) yield event;
+    }
+  } finally {
+    try { await reader.cancel(); } catch { /* already closed/errored */ }
+    try { reader.releaseLock(); } catch { /* already released */ }
   }
 }
 

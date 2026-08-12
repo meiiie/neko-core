@@ -378,6 +378,28 @@ test("ansi-cache: renderLineRows renders a line rich once; fallback is instant p
   clearAnsiCache();
 });
 
+test("ansi-cache: plain fallbacks escape OSC, CSI, BEL, and C1 controls", async () => {
+  const { fallbackRows, renderLineRows, clearAnsiCache } = await import("../src/ui/ansi-cache.ts");
+  const line: Line = {
+    id: 90004,
+    kind: "assistant",
+    text: `safe\u001b]52;c;clipboard\u0007 then \u001b[31mred\u009b2J`,
+  };
+  const rows = fallbackRows(line);
+  const output = rows.join("\n");
+  expect(output).toContain("\\u001b]52");
+  expect(output).toContain("\\u0007");
+  expect(output).toContain("\\u009b2J");
+  expect(output).not.toContain("\u001b");
+  expect(output).not.toContain("\u0007");
+  expect(output).not.toMatch(/[\u0080-\u009f]/);
+  const richOutput = renderLineRows(line, 60, CFG).join("\n");
+  expect(richOutput).not.toContain("\u001b");
+  expect(richOutput).not.toContain("\u0007");
+  expect(richOutput).not.toMatch(/[\u0080-\u009f]/);
+  clearAnsiCache();
+});
+
 test("ansi-cache: priming a committed assistant skips the raw markdown fallback", async () => {
   const { primeAnsiCache, getCachedRows, clearAnsiCache } = await import("../src/ui/ansi-cache.ts");
   const line = { id: 90003, kind: "assistant" as const, text: "**formatted answer**" };

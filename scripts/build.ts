@@ -23,6 +23,10 @@ const targetIsWindows = target ? target.includes("windows") : process.platform =
 
 const args = [
   "build", "--compile",
+  // Project-local .env/bunfig are untrusted until Neko's own trust gate runs. A compiled Bun
+  // executable otherwise consumes both before bin/neko.ts can inspect or quarantine them.
+  "--no-compile-autoload-dotenv",
+  "--no-compile-autoload-bunfig",
   "--tsconfig-override", "tsconfig.build.json", // repo jsx:react-jsx emits DEV jsxDEV calls that crash production React
   "--define", 'process.env.NODE_ENV="production"', // without it the binary ships React dev mode (~5x per frame, measured)
 ];

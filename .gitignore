@@ -2,6 +2,8 @@
 node_modules/
 dist/
 *.tsbuildinfo
+/node-compile-cache/
+/jobs/
 
 # --- Python ---
 __pycache__/

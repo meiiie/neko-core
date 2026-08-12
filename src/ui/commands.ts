@@ -4,7 +4,7 @@
  * render, and this file owns "what the commands do".
  */
 import type { Agent } from "../core/agent.ts";
-import { COMPACT_AT, estimateTokens } from "../core/agent.ts";
+import { COMPACT_AT, estimateRequestTokens } from "../core/agent.ts";
 import { loadConfig, type NekoConfig } from "../adapters/config.ts";
 import { rememberNote, renderContext } from "../adapters/context.ts";
 import { initProject } from "../adapters/project.ts";
@@ -12,6 +12,8 @@ import { getProvider, listModelOptions, type ModelOption } from "../adapters/pro
 import { setActiveProfile, setEffort, setModel } from "../adapters/project.ts";
 import { fillRecipe, listRecipes, loadRecipe } from "../adapters/recipes.ts";
 import { listSessionMetas, loadSession, renameSession, sessionTitle, type Session } from "../adapters/session.ts";
+import { SessionHandoffStore } from "../adapters/session-handoff.ts";
+import { terminalSafeText } from "../shared/terminal-text.ts";
 import { listSkills, loadSkill } from "../adapters/skills.ts";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { listTools } from "../core/tools.ts";
@@ -41,7 +43,7 @@ import { transcribeMeeting } from "../adapters/meeting-transcription.ts";
 export const HELP = [
   "Commands:",
   "  /help /cost /usage /voice /model /provider /support /browser /meeting /tools /skill(s) /init /clear /compact /transcript /reset /exit",
-  "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /continue · /retry · /effort · /context",
+  "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /handoff · /continue · /retry · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /relay · /coach · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
     "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line, Ctrl+G external editor.",
@@ -74,6 +76,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/auto", desc: "closed loop: work + self-review until done (/auto <goal>)" },
   { name: "/sessions", desc: "list saved sessions here" },
   { name: "/resume", desc: "resume a session (/resume [id|all]; Ctrl+A in the picker flips scope)" },
+  { name: "/handoff", desc: "send/list summary-only messages for this session" },
   { name: "/continue", desc: "pick up an interrupted task where it left off" },
   { name: "/retry", desc: "re-run the last message (e.g. after an error)" },
   { name: "/effort", desc: "model-aware reasoning preference (/effort <level>|default|list)" },
@@ -127,7 +130,9 @@ export interface CommandCtx {
   setBusy: (b: boolean) => void;
   setQueued: (n: number) => void;
   resumeInto: (s: Session) => void;
-  runText: (text: string) => void;
+  currentSessionId: string;
+  persistSession: () => void;
+  runText: (text: string, internal?: boolean) => void;
   compact: (reason: "manual" | "auto" | "resume") => Promise<string>; // shows the compacting progress bar
   openTranscript: () => void; // open the full-thread scroll+search viewer (/transcript)
   copy: (arg: string) => void; // copy last response / whole conversation to the clipboard (OSC 52)
@@ -140,7 +145,15 @@ export interface CommandCtx {
 /** The last two path segments - enough to tell projects apart without eating the row. */
 function folderTail(cwd: string): string {
   const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
-  return parts.slice(-2).join("/") || cwd;
+  return terminalSafeText(parts.slice(-2).join("/") || cwd, { maxChars: 160 });
+}
+
+const HANDOFF_DISPLAY_LIMIT = 10;
+const HANDOFF_SUMMARY_DISPLAY_CHARS = 2048;
+
+/** Escape untrusted handoff text to one bounded ASCII-only terminal line. */
+function handoffDisplay(value: string, maxChars: number): string {
+  return terminalSafeText(value, { maxChars, ascii: true });
 }
 
 /** Open the resume picker (claude-code/codex-class).
@@ -179,7 +192,7 @@ function openResumePicker(ctx: CommandCtx, scope: "smart" | "cwd" | "all", all =
       // The folder rides on every out-of-folder row (and is part of what typing filters on), so a
       // global search can be steered by project name, claude-code style.
       detail: `${relativeTime(s.updatedAt)} · ${s.msgCount} msgs` +
-        (s.branch ? ` · ${s.branch}` : "") + (s.bytes ? ` · ${fmtBytes(s.bytes)}` : "") +
+        (s.branch ? ` · ${terminalSafeText(s.branch, { maxChars: 120 })}` : "") + (s.bytes ? ` · ${fmtBytes(s.bytes)}` : "") +
         (s.cwd !== here ? ` · ${folderTail(s.cwd)}` : ""),
     })),
     // Preview is built LAZILY (Space on the highlighted item) - only THEN is that one transcript loaded.
@@ -189,7 +202,7 @@ function openResumePicker(ctx: CommandCtx, scope: "smart" | "cwd" | "all", all =
       return s.messages
         .filter((m: any) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
         .slice(-4)
-        .map((m: any) => (m.role === "user" ? "> " : "  ") + trunc(String(m.content), 100))
+        .map((m: any) => (m.role === "user" ? "> " : "  ") + terminalSafeText(trunc(String(m.content), 100), { maxChars: 120 }))
         .join("\n") || "(no text messages)";
     },
     onSelect: (it) => {
@@ -198,7 +211,7 @@ function openResumePicker(ctx: CommandCtx, scope: "smart" | "cwd" | "all", all =
       if (!target) return;
       // Honest note when crossing projects: the transcript is that folder's, the tools are this one's.
       if (target.cwd && target.cwd !== process.cwd()) {
-        ctx.addLine("info", `(this session was recorded in ${target.cwd}; tools keep running in the current folder)`);
+        ctx.addLine("info", `(this session was recorded in ${terminalSafeText(target.cwd, { maxChars: 512 })}; tools keep running in the current folder)`);
       }
       ctx.resumeInto(target);
     },
@@ -1019,8 +1032,12 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/rewind": {
       const undone = agent.rewind();
       const files = ctx.registry.restoreCheckpoint();
-      if (!undone && !files) return addLine("info", "nothing to rewind");
-      return addLine("info", `(rewound last turn - context restored${files ? `, ${files} file(s) reverted` : ""})`);
+      const conflicts = ctx.registry.consumeRestoreConflicts();
+      if (!undone && !files && !conflicts.length) return addLine("info", "nothing to rewind");
+      const preserved = conflicts.length
+        ? `; preserved newer changes (not overwritten): ${conflicts.map((path) => terminalSafeText(path, { maxChars: 180 })).join(", ")}`
+        : "";
+      return addLine("info", `(rewound last turn - context restored${files ? `, ${files} file(s) reverted` : ""}${preserved})`);
     }
     case "/bashes": {
       const bg = ctx.registry.backgrounds;
@@ -1115,6 +1132,56 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       }
       return openResumePicker(ctx, arg ? "all" : "smart");
     }
+    case "/handoff": {
+      const rest = input.slice("/handoff".length).trim();
+      const send = /^send\s+(\S+)\s+([\s\S]+)$/.exec(rest);
+      if (send) {
+        const target = send[1];
+        const summary = send[2].trim();
+        if (!summary) return addLine("info", "usage: /handoff send <target-session-id> <summary>");
+        try {
+          ctx.persistSession();
+          const sent = new SessionHandoffStore().send(ctx.currentSessionId, target, summary);
+          return addLine("info", [
+            `handoff queued: ${sent.id}`,
+            `source=${sent.source.sessionId}`,
+            `target=${sent.targetSessionId}`,
+            "payload=summary only; provenance=local-unverified",
+          ].join("\n"));
+        } catch (error) {
+          return addLine("error", handoffDisplay(error instanceof Error ? error.message : String(error), 512));
+        }
+      }
+      if (rest === "inbox") {
+        try {
+          const pending = new SessionHandoffStore().listPending(ctx.currentSessionId);
+          const shown = pending.items.slice(0, HANDOFF_DISPLAY_LIMIT);
+          const lines = pending.items.length
+            ? [`pending handoffs for ${ctx.currentSessionId}:`]
+            : [`no pending handoffs for ${ctx.currentSessionId}.`];
+          for (const item of shown) {
+            lines.push(`- ${item.id}  from=${item.source.sessionId}  at=${item.createdAt}`);
+            lines.push(`  cwd=${handoffDisplay(item.source.cwd, 512)}  model=${handoffDisplay(item.source.model, 256)}`);
+            lines.push(`  summary=${handoffDisplay(item.summary, HANDOFF_SUMMARY_DISPLAY_CHARS)}`);
+            lines.push("  provenance=local-unverified; verify this summary before using it");
+          }
+          if (pending.items.length > shown.length) {
+            lines.push(`showing first ${shown.length} of ${pending.items.length}; no handoffs were consumed`);
+          }
+          if (pending.rejected.length) {
+            lines.push(`rejected ${pending.rejected.length} malformed handoff file(s)`);
+            for (const item of pending.rejected.slice(0, HANDOFF_DISPLAY_LIMIT)) {
+              lines.push(`  ${handoffDisplay(item.file, 160)}: ${handoffDisplay(item.reason, 160)}`);
+            }
+          }
+          if (pending.truncated) lines.push("inbox scan stopped at the safety budget; no handoffs were consumed");
+          return addLine("info", lines.join("\n"));
+        } catch (error) {
+          return addLine("error", handoffDisplay(error instanceof Error ? error.message : String(error), 512));
+        }
+      }
+      return addLine("info", "usage: /handoff [send <target-session-id> <summary>|inbox]");
+    }
     case "/continue": {
       // Pick up an interrupted/incomplete task. The trajectory (sealed) + the todo list are already in
       // context - so tell the agent to resume the first unfinished todo and keep going, not restart.
@@ -1124,13 +1191,14 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         "tool results above, then resume the FIRST incomplete todo and keep working until every todo is " +
         "done. If a tool call was cut off, re-run it. Do NOT restart from scratch or re-ask what the task " +
         "is - it is already established above.",
+        true,
       );
       return;
     }
     case "/retry": {
-      // Re-run the last user turn (after a transient error / a bad result). rewind() drops that turn and
+      // Re-run the last human turn (after a transient error / a bad result). rewind() drops that turn and
       // its response from context, then we resubmit the same text so it runs fresh.
-      const lastUser = [...agent.messages].reverse().find((m) => m.role === "user");
+      const lastUser = agent.lastUserMessage();
       const text = typeof lastUser?.content === "string" ? lastUser.content
         : Array.isArray(lastUser?.content) ? lastUser!.content.map((p: any) => p?.text ?? "").join("") : "";
       if (!text.trim()) return addLine("info", "nothing to retry");
@@ -1201,7 +1269,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/context": {
       const win = cfg.contextWindow;
       const last = agent.cost.lastPrompt;
-      const next = estimateTokens(agent.messages);
+      const next = estimateRequestTokens(agent.messages, ctx.registry.schemas());
       const used = last || next;
       const pct = Math.min(100, Math.max(0, Math.round((100 * used) / win)));
       return addLine(

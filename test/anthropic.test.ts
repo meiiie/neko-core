@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { addCacheBreakpoints, ANTHROPIC_DEFAULT_MAX_TOKENS, anthropicMaxTokensLimit, anthropicThinkingPolicy, AnthropicProvider, extractJsonLoose, isRetryableStreamStall, parseMessage, stripCacheBreakpoints, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
+import { addCacheBreakpoints, ANTHROPIC_DEFAULT_MAX_TOKENS, ANTHROPIC_STREAM_LIMITS, anthropicMaxTokensLimit, anthropicThinkingPolicy, AnthropicProvider, extractJsonLoose, isRetryableStreamStall, parseMessage, stripCacheBreakpoints, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
 import { SESSION_CONTEXT_MARK } from "../src/core/agent-constants.ts";
 
@@ -490,4 +490,162 @@ test("anthropic stream rejects a disconnected partial response", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+function anthropicSseResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  }), { status: 200 });
+}
+
+function repeatedAnthropicSseResponse(before: string, repeated: string, count: number, after = ""): Response {
+  const encoder = new TextEncoder();
+  const beforeBytes = encoder.encode(before), repeatedBytes = encoder.encode(repeated), afterBytes = encoder.encode(after);
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (beforeBytes.byteLength) controller.enqueue(beforeBytes);
+      for (let i = 0; i < count; i++) controller.enqueue(repeatedBytes);
+      if (afterBytes.byteLength) controller.enqueue(afterBytes);
+      controller.close();
+    },
+  }), { status: 200 });
+}
+
+async function completeAnthropicStream(response: Response): Promise<any> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => response) as any;
+  try {
+    const cfg = new NekoConfig({
+      provider: "anthropic", base_url: "http://x", model: "m", reasoning_effort: "off",
+      prompt_cache: false, max_retries: 0,
+    }, null, {}, "k");
+    return await new AnthropicProvider(cfg).complete([{ role: "user", content: "hi" }], undefined, () => {});
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+test("anthropic stream fails closed on malformed non-keepalive data and invalid completion envelopes", async () => {
+  await expect(completeAnthropicStream(anthropicSseResponse(["data: {not-json}\n"])))
+    .rejects.toThrow("malformed SSE data");
+  await expect(completeAnthropicStream(anthropicSseResponse(["data: {\"hello\":\"world\"}\n"])))
+    .rejects.toThrow("not a valid event");
+  await expect(completeAnthropicStream(anthropicSseResponse(["data: {\"type\":\"message_stop\"}\n"])))
+    .rejects.toThrow("before message_start");
+  await expect(completeAnthropicStream(anthropicSseResponse([
+    'data: {"type":"message_start","message":{"usage":{}}}\n',
+    'data: {"type":"message_delta","delta":"not-an-object","usage":{}}\n',
+  ]))).rejects.toThrow("invalid message_delta");
+  await expect(completeAnthropicStream(anthropicSseResponse([
+    'data: {"type":"message_start","message":{"usage":{}}}\n',
+    'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"partial"}}\n',
+    'data: {"type":"message_stop"}\n',
+  ]))).rejects.toThrow("incomplete content block");
+});
+
+test("anthropic stream accepts bounded keepalives, preserves cached usage, and rejects truncation", async () => {
+  const result = await completeAnthropicStream(anthropicSseResponse([
+    "data: ping\n",
+    'data: {"type":"ping"}\n',
+    'data: {"type":"message_start","message":{"usage":{"input_tokens":5,"cache_read_input_tokens":7,"cache_creation_input_tokens":3}}}\n',
+    'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"ok"}}\n',
+    'data: {"type":"content_block_stop","index":0}\n',
+    'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n',
+    'data: {"type":"message_stop"}\n',
+  ]));
+  expect(result.content).toBe("ok");
+  expect(result.usage).toEqual({ prompt_tokens: 15, completion_tokens: 2, total_tokens: 17, cached_tokens: 7, cache_write_tokens: 3 });
+
+  await expect(completeAnthropicStream(anthropicSseResponse([
+    'data: {"type":"message_start","message":{"usage":{}}}\n',
+    'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{}}\n',
+    'data: {"type":"message_stop"}\n',
+  ]))).rejects.toThrow("non-success stop reason");
+});
+
+test("anthropic stream caps SSE line and aggregate bytes", async () => {
+  await expect(completeAnthropicStream(anthropicSseResponse([
+    `data: ${"x".repeat(ANTHROPIC_STREAM_LIMITS.maxLineBytes + 1)}`,
+  ]))).rejects.toThrow("SSE line exceeds safety limit");
+
+  const comment = `: ${"x".repeat(1024 * 1024)}\n`;
+  await expect(completeAnthropicStream(repeatedAnthropicSseResponse("", comment, 17)))
+    .rejects.toThrow("SSE aggregate exceeds safety limit");
+});
+
+test("anthropic stream caps accumulated content and reasoning bytes", async () => {
+  const oneMiB = "x".repeat(1024 * 1024);
+  const messageStart = 'data: {"type":"message_start","message":{"usage":{}}}\n';
+
+  await expect(completeAnthropicStream(repeatedAnthropicSseResponse(
+    `${messageStart}data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n`,
+    `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: oneMiB } })}\n`,
+    9,
+  ))).rejects.toThrow("content exceeds safety limit");
+
+  await expect(completeAnthropicStream(repeatedAnthropicSseResponse(
+    `${messageStart}data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n`,
+    `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: oneMiB } })}\n`,
+    9,
+  ))).rejects.toThrow("reasoning exceeds safety limit");
+});
+
+test("anthropic stream caps tool arguments, call indexes, ids, and names", async () => {
+  const oneMiB = "x".repeat(1024 * 1024);
+  const toolStart = [
+    'data: {"type":"message_start","message":{"usage":{}}}\n',
+    'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t","name":"read_file","input":{}}}\n',
+  ].join("");
+  await expect(completeAnthropicStream(repeatedAnthropicSseResponse(
+    toolStart,
+    `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: oneMiB } })}\n`,
+    5,
+  ))).rejects.toThrow("tool arguments exceed safety limit");
+
+  for (const [field, value, message] of [
+    ["id", "i".repeat(ANTHROPIC_STREAM_LIMITS.maxToolIdBytes + 1), "id was invalid or too large"],
+    ["name", "n".repeat(ANTHROPIC_STREAM_LIMITS.maxToolNameBytes + 1), "name was invalid or too large"],
+  ] as const) {
+    const block = { type: "tool_use", id: "t", name: "read_file", input: {}, [field]: value };
+    await expect(completeAnthropicStream(anthropicSseResponse([
+      'data: {"type":"message_start","message":{"usage":{}}}\n',
+      `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: block })}\n`,
+    ]))).rejects.toThrow(message);
+  }
+
+  await expect(completeAnthropicStream(anthropicSseResponse([
+    'data: {"type":"message_start","message":{"usage":{}}}\n',
+    `data: ${JSON.stringify({ type: "content_block_start", index: ANTHROPIC_STREAM_LIMITS.maxToolCalls, content_block: { type: "tool_use", id: "t", name: "read_file", input: {} } })}\n`,
+  ]))).rejects.toThrow("index out of range");
+});
+
+test("anthropic stream always cancels and releases its reader on success and parser failure", async () => {
+  const encoder = new TextEncoder();
+  let canceled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(encoder.encode("data: {not-json}\n")); },
+    cancel() { canceled = true; },
+  });
+  await expect(completeAnthropicStream(new Response(body, { status: 200 }))).rejects.toThrow("malformed SSE data");
+  expect(canceled).toBe(true);
+  expect(body.locked).toBe(false);
+
+  let successCanceled = false;
+  const successBody = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode([
+        'data: {"type":"message_start","message":{"usage":{}}}\n',
+        'data: {"type":"message_stop"}\n',
+      ].join("")));
+    },
+    cancel() { successCanceled = true; },
+  });
+  const result = await completeAnthropicStream(new Response(successBody, { status: 200 }));
+  expect(result.content).toBeNull();
+  expect(successCanceled).toBe(true);
+  expect(successBody.locked).toBe(false);
 });

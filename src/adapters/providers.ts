@@ -601,7 +601,15 @@ export function parseOpenAIMessage(data: any, origin = ""): ProviderResponse {
     const detail = error && typeof error === "object" ? error.message : (error ?? JSON.stringify(data));
     throw new Error(`unexpected API response: ${String(detail).slice(0, 300)}`);
   }
-  const message = choices[0]?.message ?? {};
+  const choice = choices[0];
+  const finishReason = choice?.finish_reason;
+  if (finishReason !== undefined && finishReason !== null && !["stop", "tool_calls", "function_call"].includes(finishReason)) {
+    throw new Error(`API returned non-success finish_reason: ${String(finishReason).slice(0, 100)}`);
+  }
+  if (!choice?.message || typeof choice.message !== "object" || Array.isArray(choice.message)) {
+    throw new Error("unexpected API response: missing assistant message");
+  }
+  const message = choice.message;
   const toolCalls: ToolCall[] = [];
   for (const call of message.tool_calls ?? []) {
     const fn = call.function ?? {};
@@ -669,6 +677,17 @@ function splitThink(text: string | null | undefined): { content: string | null; 
 }
 
 /** Parse a streamed (SSE) chat completion, calling onDelta for each content chunk. */
+export const OPENAI_STREAM_LIMITS = Object.freeze({
+  maxLineBytes: 2 * 1024 * 1024,
+  maxTotalBytes: 16 * 1024 * 1024,
+  maxContentBytes: 8 * 1024 * 1024,
+  maxReasoningBytes: 8 * 1024 * 1024,
+  maxToolArgumentBytes: 4 * 1024 * 1024,
+  maxToolCalls: 64,
+  maxToolIdBytes: 1024,
+  maxToolNameBytes: 256,
+});
+
 async function parseStream(
   res: Response,
   onDelta: DeltaHook,
@@ -681,16 +700,38 @@ async function parseStream(
   let reasoning = "";
   let usage: Usage | undefined;
   let reasoningField: "reasoning_content" | "reasoning" | null = null;
-  const acc: { id: string; name: string; argString: string; metadata: Record<string, any> }[] = [];
+  const acc: { id: string; name: string; argString: string; argBytes: number; sawArgumentBytes: boolean; metadata: Record<string, any> }[] = [];
   let streamedMessageMetadata: Record<string, any> = {};
+  let sawDone = false;
+  let sawValidChoice = false;
+  let sawFinish = false;
+  let contentBytes = 0;
+  let reasoningBytes = 0;
   const announced = new Set<number>(); // tool calls whose name we've already surfaced
   // OpenAI streams index-keyed argument deltas and may interleave several indexes in one chunk. There
   // is no per-call stop marker, so an index switch does NOT mean completion. A call is eager-ready only
   // once its accumulated arguments parse as a complete JSON object; invalid tails finalize at stream end.
   const finalized = new Map<number, ToolCall>();
+  let nextReadyIndex = 0;
+  const drainReady = (force = false): void => {
+    while (nextReadyIndex < acc.length) {
+      const call = finalized.get(nextReadyIndex);
+      if (!call) {
+        if (force && !acc[nextReadyIndex]) { nextReadyIndex++; continue; }
+        break;
+      }
+      try { onToolCallReady?.(call); } catch { /* an eager-start failure never breaks parsing */ }
+      nextReadyIndex++;
+    }
+  };
   const finalize = (i: number, force = false): void => {
     const t = acc[i];
     if (!t || finalized.has(i)) return;
+    // OpenAI normally announces a tool with id/name and arguments:"" before streaming the real
+    // argument bytes. Empty is therefore not evidence that this is a zero-argument call. Only
+    // eager-finalize after at least one argument byte; genuinely zero-argument calls finalize at
+    // [DONE] via the force path below.
+    if (!force && !t.sawArgumentBytes) return;
     let args: Record<string, any>;
     try {
       const parsed = t.argString ? JSON.parse(t.argString) : {};
@@ -703,56 +744,129 @@ async function parseStream(
     if (!force && (!t.id || !t.name)) return;
     const call = { id: t.id, name: t.name, arguments: args };
     finalized.set(i, call);
-    try { onToolCallReady?.(call); } catch { /* an eager-start failure never breaks parsing */ }
+    drainReady();
   };
   const think = makeThinkSplitter(
-    (s) => { content += s; onDelta(s); },
-    (s) => { reasoning += s; onDelta(s, "reasoning"); },
+    (s) => {
+      contentBytes += Buffer.byteLength(s, "utf8");
+      if (contentBytes > OPENAI_STREAM_LIMITS.maxContentBytes) throw new Error("streaming content exceeds safety limit");
+      content += s;
+      onDelta(s);
+    },
+    (s) => {
+      reasoningBytes += Buffer.byteLength(s, "utf8");
+      if (reasoningBytes > OPENAI_STREAM_LIMITS.maxReasoningBytes) throw new Error("streaming reasoning exceeds safety limit");
+      reasoning += s;
+      onDelta(s, "reasoning");
+    },
   );
 
   for await (const line of sseLines(res, onActivity)) {
     if (!line.startsWith("data:")) continue;
     const data = line.slice(5).trim();
-    if (data === "[DONE]") break;
+    if (!data || /^(?:ping|keepalive|\[keepalive\])$/i.test(data)) continue;
+    if (data === "[DONE]") { sawDone = true; break; }
     let chunk: any;
     try {
       chunk = JSON.parse(data);
     } catch {
-      continue;
+      throw new Error("streaming API sent malformed SSE data");
     }
-    if (chunk.usage) usage = chunk.usage;
-    const delta = chunk.choices?.[0]?.delta;
-    if (!delta) continue;
+    if ((chunk?.error !== undefined && chunk.error !== null) || chunk?.type === "error") {
+      const detail = typeof chunk.error === "object" ? chunk.error.message : chunk.error ?? chunk.message ?? chunk.type;
+      throw new Error(`streaming API error: ${String(detail ?? JSON.stringify(chunk.error)).slice(0, 300)}`);
+    }
+    if (["ping", "keepalive", "heartbeat"].includes(String(chunk?.type ?? "").toLowerCase()) && chunk?.choices === undefined) continue;
+    if (chunk?.usage !== undefined) usage = chunk.usage;
+    if (!Array.isArray(chunk?.choices) || chunk.choices.length === 0) {
+      // OpenAI's optional final usage frame has choices:[]; every other data frame must carry a
+      // real choice so arbitrary JSON cannot masquerade as a successful completion.
+      if (Array.isArray(chunk?.choices) && chunk.choices.length === 0 && chunk?.usage !== undefined) continue;
+      throw new Error("streaming API data had no valid choice");
+    }
+    const choice = chunk.choices[0];
+    if (!choice || typeof choice !== "object" || Array.isArray(choice)) {
+      throw new Error("streaming API data had no valid choice");
+    }
+    sawValidChoice = true;
+    const finishReason = choice.finish_reason;
+    if (finishReason !== undefined && finishReason !== null && !["stop", "tool_calls", "function_call"].includes(finishReason)) {
+      throw new Error(`streaming API returned non-success finish_reason: ${String(finishReason).slice(0, 100)}`);
+    }
+    if (finishReason !== undefined && finishReason !== null) sawFinish = true;
+    const delta = choice.delta;
+    if (delta === undefined || delta === null) {
+      if (finishReason !== undefined && finishReason !== null) continue;
+      throw new Error("streaming API choice had no delta or finish reason");
+    }
+    if (typeof delta !== "object" || Array.isArray(delta)) throw new Error("streaming API choice delta was invalid");
     streamedMessageMetadata = mergeRecords(streamedMessageMetadata, messageMetadata(delta));
-    if (delta.content) think.push(delta.content); // routes <think>..</think> -> reasoning, rest -> content
+    if (delta.content !== undefined && delta.content !== null) {
+      if (typeof delta.content !== "string") throw new Error("streaming content delta was not text");
+      if (delta.content) think.push(delta.content); // routes <think>..</think> -> reasoning, rest -> content
+    }
     if (delta.reasoning_content !== undefined) reasoningField = "reasoning_content";
     else if (delta.reasoning !== undefined) reasoningField = "reasoning";
     const r = delta.reasoning_content ?? delta.reasoning;
+    if (r !== undefined && r !== null && typeof r !== "string") throw new Error("streaming reasoning delta was not text");
     if (r) {
+      reasoningBytes += Buffer.byteLength(r, "utf8");
+      if (reasoningBytes > OPENAI_STREAM_LIMITS.maxReasoningBytes) throw new Error("streaming reasoning exceeds safety limit");
       reasoning += r;
       onDelta(r, "reasoning");
     }
+    if (delta.tool_calls !== undefined && !Array.isArray(delta.tool_calls)) throw new Error("streaming tool_calls delta was invalid");
+    if ((delta.tool_calls?.length ?? 0) > OPENAI_STREAM_LIMITS.maxToolCalls) throw new Error("streaming tool call count exceeds safety limit");
     for (const tc of delta.tool_calls ?? []) {
+      if (!tc || typeof tc !== "object" || Array.isArray(tc)) throw new Error("streaming tool call delta was invalid");
       const i = tc.index ?? 0;
-      acc[i] ??= { id: "", name: "", argString: "", metadata: {} };
-      acc[i].metadata = mergeRecords(acc[i].metadata, toolCallMetadata(tc));
-      if (tc.id) acc[i].id = tc.id;
-      if (tc.function?.name) {
-        acc[i].name = tc.function.name;
-        if (!announced.has(i)) { announced.add(i); onDelta(`preparing ${tc.function.name}...`, "reasoning"); } // show activity early
+      if (!Number.isInteger(i) || i < 0 || i >= OPENAI_STREAM_LIMITS.maxToolCalls) {
+        throw new Error(`streaming tool call index out of range: ${String(i).slice(0, 40)}`);
       }
-      if (tc.function?.arguments) {
-        acc[i].argString += tc.function.arguments;
-        onDelta(tc.function.arguments, "tool"); // count a big tool-call's args in the live token meter
+      acc[i] ??= { id: "", name: "", argString: "", argBytes: 0, sawArgumentBytes: false, metadata: {} };
+      acc[i].metadata = mergeRecords(acc[i].metadata, toolCallMetadata(tc));
+      if (tc.id !== undefined && tc.id !== null) {
+        if (typeof tc.id !== "string" || Buffer.byteLength(tc.id, "utf8") > OPENAI_STREAM_LIMITS.maxToolIdBytes) {
+          throw new Error("streaming tool call id was invalid or too large");
+        }
+        if (tc.id) acc[i].id = tc.id;
+      }
+      if (tc.function !== undefined && (typeof tc.function !== "object" || tc.function === null || Array.isArray(tc.function))) {
+        throw new Error("streaming tool function delta was invalid");
+      }
+      const nameDelta = tc.function?.name;
+      if (nameDelta !== undefined && nameDelta !== null) {
+        if (typeof nameDelta !== "string" || Buffer.byteLength(nameDelta, "utf8") > OPENAI_STREAM_LIMITS.maxToolNameBytes) {
+          throw new Error("streaming tool name was invalid or too large");
+        }
+        if (nameDelta) {
+          acc[i].name = nameDelta;
+          if (!announced.has(i)) { announced.add(i); onDelta(`preparing ${nameDelta}...`, "reasoning"); } // show activity early
+        }
+      }
+      const argumentDelta = tc.function?.arguments;
+      if (argumentDelta !== undefined && argumentDelta !== null) {
+        if (typeof argumentDelta !== "string") throw new Error("streaming tool arguments delta was not text");
+        if (argumentDelta) {
+          acc[i].argBytes += Buffer.byteLength(argumentDelta, "utf8");
+          if (acc[i].argBytes > OPENAI_STREAM_LIMITS.maxToolArgumentBytes) throw new Error("streaming tool arguments exceed safety limit");
+          acc[i].argString += argumentDelta;
+          acc[i].sawArgumentBytes = true;
+          onDelta(argumentDelta, "tool"); // count a big tool-call's args in the live token meter
+        }
       }
       finalize(i); // eager only when this index now holds a complete JSON object
     }
   }
+  if (!sawDone) throw new Error("streaming response ended before [DONE]");
+  if (!sawValidChoice) throw new Error("streaming response ended without a valid choice");
+  if (!sawFinish) throw new Error("streaming response ended without a successful finish reason");
   think.flush(); // emit any buffered tail (e.g. trailing content with no closing tag)
 
   // Finalize every accumulated call (fires onToolCallReady for the last/open one) and build the
   // response from the SAME finalized objects so eager consumers and the loop see identical calls.
   acc.forEach((_t, i) => finalize(i, true));
+  drainReady(true);
   const toolCalls: ToolCall[] = acc.map((_t, i) => finalized.get(i)!).filter(Boolean);
   if (toolCalls.length && reasoning && reasoningField) streamedMessageMetadata[reasoningField] = reasoning;
   const continuation = metadataContinuation(
@@ -768,20 +882,37 @@ async function* sseLines(res: Response, onActivity?: () => void): AsyncGenerator
   const reader = res.body!.getReader(); // parseStream guards res.body before calling this
   const decoder = new TextDecoder();
   let buffer = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    onActivity?.(); // bytes arrived -> reset the idle timeout so a healthy long stream never times out
-    buffer += decoder.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, idx).trim();
-      buffer = buffer.slice(idx + 1);
-      if (line) yield line;
+  let totalBytes = 0;
+  let lineBytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > OPENAI_STREAM_LIMITS.maxTotalBytes) throw new Error("streaming SSE aggregate exceeds safety limit");
+      // Count raw bytes, not JS characters, so multibyte UTF-8 cannot evade the per-line cap.
+      for (const byte of value) {
+        if (byte === 0x0a) lineBytes = 0;
+        else if (++lineBytes > OPENAI_STREAM_LIMITS.maxLineBytes) throw new Error("streaming SSE line exceeds safety limit");
+      }
+      onActivity?.(); // bytes arrived -> reset the idle timeout so a healthy long stream never times out
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (line) yield line;
+      }
     }
+    buffer += decoder.decode();
+    const tail = buffer.trim();
+    if (tail) yield tail;
+  } finally {
+    // parseStream stops at [DONE] before many servers close the socket. Cancel explicitly so a
+    // malicious/buggy peer cannot retain one unread connection per completion.
+    try { await reader.cancel(); } catch { /* already closed/errored */ }
+    try { reader.releaseLock(); } catch { /* already released */ }
   }
-  const tail = buffer.trim();
-  if (tail) yield tail;
 }
 
 /** Sleep that rejects immediately if the signal aborts, so a retry backoff is interruptible. */

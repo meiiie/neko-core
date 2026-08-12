@@ -3,9 +3,19 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Agent, clampObservation, estimateTokens, MAX_OBS_CHARS, unwrapToolArgs } from "../src/core/agent.ts";
+import { Agent, clampObservation, classifyToolObservation, estimateRequestTokens, estimateTokens, isValidationBashCommand, MAX_OBS_CHARS, unwrapToolArgs } from "../src/core/agent.ts";
 import { COMPACTION_PROMPT, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent-constants.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
+
+test("tool observation classification is shared by loop guards and eval telemetry", () => {
+  expect(classifyToolObservation("(exit 1 -- command FAILED)\nboom")).toBe("failed");
+  expect(classifyToolObservation("Blocked: approval required")).toBe("failed");
+  expect(classifyToolObservation("### Result\n[]")).toBe("empty");
+  expect(classifyToolObservation("(no matches)")).toBe("empty");
+  expect(classifyToolObservation("(no files)")).toBe("empty");
+  expect(classifyToolObservation("(empty)")).toBe("empty");
+  expect(classifyToolObservation("(exit 0)\n4 pass")).toBe("productive");
+});
 
 test("unwrapToolArgs tolerates _raw / wrapper / JSON-string arg shapes (GLM quirk) without breaking normal calls", () => {
   const want = { path: "a.md", content: "hi" };
@@ -32,12 +42,54 @@ class ScriptedProvider {
   }
 }
 
+test("volatile turn system context survives closed-loop passes but never enters durable history", async () => {
+  const seen: any[][] = [];
+  const replies = ["keep working", "DONE", "next turn"];
+  let dynamic = "NARROW DYNAMIC CONTEXT";
+  const provider = {
+    async complete(messages: any[]) {
+      seen.push(structuredClone(messages));
+      return { content: replies[seen.length - 1], tool_calls: [] };
+    },
+  };
+  const agent = new Agent({
+    provider: provider as any,
+    tools: new ToolRegistry(".", "auto", () => true),
+    dynamicContext: () => dynamic,
+  });
+  agent.appendSystem("MANUAL SKILL BODY");
+  agent.setTurnSystemContext("AUTO MATCHED BODY");
+
+  await agent.runUntilDone("finish it", { maxIters: 2 });
+  expect(seen).toHaveLength(2);
+  for (const request of seen) {
+    const system = request.find((message) => message.role === "system")?.content;
+    expect(system).toContain("AUTO MATCHED BODY");
+    expect(system).toContain("MANUAL SKILL BODY");
+  }
+  expect(JSON.stringify(agent.messages)).not.toContain("AUTO MATCHED BODY");
+  expect(JSON.stringify(agent.messages)).toContain("MANUAL SKILL BODY");
+
+  dynamic = "FULL DYNAMIC CONTEXT";
+  agent.clearTurnSystemContext();
+  expect(String(agent.messages.find((message) => message.role === "system")?.content)).toContain("FULL DYNAMIC CONTEXT");
+  await agent.run("a later human turn");
+  const laterSystem = seen[2].find((message) => message.role === "system")?.content;
+  expect(laterSystem).not.toContain("AUTO MATCHED BODY");
+  expect(laterSystem).toContain("MANUAL SKILL BODY");
+});
+
 test("system prompt requires observable acceptance criteria before implementation", () => {
   expect(DEFAULT_SYSTEM_PROMPT).toContain("You are Neko Core");
   expect(DEFAULT_SYSTEM_PROMPT).not.toContain("You are Neko Code");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("OBSERVABLE acceptance criteria");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("supplied source/docs");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("self-authored happy-path check is not a substitute");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("Skip todo_write for a single-file inspect/edit/verify microtask");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("names the exact file or test");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("don't inventory it with both ls and glob");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("run the full suite once after the last edit");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("focused-first only for diagnosis or an expensive suite");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("Verify from a CLEAN state");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("not disposable validation artifacts");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("a clean run recreates an output");
@@ -106,11 +158,11 @@ test("social turns keep full context, tools, reasoning preference, and conversat
 test("multi-step turns publish booked plus current-step input estimates", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-usage-est-"));
   writeFileSync(join(root, "a.txt"), "orig");
-  const seen: any[][] = [];
+  const seen: { messages: any[]; schemas: any[] }[] = [];
   let call = 0;
   const provider = {
-    async complete(messages: any[]) {
-      seen.push(structuredClone(messages));
+    async complete(messages: any[], schemas: any[]) {
+      seen.push({ messages: structuredClone(messages), schemas: structuredClone(schemas) });
       if (call++ === 0) {
         return {
           content: null,
@@ -135,10 +187,10 @@ test("multi-step turns publish booked plus current-step input estimates", async 
   });
   expect(await agent.run("go")).toBe("finished");
   expect(estimates).toEqual([
-    estimateTokens(seen[0]),
-    100 + estimateTokens(seen[1]),
+    estimateRequestTokens(seen[0].messages, seen[0].schemas),
+    100 + estimateRequestTokens(seen[1].messages, seen[1].schemas),
   ]);
-});
+}, 30_000);
 
 test("interrupted provider usage is booked once before the run returns", async () => {
   const abort = new AbortController();
@@ -601,6 +653,48 @@ test("runUntilDone iterates until the model replies DONE, and caps", async () =>
   expect(await capped.runUntilDone("do X", { maxIters: 3 })).toBe("still working"); // never DONE -> cap
 });
 
+test("runUntilDone resumes a provider idle stall from the durable conversation checkpoint", async () => {
+  let calls = 0;
+  const recoveries: any[] = [];
+  const agent = new Agent({
+    provider: {
+      async complete() {
+        calls++;
+        if (calls === 1) throw new DOMException("provider idle timeout", "TimeoutError");
+        return { content: "recovered", tool_calls: [] };
+      },
+    } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    onEvent: (kind, data) => { if (kind === "recovery") recoveries.push(data); },
+  });
+  expect(await agent.runUntilDone("finish the task", { maxIters: 1 })).toBe("recovered");
+  expect(calls).toBe(2);
+  expect(recoveries).toEqual([{ attempt: 1, max: 2, reason: "provider idle timeout" }]);
+  expect(agent.messages.some((message: any) => message._neko_internal
+    && String(message.content).includes("AUTONOMY RECOVERY"))).toBe(true);
+});
+
+test("runUntilDone bounds consecutive stall recovery and never retries a user abort", async () => {
+  let stallCalls = 0;
+  const stalled = new Agent({
+    provider: { async complete() { stallCalls++; throw new DOMException("idle timeout", "TimeoutError"); } } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  await expect(stalled.runUntilDone("finish", { maxIters: 1, maxStallRecoveries: 1 }))
+    .rejects.toMatchObject({ name: "TimeoutError" });
+  expect(stallCalls).toBe(2);
+
+  let abortedCalls = 0;
+  const aborted = new Agent({
+    provider: { async complete() { abortedCalls++; return { content: "unexpected", tool_calls: [] }; } } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  const controller = new AbortController();
+  controller.abort();
+  expect(await aborted.runUntilDone("stop", { signal: controller.signal })).toBe("[interrupted]");
+  expect(abortedCalls).toBe(0);
+});
+
 test("run attaches images as OpenAI vision content", async () => {
   let seen: any;
   const agent = new Agent({
@@ -703,6 +797,99 @@ test("concurrency-safe tool calls in one turn run in parallel", async () => {
   });
   await agent.run("go");
   expect(tools.maxActive).toBeGreaterThan(1); // overlapped => ran in parallel
+});
+
+test("executable hooks serialize otherwise concurrency-safe calls", async () => {
+  class HookedTools {
+    hooks = { preToolUse: "trusted-hook" };
+    active = 0;
+    maxActive = 0;
+    schemas() { return []; }
+    async execute() {
+      this.active++;
+      this.maxActive = Math.max(this.maxActive, this.active);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      this.active--;
+      return "done";
+    }
+  }
+  const tools = new HookedTools();
+  const agent = new Agent({
+    provider: new ScriptedProvider([
+      { content: null, tool_calls: [
+        { id: "1", name: "read_file", arguments: { path: "a" } },
+        { id: "2", name: "search", arguments: { pattern: "x" } },
+      ] },
+      { content: "done", tool_calls: [] },
+    ]) as any,
+    tools: tools as any,
+  });
+  await agent.run("inspect");
+  expect(tools.maxActive).toBe(1);
+});
+
+test("generic subagent tasks do not overlap because they may mutate shared state", async () => {
+  class WorkerTools {
+    active = 0;
+    maxActive = 0;
+    schemas() { return []; }
+    async execute() {
+      this.active++;
+      this.maxActive = Math.max(this.maxActive, this.active);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      this.active--;
+      return "worker done";
+    }
+  }
+  const tools = new WorkerTools();
+  const agent = new Agent({
+    provider: new ScriptedProvider([
+      { content: null, tool_calls: [
+        { id: "1", name: "task", arguments: { description: "first", prompt: "mutate one" } },
+        { id: "2", name: "task", arguments: { description: "second", prompt: "mutate two" } },
+      ] },
+      { content: "done", tool_calls: [] },
+    ]) as any,
+    tools: tools as any,
+  });
+
+  await agent.run("delegate mutations");
+  expect(tools.maxActive).toBe(1);
+});
+
+test("capability-restricted reviewer tasks may still fan out in parallel", async () => {
+  class ReviewerTools {
+    active = 0;
+    maxActive = 0;
+    schemas() { return []; }
+    async execute() {
+      this.active++;
+      this.maxActive = Math.max(this.maxActive, this.active);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      this.active--;
+      return "review done";
+    }
+  }
+  const tools = new ReviewerTools();
+  const agent = new Agent({
+    provider: new ScriptedProvider([
+      { content: null, tool_calls: [
+        { id: "1", name: "task", arguments: { description: "first", prompt: "review one", subagent_type: "reviewer" } },
+        { id: "2", name: "task", arguments: { description: "second", prompt: "review two", subagent_type: "reviewer" } },
+      ] },
+      { content: "done", tool_calls: [] },
+    ]) as any,
+    tools: tools as any,
+  });
+
+  await agent.run("delegate reviews");
+  expect(tools.maxActive).toBeGreaterThan(1);
+});
+
+test("completion safety treats a generic worker as state-changing but a reviewer as read-only", () => {
+  expect((Agent as any).isStateChangingCall({ name: "task", arguments: {} })).toBe(true);
+  expect((Agent as any).isStateChangingCall({ name: "task", arguments: { subagent_type: "custom" } })).toBe(true);
+  expect((Agent as any).isStateChangingCall({ name: "task", arguments: { subagent_type: "reviewer" } })).toBe(false);
 });
 
   test("loop guard stops re-running an identical tool call", async () => {
@@ -952,6 +1139,35 @@ test("estimateTokens counts opaque provider continuation data", () => {
   expect(withContinuation).toBeGreaterThan(base + 90);
 });
 
+test("estimateRequestTokens includes the separately rendered tool schema catalog", () => {
+  const messages = [{ role: "user", content: "inspect" }];
+  const schemas = [{ type: "function", function: { name: "read_file", description: "x".repeat(4000) } }];
+  expect(estimateRequestTokens(messages, [])).toBe(estimateTokens(messages));
+  expect(estimateRequestTokens(messages, schemas)).toBeGreaterThan(estimateTokens(messages) + 1000);
+});
+
+test("in-loop context guard accounts for schemas before calling the provider", async () => {
+  const schemas = [{ type: "function", function: { name: "large_tool", description: "s".repeat(25_000) } }];
+  let seen: any[] = [];
+  const provider = {
+    async complete(messages: any[]) {
+      seen = structuredClone(messages);
+      return { content: "done", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({
+    provider: provider as any,
+    tools: { schemas: () => schemas, execute: async () => "unused" } as any,
+    maxContextTokens: 20_000,
+  });
+  for (let i = 0; i < 5; i++) agent.messages.push({ role: "tool", tool_call_id: `old-${i}`, content: "o".repeat(8000) });
+
+  expect(estimateTokens([...agent.messages, { role: "user", content: "finish" }])).toBeLessThan(16_000);
+  expect(estimateRequestTokens([...agent.messages, { role: "user", content: "finish" }], schemas)).toBeGreaterThan(16_000);
+  expect(await agent.run("finish")).toBe("done");
+  expect(seen.some((message) => String(message.content).includes("chars elided to fit context"))).toBe(true);
+});
+
 test("in-loop guard clips OLD observations within one turn before context overflows", async () => {
   const big = "x".repeat(5000); // under MAX_OBS_CHARS, so it accumulates rather than being clamped per-result
   const tools = { schemas: () => [], execute: async () => big };
@@ -1011,6 +1227,45 @@ test("unproductive-result guard nudges after N empty/failed results in a row (an
   const nudges = agent.messages.filter((m: any) =>
     String(m.content).includes("[loop guard]") && String(m.content).includes("empty or failed"));
   expect(nudges.length).toBeGreaterThanOrEqual(1); // fired at the 3rd empty result in a row
+});
+
+test("toolchain capability circuit stops alternate-path recovery spirals after three failures", async () => {
+  let executions = 0;
+  const tools = {
+    schemas: () => [],
+    execute: async () => {
+      executions++;
+      return "(exit 127 -- command FAILED)\nbun: command not found";
+    },
+  };
+  const commands = ["bun test", "npm test", "C:/tools/bun.exe test", "npx bun test"];
+  const script: any[] = commands.map((command, i) => ({
+    content: null,
+    tool_calls: [{ id: `tc${i}`, name: "bash", arguments: { command } }],
+  }));
+  script.push({ content: "blocked honestly", tool_calls: [] });
+  const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
+
+  expect(await agent.run("fix and test")).toBe("blocked honestly");
+  expect(executions).toBe(3);
+  expect(agent.messages.some((m: any) => String(m.content).includes("[capability circuit opened]"))).toBe(true);
+  expect(agent.messages.some((m: any) => String(m.content).includes("already failed three independent"))).toBe(true);
+});
+
+test("broad loop counters reset between independent Agent.run calls", async () => {
+  const tools = { schemas: () => [], execute: async () => "[]" };
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "a", name: "search", arguments: { pattern: "a" } }] },
+    { content: null, tool_calls: [{ id: "b", name: "search", arguments: { pattern: "b" } }] },
+    { content: "first", tool_calls: [] },
+    { content: null, tool_calls: [{ id: "c", name: "search", arguments: { pattern: "c" } }] },
+    { content: "second", tool_calls: [] },
+  ]);
+  const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 5 });
+  expect(await agent.run("one")).toBe("first");
+  expect(await agent.run("two")).toBe("second");
+  const guard = agent.messages.filter((m: any) => String(m.content).includes("last 3 tool results"));
+  expect(guard).toHaveLength(0);
 });
 
 test("stream-eager execution: a ready read-only call starts DURING generation, never re-executes", async () => {
@@ -1193,6 +1448,40 @@ test("verify_before_exit gate fires once, then lets the model finish (off by def
   expect(on.messages.filter((m: any) => String(m.content).includes("VERIFY BEFORE FINISHING")).length).toBe(1);
 });
 
+test("verify_before_exit credits proactive fresh evidence instead of demanding a duplicate check", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "write", name: "write_file", arguments: { path: "x.ts", content: "fixed" } }] },
+    { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: "bun test" } }] },
+    { content: "fixed and verified", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider: provider as any,
+    tools: { schemas: () => [], execute: async (name: string) => name === "bash" ? "(exit 0)\n2 pass" : "Wrote x.ts" } as any,
+    maxSteps: 6,
+    verifyBeforeExit: true,
+    verifyStateChangesBeforeExit: true,
+  });
+  expect(await agent.run("fix x.ts and test it")).toBe("fixed and verified");
+  expect(provider.index).toBe(3);
+  expect(agent.messages.some((m: any) => String(m.content).includes("VERIFY BEFORE FINISHING"))).toBe(false);
+});
+
+test("verify_before_exit accepts a productive read-only observation as current-state evidence", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "inspect", name: "bash", arguments: { command: "uname -s" } }] },
+    { content: "MINGW64_NT", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider: provider as any,
+    tools: { schemas: () => [], execute: async () => "MINGW64_NT\n(exit 0)" } as any,
+    maxSteps: 5,
+    verifyBeforeExit: true,
+  });
+  expect(await agent.run("inspect the shell once")).toBe("MINGW64_NT");
+  expect(provider.index).toBe(2);
+  expect(agent.messages.some((m: any) => String(m.content).includes("VERIFY BEFORE FINISHING"))).toBe(false);
+});
+
 test("state-change completion gate requires fresh tool evidence, not a second confident claim", async () => {
   const tools = {
     schemas: () => [],
@@ -1260,6 +1549,149 @@ test("bash redirection stays state-changing and still requires independent evide
   });
   expect(await agent.run("write state.txt")).toBe("verified");
   expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(true);
+});
+
+test("a failed validator stays as completion debt after a mutation and a read cannot clear it", async () => {
+  const results = [
+    "Edited src/x.ts",
+    "(exit 1 -- command FAILED)\nSRT sandbox unavailable",
+    "const fixed = true;",
+  ];
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "src/x.ts", old_string: "false", new_string: "true" } }] },
+    { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: "rtk bun test test/x.test.ts" } }] },
+    { content: "done", tool_calls: [] },
+    { content: null, tool_calls: [{ id: "read", name: "read_file", arguments: { path: "src/x.ts" } }] },
+    { content: "verified from the file", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider: provider as any,
+    tools: { schemas: () => [], execute: async () => results.shift()! } as any,
+    maxSteps: 8,
+    verifyStateChangesBeforeExit: true,
+  });
+
+  expect(await agent.run("fix x and run its test")).toBe("verified from the file");
+  expect(agent.completionStatus).toMatchObject({
+    ok: false,
+    reason: "validation_failed",
+    command: "rtk bun test test/x.test.ts",
+  });
+  expect(agent.messages.some((message: any) => String(message.content).includes("VALIDATION FAILED"))).toBe(true);
+});
+
+test("baseline validator debt crosses a successful edit and a later validator success clears it", async () => {
+  const results = [
+    "(exit 1 -- command FAILED)\nexpected red test",
+    "Edited src/x.ts",
+    "(exit 0)\n1 pass",
+  ];
+  const agent = new Agent({
+    provider: new ScriptedProvider([
+      { content: null, tool_calls: [{ id: "red", name: "bash", arguments: { command: "bun test test/x.test.ts" } }] },
+      { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "src/x.ts", old_string: "false", new_string: "true" } }] },
+      { content: "done", tool_calls: [] },
+      { content: null, tool_calls: [{ id: "green", name: "bash", arguments: { command: "bun test test/x.test.ts" } }] },
+      { content: "verified", tool_calls: [] },
+    ]) as any,
+    tools: { schemas: () => [], execute: async () => results.shift()! } as any,
+    maxSteps: 8,
+    verifyStateChangesBeforeExit: true,
+  });
+
+  expect(await agent.run("fix x")).toBe("verified");
+  expect(agent.completionStatus).toEqual({ ok: true });
+});
+
+test("validator recognition accepts package-script suffixes but remains name-bounded", () => {
+  expect(isValidationBashCommand("rtk bun run test:unit")).toBe(true);
+  expect(isValidationBashCommand("npm run typecheck:stable")).toBe(true);
+  expect(isValidationBashCommand("pnpm lint:fix")).toBe(true);
+  expect(isValidationBashCommand("bun contest:unit")).toBe(false);
+  expect(isValidationBashCommand("echo test:unit")).toBe(false);
+});
+
+test("denied, background, and exit-masked validators cannot satisfy post-mutation debt", async () => {
+  const cases: Array<{
+    command: string;
+    observation: string;
+    reason: "validation_failed" | "validation_missing";
+    background?: boolean;
+  }> = [
+    { command: "bun test", observation: "Blocked: bash is not allowed in 'plan' mode (read-only).", reason: "validation_failed" },
+    { command: "bun test", observation: "Refused: catastrophic command is blocked.", reason: "validation_failed" },
+    { command: "bun test", observation: "Tool 'bash' is disabled (enable with /tools bash).", reason: "validation_failed" },
+    { command: "bun test", observation: "The user did NOT approve this action.", reason: "validation_failed" },
+    { command: "bun test", observation: "[capability circuit] toolchain unavailable", reason: "validation_failed" },
+    { command: "bun test", observation: "(interrupted)", reason: "validation_failed" },
+    { command: "bun test", observation: "Running in background [bg1]: bun test\nCheck its output later with /bashes.", background: true, reason: "validation_missing" },
+    { command: "bun test", observation: "Running in background [bg2]: bun test\nCheck output with /bashes.", reason: "validation_missing" },
+    { command: "bun test || true", observation: "(exit 0)", reason: "validation_missing" },
+  ];
+
+  for (const item of cases) {
+    const results = ["Edited src/x.ts", item.observation];
+    const agent = new Agent({
+      provider: new ScriptedProvider([
+        { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "src/x.ts", old_string: "false", new_string: "true" } }] },
+        { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: item.command, run_in_background: item.background ?? false } }] },
+        { content: "done", tool_calls: [] },
+        { content: "blocked", tool_calls: [] },
+      ]) as any,
+      tools: { schemas: () => [], execute: async () => results.shift()! } as any,
+      maxSteps: 5,
+    });
+
+    expect(await agent.run("edit and validate")).toBe("blocked");
+    expect(agent.completionStatus).toMatchObject({ ok: false, reason: item.reason, command: item.command });
+  }
+});
+
+test("failed incidental probes do not create validation debt and failed mutations do not advance its epoch", async () => {
+  const results = [
+    "(exit 1 -- command FAILED)\nnot a git repository",
+    "",
+  ];
+  const agent = new Agent({
+    provider: new ScriptedProvider([
+      { content: null, tool_calls: [{ id: "git", name: "bash", arguments: { command: "git status --short" } }] },
+      { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "src/x.ts", old_string: "missing", new_string: "x" } }] },
+      { content: "nothing changed", tool_calls: [] },
+    ]) as any,
+    tools: { schemas: () => [], execute: async () => results.shift()! } as any,
+    maxSteps: 5,
+    verifyStateChangesBeforeExit: true,
+  });
+
+  expect(await agent.run("inspect and edit only if present")).toBe("nothing changed");
+  expect(agent.completionStatus).toEqual({ ok: true });
+  expect(agent.messages.some((message: any) => String(message.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(false);
+});
+
+test("runUntilDone keeps validation debt across controller reviews and does not accept bare DONE as verified", async () => {
+  const results = [
+    "Edited src/x.ts",
+    "(exit 1 -- command FAILED)\nSRT sandbox unavailable",
+    "const fixed = true;",
+  ];
+  const agent = new Agent({
+    provider: new ScriptedProvider([
+      { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "src/x.ts", old_string: "false", new_string: "true" } }] },
+      { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: "bun test" } }] },
+      { content: "blocked", tool_calls: [] },
+      { content: null, tool_calls: [{ id: "read", name: "read_file", arguments: { path: "src/x.ts" } }] },
+      { content: "still blocked", tool_calls: [] },
+      { content: "DONE", tool_calls: [] },
+      { content: "DONE", tool_calls: [] },
+      { content: "continued after unverified DONE", tool_calls: [] },
+      { content: "blocked for real", tool_calls: [] },
+    ]) as any,
+    tools: { schemas: () => [], execute: async () => results.shift()! } as any,
+    maxSteps: 8,
+  });
+
+  expect(await agent.runUntilDone("fix x", { maxIters: 3 })).toBe("blocked for real");
+  expect(agent.completionStatus).toMatchObject({ ok: false, reason: "validation_failed", command: "bun test" });
 });
 
 test("adaptive effort is opt-in and keeps full effort after a single read-then-mutate (the synthesis step is protected)", async () => {

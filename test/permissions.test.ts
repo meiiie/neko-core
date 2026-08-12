@@ -8,7 +8,11 @@ const write = resolveTool("write_file");
 const edit = resolveTool("edit");
 const multiEdit = resolveTool("multi_edit");
 const bash = resolveTool("bash");
+const computer = resolveTool("computer");
+const task = resolveTool("task");
 const memory = resolveTool("memory");
+const workflow = resolveTool("workflow");
+const playbook = resolveTool("playbook");
 
 test("safe tools always allowed", () => {
   for (const m of ["default", "accept-edits", "plan", "auto"] as const) {
@@ -19,6 +23,13 @@ test("safe tools always allowed", () => {
 test("auto allows gated", () => {
   expect(decide("auto", write)).toBe("allow");
   expect(decide("auto", bash)).toBe("allow");
+});
+
+test("host computer control requires explicit consent even in auto mode", () => {
+  expect(decide("auto", computer)).toBe("prompt");
+  expect(decide("default", computer)).toBe("prompt");
+  expect(decide("accept-edits", computer)).toBe("prompt");
+  expect(decide("plan", computer)).toBe("deny");
 });
 
 test("plan denies gated", () => {
@@ -37,9 +48,20 @@ test("action-sensitive tools gate only their mutating actions", () => {
   expect(decide("plan", memory, { action: "read" })).toBe("allow");
   expect(decide("plan", memory, { action: "search" })).toBe("allow");
   expect(decide("plan", memory, { action: "write" })).toBe("deny");
+  expect(decide("plan", memory, { action: "WRITE" })).toBe("deny");
+  expect(decide("plan", workflow, { action: "Delete" })).toBe("deny");
+  expect(decide("plan", playbook, { action: "ADD" })).toBe("deny");
   expect(decide("default", memory, { action: "delete" })).toBe("prompt");
   expect(decide("default", memory, { action: "append" })).toBe("prompt");
   expect(decide("auto", memory, { action: "write" })).toBe("allow");
+});
+
+test("read-only subagents are safe, but a generic or custom worker is gated", () => {
+  expect(decide("plan", task, { subagent_type: "reviewer" })).toBe("allow");
+  expect(decide("plan", task, { subagent_type: "explorer" })).toBe("allow");
+  expect(decide("plan", task, {})).toBe("deny");
+  expect(decide("plan", task, { subagent_type: "custom-worker" })).toBe("deny");
+  expect(decide("default", task, {})).toBe("prompt");
 });
 
 test("default prompts gated", () => {

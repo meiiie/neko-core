@@ -6,6 +6,64 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-08-12
+
+### Added
+
+- **Long-running `/auto` work now recovers from provider stalls without imposing one total wall-clock
+  deadline.** Provider traffic, usage and bounded tool activity act as heartbeats; genuine inactivity
+  restarts the transport and resumes from the durable conversation/tool checkpoint with bounded retries.
+  Explicit Esc/Ctrl+C cancellation is never retried, and `neko --resume` remains the recovery path after
+  a terminal or machine restart.
+- **The one-line installer carries Neko's bundled skills in the standalone binary.** Built-in skills are
+  available from every working directory without a source checkout or a copy under
+  `~/.neko-core/skills`; that directory remains the user-global override layer. Neko does not silently
+  import private Codex/agent skills or download executable skill assets.
+- **Project control surfaces have an explicit trust boundary.** Project instructions, config, skills,
+  agents and recipes are loaded only from a canonical trusted snapshot; linked, changed, oversized or
+  polluted stores fail closed. `neko trust` exposes the decision instead of treating the current folder
+  as authority by default.
+- **Automation and evaluation gained auditable outcomes.** Headless runs preserve validation debt in their
+  exit status; benchmark/eval separates model failure from infrastructure failure, records bounded
+  metadata-only trajectories and source/runtime fingerprints, and includes a non-saturated frontier-pack
+  foundation. Harbor integration keeps the provider and OAuth lease on the host while all task tools run
+  through the remote environment with bounded framing, cancellation and process-tree cleanup.
+- **`neko-core` now has a side-effect-free library entry and a safe source bootstrap.** Embedders can import
+  the core Agent/ToolRegistry contract, while development commands enter through
+  `node bin/neko-source.cjs` so an untrusted cwd cannot preload dotenv or bunfig code before Neko applies
+  project trust.
+- **Local handoff foundations are available.** `neko handoff send`/`inbox` and their TUI counterparts move
+  a bounded, explicitly `local-unverified` summary without attaching transcripts, files, credentials or
+  permissions automatically.
+
+### Changed
+
+- Exact single-file coding turns can lease only `read_file`, target-bound `edit` and a foreground validator
+  to the Codex App Server. Ambiguous or domain-matched work retains the configured full tool surface. A
+  post-mutation completion now requires fresh inspection or an authoritative validator result; stale,
+  denied, background or exit-masked checks cannot clear validation debt.
+- Provider, MCP, HTTP and child-process boundaries are stricter: bounded streaming/output, public-address
+  HTTP pinning, canonical executables, minimal child environments, cancellable MCP calls, no blind replay
+  after unknown effects, and fail-closed sandbox/toolchain health. Bash cancellation verifies descendants
+  instead of treating a dead leader as proof that its process tree is gone.
+- Benchmark results are intentionally conservative: infrastructure errors remain in scheduled-trial
+  denominators and invalidate comparisons. The public frontier tier is documented as regression/calibration,
+  not a SOTA leaderboard claim; the proposed private v2 protocol requires held-out tasks, independent
+  execution/verdict trust domains and repeated trials.
+
+### Fixed
+
+- **Esc and Ctrl+C can no longer leave a GPT-5.6 App Server turn busy indefinitely.** Neko first sends the
+  cooperative interrupt, then closes the sidecar after a bounded grace period and waits for transport exit.
+  Cancellation during startup is covered too. The App Server watchdog measures silence rather than total
+  task duration and pauses while a bounded dynamic tool is active.
+- **Interrupted and resumed work is durable and honest.** Streamed assistant segments, announced tool calls
+  and completed tool results are checkpointed incrementally; dangling calls are sealed as unknown outcome,
+  internal controller prompts never leak into provider payloads, and recovery inspects actual state before
+  repeating a mutation.
+- Windows SRT source-run validators now use the frozen canonical Bun path through a transient exact-file
+  bridge; hostile cwd shims are ignored and launch-local files/ACLs are removed after the final process exits.
+
 ## [0.22.5] — 2026-08-05
 
 ### Added

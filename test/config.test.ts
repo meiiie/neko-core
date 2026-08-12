@@ -328,6 +328,13 @@ test("redactSecrets recursively masks MCP headers and env values", () => {
   expect(shown.mcp_servers.web.headers.Authorization).toBe("<redacted>");
 });
 
+test("MCP stdio config preserves an explicit absolute cwd", () => {
+  const cfg = loadConfig({ path: tmpConfig({
+    mcp_servers: { local: { command: process.execPath, args: ["server.ts"], cwd: "C:\\trusted\\mcp" } },
+  }) });
+  expect(cfg.mcpServers.local.cwd).toBe("C:\\trusted\\mcp");
+});
+
 test("api key from file, never in data", () => {
   const cfg = loadConfig({ path: tmpConfig({ api_key: "sk-file" }) });
   expect(cfg.apiKey).toBe("sk-file");
@@ -411,6 +418,21 @@ test("NekoConfig.adopt swaps provider/model/endpoint/key IN PLACE (the /provider
   expect(a.baseUrl).toBe("https://z.ai");
   expect(a.apiKey).toBe("ZKEY"); // key swapped too -> no "new endpoint + old key" 401 after switching
   expect(a.profile).toBe("zai");
+});
+
+test("childSecretEnvNames retains printable-removed top-level and every profile key name", () => {
+  const cfg = loadConfig({ path: tmpConfig({
+    key_env: "CUSTOM_ACTIVE_KEY",
+    key_env_fallbacks: ["CUSTOM_ACTIVE_KEY_OLD"],
+    profiles: { extra: { key_env: "EXTRA_PROVIDER_KEY", key_env_fallbacks: ["EXTRA_PROVIDER_KEY_OLD"] } },
+  }) });
+  expect(cfg.childSecretEnvNames).toEqual(expect.arrayContaining([
+    "CUSTOM_ACTIVE_KEY",
+    "CUSTOM_ACTIVE_KEY_OLD",
+    "EXTRA_PROVIDER_KEY",
+    "EXTRA_PROVIDER_KEY_OLD",
+  ]));
+  expect(cfg.withModel("other").childSecretEnvNames).toEqual(expect.arrayContaining(["CUSTOM_ACTIVE_KEY", "EXTRA_PROVIDER_KEY"]));
 });
 
 test("auto_update: ON by default; config false or NEKO_AUTO_UPDATE=0 opts out to notify-only", () => {

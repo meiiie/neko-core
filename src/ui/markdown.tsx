@@ -8,6 +8,7 @@ import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import stringWidth from "string-width";
 
+import { terminalSafeText } from "../shared/terminal-text.ts";
 import { highlightLine } from "./highlight.tsx";
 import { linkSegments, osc8 } from "./links.ts";
 
@@ -203,7 +204,9 @@ function inline(raw: string): ReactNode[] {
 
 export function Markdown({ text, width, compact, minWidth = 24 }: { text: string; width?: number; compact?: boolean; minWidth?: number }): ReactNode {
   const maxWidth = Math.max(minWidth, width ?? 80);
-  const lines = text.replace(/\r/g, "").split("\n");
+  // Live provider text and approval plans bypass the committed transcript renderer. Sanitize at this
+  // parser boundary too so raw terminal controls are never interpreted as Markdown/Ink formatting.
+  const lines = terminalSafeText(text, { preserveLineBreaks: true }).split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
   let key = 0;

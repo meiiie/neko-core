@@ -62,8 +62,8 @@ running journal of what was done and why.
 
 ## Tooling
 - Prefix shell commands with `rtk` (the token-saving wrapper).
-- Verify loop (before every commit): `bun run typecheck` · `bun test` · `bun bin/neko.ts doctor`
-  · `bun bin/neko.ts policy` · `bun run build`.
+- Verify loop (before every commit): `bun run typecheck` · `bun test` · `node bin/neko-source.cjs doctor`
+  · `node bin/neko-source.cjs policy` · `bun run build`.
 
 ## Releasing
 - Follow `docs/process/RELEASE.md` — gates, docs, tag-watch-verify, curated notes, the re-tag

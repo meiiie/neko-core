@@ -43,7 +43,7 @@ export function imageGenerationAvailable(): { ok: boolean; detail: string } {
 function defaultFactory(handlers: CodexAppServerHandlers): RpcClient {
   const support = discoverCodexSupport();
   if (support.state !== "ready" || !support.executable) throw new Error(imageGenerationAvailable().detail);
-  return startCodexAppServer(support.executable, handlers);
+  return startCodexAppServer(support.executable, handlers, { allowImageGeneration: true });
 }
 
 /**
@@ -113,6 +113,7 @@ export async function generateImage(
       approvalPolicy: "never",
       sandbox: "read-only",
       ephemeral: true,
+      environments: [],
     }, 60_000);
     threadId = String(started?.thread?.id ?? "");
     if (!threadId) throw new Error("Codex App Server did not return a thread id");

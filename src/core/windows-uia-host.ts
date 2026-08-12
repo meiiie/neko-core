@@ -2,6 +2,12 @@ import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:chil
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { createInterface, type Interface } from "node:readline";
+import { resolveWindowsSystemExecutable } from "../shared/windows-system.ts";
+
+const WINDOWS_POWERSHELL = process.platform === "win32"
+  ? resolveWindowsSystemExecutable("WindowsPowerShell\\v1.0\\powershell.exe")
+  : null;
+const WINDOWS_TASKKILL = process.platform === "win32" ? resolveWindowsSystemExecutable("taskkill.exe") : null;
 
 export interface UiaRequest {
   action: string;
@@ -65,8 +71,8 @@ export class ResidentUiaHost {
     this.lines?.close();
     this.lines = null;
     try {
-      if (child?.pid && process.platform === "win32") {
-        spawnSync("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore", timeout: 5000 });
+      if (child?.pid && process.platform === "win32" && WINDOWS_TASKKILL) {
+        spawnSync(WINDOWS_TASKKILL, ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore", timeout: 5000 });
       } else {
         child?.kill();
       }
@@ -115,7 +121,8 @@ export class ResidentUiaHost {
   private ensureChild(): ChildProcessWithoutNullStreams {
     if (this.child && !this.child.killed && this.child.exitCode === null) return this.child;
     if (!existsSync(this.script)) throw new Error(`resident Windows script not found: ${this.script}`);
-    const child = spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", this.script], {
+    if (!WINDOWS_POWERSHELL) throw new Error("trusted Windows PowerShell was not found under System32");
+    const child = spawn(WINDOWS_POWERSHELL, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", this.script], {
       cwd: dirname(this.script),
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],

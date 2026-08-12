@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 
 import {
+  __geminiChildEnvForTest,
+  __geminiLaunchForTest,
   clearGeminiCredentials,
   discoverGeminiCli,
   explainGeminiCliError,
@@ -28,7 +30,10 @@ test("Gemini CLI discovery verifies ACP-capable versions and reports old install
   const ready = discoverGeminiCli({
     env,
     platform: "win32",
+    cwd: "C:\\workspace",
     pathExists: (path) => path.endsWith("gemini.cmd"),
+    realpath: (path) => path,
+    isRegularFile: (path) => path.endsWith("gemini.cmd"),
     runVersion: () => "0.50.0",
   });
   expect(ready.state).toBe("ready");
@@ -36,10 +41,152 @@ test("Gemini CLI discovery verifies ACP-capable versions and reports old install
   const old = discoverGeminiCli({
     env,
     platform: "win32",
+    cwd: "C:\\workspace",
     pathExists: (path) => path.endsWith("gemini.cmd"),
+    realpath: (path) => path,
+    isRegularFile: (path) => path.endsWith("gemini.cmd"),
     runVersion: () => "0.20.0",
   });
   expect(old.state).toBe("outdated");
+});
+
+test("Gemini PATH discovery rejects canonical workspace targets and non-files", () => {
+  const workspace = "C:\\work";
+  const outside = "C:\\tools\\gemini.exe";
+  const redirected = discoverGeminiCli({
+    platform: "win32",
+    home: "C:\\home",
+    cwd: workspace,
+    env: { PATH: "C:\\tools" },
+    pathExists: () => true,
+    realpath: (path) => path === outside ? `${workspace}\\gemini.exe` : path,
+    isRegularFile: (path) => path === `${workspace}\\gemini.exe`,
+    runVersion: () => "0.50.0",
+  });
+  expect(redirected.state).toBe("missing");
+
+  const directory = discoverGeminiCli({
+    platform: "win32",
+    home: "C:\\home",
+    cwd: workspace,
+    env: { PATH: "C:\\tools" },
+    pathExists: () => true,
+    realpath: (path) => path,
+    isRegularFile: () => false,
+    runVersion: () => "0.50.0",
+  });
+  expect(directory.state).toBe("missing");
+
+  const relativePath = discoverGeminiCli({
+    platform: "win32",
+    home: "C:\\home",
+    cwd: workspace,
+    env: { PATH: "..\\tools" },
+    pathExists: () => true,
+    realpath: (path) => path,
+    isRegularFile: () => true,
+    runVersion: () => "0.50.0",
+  });
+  expect(relativePath.state).toBe("missing");
+});
+
+test("absolute NEKO_GEMINI_PATH is explicit workspace authority but a relative override is ignored", () => {
+  const workspace = "C:\\work";
+  const explicit = `${workspace}\\gemini.exe`;
+  const ready = discoverGeminiCli({
+    platform: "win32",
+    home: "C:\\home",
+    cwd: workspace,
+    env: { PATH: "", NEKO_GEMINI_PATH: explicit },
+    pathExists: () => true,
+    realpath: (path) => path,
+    isRegularFile: (path) => path === explicit,
+    runVersion: () => "0.50.0",
+  });
+  expect(ready.state).toBe("ready");
+  expect(ready.executable?.source).toBe("environment");
+
+  const relative = discoverGeminiCli({
+    platform: "win32",
+    home: "C:\\home",
+    cwd: workspace,
+    env: { PATH: "", NEKO_GEMINI_PATH: ".\\gemini.exe" },
+    pathExists: () => true,
+    realpath: (path) => path,
+    isRegularFile: () => true,
+    runVersion: () => "0.50.0",
+  });
+  expect(relative.state).toBe("missing");
+});
+
+test("Gemini Windows shim uses only an absolute Node outside the workspace", () => {
+  const bundle = "C:\\tools\\node_modules\\@google\\gemini-cli\\bundle\\gemini.js";
+  const trustedNode = "C:\\Program Files\\nodejs\\node.exe";
+  const launch = __geminiLaunchForTest(
+    { path: "C:\\tools\\gemini.cmd", source: "path" },
+    ["--version"],
+    {
+      platform: "win32",
+      env: { PATH: "C:\\work\\bin;C:\\Program Files\\nodejs" },
+      cwd: "C:\\work",
+      realpath: (path) => path,
+      isRegularFile: (path) => [bundle, "C:\\work\\bin\\node.exe", trustedNode].includes(path),
+    },
+  );
+  expect(launch).toEqual({ command: trustedNode, args: [bundle, "--version"] });
+});
+
+test("Gemini POSIX JS shim bypasses a workspace env-node interpreter", () => {
+  const launch = __geminiLaunchForTest(
+    { path: "/opt/gemini/gemini.js", source: "path" },
+    ["--version"],
+    {
+      platform: "linux",
+      env: { PATH: "/work/bin:/usr/bin" },
+      cwd: "/work",
+      realpath: (path) => path,
+      isRegularFile: (path) => ["/work/bin/node", "/usr/bin/node"].includes(path),
+    },
+  );
+  expect(launch).toEqual({ command: "/usr/bin/node", args: ["/opt/gemini/gemini.js", "--version"] });
+  const extensionless = __geminiLaunchForTest(
+    { path: "/opt/gemini/gemini", source: "path" },
+    ["--version"],
+    {
+      platform: "linux",
+      env: { PATH: "/work/bin:/usr/bin" },
+      cwd: "/work",
+      realpath: (path) => path,
+      isRegularFile: (path) => ["/work/bin/node", "/usr/bin/node"].includes(path),
+      readPrefix: () => "#!/usr/bin/env node\n",
+    },
+  );
+  expect(extensionless).toEqual({ command: "/usr/bin/node", args: ["/opt/gemini/gemini", "--version"] });
+});
+
+test("Gemini sidecar child env strips ambient provider and cloud credentials", () => {
+  expect(__geminiChildEnvForTest({
+    Path: "C:\\work\\bin;C:\\trusted-bin;..\\relative-bin;C:\\linked-bin",
+    BROWSER: "C:\\work\\browser.exe",
+    GEMINI_CLI_HOME: "C:\\required-auth-home",
+    GEMINI_API_KEY: "secret",
+    CUSTOM_PROVIDER_TOKEN: "secret",
+    AWS_ACCESS_KEY_ID: "secret",
+    AWS_SECRET_ACCESS_KEY: "secret",
+    GOOGLE_APPLICATION_CREDENTIALS: "C:\\secret.json",
+    GITHUB_PAT: "secret",
+    PGPASSWORD: "secret",
+    MYSQL_PWD: "secret",
+    DOCKER_AUTH_CONFIG: "secret",
+    NODE_OPTIONS: "--require=.\\workspace-preload.js",
+    ARBITRARY_CONFIGURED_KEY_ENV: "secret",
+    ORDINARY_VALUE: "kept",
+  }, {
+    platform: "win32",
+    cwd: "C:\\work",
+    realpath: (path) => path === "C:\\linked-bin" ? "C:\\work\\linked-bin" : path,
+    isRegularFile: () => true,
+  })).toEqual({ Path: "C:\\trusted-bin", GEMINI_CLI_HOME: "C:\\required-auth-home" });
 });
 
 test("Gemini discovery prefers the Neko-managed bundle and private runtime", () => {

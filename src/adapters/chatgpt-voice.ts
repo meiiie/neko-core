@@ -175,6 +175,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
         approvalPolicy: "never",
         sandbox: "read-only",
         ephemeral: true,
+        environments: [],
         developerInstructions: VOICE_AGENT_INSTRUCTIONS,
         dynamicTools: dynamicTools.tools,
       }, 60_000);

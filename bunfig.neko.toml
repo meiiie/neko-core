@@ -1,0 +1,2 @@
+# Intentionally empty. Source launches pass this trusted file explicitly so an untrusted cwd
+# bunfig.toml cannot preload code before Neko's project-trust gate starts.

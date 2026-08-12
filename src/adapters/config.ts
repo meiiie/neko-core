@@ -17,6 +17,7 @@ import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 
 import { isMode, type PermissionMode } from "../core/permissions.ts";
+import { inspectProjectTrust, type ProjectTrustSummary } from "./project-trust.ts";
 
 export const LOCAL_CONFIG_DIR = ".neko-core";
 export const LOCAL_CONFIG_NAME = "config.json";
@@ -81,7 +82,9 @@ export const DEFAULTS: Record<string, any> = {
   sandbox: true,
   sandbox_network: false, // egress blocked inside the sandbox by default
   sandbox_domains: [], // srt (Windows) allowlist used when sandbox_network is true (no allow-all in srt)
-  sandbox_auto_approve: true, // sandboxed bash skips the approval prompt (the sandbox IS the containment)
+  // Sandboxes confine writes/egress but intentionally retain broad host reads. Keep bash approval
+  // on by default until read-deny/redaction coverage is a verified confidentiality boundary.
+  sandbox_auto_approve: false,
   effort_ceiling: "high", // highest reasoning_effort the endpoint accepts (OpenAI standard caps at high); a profile can raise it
   adaptive_effort: false, // experimental lagged proxy; keep full effort unless a workload-specific eval proves it safe
   image_long_edge: 1568, // conservative cross-provider vision input; high-resolution profiles may raise it
@@ -350,6 +353,11 @@ export class NekoConfig {
     /** Set when a top-level `model` (config file or NEKO_MODEL) overrides the selected profile's preset
      * model — the #1 config trap: `--profile x` silently keeps the file's model. Doctor names the source. */
     public modelShadow: { source: string; profileModel: string } | null = null,
+    /** Top-level key_env names leave printable data but still need protecting from child processes. */
+    private childKeyEnvsFromConfig: string[] = [],
+    public projectTrust: ProjectTrustSummary = { state: "none", files: [] },
+    /** Resolved user-home boundary used by trust-aware runtime loaders; never printed or sent. */
+    public resolvedHome: string = homeDir(),
   ) {}
 
   /** Adopt another config's provider profile IN PLACE — data, profile name, and resolved key — so the
@@ -361,6 +369,9 @@ export class NekoConfig {
     this.profile = other.profile;
     this.apiKeyFromFile = other.apiKeyFromFile;
     this.modelShadow = other.modelShadow;
+    this.childKeyEnvsFromConfig = [...other.childKeyEnvsFromConfig];
+    this.projectTrust = { ...other.projectTrust, files: [...other.projectTrust.files] };
+    this.resolvedHome = other.resolvedHome;
   }
 
   get provider(): string { return String(this.data.provider ?? "openai_compat"); }
@@ -387,12 +398,12 @@ export class NekoConfig {
   }
   /** A clone of this config pointing at a different model (same endpoint + key) — e.g. the vision pre-pass. */
   withModel(model: string): NekoConfig {
-    return new NekoConfig({ ...this.data, model }, this.profile, this.profiles, this.apiKey);
+    return new NekoConfig({ ...this.data, model }, this.profile, this.profiles, this.apiKey, this.modelShadow, this.childKeyEnvsFromConfig, this.projectTrust, this.resolvedHome);
   }
   /** A clone at a different reasoning tier (same endpoint, key and model) — the oracle spends more than
    * an ordinary turn does, and that is the only difference between them. */
   withEffort(effort: string): NekoConfig {
-    return new NekoConfig({ ...this.data, reasoning_effort: effort }, this.profile, this.profiles, this.apiKey);
+    return new NekoConfig({ ...this.data, reasoning_effort: effort }, this.profile, this.profiles, this.apiKey, this.modelShadow, this.childKeyEnvsFromConfig, this.projectTrust, this.resolvedHome);
   }
   get baseUrl(): string { return String(this.data.base_url ?? "").replace(/\/+$/, ""); }
   /** A local model server (Ollama/llama.cpp/LM Studio/vLLM) — no API key required. */
@@ -500,9 +511,9 @@ export class NekoConfig {
     const v = this.data.sandbox_domains;
     return Array.isArray(v) ? v.map(String) : [];
   }
-  /** When true (default) AND the sandbox is live, bash skips the approval prompt in
+  /** When explicitly true AND the sandbox is live, bash skips the approval prompt in
    * default/accept-edits mode - the OS sandbox is the containment. `neko policy` surfaces it. */
-  get sandboxAutoApprove(): boolean { return this.data.sandbox_auto_approve !== false; }
+  get sandboxAutoApprove(): boolean { return this.data.sandbox_auto_approve === true; }
 
   /** Self-hosted SearXNG base URL for web_search metasearch ("" = off). */
   get searxngUrl(): string { return String(this.data.searxng_url ?? ""); }
@@ -540,8 +551,8 @@ export class NekoConfig {
     const value = String(this.data.browser_extension_store_id ?? "").trim().toLowerCase();
     return /^[a-p]{32}$/.test(value) ? value : "";
   }
-  /** Opt-in pre-completion gate: intercept the first tool-less final answer once and force a
-   * re-inspection of the actual state before finishing (quality over speed; +1 turn when it fires). */
+  /** Opt-in pre-completion gate: when no fresh inspection/test evidence exists, intercept the first
+   * tool-less final once and force a re-inspection (quality over speed; +1 turn only when needed). */
   get verifyBeforeExit(): boolean { return Boolean(this.data.verify_before_exit); }
   /** Prompt caching (anthropic provider): send cache_control breakpoints so the stable prefix
    * (tools + system) and the growing conversation are cached across steps/turns. ON by default —
@@ -629,7 +640,7 @@ export class NekoConfig {
   }
 
   /** Declared MCP servers: name -> stdio {command,args?,env?} OR remote {url, type?:http|sse, headers?}. */
-  get mcpServers(): Record<string, { command?: string; args?: string[]; env?: Record<string, string>; type?: "stdio" | "http" | "sse"; url?: string; headers?: Record<string, string>; oauth?: boolean }> {
+  get mcpServers(): Record<string, { command?: string; args?: string[]; env?: Record<string, string>; cwd?: string; type?: "stdio" | "http" | "sse"; url?: string; headers?: Record<string, string>; oauth?: boolean }> {
     const raw = this.data.mcp_servers;
     return raw && typeof raw === "object" ? raw : {};
   }
@@ -654,20 +665,33 @@ export class NekoConfig {
     const profile = this.profiles[this.profile];
     return [profile?.key_env, ...(profile?.key_env_fallbacks ?? [])].filter((name): name is string => Boolean(name));
   }
+
+  /** Every configured provider credential env name, not only the selected profile. */
+  get childSecretEnvNames(): string[] {
+    const names = new Set(this.childKeyEnvsFromConfig);
+    for (const profile of Object.values(this.profiles)) {
+      if (profile.key_env) names.add(profile.key_env);
+      for (const fallback of profile.key_env_fallbacks ?? []) names.add(fallback);
+    }
+    return [...names].filter(Boolean);
+  }
 }
 
-export function loadConfig(opts: { path?: string; profile?: string } = {}): NekoConfig {
+export function loadConfig(opts: { path?: string; profile?: string; cwd?: string; home?: string } = {}): NekoConfig {
+  const cwd = opts.cwd ?? process.cwd();
+  const home = opts.home ?? homeDir();
+  const projectTrust = opts.path ? null : inspectProjectTrust(cwd, home);
   // Config files, lowest precedence first. `./neko.json` (project root) is the easy, discoverable
   // settings file (claude.json / codex style); keep secrets out of it (api_key -> ~/.neko-core or env).
-  const overlayPaths: string[] = opts.path
-    ? [opts.path]
+  const overlayEntries: { path: string; data: Record<string, any> }[] = opts.path
+    ? [{ path: opts.path, data: readOverlay(opts.path) }]
     : [
-        join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME),
-        join(homeDir(), "neko.json"),
-        join(process.cwd(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME),
-        join(process.cwd(), "neko.json"),
+        { path: join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), data: readOverlay(join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)) },
+        { path: join(home, "neko.json"), data: readOverlay(join(home, "neko.json")) },
+        ...(projectTrust?.state === "trusted" ? projectTrust.configEntries : []),
       ];
-  const overlays: Record<string, any>[] = overlayPaths.map(readOverlay);
+  const overlayPaths = overlayEntries.map((entry) => entry.path);
+  const overlays = overlayEntries.map((entry) => entry.data);
   const filesMerged = overlays.reduce((acc, o) => mergeDeep(acc, o), {} as Record<string, any>);
 
   // Built-in profiles are always available; files may add or override individual ones (merge, not replace).
@@ -693,7 +717,10 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
   // `.mcp.json` (Claude-style project MCP file): merge its `mcpServers` map. ./.mcp.json (project)
   // wins over ~/.mcp.json, both layered onto config's `mcp_servers`.
   if (!opts.path) {
-    const fromMcpJson = { ...readMcpJson(join(homeDir(), ".mcp.json")), ...readMcpJson(join(process.cwd(), ".mcp.json")) };
+    const fromMcpJson = {
+      ...readMcpJson(join(home, ".mcp.json")),
+      ...(projectTrust?.state === "trusted" ? projectTrust.mcpServers : {}),
+    };
     if (Object.keys(fromMcpJson).length) merged.mcp_servers = { ...(merged.mcp_servers ?? {}), ...fromMcpJson };
   }
 
@@ -737,7 +764,13 @@ export function loadConfig(opts: { path?: string; profile?: string } = {}): Neko
     if (source) modelShadow = { source, profileModel };
   }
 
-  return new NekoConfig(merged, selected, profiles, apiKeyFromFile, modelShadow);
+  const trustSummary: ProjectTrustSummary = projectTrust
+    ? {
+        state: projectTrust.state, root: projectTrust.root, projectId: projectTrust.projectId,
+        fingerprint: projectTrust.fingerprint, files: [...projectTrust.files], reason: projectTrust.reason,
+      }
+    : { state: "none", files: [] };
+  return new NekoConfig(merged, selected, profiles, apiKeyFromFile, modelShadow, [keyEnv, ...fallbackKeyEnvs].filter(Boolean), trustSummary, home);
 }
 
 function readOverlay(path: string): Record<string, any> {

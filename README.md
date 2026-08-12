@@ -87,7 +87,11 @@ talks to **any OpenAI-compatible endpoint** — a hosted API (NVIDIA NIM, OpenAI
   `Ctrl+Enter` on terminals with the kitty keyboard protocol (auto-negotiated), `\` + `Enter`
   everywhere else, or run `neko setup terminal` to add a Windows Terminal keybinding — plain Enter
   submits. Exit leaves your shell exactly as it was — plus a one-line resume hint.
-- **Sessions** — conversations persist; resume with `neko --resume`.
+- **Sessions and long-run recovery** — conversations persist; resume with `neko --resume`. Neko journals
+  streamed assistant segments and completed tool results at clean checkpoints. Provider timeouts are based on
+  inactivity, not total wall time: traffic, usage, and tool activity are heartbeats. In `/auto`/closed-loop mode
+  a stalled provider transport is restarted and the goal resumes from that checkpoint (bounded retries), while
+  Esc/Ctrl+C interrupts immediately and escalates to bounded sidecar teardown if cooperative cancellation fails.
 - **MCP** — connect Model Context Protocol servers (stdio / http / sse + OAuth) and use their tools;
   lazy schema loading keeps a big MCP surface out of context until needed.
 
@@ -100,7 +104,8 @@ Neko is built to take on new roles, one skill and one tool at a time:
   creates or edits Word, Excel, and PowerPoint artifacts through an optional structured backend, then reopens,
   validates, reads back, and visually checks the saved file. Browser and computer-use skills likewise verify
   real UI state frame by frame. A skill is a markdown file, not a fork; built-in skills and their helper
-  scripts ship inside the single binary. The meeting skill pages long transcripts from disk and requires cited
+  scripts ship inside the single binary used by the one-line installer and are available from every folder;
+  `~/.neko-core/skills` adds user-global overrides. The meeting skill pages long transcripts from disk and requires cited
   decisions/action items instead of putting an entire recording into model context.
 - **Governable memory** — raw episodes stay in local sessions; durable facts use JIT-recalled `memory`;
   verified procedures use `workflows`; and an evidence-grounded `playbook` captures operating lessons.
@@ -168,7 +173,7 @@ Browser control and meeting capture are optional and progressively disclosed. Th
 request such as "browse Facebook in Chrome" opens a setup choice while keeping the request intact; `/browser`
 opens the same flow directly. Use it only when you want Neko to control one visible, already signed-in Chrome
 tab. Autonomous attach is enabled by default and independently switchable in the extension. Chrome still shows
-its required extension-permission confirmation. There is no second `bun bin/neko.ts ...` install step.
+its required extension-permission confirmation. There is no second source-checkout install step.
 
 For a meeting, use `/meeting` inside Neko. Its guided surface can install local Vietnamese transcription and
 start in one choice, or record immediately and transcribe later. The standalone equivalent is
@@ -383,14 +388,32 @@ neko                           # start the interactive session  (also: neko core
 
 Keep it current with `neko update`.
 
-### From source (development) — requires [Bun](https://bun.sh)
+### From source (development) — requires [Bun](https://bun.sh) and Node.js
 
 ```bash
 git clone https://github.com/meiiie/neko-core
 cd neko-core
 bun install
 bun run build                  # -> dist/neko  (single standalone executable; no Bun to run it)
-bun bin/neko.ts doctor         # or run directly via Bun, no build needed
+node bin/neko-source.cjs doctor # safe no-build launcher; never consumes project .env/bunfig
+```
+
+The compiled `dist/neko` is the primary runtime. The Node bootstrap is development-only: it starts
+Bun from Neko's package directory with autoload disabled, then restores the caller's working directory
+after the CLI has loaded. Do not launch the internal TypeScript entry directly from an untrusted project.
+
+### Embed the core (Bun + TypeScript)
+
+The package root is a side-effect-free library entry. A host injects its own provider and approval gate;
+CLI configuration, credentials, provider adapters, Ink, and startup behavior are not part of this API.
+
+```ts
+import { Agent, ToolRegistry, type ApprovalGate, type Provider } from "neko-core";
+
+export function createAgent(provider: Provider, root: string, approve: ApprovalGate) {
+  const tools = new ToolRegistry(root, "default", approve);
+  return new Agent({ provider, tools });
+}
 ```
 
 ### Commands

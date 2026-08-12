@@ -157,4 +157,5 @@ test("permission classes", () => {
   expect(resolveTool("write_file").permission).toBe(GATED);
   expect(resolveTool("edit").permission).toBe(GATED);
   expect(resolveTool("computer").permission).toBe(GATED);
+  expect(resolveTool("task").permission).toBe(GATED);
 });

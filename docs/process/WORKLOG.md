@@ -3,6 +3,195 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-12 - v0.23.0 release candidate: bounded autonomy, trust, and auditable evaluation
+
+The v0.23.0 candidate combines the long-running autonomy work with the trust, sandbox, provider,
+benchmark, and release-hardening changes accumulated since v0.22.5. Long turns now use idle-progress
+watchdogs, bounded recovery from durable checkpoints, explicit cancellation, and platform process-tree
+cleanup instead of one shared wall-clock deadline. The packaged binary embeds its built-in skills so a
+normal one-line install exposes them globally from any working directory. Project instructions and other
+control surfaces remain quarantined until trusted. Headless, benchmark, and Harbor paths now publish
+sanitized completion/usage/tool counters, preserve diagnostic lower bounds on failure, and fail closed when
+verification or containment cannot be proved. These are release-engineering and scoped evaluation results,
+not a claim that the public calibration tasks establish SOTA.
+
+- Both the current and TypeScript 5.9 stable typechecks passed. The Windows release suite was split into
+  four sequential Bun shards to avoid alpha-SRT health-probe contention: **1,354 passed, 6 intentional skips,
+  0 failed, 7,607 assertions across 125 files**. The required live Windows/SRT oracle lane then independently
+  rejected early exit and marker/stack forgery, hid verifier source, and completed the seven-launch workspace
+  boundary case (20 assertions total). The Harbor 0.20.0 no-model gate passed 46 tests with one POSIX-only
+  local skip; the POSIX process-group case has separate Linux-container evidence.
+- `doctor` resolved Neko 0.23.0, the managed Codex bridge, live SRT, and the transient exact-file Bun bridge;
+  `policy` returned its expected warning for this intentionally untrusted checkout. The compiled Windows
+  binary passed the UI probe and real PTY input probe. Three ConPTY ghost runs passed, and the scroll benchmark
+  measured 7 ms first response / 122 ms settle with viewport movement and all interaction checks green.
+- Prebuilt/autoload and installer coverage passed 9/9, including bundled skills from arbitrary directories.
+  The exact-value secret scan compared 10 current sensitive values against all 540 commit candidates and
+  found zero matches. Three generic-pattern matches were reviewed as deliberate fake credential/private-key
+  fixtures that test masking and read refusal. Local Harbor `jobs/` evidence remains untracked and ignored.
+- A clean no-loop Harbor integration retry reached a valid final frame, exited zero, ran the official pinned
+  verifier, and cleaned all private roots/processes/containers without credential leakage. It scored 0 because
+  one of three task checks failed while two image checks passed; this is useful trajectory evidence, not a
+  successful benchmark result. The prior post-final Windows cleanup race was closed by awaiting App Server
+  transport exit before deleting its isolated home.
+
+## 2026-08-09 - harness audit: trust, effect integrity, bounded delegation, and session handoff
+
+A clean-room frontier review and disposable pre-hardening `neko --yolo` dogfood runs found that Neko solved
+small coding tasks correctly but spent 5-12 calls/137k-348k tokens on microtasks and, in a matched one-line
+trial, 48 calls/2,556,744 tokens/504 seconds. That trial escaped SRT through host `computer` after Bun was
+unavailable inside the sandbox. Safe Codex diagnosed the edit but its Windows workspace remained read-only,
+so this is diagnostic evidence, not a harness ranking. The host-computer escape is now consent-gated and a
+toolchain-failure circuit stops repeated recovery. The first exact post-hardening repeat completed safely in
+118.2 seconds, 14 calls, and 477,007 cumulative tokens. The accepted pre-lease structural baseline was
+46.810 seconds, 5 calls, and 119,320 cumulative tokens at p50. After the final three-tool lease and safety
+fixes were frozen at source fingerprint `31809bf...adff9`, a wholly fresh sequential set passed 3/3:
+trial 1 was 41.656 seconds/5 calls/70,531 tokens, trial 2 was 42.523/5/68,834, and trial 3 was
+42.008/4/54,512. Official p50 is **42.008 seconds, 5 calls, 68,203 input, 631 output, 38,144 cached,
+and 68,834 cumulative tokens** (ranges 41.656-42.523 seconds, 4-5 calls, and 54,512-70,531 total).
+Every trial made one exact edit, passed all four fixture checks in SRT and on the host, preserved inventory/hashes,
+used zero forbidden/provider-native capabilities, and left no artifacts. Versus the accepted pre-lease p50,
+total tokens fell 42.31%, wall time fell 10.26%, and calls were unchanged. A discarded 68,900-token
+diagnostic and an earlier failed trial 2 were not pooled. This is repeatable scoped evidence consistent with the
+exact-file lease causing the improvement on this microtask, not a randomized causal study, multi-task benchmark,
+or SOTA claim.
+
+- Closed mixed-case mutating-action permission bypasses; made the finish gate credit fresh post-mutation
+  inspection/test evidence; and counted the 14,369-character native tool catalog in every live request/context
+  estimate.
+- Centralized credential read policy across workspace/outside reads and context imports. Provider/harness
+  credentials are stripped from bash, hook, and computer children; stdio MCP receives a minimal OS bootstrap
+  plus only explicitly configured environment grants.
+- Added exact-cwd snapshot trust for project config, context/imports, skills/assets, agents, and recipes, with
+  strict atomic per-project records. Any structural/byte change quarantines the whole layer. Project hooks and
+  MCP stay global-only; malformed, linked, polluted, oversized, over-capacity, or concurrent stores fail closed.
+- Made `doctor`, `policy`, and the model-facing dynamic runtime report the effective Neko mode, actual shell,
+  bounded launch-only sandbox health, and network boundary. Provider-host tools/skills are explicitly a different
+  runtime. Auto mode refuses direct Docker/Podman host-daemon commands unless `allow_dangerous_bash` is set.
+- Provisioned Anthropic Sandbox Runtime v1.0.0 on this Windows host and verified a real bounded launch. The
+  health probe does not independently exercise filesystem/WFP denial and says so. SRT is live for Neko bash
+  here. A canonical source-run `bun.exe` is made available through SRT's transient exact-file read grant and
+  matching shell alias; the grant is refcounted across concurrent launches and revoked after the final exit,
+  without exposing its package/profile directory. Upstream still calls SRT a beta research preview with alpha
+  Windows support; it is not outer containment for host `codex --yolo`.
+- Added public-only HTTP with all-address DNS validation and connection pinning, per-hop redirect checks,
+  credential stripping, and time/header/body caps. GitHub/YouTube stay on the same bounded path; automatic
+  SAFE `gh`/`yt-dlp` routes were removed after review found PATH-hijack, ambient-secret, and authenticated
+  private-repository bypasses. OpenAI-compatible, Anthropic, and Responses streams now have line/aggregate/
+  output/tool caps, strict event/finish validation, ordered callbacks, and guaranteed reader cleanup.
+- Made MCP calls cancellable with a 60-second total deadline, single-flight transactional reconnect, and no
+  blind replay after an unknown effect. Stdio launch uses a canonical executable/trusted cwd/minimal env;
+  composition rejects duplicate tools/prompts and routes lazy loads to one owner. SDK-side result
+  materialization bounds remain explicit debt.
+- Made `task` gated by default. Fresh installs have real coder/explorer/reviewer role prompts; mixed-case role
+  lookup matches its capability policy. Reviewer/explorer have enforced read-only allowlists; generic/custom
+  work is serialized; cancellation reaches children; and owned providers are disposed. The runtime advertises
+  only Neko skills that Neko can actually load.
+- Isolated every Codex App Server sampling thread from the project and disabled ambient native skills,
+  project instructions, plugins/apps/shell, and environment access. `environments: []` removes provider-native
+  shell/`apply_patch` while preserving Neko dynamic tools. A conservative exact-file lease now exposes only
+  `read_file`, target-bound `edit`, and foreground-validator `bash`; ambiguous, attached, domain/skill-matched,
+  or non-canonical work keeps the configured full surface. CLI, TUI, and subagents close the lease in `finally`
+  before another queued turn can start.
+- A deterministic no-model serialization audit measured 17,766 bytes of Codex base instructions, 14,044 of
+  Neko developer context, 2,090 for the three narrowed schemas, and 205 user bytes: **34,105 total versus
+  73,255, down 39,150 bytes or 53.44%** (about 9,788 fewer tokens/call at the coarse four-bytes estimator,
+  not provider billing). Transport observations were 16,496-byte `thread/start`, 344-byte `turn/start`, and
+  251 encoded input bytes.
+- Added typed validation debt across controller passes. Only a foreground recognized validator with an
+  authoritative zero exit after the latest successful mutation clears the debt; denials, background jobs,
+  masked shell status, signals, and stale reads cannot. Headless automation returns nonzero for unresolved debt
+  or explicit approval denial while retaining the partial answer. A present-but-unhealthy SRT now fails bash
+  closed, including bounded SQLite `4874` state-volume guidance, rather than silently falling back to the host.
+- Exact-file validation now accepts only foreground test/typecheck/lint/check/verify shapes and requires a live
+  OS sandbox. The original project is read-only; one unpredictable external temp is the only ordinary writable
+  directory and receives `TEMP`/`TMP`/`TMPDIR`, then is cleaned. Nested `npm test` uses a launch-local,
+  read/execute-only `bun.cmd` shim through canonical environment indirection, with cwd lookup disabled and no
+  parent/profile grant; the shim and temporary ACLs are removed at cleanup.
+- Made the sandboxed benchmark oracle a required Linux/macOS CI gate rather than a conditional smoke: Ubuntu
+  installs Bubblewrap and restores its user-namespace sysctl after the test, macOS requires Seatbelt, and
+  `NEKO_REQUIRE_SANDBOX_TESTS=1` fails on a missing primitive. GitHub-hosted Windows is intentionally not
+  auto-provisioned because alpha SRT setup is elevated and mutates host account/WFP state; a provisioned
+  Windows host remains part of release evidence.
+- Reclassified the historical `hard` coding tier honestly after its recorded glm-5.2 12/12 saturation, then
+  added a three-task `frontier` calibration tier for config-context cache isolation, rejected in-flight
+  recovery, and atomic batch publication. It protects public contracts/tests and exact inventory, snapshots
+  canonical single-link source into a fresh external verifier workspace after the turn, and checks hidden
+  deterministic edge cases under the read-only oracle. Benchmark turns now use a fixed local-only/no-network
+  tool ceiling and a 25-step default. A one-trial-per-task Luna/max calibration passed all three tasks, so this
+  public tier is now regression/calibration coverage rather than evidence of a non-saturated frontier.
+- The planner and all existing structured-write targets reject multiply-linked regular files before approval,
+  review, or hooks. After a Neko structured write, later byte divergence taints the checkpoint, refuses another
+  structured mutation, and makes `/rewind` preserve and report the editor/user conflict. Static hard-link checks
+  retain a check-to-write race, and read-returned digest/generation CAS remains open.
+- Hardened session IDs, shapes, sizes, index records, and file-identity reads. Internal controller prompts are
+  locally marked, excluded from provider payloads, and skipped by retry/rewind.
+- Escaped and bounded repository/provider metadata before the system prompt, and sanitized streamed CLI/TUI/
+  session output before terminal parsing so OSC/CSI/BEL/control bytes cannot inject clipboard/title/style state.
+- Canonicalized provider/MCP/sandbox executables outside the workspace, filtered child PATH and loader variables,
+  and moved Codex/Gemini sidecars to positive environment allowlists. Abort/timeout now terminates known process
+  trees and reports unconfirmed cleanup instead of claiming success. A loaded full-suite gate caught a real
+  Windows dead-leader orphan: cancellation now force-kills the live root `/T /F` before ancestry can be severed,
+  retries captured survivors, and never upgrades an incomplete snapshot unless the root-tree force succeeded.
+- Added the immutable summary-only handoff foundation: `neko handoff send`/`inbox` and TUI
+  `/handoff send <target> <summary...>`/`inbox` exchange a bounded `local-unverified` envelope without
+  automatic transcript, file, secret, permission, or context attachment. Sender-authored summary text may
+  itself contain sensitive data and remains untrusted. TUI send persists the current source;
+  inbox is capped at 10 entries/2,048 summary characters and does not poll. Acknowledge/consume/delete,
+  exactly-once acceptance, and pagination remain deliberately absent.
+- Evaluated `agent-substrate/substrate` and rejected it for this host boundary: upstream says it is early and
+  not production-ready with little/no hardening, and its data plane assumes Linux/Kubernetes. Bun was upgraded
+  locally from stable 1.3.14 to `1.4.0-canary.1+52bf09cb1`; the canary is intentional because stable can lose
+  raw stdin on affected Windows builds and the real PTY probe passes on canary.
+- Audited `phone-harness@720eaeb` clean-room and rejected its raw stdin-Python/Quartz execution boundary.
+  The retained design lesson is a typed observe -> preflight -> execute-once -> reobserve -> verify protocol,
+  documented with Apple constraints and benchmark caveats in
+  [`mobile-agent-safety-2026-08-09.md`](../research/mobile-agent-safety-2026-08-09.md).
+- Rebuilt the coding benchmark boundary before using it for promotion decisions. Bench/eval trials now use
+  fresh providers and the production turn/context/verification path; pass requires deterministic end state,
+  hard immutable seed constraints, and a clean production completion status. `pass`, `model_failure`, and
+  `infra_error` are distinct; infra remains in the denominator, invalidates comparison, and makes the CLI
+  non-zero. The JS oracle runs only behind a live read-only OS sandbox with network off, positive environment,
+  canonical Bun, autoload/install disabled, a separate toolchain preflight, bounded output/time, and verified
+  process-tree cleanup. Plain candidate output or an early clean exit is not sufficient for success: hidden
+  assertions are streamed rather than materialized beside candidate modules, and an unpredictable harness-owned
+  terminal attestation must follow successful completion. Implementation modules are also checked against the
+  published pure-module contract, and untrusted output never enters infrastructure diagnostics; changed tests are
+  rejected before execution. These are contamination controls, not cryptographic secrecy: candidate and assertion
+  modules still share one Bun process, so the future sealed tier requires a separate executor/verdict trust domain.
+  FizzBuzz now checks all 100 lines. No paid multi-task score was produced at that checkpoint.
+- After the oracle, fingerprint, and production-composition gates were green, one deliberately bounded paid
+  calibration ran each `frontier` task once at the effective configuration reported by the harness:
+  `gpt-5.6-luna`, effort `max`, fingerprint
+  `sha256:17ce2aecb026cf180fba3cc9d6b6c90030140736e5a84087af567d737be5a610`. An attempted shell override to
+  `gpt-5.6-sol` was rejected by PowerShell quoting before Neko started, so this is explicitly a Luna result,
+  not a Sol result. All three tasks passed: config-context-cache used 115,512 tokens and 133.5 seconds;
+  inflight-recovery used 103,052 tokens and 104.0 seconds; atomic-batch used 191,103 tokens and 314.7 seconds.
+  Aggregate CPS was 136,556 tokens/success, redundancy 8%, step efficiency 47%, constraints 100%, with zero
+  model or infrastructure failures. This single trial per task is not a reliability estimate, but 3/3 is enough
+  to classify the current tier as a regression/calibration surface rather than spend on repeated or stronger-model
+  runs. The next paid run is gated on a materially longer, non-saturated task tier and retained bounded trajectories.
+- Added `neko.eval.trajectory.v1`: an explicit metadata-only envelope with exact per-trial provider-call counts,
+  typed outcomes, opaque task/path/query/command/constraint references, tool-result class, redundancy, and explicit
+  truncation. It never persists raw arguments, paths, commands, observations, errors, final answers, or environment
+  values. The envelope caps events, constraints, task summaries, latencies, trajectories, labels, and total JSON at
+  4 MiB; async sinks are awaited and persistence failure is visible without discarding the in-memory report.
+- Primary-source review of METR, SWE-EVO, SWE-Marathon, and LongHorizon-Harness produced the proposed private
+  [`frontier-v2` design](../research/frontier-v2-design-2026-08-10.md): at least 12 held-out tasks across four
+  families, independent executor/verdict trust domains, multi-channel admission gates, three-run pilot, and a
+  predeclared five-or-six-repeat main run. These are Neko engineering proposals, not external benchmark standards.
+- Recorded primary sources, implementation status, residual risks, and the matched repeated-evaluation gate in
+  [`harness-sota-2026-08-09.md`](../research/harness-sota-2026-08-09.md).
+
+Current verification checkpoint for this uncommitted worktree: both TypeScript configurations are clean; the
+full suite reports **1,264 passed, 2 intentional platform/artifact-stage skips, 0 failed, and 7,070 assertions**.
+The production build compiled 914 modules; its compiled `__uiprobe` and real-PTY keyboard probe passed, and the
+post-build prebuilt-autoload safety file passed 4/4. Live `doctor` reports SRT
+and the Bun bridge healthy. `policy` has only the expected changed-checkout/untrusted-project warning and the
+outside-root-read informational finding. The repeated microtask set supports the scoped efficiency numbers
+above; no SOTA wording is justified until a representative multi-task suite reports confidence/uncertainty,
+cost, latency, reliability, complete artifacts, and safety.
+
 ## 2026-07-30 - v0.22.3: the composer, usage meter, activity log, and history share one viewport contract
 
 Four field reports exposed four different ownership errors in the fullscreen UI: hard-newline prompts bypassed

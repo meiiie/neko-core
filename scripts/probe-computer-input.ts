@@ -47,6 +47,8 @@ const form = Bun.spawn(["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hid
 let duplicate: ReturnType<typeof Bun.spawn> | null = null;
 const captures: string[] = [];
 const tools = new ToolRegistry(process.cwd(), "auto", async () => true);
+const computerSkillDir = join(import.meta.dir, "..", "skills", "computer-use");
+tools.loadSkill = (name) => name === "computer-use" ? { body: "", dir: computerSkillDir } : null;
 async function measured(label: string, action: () => Promise<string>): Promise<string> {
   const started = performance.now();
   const value = await action();

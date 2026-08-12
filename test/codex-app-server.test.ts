@@ -1,12 +1,15 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 
 import {
+  __codexChildEnvForTest,
+  __codexLaunchForTest,
   CodexAppServerClient,
   codexAppServerArguments,
+  codexIsolationHome,
   compareCodexVersions,
   discoverCodexSupport,
   startCodexAppServer,
@@ -40,19 +43,75 @@ test("Codex version comparison handles the 0.144 support boundary", () => {
   expect(compareCodexVersions("0.144.0-beta.1", "0.144.0")).toBe(-1);
 });
 
-test("voice launches App Server with the gated realtime feature enabled", () => {
+test("Codex transport home ignores relative and workspace overrides", () => {
+  const home = "C:\\Users\\Neko";
+  const workspace = "C:\\work\\project";
+  const fallback = "C:\\Users\\Neko\\.neko-core\\codex-home";
+  expect(codexIsolationHome(home, { NEKO_CODEX_HOME: ".\\codex-home" }, "win32", workspace)).toBe(fallback);
+  expect(codexIsolationHome(home, { NEKO_CODEX_HOME: `${workspace}\\.codex-home` }, "win32", workspace)).toBe(fallback);
+  expect(codexIsolationHome(home, { NEKO_CODEX_HOME: "C:\\transport\\codex-home" }, "win32", workspace))
+    .toBe("C:\\transport\\codex-home");
+  expect(codexIsolationHome(home, { NEKO_CODEX_HOME: "C:\\work\\project-sibling" }, "win32", workspace))
+    .toBe("C:\\work\\project-sibling");
+  expect(() => codexIsolationHome(workspace, {}, "win32", workspace)).toThrow(/outside the workspace/);
+  expect(codexIsolationHome(workspace, { NEKO_CODEX_HOME: "C:\\transport\\codex-home" }, "win32", workspace))
+    .toBe("C:\\transport\\codex-home");
+});
+
+test("Codex transport home rejects a missing path through a junction into the workspace", () => {
+  const base = mkdtempSync(join(tmpdir(), "neko-codex-home-boundary-"));
+  const workspace = join(base, "workspace");
+  const outside = join(base, "outside");
+  const home = join(outside, "home");
+  const alias = join(outside, "workspace-alias");
+  try {
+    mkdirSync(workspace, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    symlinkSync(workspace, alias, process.platform === "win32" ? "junction" : "dir");
+    const candidate = join(alias, "future", "codex-home");
+    expect(codexIsolationHome(home, { NEKO_CODEX_HOME: candidate }, process.platform, workspace))
+      .toBe(join(home, ".neko-core", "codex-home"));
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("App Server disables native surfaces and only enables realtime when requested", () => {
+  const disabled = [
+    "apps", "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use",
+    "goals", "hooks", "image_generation", "in_app_browser", "multi_agent", "plugins",
+    "plugin_sharing", "remote_plugin", "shell_tool", "skill_mcp_dependency_install", "tool_suggest",
+    "workspace_dependencies",
+  ].flatMap((name) => ["--disable", name]);
+  const disabledConfig = [
+    "apps", "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use",
+    "goals", "hooks", "image_generation", "in_app_browser", "multi_agent", "plugins",
+    "plugin_sharing", "remote_plugin", "shell_tool", "skill_mcp_dependency_install", "tool_suggest",
+    "workspace_dependencies",
+  ].flatMap((name) => ["-c", `features.${name}=false`]);
+  const noNativeSkillCatalog = ["-c", "skills.include_instructions=false"];
+  const noProjectInstructions = ["-c", "project_doc_max_bytes=0", "-c", "project_root_markers=[]"];
   expect(codexAppServerArguments(
     { path: "codex.cmd", kind: "cli", source: "path", version: "0.144.1" },
     { enableRealtimeConversation: true },
-  )).toEqual(["app-server", "--enable", "realtime_conversation", "--listen", "stdio://"]);
+  )).toEqual(["app-server", ...disabled, ...noNativeSkillCatalog, ...noProjectInstructions, "--enable", "realtime_conversation", "--listen", "stdio://"]);
   expect(codexAppServerArguments(
     { path: "codex-app-server.exe", kind: "app-server", source: "managed", version: "0.144.1" },
     { enableRealtimeConversation: true },
-  )).toEqual(["-c", "features.realtime_conversation=true", "--listen", "stdio://"]);
+  )).toEqual([...disabledConfig, ...noNativeSkillCatalog, ...noProjectInstructions, "-c", "features.realtime_conversation=true", "--listen", "stdio://"]);
   expect(codexAppServerArguments(
     { path: "codex-app-server.exe", kind: "app-server", source: "managed", version: "0.144.1" },
     {},
-  )).toEqual(["--listen", "stdio://"]);
+  )).toEqual([...disabledConfig, ...noNativeSkillCatalog, ...noProjectInstructions, "--listen", "stdio://"]);
+
+  const imageArgs = codexAppServerArguments(
+    { path: "codex.cmd", kind: "cli", source: "path", version: "0.144.1" },
+    { allowImageGeneration: true },
+  );
+  expect(imageArgs).not.toEqual(expect.arrayContaining(["--disable", "image_generation"]));
+  expect(imageArgs).toEqual(expect.arrayContaining(["--disable", "computer_use"]));
+  expect(imageArgs).toEqual(expect.arrayContaining(noNativeSkillCatalog));
+  expect(imageArgs).toEqual(expect.arrayContaining(noProjectInstructions));
 });
 
 test("support discovery prefers a compatible managed pack without requiring Codex Desktop", () => {
@@ -62,8 +121,11 @@ test("support discovery prefers a compatible managed pack without requiring Code
   const status = discoverCodexSupport({
     home,
     platform: "win32",
+    cwd: "C:\\workspace",
     env: { PATH: "" },
     pathExists: (path) => path === manifest || path === executable,
+    realpath: (path) => path,
+    isRegularFile: (path) => path === executable,
     readText: () => JSON.stringify({ protocolVersion: "0.144.1", executable: "codex-app-server.exe" }),
   });
   expect(status.state).toBe("ready");
@@ -75,12 +137,167 @@ test("support discovery reports an installed but outdated CLI honestly", () => {
   const status = discoverCodexSupport({
     platform: "linux",
     home: "/home/neko",
+    cwd: "/workspace",
     env: { PATH: "/usr/bin" },
     pathExists: (path) => path === "/usr/bin/codex",
+    realpath: (path) => path,
+    isRegularFile: (path) => path === "/usr/bin/codex",
     runVersion: () => "0.143.9",
   });
   expect(status.state).toBe("outdated");
   expect(status.detail).toContain("0.144.0");
+});
+
+test("Codex PATH discovery rejects canonical workspace targets and non-files", () => {
+  const workspace = "C:\\work";
+  const outside = "C:\\tools\\codex.exe";
+  const redirected = discoverCodexSupport({
+    platform: "win32",
+    home: "C:\\home",
+    cwd: workspace,
+    env: { PATH: "C:\\tools" },
+    pathExists: () => true,
+    realpath: (path) => path === outside ? `${workspace}\\codex.exe` : path,
+    isRegularFile: (path) => path === `${workspace}\\codex.exe`,
+    runVersion: () => "0.150.0",
+  });
+  expect(redirected.state).toBe("missing");
+
+  const directory = discoverCodexSupport({
+    platform: "win32",
+    home: "C:\\home",
+    cwd: workspace,
+    env: { PATH: "C:\\tools" },
+    pathExists: () => true,
+    realpath: (path) => path,
+    isRegularFile: () => false,
+    runVersion: () => "0.150.0",
+  });
+  expect(directory.state).toBe("missing");
+
+  const relativePath = discoverCodexSupport({
+    platform: "win32",
+    home: "C:\\home",
+    cwd: workspace,
+    env: { PATH: "..\\tools" },
+    pathExists: () => true,
+    realpath: (path) => path,
+    isRegularFile: () => true,
+    runVersion: () => "0.150.0",
+  });
+  expect(relativePath.state).toBe("missing");
+});
+
+test("absolute NEKO_CODEX_PATH is explicit workspace authority but a relative override is ignored", () => {
+  const workspace = "C:\\work";
+  const explicit = `${workspace}\\codex.exe`;
+  const ready = discoverCodexSupport({
+    platform: "win32",
+    home: "C:\\home",
+    cwd: workspace,
+    env: { PATH: "", NEKO_CODEX_PATH: explicit },
+    pathExists: () => true,
+    realpath: (path) => path,
+    isRegularFile: (path) => path === explicit,
+    runVersion: () => "0.150.0",
+  });
+  expect(ready.state).toBe("ready");
+  expect(ready.executable?.source).toBe("environment");
+
+  const relative = discoverCodexSupport({
+    platform: "win32",
+    home: "C:\\home",
+    cwd: workspace,
+    env: { PATH: "", NEKO_CODEX_PATH: ".\\codex.exe" },
+    pathExists: () => true,
+    realpath: (path) => path,
+    isRegularFile: () => true,
+    runVersion: () => "0.150.0",
+  });
+  expect(relative.state).toBe("missing");
+});
+
+test("Codex Windows shim uses only an absolute Node outside the workspace", () => {
+  const bundle = "C:\\tools\\node_modules\\@openai\\codex\\bin\\codex.js";
+  const trustedNode = "C:\\Program Files\\nodejs\\node.exe";
+  const launch = __codexLaunchForTest(
+    { path: "C:\\tools\\codex.cmd", kind: "cli", source: "path" },
+    ["--version"],
+    {
+      platform: "win32",
+      env: { PATH: "C:\\work\\bin;C:\\Program Files\\nodejs" },
+      cwd: "C:\\work",
+      realpath: (path) => path,
+      isRegularFile: (path) => [bundle, "C:\\work\\bin\\node.exe", trustedNode].includes(path),
+    },
+  );
+  expect(launch).toEqual({ command: trustedNode, args: [bundle, "--version"] });
+});
+
+test("Codex POSIX JS shim bypasses env-node and standalone PowerShell is rejected", () => {
+  const posix = __codexLaunchForTest(
+    { path: "/opt/codex/codex.js", kind: "cli", source: "path" },
+    ["--version"],
+    {
+      platform: "linux",
+      env: { PATH: "/work/bin:/usr/bin" },
+      cwd: "/work",
+      realpath: (path) => path,
+      isRegularFile: (path) => ["/work/bin/node", "/usr/bin/node"].includes(path),
+    },
+  );
+  expect(posix).toEqual({ command: "/usr/bin/node", args: ["/opt/codex/codex.js", "--version"] });
+  const extensionless = __codexLaunchForTest(
+    { path: "/opt/codex/codex", kind: "cli", source: "path" },
+    ["--version"],
+    {
+      platform: "linux",
+      env: { PATH: "/work/bin:/usr/bin" },
+      cwd: "/work",
+      realpath: (path) => path,
+      isRegularFile: (path) => ["/work/bin/node", "/usr/bin/node"].includes(path),
+      readPrefix: () => "#!/usr/bin/env node\n",
+    },
+  );
+  expect(extensionless).toEqual({ command: "/usr/bin/node", args: ["/opt/codex/codex", "--version"] });
+
+  const launch = __codexLaunchForTest(
+    { path: "C:\\authorized\\codex.ps1", kind: "cli", source: "environment" },
+    ["--version"],
+    {
+      platform: "win32",
+      env: { PATH: "" },
+      cwd: "C:\\work",
+      realpath: (path) => path,
+      isRegularFile: () => false,
+    },
+  );
+  expect(launch).toBeNull();
+});
+
+test("Codex sidecar child env strips ambient provider and cloud credentials", () => {
+  expect(__codexChildEnvForTest({
+    Path: "C:\\work\\bin;C:\\trusted-bin;..\\relative-bin;C:\\linked-bin",
+    BROWSER: "C:\\work\\browser.exe",
+    CODEX_HOME: "C:\\required-auth-home",
+    OPENAI_API_KEY: "secret",
+    CUSTOM_PROVIDER_API_KEY: "secret",
+    AWS_ACCESS_KEY_ID: "secret",
+    AWS_SECRET_ACCESS_KEY: "secret",
+    GOOGLE_APPLICATION_CREDENTIALS: "C:\\secret.json",
+    GITHUB_PAT: "secret",
+    PGPASSWORD: "secret",
+    MYSQL_PWD: "secret",
+    DOCKER_AUTH_CONFIG: "secret",
+    NODE_OPTIONS: "--require=.\\workspace-preload.js",
+    ARBITRARY_CONFIGURED_KEY_ENV: "secret",
+    ORDINARY_VALUE: "kept",
+  }, {
+    platform: "win32",
+    cwd: "C:\\work",
+    realpath: (path) => path === "C:\\linked-bin" ? "C:\\work\\linked-bin" : path,
+    isRegularFile: () => true,
+  })).toEqual({ Path: "C:\\trusted-bin", CODEX_HOME: "C:\\required-auth-home" });
 });
 
 test("JSON-RPC correlates responses and forwards notifications", async () => {
@@ -136,13 +353,13 @@ test("closeAndWait does not resolve before the App Server transport exits", asyn
   expect(settled).toBe(true);
 });
 
-test("a binary removed after discovery is a provider error, not a process crash", async () => {
+test("a binary removed after discovery fails closed before spawn", () => {
   const home = mkdtempSync(join(tmpdir(), "neko-missing-codex-"));
-  const client = startCodexAppServer(
-    { path: join(home, "missing-codex-app-server"), kind: "app-server", source: "managed", version: "0.144.1" },
-    {},
-    { codexHome: join(home, "codex-home") },
-  );
-  try { await expect(client.initialize(2_000)).rejects.toThrow("Codex App Server closed"); }
-  finally { client.close(); rmSync(home, { recursive: true, force: true }); }
+  try {
+    expect(() => startCodexAppServer(
+      { path: join(home, "missing-codex-app-server"), kind: "app-server", source: "managed", version: "0.144.1" },
+      {},
+      { codexHome: join(home, "codex-home") },
+    )).toThrow("trusted absolute regular file");
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });

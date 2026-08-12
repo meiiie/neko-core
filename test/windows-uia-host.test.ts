@@ -8,6 +8,12 @@ import { ResidentUiaHost, residentUiaHost } from "../src/core/windows-uia-host.t
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 const script = join(import.meta.dir, "..", "skills", "computer-use", "scripts", "resident-uia.ps1");
+const computerSkillDir = join(import.meta.dir, "..", "skills", "computer-use");
+
+function wireBundledComputerSupport(tools: ToolRegistry): ToolRegistry {
+  tools.loadSkill = (name) => name === "computer-use" ? { body: "", dir: computerSkillDir } : null;
+  return tools;
+}
 
 test("resident OCR bounds async waits, disposes captures, and refuses stale marks", () => {
   const source = readFileSync(script, "utf8");
@@ -193,7 +199,7 @@ $w.Content=$script:panel
 `;
   const form = Bun.spawn(["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", Buffer.from(source, "utf16le").toString("base64")], { stdout: "ignore", stderr: "ignore" });
   const host = residentUiaHost(script);
-  const tools = new ToolRegistry(join(import.meta.dir, ".."), "auto", async () => true);
+  const tools = wireBundledComputerSupport(new ToolRegistry(join(import.meta.dir, ".."), "auto", async () => true));
   try {
     await waitForUiaText(async () => {
       return String(await tools.execute("computer", { action: "read", window: title }));
@@ -225,7 +231,7 @@ $w.Content=$b
 [void]$w.ShowDialog()
 `;
   const form = Bun.spawn(["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", Buffer.from(source, "utf16le").toString("base64")], { stdout: "ignore", stderr: "ignore" });
-  const tools = new ToolRegistry(join(import.meta.dir, ".."), "auto", async () => true);
+  const tools = wireBundledComputerSupport(new ToolRegistry(join(import.meta.dir, ".."), "auto", async () => true));
   try {
     const output = await waitForUiaText(
       () => tools.execute("computer", { action: "list", window: title }).then(String),

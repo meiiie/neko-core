@@ -10,6 +10,7 @@ import { validChatGptCredentials } from "./chatgpt-auth.ts";
 import { toResponsesInput } from "./chatgpt-provider.ts";
 import {
   discoverCodexSupport,
+  codexIsolationHome,
   encodeCodexDynamicTools,
   startCodexAppServer,
   type CodexAppServerHandlers,
@@ -19,6 +20,7 @@ interface RpcClient {
   initialize(timeoutMs?: number): Promise<unknown>;
   request(method: string, params?: unknown, timeoutMs?: number): Promise<any>;
   close(): void;
+  closeAndWait?(reason?: Error, timeoutMs?: number): Promise<void>;
 }
 
 export type CodexClientFactory = (handlers: CodexAppServerHandlers) => RpcClient;
@@ -40,6 +42,8 @@ interface ActiveTurn {
   onUsage?: CompleteOptions["onUsage"];
   executeTool?: CompleteOptions["executeTool"];
   toolResults: Map<string, Promise<{ contentItems: any[]; success: boolean }>>;
+  activeTools: number;
+  heartbeat?: () => void;
   resolve: () => void;
   reject: (error: Error) => void;
   done: Promise<void>;
@@ -67,7 +71,11 @@ export class ChatGptAppServerProvider implements Provider {
   /** Thread-cumulative usage at the end of the previous turn - this turn's usage is the delta. */
   private cumulativeBase = { prompt: 0, completion: 0, total: 0, cached: 0 };
 
-  constructor(private readonly cfg: NekoConfig, private readonly clientFactory: CodexClientFactory = defaultClientFactory) {}
+  constructor(
+    private readonly cfg: NekoConfig,
+    private readonly clientFactory: CodexClientFactory = defaultClientFactory,
+    private readonly interruptGraceMs = 5_000,
+  ) {}
 
   async complete(
     messages: any[],
@@ -77,6 +85,7 @@ export class ChatGptAppServerProvider implements Provider {
     opts: CompleteOptions = {},
   ): Promise<ProviderResponse> {
     if (this.active) throw new Error("Codex App Server already has an active turn");
+    if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
     if (!this.cfg.model.startsWith("gpt-5.6-")) throw new Error(`Codex App Server route is not required for ${this.cfg.model}`);
     if (tools.length && !opts.executeTool) throw new Error("Codex App Server tools need Neko's safe execution callback");
     // Disarm the idle stop the moment a turn begins. It is armed at the END of a turn, so a LONG
@@ -85,19 +94,35 @@ export class ChatGptAppServerProvider implements Provider {
     // failure. Idle means idle: the countdown runs only between turns.
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
 
-    const client = await this.ensureClient();
-    // The Codex-native shell/apply_patch run inside codex's own read-only, no-network sandbox (a
-    // deliberate wall: every real execution must pass Neko's approval gate, never a second path).
-    // Untold, the model tries its native tools first, gets refused, and concludes the MACHINE is
-    // read-only - two field failures: a delegated write that "finished" with no file, and
-    // `agent-reach doctor` reported as "blocked by machine policy". Tell it the routing up front.
+    let startupCleanup: Promise<void> | null = null;
+    const abortStartup = () => {
+      startupCleanup ??= this.shutdown(new DOMException("Aborted by user", "AbortError"));
+      void startupCleanup.catch(() => {});
+    };
+    signal?.addEventListener("abort", abortStartup, { once: true });
+    let client: RpcClient;
+    try {
+      client = await this.ensureClient();
+      if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
+    } catch (error) {
+      signal?.removeEventListener("abort", abortStartup);
+      const pendingStartup = startupCleanup as Promise<void> | null;
+      if (pendingStartup) await pendingStartup.catch(() => {});
+      if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
+      throw error;
+    }
+    try {
+    // `thread/start.environments=[]` below removes Codex's native environment-backed tools entirely:
+    // every real execution must pass Neko's approval gate, never a second path. Tell the model which
+    // action surface remains so it does not waste a call looking for a native shell/apply_patch.
     const toolRouting = tools.length
       ? "\n\n# Tool routing (Codex App Server route)\n" +
-        "Your built-in shell and apply_patch run in a READ-ONLY, no-network Codex sandbox and will be " +
-        "refused. That refusal says nothing about this machine: for any command, file write, edit, or " +
-        "network work, call the provided dynamic tools (bash, write_file, edit, ...) - they execute in " +
-        "Neko with the user's real permissions. Never conclude the workspace is read-only from a " +
-        "native-tool refusal."
+        "The Codex process cwd is an isolated transport directory, not the user's project. The " +
+        "authoritative Neko environment block names the real project root. " +
+        "This thread has no provider-native execution environment. For any command, file write, edit, " +
+        "or network work, call the provided dynamic tools (bash, write_file, edit, ...) - they execute " +
+        "in Neko with the user's real permissions. Do not look for or attempt a built-in shell or " +
+        "apply_patch."
       : "";
     const developerInstructions = messages
       .filter((message) => message?.role === "system")
@@ -112,10 +137,11 @@ export class ChatGptAppServerProvider implements Provider {
       const started = await client.request("thread/start", {
         model: this.cfg.model,
         allowProviderModelFallback: false,
-        cwd: process.cwd(),
+        cwd: codexIsolationHome(this.cfg.resolvedHome),
         approvalPolicy: "never",
         sandbox: "read-only",
         ephemeral: true,
+        environments: [],
         developerInstructions,
         dynamicTools: encodedTools.tools,
       }, 60_000);
@@ -130,11 +156,47 @@ export class ChatGptAppServerProvider implements Provider {
       const previous = toInjectItems(toResponsesInput(messages.slice(0, -1)).input);
       if (previous.length) await client.request("thread/inject_items", { threadId: id, items: previous });
     }
+    } catch (error) {
+      signal?.removeEventListener("abort", abortStartup);
+      const pendingStartup = startupCleanup as Promise<void> | null;
+      if (pendingStartup) await pendingStartup.catch(() => {});
+      if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
+      throw error;
+    }
 
     const threadId = this.threadId;
     const active = makeActiveTurn(threadId, onDelta, opts.onUsage, opts.executeTool);
     this.active = active;
+    signal?.removeEventListener("abort", abortStartup);
     let abort: (() => void) | undefined;
+    let abortCleanup: Promise<void> | null = null;
+    let forcedCleanup: Promise<void> | null = null;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
+    const stopWatchdog = () => {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = null;
+    };
+    const forceStop = (reason: Error) => {
+      forcedCleanup ??= this.shutdown(reason);
+      void forcedCleanup.catch(() => {});
+      return forcedCleanup;
+    };
+    const heartbeat = () => {
+      stopWatchdog();
+      // Dynamic tools own their own bounded timeout and receive the user's AbortSignal. Do not mistake
+      // a quiet long-running validator for a wedged model transport; restart the idle clock when the
+      // tool settles. Everything else (deltas, usage, RPC activity) is a real transport heartbeat.
+      if (active.activeTools > 0 || this.active !== active) return;
+      const idleMs = Math.max(0.01, this.cfg.timeoutSeconds) * 1_000;
+      watchdog = setTimeout(() => {
+        void forceStop(new DOMException(
+          `Codex App Server produced no activity for ${this.cfg.timeoutSeconds}s`,
+          "TimeoutError",
+        ));
+      }, idleMs);
+      (watchdog as any).unref?.();
+    };
+    active.heartbeat = heartbeat;
     try {
       const input = toUserInput(messages.at(-1)?.content);
       const params: Record<string, any> = { threadId, input, model: this.cfg.model };
@@ -142,34 +204,60 @@ export class ChatGptAppServerProvider implements Provider {
       if (effort) params.effort = effort;
       params.summary = "auto";
       if (opts.responseSchema) params.outputSchema = opts.responseSchema;
-      const started = await client.request("turn/start", params, 60_000);
-      active.turnId = String(started?.turn?.id ?? "") || undefined;
       abort = () => {
-        if (!active.turnId) return;
-        void client.request("turn/interrupt", { threadId, turnId: active.turnId }, 5000).catch(() => {});
+        if (abortCleanup) return;
+        if (active.turnId) {
+          void client.request("turn/interrupt", { threadId, turnId: active.turnId }, 5000).catch(() => {});
+        }
+        // Cooperative interrupt gets a short chance. If the App Server never acknowledges it, tear
+        // down the sidecar and wait for transport exit so Esc/Ctrl+C cannot leave the UI busy forever.
+        abortCleanup = waitForSettlement(active.done, this.interruptGraceMs).then((settled) => {
+          if (!settled && this.active === active) {
+            return forceStop(new DOMException("Aborted by user", "AbortError"));
+          }
+        });
+        void abortCleanup.catch(() => {});
       };
       signal?.addEventListener("abort", abort, { once: true });
       if (signal?.aborted) abort();
+      const started = await client.request("turn/start", params, 60_000);
+      active.turnId = String(started?.turn?.id ?? "") || undefined;
+      if (signal?.aborted && active.turnId) {
+        void client.request("turn/interrupt", { threadId, turnId: active.turnId }, 5000).catch(() => {});
+      }
+      heartbeat();
       await active.done;
+      if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
       return { content: active.answer, tool_calls: [], usage: this.finishUsage(active) };
     } finally {
       if (abort) signal?.removeEventListener("abort", abort);
+      stopWatchdog();
+      const pendingAbort = abortCleanup as Promise<void> | null;
+      const pendingForced = forcedCleanup as Promise<void> | null;
+      if (pendingAbort) await pendingAbort.catch(() => {});
+      if (pendingForced) await pendingForced.catch(() => {});
       this.syncCumulativeBase(active); // rejected/aborted turns still belong to the thread running total
       if (this.active === active) this.active = null;
       this.armIdleStop();
     }
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
+    await this.shutdown(new Error("Codex App Server stopped"));
+  }
+
+  private async shutdown(reason: Error): Promise<void> {
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     this.clientReady = null;
     this.threadId = null;
     this.threadSignature = "";
     this.syncCumulativeBase(this.active);
-    this.active?.reject(new Error("Codex App Server stopped"));
+    this.active?.reject(reason);
     this.active = null;
-    this.client?.close();
+    const client = this.client;
     this.client = null;
+    if (client?.closeAndWait) await client.closeAndWait(reason);
+    else client?.close();
   }
 
   private armIdleStop(): void {
@@ -177,7 +265,10 @@ export class ChatGptAppServerProvider implements Provider {
     if (this.cfg.codexKeepalive <= 0 || !this.client) { this.idleTimer = null; return; }
     // Belt + suspenders to the disarm in complete(): if the timer somehow fires while a turn is
     // live, re-arm instead of killing the turn out from under the model.
-    this.idleTimer = setTimeout(() => { if (this.active) this.armIdleStop(); else this.dispose(); }, this.cfg.codexKeepalive * 60_000);
+    this.idleTimer = setTimeout(() => {
+      if (this.active) this.armIdleStop();
+      else void this.dispose().catch(() => {});
+    }, this.cfg.codexKeepalive * 60_000);
     (this.idleTimer as any).unref?.();
   }
 
@@ -203,6 +294,7 @@ export class ChatGptAppServerProvider implements Provider {
       total_tokens: use.total,
       cached_tokens: use.cached,
       context_tokens: active.lastCall?.prompt,
+      context_cached_tokens: active.lastCall?.cached,
       model_calls: Math.max(1, active.modelCalls),
     };
   }
@@ -265,9 +357,18 @@ export class ChatGptAppServerProvider implements Provider {
       arguments: isObject(params?.arguments) ? params.arguments : {},
     };
     if (!call.id || !call.name) throw new Error("Codex returned an invalid dynamic tool call");
+    active.heartbeat?.();
     let result = active.toolResults.get(call.id);
     if (!result) {
-      result = active.executeTool(call).then(toolResultContent);
+      result = (async () => {
+        active.activeTools++;
+        active.heartbeat?.();
+        try { return toolResultContent(await active.executeTool!(call)); }
+        finally {
+          active.activeTools--;
+          active.heartbeat?.();
+        }
+      })();
       active.toolResults.set(call.id, result);
     }
     return result;
@@ -276,6 +377,7 @@ export class ChatGptAppServerProvider implements Provider {
   private onNotification(method: string, params: any): void {
     const active = this.active;
     if (!active || (params?.threadId && params.threadId !== active.threadId)) return;
+    active.heartbeat?.();
     if (method === "item/agentMessage/delta") {
       const delta = String(params?.delta ?? "");
       active.answer += delta;
@@ -348,8 +450,20 @@ function makeActiveTurn(
   const done = new Promise<void>((ok, fail) => { resolve = ok; reject = fail; });
   return {
     threadId, answer: "", usageSum: { prompt: 0, completion: 0, total: 0, cached: 0 }, modelCalls: 0,
-    onDelta, onUsage, executeTool, toolResults: new Map(), resolve, reject, done,
+    onDelta, onUsage, executeTool, toolResults: new Map(), activeTools: 0, resolve, reject, done,
   };
+}
+
+async function waitForSettlement(done: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
+    (timer as any).unref?.();
+  });
+  const settled = done.then(() => true, () => true);
+  const result = await Promise.race([settled, timeout]);
+  if (timer) clearTimeout(timer);
+  return result;
 }
 
 /** One usage shape from a codex tokenUsage record ({input,output,total,cachedInput}Tokens). */
@@ -415,17 +529,30 @@ export class HybridChatGptProvider implements Provider {
   complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
     if (!this.cfg.model.startsWith("gpt-5.6-")) {
       // A live /model switch back to GPT-5.5 should release the optional process immediately.
-      this.bridge?.dispose();
+      const bridge = this.bridge;
       this.bridge = null;
+      if (bridge) {
+        return bridge.dispose().then(() => this.direct.complete(messages, tools, onDelta, signal, opts));
+      }
       return this.direct.complete(messages, tools, onDelta, signal, opts);
     }
     this.bridge ??= new ChatGptAppServerProvider(this.cfg);
     return this.bridge.complete(messages, tools, onDelta, signal, opts);
   }
 
-  dispose(): void {
-    this.direct.dispose?.();
-    this.bridge?.dispose();
+  async dispose(): Promise<void> {
+    const bridge = this.bridge;
     this.bridge = null;
+    const settle = (cleanup: () => void | Promise<void>): Promise<{} | { error: unknown }> => {
+      try { return Promise.resolve(cleanup()).then(() => ({}), (error) => ({ error })); }
+      catch (error) { return Promise.resolve({ error }); }
+    };
+    // Start both cleanups before awaiting either so one slow provider cannot keep the sidecar alive.
+    const [directResult, bridgeResult] = await Promise.all([
+      settle(() => this.direct.dispose?.()),
+      settle(() => bridge?.dispose()),
+    ]);
+    if ("error" in directResult) throw directResult.error;
+    if ("error" in bridgeResult) throw bridgeResult.error;
   }
 }
