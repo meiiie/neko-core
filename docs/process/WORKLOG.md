@@ -3,6 +3,22 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-12 - v0.23.1 self-update lock hotfix
+
+A real `v0.22.5 -> v0.23.0` update was blocked by a fresh `.update.lock` whose recorded process had
+already exited. This can happen when the startup auto-updater acquires the machine-wide lock and its
+interactive host exits before the background promise reaches `finally`. The lock now checks recorded PID
+liveness and reclaims dead owners immediately instead of waiting ten minutes. Each acquisition also has a
+random owner token, so a delayed `finally` only removes its own lock and cannot erase a successor's lock.
+Focused update tests cover the dead-owner field case, live/stale behavior, and successor ownership.
+Both TypeScript compilers passed. The Windows suite passed as four fresh-process shards with **1,352
+passed, 12 intentional skips, 0 failed and 7,597 assertions across 125 files**. A preceding monolithic
+process accumulated enough Windows process/sandbox load to miss two cleanup budgets; both cases passed
+immediately in isolation and in the clean shards. Doctor/policy, production build, UI/input probes, three
+ConPTY ghost/typing runs, the scroll/interaction benchmark, diff check and a 12-value exact secret scan
+all passed. The field lock itself was reclaimed by the patched implementation after its PID was proven
+absent; no broad filesystem cleanup was used.
+
 ## 2026-08-12 - v0.23.0 release candidate: bounded autonomy, trust, and auditable evaluation
 
 The v0.23.0 candidate combines the long-running autonomy work with the trust, sandbox, provider,

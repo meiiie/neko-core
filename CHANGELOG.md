@@ -6,6 +6,14 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.23.1] — 2026-08-12
+
+### Fixed
+
+- **A terminated background updater no longer blocks every later `neko update` for ten minutes.** The
+  machine-wide update lock now checks whether its recorded process still exists, reclaims a dead owner's
+  lock immediately, and uses an ownership token so an older updater cannot delete its successor's lock.
+
 ## [0.23.0] — 2026-08-12
 
 ### Added
