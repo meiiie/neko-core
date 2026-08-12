@@ -6,6 +6,14 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.23.2] — 2026-08-12
+
+### Fixed
+
+- **Slow but active self-update downloads no longer fail after five minutes.** The updater now watches
+  for 60 seconds without new bytes instead of imposing one total wall-clock deadline, while retaining a
+  strict 250 MB release-size ceiling. Command-line progress continues to show received bytes.
+
 ## [0.23.1] — 2026-08-12
 
 ### Fixed

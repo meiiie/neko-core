@@ -13,6 +13,8 @@ import { VERSION } from "../shared/version.ts";
 
 const REPO = "meiiie/neko-core";
 const STABLE_TAG = /^v\d+\.\d+\.\d+$/;
+const DOWNLOAD_IDLE_MS = 60_000;
+const MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024;
 
 /** The release asset for this platform/arch (matches release.yml). */
 export function assetName(platform = process.platform, arch = process.arch): string {
@@ -67,6 +69,69 @@ export async function latestVersion(): Promise<string | null> {
 
 export function parseSha256Sidecar(text: string): string | null {
   return /^\s*([0-9a-fA-F]{64})(?:\s|$)/.exec(text)?.[1]?.toLowerCase() ?? null;
+}
+
+/** Download with a progress watchdog, not one total wall-clock deadline. A slow 93 MB release remains
+ * valid while bytes keep arriving; a genuinely silent transport is aborted and every path stays bounded
+ * by the published-binary size ceiling. The fetcher/idle override is a deterministic test seam. */
+export async function downloadReleaseBytes(
+  url: string,
+  onProgress?: (received: number, total: number) => void,
+  fetcher: typeof fetch = fetch,
+  idleMs = DOWNLOAD_IDLE_MS,
+  maxBytes = MAX_DOWNLOAD_BYTES,
+): Promise<Buffer> {
+  const controller = new AbortController();
+  const waitForProgress = async <T>(operation: Promise<T>): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<T>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            const error = new Error("download made no progress");
+            controller.abort(error);
+            reject(error);
+          }, idleMs);
+          (timer as any).unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  try {
+    const res = await waitForProgress(fetcher(url, {
+      headers: { "user-agent": "neko-core" },
+      signal: controller.signal,
+    }));
+    if (!res.ok) throw new Error(`HTTP ${res.status} (${url})`);
+    const declared = Number(res.headers.get("content-length") ?? 0);
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      throw new Error("release binary exceeds the 250 MB safety limit");
+    }
+    reader = res.body?.getReader();
+    if (!reader) {
+      const bytes = Buffer.from(await waitForProgress(res.arrayBuffer()));
+      if (bytes.byteLength > maxBytes) throw new Error("release binary exceeds the 250 MB safety limit");
+      onProgress?.(bytes.byteLength, declared > 0 ? declared : 0);
+      return bytes;
+    }
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    for (;;) {
+      const chunk = await waitForProgress(reader.read());
+      if (chunk.done) break;
+      received += chunk.value.byteLength;
+      if (received > maxBytes) throw new Error("release binary exceeds the 250 MB safety limit");
+      chunks.push(chunk.value);
+      onProgress?.(received, declared > 0 ? declared : 0);
+    }
+    return Buffer.concat(chunks as any, received);
+  } finally {
+    if (controller.signal.aborted) void reader?.cancel().catch(() => {});
+  }
 }
 
 function requiresChecksum(tag: string): boolean {
@@ -266,38 +331,19 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
     const showProgress = Boolean(opts.progressTty) && Boolean((process.stdout as any).isTTY);
     let bytes: Buffer;
     try {
-      const res = await fetch(url, { headers: { "user-agent": "neko-core" }, signal: AbortSignal.timeout(300000) });
-      if (!res.ok) {
-        log(`Download failed: HTTP ${res.status} (${url})`);
-        return false;
-      }
-      // Stream so the CLI can SHOW the download moving. A silent 88 MB fetch reads as a hang - the
-      // field screenshot was a user killing exactly that wait.
-      const reader = res.body?.getReader?.();
-      if (!reader) {
-        bytes = Buffer.from(await res.arrayBuffer());
-      } else {
-        const total = Number(res.headers.get("content-length") ?? 0);
-        const mb = (n: number) => (n / 1048576).toFixed(1);
-        const chunks: Uint8Array[] = [];
-        let got = 0;
-        let lastShown = 0;
-        for (;;) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          chunks.push(chunk.value);
-          got += chunk.value.byteLength;
-          if (showProgress && Date.now() - lastShown > 250) {
-            lastShown = Date.now();
-            const line = total > 0
-              ? `  downloading ${mb(got)} / ${mb(total)} MB (${Math.floor((100 * got) / total)}%)`
-              : `  downloading ${mb(got)} MB`;
-            process.stdout.write(`\r${line.padEnd(48)}`);
-          }
-        }
-        if (showProgress) process.stdout.write(`\r${`  downloaded ${mb(got)} MB - verifying ...`.padEnd(48)}\n`);
-        bytes = Buffer.concat(chunks as any);
-      }
+      const mb = (n: number) => (n / 1048576).toFixed(1);
+      let lastShown = 0;
+      let got = 0;
+      bytes = await downloadReleaseBytes(url, (received, total) => {
+        got = received;
+        if (!showProgress || Date.now() - lastShown <= 250) return;
+        lastShown = Date.now();
+        const line = total > 0
+          ? `  downloading ${mb(received)} / ${mb(total)} MB (${Math.floor((100 * received) / total)}%)`
+          : `  downloading ${mb(received)} MB`;
+        process.stdout.write(`\r${line.padEnd(48)}`);
+      });
+      if (showProgress) process.stdout.write(`\r${`  downloaded ${mb(got)} MB - verifying ...`.padEnd(48)}\n`);
     } catch (e) {
       if (showProgress) process.stdout.write("\n");
       log(`Download failed: ${(e as Error).message}`);

@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-12) — v0.23.1 release
+## Current status (2026-08-12) — v0.23.2 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,8 +38,9 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.23.1 (2026-08-12)** - the self-update lock now reclaims a
-  terminated background updater immediately and is ownership-token protected. v0.23.0 introduced
+- **Branch:** `main`. **Current release: v0.23.2 (2026-08-12)** - the self-update lock reclaims a
+  terminated background updater immediately and is ownership-token protected; slow active downloads use
+  an idle-progress watchdog instead of a five-minute total deadline. v0.23.0 introduced
   long-running `/auto` work with idle
   heartbeats plus bounded checkpoint recovery instead of one total wall-clock deadline; Esc/Ctrl+C escalates
   an ignored App Server interrupt into bounded sidecar teardown; and every one-line-install binary carries the
