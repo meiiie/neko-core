@@ -801,7 +801,9 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     // Wait until the complete Markdown-bearing prefix reaches the live band while the provider is still
     // hanging. The trailing plain-text sentence is irrelevant to this regression and may render later on
     // a loaded runner even after all deltas were emitted, so it must not be the readiness signal.
-    for (let i = 0; i < 600; i++) {
+    // A fully loaded Linux CI worker can defer the hidden Ink flush well beyond the provider's last
+    // delta. Poll the rendered postcondition rather than assuming that 15 seconds implies a commit.
+    for (let i = 0; i < 1200; i++) {
       const frame = strip(c.lastFrame());
       if (provider.streamedAll && frame.includes("Trump - Putin") && !frame.includes("**")) break;
       await tick(25);
@@ -819,7 +821,7 @@ test("fullscreen streaming renders Markdown LIVE in the band (hidden-instance fl
     c.unmount();
     await tick(20); // let the provider leave its hang so no timer outlives the test
   }
-}, 25000); // hidden-instance rendering can exceed 8s under a fully loaded Linux runner
+}, 45000); // hidden-instance rendering reached >15s on a fully loaded Linux runner
 
 test("interrupted turn is PERSISTED incrementally - resume shows the work, not nothing", async () => {
   // The bug: persist() ran ONLY in the turn's finally block, so killing the process mid-turn (closing

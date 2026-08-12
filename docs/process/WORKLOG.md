@@ -18,6 +18,10 @@ immediately in isolation and in the clean shards. Doctor/policy, production buil
 ConPTY ghost/typing runs, the scroll/interaction benchmark, diff check and a 12-value exact secret scan
 all passed. The field lock itself was reclaimed by the patched implementation after its PID was proven
 absent; no broad filesystem cleanup was used.
+The first PR CI run was green on macOS and Windows but exposed a separate Linux UI timing flake: the
+fullscreen Markdown test assumed 15 seconds was enough for the hidden Ink renderer and asserted halfway
+through `Trump - Putin`. Its existing rendered-state poll now has a 30-second ceiling (45-second outer
+budget); the exact target passed 3/3 locally before CI was rerun. No production UI behavior changed.
 
 ## 2026-08-12 - v0.23.0 release candidate: bounded autonomy, trust, and auditable evaluation
 
