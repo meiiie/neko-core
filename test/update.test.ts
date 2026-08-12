@@ -164,7 +164,7 @@ test("plain update resumes auto-updates even when no binary replacement can run"
   }
 });
 
-test("the machine-wide update lock: one holder, live locks respected, stale locks taken over", () => {
+test("the machine-wide update lock reclaims dead owners without deleting successor locks", () => {
   // The field failure: two `neko --yolo` startups (background auto-update) plus a manual `neko update`
   // raced over ONE staging file and the same rename - garbled output and an apparent hang.
   const saved = { up: process.env.USERPROFILE, home: process.env.HOME };
@@ -172,13 +172,27 @@ test("the machine-wide update lock: one holder, live locks respected, stale lock
   process.env.USERPROFILE = home; process.env.HOME = home;
   try {
     const { acquireUpdateLock, releaseUpdateLock } = require("../src/adapters/update.ts");
+    const lock = join(home, ".neko-core", ".update.lock");
     const t0 = Date.now();
     expect(acquireUpdateLock(t0)).toBe(true);      // first caller holds it
     expect(acquireUpdateLock(t0 + 60_000)).toBe(false); // a live lock is respected
     releaseUpdateLock();
     expect(acquireUpdateLock(t0 + 61_000)).toBe(true);  // released -> free again
-    // A holder killed mid-download must not brick updates: >10 min old is presumed dead.
-    expect(acquireUpdateLock(t0 + 61_000 + 11 * 60_000)).toBe(true);
+    releaseUpdateLock();
+
+    // A killed background updater must not brick a manual update for ten minutes.
+    writeFileSync(lock, JSON.stringify({ pid: 999_999_999, at: t0 + 62_000 }));
+    expect(acquireUpdateLock(t0 + 62_001, () => false)).toBe(true);
+
+    // If a stale owner eventually runs its finally, it must not remove a successor's lock.
+    writeFileSync(lock, JSON.stringify({ pid: 42, at: t0 + 62_002, token: "successor" }));
+    releaseUpdateLock();
+    expect(JSON.parse(readFileSync(lock, "utf8")).token).toBe("successor");
+    rmSync(lock, { force: true });
+
+    // Age remains a bounded fallback when a pid is live, reused, or cannot be inspected.
+    writeFileSync(lock, JSON.stringify({ pid: 42, at: t0 }));
+    expect(acquireUpdateLock(t0 + 11 * 60_000, () => true)).toBe(true);
     releaseUpdateLock();
   } finally {
     process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;

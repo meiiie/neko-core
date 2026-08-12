@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 import { homeDir } from "../shared/home.ts";
@@ -108,32 +108,63 @@ export function cleanupStaleUpdate(exe = process.execPath, now = Date.now()): vo
 /** One update at a time, MACHINE-wide. Without this, two `neko --yolo` startups (auto_update installs
  * in the background) plus a manual `neko update` all raced over ONE staging file and the same rename -
  * the field failure: garbled progress, an apparent hang, and only luck deciding which copy won.
- * The lock is a `wx`-created file with pid+timestamp; a holder older than 10 minutes is presumed dead
- * (killed mid-download) and its lock is taken over. */
+ * The lock is a `wx`-created file with pid+timestamp+owner token. A dead holder is reclaimed
+ * immediately; age is only the fallback for a live/reused/uninspectable pid. The owner token prevents
+ * an old updater from deleting a successor's lock during its `finally`. */
 const LOCK_STALE_MS = 10 * 60_000;
 const lockPath = () => join(homeDir(), ".neko-core", ".update.lock");
+let ownedUpdateLock: { path: string; token: string } | null = null;
 
-export function acquireUpdateLock(now = Date.now()): boolean {
-  try { mkdirSync(join(homeDir(), ".neko-core"), { recursive: true }); } catch { /* homeless: let wx decide */ }
+function processIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try {
-    writeFileSync(lockPath(), JSON.stringify({ pid: process.pid, at: now }), { flag: "wx" });
+    process.kill(pid, 0);
     return true;
-  } catch {
-    try {
-      const held = JSON.parse(readFileSync(lockPath(), "utf-8"));
-      if (typeof held.at === "number" && now - held.at < LOCK_STALE_MS) return false; // someone live is updating
-    } catch { /* unreadable -> stale */ }
-    try {
-      writeFileSync(lockPath(), JSON.stringify({ pid: process.pid, at: now })); // take over the stale lock
-      return true;
-    } catch {
-      return false;
-    }
+  } catch (error: any) {
+    // EPERM means the process exists but this user cannot signal it. Unknown failures are safer to
+    // treat as live; only ESRCH proves that the recorded owner is gone.
+    return error?.code !== "ESRCH";
   }
 }
 
+function createOwnedUpdateLock(path: string, now: number): boolean {
+  const token = randomUUID();
+  try {
+    writeFileSync(path, JSON.stringify({ pid: process.pid, at: now, token }), { flag: "wx" });
+    ownedUpdateLock = { path, token };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function acquireUpdateLock(now = Date.now(), isAlive: (pid: number) => boolean = processIsAlive): boolean {
+  try { mkdirSync(join(homeDir(), ".neko-core"), { recursive: true }); } catch { /* homeless: let wx decide */ }
+  const path = lockPath();
+  if (createOwnedUpdateLock(path, now)) return true;
+
+  try {
+    const held = JSON.parse(readFileSync(path, "utf-8"));
+    const fresh = typeof held.at === "number" && now - held.at < LOCK_STALE_MS;
+    const live = isAlive(held.pid);
+    if (fresh && live) return false;
+  } catch {
+    /* unreadable/malformed -> abandoned */
+  }
+  try { rmSync(path, { force: true }); } catch { return false; }
+  // Re-create exclusively: if another updater won the takeover race, it remains the sole owner.
+  return createOwnedUpdateLock(path, now);
+}
+
 export function releaseUpdateLock(): void {
-  try { rmSync(lockPath(), { force: true }); } catch { /* stale takeover will handle it */ }
+  const owned = ownedUpdateLock;
+  if (!owned) return;
+  ownedUpdateLock = null;
+  try {
+    const current = JSON.parse(readFileSync(owned.path, "utf-8"));
+    if (current.token !== owned.token) return;
+    rmSync(owned.path, { force: true });
+  } catch { /* stale takeover will handle it */ }
 }
 
 /** Activate a fully verified staged binary. If the second rename fails, restore the original immediately. */
