@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -85,6 +85,21 @@ test("no project control files requires no trust", () => {
   expect(inspection.state).toBe("none");
   expect(inspection.files).toEqual([]);
   expect(loadConfig({ cwd: root, home }).projectTrust.state).toBe("none");
+});
+
+test("project trust rejects multiply-linked control files", () => {
+  const { root, home } = fixture();
+  const external = join(dirname(root), "credential-source.txt");
+  writeFileSync(external, "PROJECT_CONTROL_CREDENTIAL_SENTINEL");
+  try {
+    linkSync(external, join(root, "AGENTS.md"));
+  } catch (error: any) {
+    if (["EPERM", "EACCES", "EXDEV", "ENOTSUP", "ENOSYS"].includes(String(error?.code))) return;
+    throw error;
+  }
+  expect(inspectProjectTrust(root, home)).toMatchObject({ state: "error" });
+  expect(() => trustProject(root, home)).toThrow("Cannot safely snapshot project control surfaces");
+  expect(loadProjectContext(root, home)).not.toContain("PROJECT_CONTROL_CREDENTIAL_SENTINEL");
 });
 
 test("project controls are quarantined until their exact snapshot is trusted", () => {

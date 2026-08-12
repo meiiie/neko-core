@@ -304,7 +304,7 @@ function setManifestDigest(state: SnapshotState, name: string, digest: string): 
 }
 
 function statIdentity(stat: Stats): string {
-  return [stat.dev, stat.ino, stat.mode, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
+  return [stat.dev, stat.ino, stat.mode, stat.nlink, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
 }
 
 function assertDirectAncestors(path: string): void {
@@ -350,13 +350,15 @@ function verifiedLstat(root: string, rootIdentity: string, path: string): Stats 
 
 function readVerifiedFile(state: SnapshotState, path: string, maxBytes: number): Buffer {
   const before = verifiedLstat(state.root, state.rootIdentity, path);
-  if (!before.isFile()) throw new Error("Project control is not a regular file");
+  if (!before.isFile() || before.nlink !== 1) throw new Error("Project control is not a single-link regular file");
   if (before.size > maxBytes) throw new Error("Project control exceeds its size limit");
   let fd: number | undefined;
   try {
     fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const opened = fstatSync(fd);
-    if (!opened.isFile() || statIdentity(opened) !== statIdentity(before)) throw new Error("Project control changed while opening");
+    if (!opened.isFile() || opened.nlink !== 1 || statIdentity(opened) !== statIdentity(before)) {
+      throw new Error("Project control changed while opening");
+    }
     const buffer = Buffer.allocUnsafe(Math.max(1, opened.size + 1));
     let used = 0;
     while (used < buffer.length) {
@@ -368,7 +370,8 @@ function readVerifiedFile(state: SnapshotState, path: string, maxBytes: number):
     const after = fstatSync(fd);
     const pathAfter = verifiedLstat(state.root, state.rootIdentity, path);
     const realAfter = realpathSync.native(path);
-    if (!isContained(state.root, realAfter) || statIdentity(opened) !== statIdentity(after)
+    if (!isContained(state.root, realAfter) || after.nlink !== 1 || pathAfter.nlink !== 1
+      || statIdentity(opened) !== statIdentity(after)
       || statIdentity(opened) !== statIdentity(pathAfter) || used !== opened.size) {
       throw new Error("Project control changed while reading");
     }

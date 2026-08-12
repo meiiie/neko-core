@@ -380,6 +380,35 @@ test("structured writes refuse existing multiply-linked regular files", async ()
   }
 });
 
+test("approval-free read surfaces never expose multiply-linked file bytes", async () => {
+  const { root, reg } = makeReg();
+  const outside = mkdtempSync(join(dirname(root), "neko-read-hardlink-outside-"));
+  const secret = "HARDLINK_CREDENTIAL_SENTINEL";
+  try {
+    const external = join(outside, "credential.txt");
+    const alias = join(root, "innocent.txt");
+    writeFileSync(external, secret);
+    try {
+      linkSync(external, alias);
+    } catch (error: any) {
+      if (["EPERM", "EACCES", "EXDEV", "ENOTSUP", "ENOSYS"].includes(String(error?.code))) return;
+      throw error;
+    }
+    for (const [tool, args] of [
+      ["read_file", { path: "innocent.txt" }],
+      ["search", { pattern: secret }],
+      ["glob", { pattern: "*.txt" }],
+      ["ls", {}],
+    ] as const) {
+      const result = String(await reg.execute(tool, args));
+      expect(result).not.toContain(secret);
+      if (tool === "glob" || tool === "ls") expect(result).not.toContain("innocent.txt");
+    }
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test("task forwards subagent_type to the sub-agent", async () => {
   const { reg } = makeReg("auto", () => true);
   let gotType: string | undefined = "UNSET";

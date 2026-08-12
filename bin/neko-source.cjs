@@ -20,18 +20,18 @@ function inside(base, candidate) {
 
 function candidatePaths() {
   const explicit = String(process.env.NEKO_BUN_PATH || "").trim();
-  if (explicit) return [explicit];
+  if (explicit) return [{ path: explicit, trustedInstall: true }];
   const found = [];
   const install = String(process.env.BUN_INSTALL || "").trim();
-  if (install && isAbsolute(install)) found.push(join(install, "bin", executableName));
-  found.push(join(homedir(), ".bun", "bin", executableName));
+  if (install && isAbsolute(install)) found.push({ path: join(install, "bin", executableName), trustedInstall: false });
+  found.push({ path: join(homedir(), ".bun", "bin", executableName), trustedInstall: true });
   for (const entry of String(process.env.PATH || "").split(delimiter)) {
     if (!entry || !isAbsolute(entry)) continue;
     for (const candidate of [
       join(entry, executableName),
       ...(process.platform === "win32" ? [join(entry, "node_modules", "bun", "bin", executableName)] : []),
     ]) {
-      if (!inside(cwd, resolve(candidate))) found.push(candidate);
+      if (!inside(cwd, resolve(candidate))) found.push({ path: candidate, trustedInstall: false });
     }
   }
   return found;
@@ -40,9 +40,9 @@ function candidatePaths() {
 let bun = "";
 for (const candidate of candidatePaths()) {
   try {
-    if (!isAbsolute(candidate) || !existsSync(candidate)) continue;
-    const real = realpathSync(candidate);
-    if (process.env.NEKO_BUN_PATH || !inside(cwd, real)) { bun = real; break; }
+    if (!isAbsolute(candidate.path) || !existsSync(candidate.path)) continue;
+    const real = realpathSync(candidate.path);
+    if (candidate.trustedInstall || !inside(cwd, real)) { bun = real; break; }
   } catch { /* try the next trusted absolute candidate */ }
 }
 if (!bun) {

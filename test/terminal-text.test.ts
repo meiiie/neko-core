@@ -28,4 +28,9 @@ describe("terminal-safe text", () => {
     expect(output.length).toBeLessThanOrEqual(24);
     expect(output).toEndWith("... [truncated]");
   });
+
+  test("ASCII mode escapes non-ASCII code points for legacy Windows consoles", () => {
+    expect(terminalSafeText("Neko mô hình 模型", { ascii: true }))
+      .toBe("Neko m\\u00f4 h\\u00ecnh \\u6a21\\u578b");
+  });
 });

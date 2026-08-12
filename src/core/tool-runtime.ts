@@ -41,7 +41,7 @@ import { debug, messageOf } from "../shared/debug.ts";
 import { scrubChildEnv } from "../shared/child-env.ts";
 import { minimalWindowsSystemEnv, resolveWindowsSystemExecutable } from "../shared/windows-system.ts";
 import { MAX_OBS_PAGE_CHARS } from "./agent-constants.ts";
-import { CREDENTIAL_READ_DENY_GLOBS, deniedCredentialPath, requiresPolicyAwareSearch, WINDOWS_DEVICE_READ_DENY_GLOBS } from "./read-policy.ts";
+import { deniedCredentialPath } from "./read-policy.ts";
 import { isForegroundValidatorOnlyCommand } from "./validation-command.ts";
 
 export { deniedCredentialPath as deniedOutsideRoot } from "./read-policy.ts";
@@ -1484,13 +1484,17 @@ async function toolReadFile(root: string, args: Record<string, any>, opts: ToolO
 function openRegularFile(path: string, raw: string): { fd: number; size: number } {
   const before = lstatSync(path);
   if (!before.isFile()) throw new Error(`not a regular file: ${raw}`);
+  if (before.nlink !== 1) throw new Error(`not a single-link regular file: ${raw}`);
   let flags = constants.O_RDONLY;
   if (process.platform !== "win32") flags |= constants.O_NOFOLLOW | constants.O_NONBLOCK;
   const fd = openSync(path, flags);
   try {
     const opened = fstatSync(fd);
     if (!opened.isFile()) throw new Error(`not a regular file: ${raw}`);
-    if (opened.dev !== before.dev || opened.ino !== before.ino) throw new Error(`file changed while opening: ${raw}`);
+    if (opened.nlink !== 1) throw new Error(`not a single-link regular file: ${raw}`);
+    if (opened.dev !== before.dev || opened.ino !== before.ino || opened.nlink !== before.nlink) {
+      throw new Error(`file changed while opening: ${raw}`);
+    }
     return { fd, size: opened.size };
   } catch (error) {
     closeSync(fd);
@@ -1724,45 +1728,9 @@ function imageDims(buf: Buffer, ext: string): { w: number; h: number } | null {
 
 function toolSearch(root: string, args: Record<string, any>, opts: ToolOpts): string {
   const pattern = requireArg(args, "pattern");
-  // Prefer ripgrep when installed: far faster on big trees + honors .gitignore. Fall back to the
-  // built-in walk (no rg) — both support glob/case_insensitive/context so behavior is consistent.
-  const rg = executableOnPath("rg", process.env.PATH ?? "", root);
-  if (rg) {
-    const out = ripgrepSearch(rg, root, pattern, args, opts);
-    if (out !== null) return out; // null = rg couldn't run -> use the JS walk
-  }
+  // Search through descriptor-verified reads. A recursive external process cannot prove that an
+  // innocently named file is not a hard-link alias to a credential inode.
   return jsSearch(root, pattern, args, opts);
-}
-
-/** ripgrep search. Returns null only if rg fails to spawn (so the caller falls back to jsSearch). */
-function ripgrepSearch(rgPath: string, root: string, pattern: string, args: Record<string, any>, opts: ToolOpts): string | null {
-  const base = resolveForRead(root, args.path || ".", opts.readOutsideRoot);
-  const realBase = realpathNearest(base);
-  if (realBase !== base || requiresPolicyAwareSearch(realBase)) return null;
-  const rel = args.path ? relative(resolve(root), base).split(sep).join("/") || "." : ".";
-  const ctx = Math.max(0, Math.min(5, Math.floor(Number(args.context) || 0)));
-  const rgArgs = ["--line-number", "--no-heading", "--color=never", "--max-columns=250", "--max-count=2000"];
-  // Windows: a file literally named `nul` (usually debris from a cmd-style `> nul` redirect run in the
-  // wrong shell) opens as the NUL DEVICE, and rg's read of it fails with "Incorrect function".
-  if (args.case_insensitive) rgArgs.push("-i");
-  if (args.glob) rgArgs.push("--glob", String(args.glob));
-  // Keep policy exclusions LAST: ripgrep lets later globs override earlier ones, so a caller-supplied
-  // positive glob must never re-include a credential path that the safe-read boundary excluded.
-  for (const denied of CREDENTIAL_READ_DENY_GLOBS) rgArgs.push("--glob", `!${denied}`);
-  if (process.platform === "win32") {
-    for (const denied of WINDOWS_DEVICE_READ_DENY_GLOBS) rgArgs.push("--glob", `!${denied}`);
-  }
-  if (ctx) rgArgs.push("-C", String(ctx));
-  rgArgs.push("--", pattern, rel); // -- so a pattern starting with '-' isn't read as a flag
-  const r = spawnSync(rgPath, rgArgs, {
-    cwd: root,
-    encoding: "utf-8",
-    maxBuffer: 16 * 1024 * 1024,
-    timeout: 30_000,
-    env: scrubChildEnv(process.env, opts.childSecretEnvNames),
-  });
-  if (r.error) return null; // couldn't spawn -> let the JS fallback handle it
-  return formatRipgrepResult(r.status, String(r.stdout || ""), String(r.stderr || ""));
 }
 
 /** Turn an rg exit into an observation. Exit 2 means "an error occurred" - INCLUDING one unreadable
@@ -1802,10 +1770,14 @@ function jsSearch(root: string, pattern: string, args: Record<string, any>, opts
       if (!glob.match(relToBase) && !glob.match(file.split(sep).pop() ?? "")) continue;
     }
     let text: string;
+    let opened: ReturnType<typeof openRegularFile> | undefined;
     try {
-      text = readFileSync(file, "utf-8");
+      opened = openRegularFile(file, relative(rootResolved, file));
+      text = readFileSync(opened.fd, "utf-8");
     } catch {
       continue; // binary / unreadable
+    } finally {
+      if (opened) try { closeSync(opened.fd); } catch { /* best effort */ }
     }
     const lines = text.split(/\r?\n/);
     const rel = relative(rootResolved, file).split(sep).join("/");
@@ -2031,7 +2003,13 @@ function deniedReadPath(path: string): string | null {
   const lexical = deniedCredentialPath(path);
   if (lexical) return lexical;
   const real = realpathNearest(path);
-  return real === path ? null : deniedCredentialPath(real);
+  const canonical = real === path ? null : deniedCredentialPath(real);
+  if (canonical) return canonical;
+  try {
+    const stat = lstatSync(path);
+    if (stat.isFile() && stat.nlink !== 1) return "a multiply-linked file";
+  } catch { /* missing paths are handled by the caller */ }
+  return null;
 }
 
 /**

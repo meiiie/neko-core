@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -47,6 +47,25 @@ test.skipIf(!nodeExecutable)("public source bootstrap resolves trusted package p
   expect(output).not.toContain("BUNFIG_RAN");
   expect(existsSync(f.marker)).toBe(false);
 }, { timeout: 20_000 });
+
+test.skipIf(!nodeExecutable)("source bootstrap accepts the user's Bun install when cwd is their home", () => {
+  const f = fixture("neko-node-home-bootstrap-");
+  const installed = join(f.home, ".bun", "bin", process.platform === "win32" ? "bun.exe" : "bun");
+  mkdirSync(join(f.home, ".bun", "bin"), { recursive: true });
+  copyFileSync(process.execPath, installed);
+  if (process.platform !== "win32") chmodSync(installed, 0o755);
+  const env = cleanEnv(f.home);
+  delete env.BUN_INSTALL;
+  env.PATH = "";
+  const result = Bun.spawnSync([nodeExecutable!, sourceLauncher, "config"], {
+    cwd: f.home,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const output = result.stdout.toString() + result.stderr.toString();
+  expect(result.exitCode, output).toBe(0);
+}, { timeout: 30_000 });
 
 test("compiled Bun opt-outs block cwd dotenv and bunfig preloads before the entrypoint", () => {
   const f = fixture("neko-compile-autoload-");

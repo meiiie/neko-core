@@ -145,7 +145,10 @@ function installSafeConsole(): void {
   const rawLog = console.log.bind(console);
   const rawError = console.error.bind(console);
   const rawWarn = console.warn.bind(console);
-  const encode = (values: unknown[]) => terminalSafeText(format(...values), { preserveLineBreaks: true });
+  const encode = (values: unknown[]) => terminalSafeText(format(...values), {
+    preserveLineBreaks: true,
+    ascii: process.platform === "win32",
+  });
   console.log = (...values: unknown[]) => rawLog(encode(values));
   console.error = (...values: unknown[]) => rawError(encode(values));
   console.warn = (...values: unknown[]) => rawWarn(encode(values));
