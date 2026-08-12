@@ -288,14 +288,8 @@ export function hardenPrivateHarborRoot(root: string): string {
   const aclScript = [
     "$ErrorActionPreference='Stop'",
     "$acl=Get-Acl -LiteralPath $env:NEKO_ACL_TARGET",
-    "$rules=@($acl.Access | ForEach-Object { [pscustomobject]@{",
-    "sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value",
-    "inherited=$_.IsInherited",
-    "type=[int]$_.AccessControlType",
-    "full=(($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl)",
-    "inheritance=[int]$_.InheritanceFlags",
-    "propagation=[int]$_.PropagationFlags } })",
-    "[pscustomobject]@{ protected=$acl.AreAccessRulesProtected; rules=$rules } | ConvertTo-Json -Compress -Depth 4",
+    "$section=[System.Security.AccessControl.AccessControlSections]::Access",
+    "[pscustomobject]@{ protected=$acl.AreAccessRulesProtected; sddl=$acl.GetSecurityDescriptorSddlForm($section) } | ConvertTo-Json -Compress",
   ].join("\n");
   const inspected = runAclTool(
     powershell,
@@ -304,12 +298,15 @@ export function hardenPrivateHarborRoot(root: string): string {
   );
   let acl: any;
   try { acl = JSON.parse(inspected.stdout.trim()); } catch { acl = null; }
-  const rules = Array.isArray(acl?.rules) ? acl.rules : acl?.rules ? [acl.rules] : [];
+  const rules = typeof acl?.sddl === "string"
+    ? [...acl.sddl.matchAll(/\(([^()]*)\)/g)].map((match: RegExpMatchArray) => match[1].split(";"))
+    : [];
   const expectedSids = new Set([sid.toUpperCase(), "S-1-5-18"]);
   if (inspected.exitCode !== 0 || acl?.protected !== true || rules.length !== expectedSids.size
-    || rules.some((rule: any) => !rule || rule.inherited !== false || rule.type !== 0
-      || rule.full !== true || rule.inheritance !== 3 || rule.propagation !== 0
-      || !expectedSids.delete(String(rule.sid ?? "").toUpperCase()))
+    || rules.some((rule: string[]) => rule.length !== 6 || rule[0] !== "A"
+      || !rule[1].includes("OI") || !rule[1].includes("CI") || rule[1].includes("ID")
+      || !["FA", "0X1F01FF"].includes(rule[2].toUpperCase())
+      || !expectedSids.delete((rule[5].toUpperCase() === "SY" ? "S-1-5-18" : rule[5].toUpperCase())))
     || expectedSids.size !== 0) {
     throw new Error("Could not verify Harbor private staging ACL.");
   }
