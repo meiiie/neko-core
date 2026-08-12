@@ -21,7 +21,7 @@ test("shouldStreamPump: pinned (live tail visible) throttles to STREAM_PUMP_MS",
   const t0 = 1_000_000;
   // at least the cadence elapsed -> allow (leading edge)
   expect(shouldStreamPump(t0 + STREAM_PUMP_MS, t0, false)).toBe(true);
-  // one tick short of the cadence -> block (no timer: deltas pile into refs until the gate opens)
+  // one tick short of the cadence -> block (the caller coalesces a trailing pump for the remaining delay)
   expect(shouldStreamPump(t0 + STREAM_PUMP_MS - 1, t0, false)).toBe(false);
   // well past -> allow
   expect(shouldStreamPump(t0 + 1_000, t0, false)).toBe(true);

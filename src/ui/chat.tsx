@@ -134,9 +134,8 @@ interface ChatProps {
 }
 
 /** Live-tail pump cadence: deltas accumulate in refs and the screen syncs at most every STREAM_PUMP_MS
- *  (~25fps, leading-edge, no timer). Streaming re-parses markdown a few times a second instead of once
- *  per token - smooth, no flicker, far less CPU. Final tokens within the last window land when
- *  flushStream commits the assistant line, so nothing is lost. */
+ *  (~25fps). Streaming re-parses markdown a few times a second instead of once per token - smooth, no
+ *  flicker, far less CPU. A coalesced trailing timer publishes final deltas even when a provider stays busy. */
 export const STREAM_PUMP_MS = 40;
 /** Scrolled-away cadence: the live tail sits BELOW the viewport, so each pump costs a full React render
  *  plus the streamed-markdown re-render for rows nobody can see. At 25fps that saturated the event loop
@@ -191,7 +190,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const startupToolSchemas = useMemo(() => [...toolSchemas(), ...(mcpHub?.toolSchemas() ?? [])], [mcpHub]);
   const idRef = useRef(0);
   const streamRef = useRef("");
-  const lastPumpRef = useRef(0); // throttle stream re-renders (leading-edge, no timer)
+  const lastPumpRef = useRef(0);
+  const streamPumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busyRef = useRef(false); // mirrors `busy` for closures (onSubmit's queue decision) — no stale read
   const alwaysApproved = useRef<Set<string>>(new Set());
   const historyRef = useRef<string[]>([]);
@@ -449,7 +449,25 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const maybePump = (force = false) => {
     // Pump gate is the module-scope shouldStreamPump() (STREAM_PUMP_MS / STREAM_PUMP_SCROLLED_MS), so the
     // 40ms/300ms cadence contract is unit-tested deterministically instead of via a flaky wall-clock sim.
-    if (!force && !shouldStreamPump(Date.now(), lastPumpRef.current, scrolledAwayRef.current)) return;
+    const now = Date.now();
+    const cadence = scrolledAwayRef.current ? STREAM_PUMP_SCROLLED_MS : STREAM_PUMP_MS;
+    if (!force && !shouldStreamPump(now, lastPumpRef.current, scrolledAwayRef.current)) {
+      // Keep the leading-edge throttle, but guarantee one trailing pump. Without this timer the provider
+      // can emit its last few deltas inside the cadence window and then remain busy, leaving the visible
+      // live tail permanently behind streamRef until the whole turn finishes.
+      if (!streamPumpTimerRef.current) {
+        const remaining = Math.max(0, cadence - (now - lastPumpRef.current));
+        streamPumpTimerRef.current = setTimeout(() => {
+          streamPumpTimerRef.current = null;
+          maybePump(true);
+        }, remaining);
+      }
+      return;
+    }
+    if (streamPumpTimerRef.current) {
+      clearTimeout(streamPumpTimerRef.current);
+      streamPumpTimerRef.current = null;
+    }
     lastPumpRef.current = Date.now();
     // Progressive commit: the terminal auto-follows output, so a live region TALLER than the viewport
     // makes it redraw from the top every frame -- the "streaming keeps jumping to the top" bug. Once the
@@ -472,6 +490,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   };
 
   const flushStream = () => {
+    if (streamPumpTimerRef.current) {
+      clearTimeout(streamPumpTimerRef.current);
+      streamPumpTimerRef.current = null;
+    }
     if (streamRef.current.trim()) addLine("assistant", streamRef.current.trimEnd());
     streamRef.current = "";
     setStream("");
@@ -481,6 +503,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     toolStreamRef.current = "";
     setReasoning("");
   };
+  useEffect(() => () => {
+    if (streamPumpTimerRef.current) clearTimeout(streamPumpTimerRef.current);
+  }, []);
 
   // Serialized so concurrent (parallel sub-agent) tool calls prompt one at a time, not at once.
   const gateChain = useRef<Promise<unknown>>(Promise.resolve());

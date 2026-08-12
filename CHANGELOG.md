@@ -25,6 +25,11 @@ All notable changes to Neko Core are documented here. The format follows
   subagent, and sandbox behavior from drifting between terminal and editor hosts.
 - Native release artifacts must complete an SDK-to-binary ACP initialization/auth handshake before upload.
 
+### Fixed
+
+- Fullscreen streaming now schedules one coalesced trailing render, so a provider that stays busy after its
+  last delta cannot leave the visible live response stuck on a partial word.
+
 ## [0.23.2] — 2026-08-12
 
 ### Fixed
