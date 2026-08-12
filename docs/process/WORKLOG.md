@@ -3,6 +3,20 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-12 - v0.23.2 self-update progress-watchdog hotfix
+
+The first end-to-end dogfood from installed v0.22.5 proved the v0.23.1 dead-lock repair worked: it
+reclaimed the dead PID, admitted one updater, and removed the owned lock in `finally`. It then exposed a
+second independent field issue: the 93 MB Windows asset did not finish over the current route before the
+old updater's fixed 300-second `AbortSignal.timeout`, so a healthy moving download was aborted and the
+installed v0.22.5 binary remained intact. The updater now applies a 60-second no-progress watchdog to
+fetch headers and each body read, resetting on every received chunk, plus a 250 MB declared/streamed size
+ceiling. Deterministic tests cover a download whose total duration exceeds its idle window, a silent
+stream, and an oversized response.
+Focused update coverage passed 13/13; both TypeScript compilers and the production UI/input artifact
+probes passed. The full Windows suite passed in four fresh-process shards with **1,353 passed, 12
+intentional skips, 0 failed and 7,601 assertions across 125 files** before public CI.
+
 ## 2026-08-12 - v0.23.1 self-update lock hotfix
 
 A real `v0.22.5 -> v0.23.0` update was blocked by a fresh `.update.lock` whose recorded process had

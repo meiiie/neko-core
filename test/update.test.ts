@@ -125,6 +125,30 @@ test("release checksum sidecars are parsed strictly", () => {
   expect(parseSha256Sidecar("abc *neko")).toBe(null);
 });
 
+test("release downloads use an idle-progress watchdog instead of one total deadline", async () => {
+  const { downloadReleaseBytes } = await import("../src/adapters/update.ts");
+  const chunks = ["slow-", "but-", "moving"];
+  const moving = async () => new Response(new ReadableStream({
+    async start(controller) {
+      for (const text of chunks) {
+        await Bun.sleep(35);
+        controller.enqueue(new TextEncoder().encode(text));
+      }
+      controller.close();
+    },
+  }));
+  const progress: number[] = [];
+  expect((await downloadReleaseBytes("https://release.invalid/neko", (n: number) => progress.push(n), moving as any, 80)).toString())
+    .toBe(chunks.join("")); // total wall time >80ms, but each chunk resets the watchdog
+  expect(progress).toEqual([5, 9, 15]);
+
+  const stalled = async () => new Response(new ReadableStream({ start() { /* never produces bytes */ } }));
+  await expect(downloadReleaseBytes("https://release.invalid/neko", undefined, stalled as any, 40)).rejects.toThrow(/no progress/i);
+
+  const oversized = async () => new Response("123456", { headers: { "content-length": "6" } });
+  await expect(downloadReleaseBytes("https://release.invalid/neko", undefined, oversized as any, 40, 5)).rejects.toThrow(/250 MB safety limit/i);
+});
+
 test("setAutoUpdate writes the hold flag to the user config (rollback sticks)", () => {
   const saved = { up: process.env.USERPROFILE, home: process.env.HOME };
   const home = mkdtempSync(join(tmpdir(), "neko-pin-"));
