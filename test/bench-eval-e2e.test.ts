@@ -985,7 +985,7 @@ test("benchmark JS oracle fails closed and cannot write the model workspace", ()
       join(root, "detach.mjs"),
       [
         'import { spawn } from "node:child_process";',
-        'const child = spawn(process.execPath, ["--no-env-file", "--no-install", "--config=./safe-child.toml", "--eval", "setTimeout(() => {}, 8000)"], { detached: true, stdio: "ignore" });',
+        'const child = spawn(process.execPath, ["--no-env-file", "--no-install", "--config=./safe-child.toml", "--eval", "setTimeout(() => {}, 8000)"], { detached: true, stdio: "inherit" });',
         "child.unref();",
         'console.log(`detached:${child.pid}`);',
         "",
@@ -997,7 +997,9 @@ test("benchmark JS oracle fails closed and cannot write the model workspace", ()
     const stdinPrivate = await __runBenchJsForTest(root, "stdin-private.mjs");
     const falseGreen = await __runBenchJsForTest(root, "false-green.mjs");
     const hostRead = await __runBenchJsForTest(root, "host-read.mjs");
+    const detachedStarted = Date.now();
     const detached = await __runBenchJsForTest(root, "detach.mjs");
+    const detachedMs = Date.now() - detachedStarted;
     expect(benign.ok).toBe(true);
     expect(benign.out.trim()).toBe("oracle-ok");
     expect(env.ok).toBe(true);
@@ -1017,10 +1019,10 @@ test("benchmark JS oracle fails closed and cannot write the model workspace", ()
       // primitive that denies the fork outright is also safe and is accepted by this cross-platform test.
       const pid = Number(/detached:(\d+)/.exec(detached.out)?.[1] ?? 0);
       expect(pid).toBeGreaterThan(0);
-      let live = false;
-      try { process.kill(pid, 0); live = true; }
-      catch (error) { live = (error as NodeJS.ErrnoException).code === "EPERM"; }
-      expect(live).toBe(false);
+      // The detached child inherits the oracle's stdout descriptor and sleeps for eight seconds.
+      // A quick EOF therefore proves that the containment primitive tore the descendant down;
+      // namespace-local PIDs cannot be safely probed from the host PID namespace.
+      expect(detachedMs).toBeLessThan(3_000);
     }
     expect(readFileSync(join(root, "protected.txt"), "utf8")).toBe("original\n");
     expect(readdirSync(root).sort()).toEqual([

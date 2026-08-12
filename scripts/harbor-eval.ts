@@ -292,7 +292,7 @@ export function hardenPrivateHarborRoot(root: string): string {
     "sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value",
     "inherited=$_.IsInherited",
     "type=[int]$_.AccessControlType",
-    "rights=[int]$_.FileSystemRights",
+    "full=(($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl)",
     "inheritance=[int]$_.InheritanceFlags",
     "propagation=[int]$_.PropagationFlags } })",
     "[pscustomobject]@{ protected=$acl.AreAccessRulesProtected; rules=$rules } | ConvertTo-Json -Compress -Depth 4",
@@ -308,7 +308,7 @@ export function hardenPrivateHarborRoot(root: string): string {
   const expectedSids = new Set([sid.toUpperCase(), "S-1-5-18"]);
   if (inspected.exitCode !== 0 || acl?.protected !== true || rules.length !== expectedSids.size
     || rules.some((rule: any) => !rule || rule.inherited !== false || rule.type !== 0
-      || rule.rights !== 2_032_127 || rule.inheritance !== 3 || rule.propagation !== 0
+      || rule.full !== true || rule.inheritance !== 3 || rule.propagation !== 0
       || !expectedSids.delete(String(rule.sid ?? "").toUpperCase()))
     || expectedSids.size !== 0) {
     throw new Error("Could not verify Harbor private staging ACL.");
