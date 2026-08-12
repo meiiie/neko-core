@@ -292,7 +292,19 @@ export function hardenPrivateHarborRoot(root: string): string {
     "$ErrorActionPreference='Stop'",
     "$section=[System.Security.AccessControl.AccessControlSections]::Access",
     "$acl=[System.Security.AccessControl.DirectorySecurity]::new($env:NEKO_ACL_TARGET,$section)",
-    "[pscustomobject]@{ protected=$acl.AreAccessRulesProtected; sddl=$acl.GetSecurityDescriptorSddlForm($section) } | ConvertTo-Json -Compress",
+    "$rules=@($acl.GetAccessRules($true,$false,[System.Security.Principal.SecurityIdentifier]))",
+    "$expected=[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)",
+    "[void]$expected.Add([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)",
+    "[void]$expected.Add('S-1-5-18')",
+    "$valid=$rules.Count -eq 2",
+    "foreach($rule in $rules){",
+    "  $valid=$valid -and $rule.AccessControlType -eq 'Allow' -and -not $rule.IsInherited -and $rule.FileSystemRights -eq 'FullControl'",
+    "  $valid=$valid -and $rule.InheritanceFlags.HasFlag([System.Security.AccessControl.InheritanceFlags]::ObjectInherit)",
+    "  $valid=$valid -and $rule.InheritanceFlags.HasFlag([System.Security.AccessControl.InheritanceFlags]::ContainerInherit)",
+    "  $valid=$valid -and $rule.PropagationFlags -eq 'None' -and $expected.Remove($rule.IdentityReference.Value)",
+    "}",
+    "$valid=$valid -and $expected.Count -eq 0",
+    "[pscustomobject]@{ protected=$acl.AreAccessRulesProtected; valid=$valid; rules=$rules.Count } | ConvertTo-Json -Compress",
   ].join("\n");
   const inspected = runAclTool(
     powershell,
@@ -301,19 +313,9 @@ export function hardenPrivateHarborRoot(root: string): string {
   );
   let acl: any;
   try { acl = JSON.parse(inspected.stdout.trim()); } catch { acl = null; }
-  const rules = typeof acl?.sddl === "string"
-    ? [...acl.sddl.matchAll(/\(([^()]*)\)/g)].map((match: RegExpMatchArray) => match[1].split(";"))
-    : [];
-  const expectedSids = new Set([sid.toUpperCase(), "S-1-5-18"]);
-  if (inspected.exitCode !== 0 || acl?.protected !== true || rules.length !== expectedSids.size
-    || rules.some((rule: string[]) => rule.length !== 6 || rule[0] !== "A"
-      || !rule[1].includes("OI") || !rule[1].includes("CI") || rule[1].includes("ID")
-      || !["FA", "0X1F01FF"].includes(rule[2].toUpperCase())
-      || !expectedSids.delete((rule[5].toUpperCase() === "SY" ? "S-1-5-18" : rule[5].toUpperCase())))
-    || expectedSids.size !== 0) {
-    const shapes = rules.map((rule: string[]) => `${rule[0] ?? "?"}/${rule[1] ?? "?"}/${rule[2] ?? "?"}`).join(",");
+  if (inspected.exitCode !== 0 || acl?.protected !== true || acl?.valid !== true || acl?.rules !== 2) {
     throw new Error(
-      `Could not verify Harbor private staging ACL (inspect=${inspected.exitCode}, parsed=${Boolean(acl)}, protected=${String(acl?.protected)}, rules=${rules.length}, shapes=${shapes || "none"}).`,
+      `Could not verify Harbor private staging ACL (inspect=${inspected.exitCode}, parsed=${Boolean(acl)}, protected=${String(acl?.protected)}, valid=${String(acl?.valid)}, rules=${String(acl?.rules ?? 0)}).`,
     );
   }
   return canonical;
