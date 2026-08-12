@@ -63,7 +63,7 @@ test("resident UIA host reuses one PowerShell process and restarts after disposa
   } finally {
     host.dispose();
   }
-}, 15_000);
+}, 30_000); // two cold PowerShell starts can exceed 15s under the full Windows CI suite
 
 test("resident host handles waits without spawning another PowerShell process", async () => {
   if (process.platform !== "win32") return;
