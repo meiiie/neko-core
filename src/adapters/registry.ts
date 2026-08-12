@@ -90,6 +90,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "chat", group: "agent", summary: "Interactive agentic session (REPL).", example: "neko chat" },
   { name: "resume", group: "agent", summary: "Resume the latest or an exact saved session.", example: "neko resume <session-id>" },
   { name: "run", group: "agent", summary: "One-shot: run a single instruction.", example: "neko run 'add a test for X'" },
+  { name: "acp", group: "agent", summary: "Serve stable ACP v1 over stdio for editor clients.", example: "neko acp" },
   { name: "oracle", group: "agent", summary: "Ask a configured stronger model for a second opinion.", example: "neko oracle -p 'review this design'" },
   { name: "bench", group: "agent", summary: "Run the configured model through Neko's benchmark tiers.", example: "neko bench hard" },
   { name: "config", group: "config", summary: "Show the resolved config-first settings.", example: "neko config" },

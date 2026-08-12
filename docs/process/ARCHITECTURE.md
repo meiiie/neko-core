@@ -394,6 +394,19 @@ continuity without saving partial speech or audio. The LIVE panel reuses FrameDi
 for mouse Mute/Unmute and Stop; approval, picker, viewer, and find surfaces take focus and suppress those targets.
 Alt+M and Alt+X remain keyboard-equivalent controls.
 
+## ACP host boundary
+
+`adapters/acp.ts` is a stable ACP v1 stdio adapter. It owns JSON-RPC connection/session lifecycle,
+stream/update projection, cancellation, and permission requests; it does not execute tools itself.
+`adapters/agent-runtime.ts` is the shared non-TUI production composition used by both `neko run` and
+`neko acp`, so provider selection, global skills, project context, MCP, ToolRegistry decisions, path
+containment, bash sandboxing, and the catastrophic-command seatbelt cannot drift between hosts.
+
+The ACP client's permission response is only an implementation of core's `ApprovalGate`. Core still
+decides whether a call is allowed, denied, or eligible to prompt. In particular, `plan` is a hard deny;
+`auto` does not bypass host-computer consent or seatbelts; and allow/reject-always choices are scoped to
+one ACP session. ACP stdout is protocol-only.
+
 ## Verify loop (the harness)
 
 ```

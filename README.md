@@ -169,6 +169,19 @@ neko
 #        -> DeepSeek  -> DeepSeek V4 API key
 ```
 
+### Use Neko in an ACP editor
+
+Neko ships a stable ACP v1 server, so Zed, JetBrains IDEs, and other ACP clients can provide the desktop
+conversation UI while Neko keeps its own provider, global skills, project context, sandbox, tools, and
+permission boundary:
+
+```bash
+neko acp
+```
+
+See [Neko over ACP](docs/process/ACP.md) for the Zed custom-agent snippet, client setup, supported methods,
+and the exact mapping from ACP permission requests to `default` / `accept-edits` / `plan` / `auto`.
+
 Browser control and meeting capture are optional and progressively disclosed. The first Neko session mentions browser control, and a natural
 request such as "browse Facebook in Chrome" opens a setup choice while keeping the request intact; `/browser`
 opens the same flow directly. Use it only when you want Neko to control one visible, already signed-in Chrome
@@ -418,7 +431,7 @@ export function createAgent(provider: Provider, root: string, approve: ApprovalG
 
 ### Commands
 
-`neko` (session, default) · `run <task>` · `config` · `doctor` · `profiles` · `init[-user]` · `tools` ·
+`neko` (session, default) · `run <task>` · `acp` · `config` · `doctor` · `profiles` · `init[-user]` · `tools` ·
 `agents` · `commands` · `capabilities` · `policy` · `context` · `sessions` · `procurement` · `mcp` · `login` · `logout` · `update`.
 
 Bare `neko` (or `neko core`; legacy `neko code`) starts the interactive session.

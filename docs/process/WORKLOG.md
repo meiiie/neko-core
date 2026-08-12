@@ -3,6 +3,26 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-12 - v0.24.0 stable ACP v1 agent host
+
+Added `neko acp`, a stable ACP v1 server over NDJSON stdio using the official pinned TypeScript SDK.
+The adapter supports session creation/prompt/cancel/close, the four Neko permission modes, streamed
+message/thought chunks, structured tool lifecycle updates, and embedded-text prompts. Client-supplied MCP
+is rejected before runtime composition so `session/new` cannot launch an untrusted command or connection.
+The handshake advertises Registry-compatible Terminal Auth through the existing browser-based ChatGPT
+login command; credentials never cross ACP JSON-RPC or its stdout protocol stream.
+ACP permission requests implement the existing ApprovalGate;
+they never replace ToolRegistry decisions, the OS sandbox, path checks, or destructive-command seatbelt.
+Session-level allow/reject choices are ephemeral and fail closed on disconnect/cancel.
+
+Extracted the non-TUI production Agent composition into `adapters/agent-runtime.ts`, used by both
+`neko run` and ACP, preventing provider/tool/context/skill policy drift. SDK-to-SDK tests cover
+initialization, modes, streaming, edit permission, session-scoped allow-always, plan hard denial,
+cancellation, cleanup, and tool updates. User setup and the Zed custom-agent configuration are documented
+in `docs/process/ACP.md`, together with a JetBrains configuration that keeps unsupported client MCP
+forwarding off. Native release artifacts must pass an SDK-to-binary ACP handshake before upload; Registry
+publication remains a separate post-release submission.
+
 ## 2026-08-12 - v0.23.2 self-update progress-watchdog hotfix
 
 The first end-to-end dogfood from installed v0.22.5 proved the v0.23.1 dead-lock repair worked: it

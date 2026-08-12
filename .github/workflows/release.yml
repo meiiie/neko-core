@@ -95,6 +95,10 @@ jobs:
         if: ${{ matrix.smoke }}
         shell: bash
         run: bun scripts/input-probe.ts ./${{ matrix.asset }}
+      - name: ACP smoke - the artifact must handshake without a model call
+        if: ${{ matrix.smoke }}
+        shell: bash
+        run: bun scripts/acp-smoke.ts ./${{ matrix.asset }}
       - name: publish SHA-256 beside the binary
         shell: bash
         run: |

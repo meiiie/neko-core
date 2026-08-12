@@ -6,6 +6,25 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-08-12
+
+### Added
+
+- **Neko now runs as a stable ACP v1 agent in Zed, JetBrains IDEs, and other compatible clients.**
+  Start it with `neko acp`; the editor supplies the desktop conversation UI while Neko retains its
+  configured provider, global skills, project instructions, tools, sandbox, and permission modes.
+- **ACP permissions preserve Neko's safety boundary.** `default`, `accept-edits`, `plan`, and `auto` map
+  to the protocol's session modes, while allow/reject decisions remain session-scoped and cannot override
+  plan-mode denial, workspace containment, host-computer consent, or catastrophic-command checks.
+- **ChatGPT Terminal Auth is capability-negotiated.** Supporting clients can launch Neko's existing
+  browser OAuth flow in a separate terminal and reconnect afterward; credentials never cross ACP JSON-RPC.
+
+### Changed
+
+- CLI `run` and ACP now share one production Agent composition, preventing provider, MCP, skill, context,
+  subagent, and sandbox behavior from drifting between terminal and editor hosts.
+- Native release artifacts must complete an SDK-to-binary ACP initialization/auth handshake before upload.
+
 ## [0.23.2] — 2026-08-12
 
 ### Fixed

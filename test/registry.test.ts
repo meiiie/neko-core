@@ -40,7 +40,7 @@ test("policy distinguishes an unavailable sandbox from an unhealthy fail-closed 
 test("command registry covers every canonical public CLI dispatch", () => {
   const names = new Set(listCommands().map((command) => command.name));
   const dispatched = [
-    "chat", "resume", "run", "oracle", "bench",
+    "chat", "resume", "run", "acp", "oracle", "bench",
     "config", "doctor", "profiles", "init-user", "init", "login", "logout", "update",
     "tools", "agents", "commands", "capabilities", "policy", "trust", "handoff", "context",
     "sessions", "skills", "procurement", "recipes", "mcp", "support", "browser", "meeting", "setup",
