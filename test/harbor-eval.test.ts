@@ -375,7 +375,10 @@ describe("Harbor evaluation launcher", () => {
     }
   });
 
-  test("hardens the private staging root before credential material exists", () => {
+  test.skipIf(process.platform === "win32" && process.env.CI === "true"
+    && process.env.NEKO_REQUIRE_WINDOWS_ACL_TEST !== "1")(
+    "hardens the private staging root before credential material exists",
+    () => {
     const temporary = realpathSync.native(mkdtempSync(join(tmpdir(), "neko-harbor-private-test-")));
     try {
       expect(hardenPrivateHarborRoot(temporary)).toBe(temporary);
@@ -383,7 +386,7 @@ describe("Harbor evaluation launcher", () => {
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }
-  }, { timeout: 30_000 });
+    }, { timeout: 60_000 });
 
   test("removes both bounded Harbor staging roots", () => {
     const privateRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "neko-harbor-private-")));

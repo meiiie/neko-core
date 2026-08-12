@@ -542,10 +542,11 @@ export function buildSandbox(
     return {
       file: primitiveExe ?? "bwrap",
       args: [
-        // A timed-out validator must not leave detached descendants. PID namespaces make the
-        // sandboxed command PID 1, so killing the launch tears down the entire namespace; the
+        // A timed-out validator must not leave detached descendants. Run the command itself as
+        // PID 1: when it exits, Linux tears down every process left in that PID namespace. The
         // parent-death contract also closes abrupt harness exits.
         "--unshare-pid",
+        "--as-pid-1",
         "--die-with-parent",
         "--ro-bind", "/", "/", // whole fs read-only...
         "--tmpfs", "/run", // hide Docker/Podman/rootless daemon sockets from the sandbox

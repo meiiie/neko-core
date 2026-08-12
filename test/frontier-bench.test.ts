@@ -13,7 +13,9 @@ function requiredFrontierSandboxAvailable(
   if (!live && required) {
     throw new Error("NEKO_REQUIRE_SANDBOX_TESTS=1 but no live OS sandbox is available for frontier oracles");
   }
-  return live;
+  // Ordinary local/full-suite runs remain deterministic. The dedicated CI security lane sets
+  // NEKO_REQUIRE_SANDBOX_TESTS=1 and therefore exercises every live frontier oracle fail-closed.
+  return required && live;
 }
 
 const frontierSandboxAvailable = requiredFrontierSandboxAvailable();

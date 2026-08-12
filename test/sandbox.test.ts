@@ -32,6 +32,7 @@ test("bwrap confines fs to the workspace + blocks network by default", () => {
   expect(t.args.join(" ")).toContain("--tmpfs /run"); // host daemon sockets are hidden
   expect(t.args).toContain("--unshare-net"); // no network
   expect(t.args).toContain("--unshare-pid"); // descendants die with the PID namespace
+  expect(t.args).toContain("--as-pid-1");
   expect(t.args).toContain("--die-with-parent");
   expect(t.treeContainedOnClose).toBe(true);
   expect(t.args.slice(-3)).toEqual(["bash", "-c", "echo hi"]);

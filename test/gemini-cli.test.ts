@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -206,7 +206,9 @@ test("Gemini discovery prefers the Neko-managed bundle and private runtime", () 
     const status = discoverGeminiCli({ home, env: { PATH: "" }, platform: process.platform, runVersion: (executable) => executable.version ?? null });
     expect(status.state).toBe("ready");
     expect(status.executable?.source).toBe("managed");
-    expect(status.executable?.runtime).toBe(realpathSync(join(root, "node", runtimeName)));
+    const discovered = statSync(status.executable!.runtime!);
+    const expectedRuntime = statSync(join(root, "node", runtimeName));
+    expect([discovered.dev, discovered.ino]).toEqual([expectedRuntime.dev, expectedRuntime.ino]);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

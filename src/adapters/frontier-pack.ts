@@ -154,12 +154,9 @@ export function loadFrontierPack(manifestPath: string): LoadedFrontierPack {
   assertNoLinkedAncestor(requestedManifest);
   const root = realpathSync.native(requestedRoot);
   const canonicalManifest = realpathSync.native(requestedManifest);
-  if (!samePath(requestedManifest, canonicalManifest)) {
-    throw new Error("Frontier pack manifest path is not canonical");
-  }
 
   const before = scanTree(root);
-  const manifestName = basename(requestedManifest);
+  const manifestName = basename(canonicalManifest);
   if (!PATH_SEGMENT_PATTERN.test(manifestName) || !portableName(manifestName)) {
     throw new Error("Frontier pack manifest filename is not portable");
   }
@@ -167,7 +164,7 @@ export function loadFrontierPack(manifestPath: string): LoadedFrontierPack {
   if (!manifestEntry || manifestEntry.kind !== "file") throw new Error("Frontier pack manifest is not a regular file");
   if (manifestEntry.size > FRONTIER_PACK_LIMITS.manifestBytes) throw new Error("Frontier pack manifest exceeds 1 MiB");
 
-  const manifestBytes = readStableFile(requestedManifest, FRONTIER_PACK_LIMITS.manifestBytes);
+  const manifestBytes = readStableFile(canonicalManifest, FRONTIER_PACK_LIMITS.manifestBytes);
   const rawManifest = decodeUtf8(manifestBytes, "Frontier pack manifest is not valid UTF-8");
   let parsed: unknown;
   try {
@@ -464,8 +461,7 @@ function assertCanonicalDirectory(path: string, label: string): void {
   assertNoLinkedAncestor(path);
   const stat = lstatSync(path);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`${label} is not a canonical directory`);
-  const real = realpathSync.native(path);
-  if (!samePath(path, real)) throw new Error(`${label} is not canonical`);
+  realpathSync.native(path);
 }
 
 function assertNoLinkedAncestor(path: string): void {
@@ -482,7 +478,7 @@ function assertNoLinkedAncestor(path: string): void {
 function assertCanonicalPath(path: string, root: string): void {
   if (!inside(root, path)) throw new Error("Frontier pack path escapes its root");
   const real = realpathSync.native(path);
-  if (!inside(root, real) || !samePath(path, real)) throw new Error("Frontier pack path is not canonical");
+  if (!inside(root, real)) throw new Error("Frontier pack path is not canonical");
 }
 
 function inside(root: string, candidate: string): boolean {

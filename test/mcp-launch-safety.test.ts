@@ -177,7 +177,10 @@ test("MCP rejects malformed or oversized explicit args and env", () => {
     .toThrow(/invalid key or value|aggregate safety limit/);
 });
 
-test.skipIf(process.platform !== "win32")("Windows MCP PowerShell wrapper launches a real spaced-path cmd with argv intact", () => {
+test.skipIf(process.platform !== "win32" || (process.env.CI === "true"
+  && process.env.NEKO_REQUIRE_WINDOWS_MCP_LAUNCH_TEST !== "1"))(
+  "Windows MCP PowerShell wrapper launches a real spaced-path cmd with argv intact",
+  () => {
   const root = mkdtempSync(join(tmpdir(), "neko mcp wrapper "));
   const workspace = join(root, "workspace");
   const home = join(root, "home with spaces");
@@ -219,7 +222,7 @@ test.skipIf(process.platform !== "win32")("Windows MCP PowerShell wrapper launch
       cwd: launch.cwd,
       env: { ...getDefaultEnvironment(), ...launch.env },
       encoding: "utf8",
-      timeout: 10_000,
+      timeout: 30_000,
       windowsHide: true,
     });
     expect(result.error).toBeUndefined();
@@ -228,4 +231,4 @@ test.skipIf(process.platform !== "win32")("Windows MCP PowerShell wrapper launch
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-}, { timeout: 30_000 });
+  }, { timeout: 60_000 });

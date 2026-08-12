@@ -42,7 +42,14 @@ jobs:
         shell: bash
         env:
           NEKO_REQUIRE_SANDBOX_TESTS: "1"
-        run: bun test test/bench-eval-e2e.test.ts
+        run: bun test test/bench-eval-e2e.test.ts test/frontier-bench.test.ts
+      - name: require live Windows ACL and MCP launcher boundaries
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          NEKO_REQUIRE_WINDOWS_ACL_TEST: "1"
+          NEKO_REQUIRE_WINDOWS_MCP_LAUNCH_TEST: "1"
+        run: bun test test/harbor-eval.test.ts test/mcp-launch-safety.test.ts
       - name: restore the Linux sandbox host policy
         if: always() && runner.os == 'Linux'
         shell: bash

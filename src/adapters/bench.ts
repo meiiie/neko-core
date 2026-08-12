@@ -569,7 +569,9 @@ async function runVerifierSource(
         allowNetwork: false,
         allowHostDaemon: false,
         readOnlyWorkspace: true,
-        denyChildProcesses: process.platform === "darwin",
+        // This launch contains only the trusted runtime probe. Bun may need normal process
+        // facilities during startup on macOS; candidate code is confined by the target launch.
+        denyChildProcesses: false,
         denyReadFiles: benchmarkHostCodeFiles(root),
       });
       const checked = await runBoundedSandboxTarget(
