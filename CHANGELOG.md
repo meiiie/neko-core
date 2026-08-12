@@ -6,7 +6,7 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.24.0] — 2026-08-12
+## [0.24.0] — 2026-08-13
 
 ### Added
 

@@ -28,8 +28,26 @@ function cleanEnv(home: string): Record<string, string> {
   return { ...env, HOME: home, USERPROFILE: home, NEKO_AUTO_UPDATE: "0" };
 }
 
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+async function removeFixture(dir: string): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt === 7) throw error;
+      // A just-exited Windows executable can retain a short-lived loader/AV handle. Retry only the exact
+      // mkdtemp fixture; never weaken the test or leave its compiled probe behind.
+      await Bun.sleep(Math.min(500, 50 * (2 ** attempt)));
+    }
+  }
+}
+
+afterEach(async () => {
+  let firstError: unknown;
+  for (const dir of tempDirs.splice(0)) {
+    try { await removeFixture(dir); } catch (error) { firstError ??= error; }
+  }
+  if (firstError) throw firstError;
 });
 
 const nodeExecutable = Bun.which("node");

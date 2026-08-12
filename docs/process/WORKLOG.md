@@ -3,7 +3,7 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
-## 2026-08-12 - v0.24.0 stable ACP v1 agent host
+## 2026-08-13 - v0.24.0 stable ACP v1 agent host
 
 Added `neko acp`, a stable ACP v1 server over NDJSON stdio using the official pinned TypeScript SDK.
 The adapter supports session creation/prompt/cancel/close, the four Neko permission modes, streamed

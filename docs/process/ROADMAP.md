@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-12) — v0.24.0 release
+## Current status (2026-08-13) — v0.24.0 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,7 +38,7 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.0 (2026-08-12)** - `neko acp` exposes the same governed
+- **Branch:** `main`. **Current release: v0.24.0 (2026-08-13)** - `neko acp` exposes the same governed
   production Agent runtime to Zed, JetBrains, and other stable ACP v1 clients, including streamed tool
   lifecycle updates, cancellation, session modes, and capability-negotiated Terminal Auth. The editor
   supplies the desktop UI while Neko retains its provider, global skills, context, MCP configuration,
