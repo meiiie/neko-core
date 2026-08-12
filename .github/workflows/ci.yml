@@ -36,7 +36,23 @@ jobs:
       - run: bun run typecheck
       - name: cross-check with stable 5.9 (typecheck runs 7.0-rc; drop this step at 7.0 GA)
         run: bun run typecheck:stable
-      - run: bun test
+      - name: full test suite
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -eq 'Windows') {
+            # A single 1,350-test Bun process accumulates SRT/UIA/subprocess state on hosted Windows:
+            # consecutive clean-main runs failed in unrelated 5s/15s fixtures while PR/local shards
+            # passed. Fresh processes keep the SAME 125-file suite and assertions without cross-file
+            # process pressure; keep this sequential so the live sandbox primitives do not contend.
+            1..4 | ForEach-Object {
+              Write-Host "=== Windows shard $_/4 ==="
+              bun test --shard="$_/4"
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          } else {
+            bun test
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: require a live benchmark-oracle sandbox
         if: runner.os != 'Windows'
         shell: bash

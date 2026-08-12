@@ -16,6 +16,12 @@ stream, and an oversized response.
 Focused update coverage passed 13/13; both TypeScript compilers and the production UI/input artifact
 probes passed. The full Windows suite passed in four fresh-process shards with **1,353 passed, 12
 intentional skips, 0 failed and 7,601 assertions across 125 files** before public CI.
+PR CI passed all three platforms. On the identical merge bytes, two hosted-Windows monolithic reruns
+then failed in disjoint infrastructure-sensitive tests: first WPF lost its desktop target while PDF
+extraction reached 5 seconds; next an MCP child startup reached 15 seconds. Ubuntu/macOS stayed green,
+and both local four-shard runs were green. CI now runs the complete Windows suite as four sequential
+fresh Bun processes, preserving all 125 files/assertions while avoiding accumulated SRT/UIA/subprocess
+pressure; Linux and macOS remain one process.
 
 ## 2026-08-12 - v0.23.1 self-update lock hotfix
 
