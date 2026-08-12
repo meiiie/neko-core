@@ -287,8 +287,8 @@ export function hardenPrivateHarborRoot(root: string): string {
   }
   const aclScript = [
     "$ErrorActionPreference='Stop'",
-    "$acl=Get-Acl -LiteralPath $env:NEKO_ACL_TARGET",
     "$section=[System.Security.AccessControl.AccessControlSections]::Access",
+    "$acl=[System.Security.AccessControl.DirectorySecurity]::new($env:NEKO_ACL_TARGET,$section)",
     "[pscustomobject]@{ protected=$acl.AreAccessRulesProtected; sddl=$acl.GetSecurityDescriptorSddlForm($section) } | ConvertTo-Json -Compress",
   ].join("\n");
   const inspected = runAclTool(
@@ -308,7 +308,10 @@ export function hardenPrivateHarborRoot(root: string): string {
       || !["FA", "0X1F01FF"].includes(rule[2].toUpperCase())
       || !expectedSids.delete((rule[5].toUpperCase() === "SY" ? "S-1-5-18" : rule[5].toUpperCase())))
     || expectedSids.size !== 0) {
-    throw new Error("Could not verify Harbor private staging ACL.");
+    const shapes = rules.map((rule: string[]) => `${rule[0] ?? "?"}/${rule[1] ?? "?"}/${rule[2] ?? "?"}`).join(",");
+    throw new Error(
+      `Could not verify Harbor private staging ACL (inspect=${inspected.exitCode}, parsed=${Boolean(acl)}, protected=${String(acl?.protected)}, rules=${rules.length}, shapes=${shapes || "none"}).`,
+    );
   }
   return canonical;
 }
