@@ -808,7 +808,7 @@ test("read_file: a PDF is routed to text extraction and degrades gracefully", as
   const out = await reg.execute("read_file", { path: "doc.pdf" });
   expect(typeof out).toBe("string");
   expect(out as string).toMatch(/PDF|extract|text/i); // never a thrown crash
-});
+}, { timeout: 35_000 }); // production intentionally gives the external extractor up to 30s
 
 test("safe PDF reads never execute a workspace-local pdftotext", async () => {
   const { root, reg } = makeReg();
