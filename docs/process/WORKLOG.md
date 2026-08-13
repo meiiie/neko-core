@@ -3,6 +3,13 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-13 - v0.24.1 idempotent update exit status
+
+The installed v0.24.0 one-line release canary exposed that plain `neko update` printed both
+`Already up to date` and `Auto-updates resumed` but exited 1. Replaced the updater's ambiguous boolean
+with explicit `updated`, `up-to-date`, and `failed` results. CLI automation now receives exit 0 for both
+successful update states; background auto-update still distinguishes a real replacement from a no-op.
+
 ## 2026-08-13 - v0.24.0 stable ACP v1 agent host
 
 Added `neko acp`, a stable ACP v1 server over NDJSON stdio using the official pinned TypeScript SDK.

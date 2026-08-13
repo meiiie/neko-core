@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { activateStagedBinary, assetName, cleanupStaleUpdate, isNewer, latestVersion, parseSha256Sidecar } from "../src/adapters/update.ts";
+import { activateStagedBinary, assetName, cleanupStaleUpdate, isNewer, latestVersion, parseSha256Sidecar, selfUpdateSucceeded } from "../src/adapters/update.ts";
 
 test("cleanupStaleUpdate removes the leftover <exe>.old; no-op when absent", () => {
   const dir = mkdtempSync(join(tmpdir(), "neko-upd-"));
@@ -39,6 +39,12 @@ test("isNewer compares versions numerically, ignoring a leading v", () => {
   expect(isNewer("0.2.0", "0.2.0")).toBe(false);
   expect(isNewer("0.1.9", "0.2.0")).toBe(false);
   expect(isNewer("v0.2.0", "v0.2.0")).toBe(false);
+});
+
+test("an idempotent update is command success, while a real failure is not", () => {
+  expect(selfUpdateSucceeded("updated")).toBe(true);
+  expect(selfUpdateSucceeded("up-to-date")).toBe(true);
+  expect(selfUpdateSucceeded("failed")).toBe(false);
 });
 
 test("assetName picks the right release asset per platform/arch (matches release.yml)", () => {

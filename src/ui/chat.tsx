@@ -1031,8 +1031,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     void checkForUpdate().then(async (v) => {
       if (!v) return;
       if (cfg.autoUpdate) {
-        const ok = await selfUpdate(() => {}).catch(() => false);
-        if (ok) return addLine("info", `auto-updated to ${v} - takes effect the next time neko starts ("auto_update": false to disable)`);
+        const result = await selfUpdate(() => {}).catch(() => "failed" as const);
+        if (result === "updated") return addLine("info", `auto-updated to ${v} - takes effect the next time neko starts ("auto_update": false to disable)`);
+        if (result === "up-to-date") return;
       }
       addLine("info", `a newer Neko (${v}) is available - run \`neko update\``);
     }).catch(() => {});

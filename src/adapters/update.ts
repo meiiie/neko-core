@@ -274,7 +274,8 @@ export function normalizeTag(v: string): string | null {
 }
 
 /**
- * Download a release binary and replace the running executable. Returns true on success.
+ * Download a release binary and replace the running executable. `up-to-date` is a successful,
+ * idempotent outcome; callers must not collapse it into the same state as a transport/install failure.
  *   selfUpdate(log)            -> latest (refuses if already current)
  *   selfUpdate(log, "v0.7.7")  -> that EXACT version, UP or DOWN (a rollback). Downgrades are allowed:
  *                                 the caller pins `auto_update: false` so the daily updater can't undo it.
@@ -283,28 +284,34 @@ export function normalizeTag(v: string): string | null {
  * `\r` line would corrupt the frame. (An 88 MB download with no output at all is the other failure
  * mode: it reads as a hang, and the user kills it mid-swap.)
  */
-export async function selfUpdate(log: (s: string) => void, target?: string, opts: { progressTty?: boolean } = {}): Promise<boolean> {
+export type SelfUpdateResult = "updated" | "up-to-date" | "failed";
+
+export function selfUpdateSucceeded(result: SelfUpdateResult): boolean {
+  return result !== "failed";
+}
+
+export async function selfUpdate(log: (s: string) => void, target?: string, opts: { progressTty?: boolean } = {}): Promise<SelfUpdateResult> {
   const exe = process.execPath;
   if (basename(exe).replace(/\.exe$/i, "").toLowerCase() === "bun") {
     log("Running from source (bun). Update with:  git pull && bun run build");
-    return false;
+    return "failed";
   }
   let tag: string;
   if (target) {
     const t = normalizeTag(target);
-    if (!t) { log(`Not a version: "${target}" (use e.g. 0.7.7).`); return false; }
+    if (!t) { log(`Not a version: "${target}" (use e.g. 0.7.7).`); return "failed"; }
     tag = t;
-    if (t.replace(/^v/, "") === VERSION) { log(`Already on ${t}.`); return false; }
+    if (t.replace(/^v/, "") === VERSION) { log(`Already on ${t}.`); return "up-to-date"; }
     log(isNewer(t, VERSION) ? `Switching v${VERSION} -> ${t} ...` : `Rolling back v${VERSION} -> ${t} ...`);
   } else {
     const latest = await latestVersion();
     if (!latest) {
       log("Could not reach the release server (check your connection).");
-      return false;
+      return "failed";
     }
     if (!isNewer(latest, VERSION)) {
       log(`Already up to date (v${VERSION}).`);
-      return false;
+      return "up-to-date";
     }
     tag = latest;
     log(`Updating v${VERSION} -> ${tag} ...`);
@@ -313,7 +320,7 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
   // leaves, instead of silently double-downloading and racing the swap.
   if (!acquireUpdateLock()) {
     log("Another neko is already installing an update. Let it finish, then check with `neko --version`.");
-    return false;
+    return "failed";
   }
   try {
     const url = `https://github.com/${REPO}/releases/download/${tag}/${assetName()}`;
@@ -326,7 +333,7 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
     }
     if (!expectedSha && requiresChecksum(tag)) {
       log(`Release ${tag} is missing its required SHA-256 sidecar.`);
-      return false;
+      return "failed";
     }
     const showProgress = Boolean(opts.progressTty) && Boolean((process.stdout as any).isTTY);
     let bytes: Buffer;
@@ -347,13 +354,13 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
     } catch (e) {
       if (showProgress) process.stdout.write("\n");
       log(`Download failed: ${(e as Error).message}`);
-      return false;
+      return "failed";
     }
     if (expectedSha) {
       const actualSha = createHash("sha256").update(bytes).digest("hex");
       if (actualSha !== expectedSha) {
         log(`Downloaded SHA-256 does not match the official ${tag} release.`);
-        return false;
+        return "failed";
       }
     }
     // Replace the running binary. Windows can't OVERWRITE a running exe, but it CAN rename it out of
@@ -368,15 +375,15 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
       if (probe.status !== 0 || !probed || `v${probed}` !== tag) {
         rmSync(tmp, { force: true });
         log(`Downloaded binary failed its version probe (expected ${tag}).`);
-        return false;
+        return "failed";
       }
       activateStagedBinary(exe, tmp);
       log(`Installed ${tag}. Restart neko to use it.`);
-      return true;
+      return "updated";
     } catch (e) {
       log(`Install failed: ${(e as Error).message}`);
       try { if (existsSync(tmp)) rmSync(tmp); } catch { /* */ }
-      return false;
+      return "failed";
     }
   } finally {
     releaseUpdateLock();

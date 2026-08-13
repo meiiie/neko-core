@@ -1401,14 +1401,14 @@ async function main(): Promise<number> {
       case "meeting": return await cmdMeeting(args);
       case "oracle": return await cmdOracle(args);
       case "update": {
-        const { selfUpdate } = await import("../src/adapters/update.ts");
+        const { selfUpdate, selfUpdateSucceeded } = await import("../src/adapters/update.ts");
         const { setAutoUpdate } = await import("../src/adapters/project.ts");
         const target = args.positionals[0]; // `neko update 0.7.7` rolls back (or forward) to an exact version
         // Plain `neko update` means "follow latest" even when no download is needed (or possible while
         // running from source). Resume before the updater's early returns so an existing pin cannot stick.
         if (!target) setAutoUpdate(true);
-        const ok = await selfUpdate(console.log, target, { progressTty: true });
-        if (ok) {
+        const result = await selfUpdate(console.log, target, { progressTty: true });
+        if (selfUpdateSucceeded(result)) {
           // A pinned version HOLDS: auto_update off so the daily updater can't drag it forward again
           // (that flag is honored by the version being installed, so the pin sticks). Plain `neko update`
           // (to latest) RESUMES auto-updates - "get me current and keep me current".
@@ -1419,7 +1419,7 @@ async function main(): Promise<number> {
         } else if (!target) {
           console.log("Auto-updates resumed.");
         }
-        return ok ? 0 : 1;
+        return selfUpdateSucceeded(result) ? 0 : 1;
       }
       // Hidden build-time smoke probe: render a real Ink/JSX tree headlessly. The test suite runs from
       // SOURCE, so a transform/runtime mismatch baked into the COMPILED binary (e.g. dev-jsx callsites

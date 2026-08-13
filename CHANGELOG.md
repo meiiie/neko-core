@@ -6,6 +6,14 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.1] — 2026-08-13
+
+### Fixed
+
+- `neko update` now exits successfully when the installed binary is already the latest release. The
+  idempotent `up-to-date` result remains distinct from network, lock, checksum, and install failures, while
+  a plain update still resumes automatic updates after a pinned install.
+
 ## [0.24.0] — 2026-08-13
 
 ### Added
