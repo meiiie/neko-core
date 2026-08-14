@@ -192,7 +192,7 @@ test("plain update resumes auto-updates even when no binary replacement can run"
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
-});
+}, 15_000); // A cold Bun CLI process can cross the 5s default on hosted Windows under shard load.
 
 test("the machine-wide update lock reclaims dead owners without deleting successor locks", () => {
   // The field failure: two `neko --yolo` startups (background auto-update) plus a manual `neko update`
