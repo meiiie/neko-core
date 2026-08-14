@@ -83,6 +83,13 @@ export const TOOL_SPECS: ToolSpec[] = [
     required: [],
   },
   {
+    name: "disk_cleanup_scan",
+    permission: SAFE,
+    summary: "Scan allowlisted Windows cleanup/cache locations and report bounded aggregate sizes. Read-only: does not open file contents, follow links, or delete anything; reports partial lower bounds when access/time/entry limits intervene. Use this instead of writing a PowerShell script when the user asks what can be cleaned from the system drive.",
+    parameters: {},
+    required: [],
+  },
+  {
     name: "write_file",
     permission: GATED,
     summary: "Create or overwrite a file (approval-gated). For a LARGE file, write a skeleton first, then extend it with `edit` — one very large write can be truncated or stall the model stream on some providers.",
@@ -274,10 +281,9 @@ export const TOOL_SPECS: ToolSpec[] = [
 ];
 
 export function listTools(platform: NodeJS.Platform = process.platform): ToolSpec[] {
-  // The computer tool drives Windows UI Automation (PowerShell scripts) - on other platforms the model
-  // should never even SEE it in the schema, rather than call it and get a refusal. (tool-runtime keeps
-  // a runtime guard as the backstop for anything that slips through, e.g. a resumed session replaying.)
-  if (platform !== "win32") return TOOL_SPECS.filter((t) => t.name !== "computer");
+  // Host Windows capabilities should never appear on other platforms. Runtime guards remain the
+  // backstop for resumed sessions replaying an older tool call.
+  if (platform !== "win32") return TOOL_SPECS.filter((t) => t.name !== "computer" && t.name !== "disk_cleanup_scan");
   return TOOL_SPECS;
 }
 
@@ -297,6 +303,7 @@ const TOOL_LABELS: Record<string, string> = {
   search: "Search",
   glob: "Glob",
   ls: "List",
+  disk_cleanup_scan: "DiskScan",
   bash: "Bash",
   computer: "Computer",
   todo_write: "Update Todos",

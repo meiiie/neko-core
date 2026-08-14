@@ -25,8 +25,8 @@ export const AGENTS: AgentSpec[] = [
     name: "coder",
     access: READ_WRITE,
     summary: "Drives the agent loop: reads, searches, edits, and runs to complete a task.",
-    tools: ["read_file", "search", "glob", "ls", "write_file", "edit", "bash"],
-    reads: ["project files"],
+    tools: ["read_file", "search", "glob", "ls", ...(process.platform === "win32" ? ["disk_cleanup_scan"] : []), "write_file", "edit", "bash"],
+    reads: ["project files", ...(process.platform === "win32" ? ["bounded host storage metadata"] : [])],
     writes: ["project files", "shell side effects"],
     handoff: "Applies changes behind the approval gate; reports what it changed.",
   },
@@ -149,6 +149,7 @@ export function collectCapabilities(config: NekoConfig): Capability[] {
     { name: "agent_loop", klass: "agent", status: "enabled", detail: `complete -> tool-calls -> observe, capped at max_steps=${config.maxSteps}` },
     { name: "model_completion", klass: "agent", status: "enabled", detail: `${config.provider}: ${config.model || "(model unset)"}` },
     { name: "file_read", klass: "tool", status: "enabled", detail: "read_file + search + glob + ls (safe, no approval)" },
+    { name: "disk_cleanup_scan", klass: "tool", status: process.platform === "win32" ? "enabled" : "unavailable", detail: "bounded Windows cleanup/cache metadata only; no file contents or deletion; independent of bash" },
     { name: "file_write", klass: "tool", status: "enabled", detail: "write_file + edit (gated: needs approval)" },
     {
       name: "shell",
@@ -194,7 +195,7 @@ export interface SandboxRuntimeStatus {
 }
 
 const MUST_BE_GATED = new Set(["write_file", "edit", "multi_edit", "bash", "computer", "task"]);
-const MUST_BE_SAFE = new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "skill"]);
+const MUST_BE_SAFE = new Set(["read_file", "search", "glob", "ls", "disk_cleanup_scan", "web_search", "web_fetch", "skill"]);
 const MUST_GATE_ACTIONS: Record<string, string[]> = {
   memory: ["write", "append", "delete"],
   workflow: ["write", "delete"],

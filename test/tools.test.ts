@@ -135,16 +135,21 @@ test("schema shape", () => {
 
 test("tool order", () => {
   const expected = [
-    "read_file", "search", "glob", "ls", "write_file", "edit", "multi_edit", "bash", "computer", "todo_write",
+    "read_file", "search", "glob", "ls", "disk_cleanup_scan", "write_file", "edit", "multi_edit", "bash", "computer", "todo_write",
     "web_search", "web_fetch", "exit_plan_mode", "task", "memory", "skill", "workflow", "playbook",
   ];
-  if (process.platform !== "win32") expected.splice(expected.indexOf("computer"), 1);
+  if (process.platform !== "win32") {
+    expected.splice(expected.indexOf("disk_cleanup_scan"), 1);
+    expected.splice(expected.indexOf("computer"), 1);
+  }
   expect(toolSchemas().map((t: any) => t.function.name)).toEqual(expected);
 });
 
 test("tool schemas hide Windows-only computer control on other platforms", () => {
   expect(toolSchemas("linux").map((t: any) => t.function.name)).not.toContain("computer");
+  expect(toolSchemas("linux").map((t: any) => t.function.name)).not.toContain("disk_cleanup_scan");
   expect(toolSchemas("win32").map((t: any) => t.function.name)).toContain("computer");
+  expect(toolSchemas("win32").map((t: any) => t.function.name)).toContain("disk_cleanup_scan");
 });
 
 test("resolve unknown throws", () => {
@@ -154,6 +159,7 @@ test("resolve unknown throws", () => {
 test("permission classes", () => {
   expect(resolveTool("read_file").permission).toBe(SAFE);
   expect(resolveTool("glob").permission).toBe(SAFE);
+  expect(resolveTool("disk_cleanup_scan").permission).toBe(SAFE);
   expect(resolveTool("write_file").permission).toBe(GATED);
   expect(resolveTool("edit").permission).toBe(GATED);
   expect(resolveTool("computer").permission).toBe(GATED);

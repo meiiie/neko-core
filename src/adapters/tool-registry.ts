@@ -77,7 +77,7 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
       ? `${detected} live (writes confined to workspace/temp; host reads remain available; network ${network})`
       : detected === "none"
         ? "requested but unavailable (host/unconfined)"
-        : `${detected} present but unhealthy (bash FAILS CLOSED; no host fallback)`;
+      : `${detected} present but unhealthy in the latest snapshot (bash FAILS CLOSED; no host fallback; a later bash call re-checks SRT health after the bounded failure cache expires)`;
 
   return [
     "# NEKO DYNAMIC-TOOL RUNTIME",
@@ -93,6 +93,9 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     bashCallable
       ? `Neko bash dynamic tool: callable; shell=${shell}; sandbox=${sandbox}. Docker/podman host-daemon access is refused or contained unless allow_dangerous_bash explicitly grants that capability.`
       : "Neko bash dynamic tool: unavailable in this request.",
+    failClosedBash
+      ? "Do not create a shell script whose only purpose is to wait for unavailable bash. Prefer an independent safe native tool that directly covers the task; otherwise state the boundary or request explicit computer consent before changing files."
+      : "",
     skillCallable
       ? "Neko skill dynamic tool: callable. Only exact names under NEKO SKILL CATALOG are accepted; provider-native skill names are not Neko skills."
       : "Neko skill dynamic tool: unavailable in this request; no Neko skill catalog is callable.",

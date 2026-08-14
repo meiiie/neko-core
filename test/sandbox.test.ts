@@ -5,7 +5,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
-import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, isDockerCommand, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtLaunchRefusal, srtScript, srtSettings, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
+import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
 
 test("security executables are resolved from PATH without trusting the workspace", () => {
   const root = mkdtempSync(join(tmpdir(), "neko-path-primitive-"));
@@ -220,6 +220,23 @@ test("an enabled but unhealthy SRT is refused before launch, while other posture
   expect(srtLaunchRefusal(true, "srt", { ok: true, detail: "healthy" })).toBeNull();
   expect(srtLaunchRefusal(false, "srt", { ok: false, detail: "down" })).toBeNull();
   expect(srtLaunchRefusal(true, "none", { ok: false, detail: "absent" })).toBeNull();
+});
+
+test("SRT health failures expose timeout and signal details instead of exit question-mark", () => {
+  const error = Object.assign(new Error("spawnSync ETIMEDOUT"), { code: "ETIMEDOUT" });
+  expect(formatSrtProbeFailure({ status: null, signal: "SIGTERM", error, stdout: "", stderr: "" }, 20_017))
+    .toBe("status=null signal=SIGTERM code=ETIMEDOUT timeout=true elapsed_ms=20017");
+  expect(formatSrtProbeFailure({ status: null, signal: "SIGTERM", error, stdout: "starting", stderr: "" }, 20_017))
+    .toBe("starting; status=null signal=SIGTERM code=ETIMEDOUT timeout=true elapsed_ms=20017");
+  expect(formatSrtProbeFailure({ status: 1, signal: null, stdout: "", stderr: "account unavailable\n" }, 83))
+    .toBe("account unavailable");
+});
+
+test("a failed SRT health result expires while a healthy result stays reusable", () => {
+  const failed = { result: { ok: false, detail: "timeout" }, checkedAt: 1_000 };
+  expect(srtHealthCacheReusable(failed, 30_999)).toBe(true);
+  expect(srtHealthCacheReusable(failed, 31_000)).toBe(false);
+  expect(srtHealthCacheReusable({ result: { ok: true, detail: "healthy" }, checkedAt: 1_000 }, 9_999_999)).toBe(true);
 });
 
 test("an SRT SQLite shared-memory failure gives safe disk-space recovery guidance", () => {

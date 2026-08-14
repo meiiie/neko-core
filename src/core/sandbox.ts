@@ -127,8 +127,9 @@ let srtCached: string | null | undefined;
  * .cmd shims route argv through cmd.exe, whose quoting a hostile command string can escape --
  * defeating the very sandbox being launched. `bun add -g @anthropic-ai/sandbox-runtime`
  * installs the .exe shim. null if none. */
-export function findSrt(): string | null {
-  if (srtCached !== undefined) return srtCached;
+export function findSrt(refresh = false): string | null {
+  if (!refresh && srtCached !== undefined) return srtCached;
+  if (refresh) srtCached = undefined;
   // Bun's global bin directory is not automatically added to PATH on every Windows installation.
   // It is still a stable user-owned install root, unlike cwd/the checked-out repository.
   const installRoots = [
@@ -141,7 +142,10 @@ export function findSrt(): string | null {
 }
 
 let srtProvisionedCached: boolean | undefined;
-let srtHealthCached: { ok: boolean; detail: string } | undefined;
+export interface SrtHealthResult { ok: boolean; detail: string }
+export interface SrtHealthCacheEntry { result: SrtHealthResult; checkedAt: number }
+let srtHealthCached: SrtHealthCacheEntry | undefined;
+const SRT_UNHEALTHY_CACHE_MS = 30_000;
 const WINDOWS_NET = process.platform === "win32" ? resolveWindowsSystemExecutable("net.exe") : null;
 const WINDOWS_ICACLS = process.platform === "win32" ? resolveWindowsSystemExecutable("icacls.exe") : null;
 
@@ -188,10 +192,10 @@ export function resolveSrtBunBridge(
 }
 
 /** Whether the one-time `srt windows-install` provisioning (the srt-sandbox account) has run.
- * Without it srt refuses to launch, so bash under sandbox fails closed with srt's own message.
- * Cached per process (an account appearing mid-session is a re-run-doctor event, not a hot path). */
-export function srtProvisioned(): boolean {
-  if (srtProvisionedCached !== undefined) return srtProvisionedCached;
+ * Without it srt refuses to launch, so bash under sandbox fails closed with srt's own message. */
+export function srtProvisioned(refresh = false): boolean {
+  if (!refresh && srtProvisionedCached !== undefined) return srtProvisionedCached;
+  if (refresh) srtProvisionedCached = undefined;
   if (!WINDOWS_NET) return (srtProvisionedCached = false);
   try {
     return (srtProvisionedCached = spawnSync(WINDOWS_NET, ["user", "srt-sandbox"], {
@@ -205,28 +209,62 @@ export function srtProvisioned(): boolean {
   }
 }
 
+/** Healthy launches remain stable for the process. Failures are only a short snapshot: SRT startup,
+ * Secondary Logon and its state DB can recover while a long-lived Neko session stays open. */
+export function srtHealthCacheReusable(entry: SrtHealthCacheEntry, now = Date.now()): boolean {
+  return entry.result.ok || now - entry.checkedAt < SRT_UNHEALTHY_CACHE_MS;
+}
+
+type SrtProbeFailure = {
+  status: number | null;
+  signal?: NodeJS.Signals | string | null;
+  error?: unknown;
+  stdout?: unknown;
+  stderr?: unknown;
+};
+
+/** Preserve the host-owned launch diagnostics that `status ?? "?"` used to erase. */
+export function formatSrtProbeFailure(probe: SrtProbeFailure, elapsedMs: number): string {
+  const output = String(probe.stderr || probe.stdout || "").replace(/\s+/g, " ").trim().slice(0, 300);
+  const error = probe.error as NodeJS.ErrnoException | undefined;
+  const code = String(error?.code || "none").replace(/\s+/g, " ").slice(0, 80);
+  const timedOut = code.toUpperCase() === "ETIMEDOUT";
+  const base = `status=${probe.status ?? "null"} signal=${probe.signal ?? "none"} code=${code} timeout=${timedOut} elapsed_ms=${Math.max(0, Math.round(elapsedMs))}`;
+  // Ordinary non-zero exits usually carry the most useful SRT-owned explanation. A launch
+  // timeout/error may still leave partial output, so retain both that text and the host metadata.
+  if (output && probe.status !== null && !probe.signal && !error) return output;
+  if (output) return `${output}; ${base}`;
+  if (!error || error.code) return base;
+  return `${base} error=${String(error.message || error).replace(/\s+/g, " ").trim().slice(0, 160)}`;
+}
+
 /** Behavioral Windows health check. Account existence alone is insufficient: package ACL drift,
  * WFP setup, Secondary Logon, or the credential store can still make every sandbox launch fail. */
-export function srtHealth(): { ok: boolean; detail: string } {
-  if (srtHealthCached) return srtHealthCached;
-  const exe = findSrt();
-  if (!exe) return (srtHealthCached = { ok: false, detail: "srt.exe not found" });
-  if (!srtProvisioned()) return (srtHealthCached = { ok: false, detail: "sandbox account is not provisioned" });
+export function srtHealth(): SrtHealthResult {
+  if (srtHealthCached && srtHealthCacheReusable(srtHealthCached)) return srtHealthCached.result;
+  const refreshDependencies = Boolean(srtHealthCached);
+  const remember = (result: SrtHealthResult): SrtHealthResult => {
+    srtHealthCached = { result, checkedAt: Date.now() };
+    return result;
+  };
+  const exe = findSrt(refreshDependencies);
+  if (!exe) return remember({ ok: false, detail: "srt.exe not found" });
+  if (!srtProvisioned(refreshDependencies)) return remember({ ok: false, detail: "sandbox account is not provisioned" });
   let settings: ReturnType<typeof writeEphemeralSrtSettings> | undefined;
   try {
     settings = writeEphemeralSrtSettings(tmpdir(), process.cwd(), false, []);
+    const startedAt = Date.now();
     const probe = spawnSync(exe, ["--settings", settings.path, "-c", "exit /b 0"], {
       cwd: process.cwd(),
       encoding: "utf-8",
       timeout: 20_000,
       windowsHide: true,
     });
-    if (probe.status === 0) return (srtHealthCached = { ok: true, detail: "behavioral sandbox launch passed (egress policy not probed here)" });
-    const detail = String(probe.stderr || probe.stdout || `exit ${probe.status ?? "?"}`)
-      .replace(/\s+/g, " ").trim().slice(0, 300);
-    return (srtHealthCached = { ok: false, detail: detail || "behavioral probe failed" });
+    if (probe.status === 0) return remember({ ok: true, detail: "behavioral sandbox launch passed (egress policy not probed here)" });
+    return remember({ ok: false, detail: formatSrtProbeFailure(probe, Date.now() - startedAt) });
   } catch (error) {
-    return (srtHealthCached = { ok: false, detail: `behavioral probe failed: ${String(error)}`.slice(0, 300) });
+    const detail = `behavioral probe failed: ${String(error)}`.replace(/\s+/g, " ").trim().slice(0, 300);
+    return remember({ ok: false, detail });
   } finally {
     settings?.cleanup();
   }

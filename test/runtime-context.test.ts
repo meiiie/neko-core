@@ -71,6 +71,8 @@ test("runtime block says unhealthy SRT fails closed without a host fallback", ()
 
   expect(block).toContain("FAILS CLOSED");
   expect(block).toContain("no host fallback");
+  expect(block).toContain("re-checks SRT health");
+  expect(block).toContain("Do not create a shell script");
   expect(block).not.toContain("host/unconfined");
   expect(block).not.toContain("UNCONFINED AUTO");
 });

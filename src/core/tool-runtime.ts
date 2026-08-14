@@ -43,6 +43,7 @@ import { minimalWindowsSystemEnv, resolveWindowsSystemExecutable } from "../shar
 import { MAX_OBS_PAGE_CHARS } from "./agent-constants.ts";
 import { deniedCredentialPath } from "./read-policy.ts";
 import { isForegroundValidatorOnlyCommand } from "./validation-command.ts";
+import { runDiskCleanupScan } from "./disk-cleanup.ts";
 
 export { deniedCredentialPath as deniedOutsideRoot } from "./read-policy.ts";
 
@@ -952,7 +953,10 @@ export class ToolRegistry {
   schemas(): any[] {
     if (this.noTools) return []; // perception mode: a vision-only endpoint 400s if sent any tools
     return [
-      ...toolSchemas().filter((s) => this.isToolAvailable(s.function.name)).map((schema) => this.schemaForTurn(schema)),
+      ...toolSchemas()
+        .filter((s) => !(s.function.name === "disk_cleanup_scan" && !this.readOutsideRoot))
+        .filter((s) => this.isToolAvailable(s.function.name))
+        .map((schema) => this.schemaForTurn(schema)),
       ...(this.mcp?.toolSchemas() ?? []).filter((s) => {
         const name = String(s?.function?.name ?? "");
         return !this.nativeBackendTools.has(name as NativeToolName) && this.isToolAvailable(name);
@@ -1226,6 +1230,9 @@ export class ToolRegistry {
       const out = nativeBackend ? await this.runNativeBackend(nativeBackend, name as NativeToolName, args, signal)
         : name === "bash" ? await this.runBash(args, signal)
         : name === "read_file" ? await this.runReadFile(args)
+        : name === "disk_cleanup_scan" ? (this.readOutsideRoot
+          ? await runDiskCleanupScan(signal)
+          : "Error: disk_cleanup_scan is disabled because read_outside_root=false sets a hard project read wall.")
         : name === "skill" ? this.runSkill(args)
         : name === "computer" ? await this.runComputer(args, signal)
         : await DISPATCH[name](this.root, args, {

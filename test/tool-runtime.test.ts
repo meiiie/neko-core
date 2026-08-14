@@ -128,6 +128,13 @@ test("path escape refused for writes; reads are the host's call", async () => {
   expect(await reg.execute("read_file", { path: "../x" })).toContain("escapes project root");
 });
 
+test("hard project read wall hides and refuses the host disk cleanup scan", async () => {
+  const { reg } = makeReg();
+  reg.readOutsideRoot = false;
+  expect(reg.schemas().map((schema: any) => schema.function.name)).not.toContain("disk_cleanup_scan");
+  expect(await reg.execute("disk_cleanup_scan", {})).toContain("read_outside_root=false");
+});
+
 test("missing required arg", async () => {
   const { reg } = makeReg();
   expect(await reg.execute("read_file", {})).toContain("missing required argument");

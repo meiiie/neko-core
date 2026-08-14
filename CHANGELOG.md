@@ -6,6 +6,25 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.4] — 2026-08-15
+
+### Added
+
+- **Windows cleanup inventory no longer depends on Bash.** Neko can now scan an allowlisted set of
+  system-drive caches using a bounded native read-only tool that opens no file contents, follows no
+  links, and provides no delete action. Results distinguish safe caches, re-downloadable caches,
+  Windows-managed data, manual-review data, and files that must not be deleted; partial scans report
+  access errors and lower bounds instead of pretending to be complete.
+
+### Fixed
+
+- **A temporary SRT failure no longer poisons a long-lived session.** Failed Windows sandbox health
+  snapshots expire after 30 seconds and are rechecked before a later Bash call, while healthy results
+  remain cached. Timeout, signal, error code, and elapsed time replace the former unhelpful `exit ?`.
+- When Bash is unavailable, the runtime now tells the model to use an independent safe native tool or
+  state the boundary instead of creating a script it cannot run. Resident Windows UI automation cleanup
+  can also be awaited, preventing rapid restart/teardown from leaving unsettled process handles.
+
 ## [0.24.3] — 2026-08-14
 
 ### Fixed

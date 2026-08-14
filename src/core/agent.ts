@@ -629,7 +629,7 @@ export class Agent {
     private isMechanicalReadCall(call: { name: string; arguments?: Record<string, any> }): boolean {
       const name = call.name.toLowerCase();
       if (name === "bash") return Agent.isClearlyReadOnlyBash(call.arguments);
-      if (new Set(["read_file", "search", "glob", "ls", "web_search", "web_fetch", "mcp_load"]).has(name)) return true;
+      if (new Set(["read_file", "search", "glob", "ls", "disk_cleanup_scan", "web_search", "web_fetch", "mcp_load"]).has(name)) return true;
       if (name === "computer") {
         return new Set(["list", "read", "get", "display", "watch", "wait", "screenshot"]).has(String(call.arguments?.action ?? "").toLowerCase());
       }

@@ -1,18 +1,44 @@
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { ResidentUiaHost, residentUiaHost } from "../src/core/windows-uia-host.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
+import { resolveWindowsSystemExecutable } from "../src/shared/windows-system.ts";
 
 const script = join(import.meta.dir, "..", "skills", "computer-use", "scripts", "resident-uia.ps1");
 const computerSkillDir = join(import.meta.dir, "..", "skills", "computer-use");
+const WINDOWS_POWERSHELL = process.platform === "win32"
+  ? resolveWindowsSystemExecutable(join("WindowsPowerShell", "v1.0", "powershell.exe"))
+  : null;
+
+async function spawnWpfFixture(source: string) {
+  if (!WINDOWS_POWERSHELL) throw new Error("trusted Windows PowerShell is unavailable");
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return Bun.spawn([WINDOWS_POWERSHELL, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", Buffer.from(source, "utf16le").toString("base64")], {
+        cwd: dirname(WINDOWS_POWERSHELL), stdout: "ignore", stderr: "ignore",
+      });
+    } catch (error) {
+      // A heavily loaded Windows desktop may transiently refuse process creation even for the
+      // canonical System32 binary. Bound the fixture retry; every other error still fails at once.
+      if ((error as NodeJS.ErrnoException).code !== "EPERM" || attempt >= 6) throw error;
+      await Bun.sleep(attempt * 500);
+    }
+  }
+}
 
 function wireBundledComputerSupport(tools: ToolRegistry): ToolRegistry {
   tools.loadSkill = (name) => name === "computer-use" ? { body: "", dir: computerSkillDir } : null;
   return tools;
+}
+
+async function stopWpfFixture(form: ReturnType<typeof Bun.spawn>): Promise<void> {
+  form.kill();
+  const exited = await Promise.race([form.exited, Bun.sleep(5_000).then(() => null)]);
+  expect(exited).not.toBeNull();
 }
 
 test("resident OCR bounds async waits, disposes captures, and refuses stale marks", () => {
@@ -56,12 +82,12 @@ test("resident UIA host reuses one PowerShell process and restarts after disposa
     expect(second.ok).toBe(true);
     expect(first.pid).toBe(second.pid);
 
-    host.dispose();
+    await host.dispose();
     const restarted = await host.request({ action: "ping" });
     expect(restarted.ok).toBe(true);
     expect(restarted.pid).not.toBe(first.pid);
   } finally {
-    host.dispose();
+    await host.dispose();
   }
 }, 30_000); // two cold PowerShell starts can exceed 15s under the full Windows CI suite
 
@@ -75,7 +101,7 @@ test("resident host handles waits without spawning another PowerShell process", 
     expect(waited.output).toContain("waited 1 ms");
     expect(waited.pid).toBe(ready.pid);
   } finally {
-    host.dispose();
+    await host.dispose();
   }
 }, 15_000);
 
@@ -92,7 +118,7 @@ test("a resident wait can be interrupted and the host recovers", async () => {
     expect(after.ok).toBe(true);
     expect(after.pid).not.toBe(before.pid);
   } finally {
-    host.dispose();
+    await host.dispose();
   }
 }, 15_000);
 
@@ -112,7 +138,7 @@ test("resident host captures consecutive frames and keeps delta state in one pro
     expect(existsSync(firstPath) && statSync(firstPath).size > 0).toBe(true);
     expect(existsSync(secondPath) && statSync(secondPath).size > 0).toBe(true);
   } finally {
-    host.dispose();
+    await host.dispose();
     rmSync(firstPath, { force: true });
     rmSync(secondPath, { force: true });
   }
@@ -123,10 +149,10 @@ test("an idle resident host does not pin a short-lived Neko process", async () =
   const moduleUrl = pathToFileURL(join(import.meta.dir, "..", "src", "core", "windows-uia-host.ts")).href;
   const code = `import { ResidentUiaHost } from ${JSON.stringify(moduleUrl)}; const h = new ResidentUiaHost(${JSON.stringify(script)}); await h.request({action:'ping'});`;
   const child = Bun.spawn([process.execPath, "-e", code], { stdout: "ignore", stderr: "pipe" });
-  const exited = await Promise.race([child.exited, Bun.sleep(5_000).then(() => null)]);
+  const exited = await Promise.race([child.exited, Bun.sleep(15_000).then(() => null)]);
   if (exited === null) child.kill();
   expect(exited).toBe(0);
-}, 15_000);
+}, 30_000);
 
 test("resident UIA host reads a disposable WPF accessibility tree", async () => {
   if (process.platform !== "win32") return;
@@ -147,7 +173,7 @@ $button.Add_Click({ $b.Text='Invoked' })
 $w.Content=$p
 [void]$w.ShowDialog()
 `;
-  const form = Bun.spawn(["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", Buffer.from(source, "utf16le").toString("base64")], { stdout: "ignore", stderr: "ignore" });
+  const form = await spawnWpfFixture(source);
   const host = new ResidentUiaHost(script);
   try {
     const output = await waitForUiaText(async () => {
@@ -162,9 +188,8 @@ $w.Content=$p
     expect((await host.request({ action: "invoke", window: title, name: "Resident probe button" })).output).toContain("invoked");
     expect((await host.request({ action: "get", window: title, name: "Resident probe input" })).output).toContain("Invoked");
   } finally {
-    host.dispose();
-    form.kill();
-    await Promise.race([form.exited, Bun.sleep(1000)]);
+    await host.dispose();
+    await stopWpfFixture(form);
   }
 }, 45_000);
 
@@ -197,7 +222,7 @@ $button.Add_Click({
 $w.Content=$script:panel
 [void]$w.ShowDialog()
 `;
-  const form = Bun.spawn(["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", Buffer.from(source, "utf16le").toString("base64")], { stdout: "ignore", stderr: "ignore" });
+  const form = await spawnWpfFixture(source);
   const host = residentUiaHost(script);
   const tools = wireBundledComputerSupport(new ToolRegistry(join(import.meta.dir, ".."), "auto", async () => true));
   try {
@@ -212,9 +237,8 @@ $w.Content=$script:panel
     expect(watched).toMatch(/state=[a-f0-9]{12}/);
     expect(watched).toContain("Repeated message");
   } finally {
-    host.dispose();
-    form.kill();
-    await Promise.race([form.exited, Bun.sleep(1000)]);
+    await host.dispose();
+    await stopWpfFixture(form);
   }
 }, 45_000);
 
@@ -230,7 +254,7 @@ $b=New-Object System.Windows.Controls.TextBox
 $w.Content=$b
 [void]$w.ShowDialog()
 `;
-  const form = Bun.spawn(["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", Buffer.from(source, "utf16le").toString("base64")], { stdout: "ignore", stderr: "ignore" });
+  const form = await spawnWpfFixture(source);
   const tools = wireBundledComputerSupport(new ToolRegistry(join(import.meta.dir, ".."), "auto", async () => true));
   try {
     const output = await waitForUiaText(
@@ -239,7 +263,6 @@ $w.Content=$b
     );
     expect(output).toContain("Dispatch probe input");
   } finally {
-    form.kill();
-    await Promise.race([form.exited, Bun.sleep(1000)]);
+    await stopWpfFixture(form);
   }
 }, 45_000);

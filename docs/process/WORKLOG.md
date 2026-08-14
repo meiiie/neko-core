@@ -3,6 +3,38 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-15 - v0.24.4 candidate: native Windows cleanup scan and recoverable SRT health
+
+A real GLM-5.3 turn was asked to scan drive C without deleting anything. The only available execution
+path was Bash; the session had snapshotted SRT as unhealthy, wrote a 102-line PowerShell script that it
+could not run, and then offered manual execution or consented desktop control. The Bash observation was
+only `exit ?`, and the failed SRT health result remained cached for the process lifetime. The script also
+needed to suppress access errors and manually avoid overlapping cache roots, making it a poor substitute
+for a governed read surface.
+
+Added the Windows-only `disk_cleanup_scan` native tool. It walks a fixed allowlist using metadata only,
+does not open file contents, skips links, de-duplicates hard links, has 60-second/500,000-entry defaults,
+and exposes no mutation. Aggregate output uses environment placeholders rather than user names or child
+file names and separates safe, re-downloadable, Windows-managed, manual-review, and do-not-delete data.
+`read_outside_root=false` removes the schema and refuses replayed calls. SRT health failures now expire
+after 30 seconds, refresh discovery/provisioning, and retain status/signal/error/timeout/elapsed details.
+The dynamic runtime explicitly avoids creating an unusable shell script when a safe native tool exists.
+
+End-to-end source dogfood through GLM-5.3 selected `DiskScan` without Bash, computer control, or writes,
+finished in 86.8 seconds over two provider-reported calls, scanned 142,436 entries, and reported 14 access
+errors as partial evidence. On this host it found only 4.51 GB free, a 7.2 GB safe-cache candidate, a
+1.75 GB re-downloadable candidate, and classified the 134.27 GB Docker image as manual review rather than
+deleting its VHD. Git inventory showed no generated script or task artifact afterward.
+
+Focused product coverage passed 208/208 before the Windows lifecycle follow-up; both TypeScript compilers,
+the live ToolRegistry scan, doctor, and policy passed. Full-suite attempts on a workstation already running
+roughly 385 unrelated processes exposed existing Windows integration pressure: SRT/CIM, WPF PowerShell,
+and a 5-second meeting fixture reached their exact local deadlines, while every reported target passed in
+fresh isolation (including SRT bridge 9.2 seconds and the skill path 4.0 seconds). Resident UIA teardown is
+now awaitable and its nine-case live file passed 9/9 under the same load. The candidate remains untagged
+until the repository's four-shard hosted-Windows gate and the remaining release gates are green; no timeout,
+permission boundary, or Ctrl+C containment guarantee was weakened to manufacture a local pass.
+
 ## 2026-08-14 - v0.24.3 stale Z.AI model catalog merge
 
 The v0.24.2 profile correctly declared GLM-5.3, but a real `/model` session still showed only eight models

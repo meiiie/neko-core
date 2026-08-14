@@ -15,6 +15,9 @@ import { detectSandbox, resolveSrtBunBridge, sandboxActive } from "../src/core/s
 import { isForegroundValidatorOnlyCommand } from "../src/core/validation-command.ts";
 
 const tempDirs: string[] = [];
+// Windows SRT startup is serialized and can exceed a minute while the full suite exercises other
+// live sandbox paths. Keep the product command deadline unchanged; this is only the outer test gate.
+const LIVE_SRT_TEST_TIMEOUT_MS = 180_000;
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -388,7 +391,7 @@ test("a live SRT exact validator cannot mutate the project directly or through t
   } finally {
     lease.close();
   }
-}, 60_000);
+}, LIVE_SRT_TEST_TIMEOUT_MS);
 
 test("a live SRT exact validator bridges canonical Bun into npm child scripts without changing project bytes", async () => {
   const bridge = process.platform === "win32" ? resolveSrtBunBridge(process.cwd()) : null;
@@ -438,7 +441,7 @@ test("a live SRT exact validator bridges canonical Bun into npm child scripts wi
   } finally {
     lease.close();
   }
-}, 90_000);
+}, LIVE_SRT_TEST_TIMEOUT_MS);
 
 test("attachments, images, controller text, security, built-in domain, and explicit skills stay full", () => {
   const fx = fixture();

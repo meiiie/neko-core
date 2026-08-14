@@ -65,11 +65,24 @@ export class ResidentUiaHost {
     return result;
   }
 
-  dispose(): void {
+  dispose(): Promise<void> {
     const child = this.child;
     this.child = null;
     this.lines?.close();
     this.lines = null;
+    const settled = !child || child.exitCode !== null || child.signalCode !== null
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+        let timer: ReturnType<typeof setTimeout>;
+        const done = () => {
+          clearTimeout(timer);
+          child.removeListener("close", done);
+          resolve();
+        };
+        child.once("close", done);
+        timer = setTimeout(done, 5_000);
+        timer.unref?.();
+      });
     try {
       if (child?.pid && process.platform === "win32" && WINDOWS_TASKKILL) {
         spawnSync(WINDOWS_TASKKILL, ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore", timeout: 5000 });
@@ -78,6 +91,7 @@ export class ResidentUiaHost {
       }
     } catch {}
     this.failPending(new Error("resident Windows host stopped"));
+    return settled;
   }
 
   private requestNow(request: UiaRequest, timeoutMs: number, signal?: AbortSignal): Promise<UiaResponse> {
@@ -92,13 +106,13 @@ export class ResidentUiaHost {
         if (!pending) return;
         clearTimeout(pending.timer);
         this.pending.delete(id);
-        this.dispose();
+        void this.dispose();
         reject(new Error("resident Windows request interrupted"));
       };
       const timer = setTimeout(() => {
         this.pending.delete(id);
         signal?.removeEventListener("abort", onAbort);
-        this.dispose();
+        void this.dispose();
         const detail = this.stderrTail.trim().slice(-1000);
         reject(new Error(`resident Windows request timed out after ${timeoutMs}ms${detail ? `: ${detail}` : ""}`));
       }, timeoutMs);
@@ -188,7 +202,7 @@ export function residentUiaHost(script: string): ResidentUiaHost {
   if (!cleanupInstalled) {
     cleanupInstalled = true;
     process.once("exit", () => {
-      for (const active of hosts.values()) active.dispose();
+      for (const active of hosts.values()) void active.dispose();
       hosts.clear();
     });
   }
