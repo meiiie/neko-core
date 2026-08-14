@@ -433,3 +433,21 @@ test("ChatGPT model picker falls back to the configured catalog when the live en
   );
   expect(await listModels(cfg)).toEqual(["gpt-5.4", "gpt-5.4-mini", "gpt-5.5"]);
 });
+
+test("a stale compatible-provider catalog cannot hide a profile-confirmed newer model", async () => {
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    expect(String(input)).toBe("https://api.z.ai/api/anthropic/v1/models");
+    return Response.json({ data: [
+      { id: "glm-5" },
+      { id: "glm-5.1" },
+      { id: "glm-5.2" },
+    ] });
+  }) as typeof fetch;
+  const cfg = new NekoConfig(
+    { provider: "anthropic", base_url: "https://api.z.ai/api/anthropic", model: "glm-5.2" },
+    "zai",
+    { zai: { models: ["glm-5.3", "glm-5.2", "glm-5.1", "glm-5"] } },
+    "test-key",
+  );
+  expect(await listModels(cfg)).toEqual(["glm-5", "glm-5.1", "glm-5.2", "glm-5.3"]);
+});

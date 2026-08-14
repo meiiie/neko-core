@@ -305,7 +305,12 @@ export async function listModelOptions(config: NekoConfig, codexSupport?: CodexS
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const live = ((data?.data ?? []) as any[]).map((m) => String(m?.id ?? "")).filter(Boolean).sort().map((id) => ({ id, label: id }));
-    return live.length ? live : configured;
+    if (!live.length) return configured;
+    // Compatible model-list endpoints can lag a documented rollout (Z.AI listed only through
+    // GLM-5.2 while its Coding Plan already accepted GLM-5.3). Keep live discovery, but do not let
+    // an incomplete list erase profile-confirmed models from /model.
+    const liveIds = new Set(live.map((model) => model.id));
+    return [...live, ...configured.filter((model) => !liveIds.has(model.id))];
   } catch (error) {
     if (configured.length) return configured;
     throw error;

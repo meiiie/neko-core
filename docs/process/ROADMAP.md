@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-14) — v0.24.2 release
+## Current status (2026-08-14) — v0.24.3 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,9 +38,10 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.2 (2026-08-14)** - the Z.AI Coding Plan profile now offers
-  GLM-5.3 with its 1M context window, while provider/login UX distinguishes subscription quota from the
-  separate pay-as-you-go General API route. Previous (v0.24.1, 2026-08-13): `neko update` treats an already-current
+- **Branch:** `main`. **Current release: v0.24.3 (2026-08-14)** - `/model` now merges compatible providers'
+  live discovery with profile-confirmed models, so Z.AI's stale list cannot hide Coding Plan GLM-5.3.
+  Previous (v0.24.2, 2026-08-14): the Z.AI Coding Plan profile added GLM-5.3 with its 1M context window
+  and separated subscription quota from the pay-as-you-go General API route. Previous (v0.24.1, 2026-08-13): `neko update` treats an already-current
   binary as idempotent command success while preserving distinct failures and resuming automatic updates.
   Previous (v0.24.0, 2026-08-13): `neko acp` exposes the same governed
   production Agent runtime to Zed, JetBrains, and other stable ACP v1 clients, including streamed tool

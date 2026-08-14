@@ -3,6 +3,14 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-14 - v0.24.3 stale Z.AI model catalog merge
+
+The v0.24.2 profile correctly declared GLM-5.3, but a real `/model` session still showed only eight models
+through GLM-5.2. Reproduction proved that Z.AI's Coding Plan `/v1/models` response lagged the documented and
+completion-verified rollout, and the generic picker replaced the complete profile catalog with that stale live
+list. `listModelOptions` now keeps every live-discovered id and appends profile-confirmed ids that are missing.
+A red/green regression plus a credential-safe live catalog probe locks GLM-5.3 into the resulting nine-model list.
+
 ## 2026-08-14 - v0.24.2 Z.AI GLM-5.3 route clarity
 
 The built-in provider catalog still showed separate, ambiguous `zai` and `zai-openai` entries capped at

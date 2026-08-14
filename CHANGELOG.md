@@ -6,6 +6,14 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.3] — 2026-08-14
+
+### Fixed
+
+- **GLM-5.3 remains visible in `/model` when Z.AI's live model list lags the Coding Plan rollout.**
+  Compatible provider catalogs are now merged with profile-confirmed models instead of silently erasing
+  a newer documented model. The live list still supplies every discovered model.
+
 ## [0.24.2] — 2026-08-14
 
 ### Added
