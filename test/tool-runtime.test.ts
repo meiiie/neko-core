@@ -512,7 +512,7 @@ test("bash is interrupted at once when the abort signal fires (no long wait, no 
   const out = await p;
   expect(out).toContain("interrupted");
   expect(out).not.toContain("could not be confirmed");
-  expect(Date.now() - start).toBeLessThan(6000); // bounded snapshot + tree kill, not the 10s command
+  expect(Date.now() - start).toBeLessThan(8000); // bounded snapshot + tree kill, not the 10s command
 });
 
 function writeBashTreeFixture(root: string, marker: string): string {
@@ -766,7 +766,7 @@ test("bash honors the configured timeout ceiling", async () => {
   reg.bashTimeoutCapMs = 1000;
   const out = await reg.execute("bash", { command: "sleep 9", timeout: 9000 });
   expect(out).toContain("timed out after 1000ms");
-});
+}, 12_000);
 
 test("bash run_in_background returns at once and records the job", async () => {
   const { reg } = makeReg("auto", () => true);

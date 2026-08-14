@@ -2057,7 +2057,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
         setOverlay({
-          title: family === "openai" ? "OpenAI - choose how to sign in" : family === "google" ? "Google - choose how to sign in" : `Sign in to ${family}`,
+          title: family === "openai" ? "OpenAI - choose how to sign in" : family === "google" ? "Google - choose how to sign in" : family === "zai" ? "Z.AI - choose API route" : `Sign in to ${family}`,
           items: routes,
           onSelect: (route) => { void selectRoute(route); },
         });

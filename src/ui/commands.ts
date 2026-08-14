@@ -700,7 +700,7 @@ function openProviderPicker(ctx: CommandCtx, initialFamily?: string): void {
       return;
     }
     ctx.setOverlay({
-      title: `${family === "openai" ? "OpenAI" : family === "google" ? "Google" : family} - choose account`,
+      title: `${family === "openai" ? "OpenAI" : family === "google" ? "Google" : family === "zai" ? "Z.AI" : family} - choose account`,
       items: routes,
       onSelect: async (route) => {
         ctx.setOverlay(null);

@@ -191,8 +191,32 @@ export const DEFAULTS: Record<string, any> = {
     // content returns HTTP 400 ("messages.content.type ... allowed values: ['text']"). vision:true here would
     // make read_file hand images to a model that rejects them. For document/image OCR with GLM, neko must fall
     // back to on-screen OCR; for true image understanding, use a vision endpoint (claude/gemini/kimi profiles).
-    zai: { provider: "anthropic", base_url: "https://api.z.ai/api/anthropic", model: "glm-4.6", key_env: "ZAI_API_KEY" },         // GLM Coding Plan quota
-    "zai-openai": { provider: "openai_compat", base_url: "https://api.z.ai/api/paas/v4", model: "glm-4.6", key_env: "ZAI_API_KEY" }, // Z.ai pay-as-you-go
+    zai: {
+      provider: "anthropic",
+      family: "zai",
+      label: "GLM Coding Plan",
+      auth: "api_key",
+      base_url: "https://api.z.ai/api/anthropic",
+      model: "glm-5.3",
+      models: ["glm-5.3", "glm-5.2", "glm-5.1", "glm-5"],
+      model_context: { "glm-5.3": 1_000_000, "glm-5.2": 1_000_000 },
+      context_window: 1_000_000,
+      effort_ceiling: "max",
+      key_env: "ZAI_API_KEY",
+    },
+    "zai-openai": {
+      provider: "openai_compat",
+      family: "zai",
+      label: "Z.AI API (pay-as-you-go)",
+      auth: "api_key",
+      base_url: "https://api.z.ai/api/paas/v4",
+      model: "glm-5.2",
+      models: ["glm-5.2", "glm-5.1", "glm-5"],
+      model_context: { "glm-5.2": 1_000_000 },
+      context_window: 1_000_000,
+      effort_ceiling: "max",
+      key_env: "ZAI_API_KEY",
+    },
     // Most hosted providers are OpenAI-compatible -> a profile, not new code. Set your model with /model.
     groq: { provider: "openai_compat", base_url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile", key_env: "GROQ_API_KEY" },
     deepseek: {

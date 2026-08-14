@@ -25,6 +25,7 @@ function familyLabel(family: string): string {
   if (family === "xai") return "xAI";
   if (family === "kimi") return "Kimi";
   if (family === "deepseek") return "DeepSeek";
+  if (family === "zai") return "Z.AI";
   return family;
 }
 
@@ -54,7 +55,9 @@ export function providerChoices(cfg: NekoConfig, authOnly = false): Choice[] {
                 ? `Kimi Code account or API key${current}`
                 : family === "deepseek"
                   ? `DeepSeek API key${current}`
-                  : `${profile.provider ?? "?"} · ${profile.model ?? "?"}${current}`,
+                  : family === "zai"
+                    ? `Coding Plan (GLM-5.3) or pay-as-you-go API${current}`
+                    : `${profile.provider ?? "?"} · ${profile.model ?? "?"}${current}`,
     });
   }
   return choices;
@@ -77,7 +80,8 @@ export function authChoices(cfg: NekoConfig, family: string, availability: AuthA
           : profile.auth === "gemini_oauth" ? "Standard/Enterprise only; consumer plans moved to Antigravity"
             : profile.auth === "kimi_oauth" ? "Kimi Code account; no API key"
             : family === "google" ? "official API; free tier available"
-              : "pay-as-you-go API";
+              : family === "zai" ? (name === "zai" ? "Coding Plan subscription quota; GLM-5.3 available" : "pay-as-you-go API billing")
+                : "pay-as-you-go API";
       return {
         id: name,
         label: profile.label || name,

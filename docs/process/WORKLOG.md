@@ -3,6 +3,19 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-14 - v0.24.2 Z.AI GLM-5.3 route clarity
+
+The built-in provider catalog still showed separate, ambiguous `zai` and `zai-openai` entries capped at
+older defaults even after GLM-5.3 launched. Official Z.AI documentation says GLM-5.3 is available to all
+Coding Plan users while the General API is still coming soon. A credential-safe live probe then returned
+HTTP 200 and model `glm-5.3` through both Coding Plan protocols, including the exact Anthropic-compatible
+route Neko uses. Updated `zai` to default to GLM-5.3 with a 1M context catalog, retained GLM-5.2 for the
+pay-as-you-go General API, and grouped both under one Z.AI provider with explicit billing labels. Existing
+user pins remain authoritative; the new catalog makes GLM-5.3 selectable without rewriting their config.
+The release gate also exposed a busy-Windows cancellation edge: CIM enumeration exceeded its old two-second
+budget even though `taskkill` stopped the command. The snapshot remains bounded but now has five seconds,
+and real abort/timeout/grandchild regressions verify that ESC/Ctrl+C returns without leaving an orphan.
+
 ## 2026-08-13 - v0.24.1 idempotent update exit status
 
 The installed v0.24.0 one-line release canary exposed that plain `neko update` printed both

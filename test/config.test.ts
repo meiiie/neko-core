@@ -54,6 +54,30 @@ test("current GLM and high-resolution Fable routes are first-class profiles", ()
   expect(fable.imageMaxBytes).toBe(4_500_000);
 });
 
+test("Z.AI keeps Coding Plan GLM-5.3 separate from the paid General API", () => {
+  const coding = loadConfig({ path: tmpConfig({}), profile: "zai" });
+  expect(coding.provider).toBe("anthropic");
+  expect(coding.baseUrl).toBe("https://api.z.ai/api/anthropic");
+  expect(coding.model).toBe("glm-5.3");
+  expect(coding.contextWindow).toBe(1_000_000);
+  expect(coding.profiles.zai.models).toContain("glm-5.3");
+
+  const paid = loadConfig({ path: tmpConfig({}), profile: "zai-openai" });
+  expect(paid.provider).toBe("openai_compat");
+  expect(paid.baseUrl).toBe("https://api.z.ai/api/paas/v4");
+  expect(paid.model).toBe("glm-5.2");
+  expect(paid.profiles["zai-openai"].models).not.toContain("glm-5.3");
+});
+
+test("an existing Z.AI 5.2 pin stays selected while the 5.3 catalog becomes available", () => {
+  const coding = loadConfig({
+    path: tmpConfig({ profiles: { zai: { model: "glm-5.2" } } }),
+    profile: "zai",
+  });
+  expect(coding.model).toBe("glm-5.2");
+  expect(coding.profiles.zai.models).toContain("glm-5.3");
+});
+
 test("Claude and xAI use current official native API profiles", () => {
   const claude = loadConfig({ path: tmpConfig({}), profile: "claude" });
   expect(claude.provider).toBe("anthropic");

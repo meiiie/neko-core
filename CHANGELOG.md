@@ -6,6 +6,20 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.2] — 2026-08-14
+
+### Added
+
+- **GLM-5.3 is available through the Z.AI Coding Plan profile.** `/login` now groups Z.AI under one
+  provider and clearly separates subscription quota (`zai`, Anthropic-compatible) from pay-as-you-go
+  API billing (`zai-openai`, OpenAI-compatible). Existing explicit GLM-5.2 pins remain selected, while
+  `/model` exposes GLM-5.3 for an intentional upgrade.
+
+### Fixed
+
+- **Windows ESC/Ctrl+C process-tree verification no longer false-warns on busy machines.** The bounded
+  CIM snapshot budget now covers normal startup latency before Neko force-stops and verifies descendants.
+
 ## [0.24.1] — 2026-08-13
 
 ### Fixed

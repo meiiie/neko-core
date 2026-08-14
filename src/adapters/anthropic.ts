@@ -25,7 +25,7 @@ export class AnthropicProvider implements Provider {
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
     if (!this.cfg.baseUrl) throw new Error("anthropic provider needs a base_url (e.g. https://api.z.ai/api/anthropic).");
-    if (!this.cfg.model) throw new Error("anthropic provider needs a model (e.g. glm-4.6).");
+    if (!this.cfg.model) throw new Error("anthropic provider needs a model (e.g. glm-5.3 or claude-sonnet-5).");
     const key = this.cfg.apiKey;
     if (!key && !this.cfg.isLocalEndpoint) throw new Error("No API key for the anthropic provider. Set it in the profile's api_key or NEKO_API_KEY.");
 

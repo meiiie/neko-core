@@ -56,6 +56,25 @@ test("Kimi groups official account OAuth and API billing while DeepSeek stays AP
   expect(providerChoices(cfg("deepseek")).find((choice) => choice.id === "deepseek")?.detail).toContain("DeepSeek API key");
 });
 
+test("Z.AI groups Coding Plan and paid API routes while naming their billing boundary", () => {
+  const grouped = providerChoices(cfg("zai"));
+  expect(grouped.filter((choice) => choice.id === "zai")).toHaveLength(1);
+  expect(grouped.find((choice) => choice.id === "zai")).toMatchObject({
+    label: "Z.AI",
+    detail: expect.stringContaining("Coding Plan (GLM-5.3) or pay-as-you-go API"),
+  });
+  const routes = authChoices(cfg("zai"), "zai", {
+    chatgpt: false, gemini: false, kimi: false, apiProfiles: new Set(["zai"]),
+  });
+  expect(routes.map((choice) => choice.id)).toEqual(["zai", "zai-openai"]);
+  expect(routes[0]).toMatchObject({
+    label: "GLM Coding Plan",
+    detail: expect.stringContaining("subscription quota; GLM-5.3 available"),
+  });
+  expect(routes[1]).toMatchObject({ label: "Z.AI API (pay-as-you-go)", detail: expect.stringContaining("pay-as-you-go API billing") });
+  expect(profileDisplayName(cfg("zai"))).toContain("GLM Coding Plan");
+});
+
 test("profile display and model context name the active OpenAI auth route", () => {
   expect(profileDisplayName(cfg("chatgpt"))).toBe("OpenAI · ChatGPT Plus/Pro");
   expect(profileDisplayName(cfg("openai"))).toBe("OpenAI · API key (pay-as-you-go)");

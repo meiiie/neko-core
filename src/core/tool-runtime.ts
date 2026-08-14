@@ -144,6 +144,9 @@ const BASH_TIMEOUT_MS = 60_000;
 const BASH_TERMINATE_GRACE_MS = 250;
 const BASH_FORCE_WAIT_MS = 750;
 const WINDOWS_TASKKILL_TIMEOUT_MS = 2_000;
+// CIM startup alone can exceed two seconds on a busy Windows workstation. Keep cancellation
+// bounded, but leave enough time to capture the descendant set that makes the kill verifiable.
+const WINDOWS_PROCESS_SNAPSHOT_TIMEOUT_MS = 5_000;
 const MAX_WINDOWS_TREE_PIDS = 256;
 const MAX_RESTORE_CONFLICT_PATHS = 20;
 const WINDOWS_POWERSHELL = process.platform === "win32"
@@ -211,7 +214,7 @@ function trustedWindowsPowerShell(script: string): string | null {
     env: minimalWindowsSystemEnv(),
     encoding: "utf-8",
     maxBuffer: 512 * 1024,
-    timeout: 2_000,
+    timeout: WINDOWS_PROCESS_SNAPSHOT_TIMEOUT_MS,
     windowsHide: true,
   });
   return result.status === 0 && !result.error ? String(result.stdout) : null;
