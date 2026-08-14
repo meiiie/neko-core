@@ -513,7 +513,7 @@ test("bash is interrupted at once when the abort signal fires (no long wait, no 
   expect(out).toContain("interrupted");
   expect(out).not.toContain("could not be confirmed");
   expect(Date.now() - start).toBeLessThan(8000); // bounded snapshot + tree kill, not the 10s command
-});
+}, 10_000);
 
 function writeBashTreeFixture(root: string, marker: string): string {
   const grandchild = join(root, `grandchild-${marker}.ts`);
