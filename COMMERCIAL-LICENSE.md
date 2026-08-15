@@ -5,8 +5,11 @@ This file is a notice, not a commercial license grant.
 Neko Core's AGPL-covered material is available under either:
 
 1. `AGPL-3.0-only`; or
-2. a separate commercial agreement signed by the applicable copyright
-   holder(s) or an authorized licensor operating under The Wiii Lab brand.
+2. a separate commercial agreement signed by Meiiie or an expressly
+   authorized representative of Meiiie.
+
+Meiiie is the project owner and licensor. The Wiii Lab is the project and
+brand identity operated by Meiiie.
 
 A commercial agreement may be appropriate for organizations that cannot meet
 the AGPL obligations for proprietary redistribution or network deployment.

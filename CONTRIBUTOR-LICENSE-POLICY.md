@@ -4,6 +4,9 @@ Neko Core keeps the core available under AGPL while preserving the ability to
 offer a commercial alternative. That requires a documented inbound license
 for every contribution.
 
+For this policy, the project licensor is **Meiiie**, or an expressly
+authorized representative acting for Meiiie.
+
 Before merging a contribution to AGPL-covered material, a maintainer must
 confirm that the contributor has signed a separate contributor agreement, or
 otherwise provided a written grant, that authorizes the project licensor to

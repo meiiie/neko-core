@@ -3,6 +3,14 @@
 Effective for source distributions made from this repository on or after
 2026-08-15, Neko Core uses a split-license model.
 
+## Ownership record
+
+On 2026-08-16, the project owner confirmed that **Meiiie** owns and controls
+the rights needed to license Neko Core. **The Wiii Lab** is the project and
+brand identity operated by Meiiie. This record does not replace or remove
+third-party licenses, contributor attribution, or rights that remain with
+their respective owners.
+
 ## License map
 
 | Scope | Public license |
@@ -32,9 +40,9 @@ tag or commit used for the build, not merely to a moving branch.
 ## Commercial dual licensing
 
 The AGPL-covered material may also be offered under a separate written
-commercial agreement by the applicable copyright holder or an authorized
-licensor. The public repository does not itself grant that commercial
-license. See [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+commercial agreement by Meiiie or an expressly authorized representative of
+Meiiie. The public repository does not itself grant that commercial license.
+See [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
 
 The Apache SDK does not require a commercial license for uses already allowed
 by Apache-2.0.

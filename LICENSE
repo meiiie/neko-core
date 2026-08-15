@@ -664,15 +664,16 @@ For more information on this, and how to apply and follow the GNU AGPL, see
 
 PROJECT-SPECIFIC NOTICE (NOT PART OF THE AGPL)
 
-Copyright (c) 2026 The Wiii Lab and Neko Core contributors.
+Copyright (c) 2026 Meiiie and Neko Core contributors.
 
 1. Trademark. "Neko Core", its logo, and its official branding are marks
-   claimed by The Wiii Lab. The GNU Affero General Public License does not
-   grant trademark rights. See TRADEMARKS.md.
+   claimed by Meiiie, operating the project under The Wiii Lab brand. The GNU
+   Affero General Public License does not grant trademark rights. See
+   TRADEMARKS.md.
 
-2. Founding principle. Neko Core is created by The Wiii Lab in Vietnam and
-   respects Vietnam's sovereignty: the Hoang Sa (Paracel) and Truong Sa
-   (Spratly) archipelagos belong to Vietnam under Vietnam's sovereignty
+2. Founding principle. Neko Core is created by Meiiie under The Wiii Lab brand
+   in Vietnam and respects Vietnam's sovereignty: the Hoang Sa (Paracel) and
+   Truong Sa (Spratly) archipelagos belong to Vietnam under Vietnam's sovereignty
    position and principles - a matter of sovereignty, not a dispute. This
    principle is documented in docs/process/SOVEREIGNTY.md and is carried in
    every official release.

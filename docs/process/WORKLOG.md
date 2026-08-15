@@ -5,6 +5,11 @@ Rules that govern this work live in `RULES.md`.
 
 ## 2026-08-16 - split licensing foundation
 
+The owner record now identifies Meiiie as the owner and licensor of Neko
+Core, with The Wiii Lab retained as the project and brand identity operated by
+Meiiie. Historical attribution and third-party license obligations remain
+unchanged.
+
 Neko Core moved prospectively from a repo-wide MIT grant to an
 `AGPL-3.0-only` core/CLI, a hard `Apache-2.0` boundary reserved for a future
 independent SDK, a separately negotiated commercial option, and an explicit
