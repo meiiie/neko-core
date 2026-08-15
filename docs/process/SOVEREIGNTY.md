@@ -46,9 +46,9 @@ Honest answer: **no software rule is technically unremovable** — anyone with t
 line. What IS enforceable:
 
 - **In the official repo/releases:** the regression-guard test (#3) blocks any release that drops it.
-- **For forks/redistribution:** the name is protected (#4). A fork MAY technically remove the clause
-  (the MIT license permits modifying the code), but it then **may not call itself "Neko Core"** or use
-  its branding. The official Neko Core always carries this principle.
-- **A stricter option** (owner's choice): replace MIT with a source-available license that forbids
-  removing this clause. That makes the project **not open-source** (adoption tradeoff); it is a
-  legitimate choice but is deliberately NOT taken by default. See `LICENSE`.
+- **For forks/redistribution:** the code license permits modification, but trademark rights remain
+  separate. A fork MAY technically remove the clause, but it then **may not call itself "Neko Core"**
+  or use its branding. The official Neko Core always carries this principle.
+- **License boundary:** the core is open source under AGPL-3.0-only, with a separate commercial
+  licensing path. Independently implemented SDK code under `sdk/` is Apache-2.0. Neither code
+  license grants the Neko Core name or branding. See `LICENSING.md` and `TRADEMARKS.md`.

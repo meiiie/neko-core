@@ -3,6 +3,10 @@
 > Đội **Neko Core** · soạn 29/07/2026 · **hạn nộp 31/07/2026** (BTC không công bố giờ chốt/múi giờ
 > — nộp sớm ít nhất một ngày). Dữ kiện thể lệ và nguyên văn form: `thucchien-ai-2026.md` cùng thư mục.
 
+> Historical record: references to the MIT license below describe the public
+> releases available when this July 2026 submission was written. Current
+> licensing is defined by [`../../LICENSING.md`](../../LICENSING.md).
+
 ---
 
 ## PHẦN 1 — Điền form đăng ký (dán thẳng vào từng ô)

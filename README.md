@@ -7,12 +7,12 @@
 > new roles, from sourcing goods to driving a browser. Built on **TypeScript + Bun + Ink**,
 > **provider-agnostic**, **offline-capable**.
 
-**By [The Wiii Lab](https://github.com/meiiie).** MIT-licensed — contributions welcome.
+**By [The Wiii Lab](https://github.com/meiiie).** AGPL core, Apache SDK boundary, and commercial dual licensing.
 **[neko.holilihu.online](https://neko.holilihu.online)** — download, in English and Vietnamese.
 
 [![CI](https://github.com/meiiie/neko-core/actions/workflows/ci.yml/badge.svg)](https://github.com/meiiie/neko-core/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/meiiie/neko-core?sort=semver)](https://github.com/meiiie/neko-core/releases)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg)](LICENSING.md)
 [![Made with Bun](https://img.shields.io/badge/runtime-Bun-000?logo=bun)](https://bun.sh)
 
 ---
@@ -466,4 +466,9 @@ Thị Minh Hồng · Phạm Thị Thu Thảo · Nghiêm Thị Mỹ Linh
 
 ## License
 
-MIT © 2026 The Wiii Lab — see [LICENSE](LICENSE).
+The core and CLI are available under **AGPL-3.0-only** or a separate
+commercial agreement. Independently implemented code under `sdk/` is
+**Apache-2.0**. The Neko Core name and branding are not granted by either
+code license. See [LICENSING.md](LICENSING.md),
+[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md), and
+[TRADEMARKS.md](TRADEMARKS.md).

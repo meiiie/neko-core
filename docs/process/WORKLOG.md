@@ -3,6 +3,34 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-16 - split licensing foundation
+
+Neko Core moved prospectively from a repo-wide MIT grant to an
+`AGPL-3.0-only` core/CLI, a hard `Apache-2.0` boundary reserved for a future
+independent SDK, a separately negotiated commercial option, and an explicit
+trademark policy. Earlier MIT releases remain MIT; their historical license is
+retained instead of being treated as revoked. The existing `src/index.ts`
+library surface still loads the AGPL core and is honestly documented as AGPL,
+not relabeled as an Apache SDK.
+
+The repository now includes the verbatim AGPL and Apache texts, scope map,
+NOTICE, commercial-licensing notice, contributor-license gate, trademark
+policy, package metadata, README/contributor guidance, and the permanent
+founding-principle notice. Future SDK code must be independently usable, carry
+Apache SPDX headers, avoid core implementation imports, and ship its own
+LICENSE/NOTICE.
+
+Both TypeScript compilers, the 16-test context/founding-principle suite,
+doctor, policy, production compile, UI probe, real-PTY input probe, and ACP
+binary smoke passed. The unsharded suite reached 1,399 pass and 12 conditional
+skips before three failures: the license guard was fixed and passed focused;
+the remaining two WPF fixture tests were blocked by Microsoft Defender denying
+their PowerShell `-STA -EncodedCommand` fixtures. Defender recorded those
+exact command lines and quarantined `rtk.exe`; no antivirus exclusion or test
+weakening was applied. Scoped diff and credential scans passed. Bun again
+emitted its known non-fatal Windows `tsconfig.build.json` directory-mismatch
+diagnostic after the build artifact and all post-build probes had succeeded.
+
 ## 2026-08-15 - first-turn `--yolo` freeze: asynchronous SRT health
 
 The remaining first-message pause was isolated from the earlier persistence/render stalls. On Windows,

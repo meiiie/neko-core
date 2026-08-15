@@ -3,6 +3,11 @@
 Thanks for being here — Neko is a small, friendly codebase and contributions of every size are welcome:
 bug fixes, a new provider profile, a skill, docs, tests, or just a sharp issue.
 
+Neko Core uses a dual-licensing model. Before a contribution to the core can
+be merged, its licensing authority must satisfy
+[CONTRIBUTOR-LICENSE-POLICY.md](CONTRIBUTOR-LICENSE-POLICY.md). Apache SDK
+contributions are accepted only inside the explicit `sdk/` boundary.
+
 ## Get set up
 
 You need [Bun](https://bun.sh) (the runtime + bundler + test runner).
