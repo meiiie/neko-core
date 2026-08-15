@@ -21,8 +21,8 @@ test("shared composition provisions the global research ledger and canonical exp
     );
     const registry = configureToolRegistry(new ToolRegistry(project, "auto", () => true), cfg);
     expect(registry.additionalWriteRoots).toEqual([
-      join(home, ".neko-core", "research"),
-      extra,
+      realpathSync.native(join(home, ".neko-core", "research")),
+      realpathSync.native(extra),
     ]);
     expect(existsSync(join(home, ".neko-core", "research"))).toBe(true);
     expect(await registry.execute("write_file", {
@@ -61,7 +61,7 @@ test("shared composition canonicalizes a parent alias but refuses an aliased gra
     const cfg = new NekoConfig({}, null, {}, "", null, [], { state: "none", files: [] }, aliasedHome);
     const registry = configureToolRegistry(new ToolRegistry(base, "auto", () => true), cfg);
     expect(registry.additionalWriteRoots).toEqual([
-      realpathSync(join(aliasedHome, ".neko-core", "research")),
+      realpathSync.native(join(aliasedHome, ".neko-core", "research")),
     ]);
 
     const directAlias = new NekoConfig(
