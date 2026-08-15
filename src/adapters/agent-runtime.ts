@@ -27,6 +27,7 @@ export interface BuildAgentRuntimeOptions {
   noTools?: boolean;
   onDelta?: DeltaHook;
   onEvent?: (kind: string, data: any) => void;
+  onCheckpoint?: () => void | Promise<void>;
   mcpServers?: Record<string, McpServerConfig>;
 }
 
@@ -141,6 +142,7 @@ export async function buildAgentRuntime(
       includeTodos: true,
     }),
     onEvent: options.onEvent,
+    onCheckpoint: options.onCheckpoint,
     onDelta: options.onDelta,
     verifyBeforeExit: options.noTools ? cfg.verifyBeforeExit : cfg.data.verify_before_exit !== false,
     verifyStateChangesBeforeExit: true,

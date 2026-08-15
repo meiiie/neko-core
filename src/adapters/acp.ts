@@ -15,11 +15,11 @@ import { loadConfig, type NekoConfig } from "./config.ts";
 import { getProvider } from "./providers.ts";
 import {
   acquireSessionLease,
+  AsyncSessionWriter,
   listSessionMetas,
   loadSession,
   newSessionId,
   recoverSessionTodos,
-  saveSession,
   sessionTitle,
   type Session,
   type SessionLease,
@@ -59,6 +59,9 @@ interface AcpSession {
   streamedContentSinceTool: string;
   liveAgentMessageId: string;
   activeToolCallIds: Set<string>;
+  writer: AsyncSessionWriter;
+  persistenceFailure?: unknown;
+  persistenceFailed: boolean;
   flush(): Promise<void>;
   close(): Promise<void>;
 }
@@ -317,36 +320,56 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     Object.assign(session.runtime.agent.cost, session.record.usage);
   };
 
-  const storedMessages = (session: AcpSession): any[] => {
+  const storedMessages = async (session: AcpSession): Promise<any[]> => {
     const secret = session.runtime.config.apiKey;
-    const serialized = JSON.stringify(session.runtime.agent.messages, (_key, value) =>
-      typeof value === "string" && secret.length >= 8 ? value.split(secret).join("[redacted credential]") : value);
-    return JSON.parse(serialized);
+    if (secret.length < 8) return [...session.runtime.agent.messages];
+    const messages: any[] = [];
+    let lastYield = performance.now();
+    for (const message of session.runtime.agent.messages) {
+      const serialized = JSON.stringify(message, (_key, value) =>
+        typeof value === "string" ? value.split(secret).join("[redacted credential]") : value);
+      messages.push(JSON.parse(serialized));
+      if (performance.now() - lastYield >= 8) {
+        await new Promise<void>((resolveYield) => setTimeout(resolveYield, 0));
+        lastYield = performance.now();
+      }
+    }
+    return messages;
   };
 
-  const persist = (session: AcpSession, turnState = session.record.turnState): void => {
-    session.record = {
-      ...session.record,
-      schemaVersion: 2,
-      cwd: session.root,
-      provider: session.runtime.config.provider,
-      model: session.runtime.config.model,
-      profile: session.runtime.config.profile,
-      mode: session.runtime.registry.mode,
-      reasoningEffort: session.runtime.config.effort,
-      revision: (session.record.revision ?? 0) + 1,
-      messages: storedMessages(session),
-      usage: usageSnapshot(session),
-      turnState,
-      contextFingerprint: createHash("sha256").update(JSON.stringify({
+  const persist = (session: AcpSession, turnState = session.record.turnState): Promise<void> => {
+    return session.writer.saveLazy(async () => {
+      session.record = {
+        ...session.record,
+        schemaVersion: 2,
+        cwd: session.root,
         provider: session.runtime.config.provider,
         model: session.runtime.config.model,
         profile: session.runtime.config.profile,
-        effort: session.runtime.config.effort,
-        system: session.runtime.agent.messages.filter((message: any) => message?.role === "system"),
-      })).digest("hex"),
-    };
-    saveSession(session.record);
+        mode: session.runtime.registry.mode,
+        reasoningEffort: session.runtime.config.effort,
+        revision: (session.record.revision ?? 0) + 1,
+        messages: await storedMessages(session),
+        usage: usageSnapshot(session),
+        turnState,
+        contextFingerprint: createHash("sha256").update(JSON.stringify({
+          provider: session.runtime.config.provider,
+          model: session.runtime.config.model,
+          profile: session.runtime.config.profile,
+          effort: session.runtime.config.effort,
+          system: session.runtime.agent.messages.filter((message: any) => message?.role === "system"),
+        })).digest("hex"),
+      };
+      return session.record;
+    });
+  };
+
+  const queuePersist = (session: AcpSession, turnState = session.record.turnState): void => {
+    void persist(session, turnState).catch((error) => {
+      session.persistenceFailure ??= error;
+      session.persistenceFailed = true;
+      session.pending?.abort();
+    });
   };
 
   const infoMeta = (session: AcpSession) => ({
@@ -495,6 +518,14 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         root,
         mode: record.mode ?? cfg.mode,
         approval,
+        onCheckpoint: async () => {
+          if (session.persistenceFailed) throw session.persistenceFailure;
+          await persist(session, {
+            ...(session.record.turnState ?? { status: "running" }),
+            status: "running",
+            activeToolCallIds: [...session.activeToolCallIds],
+          });
+        },
         onDelta: (text, kind) => {
           if (!text || kind === "tool") return;
           if (kind !== "reasoning") session.streamedContentSinceTool += text;
@@ -515,11 +546,6 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
             toolCalls.set(update.toolCallId, update);
             session.activeToolCallIds.add(update.toolCallId);
             enqueue({ sessionUpdate: "tool_call", ...update } as acp.SessionUpdate);
-            persist(session, {
-              ...(session.record.turnState ?? { status: "running" }),
-              status: "running",
-              activeToolCallIds: [...session.activeToolCallIds],
-            });
           } else if (kind === "tool_result") {
             const call = data.call as ToolCall;
             const text = observationText(data.observation);
@@ -535,13 +561,8 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
             enqueue({ sessionUpdate: "tool_call_update", ...update });
             session.streamedContentSinceTool = "";
             session.liveAgentMessageId = "";
-            persist(session, {
-              ...(session.record.turnState ?? { status: "running" }),
-              status: "running",
-              activeToolCallIds: [...session.activeToolCallIds],
-            });
-          } else if (kind === "checkpoint" || kind === "step" || kind === "recovery") {
-            persist(session, {
+          } else if (kind === "recovery") {
+            queuePersist(session, {
               ...(session.record.turnState ?? { status: "running" }),
               status: "running",
               activeToolCallIds: [...session.activeToolCallIds],
@@ -561,7 +582,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
                 content: { type: "text", text: final },
               });
             }
-            persist(session, session.record.turnState);
+            queuePersist(session, session.record.turnState);
           }
         },
       });
@@ -581,7 +602,13 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         streamedContentSinceTool: "",
         liveAgentMessageId: "",
         activeToolCallIds: new Set(),
-        flush: () => sendChain,
+        writer: new AsyncSessionWriter(),
+        persistenceFailed: false,
+        flush: async () => {
+          await sendChain;
+          await session.writer.flush();
+          if (session.persistenceFailed) throw session.persistenceFailure;
+        },
         close: async () => {
           if (closed) return;
           closed = true;
@@ -591,7 +618,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           let failure: unknown;
           try {
             const interrupted = session.record.turnState?.status === "running";
-            persist(session, interrupted ? {
+            await persist(session, interrupted ? {
               ...session.record.turnState,
               status: "interrupted",
               lastStopReason: "connection_closed",
@@ -619,7 +646,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         runtime.agent.refreshSystemPrompt();
         runtime.registry.todos = recoverSessionTodos(runtime.agent.messages);
         session.activeToolCallIds.clear();
-        persist(session, wasRunning || sealedUnknownOutcome ? {
+        await persist(session, wasRunning || sealedUnknownOutcome ? {
           status: "interrupted",
           startedAt: record.turnState?.startedAt,
           recoveredAt: new Date().toISOString(),
@@ -627,7 +654,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           activeToolCallIds: [],
         } : { ...(record.turnState ?? { status: "idle" }), activeToolCallIds: [] });
       } else {
-        persist(session, { status: "idle", activeToolCallIds: [] });
+        await persist(session, { status: "idle", activeToolCallIds: [] });
       }
       sessions.set(record.id, session);
       return session;
@@ -730,7 +757,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     if (!session) throw new acp.RequestError(-32002, "ACP session not found.");
     if (!MODE_IDS.has(params.modeId)) throw new acp.RequestError(-32602, "Unknown Neko permission mode.");
     session.runtime.registry.mode = params.modeId as PermissionMode;
-    persist(session, session.record.turnState);
+    await persist(session, session.record.turnState);
     await client.notify(acp.methods.client.session.update, {
       sessionId: params.sessionId,
       update: { sessionUpdate: "current_mode_update", currentModeId: params.modeId },
@@ -776,7 +803,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     session.runtime.agent.setProvider(provider);
     session.runtime.agent.setMaxContextTokens(current.contextWindow);
     session.runtime.agent.refreshSystemPrompt();
-    persist(session, session.record.turnState);
+    await persist(session, session.record.turnState);
     const updated = configOptions(current);
     await client.notify(acp.methods.client.session.update, {
       sessionId: session.sessionId,
@@ -857,7 +884,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       const answerPromise = runtime.agent.run(input.text, pending.signal, input.images.length ? input.images : undefined);
       const lastUser = [...runtime.agent.messages].reverse().find((message: any) => message?.role === "user" && message._neko_internal !== true);
       if (lastUser && !lastUser._neko_acp_message_id) lastUser._neko_acp_message_id = `msg_${randomUUID()}`;
-      persist(session, session.record.turnState);
+      await persist(session, session.record.turnState);
       const answer = await answerPromise;
       await session.flush();
       const stopReason = !pending.signal.aborted && answer === "[interrupted]"
@@ -871,7 +898,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       session.record.turnState = interruptedMutation
         ? { status: "interrupted", lastStopReason: stopReason, activeToolCallIds: [...session.activeToolCallIds] }
         : { status: "idle", lastStopReason: stopReason, activeToolCallIds: [] };
-      persist(session, session.record.turnState);
+      await persist(session, session.record.turnState);
       await syncSessionState(session, client);
       return { stopReason };
     } catch (error) {
@@ -882,7 +909,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         lastStopReason: pending.signal.aborted ? "cancelled" : "error",
         activeToolCallIds: [...session.activeToolCallIds],
       };
-      persist(session, session.record.turnState);
+      await persist(session, session.record.turnState);
       throw error;
     } finally {
       signal.removeEventListener("abort", abort);

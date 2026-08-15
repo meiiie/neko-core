@@ -7,6 +7,7 @@
  * interruption in that window leaves an unparseable file that loaders then silently drop.
  */
 import { renameSync, rmSync, writeFileSync } from "node:fs";
+import { rename, rm, writeFile } from "node:fs/promises";
 
 let counter = 0;
 
@@ -18,5 +19,18 @@ export function atomicWriteFileSync(path: string, data: string, mode?: number): 
   } catch (err) {
     try { rmSync(tmp, { force: true }); } catch { /* best effort cleanup */ }
     throw err; // never leave the target corrupt: on failure the original bytes are still intact
+  }
+}
+
+/** Async counterpart for event-loop-facing adapters. The durability contract is identical to the
+ * synchronous helper, but slow disks and antivirus scans cannot freeze terminal input/rendering. */
+export async function atomicWriteFile(path: string, data: string, mode?: number): Promise<void> {
+  const tmp = `${path}.tmp-${process.pid}-${counter++}`;
+  try {
+    await writeFile(tmp, data, { encoding: "utf-8", ...(mode === undefined ? {} : { mode }) });
+    await rename(tmp, path);
+  } catch (err) {
+    try { await rm(tmp, { force: true }); } catch { /* best effort cleanup */ }
+    throw err;
   }
 }

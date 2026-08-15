@@ -53,6 +53,7 @@ await runAcpServer({
         provider,
         tools: registry,
         maxSteps: 3,
+        onCheckpoint: options.onCheckpoint,
         onDelta: options.onDelta,
         onEvent: options.onEvent,
         verifyBeforeExit: false,

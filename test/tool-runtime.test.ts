@@ -650,6 +650,48 @@ test("pre_tool_use hook blocks a tool on non-zero exit, allows on zero", async (
   expect(await allowed.execute("ls", {})).not.toContain("Blocked");
 });
 
+test("slow pre/post hooks never freeze the event loop", async () => {
+  const { root, reg } = makeReg("auto", () => true);
+  writeFileSync(join(root, "source.txt"), "ready", "utf8");
+  const pre = join(root, "slow-pre.cjs");
+  const post = join(root, "slow-post.cjs");
+  const postMarker = join(root, "post-finished.txt");
+  writeFileSync(pre, "setTimeout(() => process.exit(0), 200);\n", "utf8");
+  writeFileSync(post, `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(postMarker)}, 'done'), 300);\n`, "utf8");
+  reg.hooks = { preToolUse: `\"${process.execPath}\" \"${pre}\"` };
+  let ticks = 0;
+  const ticker = setInterval(() => { ticks++; }, 10);
+  try {
+    expect(await reg.execute("read_file", { path: "source.txt" })).toContain("ready");
+    expect(ticks).toBeGreaterThan(3);
+    reg.hooks = { postToolUse: `\"${process.execPath}\" \"${post}\"` };
+    const ticksBeforePost = ticks;
+    expect(await reg.execute("read_file", { path: "source.txt" })).toContain("ready");
+    expect(ticks).toBeGreaterThan(ticksBeforePost); // ordered hook runs, but the UI clock keeps moving
+    const deadline = Date.now() + 3_000;
+    while (!existsSync(postMarker) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(readFileSync(postMarker, "utf8")).toBe("done");
+  } finally {
+    clearInterval(ticker);
+  }
+});
+
+test("Esc aborts a running pre-tool hook instead of waiting for its timeout", async () => {
+  const { root, reg } = makeReg("auto", () => true);
+  writeFileSync(join(root, "source.txt"), "ready", "utf8");
+  const hook = join(root, "stuck-pre.cjs");
+  writeFileSync(hook, "setTimeout(() => process.exit(0), 60000);\n", "utf8");
+  reg.hooks = { preToolUse: `\"${process.execPath}\" \"${hook}\"` };
+  const controller = new AbortController();
+  let timerFired = false;
+  setTimeout(() => { timerFired = true; controller.abort(); }, 100);
+  const started = Date.now();
+  const result = await reg.execute("read_file", { path: "source.txt" }, controller.signal);
+  expect(result).toContain("interrupted");
+  expect(timerFired).toBe(true);
+  expect(Date.now() - started).toBeLessThan(8_000);
+}, { timeout: 10_000 });
+
 test("read-only task skips parent hooks and denied generic task runs no hook", async () => {
   const { root, reg } = makeReg("default", () => false);
   const marker = join(root, "parent-hook.txt");

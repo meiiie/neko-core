@@ -570,7 +570,9 @@ test("auto mode: a safe tool call + markdown answer render end-to-end", async ()
   stdin.write("look around");
   await tick(20);
   stdin.write("\r"); // Enter
-  await tick(250);
+  // Durable checkpoints deliberately yield while the session snapshot is published. Assert the
+  // observable UI result instead of assuming a particular local-disk latency.
+  expect(await until(() => frames.join("\n").includes("Done listing"))).toBe(true);
   const all = frames.join("\n");
   expect(all).toContain("> look around"); // user line
   expect(all).toContain("List"); // tool-call line (Claude-style label for ls)

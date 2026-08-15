@@ -188,6 +188,10 @@ export interface AgentOptions {
   maxSteps?: number;
   systemPrompt?: string;
   onEvent?: EventHook;
+  /** Host durability barrier. The Agent awaits it before a provider request, before model-requested
+   * tools can cause side effects, and before returning a final answer. Periodic stream checkpoints
+   * are queued without blocking token delivery; their first failure is raised at the next barrier. */
+  onCheckpoint?: () => void | Promise<void>;
   /** When set, assistant content is streamed chunk-by-chunk as it arrives. */
   onDelta?: DeltaHook;
   /** Re-evaluated before every turn (env + project context), so model/cwd/git/NEKO.md stay

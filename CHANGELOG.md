@@ -6,6 +6,26 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.6] — 2026-08-15
+
+### Fixed
+
+- **Long turns no longer make the terminal appear completely frozen during session checkpoints or
+  helper commands.** Session serialization/publication, Git metadata lookup, hooks, PDF extraction,
+  the Windows computer fallback, and built-in filesystem walks now yield to Ink's event loop. The
+  timer keeps painting and Esc/Ctrl+C remains actionable while those operations are in progress.
+- Durable checkpoints are coalesced without weakening crash safety: a tool call is on disk before its
+  side effect starts, its result is checkpointed afterward, and ACP still recovers an interrupted
+  mutation as outcome-unknown instead of executing it twice.
+
+### Changed
+
+- Built-in search, glob, list, and large verified reads are asynchronous and cancellable. Search skips
+  individual files above 8 MiB to bound memory/event-loop pressure; use `read_file` with paging when a
+  specific large file must be inspected.
+- Set `NEKO_DEBUG=ui-stall` to record a silent diagnostic breadcrumb when event-loop lag reaches one
+  second. Normal sessions receive no additional UI noise.
+
 ## [0.24.5] — 2026-08-15
 
 ### Added

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { acquireSessionLease, isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, setSessionsDir } from "../src/adapters/session.ts";
+import { acquireSessionLease, AsyncSessionWriter, isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, saveSessionAsync, setSessionsDir } from "../src/adapters/session.ts";
 
 // Isolate from the user's real ~/.neko-core: these tests WRITE session files. Pointing HOME at a
 // temp dir was the old way, but env mutation across bun test files is racy (see bun-test-env-races)
@@ -48,6 +48,61 @@ test("save / load / list round-trip", () => {
   } finally {
     rmSync(join(TEST_DIR, `${id}.json`), { force: true });
   }
+});
+
+test("async checkpoints yield to the event loop and preserve the last readable backup", async () => {
+  const id = `${newSessionId()}-async`;
+  const base = {
+    id,
+    createdAt: new Date().toISOString(),
+    updatedAt: "",
+    cwd: "/tmp/neko-session-async",
+    model: "m",
+    messages: Array.from({ length: 384 }, (_, index) => ({
+      role: index % 2 ? "assistant" : "user",
+      content: `${index}:` + "x".repeat(32 * 1024),
+    })),
+  };
+  let ticks = 0;
+  const ticker = setInterval(() => { ticks++; }, 1);
+  try {
+    await saveSessionAsync(base);
+    await saveSessionAsync({ ...base, messages: [...base.messages, { role: "assistant", content: "newest" }] });
+    expect(ticks).toBeGreaterThan(0);
+    expect(loadSession(id)?.messages.at(-1)?.content).toBe("newest");
+    writeFileSync(join(TEST_DIR, `${id}.json`), "{broken", "utf8");
+    expect(loadSession(id)?.messages).toHaveLength(base.messages.length);
+  } finally {
+    clearInterval(ticker);
+    rmSync(join(TEST_DIR, `${id}.json`), { force: true });
+    rmSync(join(TEST_DIR, `${id}.json.bak`), { force: true });
+  }
+}, { timeout: 30_000 });
+
+test("AsyncSessionWriter coalesces pending generations and never overlaps writes", async () => {
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const saved: string[] = [];
+  let active = 0;
+  let maxActive = 0;
+  const writer = new AsyncSessionWriter(async (session) => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    saved.push(String(session.messages[0]?.content));
+    if (saved.length === 1) await firstGate;
+    active--;
+  });
+  const make = (content: string) => ({
+    id: newSessionId(), createdAt: new Date().toISOString(), updatedAt: "", cwd: "/tmp", model: "m",
+    messages: [{ role: "user", content }],
+  });
+  const first = writer.save(make("first"));
+  const skipped = writer.save(make("skipped"));
+  const latest = writer.save(make("latest"));
+  releaseFirst();
+  await Promise.all([first, skipped, latest, writer.flush()]);
+  expect(saved).toEqual(["first", "latest"]);
+  expect(maxActive).toBe(1);
 });
 
 test("durable metadata round-trips and a corrupt primary falls back to the last good checkpoint", () => {

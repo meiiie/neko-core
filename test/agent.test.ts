@@ -155,6 +155,58 @@ test("social turns keep full context, tools, reasoning preference, and conversat
   expect(DEFAULT_SYSTEM_PROMPT).toContain("repeated greetings");
 });
 
+test("durable checkpoint blocks provider admission without blocking the event loop", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let checkpoints = 0;
+  let providerCalls = 0;
+  const agent = new Agent({
+    provider: { async complete() { providerCalls++; return { content: "done", tool_calls: [] }; } } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    onCheckpoint: () => ++checkpoints === 1 ? gate : undefined,
+  });
+  let timerFired = false;
+  setTimeout(() => { timerFired = true; }, 0);
+  const running = agent.run("persist me first");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(timerFired).toBe(true);
+  expect(providerCalls).toBe(0);
+  release();
+  expect(await running).toBe("done");
+  expect(providerCalls).toBe(1);
+  expect(checkpoints).toBeGreaterThanOrEqual(2);
+});
+
+test("a tool call and its result cross durable barriers around the side effect", async () => {
+  let call = 0;
+  let releaseTool!: () => void;
+  const toolGate = new Promise<void>((resolve) => { releaseTool = resolve; });
+  let checkpoints = 0;
+  let executed = false;
+  const tools = {
+    schemas: () => [{ type: "function", function: { name: "write_file", parameters: { type: "object", required: ["path", "content"] } } }],
+    execute: async () => { executed = true; return "Wrote x.txt  (+1)"; },
+  } as any;
+  const agent = new Agent({
+    provider: {
+      async complete() {
+        if (call++ === 0) return { content: null, tool_calls: [{ id: "write-1", name: "write_file", arguments: { path: "x.txt", content: "x" } }] };
+        return { content: "done", tool_calls: [] };
+      },
+    } as any,
+    tools,
+    onCheckpoint: () => ++checkpoints === 2 ? toolGate : undefined,
+  });
+  const running = agent.run("write it");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(checkpoints).toBe(2);
+  expect(executed).toBe(false);
+  releaseTool();
+  expect(await running).toBe("done");
+  expect(executed).toBe(true);
+  expect(checkpoints).toBeGreaterThanOrEqual(5); // prompt, call, result, next prompt, final
+});
+
 test("multi-step turns publish booked plus current-step input estimates", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-usage-est-"));
   writeFileSync(join(root, "a.txt"), "orig");

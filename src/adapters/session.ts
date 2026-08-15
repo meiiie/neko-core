@@ -5,10 +5,11 @@
  */
 import { randomBytes } from "node:crypto";
 import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, unlinkSync, writeSync } from "node:fs";
+import { lstat, mkdir, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { atomicWriteFileSync } from "../shared/atomic.ts";
+import { atomicWriteFile, atomicWriteFileSync } from "../shared/atomic.ts";
 import { hasTerminalControl, terminalSafeText } from "../shared/terminal-text.ts";
-import { trustedGitOutput } from "./trusted-git.ts";
+import { trustedGitOutput, trustedGitOutputAsync } from "./trusted-git.ts";
 import { homeDir } from "../shared/home.ts";
 import { dirname, join, resolve } from "node:path";
 
@@ -222,6 +223,7 @@ function readSessionPath(path: string, expectedId: string): Session | null {
 // git (a blocking spawnSync, up to 2s) on every per-turn save — that hitch adds up and is what made
 // the session test flaky under load.
 const branchCache = new Map<string, string>();
+const branchPromiseCache = new Map<string, Promise<string>>();
 function currentBranch(cwd: string): string {
   const cached = branchCache.get(cwd);
   if (cached !== undefined) return cached;
@@ -229,6 +231,26 @@ function currentBranch(cwd: string): string {
   branch = trustedGitOutput(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
   branchCache.set(cwd, branch);
   return branch;
+}
+
+async function currentBranchAsync(cwd: string): Promise<string> {
+  const cached = branchCache.get(cwd);
+  if (cached !== undefined) return cached;
+  let pending = branchPromiseCache.get(cwd);
+  if (!pending) {
+    pending = trustedGitOutputAsync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])
+      .then((branch) => {
+        branchCache.set(cwd, branch);
+        branchPromiseCache.delete(cwd);
+        return branch;
+      }, () => {
+        branchCache.set(cwd, "");
+        branchPromiseCache.delete(cwd);
+        return "";
+      });
+    branchPromiseCache.set(cwd, pending);
+  }
+  return pending;
 }
 
 export function newSessionId(): string {
@@ -253,6 +275,140 @@ export function saveSession(session: Session): void {
   const previous = existsSync(path) ? readSessionPath(path, session.id) : null;
   if (previous) atomicWriteFileSync(`${path}.bak`, serializeSession(previous));
   atomicWriteFileSync(path, serialized);
+}
+
+const yieldToEventLoop = () => new Promise<void>((resolveYield) => setTimeout(resolveYield, 0));
+
+async function serializeSessionAsync(session: Session): Promise<string> {
+  const messageJson: string[] = [];
+  let messageChars = 2; // []
+  let lastYield = performance.now();
+  for (const message of session.messages) {
+    const serialized = JSON.stringify(message);
+    if (serialized === undefined) throw new Error(`Invalid session '${session.id}'`);
+    if (messageJson.length) messageChars++;
+    messageChars += serialized.length;
+    messageJson.push(serialized);
+    if (performance.now() - lastYield >= 8) {
+      await yieldToEventLoop();
+      lastYield = performance.now();
+    }
+  }
+  session.bytes = messageChars;
+  if (!parseSession(session, session.id)) throw new Error(`Invalid session '${session.id}'`);
+  const { messages: _messages, ...metadata } = session;
+  const head = JSON.stringify(metadata);
+  const serialized = `${head.slice(0, -1)},"messages":[${messageJson.join(",")}]}`;
+  if (Buffer.byteLength(serialized, "utf8") > MAX_SESSION_BYTES) {
+    throw new Error(`Session '${session.id}' exceeds 64 MiB`);
+  }
+  return serialized;
+}
+
+async function readSessionPathAsync(path: string, expectedId: string): Promise<{ session: Session; text: string } | null> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    const before = await lstat(path);
+    if (!before.isFile() || before.size > MAX_SESSION_BYTES) return null;
+    const flags = fsConstants.O_RDONLY | (process.platform === "win32"
+      ? 0
+      : (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
+    handle = await open(path, flags);
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.size > MAX_SESSION_BYTES
+      || opened.dev !== before.dev || opened.ino !== before.ino) return null;
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    if (!after.isFile() || after.dev !== opened.dev || after.ino !== opened.ino
+      || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || bytes.byteLength !== opened.size) return null;
+    const text = bytes.toString("utf-8");
+    const session = parseSession(JSON.parse(text), expectedId);
+    return session ? { session, text } : null;
+  } catch {
+    return null;
+  } finally {
+    try { await handle?.close(); } catch { /* already closed */ }
+  }
+}
+
+/** Event-loop-friendly durable checkpoint. Serialization yields between messages, filesystem I/O is
+ * asynchronous, and the previous readable primary remains the backup before the atomic publish. */
+export async function saveSessionAsync(session: Session): Promise<void> {
+  const path = sessionPath(session.id);
+  if (!path || !parseSession(session, session.id)) throw new Error(`Invalid session '${session.id}'`);
+  await mkdir(sessionsDir(), { recursive: true });
+  session.updatedAt = new Date().toISOString();
+  session.branch = await currentBranchAsync(session.cwd);
+  const serialized = await serializeSessionAsync(session);
+  const previous = await readSessionPathAsync(path, session.id);
+  if (previous) await atomicWriteFile(`${path}.bak`, previous.text);
+  await atomicWriteFile(path, serialized);
+}
+
+interface SessionSaveWaiter {
+  generation: number;
+  resolve(): void;
+  reject(error: unknown): void;
+}
+
+/** Latest-wins checkpoint queue. A long save never creates an unbounded 750ms checkpoint backlog;
+ * callers that require durability can await their generation before provider/tool side effects. */
+export class AsyncSessionWriter {
+  private generation = 0;
+  private pending: { generation: number; create: () => Session | Promise<Session> } | null = null;
+  private running: Promise<void> | null = null;
+  private readonly waiters: SessionSaveWaiter[] = [];
+  private latest: Promise<void> = Promise.resolve();
+
+  constructor(private readonly saver: (session: Session) => Promise<void> = saveSessionAsync) {}
+
+  save(session: Session): Promise<void> {
+    return this.saveLazy(() => ({ ...session, messages: [...session.messages] }));
+  }
+
+  /** Lazy form for adapters that must redact/copy a large trajectory. Coalesced generations that
+   * never reach disk also never pay that CPU/memory cost. */
+  saveLazy(create: () => Session | Promise<Session>): Promise<void> {
+    const generation = ++this.generation;
+    this.pending = { generation, create };
+    const result = new Promise<void>((resolve, reject) => this.waiters.push({ generation, resolve, reject }));
+    this.latest = result;
+    if (!this.running) this.running = this.drain();
+    return result;
+  }
+
+  /** Wait for the newest generation known at call time. */
+  flush(): Promise<void> {
+    return this.latest;
+  }
+
+  private settle(generation: number, ok: boolean, error?: unknown): void {
+    for (let index = this.waiters.length - 1; index >= 0; index--) {
+      const waiter = this.waiters[index];
+      if (waiter.generation > generation) continue;
+      this.waiters.splice(index, 1);
+      if (ok) waiter.resolve();
+      else waiter.reject(error);
+    }
+  }
+
+  private async drain(): Promise<void> {
+    try {
+      while (this.pending) {
+        const next = this.pending;
+        this.pending = null;
+        try {
+          await this.saver(await next.create());
+          this.settle(next.generation, true);
+        } catch (error) {
+          this.settle(next.generation, false, error);
+        }
+      }
+    } finally {
+      this.running = null;
+      if (this.pending) this.running = this.drain();
+    }
+  }
 }
 
 function serializeSession(session: Session): string {

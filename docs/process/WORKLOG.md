@@ -3,6 +3,38 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-15 - responsive checkpoints and subprocesses (intermittent TUI freeze)
+
+Intermittent whole-terminal pauses were traced to synchronous work on Ink's event-loop thread, not to
+provider reasoning. The TUI synchronously serialized and atomically saved the entire session at step,
+tool, checkpoint, and final boundaries; the same path performed a bounded synchronous Git lookup. Native
+tool execution also used `spawnSync` for hooks, PDF extraction, and the Windows computer fallback, while
+search/glob/ls and large verified reads could walk or consume substantial input without yielding. During
+those windows Ink could neither repaint its timer nor receive Esc/Ctrl+C, then appeared to "unfreeze" when
+the blocking operation returned.
+
+Session publication now has an async atomic path and a latest-wins `AsyncSessionWriter`: it coalesces
+periodic snapshots, yields while copying large trajectories, preserves the previous readable checkpoint as
+a backup, and provides explicit durable barriers before provider admission, before a tool side effect, and
+after its result. CLI and ACP use the same writer. ACP crash recovery still records an attempted mutation
+before execution and seals an unanswered call as `unknown_outcome`; its process-kill regression proves the
+mutation is not replayed. Persistence failure aborts the active turn rather than silently claiming success.
+
+Normal-path hooks and external helper processes now use bounded async spawn/capture with AbortSignal and
+the existing process-tree terminator. Large descriptor-verified reads and filesystem search/list/glob paths
+are asynchronous, cancellable, and periodically yield; search skips individual files above 8 MiB. A silent
+`NEKO_DEBUG=ui-stall` event-loop breadcrumb reports >=1 second lag with active-turn state for future
+third-party/runtime stalls without adding normal UI noise. The only remaining synchronous subprocesses in
+the runtime are bounded Windows process-tree discovery/termination used during cancellation itself.
+
+Regression coverage proves timers continue during durable session writes and slow pre/post hooks, Esc
+terminates a 60-second pre-hook promptly, side effects cannot cross an unpersisted tool-call barrier, and
+ACP survives a forced mid-mutation process kill. The final unsharded suite passed 1,400 tests with 12
+conditional skips, 0 failures, and 7,823 assertions across 128 files (272.26 seconds). Both TypeScript
+compilers, source doctor, policy, production compile, UI probe, real-PTY keyboard probe, and ACP binary smoke
+passed. Bun emitted its previously isolated Windows `tsconfig.build.json` directory-mismatch diagnostic but
+returned success and the compiled artifact passed every post-build probe.
+
 ## 2026-08-15 - v0.24.5 candidate: path-scoped global autonomy and transient SRT retry
 
 A real `--yolo` session needed to maintain a cross-project research ledger under

@@ -168,6 +168,9 @@ export class Agent {
   private readonly maxSteps: number;
   private readonly systemPrompt: string;
   private readonly onEvent?: EventHook;
+  private readonly onCheckpoint?: () => void | Promise<void>;
+  private checkpointFailure: unknown;
+  private hasCheckpointFailure = false;
   private readonly onDelta?: DeltaHook;
   private readonly dynamicContext?: () => string;
   private maxContextTokens: number;
@@ -203,6 +206,7 @@ export class Agent {
     this.maxSteps = opts.maxSteps ?? 20;
     this.systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.onEvent = opts.onEvent;
+    this.onCheckpoint = opts.onCheckpoint;
     this.onDelta = opts.onDelta;
     this.dynamicContext = opts.dynamicContext;
     this.maxContextTokens = opts.maxContextTokens ?? 131072;
@@ -768,6 +772,7 @@ export class Agent {
     let budgetNudges = 0; // SOTA "completion predicate": remind the model to LAND the deliverable near the budget edge
     for (let step = 0; step < this.maxSteps; step++) {
       this.emit("step", step + 1);
+      await this.durableCheckpoint(); // user prompt / prior tool result is durable before provider work
       if (signal?.aborted) return "[interrupted]";
       // In-loop overflow guard: within ONE turn (e.g. many huge browser snapshots) context can grow
       // past the window with no chance for the between-turn UI compaction to run. Compact here BEFORE a
@@ -818,11 +823,12 @@ export class Agent {
       let streamedContent = "";
       let managedTrace = false;
       let lastCheckpointAt = 0;
-      const checkpoint = (force = false) => {
+      const checkpoint = (force = false, queueDurable = true) => {
         const now = Date.now();
         if (!force && lastCheckpointAt && now - lastCheckpointAt < 750) return;
         lastCheckpointAt = now;
         this.emit("checkpoint", { reason: "inflight" });
+        if (queueDurable) this.queueDurableCheckpoint();
       };
       const ensureInflight = () => {
         if (!inflightAssistant) {
@@ -870,12 +876,14 @@ export class Agent {
           // and then lose the network/terminal before returning. Resume must know that call was attempted;
           // sealDanglingToolCalls() marks its outcome unknown when no result was journaled.
           finalizeInflight(null, [call]);
-          checkpoint(true);
+          checkpoint(true, false);
           this.emit("tool_call", call);
+          await this.durableCheckpoint();
           const observation = await this.safeExecute(call, signal);
           noteTool(call, observation);
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
-          this.emit("tool_result", { call, observation }); // UI persists after the pair is materialized
+          this.emit("tool_result", { call, observation });
+          await this.durableCheckpoint(); // completed outcome is durable before the managed provider continues
           return observation;
         });
         managedToolChain = task.then(() => undefined, () => undefined);
@@ -1024,12 +1032,14 @@ export class Agent {
           });
           continue;
         }
+        await this.durableCheckpoint();
         this.emit("final", final);
         return final;
       }
 
       finalizeInflight(response.content, toolCalls, response.continuation);
-      checkpoint(true); // the call itself is durable before a slow or state-changing tool starts
+      checkpoint(true, false);
+      await this.durableCheckpoint(); // the call itself is durable before a slow or state-changing tool starts
       if (signal?.aborted) return "[interrupted]";
       let stepHadUnproductiveResult = false;
 
@@ -1049,6 +1059,7 @@ export class Agent {
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observations[i]) });
           this.emit("tool_result", { call, observation: observations[i] });
         });
+        await this.durableCheckpoint();
       } else {
         for (const call of toolCalls) {
           if (signal?.aborted) return "[interrupted]"; // stop promptly between tools on Esc
@@ -1093,6 +1104,7 @@ export class Agent {
             this.consecutiveUnproductive = Agent.isUnproductiveResult(observation) ? this.consecutiveUnproductive + 1 : 0;
             this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
             this.emit("tool_result", { call, observation });
+            await this.durableCheckpoint();
             // Tool-error recovery (Self-Harness pattern, arXiv 2606.09498 - the paper's single biggest win
             // was a recovery directive injected AT the point of a tool error): on the FIRST failure of a
             // MUTATING tool, tell the model HOW to recover - models otherwise flail (blind re-runs, deleting
@@ -1158,6 +1170,7 @@ export class Agent {
     // Step limit reached: instead of an abrupt stop, ask for one tool-less wrap-up so the user gets
     // a useful summary of what was done and what remains (don't leave the task half-narrated).
     this.emit("max_steps", this.maxSteps);
+    let final: string;
     try {
       const wrap = await this.provider.complete(
         cleanProviderMessages([...this.providerHistory(), { role: "user", content: `Step limit (${this.maxSteps}) reached. Stop calling tools and concisely summarize what you did and what's left.`, _neko_internal: true }]),
@@ -1166,17 +1179,48 @@ export class Agent {
         signal,
       );
       this.cost.add(wrap.usage); // the wrap-up call costs tokens too — count it
-      const final = wrap.content?.trim() || `[stopped: reached max_steps=${this.maxSteps}]`;
-      this.messages.push({ role: "assistant", content: final });
-      this.emit("final", final);
-      return final;
+      final = wrap.content?.trim() || `[stopped: reached max_steps=${this.maxSteps}]`;
     } catch {
       return `[stopped: reached max_steps=${this.maxSteps}]`;
     }
+    this.messages.push({ role: "assistant", content: final });
+    await this.durableCheckpoint();
+    this.emit("final", final);
+    return final;
   }
 
   private emit(kind: string, data: any): void {
     this.onEvent?.(kind, data);
+  }
+
+  private queueDurableCheckpoint(): void {
+    if (!this.onCheckpoint || this.hasCheckpointFailure) return;
+    try {
+      void Promise.resolve(this.onCheckpoint()).catch((error) => {
+        if (!this.hasCheckpointFailure) this.checkpointFailure = error;
+        this.hasCheckpointFailure = true;
+      });
+    } catch (error) {
+      this.checkpointFailure = error;
+      this.hasCheckpointFailure = true;
+    }
+  }
+
+  private async durableCheckpoint(): Promise<void> {
+    if (this.hasCheckpointFailure) {
+      const error = this.checkpointFailure;
+      this.hasCheckpointFailure = false;
+      this.checkpointFailure = undefined;
+      throw error;
+    }
+    if (!this.onCheckpoint) return;
+    await this.onCheckpoint();
+    if (this.hasCheckpointFailure) {
+      const error = this.checkpointFailure;
+      this.hasCheckpointFailure = false;
+      this.checkpointFailure = undefined;
+      throw error;
+    }
   }
 }
 

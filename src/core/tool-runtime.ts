@@ -18,14 +18,15 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
+  read,
+  readFile,
   readFileSync,
-  readSync,
-  readdirSync,
   realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { readdir as readdirAsync, rm as rmAsync, stat as statAsync, writeFile as writeFileAsync } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -139,6 +140,7 @@ const MAX_INLINE_READ_BYTES = MAX_READ_BODY_CHARS * 4; // UTF-8 is <= 4 bytes/ch
 const MAX_IMAGE_READ_BYTES = 20 * 1024 * 1024;
 const MAX_PDF_READ_BYTES = 32 * 1024 * 1024;
 const MAX_SEARCH_MATCHES = 200;
+const MAX_SEARCH_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_LIST = 200;
 const MAX_OUTPUT_CHARS = 20_000;
 const BASH_TIMEOUT_MS = 60_000;
@@ -158,6 +160,19 @@ const WINDOWS_TASKKILL = process.platform === "win32"
   : null;
 
 type BashChild = ReturnType<typeof spawn>;
+
+function readDescriptor(fd: number): Promise<Buffer> {
+  return new Promise((resolveRead, rejectRead) => {
+    readFile(fd, (error, bytes) => error ? rejectRead(error) : resolveRead(bytes));
+  });
+}
+
+function readDescriptorChunk(fd: number, buffer: Buffer): Promise<number> {
+  return new Promise((resolveRead, rejectRead) => {
+    read(fd, buffer, 0, buffer.length, null, (error, bytesRead) =>
+      error ? rejectRead(error) : resolveRead(bytesRead));
+  });
+}
 
 /** Wait for the direct shell to close without letting a broken child stall cancellation forever. */
 function waitForBashClose(child: BashChild, timeoutMs: number): Promise<void> {
@@ -331,6 +346,97 @@ export async function terminateProcessTree(child: BashChild): Promise<boolean> {
   signalPosixBashTree(child, true);
   await waitForBashClose(child, BASH_FORCE_WAIT_MS);
   return await waitForPosixProcessGroupGone(child, BASH_FORCE_WAIT_MS);
+}
+
+interface ResponsiveChildResult {
+  status: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+  error?: Error;
+  timedOut: boolean;
+  aborted: boolean;
+  cleanupConfirmed: boolean;
+}
+
+/** Bounded subprocess capture for UI-facing helpers. Unlike spawnSync, the terminal can render and
+ * process Esc/Ctrl+C while the child is running. Timeout/abort owns and verifies the whole tree. */
+async function runResponsiveChild(
+  file: string,
+  args: string[],
+  options: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    timeoutMs: number;
+    maxOutputBytes: number;
+    shell?: boolean;
+    signal?: AbortSignal;
+  },
+): Promise<ResponsiveChildResult> {
+  if (options.signal?.aborted) {
+    return { status: null, signal: null, stdout: "", stderr: "", timedOut: false, aborted: true, cleanupConfirmed: true };
+  }
+  let child: BashChild;
+  try {
+    child = spawn(file, args, {
+      cwd: options.cwd,
+      env: options.env,
+      shell: options.shell,
+      detached: process.platform !== "win32",
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    return {
+      status: null, signal: null, stdout: "", stderr: "", error: error as Error,
+      timedOut: false, aborted: false, cleanupConfirmed: true,
+    };
+  }
+  let stdout = "", stderr = "";
+  const append = (target: "stdout" | "stderr", chunk: any) => {
+    const value = String(chunk);
+    if (target === "stdout") stdout += value.slice(0, Math.max(0, options.maxOutputBytes - stdout.length));
+    else stderr += value.slice(0, Math.max(0, options.maxOutputBytes - stderr.length));
+  };
+  child.stdout?.on("data", (chunk) => append("stdout", chunk));
+  child.stderr?.on("data", (chunk) => append("stderr", chunk));
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let abortResolve: (() => void) | undefined;
+  const onAbort = () => abortResolve?.();
+  const outcome = await Promise.race([
+    new Promise<{ kind: "close"; status: number | null; signal: NodeJS.Signals | null }>((resolveClose) =>
+      child.once("close", (status, signal) => resolveClose({ kind: "close", status, signal }))),
+    new Promise<{ kind: "error"; error: Error }>((resolveError) =>
+      child.once("error", (error) => resolveError({ kind: "error", error }))),
+    new Promise<{ kind: "timeout" }>((resolveTimeout) => {
+      timeout = setTimeout(() => resolveTimeout({ kind: "timeout" }), options.timeoutMs);
+      timeout.unref?.();
+    }),
+    new Promise<{ kind: "abort" }>((resolveAbort) => {
+      if (!options.signal) return;
+      abortResolve = () => resolveAbort({ kind: "abort" });
+      options.signal.addEventListener("abort", onAbort, { once: true });
+    }),
+  ]);
+  if (timeout) clearTimeout(timeout);
+  options.signal?.removeEventListener("abort", onAbort);
+  if (outcome.kind === "close") {
+    return { status: outcome.status, signal: outcome.signal, stdout, stderr, timedOut: false, aborted: false, cleanupConfirmed: true };
+  }
+  if (outcome.kind === "error") {
+    return { status: null, signal: null, stdout, stderr, error: outcome.error, timedOut: false, aborted: false, cleanupConfirmed: true };
+  }
+  const cleanupConfirmed = await terminateProcessTree(child);
+  return {
+    status: null,
+    signal: null,
+    stdout,
+    stderr,
+    timedOut: outcome.kind === "timeout",
+    aborted: outcome.kind === "abort",
+    cleanupConfirmed,
+  };
 }
 
 const IGNORE_DIRS = new Set([
@@ -1073,14 +1179,20 @@ export class ToolRegistry {
     // A trusted hook is executable policy. Run it only after the native/MCP permission decision,
     // so a denied action cannot mutate through its hook. Read-only reviewer/explorer tasks skip
     // parent hooks entirely; their SAFE/parallel contract must remain side-effect free.
-    const runPreHook = (): string | null => {
-      if (!this.hooks?.preToolUse || (name === "task" && taskDelegatesReadOnly(args))) return null;
-      const r = spawnSync(this.hooks.preToolUse, {
-        shell: true, cwd: this.root, encoding: "utf-8", timeout: 10000,
+    const preHookApplies = Boolean(this.hooks?.preToolUse)
+      && !(name === "task" && taskDelegatesReadOnly(args));
+    const runPreHook = async (): Promise<string | null> => {
+      const r = await runResponsiveChild(this.hooks!.preToolUse!, [], {
+        shell: true, cwd: this.root, timeoutMs: 10_000, maxOutputBytes: 64 * 1024, signal,
         env: { ...scrubChildEnv(process.env, this.childSecretEnvNames), NEKO_TOOL: name, NEKO_ARGS: JSON.stringify(args) },
       });
+      if (r.aborted) return "(interrupted)";
       if (r.status !== 0) {
-        return `Blocked by pre_tool_use hook (exit ${r.status ?? "?"}): ${String(r.stderr || r.stdout || "").trim().slice(0, 200)}`;
+        const reason = r.timedOut ? "timed out after 10s"
+          : r.error ? r.error.message
+          : `exit ${r.status ?? "?"}`;
+        const cleanup = r.cleanupConfirmed ? "" : " (process-tree cleanup unconfirmed)";
+        return `Blocked by pre_tool_use hook (${reason})${cleanup}: ${String(r.stderr || r.stdout || "").trim().slice(0, 200)}`;
       }
       return null;
     };
@@ -1097,7 +1209,7 @@ export class ToolRegistry {
 
     // web_search: pick the best configured backend (SearXNG > Tavily > DuckDuckGo).
     if (name === "web_search") {
-      const blocked = runPreHook(); if (blocked) return blocked;
+      const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       if (!this.web) return "Error: web adapter is not configured";
       return this.web.search(String(args.query ?? ""), { searxngUrl: this.searxngUrl, backend: this.searchBackend, keepaliveMin: this.searxngKeepalive, tavilyKey: this.tavilyKey });
     }
@@ -1105,7 +1217,7 @@ export class ToolRegistry {
     // web_fetch: fetch the page, then (if a prompt + summarizer are available) extract just what
     // was asked via a single model pass — instead of dumping the whole page into context.
     if (name === "web_fetch") {
-      const blocked = runPreHook(); if (blocked) return blocked;
+      const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       if (!this.web) return "Error: web adapter is not configured";
       return this.web.fetch(this.root, args, this.scrapeBackend, this.summarize);
     }
@@ -1114,13 +1226,13 @@ export class ToolRegistry {
     if (name === "exit_plan_mode") {
       const ok = await this.prompt(name, args);
       if (!ok) return "The user did NOT approve the plan. Ask what to change, then call exit_plan_mode again with a revised plan.";
-      const blocked = runPreHook(); if (blocked) return blocked;
+      const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       return "Plan approved by the user. Implement it now.";
     }
 
     // todo_write: safe, no approval — record the plan for the REPL to render.
     if (name === "todo_write") {
-      const blocked = runPreHook(); if (blocked) return blocked;
+      const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       if (!Array.isArray(args.todos)) return "Error: todo_write needs a 'todos' array.";
       if (args.todos.length > 64) return "Error: todo_write accepts at most 64 items; keep the plan at the useful working level.";
       const next = args.todos.map((t: any) => ({ content: String(t?.content ?? "").trim(), status: String(t?.status ?? "") }));
@@ -1143,7 +1255,7 @@ export class ToolRegistry {
 
     // mcp_load: a SAFE meta-tool that pulls MCP tool schemas on demand (lazy mode). No side effects.
     if (name === "mcp_load" && this.mcp?.loadTools) {
-      const blocked = runPreHook(); if (blocked) return blocked;
+      const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       const names = Array.isArray(args.names) ? args.names.map(String) : [String(args.name ?? "")].filter(Boolean);
       return this.mcp.loadTools(names);
     }
@@ -1161,7 +1273,7 @@ export class ToolRegistry {
         const v = await this.checkAction(name, args);
         if (!v.ok) return `Blocked by adversarial check: ${v.reason || "looks unsafe"}`;
       }
-      const blocked = runPreHook(); if (blocked) return blocked;
+      const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       try {
         return await this.mcp.call(name, args, signal);
       } catch (error) {
@@ -1213,7 +1325,7 @@ export class ToolRegistry {
       const refusal = this.structuredMutationRefusal(structuredPath, String(args.path));
       if (refusal) return refusal;
     }
-    const blocked = runPreHook(); if (blocked) return blocked;
+    const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
 
     // A generic/custom child inherits mutating authority, so task reaches this point only after the
     // ordinary gated decision. reviewer/explorer are dynamically safe and capability-restricted by
@@ -1238,7 +1350,7 @@ export class ToolRegistry {
       }
       const out = nativeBackend ? await this.runNativeBackend(nativeBackend, name as NativeToolName, args, signal)
         : name === "bash" ? await this.runBash(args, signal)
-        : name === "read_file" ? await this.runReadFile(args)
+        : name === "read_file" ? await this.runReadFile(args, signal)
         : name === "disk_cleanup_scan" ? (this.readOutsideRoot
           ? await runDiskCleanupScan(signal)
           : "Error: disk_cleanup_scan is disabled because read_outside_root=false sets a hard project read wall.")
@@ -1250,6 +1362,7 @@ export class ToolRegistry {
           childSecretEnvNames: this.childSecretEnvNames,
           strictEditMatch: name === "edit" && Boolean(this.turnToolPolicy?.editTarget),
           exactEditTarget: name === "edit" ? this.turnToolPolicy?.editTarget?.absolute : undefined,
+          signal,
         });
       if (structuredPath) {
         const succeeded = typeof out === "string" && (name === "write_file" ? out.startsWith("Wrote ") : out.startsWith("Edited "));
@@ -1259,7 +1372,7 @@ export class ToolRegistry {
         const succeeded = typeof out === "string" && (name === "write_file" ? out.startsWith("Wrote ") : out.startsWith("Edited "));
         if (succeeded) this.remoteMutationPaths.add(String(args.path ?? "(unknown path)"));
       }
-      this.runPostHook(name, args, typeof out === "string" ? out : "[image]");
+      await this.runPostHook(name, args, typeof out === "string" ? out : "[image]", signal);
       return out;
     } catch (error) {
       if (structuredPath) this.finishStructuredMutation(structuredPath, false);
@@ -1269,7 +1382,7 @@ export class ToolRegistry {
 
   /** read_file with media awareness: images -> vision content (if enabled), PDFs -> extracted text,
    * everything else -> the line-numbered text path. */
-  private async runReadFile(args: Record<string, any>): Promise<string | any[]> {
+  private async runReadFile(args: Record<string, any>, signal?: AbortSignal): Promise<string | any[]> {
     const raw = requireArg(args, "path");
     const path = resolveForRead(this.root, raw, this.readOutsideRoot);
     if (!existsSync(path)) return `Error: no such file: ${raw}`;
@@ -1279,9 +1392,9 @@ export class ToolRegistry {
       try {
         const cap = IMAGE_EXTS.has(ext) ? MAX_IMAGE_READ_BYTES : MAX_PDF_READ_BYTES;
         if (opened.size > cap) return `Error: ${ext === "pdf" ? "PDF" : "image"} exceeds the ${Math.floor(cap / 1024 / 1024)} MiB read limit: ${raw}`;
-        const bytes = readFileSync(opened.fd);
+        const bytes = await readDescriptor(opened.fd);
         if (IMAGE_EXTS.has(ext)) return renderImageFile(bytes, raw, ext, this.vision);
-        return readPdfFile(bytes, raw, args, this.root, this.childSecretEnvNames);
+        return await readPdfFile(bytes, raw, args, this.root, this.childSecretEnvNames, signal);
       } finally {
         try { closeSync(opened.fd); } catch { /* Bun streams may close an adopted fd despite autoClose:false. */ }
       }
@@ -1432,14 +1545,20 @@ export class ToolRegistry {
       if (residentOutput === null) {
         if (action === "watch") return "Error: computer watch requires the resident Windows UIA host. Enable computer_use_resident, or use wait then read as the slower fallback.";
         if (action === "click" && args.mark !== undefined) return "Error: click by mark needs the resident host (computer_use_resident). Enable it and re-run ocr, or use a freshly verified screenshot with explicit x,y.";
-        const r = spawnSync(WINDOWS_POWERSHELL, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa], { encoding: "utf-8", cwd: this.root, env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
+        const r = await runResponsiveChild(
+          WINDOWS_POWERSHELL,
+          ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa],
+          { cwd: this.root, env, timeoutMs: 90_000, maxOutputBytes: 8 * 1024 * 1024, signal },
+        );
         // Surface failures instead of swallowing them into "(no output)" — the agent can only adapt to a
         // failure it can SEE (same contract as the rest of the loop). Timeout/spawn error -> r.error.
-        if (r.error) {
-          const timedOut = (r.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
-          return `Error: computer ${action} ${timedOut ? "timed out after 90s (the PowerShell action hung)" : "could not run PowerShell"}: ${r.error.message}`;
+        if (r.aborted) return `(interrupted)${r.cleanupConfirmed ? "" : "\n(process-tree cleanup could not be confirmed)"}`;
+        if (r.error) return `Error: computer ${action} could not run PowerShell: ${r.error.message}`;
+        if (r.timedOut) {
+          return `Error: computer ${action} timed out after 90s (the PowerShell action hung).` +
+            (r.cleanupConfirmed ? "" : " Process-tree cleanup could not be confirmed.");
         }
-        out = (r.stdout || "").trim(); err = (r.stderr || "").trim();
+        out = r.stdout.trim(); err = r.stderr.trim();
         if (r.status && r.status !== 0) return `Error: computer ${action} failed (PowerShell exit ${r.status}). ${err || out || ""}`.trim();
       }
       if (capturePath) {
@@ -1467,14 +1586,17 @@ export class ToolRegistry {
     }
   }
 
-  /** post_tool_use hook: fire-and-observe after a tool runs (logging/formatting; never blocks). */
-  private runPostHook(name: string, args: Record<string, any>, result: string): void {
+  /** post_tool_use hook: ordered after the tool, but asynchronous so rendering/input stay live. */
+  private async runPostHook(name: string, args: Record<string, any>, result: string, signal?: AbortSignal): Promise<void> {
     if (!this.hooks?.postToolUse) return;
     try {
-      spawnSync(this.hooks.postToolUse, {
-        shell: true, cwd: this.root, timeout: 10000,
+      const outcome = await runResponsiveChild(this.hooks.postToolUse, [], {
+        shell: true, cwd: this.root, timeoutMs: 10_000, maxOutputBytes: 64 * 1024, signal,
         env: { ...scrubChildEnv(process.env, this.childSecretEnvNames), NEKO_TOOL: name, NEKO_ARGS: JSON.stringify(args), NEKO_RESULT: String(result).slice(0, 4000) },
       });
+      if (outcome.status !== 0 && !outcome.aborted) {
+        debug("hook", () => `post_tool_use hook failed for ${name}: ${outcome.timedOut ? "timeout" : outcome.error?.message ?? `exit ${outcome.status ?? "?"}`}`);
+      }
       } catch (e) {
         debug("hook", () => `post_tool_use hook threw for ${name}: ${messageOf(e)}`);
       }
@@ -1493,7 +1615,7 @@ async function toolReadFile(root: string, args: Record<string, any>, opts: ToolO
     if (opened.size > MAX_INLINE_READ_BYTES) return await readLargeFileWindow(opened.fd, raw, offset, column, limit);
     let text: string;
     try {
-      text = readFileSync(opened.fd, "utf-8");
+      text = (await readDescriptor(opened.fd)).toString("utf-8");
     } catch {
       return `Error: cannot read file: ${raw}`;
     }
@@ -1656,10 +1778,15 @@ async function readLargeFileWindow(fd: number, raw: string, offset: number, colu
   // the same descriptor number. A bounded synchronous chunk loop keeps ownership deterministic.
   const decoder = new TextDecoder("utf-8");
   const buffer = Buffer.allocUnsafe(64 * 1024);
+  let lastYield = performance.now();
   while (!stopped) {
-    const count = readSync(fd, buffer, 0, buffer.length, null);
+    const count = await readDescriptorChunk(fd, buffer);
     if (count === 0) break;
     consume(decoder.decode(buffer.subarray(0, count), { stream: true }));
+    if (performance.now() - lastYield >= 8) {
+      await new Promise<void>((resolveYield) => setTimeout(resolveYield, 0));
+      lastYield = performance.now();
+    }
   }
   if (!stopped) consume(decoder.decode());
   // A final non-newline-terminated line still counts. Empty large files never reach this path.
@@ -1691,27 +1818,31 @@ function renderImageFile(buf: Buffer, raw: string, ext: string, vision: boolean)
 }
 
 /** Extract text from a PDF via pdftotext (poppler) when available; else explain how to read it. */
-function readPdfFile(
+async function readPdfFile(
   bytes: Buffer,
   raw: string,
   args: Record<string, any>,
   root: string,
   childSecretEnvNames: Iterable<string>,
-): string {
+  signal?: AbortSignal,
+): Promise<string> {
   const exe = executableOnPath("pdftotext", process.env.PATH ?? "", root);
   if (!exe) return `[PDF ${raw}] - text extraction needs 'pdftotext' (poppler) on PATH (not found). Install it, or open the pages with a vision model.`;
   const dir = mkdtempSync(join(tmpdir(), "neko-pdf-"));
   const path = join(dir, "document.pdf");
   try {
-    writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
-    const r = spawnSync(exe, ["-layout", path, "-"], {
-      encoding: "utf-8",
-      maxBuffer: 16 * 1024 * 1024,
-      timeout: 30_000,
+    await writeFileAsync(path, bytes, { flag: "wx", mode: 0o600 });
+    const r = await runResponsiveChild(exe, ["-layout", path, "-"], {
+      cwd: root,
+      maxOutputBytes: 16 * 1024 * 1024,
+      timeoutMs: 30_000,
       env: scrubChildEnv(process.env, childSecretEnvNames),
+      signal,
     });
+    if (r.aborted) return `(interrupted)${r.cleanupConfirmed ? "" : "\n(process-tree cleanup could not be confirmed)"}`;
     if (r.error) return `Error extracting PDF: ${r.error.message}`;
-    const text = String(r.stdout || "");
+    if (r.timedOut) return `Error extracting PDF: timed out after 30s${r.cleanupConfirmed ? "" : " (process-tree cleanup unconfirmed)"}`;
+    const text = r.stdout;
     if (!text.trim()) {
       const err = String(r.stderr || "").trim().slice(0, 150);
       return r.status !== 0 && err
@@ -1723,7 +1854,7 @@ function readPdfFile(
     const limit = Number(args.limit) > 0 ? Math.floor(Number(args.limit)) : undefined;
     return formatReadWindow(text.split("\n"), raw, offset, column, limit);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rmAsync(dir, { recursive: true, force: true });
   }
 }
 
@@ -1749,11 +1880,11 @@ function imageDims(buf: Buffer, ext: string): { w: number; h: number } | null {
   return null;
 }
 
-function toolSearch(root: string, args: Record<string, any>, opts: ToolOpts): string {
+async function toolSearch(root: string, args: Record<string, any>, opts: ToolOpts): Promise<string> {
   const pattern = requireArg(args, "pattern");
   // Search through descriptor-verified reads. A recursive external process cannot prove that an
   // innocently named file is not a hard-link alias to a credential inode.
-  return jsSearch(root, pattern, args, opts);
+  return await jsSearch(root, pattern, args, opts);
 }
 
 /** Turn an rg exit into an observation. Exit 2 means "an error occurred" - INCLUDING one unreadable
@@ -1775,7 +1906,7 @@ export function formatRipgrepResult(status: number | null, stdout: string, stder
 }
 
 /** Built-in regex walk — the fallback when ripgrep isn't installed. Also supports glob/case/context. */
-function jsSearch(root: string, pattern: string, args: Record<string, any>, opts: ToolOpts): string {
+async function jsSearch(root: string, pattern: string, args: Record<string, any>, opts: ToolOpts): Promise<string> {
   let regex: RegExp;
   try {
     regex = new RegExp(pattern, args.case_insensitive ? "i" : "");
@@ -1787,7 +1918,9 @@ function jsSearch(root: string, pattern: string, args: Record<string, any>, opts
   const ctx = Math.max(0, Math.min(5, Math.floor(Number(args.context) || 0)));
   const glob = args.glob ? new Bun.Glob(String(args.glob)) : null;
   const matches: string[] = [];
-  for (const file of walkFiles(base)) {
+  let lastYield = performance.now();
+  for await (const file of walkFilesAsync(base, opts.signal)) {
+    if (opts.signal?.aborted) return "(interrupted)";
     if (glob) {
       const relToBase = relative(base, file).split(sep).join("/");
       if (!glob.match(relToBase) && !glob.match(file.split(sep).pop() ?? "")) continue;
@@ -1796,7 +1929,8 @@ function jsSearch(root: string, pattern: string, args: Record<string, any>, opts
     let opened: ReturnType<typeof openRegularFile> | undefined;
     try {
       opened = openRegularFile(file, relative(rootResolved, file));
-      text = readFileSync(opened.fd, "utf-8");
+      if (opened.size > MAX_SEARCH_FILE_BYTES) continue;
+      text = (await readDescriptor(opened.fd)).toString("utf-8");
     } catch {
       continue; // binary / unreadable
     } finally {
@@ -1819,18 +1953,23 @@ function jsSearch(root: string, pattern: string, args: Record<string, any>, opts
         }
       }
     }
+    if (performance.now() - lastYield >= 8) {
+      await new Promise<void>((resolveYield) => setTimeout(resolveYield, 0));
+      lastYield = performance.now();
+    }
   }
   return matches.length ? matches.join("\n") : "(no matches)";
 }
 
-function toolGlob(root: string, args: Record<string, any>, opts: ToolOpts): string {
+async function toolGlob(root: string, args: Record<string, any>, opts: ToolOpts): Promise<string> {
   const pattern = requireArg(args, "pattern");
   const base = resolveForRead(root, args.path || ".", opts.readOutsideRoot);
   const rootResolved = resolve(root);
   const results: string[] = [];
   try {
     const glob = new Bun.Glob(pattern);
-    for (const rel of glob.scanSync({ cwd: base, onlyFiles: true })) {
+    for await (const rel of glob.scan({ cwd: base, onlyFiles: true })) {
+      if (opts.signal?.aborted) return "(interrupted)";
       const abs = resolve(base, rel);
       if (deniedReadPath(abs)) continue;
       const relToRoot = relative(rootResolved, abs).split(sep).join("/");
@@ -1847,12 +1986,14 @@ function toolGlob(root: string, args: Record<string, any>, opts: ToolOpts): stri
   return results.length ? results.sort().join("\n") : "(no files)";
 }
 
-function toolLs(root: string, args: Record<string, any>, opts: ToolOpts): string {
+async function toolLs(root: string, args: Record<string, any>, opts: ToolOpts): Promise<string> {
   const raw = args.path || ".";
   const path = resolveForRead(root, raw, opts.readOutsideRoot);
-  if (!existsSync(path)) return `Error: no such directory: ${raw}`;
-  if (!statSync(path).isDirectory()) return `Error: not a directory: ${raw}`;
-  const entries = readdirSync(path, { withFileTypes: true })
+  let info;
+  try { info = await statAsync(path); }
+  catch { return `Error: no such directory: ${raw}`; }
+  if (!info.isDirectory()) return `Error: not a directory: ${raw}`;
+  const entries = (await readdirAsync(path, { withFileTypes: true }))
     .filter((e) => !IGNORE_DIRS.has(e.name) && !deniedReadPath(join(path, e.name)))
     .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
     .sort();
@@ -2124,19 +2265,20 @@ function canonicalRegularFileForWrite(root: string, p: string, additionalRoots: 
   return real;
 }
 
-function* walkFiles(base: string): Generator<string> {
+async function* walkFilesAsync(base: string, signal?: AbortSignal): AsyncGenerator<string> {
   let entries;
   try {
-    entries = readdirSync(base, { withFileTypes: true });
+    entries = await readdirAsync(base, { withFileTypes: true });
   } catch {
     return;
   }
   for (const entry of entries) {
+    if (signal?.aborted) return;
     const path = join(base, entry.name);
     if (deniedReadPath(path)) continue;
     if (entry.isDirectory()) {
       if (IGNORE_DIRS.has(entry.name)) continue;
-      yield* walkFiles(path);
+      yield* walkFilesAsync(path, signal);
     } else if (entry.isFile()) {
       yield path;
     }
@@ -2189,6 +2331,7 @@ export interface ToolOpts {
   strictEditMatch?: boolean;
   /** Canonical identity captured when the exact-file lease was entered. */
   exactEditTarget?: string;
+  signal?: AbortSignal;
 }
 
 const DISPATCH: Record<string, (root: string, args: Record<string, any>, opts: ToolOpts) => string | Promise<string>> = {

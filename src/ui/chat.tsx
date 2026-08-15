@@ -67,11 +67,12 @@ import { browserExtensionSetupMessage, chromeHasMultipleProfiles, openBrowserExt
 import { checkForUpdate, selfUpdate } from "../adapters/update.ts";
 import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { VERSION } from "../shared/version.ts";
+import { debug } from "../shared/debug.ts";
 import { expandPlaceholders } from "../shared/paste-collapse.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
-import { latestSession, loadSession, newSessionId, renameSession, saveSession, type Session } from "../adapters/session.ts";
+import { AsyncSessionWriter, latestSession, loadSession, newSessionId, renameSession, type Session } from "../adapters/session.ts";
 import { applySkillPolicyForTurn, matchesSkill } from "../adapters/skills.ts";
 import { ToolRegistry } from "../core/tool-runtime.ts";
 import { WEB_EXTRACT_PROMPT } from "../adapters/web.ts";
@@ -419,6 +420,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   };
 
+  // A late tick cannot prevent a third-party/native stall, but it leaves a precise breadcrumb after
+  // recovery instead of a vague "Neko froze" report. Silent by default; NEKO_DEBUG=ui-stall enables it.
+  useEffect(() => {
+    const intervalMs = 500;
+    let expectedAt = Date.now() + intervalMs;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const lagMs = Math.max(0, now - expectedAt);
+      expectedAt = now + intervalMs;
+      if (lagMs >= 1_000) {
+        debug("ui-stall", () => `event loop resumed after ${lagMs}ms lag; turn_active=${busyRef.current}`);
+      }
+    }, intervalMs);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  }, []);
+
   // Pairing instructions belong to the local terminal. Mirroring them back into the paired browser
   // wastes the transcript, exposes a redundant capability URL on-screen, and recursively describes
   // the transport instead of the conversation.
@@ -618,7 +636,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // is killed mid-turn (the user closes the terminal), that turn - the user's prompt AND every tool
   // result Neko produced - was lost. This ref lets onEvent snapshot the session at each clean checkpoint
   // (step boundaries, completed tool results) so a resume shows the interrupted work instead of nothing.
-  const persistRef = useRef<() => void>(() => {});
+  const persistRef = useRef<() => Promise<void>>(async () => {});
+  const sessionWriterRef = useRef<AsyncSessionWriter | null>(null);
+  if (!sessionWriterRef.current) sessionWriterRef.current = new AsyncSessionWriter();
+  const persistErrorShownRef = useRef(false);
+  const queuePersist = () => {
+    void persistRef.current().catch((error) => {
+      if (persistErrorShownRef.current) return;
+      persistErrorShownRef.current = true;
+      addLine("error", `session checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  };
   const agentRef = useRef<Agent | null>(null);
   if (!agentRef.current) {
     agentRef.current = new Agent({
@@ -629,6 +657,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       verifyBeforeExit: cfg.verifyBeforeExit,
       verifyStateChangesBeforeExit: true,
       adaptiveEffort: cfg.adaptiveEffort,
+      onCheckpoint: () => persistRef.current(),
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
       dynamicContext: () => productionTurnContext(registryRef.current!, {
@@ -692,17 +721,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             addLine("tool_result", obs);
           }
           setTodos([...registryRef.current!.todos]); // reflect todo_write changes
-          persistRef.current(); // a tool finished + its result is in messages -> checkpoint (survives a kill)
         } else if (kind === "step") {
           setStep(data);
-          persistRef.current(); // start of a loop iteration = messages in a clean, resumable state
-        } else if (kind === "checkpoint") {
-          // Agent.messages already contains the partial assistant segment / completed provider-managed
-          // tool trajectory. The Agent throttles these events, so durability never becomes per-token I/O.
-          persistRef.current();
         } else if (kind === "recovery") {
           addLine("info", `watchdog: provider stalled; resumed from checkpoint (${data.attempt}/${data.max})`);
-          persistRef.current();
+          queuePersist();
         } else if (kind === "compact") {
           // In-loop safety-net compaction (a single huge turn). Show the same progress bar; the agent
           // emits compact_done when its summarizer call returns.
@@ -732,8 +755,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } catch { /* terminal teardown must not be blocked by provider cleanup */ }
   }, [provider]);
 
-  const persist = () => {
-    saveSession({
+  const persist = () => sessionWriterRef.current!.save({
       id: sessionIdRef.current,
       createdAt: createdAtRef.current,
       updatedAt: new Date().toISOString(),
@@ -742,7 +764,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       title: pinnedTitleRef.current || undefined,
       messages: agentRef.current!.messages,
     });
-  };
   persistRef.current = persist; // onEvent (set up once) calls through this ref so mid-turn checkpoints use the latest
 
   // Load a session's history into the live agent AND replay it into the transcript (like opening a
@@ -1491,7 +1512,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           // Voice owns a separate App Server thread while it is live. Mirror finalized transcripts
           // into Neko's session so a later text turn or resumed session keeps the conversation.
           agentRef.current!.messages.push({ role, content: text, ...(role === "user" ? { _neko_internal: false } : {}) });
-          persistRef.current();
+          queuePersist();
         }
       },
     });
@@ -2323,7 +2344,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       setTabTitle(titleTaskRef.current || "Neko Core", false); // the cat returns, the dot stops
       if (inflightRef.current.length) { inflightRef.current = []; syncInflight(); } // drop any un-resulted (aborted) blinking lines
       controllerRef.current = null;
-      persist();
+      try {
+        await persist();
+        persistErrorShownRef.current = false;
+      } catch (error) {
+        if (!persistErrorShownRef.current) {
+          persistErrorShownRef.current = true;
+          addLine("error", `session checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       const next = queueRef.current.shift();
       setQueued(queueRef.current.length);
       if (next !== undefined) void handle(next).catch((e) => addLine("error", e instanceof Error ? e.message : String(e))); // drain queued input
@@ -2439,7 +2468,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
               const role = event.role === "user" ? "user" : "assistant";
               addLine(role, `(voice · phone) ${text}`);
               agentRef.current!.messages.push({ role, content: text, ...(role === "user" ? { _neko_internal: false } : {}) });
-              persistRef.current();
+              queuePersist();
             }
           },
         });
