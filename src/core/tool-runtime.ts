@@ -2013,7 +2013,9 @@ function realpathNearest(p: string): string {
   let probe = p;
   while (probe !== dirname(probe) && !existsSync(probe)) probe = dirname(probe);
   try {
-    const real = realpathSync(probe);
+    // Native realpath is required on Windows: the generic implementation can preserve an 8.3
+    // spelling such as RUNNER~1 while a configured capability was canonicalized to the long path.
+    const real = realpathSync.native(probe);
     return probe === p ? real : real + p.slice(probe.length); // re-attach the not-yet-existing tail
   } catch {
     return p;
