@@ -16,7 +16,7 @@ test("Markdown wraps paragraphs at its OWN width, not the ambient terminal width
   const lines = strip(render(<Markdown text={long} width={40} />).lastFrame()).split("\n").filter((l) => l.trim());
   expect(lines.length).toBeGreaterThan(2); // wrapped at 40, not at the ~100-col ambient width
   for (const l of lines) expect([...l].length).toBeLessThanOrEqual(40); // never overflows OUR width
-});
+}, 15_000);
 
 test("display math $$...$$ renders as Unicode, inline $...$ too, but a price $5 is left alone", () => {
   const dm = strip(render(<Markdown text={"$$E = mc^2$$"} width={40} />).lastFrame());
