@@ -4,7 +4,7 @@ import { platform } from "node:os";
 import { resolve } from "node:path";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { subagentToolAllowlist } from "../core/tools.ts";
-import { detectSandbox, findWindowsBash, sandboxActive, srtHealth, transientSrtHealthFailure } from "../core/sandbox.ts";
+import { detectSandbox, findWindowsBash, srtHealthSnapshot, transientSrtHealthFailure } from "../core/sandbox.ts";
 import type { NekoConfig } from "./config.ts";
 import { withBrowserBridge } from "./browser-bridge.ts";
 import { withOfficeTools } from "./office-tools.ts";
@@ -50,10 +50,15 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
   const detected = bashCallable && registry.sandboxBash
     ? (sandboxRuntime?.kind ?? detectSandbox())
     : "none";
-  const liveSandbox = registry.sandboxBash && detected !== "none" &&
-    (sandboxRuntime?.live ?? sandboxActive());
+  const cachedSrtHealth = !sandboxRuntime && detected === "srt" ? srtHealthSnapshot() : undefined;
+  const healthDeferred = detected === "srt" && (
+    (!sandboxRuntime && !cachedSrtHealth)
+    || (!sandboxRuntime?.live && /health check deferred/i.test(sandboxRuntime?.detail ?? ""))
+  );
+  const liveSandbox = registry.sandboxBash && detected !== "none" && (sandboxRuntime?.live
+    ?? (detected === "srt" ? cachedSrtHealth?.ok ?? false : true));
   const transientSrt = registry.sandboxBash && detected === "srt" && !liveSandbox
-    && transientSrtHealthFailure(sandboxRuntime ? (sandboxRuntime.detail ?? "") : srtHealth().detail);
+    && transientSrtHealthFailure(sandboxRuntime?.detail ?? cachedSrtHealth?.detail ?? "");
   const exactReadOnlyValidator = turnPolicy?.bashPolicy === "foreground-validator-only";
   const failClosedBash = exactReadOnlyValidator
     ? !liveSandbox
@@ -79,6 +84,8 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     ? "off (host/unconfined)"
     : liveSandbox
       ? `${detected} live (writes confined to workspace/temp plus explicit additional_write_roots; host reads remain available; network ${network})`
+      : healthDeferred
+        ? "srt health check deferred until the first bash call (the bounded check is asynchronous; no host fallback)"
       : transientSrt
         ? "srt behavioral probe timed out under host load; bash will still attempt the exact SRT boundary once and will never fall back unconfined"
       : detected === "none"

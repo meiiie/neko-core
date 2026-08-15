@@ -93,6 +93,22 @@ test("runtime block distinguishes a transient SRT probe timeout from unconfined 
   expect(block).not.toContain("Do not create a shell script");
 });
 
+test("runtime block defers an uncached SRT health probe instead of blocking the first turn", () => {
+  const value = registry("auto");
+  value.sandboxBash = true;
+  value.sandboxAutoApprove = true;
+  const block = dynamicToolRuntimeBlock(value, {
+    kind: "srt",
+    live: false,
+    detail: "health check deferred",
+  });
+  expect(block).toContain("health check deferred until the first bash call");
+  expect(block).toContain("bounded check is asynchronous");
+  expect(block).toContain("no host fallback");
+  expect(block).toContain("FAILS CLOSED");
+  expect(block).not.toContain("UNCONFINED AUTO");
+});
+
 test("runtime block calls disabled or unavailable sandbox unconfined in auto mode", () => {
   const disabled = dynamicToolRuntimeBlock(registry("auto"));
   expect(disabled).toContain("UNCONFINED AUTO");

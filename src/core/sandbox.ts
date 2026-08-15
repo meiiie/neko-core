@@ -14,7 +14,7 @@
  * File tools and bash share the same project-plus-explicit-roots capability boundary. Pure + node-only
  * (no adapter imports) so it stays in core.
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -146,6 +146,7 @@ let srtProvisionedCached: boolean | undefined;
 export interface SrtHealthResult { ok: boolean; detail: string }
 export interface SrtHealthCacheEntry { result: SrtHealthResult; checkedAt: number }
 let srtHealthCached: SrtHealthCacheEntry | undefined;
+let srtHealthPending: Promise<SrtHealthResult> | undefined;
 const SRT_UNHEALTHY_CACHE_MS = 30_000;
 const WINDOWS_NET = process.platform === "win32" ? resolveWindowsSystemExecutable("net.exe") : null;
 const WINDOWS_ICACLS = process.platform === "win32" ? resolveWindowsSystemExecutable("icacls.exe") : null;
@@ -210,10 +211,90 @@ export function srtProvisioned(refresh = false): boolean {
   }
 }
 
+interface AsyncProbeResult {
+  status: number | null;
+  signal: NodeJS.Signals | null;
+  error?: NodeJS.ErrnoException;
+  stdout: string;
+  stderr: string;
+}
+
+/** Run a tiny host-owned probe without blocking Ink's event loop. SRT itself owns a kill-on-close
+ * Windows Job, so terminating the broker also contains its probe child. Output is diagnostic-only
+ * and bounded before it reaches the health cache. */
+function runAsyncProbe(
+  file: string,
+  args: string[],
+  options: { cwd?: string; timeoutMs: number; env?: NodeJS.ProcessEnv },
+): Promise<AsyncProbeResult> {
+  return new Promise((resolveProbe) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const child = spawn(file, args, {
+      cwd: options.cwd,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: options.env,
+    });
+    const finish = (result: AsyncProbeResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolveProbe(result);
+    };
+    const append = (current: string, chunk: unknown) => {
+      if (current.length >= 64 * 1024) return current;
+      return current + String(chunk).slice(0, 64 * 1024 - current.length);
+    };
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => { stdout = append(stdout, chunk); });
+    child.stderr?.on("data", (chunk) => { stderr = append(stderr, chunk); });
+    child.once("error", (error: NodeJS.ErrnoException) => finish({ status: null, signal: null, error, stdout, stderr }));
+    child.once("close", (status, signal) => {
+      const error = timedOut
+        ? Object.assign(new Error("sandbox health probe timed out"), { code: "ETIMEDOUT" })
+        : undefined;
+      finish({ status, signal, error, stdout, stderr });
+    });
+    timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill("SIGKILL"); } catch { /* already closed */ }
+    }, options.timeoutMs);
+    timer.unref?.();
+  });
+}
+
+async function srtProvisionedAsync(refresh = false): Promise<boolean> {
+  if (!refresh && srtProvisionedCached !== undefined) return srtProvisionedCached;
+  if (refresh) srtProvisionedCached = undefined;
+  if (!WINDOWS_NET) return (srtProvisionedCached = false);
+  try {
+    const result = await runAsyncProbe(WINDOWS_NET, ["user", "srt-sandbox"], {
+      timeoutMs: 3000,
+      env: minimalWindowsSystemEnv(),
+    });
+    return (srtProvisionedCached = result.status === 0);
+  } catch {
+    return (srtProvisionedCached = false);
+  }
+}
+
 /** Healthy launches remain stable for the process. Failures are only a short snapshot: SRT startup,
  * Secondary Logon and its state DB can recover while a long-lived Neko session stays open. */
 export function srtHealthCacheReusable(entry: SrtHealthCacheEntry, now = Date.now()): boolean {
   return entry.result.ok || now - entry.checkedAt < SRT_UNHEALTHY_CACHE_MS;
+}
+
+/** Non-blocking read for prompt composition. `undefined` means no reusable health evidence exists;
+ * callers must describe the boundary as deferred, never guess that SRT is healthy or fall back. */
+export function srtHealthSnapshot(): SrtHealthResult | undefined {
+  return srtHealthCached && srtHealthCacheReusable(srtHealthCached)
+    ? srtHealthCached.result
+    : undefined;
 }
 
 type SrtProbeFailure = {
@@ -276,6 +357,73 @@ export function srtHealth(): SrtHealthResult {
   } finally {
     settings?.cleanup();
   }
+}
+
+/** The same behavioral SRT check as srtHealth(), but event-loop friendly. A shared in-flight probe
+ * prevents simultaneous tool calls from multiplying the expensive Windows account/SRT startup.
+ * The synchronous form remains for explicit doctor/policy commands, never the interactive turn. */
+export function srtHealthAsync(signal?: AbortSignal): Promise<SrtHealthResult> {
+  const interrupted = (): SrtHealthResult => ({ ok: false, detail: "health check wait interrupted" });
+  if (signal?.aborted) return Promise.resolve(interrupted());
+  const cached = srtHealthSnapshot();
+  if (cached) return Promise.resolve(cached);
+  if (!srtHealthPending) {
+    const refreshDependencies = Boolean(srtHealthCached);
+    const remember = (result: SrtHealthResult): SrtHealthResult => {
+      srtHealthCached = { result, checkedAt: Date.now() };
+      return result;
+    };
+    srtHealthPending = (async () => {
+      const exe = findSrt(refreshDependencies);
+      if (!exe) return remember({ ok: false, detail: "srt.exe not found" });
+      if (!(await srtProvisionedAsync(refreshDependencies))) {
+        return remember({ ok: false, detail: "sandbox account is not provisioned" });
+      }
+      let settings: ReturnType<typeof writeEphemeralSrtSettings> | undefined;
+      try {
+        settings = writeEphemeralSrtSettings(tmpdir(), process.cwd(), false, []);
+        const startedAt = Date.now();
+        const probe = await runAsyncProbe(exe, ["--settings", settings.path, "-c", "exit /b 0"], {
+          cwd: process.cwd(),
+          timeoutMs: 20_000,
+        });
+        if (probe.status === 0) {
+          return remember({ ok: true, detail: "behavioral sandbox launch passed (egress policy not probed here)" });
+        }
+        return remember({ ok: false, detail: formatSrtProbeFailure(probe, Date.now() - startedAt) });
+      } catch (error) {
+        const detail = `behavioral probe failed: ${String(error)}`.replace(/\s+/g, " ").trim().slice(0, 300);
+        return remember({ ok: false, detail });
+      } finally {
+        settings?.cleanup();
+      }
+    })().finally(() => {
+      srtHealthPending = undefined;
+    });
+  }
+  const pending = srtHealthPending;
+  if (!signal) return pending;
+  return new Promise((resolveHealth) => {
+    let settled = false;
+    const finish = (result: SrtHealthResult) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", abort);
+      resolveHealth(result);
+    };
+    const abort = () => finish(interrupted());
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    void pending.then(finish);
+  });
+}
+
+/** Async policy query for interactive tool dispatch. The health probe may be slow on Windows, but
+ * timers, streaming, Esc/Ctrl+C, and the rest of the TUI remain responsive while it runs. */
+export async function sandboxActiveAsync(signal?: AbortSignal): Promise<boolean> {
+  const kind = detectSandbox();
+  if (kind === "none") return false;
+  return kind !== "srt" || (await srtHealthAsync(signal)).ok;
 }
 
 /** True when bash would actually run CONFINED right now: a primitive exists and (for srt) the

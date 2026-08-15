@@ -3,6 +3,29 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-15 - first-turn `--yolo` freeze: asynchronous SRT health
+
+The remaining first-message pause was isolated from the earlier persistence/render stalls. On Windows,
+the model-facing dynamic-tool context called `sandboxActive()`, which performed SRT's behavioral launch
+through `spawnSync` with a 20-second ceiling. The probe result was cached, explaining the exact field
+pattern: the first `--yolo` turn froze Ink, input, Esc, and timers, while later turns behaved normally.
+A live cold-process measurement blocked the event loop for 16.7 seconds.
+
+Interactive context composition now reads only reusable SRT health evidence. With no evidence it reports
+that health is deferred to the first Bash call and keeps the no-host-fallback posture. Interactive Bash
+policy and launch paths perform the same account and behavioral checks through bounded asynchronous child
+processes, share one in-flight result, and let an aborted caller stop waiting without weakening or cancelling
+the shared fail-closed probe. Explicit `doctor`/`policy` commands retain their synchronous diagnostic form.
+
+Live verification reduced cold prompt composition to 3.47 ms. A cold async health launch delivered 32
+100-ms heartbeats while it ran, and an end-to-end sandboxed Bash launch delivered 72 heartbeats before
+returning `(exit 0)`. Focused sandbox, tool-runtime, turn-context, TUI, and UX suites passed 210 tests; both
+TypeScript compilers and diff checks passed. The final unsharded suite passed 1,402 tests with 12 conditional
+skips, 0 failures, and 7,831 assertions across 128 files (379.77 seconds). Source doctor and policy retained
+the expected untrusted-checkout warnings, while production compile, UI probe, real-PTY input probe, and ACP
+binary smoke passed. Bun again emitted its known non-fatal Windows `tsconfig.build.json` directory-mismatch
+diagnostic; the artifact compiled and passed every post-build probe.
+
 ## 2026-08-15 - responsive checkpoints and subprocesses (intermittent TUI freeze)
 
 Intermittent whole-terminal pauses were traced to synchronous work on Ink's event-loop thread, not to

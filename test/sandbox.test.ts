@@ -5,7 +5,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
-import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
+import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtHealthAsync, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
 
 test("security executables are resolved from PATH without trusting the workspace", () => {
   const root = mkdtempSync(join(tmpdir(), "neko-path-primitive-"));
@@ -269,6 +269,16 @@ test("a failed SRT health result expires while a healthy result stays reusable",
   expect(srtHealthCacheReusable(failed, 30_999)).toBe(true);
   expect(srtHealthCacheReusable(failed, 31_000)).toBe(false);
   expect(srtHealthCacheReusable({ result: { ok: true, detail: "healthy" }, checkedAt: 1_000 }, 9_999_999)).toBe(true);
+});
+
+test("an aborted interactive turn does not wait for an SRT health probe", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const startedAt = performance.now();
+  const result = await srtHealthAsync(controller.signal);
+  expect(result.ok).toBe(false);
+  expect(result.detail).toContain("interrupted");
+  expect(performance.now() - startedAt).toBeLessThan(100);
 });
 
 test("an SRT SQLite shared-memory failure gives safe disk-space recovery guidance", () => {

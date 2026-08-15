@@ -35,7 +35,7 @@ import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
 import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
-import { destructiveInWorkspace, detectSandbox, executableOnPath, isDockerCommand, sandboxActive, srtHealth, srtLaunchRefusal, withSrtStateVolumeGuidance, wrapBash } from "./sandbox.ts";
+import { destructiveInWorkspace, detectSandbox, executableOnPath, isDockerCommand, sandboxActiveAsync, srtHealthAsync, srtLaunchRefusal, withSrtStateVolumeGuidance, wrapBash } from "./sandbox.ts";
 import { effectivePermission, GATED, resolveTool, taskDelegatesReadOnly, toolSchemas } from "./tools.ts";
 import { residentUiaHost } from "./windows-uia-host.ts";
 import { debug, messageOf } from "../shared/debug.ts";
@@ -851,7 +851,7 @@ export class ToolRegistry {
   }
 
   /** Run a shell command. Resolves on exit/timeout, OR early (kept running) if Ctrl+B detaches it. */
-  private exactValidatorSandboxRefusal(backend?: NativeToolBackend): string | null {
+  private async exactValidatorSandboxRefusal(backend?: NativeToolBackend, signal?: AbortSignal): Promise<string | null> {
     if (!this.sandboxBash) {
       return "Error: exact-file validation requires a live OS sandbox with the project mounted read-only; bash was not executed.";
     }
@@ -863,10 +863,13 @@ export class ToolRegistry {
     }
     const kind = detectSandbox();
     if (kind === "srt") {
-      const unhealthy = srtLaunchRefusal(true, kind, srtHealth());
+      const health = await srtHealthAsync(signal);
+      if (signal?.aborted) return "(interrupted)";
+      const unhealthy = srtLaunchRefusal(true, kind, health);
       if (unhealthy) return unhealthy;
     }
-    if (kind === "none" || !sandboxActive()) {
+    if (kind === "none" || !(await sandboxActiveAsync(signal))) {
+      if (signal?.aborted) return "(interrupted)";
       return "Error: exact-file validation requires a live OS sandbox with the project mounted read-only; bash was not executed.";
     }
     return null;
@@ -885,13 +888,15 @@ export class ToolRegistry {
     // Per-call timeout (default 60s, clamped to [1s, 10min]) so slow builds/tests aren't cut off.
     const timeoutMs = this.bashTimeoutMs(args);
     const exactValidator = this.turnToolPolicy?.bashPolicy === "foreground-validator-only";
-    const exactRefusal = exactValidator ? this.exactValidatorSandboxRefusal() : null;
+    const exactRefusal = exactValidator ? await this.exactValidatorSandboxRefusal(undefined, signal) : null;
     if (exactRefusal) return exactRefusal;
+    if (signal?.aborted) return "(interrupted)";
     const sandboxKind = this.sandboxBash ? detectSandbox() : "none";
     const refusal = sandboxKind === "srt"
-      ? srtLaunchRefusal(this.sandboxBash, sandboxKind, srtHealth())
+      ? srtLaunchRefusal(this.sandboxBash, sandboxKind, await srtHealthAsync(signal))
       : null;
     if (refusal) return refusal;
+    if (signal?.aborted) return "(interrupted)";
     const sb = wrapBash(command, this.root, {
       enabled: this.sandboxBash,
       allowNetwork: this.sandboxAllowNetwork,
@@ -1168,7 +1173,7 @@ export class ToolRegistry {
         "Run one or more recognized test/typecheck/lint/check/verify commands joined only by &&; build targets, source-fixing flags, shell substitution, redirection, masking, and background execution are unavailable.";
     }
     if (name === "bash" && this.turnToolPolicy?.bashPolicy === "foreground-validator-only") {
-      const refusal = this.exactValidatorSandboxRefusal(nativeBackend);
+      const refusal = await this.exactValidatorSandboxRefusal(nativeBackend, signal);
       if (refusal) return refusal;
     }
     if (name === "skill" && this.skillToolUnavailable) {
@@ -1302,9 +1307,12 @@ export class ToolRegistry {
     // commands that irreversibly destroy data inside the workspace: the sandbox contains the blast
     // radius, but the user's own code + .git are writable, so those still get one confirmation.
     // (mode=auto/yolo still allows everything - that's the point of yolo; always-allow-bash too.)
+    const needsLiveSandboxDecision = spec.name === "bash" && this.sandboxBash
+      && this.sandboxAutoApprove && this.mode !== "auto";
     const liveBashSandbox = nativeBackend
       ? this.nativeBackendAttestation?.bashSandbox === "backend-enforced"
-      : sandboxActive();
+      : needsLiveSandboxDecision ? await sandboxActiveAsync(signal) : false;
+    if (signal?.aborted) return "(interrupted)";
     const sandboxedBash = spec.name === "bash" && this.sandboxBash && this.sandboxAutoApprove
       && liveBashSandbox && !destructiveInWorkspace(String(args.command ?? ""))
       && !isDockerCommand(String(args.command ?? "")); // docker runs unsandboxed -> don't sandbox-auto-approve it
