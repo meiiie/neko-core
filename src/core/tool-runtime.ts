@@ -2081,17 +2081,22 @@ function resolveForWrite(root: string, p: string, additionalRoots: readonly stri
   const primary = resolve(root);
   const resolved = resolve(primary, p);
   if (pathWithin(primary, resolved)) return resolveInRoot(root, p);
+  const targetReal = realpathNearest(resolved);
   for (const rawRoot of additionalRoots) {
     const allowed = resolve(rawRoot);
-    if (!pathWithin(allowed, resolved)) continue;
     const allowedReal = realpathNearest(allowed);
-    const targetReal = realpathNearest(resolved);
     if (!pathWithin(allowedReal, targetReal)) {
+      // Preserve the specific escape diagnostic when the requested spelling starts inside a grant
+      // but a child link redirects it elsewhere. A platform-owned alias above the grant (macOS
+      // `/var`, Windows 8.3 names) is different: its canonical target is inside allowedReal.
+      if (!pathWithin(allowed, resolved)) continue;
       throw new Error(`path escapes additional write root via a symlink: ${p}`);
     }
-    const denied = deniedReadPath(resolved) ?? (targetReal === resolved ? null : deniedReadPath(targetReal));
+    const denied = deniedReadPath(resolved) ?? deniedReadPath(targetReal);
     if (denied) throw new Error(`refused: ${denied} may not be modified outside the project: ${p}`);
-    return resolved;
+    // Never continue mutation through the alias spelling after admission: use the already-resolved
+    // canonical parent plus the not-yet-existing tail.
+    return targetReal;
   }
   return resolveInRoot(root, p);
 }

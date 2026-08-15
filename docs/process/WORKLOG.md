@@ -45,8 +45,11 @@ The first hosted release-candidate CI run passed Linux and Windows but failed ma
 could mount: macOS canonicalizes the system `/var` prefix to `/private/var`, and the initial root validator
 mistook that platform-owned parent alias for an aliased grant leaf. Validation now rejects a symlink/junction
 at the granted leaf, canonicalizes its ancestor chain, and verifies the leaf's filesystem identity before
-storing only the canonical target. A cross-platform parent-alias/direct-leaf-alias regression locks both sides
-of that boundary; the release remained untagged while the fix returned through the full CI gate.
+storing only the canonical target. Structured mutations likewise canonicalize the nearest existing parent
+before admission and continue through the canonical spelling, so `/var` and Windows 8.3 aliases cannot cause
+either a false refusal or a post-check alias traversal. Cross-platform parent-alias/direct-leaf-alias
+regressions lock both sides of that boundary; the release remained untagged while the fix returned through the
+full CI gate.
 
 ## 2026-08-15 - v0.24.4 candidate: native Windows cleanup scan and recoverable SRT health
 

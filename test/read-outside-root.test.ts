@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -91,6 +91,27 @@ test("an explicit additional root allows structured writes without granting its 
     }))).toContain("escapes additional write root via a symlink");
   } finally {
     clean();
+  }
+});
+
+test("an additional root accepts a platform-style parent alias and writes through its canonical path", async () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-write-parent-alias-")));
+  const actualParent = join(base, "actual-parent");
+  const aliasParent = join(base, "parent-alias");
+  const project = join(base, "project");
+  const actualRoot = join(actualParent, "granted");
+  mkdirSync(project, { recursive: true });
+  mkdirSync(actualRoot, { recursive: true });
+  try {
+    symlinkSync(actualParent, aliasParent, process.platform === "win32" ? "junction" : "dir");
+    const registry = new ToolRegistry(project, "auto", autoApprove);
+    registry.additionalWriteRoots = [realpathSync.native(actualRoot)];
+    const lexicalTarget = join(aliasParent, "granted", "notes.md");
+    expect(await registry.execute("write_file", { path: lexicalTarget, content: "canonical\n" }))
+      .toContain("Wrote");
+    expect(readFileSync(join(actualRoot, "notes.md"), "utf8")).toBe("canonical\n");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
   }
 });
 
