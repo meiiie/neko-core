@@ -29,6 +29,9 @@ All notable changes to Neko Core are documented here. The format follows
 - A Windows SRT health probe that times out under temporary host pressure no longer permanently disables
   Bash for the session. Neko may make one real launch attempt through the exact configured SRT boundary;
   provisioning, credentials, state, and launch failures still fail closed with no unconfined fallback.
+- Global write roots now canonicalize platform-owned parent aliases such as macOS `/var` to
+  `/private/var`, while an aliased grant leaf itself remains refused. This keeps normal macOS temporary
+  homes working without weakening the exact-root boundary.
 
 ## [0.24.4] — 2026-08-15
 

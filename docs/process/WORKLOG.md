@@ -41,6 +41,13 @@ inspected 140,182 entries in its 60-second bound without Bash, file-content read
 whole-suite attempts had exposed only local workstation-pressure budgets; the final unsharded run closed that
 evidence gap before the release commit.
 
+The first hosted release-candidate CI run passed Linux and Windows but failed macOS before its UI fixtures
+could mount: macOS canonicalizes the system `/var` prefix to `/private/var`, and the initial root validator
+mistook that platform-owned parent alias for an aliased grant leaf. Validation now rejects a symlink/junction
+at the granted leaf, canonicalizes its ancestor chain, and verifies the leaf's filesystem identity before
+storing only the canonical target. A cross-platform parent-alias/direct-leaf-alias regression locks both sides
+of that boundary; the release remained untagged while the fix returned through the full CI gate.
+
 ## 2026-08-15 - v0.24.4 candidate: native Windows cleanup scan and recoverable SRT health
 
 A real GLM-5.3 turn was asked to scan drive C without deleting anything. The only available execution

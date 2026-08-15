@@ -132,11 +132,16 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
       throw new Error(`additional_write_roots must name a canonical directory: ${rawRoot}`);
     }
-    const canonical = realpathSync(requested);
-    const same = process.platform === "win32"
-      ? canonical.toLowerCase() === requested.toLowerCase()
-      : canonical === requested;
-    if (!same) throw new Error(`additional_write_roots must not traverse a symlink or junction: ${rawRoot}`);
+    // Store and use only the canonical target. macOS exposes system temporary directories through
+    // `/var` -> `/private/var`, so requiring the entire lexical ancestor chain to be alias-free would
+    // reject every normal test/home rooted there. The granted leaf itself must still be a real
+    // directory (checked above), and the pre/post identity check closes a swap between lstat/realpath.
+    const canonical = realpathSync.native(requested);
+    const canonicalStat = lstatSync(canonical);
+    if (!canonicalStat.isDirectory() || canonicalStat.isSymbolicLink()
+      || canonicalStat.dev !== stat.dev || canonicalStat.ino !== stat.ino) {
+      throw new Error(`additional_write_roots changed while being validated: ${rawRoot}`);
+    }
     return canonical;
   });
   registry.bashTimeoutCapMs = cfg.bashTimeoutCapMs;

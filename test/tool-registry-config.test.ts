@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -44,6 +44,35 @@ test("shared composition refuses missing configured write roots", () => {
   expect(() => configureToolRegistry(new ToolRegistry(base, "auto", () => true), cfg))
     .toThrow("directory does not exist");
   rmSync(base, { recursive: true, force: true });
+});
+
+test("shared composition canonicalizes a parent alias but refuses an aliased grant leaf", () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-write-alias-")));
+  const actualParent = join(base, "actual-parent");
+  const aliasParent = join(base, "parent-alias");
+  const actualExtra = join(base, "actual-extra");
+  const aliasExtra = join(base, "extra-alias");
+  mkdirSync(actualParent, { recursive: true });
+  mkdirSync(actualExtra, { recursive: true });
+  try {
+    symlinkSync(actualParent, aliasParent, process.platform === "win32" ? "junction" : "dir");
+    symlinkSync(actualExtra, aliasExtra, process.platform === "win32" ? "junction" : "dir");
+    const aliasedHome = join(aliasParent, "home");
+    const cfg = new NekoConfig({}, null, {}, "", null, [], { state: "none", files: [] }, aliasedHome);
+    const registry = configureToolRegistry(new ToolRegistry(base, "auto", () => true), cfg);
+    expect(registry.additionalWriteRoots).toEqual([
+      realpathSync(join(aliasedHome, ".neko-core", "research")),
+    ]);
+
+    const directAlias = new NekoConfig(
+      { additional_write_roots: [aliasExtra] }, null, {}, "", null, [],
+      { state: "none", files: [] }, join(actualParent, "separate-home"),
+    );
+    expect(() => configureToolRegistry(new ToolRegistry(base, "auto", () => true), directAlias))
+      .toThrow("must name a canonical directory");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test("shared registry composition wires native web and preserves every child safety boundary", () => {
