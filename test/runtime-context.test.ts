@@ -77,6 +77,22 @@ test("runtime block says unhealthy SRT fails closed without a host fallback", ()
   expect(block).not.toContain("UNCONFINED AUTO");
 });
 
+test("runtime block distinguishes a transient SRT probe timeout from unconfined fallback", () => {
+  const value = registry("auto");
+  value.sandboxBash = true;
+  value.sandboxAutoApprove = true;
+  const block = dynamicToolRuntimeBlock(value, {
+    kind: "srt",
+    live: false,
+    detail: "status=null signal=SIGTERM code=ETIMEDOUT timeout=true elapsed_ms=20060",
+  });
+  expect(block).toContain("behavioral probe timed out");
+  expect(block).toContain("attempt the exact SRT boundary once");
+  expect(block).toContain("never fall back unconfined");
+  expect(block).not.toContain("UNCONFINED AUTO");
+  expect(block).not.toContain("Do not create a shell script");
+});
+
 test("runtime block calls disabled or unavailable sandbox unconfined in auto mode", () => {
   const disabled = dynamicToolRuntimeBlock(registry("auto"));
   expect(disabled).toContain("UNCONFINED AUTO");

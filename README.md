@@ -438,6 +438,11 @@ Bare `neko` (or `neko core`; legacy `neko code`) starts the interactive session.
 `--profile <name>` selects a runtime profile · `--yolo` auto-approves gated tools ·
 `neko --resume` continues the latest session.
 
+`--yolo` automates approvals; it does not silently grant machine-wide writes. Ordinary host reads are
+available by default, while writes stay inside the project plus canonical `additional_write_roots`.
+The global `~/.neko-core/research` ledger is included automatically; see
+[`docs/process/SANDBOX.md`](docs/process/SANDBOX.md#outside-workspace-autonomy-is-path-scoped).
+
 ## Contributing
 
 Issues and PRs are very welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. In short: `bun install`,

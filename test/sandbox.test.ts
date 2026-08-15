@@ -49,6 +49,27 @@ test("bwrap keeps network when explicitly allowed", () => {
   expect(buildSandbox("bwrap", "x", "/w", true).args).not.toContain("--unshare-net");
 });
 
+test("ordinary sandbox profiles grant only explicit additional write roots", () => {
+  const bwrap = buildSandbox("bwrap", "echo hi", "/work", false, undefined, "/usr/bin/bwrap", {
+    shellExe: "/bin/bash",
+    additionalWriteRoots: ["/home/me/.neko-core/research", "/data/shared"],
+  });
+  const bwrapArgs = bwrap.args.join(" ");
+  expect(bwrapArgs).toContain("--bind /home/me/.neko-core/research /home/me/.neko-core/research");
+  expect(bwrapArgs).toContain("--bind /data/shared /data/shared");
+
+  const seatbelt = buildSandbox("sandbox-exec", "echo hi", "/work", false, undefined, "/usr/bin/sandbox-exec", {
+    shellExe: "/bin/bash",
+    additionalWriteRoots: ["/Users/me/.neko-core/research"],
+  });
+  expect(seatbelt.args[1]).toContain('(subpath "/Users/me/.neko-core/research")');
+
+  const srt = JSON.parse(srtSettings(
+    "C:\\work", false, [], [], ["C:\\work", "C:\\Users\\me\\.neko-core\\research"],
+  ));
+  expect(srt.filesystem.allowWrite).toEqual(["C:\\work", "C:\\Users\\me\\.neko-core\\research"]);
+});
+
 test("read-only bwrap uses isolated tmpfs and re-asserts a root nested below /tmp", () => {
   const t = buildSandbox("bwrap", "bun test", "/tmp/repo", false, undefined, "/usr/bin/bwrap", {
     readOnlyWorkspace: true,
@@ -222,6 +243,17 @@ test("an enabled but unhealthy SRT is refused before launch, while other posture
   expect(srtLaunchRefusal(true, "none", { ok: false, detail: "absent" })).toBeNull();
 });
 
+test("an SRT health-probe timeout retries the exact sandbox instead of creating a false refusal", () => {
+  expect(srtLaunchRefusal(true, "srt", {
+    ok: false,
+    detail: "status=null signal=SIGTERM code=ETIMEDOUT timeout=true elapsed_ms=20060",
+  })).toBeNull();
+  expect(srtLaunchRefusal(true, "srt", {
+    ok: false,
+    detail: "credential store unavailable",
+  })).toContain("bash was not executed");
+});
+
 test("SRT health failures expose timeout and signal details instead of exit question-mark", () => {
   const error = Object.assign(new Error("spawnSync ETIMEDOUT"), { code: "ETIMEDOUT" });
   expect(formatSrtProbeFailure({ status: null, signal: "SIGTERM", error, stdout: "", stderr: "" }, 20_017))
@@ -286,6 +318,31 @@ test("srt settings ignore a poisoned deterministic temp file and clean up unique
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a live Windows SRT can write an exact additional root without host fallback", () => {
+  if (process.platform !== "win32" || detectSandbox() !== "srt" || !sandboxActive()) return;
+  const extra = mkdtempSync(join(tmpdir(), "neko-srt-extra-write-"));
+  const output = join(extra, "canary.txt");
+  const posix = output
+    .replace(/^([A-Za-z]):[\\/]/, (_all, drive: string) => `/${drive.toLowerCase()}/`)
+    .replace(/\\/g, "/");
+  const target = wrapBash(`printf 'NEKO_SRT_EXTRA_ROOT_OK\\n' > '${posix}'`, process.cwd(), {
+    enabled: true,
+    allowNetwork: false,
+    additionalWriteRoots: [extra],
+  });
+  try {
+    const result = spawnSync(target.file, target.args, {
+      cwd: process.cwd(), encoding: "utf8", timeout: 30_000, windowsHide: true,
+      env: { ...process.env, ...target.env },
+    });
+    expect(result.status, String(result.stderr || result.stdout)).toBe(0);
+    expect(readFileSync(output, "utf8")).toBe("NEKO_SRT_EXTRA_ROOT_OK\n");
+  } finally {
+    target.cleanup?.();
+    rmSync(extra, { recursive: true, force: true });
+  }
+}, 40_000);
 
 test("srt command scripts are unique and removed after their launch lifecycle", () => {
   const dir = mkdtempSync(join(tmpdir(), "neko-srt-script-"));

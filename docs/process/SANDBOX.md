@@ -4,7 +4,8 @@ Neko has layered safety for the gated tools:
 
 1. **Permission modes** (default/accept-edits/plan/auto) + the inline approval gate.
 2. **Structured-write confinement** — `write_file`/`edit`/`multi_edit` refuse paths outside the
-   workspace root and reject existing multiply-linked regular files before approval or hooks.
+   workspace or an exact `additional_write_roots` capability and reject outside credential paths, link
+   escapes, and existing multiply-linked regular files before approval or hooks.
 3. **Catastrophic-command seatbelt** — `bash` refuses `rm -rf /`, `mkfs`, fork bombs, `format c:`,
    `> /dev/sd*`, etc. (unless `allow_dangerous_bash: true`).
 4. **Adversarial check** (opt-in) — a model pass vets auto-approved mutating actions.
@@ -13,7 +14,8 @@ Neko has layered safety for the gated tools:
 ## Bash OS sandbox (ON by default)
 
 Like Claude Code / Codex CLI, Neko runs ordinary/full-turn `bash` under an OS sandbox: the
-filesystem is **read-only except the workspace** (+ `/tmp`), and network egress is blocked by default.
+filesystem is **read-only except the workspace, explicit additional write roots** (+ `/tmp`), and
+network egress is blocked by default.
 Default ON since 2026-07-22 (owner decision): machines with a primitive confine bash out of the
 box; machines without one fall back to the seatbelt + gate unchanged (doctor shows which).
 
@@ -33,6 +35,33 @@ approval or hooks rather than widening to ordinary/full-turn bash.
 ```
 
 (Env rollback: `NEKO_SANDBOX=0`.)
+
+### Outside-workspace autonomy is path-scoped
+
+Neko reads ordinary host files outside the project by default (`read_outside_root: true`), while its
+credential/device deny policy remains active. `auto`/`--yolo` removes approval prompts; it does not
+silently turn that read reach into a machine-wide write grant. Structured file tools and all three
+ordinary Bash sandbox backends share an explicit write-capability list:
+
+```json
+{
+  "additional_write_roots": ["D:\\Research", "E:\\Shared\\Reports"]
+}
+```
+
+`NEKO_ADDITIONAL_WRITE_ROOTS` accepts the operating system's PATH delimiter (`;` on Windows, `:` on
+POSIX). This capability may be set only by user-global config or environment; a project config cannot
+grant itself authority outside its checkout, even after project trust. Roots must be existing canonical
+directories. Filesystem roots, the user home, and agent or
+credential control directories such as `.ssh`, `.codex`, `.agents`, and non-research `.neko-core`
+state are refused. Neko always provisions one narrow built-in capability:
+`~/.neko-core/research`. A cross-project research ledger can therefore continue without granting
+write access to the rest of the user profile.
+
+This mirrors the current Claude Code posture rather than an unrestricted shell: its official
+[permissions](https://code.claude.com/docs/en/permissions) and
+[sandboxing](https://code.claude.com/docs/en/sandboxing) documentation likewise separate approval
+automation from filesystem containment and use additional writable directories as explicit policy.
 
 ### Sandboxed bash still asks by default
 
@@ -78,10 +107,14 @@ srt windows-install                        # one-time: provisions srt-sandbox + 
 ```
 
 With `"sandbox": true`, ordinary/full-turn bash runs as `srt` -> git-bash -> the command: filesystem
-read-only except the workspace, network hard-blocked unless `"sandbox_network": true`. If `srt` is on PATH
+read-only except the workspace and exact additional roots, network hard-blocked unless `"sandbox_network": true`. If `srt` is on PATH
 but provisioning hasn't run, bash fails closed with srt's own actionable error (and `neko doctor`
 warns). The same no-fallback rule applies when SRT is installed and provisioned but its behavioral
-health probe fails: `doctor` and `policy` report that bash **fails closed**, not `UNCONFINED AUTO`.
+health probe fails for a provisioning/credential/runtime reason: `doctor` and `policy` report that
+bash **fails closed**, not `UNCONFINED AUTO`. A health probe that itself reaches its bounded timeout
+under host load is treated differently: Neko attempts the real command once through the same exact
+`srt.exe` + settings boundary. That attempt either succeeds or reports its own failure; it never falls
+back to a host shell.
 That latter label is reserved for auto mode with the sandbox disabled or with no primitive detected.
 Alternatives remain: run Neko inside WSL (bwrap) or a container/dev-container.
 
@@ -118,10 +151,11 @@ Mechanics worth knowing (verified on Windows 11 Home, srt 1.0.0):
   every tool in this class). For untrusted code at scale, use a VM/microVM.
 - Read confinement is not complete: do not treat a live sandbox as permission to expose arbitrary
   host files. Keep approval on unless the host is disposable or a stronger outer boundary exists.
-- File tools are path-confined regardless of this setting. Existing structured-write targets must
+- File tools are project-plus-explicit-root confined regardless of this setting. Existing structured-write targets must
   also have exactly one hard link, closing static same-volume aliases; new-file creation remains
   available. This identity check still has a check-to-write race.
 - After a Neko structured write, later byte divergence on the same path taints its checkpoint,
   refuses another structured mutation, and makes `/rewind` preserve/report the conflict. This is not
   read-to-write digest/generation CAS or filesystem transactional isolation.
-- The sandbox is what contains ordinary/full-turn `bash`, which can otherwise write anywhere.
+- The sandbox is what keeps ordinary/full-turn `bash` on the same workspace-plus-explicit-roots
+  boundary; disabling it makes Bash host-unconfined and is reported as such.

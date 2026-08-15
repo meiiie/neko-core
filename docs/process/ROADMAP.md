@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-15) — v0.24.4 release
+## Current status (2026-08-15) — v0.24.5 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,9 +38,14 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.4 (2026-08-15)** - Windows cleanup inventory is now a
-  bounded native read-only tool, independent of Bash/SRT, and transient SRT health failures recover in
-  long-lived sessions instead of remaining cached forever. Previous (v0.24.3, 2026-08-14): `/model`
+- **Branch:** `main`. **Current release: v0.24.5 (2026-08-15)** - ACP v1 sessions are durable across
+  process restarts with list/load/resume, continuous atomic checkpoints, stable replay IDs, one-writer
+  leases, and outcome-unknown recovery for interrupted mutations. Automatic mode can write to the
+  built-in `~/.neko-core/research` ledger or explicitly configured canonical roots without receiving
+  home-wide authority; transient SRT health-probe timeouts receive one exact sandboxed launch attempt.
+  Previous (v0.24.4, 2026-08-15): Windows cleanup inventory became a bounded native read-only tool,
+  independent of Bash/SRT, and transient SRT health failures began expiring instead of remaining cached
+  forever. Previous (v0.24.3, 2026-08-14): `/model`
   began merging compatible providers' live discovery with profile-confirmed models, so Z.AI's stale list
   cannot hide Coding Plan GLM-5.3. Previous (v0.24.2, 2026-08-14): the Z.AI Coding Plan profile added GLM-5.3 with its 1M context window
   and separated subscription quota from the pay-as-you-go General API route. Previous (v0.24.1, 2026-08-13): `neko update` treats an already-current

@@ -79,6 +79,7 @@ function cleanProviderMessages(messages: any[]): any[] {
     const clean = { ...message };
     delete clean._neko_internal;
     delete clean._neko_inflight;
+    delete clean._neko_acp_message_id;
     return clean;
   });
 }
@@ -864,13 +865,13 @@ export class Agent {
         // assistant(function_call) is followed by its own tool(function_call_output) before the next
         // call begins; otherwise completion order can create invalid role ordering on resume.
         const task = managedToolChain.then(async () => {
-          this.emit("tool_call", call);
           // Provider-managed calls do not come back in response.tool_calls. Materialize and persist the
           // assistant function_call BEFORE execution: a mutating tool can finish its external side effect
           // and then lose the network/terminal before returning. Resume must know that call was attempted;
           // sealDanglingToolCalls() marks its outcome unknown when no result was journaled.
           finalizeInflight(null, [call]);
           checkpoint(true);
+          this.emit("tool_call", call);
           const observation = await this.safeExecute(call, signal);
           noteTool(call, observation);
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });

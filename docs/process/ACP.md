@@ -88,15 +88,37 @@ non-responsive client fails closed.
 ## Current v1 surface
 
 - `initialize` with capability-negotiated, Registry-compatible ChatGPT Terminal Auth
-- `session/new`, `session/prompt`, `session/cancel`, `session/close`, `session/set_mode`
+- durable `session/new`, `session/list`, `session/load`, `session/resume`, and `session/close`
+- `session/prompt`, `session/cancel`, `session/set_mode`, and `session/set_config_option`
 - streamed agent text/thought chunks and tool lifecycle updates
+- session metadata, usage, mode, provider/profile/model/effort configuration, and implemented slash commands
 - text, resource links, and embedded text context
 - trusted MCP servers from Neko's normal user/project configuration
 
-Neko does not advertise session load/list/delete/resume, additional workspace roots, client-supplied MCP,
-image/audio prompts, or draft ACP v2. Those methods fail explicitly rather than degrading to a broader local
-authority. Client-supplied MCP is deliberately held back because merely opening a session must not launch an
-untrusted stdio command or network connection before Neko's permission boundary runs.
+ACP session IDs are the same durable IDs used by `neko sessions` and `neko resume`. `session/load` restores
+the canonical Agent messages and replays user/assistant/tool history with stable message/tool IDs before it
+responds. `session/resume` restores the same model context without replay, for clients that already retain the
+transcript. `session/list` supports canonical-cwd filtering and bounded cursor pagination.
+
+The adapter checkpoints the existing atomic session store before provider waits, before a materialized tool
+call executes, after tool results, at Agent crash-journal checkpoints, and on completion/cancel/error/close.
+The store keeps the previous valid checkpoint as a fallback and uses a cross-process single-writer lease. If
+a process dies after a mutation may have run but before its result was journaled, resume adds a failed
+`outcome unknown` result and tells the Agent to inspect reality before retrying; it never silently repeats the
+mutation. Provider continuation items remain opaque inside the canonical messages and are never exposed as
+thought text. Resolved provider credentials are redacted from checkpoint strings.
+
+The provider/profile/model/effort selectors rebuild only the provider between idle turns while preserving
+canonical messages. A provider or endpoint switch is rejected when opaque continuation state makes it unsafe;
+the client can start/fork a separate session instead. Session-local `always allow`/`always reject` answers are
+not persisted and therefore return to the named permission mode after a restart. Neko currently advertises
+only `/help`, `/cost`, `/sessions`, and `/tools`; each is dispatched by the ACP adapter rather than sent to the
+model as an ordinary prompt.
+
+Neko still does not advertise session delete, additional workspace roots, client-supplied MCP, image/audio
+prompts, or draft ACP v2. Those methods fail explicitly rather than degrading to a broader local authority.
+Client-supplied MCP is deliberately held back because merely opening a session must not launch an untrusted
+stdio command or network connection before Neko's permission boundary runs.
 
 ## Debugging
 

@@ -6,6 +6,30 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.5] — 2026-08-15
+
+### Added
+
+- **ACP sessions now survive editor and agent-process restarts.** ACP v1 clients can list, load, and
+  resume the same durable sessions used by `neko sessions`/`neko resume`; history replay retains stable
+  message and tool-call IDs, while resume restores model context without duplicating a client's local
+  transcript. Atomic checkpoints cover prompts, tool calls/results, cancellation, errors, and close.
+- ACP clients now receive live session metadata, usage, mode, provider/profile/model/effort selectors,
+  and a small set of adapter-dispatched slash commands. A cross-process single-writer lease prevents two
+  clients from mutating one session, and crash recovery marks unfinished mutations as outcome-unknown
+  instead of silently retrying them.
+- **Automatic mode can maintain explicitly scoped data outside the project without becoming home-wide
+  access.** `~/.neko-core/research` is provisioned as a built-in durable write root; additional existing
+  directories can be granted globally with `additional_write_roots` or
+  `NEKO_ADDITIONAL_WRITE_ROOTS`. Structured edits and ordinary sandboxed Bash share the same canonical
+  boundary and still reject credential/control directories, links, filesystem roots, and the user home.
+
+### Fixed
+
+- A Windows SRT health probe that times out under temporary host pressure no longer permanently disables
+  Bash for the session. Neko may make one real launch attempt through the exact configured SRT boundary;
+  provisioning, credentials, state, and launch failures still fail closed with no unconfined fallback.
+
 ## [0.24.4] — 2026-08-15
 
 ### Added

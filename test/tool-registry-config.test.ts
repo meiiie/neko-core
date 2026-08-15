@@ -1,11 +1,50 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { NekoConfig } from "../src/adapters/config.ts";
 import { configureToolRegistry, inheritToolRegistrySettings, restrictToolRegistryForSubagent } from "../src/adapters/tool-registry.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
+
+test("shared composition provisions the global research ledger and canonical explicit write roots", async () => {
+  const base = mkdtempSync(join(tmpdir(), "neko-write-compose-"));
+  const project = join(base, "project");
+  const home = join(base, "home");
+  const extra = join(base, "shared-notes");
+  mkdirSync(project, { recursive: true });
+  mkdirSync(extra, { recursive: true });
+  try {
+    const cfg = new NekoConfig(
+      { additional_write_roots: [extra] }, null, {}, "", null, [],
+      { state: "none", files: [] }, home,
+    );
+    const registry = configureToolRegistry(new ToolRegistry(project, "auto", () => true), cfg);
+    expect(registry.additionalWriteRoots).toEqual([
+      join(home, ".neko-core", "research"),
+      extra,
+    ]);
+    expect(existsSync(join(home, ".neko-core", "research"))).toBe(true);
+    expect(await registry.execute("write_file", {
+      path: join(home, ".neko-core", "research", "ledger.md"),
+      content: "# durable global ledger\n",
+    })).toContain("Wrote");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("shared composition refuses missing configured write roots", () => {
+  const base = mkdtempSync(join(tmpdir(), "neko-write-missing-"));
+  const home = join(base, "home");
+  const cfg = new NekoConfig(
+    { additional_write_roots: [join(base, "missing")] }, null, {}, "", null, [],
+    { state: "none", files: [] }, home,
+  );
+  expect(() => configureToolRegistry(new ToolRegistry(base, "auto", () => true), cfg))
+    .toThrow("directory does not exist");
+  rmSync(base, { recursive: true, force: true });
+});
 
 test("shared registry composition wires native web and preserves every child safety boundary", () => {
   const cfg = new NekoConfig({

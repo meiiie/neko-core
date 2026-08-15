@@ -14,7 +14,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { homeDir } from "../shared/home.ts";
-import { join } from "node:path";
+import { delimiter, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 import { isMode, type PermissionMode } from "../core/permissions.ts";
 import { inspectProjectTrust, type ProjectTrustSummary } from "./project-trust.ts";
@@ -96,6 +96,10 @@ export const DEFAULTS: Record<string, any> = {
   // while refusing it made ordinary work impossible. Credential paths stay refused either way
   // (core/tool-runtime.ts OUTSIDE_DENIED). Set false for a hard wall around the project.
   read_outside_root: true,
+  // Structured writes and sandboxed bash may also modify these explicit directory capabilities.
+  // Neko's own research ledger is a built-in user-global writable surface; broader paths remain
+  // opt-in through additional_write_roots (or NEKO_ADDITIONAL_WRITE_ROOTS, PATH-delimited).
+  additional_write_roots: [],
   mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
   // The oracle: a second opinion from a STRONGER model, consulted with a curated bundle of files and
   // no tools. `profile` names any profile below - which model is "the strong one" is your decision, not
@@ -518,8 +522,52 @@ export class NekoConfig {
       aggregatorTemperature: m.aggregator_temperature != null ? Number(m.aggregator_temperature) : this.temperature,
     };
   }
-  /** Reads may resolve outside the project root (default true); writes never may. */
+  /** Reads may resolve outside the project root (default true). */
   get readOutsideRoot(): boolean { return this.data.read_outside_root !== false; }
+
+  get researchWriteRoot(): string { return resolve(this.resolvedHome, ".neko-core", "research"); }
+
+  /** Extra directories that may be modified by structured tools and sandboxed bash. Keep this
+   * path-scoped: auto mode removes approval prompts, not filesystem containment. */
+  get additionalWriteRoots(): string[] {
+    const raw = this.data.additional_write_roots;
+    const configured = Array.isArray(raw)
+      ? raw.map(String)
+      : typeof raw === "string"
+        ? raw.split(delimiter)
+        : [];
+    const research = this.researchWriteRoot;
+    const sensitiveRoots = [".codex", ".agents", ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".config"]
+      .map((name) => resolve(this.resolvedHome, name));
+    const nekoState = resolve(this.resolvedHome, ".neko-core");
+    const home = resolve(this.resolvedHome);
+    const folded = (value: string) => process.platform === "win32" ? value.toLowerCase() : value;
+    const within = (base: string, value: string) => {
+      const rel = relative(base, value);
+      return rel === "" || (rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel));
+    };
+    const out: string[] = [];
+    for (const value of [research, ...configured]) {
+      const trimmed = String(value ?? "").trim();
+      if (!trimmed) continue;
+      const expanded = trimmed === "~"
+        ? home
+        : /^~[\\/]/.test(trimmed)
+          ? resolve(home, trimmed.slice(2))
+          : trimmed;
+      if (!isAbsolute(expanded)) throw new Error(`additional_write_roots entries must be absolute (or start with ~/): ${trimmed}`);
+      const candidate = resolve(expanded);
+      if (candidate === parse(candidate).root || within(candidate, home) || folded(candidate) === folded(home)) {
+        throw new Error(`additional_write_roots refuses a filesystem or home-directory root: ${trimmed}`);
+      }
+      const isResearch = within(research, candidate);
+      if (!isResearch && (within(nekoState, candidate) || sensitiveRoots.some((root) => within(root, candidate)))) {
+        throw new Error(`additional_write_roots refuses a credential or agent-control directory: ${trimmed}`);
+      }
+      if (!out.some((item) => folded(item) === folded(candidate))) out.push(candidate);
+    }
+    return out;
+  }
 
   /** When true, the catastrophic-bash seatbelt is disabled (default false). */
   get allowDangerousBash(): boolean { return Boolean(this.data.allow_dangerous_bash); }

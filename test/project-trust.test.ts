@@ -337,6 +337,21 @@ test("project-local hooks and MCP execution routes stay disabled after trust", (
   expect(unpolluted.mcpServers.polluted).toBeUndefined();
 });
 
+test("a project cannot grant itself an outside write root even after trust", () => {
+  const { root, home } = fixture();
+  const outside = join(dirname(root), "outside-authority");
+  mkdirSync(outside, { recursive: true });
+  writeJson(join(root, "neko.json"), { additional_write_roots: [outside] });
+
+  const inspection = inspectProjectTrust(root, home);
+  expect(inspection.state).toBe("error");
+  expect(inspection.reason).toContain("external write roots");
+  expect(() => trustProject(root, home)).toThrow("configure them globally");
+
+  const cfg = loadConfig({ cwd: root, home });
+  expect(cfg.additionalWriteRoots).toEqual([join(home, ".neko-core", "research")]);
+});
+
 test("all project prompts, skills, agents, and recipes use one exact trusted snapshot", () => {
   const { root, home } = fixture();
   mkdirSync(join(home, ".neko-core", "skills"), { recursive: true });

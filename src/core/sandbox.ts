@@ -1,6 +1,7 @@
 /**
  * Optional OS-level sandbox for the `bash` tool (like Claude Code / Codex CLI). When enabled, bash
- * runs with the filesystem READ-ONLY except the workspace (+ /tmp), and optionally with no network.
+ * runs with the filesystem READ-ONLY except the workspace, explicit additional write roots (+ /tmp),
+ * and optionally with no network.
  *
  *   Linux   -> bubblewrap (bwrap): unprivileged namespaces.
  *   macOS   -> sandbox-exec (Seatbelt): SBPL profile.
@@ -10,8 +11,8 @@
  *   else    -> "none": bash runs unconfined, but the catastrophic-command seatbelt +
  *              permission gate still apply (documented in WEB/SANDBOX).
  *
- * File TOOLS (write_file/edit) are already confined to the workspace; this contains bash, which can
- * otherwise write anywhere. Pure + node-only (no adapter imports) so it stays in core.
+ * File tools and bash share the same project-plus-explicit-roots capability boundary. Pure + node-only
+ * (no adapter imports) so it stays in core.
  */
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -238,6 +239,13 @@ export function formatSrtProbeFailure(probe: SrtProbeFailure, elapsedMs: number)
   return `${base} error=${String(error.message || error).replace(/\s+/g, " ").trim().slice(0, 160)}`;
 }
 
+/** A behavioral probe can time out under host contention even though the next exact SRT launch works.
+ * This is not authority to fall back to the host: it only permits one ordinary command to attempt the
+ * same configured SRT boundary and let that real launch succeed or fail on its own. */
+export function transientSrtHealthFailure(detail: string): boolean {
+  return /(?:\bETIMEDOUT\b|\btimeout=true\b)/i.test(String(detail));
+}
+
 /** Behavioral Windows health check. Account existence alone is insufficient: package ACL drift,
  * WFP setup, Secondary Logon, or the credential store can still make every sandbox launch fail. */
 export function srtHealth(): SrtHealthResult {
@@ -289,6 +297,10 @@ export function srtLaunchRefusal(
 ): string | null {
   if (!enabled || kind !== "srt" || health.ok) return null;
   const raw = String(health.detail || "behavioral health check failed").replace(/\s+/g, " ").trim().slice(0, 500);
+  // The actual command still launches only through srt.exe + an exact settings file. A transient
+  // preflight timeout therefore cannot weaken confinement; refusing it here only creates a false
+  // negative like a busy Windows host did in the field.
+  if (transientSrtHealthFailure(raw)) return null;
   return withSrtStateVolumeGuidance(
     `Error: configured SRT sandbox is unusable; bash was not executed: ${raw}`,
   );
@@ -563,6 +575,8 @@ export interface SandboxBuildOptions {
   denyChildProcesses?: boolean;
   /** Trusted host implementation files hidden from benchmark candidates. */
   denyReadFiles?: readonly string[];
+  /** Explicit host-owned writable directory capabilities for ordinary (non-validator) turns. */
+  additionalWriteRoots?: readonly string[];
 }
 
 /** Build the spawn target for running `command` under the given sandbox kind. Pure (testable). */
@@ -597,7 +611,11 @@ export function buildSandbox(
               // Re-assert the project after the temp mount: a checkout below /tmp must stay read-only.
               "--ro-bind", root, root,
             ]
-          : ["--bind", "/tmp", "/tmp", "--bind", root, root]), // full turns keep the workspace writable
+          : [
+              "--bind", "/tmp", "/tmp",
+              "--bind", root, root,
+              ...(options.additionalWriteRoots ?? []).flatMap((path) => ["--bind", path, path]),
+            ]), // full turns keep the workspace + explicit additional roots writable
         ...(options.denyReadFiles ?? []).flatMap((path) => ["--ro-bind", "/dev/null", path]),
         "--chdir", root,
         ...(allowNetwork ? [] : ["--unshare-net"]),
@@ -613,7 +631,9 @@ export function buildSandbox(
     const writes = options.readOnlyWorkspace
       ? `(allow file-write* (subpath "${esc(options.writableTemp!)}") (subpath "/dev"))` +
         `(deny file-write* (subpath "${esc(root)}"))`
-      : `(allow file-write* (subpath "${esc(root)}") (subpath "/tmp") (subpath "/private/tmp") (subpath "/dev"))`;
+      : `(allow file-write* (subpath "${esc(root)}") ` +
+        (options.additionalWriteRoots ?? []).map((path) => `(subpath "${esc(path)}") `).join("") +
+        `(subpath "/tmp") (subpath "/private/tmp") (subpath "/dev"))`;
     const profile =
       "(version 1)(allow default)(deny file-write*)" +
       writes +
@@ -669,7 +689,7 @@ export function isDockerCommand(command: string): boolean {
   return false;
 }
 
-export function wrapBash(command: string, root: string, opts: { enabled: boolean; allowNetwork: boolean; domains?: string[]; allowHostDaemon?: boolean; readOnlyWorkspace?: boolean; denyChildProcesses?: boolean; denyReadFiles?: readonly string[]; stdinSource?: string }): SpawnTarget {
+export function wrapBash(command: string, root: string, opts: { enabled: boolean; allowNetwork: boolean; domains?: string[]; allowHostDaemon?: boolean; readOnlyWorkspace?: boolean; denyChildProcesses?: boolean; denyReadFiles?: readonly string[]; additionalWriteRoots?: readonly string[]; stdinSource?: string }): SpawnTarget {
   const requiresLiveSandbox = opts.readOnlyWorkspace || Boolean(opts.denyReadFiles?.length);
   if (!opts.enabled) {
     if (requiresLiveSandbox) throw new Error("restricted bash profile requires a live OS sandbox");
@@ -730,7 +750,7 @@ export function wrapBash(command: string, root: string, opts: { enabled: boolean
           opts.allowNetwork,
           opts.domains ?? [],
           opts.readOnlyWorkspace ? [root, ...(bunPath ? [bunPath] : [])] : (bunPath ? [bunPath] : []),
-          opts.readOnlyWorkspace ? [validationTemp!.path] : [root],
+          opts.readOnlyWorkspace ? [validationTemp!.path] : [root, ...(opts.additionalWriteRoots ?? [])],
           opts.readOnlyWorkspace ? [root] : [],
           opts.denyReadFiles ?? [],
         )
@@ -762,6 +782,7 @@ export function wrapBash(command: string, root: string, opts: { enabled: boolean
         shellExe: sandboxShell ?? undefined,
         denyChildProcesses: opts.denyChildProcesses,
         denyReadFiles: opts.denyReadFiles,
+        additionalWriteRoots: opts.additionalWriteRoots,
       });
     const srtBridgeEnv: Record<string, string> = kind === "srt" && bunPath && script?.toolchainDir
       ? {

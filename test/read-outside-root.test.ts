@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -54,6 +54,41 @@ test("writing outside the root stays refused, allowed reads or not", async () =>
       const result = await registry.execute(call[0], call[1] as Record<string, any>);
       expect(String(result)).toContain("escapes project root"); // ...and writes are not
     }
+  } finally {
+    clean();
+  }
+});
+
+test("an explicit additional root allows structured writes without granting its siblings or aliases", async () => {
+  const { root, outside, clean } = workspace();
+  const sibling = join(dirname(outside), "not-granted");
+  try {
+    mkdirSync(sibling, { recursive: true });
+    const registry = new ToolRegistry(root, "auto", autoApprove);
+    registry.additionalWriteRoots = [outside];
+
+    expect(await registry.execute("write_file", { path: join(outside, "notes.md"), content: "one\n" }))
+      .toContain("Wrote");
+    expect(await registry.execute("edit", {
+      path: join(outside, "notes.md"), old_string: "one", new_string: "two",
+    })).toContain("Edited");
+    expect(await registry.execute("multi_edit", {
+      path: join(outside, "notes.md"), edits: [{ old_string: "two", new_string: "three" }],
+    })).toContain("Edited");
+    expect(readFileSync(join(outside, "notes.md"), "utf8")).toBe("three\n");
+
+    expect(String(await registry.execute("write_file", {
+      path: join(sibling, "blocked.txt"), content: "no",
+    }))).toContain("escapes project root");
+    expect(String(await registry.execute("write_file", {
+      path: join(outside, ".env"), content: "SECRET=no",
+    }))).toContain("refused");
+
+    const alias = join(outside, "alias");
+    symlinkSync(sibling, alias, process.platform === "win32" ? "junction" : "dir");
+    expect(String(await registry.execute("write_file", {
+      path: join(alias, "escaped.txt"), content: "no",
+    }))).toContain("escapes additional write root via a symlink");
   } finally {
     clean();
   }

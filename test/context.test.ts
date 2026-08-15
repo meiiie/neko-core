@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   DEFAULT_GLOBAL_NEKO_MD,
   ensureGlobalNekoMd,
+  ensureNekoHome,
   environmentBlock,
   globalNekoMdPath,
   loadProjectContext,
@@ -72,6 +73,13 @@ test("cross-project memory stays separate from the global life story", () => {
   expect(rememberNote("The user prefers concise Vietnamese.", "user", home)).toContain("memory/user.md");
   expect(readFileSync(state.path, "utf-8")).toBe(DEFAULT_GLOBAL_NEKO_MD);
   expect(readFileSync(join(home, ".neko-core", "memory", "user.md"), "utf-8")).toContain("The user prefers concise Vietnamese.");
+});
+
+test("zero-setup home bootstrap provisions the empty global research ledger root", () => {
+  const home = mkdtempSync(join(tmpdir(), "neko-research-home-"));
+  const state = ensureNekoHome(home);
+  expect(state.researchDir).toBe(join(home, ".neko-core", "research"));
+  expect(existsSync(state.researchDir)).toBe(true);
 });
 
 test("loads NEKO.md from the project root", () => {

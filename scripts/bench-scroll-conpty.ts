@@ -67,7 +67,14 @@ if (!resizeOk) {
   console.log(resized.map((line, i) => `${String(i).padStart(2)}|${line}`).join("\n"));
 }
 term.write("/");
-const menuOk = await until(() => vt.text().includes("/help") && vt.text().includes("up/down to select, tab to complete"), 2000);
+// The narrow resized viewport may show only the tail of the command list, so `/help` itself is not a
+// stable visibility marker. The footer is rendered only while the slash picker is actually open.
+const menuOk = await until(() => vt.text().includes("up/down to select, tab to complete"), 2000);
+if (!menuOk) {
+  const lines = vt.lines();
+  console.log(`[${label}] slash-menu diagnostics:`);
+  console.log(lines.map((line, i) => `${String(i).padStart(2)}|${line}`).join("\n"));
+}
 term.write("\x1b[B"); await sleep(80); term.write("\t");
 const keyboardOk = await until(() => vt.text().includes("> /cost"), 2000);
 console.log(`[${label}] startup=${startupOk ? "OK" : "FAIL"} resize=${resizeOk ? "OK" : "FAIL"} slash-menu=${menuOk ? "OK" : "FAIL"} keyboard=${keyboardOk ? "OK" : "FAIL"}`);

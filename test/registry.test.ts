@@ -35,6 +35,14 @@ test("policy distinguishes an unavailable sandbox from an unhealthy fail-closed 
     finding.code === "auto_with_unusable_sandbox" && finding.message.includes("FAILS CLOSED")
   )).toBe(true);
   expect(unhealthy.findings.some((finding) => finding.message.includes("UNCONFINED AUTO"))).toBe(false);
+
+  const transient = evaluatePolicy(
+    new NekoConfig({ mode: "auto", sandbox: true }, null, {}, ""),
+    { kind: "srt", live: false, detail: "code=ETIMEDOUT timeout=true elapsed_ms=20060" },
+  );
+  expect(transient.findings.some((finding) => finding.code === "auto_srt_probe_timed_out")).toBe(true);
+  expect(transient.findings.some((finding) => finding.code === "auto_with_unusable_sandbox")).toBe(false);
+  expect(transient.findings.some((finding) => finding.message.includes("UNCONFINED AUTO"))).toBe(false);
 });
 
 test("command registry covers every canonical public CLI dispatch", () => {

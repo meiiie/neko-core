@@ -243,22 +243,7 @@ export function replaySessionLines(messages: any[], nextId: () => number, option
   }, ...kept];
 }
 
-/** Recover the todo list from saved messages: the last todo_write tool_call carries the plan in its
- * arguments. The registry (rebuilt on resume) starts with empty todos, so without this a resumed
- * session loses its task tracker - the "handoff state" that lets you (and the agent) pick up the
- * interrupted work (Handoff Debt, arXiv 2606.02875). Returns [] if the session had no todos. */
-export function recoverTodos(messages: any[]): { content: string; status: string }[] {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    for (const tc of messages[i]?.tool_calls ?? []) {
-      if (tc.function?.name !== "todo_write") continue;
-      try {
-        const args = typeof tc.function.arguments === "string" ? JSON.parse(tc.function.arguments) : tc.function.arguments;
-        if (Array.isArray(args?.todos)) return args.todos.map((t: any) => ({ content: String(t?.content ?? ""), status: String(t?.status ?? "pending") }));
-      } catch { /* keep scanning */ }
-    }
-  }
-  return [];
-}
+export { recoverSessionTodos as recoverTodos } from "../adapters/session.ts";
 
 /** Cap live-streamed text to a bounded tail so re-parsing + re-rendering it every frame stays O(1),
  * not O(n): a long reasoning trace or a huge answer must NEVER block the event loop, or Esc/Ctrl+C

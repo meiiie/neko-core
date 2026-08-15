@@ -3,6 +3,44 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-15 - v0.24.5 candidate: path-scoped global autonomy and transient SRT retry
+
+A real `--yolo` session needed to maintain a cross-project research ledger under
+`~/.neko-core/research`, but structured writes were still project-only. The same session later showed
+`status=null signal=SIGTERM code=ETIMEDOUT timeout=true elapsed_ms=20060`: SRT's bounded behavioral
+health probe timed out under a loaded Windows host, so Neko refused Bash even though the next exact SRT
+launch could still be healthy. Neither failure justified an unconfined shell or a home-wide write grant.
+
+Neko now separates approval automation from filesystem authority. `read_outside_root` remains the broad
+safe-read switch. Structured writes and ordinary Bash sandbox profiles share canonical
+`additional_write_roots`; the empty `~/.neko-core/research` root is provisioned automatically, while
+broader existing directories require explicit config or `NEKO_ADDITIONAL_WRITE_ROOTS`. Filesystem/home
+roots, credential and agent-control directories, missing configured roots, symlink/junction escapes,
+and multiply-linked files remain refused. `auto` skips prompts only inside those exact capabilities.
+This follows the same permission-vs-containment split documented by Claude Code rather than treating
+its automatic mode as unrestricted machine access.
+
+SRT provisioning, credential, state-database, and launch failures still fail closed. Only a health
+snapshot whose own process hit the bounded timeout may proceed to one real command attempt, and that
+attempt still uses the canonical `srt.exe`, exact settings, scrubbed environment, job containment, and
+no host fallback. Policy/runtime output names this transient state instead of misreporting either
+`UNCONFINED AUTO` or a permanent sandbox failure.
+
+The final release gate passed both TypeScript compilers, source doctor, policy, production compile, UI,
+real-PTY input, and ACP binary smokes. The full local suite passed 1,392 tests with 12 conditional skips,
+0 failures, and 7,795 assertions across 128 files (301.06 seconds). Real ConPTY ghost/typing passed 3/3;
+the scroll interaction bench measured 5 ms first response and 98 ms settle with resize, slash picker,
+keyboard completion, and viewport movement all green. Its stale `/help` visibility assertion was corrected
+after the public v0.24.4 binary reproduced the same false failure at narrow width: the picker footer is the
+stable open-state marker, while `/help` can be above the visible tail. Diff check plus eight high-confidence
+secret patterns and 12 current exact secret values found zero hits across all 35 release files.
+Policy completed with only the expected warning that this working checkout's changed AGENTS/control snapshot
+is not in the user's project-trust store; the safe/gated and additional-root findings themselves are sound.
+A live Windows SRT canary wrote and removed a file in one exact external write root. The native C-drive scan
+inspected 140,182 entries in its 60-second bound without Bash, file-content reads, or deletion. Earlier
+whole-suite attempts had exposed only local workstation-pressure budgets; the final unsharded run closed that
+evidence gap before the release commit.
+
 ## 2026-08-15 - v0.24.4 candidate: native Windows cleanup scan and recoverable SRT health
 
 A real GLM-5.3 turn was asked to scan drive C without deleting anything. The only available execution
@@ -3738,3 +3776,18 @@ Raising the ceiling is safe on any plan: the account catalog stays authoritative
 downward from a rejection, so a ceiling above what an account offers costs nothing while one below it
 hides what the user is paying for. `oracle.effort` lands alongside it — the oracle is one expensive
 question by design, and it should be allowed to cost more than an ordinary turn.
+## 2026-08-15 - Durable ACP Session Bridge v1
+
+Connected the stable ACP v1 adapter to Neko's existing atomic session store. ACP now advertises and
+implements bounded `session/list`, replaying `session/load`, non-replaying `session/resume`, continuous
+mid-turn checkpoints, stable replay IDs, model/profile/provider/effort selectors, metadata/usage/command
+updates, and a small command surface that is actually dispatched by the adapter. Session schema v2 remains
+backward-compatible while retaining provider continuation messages, task state, usage, mode, revision, and
+context identity without persisting the resolved provider credential.
+
+Crash recovery reuses the core Agent journal: a dangling mutation becomes `outcome unknown` and is never
+automatically re-executed. A cross-process lease enforces one active writer; canonical cwd checks prevent a
+session from being reopened under a different workspace; a previous valid file backs up a corrupt primary;
+connection close persists before provider/runtime disposal. Focused tests cover process-boundary reopen,
+load replay versus resume, stable message/tool IDs, todo hydration, unknown mutation outcomes, credential
+redaction, one-writer/cwd enforcement, corrupt-checkpoint fallback, pagination, and session-local permissions.

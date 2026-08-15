@@ -152,13 +152,17 @@ function hasUnsafeConfigShape(root: unknown): boolean {
 
 function hasExecutableProjectConfig(data: Record<string, any>): boolean {
   if (hasUnsafeConfigShape(data)) return true;
+  // A checkout may tune declarative model behavior after exact-cwd trust, but it must never grant
+  // itself write authority elsewhere on the host. External write roots are user-global/env policy.
+  if (Object.hasOwn(data, "additional_write_roots")) return true;
   if (nonEmptyExecutableMap(Object.hasOwn(data, "hooks") ? data.hooks : undefined)
     || nonEmptyExecutableMap(Object.hasOwn(data, "mcp_servers") ? data.mcp_servers : undefined)
     || nonEmptyExecutableMap(Object.hasOwn(data, "mcpServers") ? data.mcpServers : undefined)) return true;
   const profiles = Object.hasOwn(data, "profiles") ? data.profiles : undefined;
   if (profiles !== undefined && !isObject(profiles)) return true;
   return isObject(profiles) && Object.values(profiles).some((profile) => isObject(profile)
-    && (nonEmptyExecutableMap(profile.hooks) || nonEmptyExecutableMap(profile.mcp_servers)
+    && (Object.hasOwn(profile, "additional_write_roots")
+      || nonEmptyExecutableMap(profile.hooks) || nonEmptyExecutableMap(profile.mcp_servers)
       || nonEmptyExecutableMap(profile.mcpServers)));
 }
 
@@ -540,7 +544,7 @@ function snapshotProject(cwd: string): ProjectTrustInspection {
   } catch (error) {
     return {
       ...emptyInspection("error", (error as Error).message.includes("configured globally")
-        ? "Project-local hooks and MCP servers are not executable; configure them globally"
+        ? "Project-local hooks, MCP servers, and external write roots are not authoritative; configure them globally"
         : "Cannot safely parse project control configuration"),
       root,
       projectId,

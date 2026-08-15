@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { loadConfig, NekoConfig, redactSecrets } from "../src/adapters/config.ts";
 
@@ -17,6 +17,36 @@ function tmpConfig(data: any): string {
   writeFileSync(path, JSON.stringify(data));
   return path;
 }
+
+function configAtHome(data: Record<string, any>, home: string): NekoConfig {
+  return new NekoConfig(data, null, {}, "", null, [], { state: "none", files: [] }, home);
+}
+
+test("additional write roots include only the global research ledger by default", () => {
+  const home = mkdtempSync(join(tmpdir(), "neko-write-home-"));
+  expect(configAtHome({}, home).additionalWriteRoots).toEqual([join(home, ".neko-core", "research")]);
+});
+
+test("additional write roots accept explicit absolute capabilities from config or env", () => {
+  const base = mkdtempSync(join(tmpdir(), "neko-write-roots-"));
+  const home = join(base, "home");
+  const a = join(base, "a");
+  const b = join(base, "b");
+  mkdirSync(home, { recursive: true });
+  expect(configAtHome({ additional_write_roots: [a, b, a] }, home).additionalWriteRoots)
+    .toEqual([join(home, ".neko-core", "research"), a, b]);
+  expect(configAtHome({ additional_write_roots: `${a}${delimiter}${b}` }, home).additionalWriteRoots)
+    .toEqual([join(home, ".neko-core", "research"), a, b]);
+});
+
+test("additional write roots reject broad, relative, and agent-control capabilities", () => {
+  const base = mkdtempSync(join(tmpdir(), "neko-write-policy-"));
+  const home = join(base, "home");
+  mkdirSync(home, { recursive: true });
+  for (const root of ["relative", home, join(home, ".ssh"), join(home, ".neko-core", "sessions")]) {
+    expect(() => configAtHome({ additional_write_roots: [root] }, home).additionalWriteRoots).toThrow();
+  }
+});
 
 test("isLocalEndpoint detects local model servers (no key needed)", () => {
   expect(loadConfig({ path: tmpConfig({ base_url: "http://localhost:11434/v1" }) }).isLocalEndpoint).toBe(true);

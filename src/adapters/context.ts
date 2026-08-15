@@ -97,11 +97,17 @@ export function ensureGlobalNekoMd(home: string = homeDir()): GlobalNekoMdState 
 export interface NekoHomeState {
   identity: GlobalNekoMdState;
   memory: MemoryBootstrapState;
+  researchDir: string;
 }
 
 /** Zero-setup bootstrap shared by one-shot mode, the interactive TUI, and `init-user`. */
 export function ensureNekoHome(home: string = homeDir()): NekoHomeState {
-  return { identity: ensureGlobalNekoMd(home), memory: ensureCoreMemories(home) };
+  const researchDir = join(home, ".neko-core", "research");
+  // This directory is Neko's one built-in user-global write capability. Creating the empty
+  // directory at bootstrap keeps all three OS sandbox backends able to bind/allow the exact root;
+  // no research content is created until an approved/auto tool actually writes it.
+  try { mkdirSync(researchDir, { recursive: true }); } catch { /* the eventual tool reports the exact failure */ }
+  return { identity: ensureGlobalNekoMd(home), memory: ensureCoreMemories(home), researchDir };
 }
 
 export interface ContextFile {

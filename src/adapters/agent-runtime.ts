@@ -154,7 +154,7 @@ export async function buildAgentRuntime(
     close: async () => {
       browserBridge?.close();
       await hub.close();
-      try { await provider.dispose?.(); } catch { /* best-effort provider shutdown */ }
+      try { await agent.currentProvider().dispose?.(); } catch { /* best-effort provider shutdown */ }
     },
   };
 }

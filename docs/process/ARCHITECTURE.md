@@ -98,6 +98,14 @@ dedicated account is provisioned. It remains an upstream alpha boundary. Docker 
 host daemon outside that OS sandbox; auto mode refuses those direct commands unless
 `allow_dangerous_bash` is explicitly enabled.
 
+Outside-workspace authority is split deliberately. Safe file readers may traverse ordinary host paths
+when `read_outside_root` is enabled, while structured mutations and ordinary sandboxed Bash share the
+project plus canonical `additional_write_roots`. The sole built-in global write capability is
+`~/.neko-core/research`; broader roots are user policy, not a side effect of `auto`/`--yolo`. Filesystem
+roots, home-wide grants, credential/agent-control capability roots, outside credential targets,
+symlink/junction escapes, and hardlink aliases are refused at the structured boundary. A timed-out SRT health probe may retry one real launch
+through the same exact SRT settings, but never authorizes an unconfined fallback.
+
 The `task` tool is gated by default. Built-in reviewer/explorer roles receive explicit read-only
 allowlists and may run concurrently; generic/custom tasks retain only inherited authority and are
 serialized because they can mutate the shared worktree. Cancellation propagates into the child agent,
@@ -397,7 +405,11 @@ Alt+M and Alt+X remain keyboard-equivalent controls.
 ## ACP host boundary
 
 `adapters/acp.ts` is a stable ACP v1 stdio adapter. It owns JSON-RPC connection/session lifecycle,
-stream/update projection, cancellation, and permission requests; it does not execute tools itself.
+stream/update projection, durable session hydration/replay/checkpointing, cancellation, and permission
+requests; it does not execute tools itself. It reuses `adapters/session.ts` as the single persistence
+authority, including atomic current/previous checkpoints and cross-process writer leases. ACP tool calls
+still execute only through the core Agent and ToolRegistry; a recovered unanswered call is sealed as an
+unknown outcome before the next provider request rather than replayed as a mutation.
 `adapters/agent-runtime.ts` is the shared non-TUI production composition used by both `neko run` and
 `neko acp`, so provider selection, global skills, project context, MCP, ToolRegistry decisions, path
 containment, bash sandboxing, and the catastrophic-command seatbelt cannot drift between hosts.

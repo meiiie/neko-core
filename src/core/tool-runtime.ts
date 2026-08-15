@@ -6,7 +6,7 @@
  * computer           : host boundary -> requires explicit approval even in auto mode.
  *
  * Each tool returns a STRING observation (errors + denials included) so a failed or denied
- * tool never crashes the agent loop. Path-taking tools refuse to escape the project root.
+ * tool never crashes the agent loop. Mutations stay inside the project or explicit additional roots.
  */
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -412,6 +412,9 @@ export class ToolRegistry {
   /** Reads may leave the project root (default). Writes never do. Credential paths are refused either
    * way - see OUTSIDE_DENIED. Set false to restore a hard wall around the project. */
   readOutsideRoot = true;
+  /** Extra host-owned directory capabilities. Relative write paths still resolve inside `root`; only
+   * an absolute path can select one of these roots. Auto mode changes approval, not this boundary. */
+  additionalWriteRoots: string[] = [];
   /** The agent's current todo list (set by the todo_write tool; rendered by the REPL). */
   todos: { content: string; status: string }[] = [];
   /** Opt-in shell hooks around tool calls (set from config). */
@@ -623,6 +626,11 @@ export class ToolRegistry {
         continue;
       }
       try {
+        // Re-resolve immediately before rewind. A path that became a symlink/junction/hardlink
+        // after Neko's write must not turn checkpoint restore into an escape from the granted root.
+        const resolved = resolveForWrite(this.root, path, this.additionalWriteRoots);
+        if (resolved !== path) throw new Error("checkpoint path identity changed");
+        assertSingleLinkStructuredTarget(path, path);
         const current = existsSync(path) ? readFileSync(path, "utf-8") : null;
         if (current !== snapshot.lastWritten) {
           this.noteRestoreConflict(path);
@@ -678,7 +686,7 @@ export class ToolRegistry {
           display: editTarget.replaceAll("\\", "/"),
           // Never ask the host OS to resolve a path in a remote POSIX workspace. A supporting
           // backend receives the raw target and attests that it compares canonical identities.
-          ...(remoteEdit ? {} : { absolute: canonicalRegularFileInRoot(this.root, editTarget) }),
+          ...(remoteEdit ? {} : { absolute: canonicalRegularFileForWrite(this.root, editTarget, this.additionalWriteRoots) }),
         },
       } : {}),
       ...(policy.bashPolicy ? { bashPolicy: policy.bashPolicy } : {}),
@@ -785,6 +793,7 @@ export class ToolRegistry {
       allowHostDaemon: exactValidator ? false : this.allowDangerousBash,
       readOnlyWorkspace: exactValidator,
       denyReadFiles: this.sandboxDenyReadFiles,
+      additionalWriteRoots: this.additionalWriteRoots,
     });
     // Agent-presence opt-in: desktop helpers read NEKO_PRESENCE to show the independent cursor + honour takeover.
     // Desktop input backend opt-in: NEKO_INPUT picks the non-hijacking (inject) vs legacy (sendinput) path.
@@ -1038,7 +1047,7 @@ export class ToolRegistry {
       } else {
         let requested: string;
         try {
-          requested = canonicalRegularFileInRoot(this.root, requireArg(args, "path"));
+          requested = canonicalRegularFileForWrite(this.root, requireArg(args, "path"), this.additionalWriteRoots);
         } catch (error) {
           return `Error: ${messageOf(error)}`;
         }
@@ -1166,7 +1175,7 @@ export class ToolRegistry {
       spec = resolveTool(name);
       const structuredMutation = name === "write_file" || name === "edit" || name === "multi_edit";
       structuredPath = !nativeBackend && structuredMutation && args.path
-        ? resolveInRoot(this.root, String(args.path))
+        ? resolveForWrite(this.root, String(args.path), this.additionalWriteRoots)
         : undefined;
     } catch (error) {
       return `Error: ${(error as Error).message}`;
@@ -1237,6 +1246,7 @@ export class ToolRegistry {
         : name === "computer" ? await this.runComputer(args, signal)
         : await DISPATCH[name](this.root, args, {
           readOutsideRoot: this.readOutsideRoot,
+          additionalWriteRoots: this.additionalWriteRoots,
           childSecretEnvNames: this.childSecretEnvNames,
           strictEditMatch: name === "edit" && Boolean(this.turnToolPolicy?.editTarget),
           exactEditTarget: name === "edit" ? this.turnToolPolicy?.editTarget?.absolute : undefined,
@@ -1276,7 +1286,10 @@ export class ToolRegistry {
         try { closeSync(opened.fd); } catch { /* Bun streams may close an adopted fd despite autoClose:false. */ }
       }
     }
-    return await toolReadFile(this.root, args, { readOutsideRoot: this.readOutsideRoot });
+    return await toolReadFile(this.root, args, {
+      readOutsideRoot: this.readOutsideRoot,
+      additionalWriteRoots: this.additionalWriteRoots,
+    });
   }
 
   /** First-class desktop/GUI control (Windows): dispatches to the computer-use skill's accessibility-tree
@@ -1848,11 +1861,11 @@ function toolLs(root: string, args: Record<string, any>, opts: ToolOpts): string
   return out;
 }
 
-function toolWriteFile(root: string, args: Record<string, any>): string {
+function toolWriteFile(root: string, args: Record<string, any>, opts: ToolOpts): string {
   const raw = requireArg(args, "path");
   const content = args.content;
   if (content === undefined || content === null) throw new Error("missing required argument: content");
-  const path = resolveInRoot(root, raw);
+  const path = resolveForWrite(root, raw, opts.additionalWriteRoots);
   const existed = existsSync(path);
   mkdirSync(dirname(path), { recursive: true });
   assertSingleLinkStructuredTarget(path, raw);
@@ -1889,10 +1902,10 @@ function toolEdit(root: string, args: Record<string, any>, opts: ToolOpts): stri
   const newStr = args.new_string;
   if (oldStr === undefined || oldStr === null) throw new Error("missing required argument: old_string");
   if (newStr === undefined || newStr === null) throw new Error("missing required argument: new_string");
-  const path = resolveInRoot(root, raw);
+  const path = resolveForWrite(root, raw, opts.additionalWriteRoots);
   if (!existsSync(path)) return `Error: no such file: ${raw}`;
   assertSingleLinkStructuredTarget(path, raw);
-  if (opts.exactEditTarget && canonicalRegularFileInRoot(root, raw) !== opts.exactEditTarget) {
+  if (opts.exactEditTarget && canonicalRegularFileForWrite(root, raw, opts.additionalWriteRoots) !== opts.exactEditTarget) {
     return `Error: exact-file target identity changed before read: ${raw}`;
   }
   let text = readFileSync(path, "utf-8");
@@ -1929,7 +1942,7 @@ function toolEdit(root: string, args: Record<string, any>, opts: ToolOpts): stri
     text = next.join("\n");
   }
   assertSingleLinkStructuredTarget(path, raw);
-  if (opts.exactEditTarget && canonicalRegularFileInRoot(root, raw) !== opts.exactEditTarget) {
+  if (opts.exactEditTarget && canonicalRegularFileForWrite(root, raw, opts.additionalWriteRoots) !== opts.exactEditTarget) {
     return `Error: exact-file target identity changed before write: ${raw}`;
   }
   writeFileSync(path, text, "utf-8");
@@ -1937,12 +1950,12 @@ function toolEdit(root: string, args: Record<string, any>, opts: ToolOpts): stri
 }
 
 /** Apply several exact-match edits to one file, in order, atomically (writes only if all succeed). */
-function toolMultiEdit(root: string, args: Record<string, any>): string {
+function toolMultiEdit(root: string, args: Record<string, any>, opts: ToolOpts): string {
   const raw = requireArg(args, "path");
   const edits = args.edits;
   if (!Array.isArray(edits) || edits.length === 0) return "Error: multi_edit needs a non-empty 'edits' array";
   if (edits.length > 100) return "Error: multi_edit accepts at most 100 edits (no change written)";
-  const path = resolveInRoot(root, raw);
+  const path = resolveForWrite(root, raw, opts.additionalWriteRoots);
   if (!existsSync(path)) return `Error: no such file: ${raw}`;
   assertSingleLinkStructuredTarget(path, raw);
   let text = readFileSync(path, "utf-8");
@@ -2022,6 +2035,12 @@ function deniedReadPath(path: string): string | null {
   return null;
 }
 
+function pathWithin(basePath: string, candidatePath: string): boolean {
+  const base = process.platform === "win32" ? basePath.toLowerCase() : basePath;
+  const candidate = process.platform === "win32" ? candidatePath.toLowerCase() : candidatePath;
+  return candidate === base || candidate.startsWith(base + sep);
+}
+
 /**
  * Resolve a path for a READ. Credential material is refused everywhere. For ordinary paths outside
  * the root, the host decides: `allowOutside` opens reads while the closed mode keeps the old wall.
@@ -2033,7 +2052,7 @@ function resolveForRead(root: string, p: string, allowOutside: boolean): string 
   const denied = deniedReadPath(resolved);
   if (denied) throw new Error(`refused: ${denied} is never read, inside the project or out: ${p}`);
   if (!allowOutside) return resolveInRoot(root, p);
-  if (resolved === rootResolved || resolved.startsWith(rootResolved + sep)) return resolveInRoot(root, p);
+  if (pathWithin(rootResolved, resolved)) return resolveInRoot(root, p);
   return resolved;
 }
 
@@ -2041,17 +2060,40 @@ function resolveInRoot(root: string, p: string): string {
   const resolved = resolve(root, p);
   const rootResolved = resolve(root);
   // 1) lexical containment — catches ../ escapes cheaply.
-  if (resolved !== rootResolved && !resolved.startsWith(rootResolved + sep)) {
+  if (!pathWithin(rootResolved, resolved)) {
     throw new Error(`path escapes project root: ${p}`);
   }
   // 2) symlink containment — a symlink INSIDE the root pointing OUTSIDE would pass the lexical check but
   // actually escape. Compare realpaths (both via realpathNearest so a new file's existing parent is resolved).
   const rootReal = realpathNearest(rootResolved);
   const real = realpathNearest(resolved);
-  if (real !== rootReal && !real.startsWith(rootReal + sep)) {
+  if (!pathWithin(rootReal, real)) {
     throw new Error(`path escapes project root via a symlink: ${p}`);
   }
   return resolved;
+}
+
+/** Resolve a structured mutation against the project plus explicit additional directory capabilities.
+ * An allowed root is still canonicalized, so a symlink/junction inside it cannot escape to another
+ * directory. Credential/device paths remain immutable outside the project even when their parent was
+ * granted broadly. */
+function resolveForWrite(root: string, p: string, additionalRoots: readonly string[]): string {
+  const primary = resolve(root);
+  const resolved = resolve(primary, p);
+  if (pathWithin(primary, resolved)) return resolveInRoot(root, p);
+  for (const rawRoot of additionalRoots) {
+    const allowed = resolve(rawRoot);
+    if (!pathWithin(allowed, resolved)) continue;
+    const allowedReal = realpathNearest(allowed);
+    const targetReal = realpathNearest(resolved);
+    if (!pathWithin(allowedReal, targetReal)) {
+      throw new Error(`path escapes additional write root via a symlink: ${p}`);
+    }
+    const denied = deniedReadPath(resolved) ?? (targetReal === resolved ? null : deniedReadPath(targetReal));
+    if (denied) throw new Error(`refused: ${denied} may not be modified outside the project: ${p}`);
+    return resolved;
+  }
+  return resolveInRoot(root, p);
 }
 
 /** Existing multiply-linked files can alias an inode outside the workspace even when their path is
@@ -2066,8 +2108,8 @@ function assertSingleLinkStructuredTarget(path: string, shown: string): void {
 
 /** Resolve a pre-existing direct regular file without accepting a symlink/junction spelling. Exact-file
  * turn policy is a capability boundary, so a project cannot swap its named target for an in-root alias. */
-function canonicalRegularFileInRoot(root: string, p: string): string {
-  const path = resolveInRoot(root, p);
+function canonicalRegularFileForWrite(root: string, p: string, additionalRoots: readonly string[]): string {
+  const path = resolveForWrite(root, p, additionalRoots);
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new Error(`not a canonical regular file: ${p}`);
   const real = realpathSync(path);
@@ -2134,6 +2176,7 @@ function describe(name: string, args: Record<string, any>): string {
 
 export interface ToolOpts {
   readOutsideRoot: boolean;
+  additionalWriteRoots: readonly string[];
   childSecretEnvNames?: Iterable<string>;
   /** Exact-file leases refuse the legacy whitespace-tolerant edit fallback. */
   strictEditMatch?: boolean;

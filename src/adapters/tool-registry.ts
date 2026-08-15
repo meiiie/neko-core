@@ -1,8 +1,10 @@
 /** Shared ToolRegistry composition for CLI, TUI, and depth-one subagents. */
+import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { platform } from "node:os";
+import { resolve } from "node:path";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { subagentToolAllowlist } from "../core/tools.ts";
-import { detectSandbox, findWindowsBash, sandboxActive } from "../core/sandbox.ts";
+import { detectSandbox, findWindowsBash, sandboxActive, srtHealth, transientSrtHealthFailure } from "../core/sandbox.ts";
 import type { NekoConfig } from "./config.ts";
 import { withBrowserBridge } from "./browser-bridge.ts";
 import { withOfficeTools } from "./office-tools.ts";
@@ -50,10 +52,12 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     : "none";
   const liveSandbox = registry.sandboxBash && detected !== "none" &&
     (sandboxRuntime?.live ?? sandboxActive());
+  const transientSrt = registry.sandboxBash && detected === "srt" && !liveSandbox
+    && transientSrtHealthFailure(sandboxRuntime ? (sandboxRuntime.detail ?? "") : srtHealth().detail);
   const exactReadOnlyValidator = turnPolicy?.bashPolicy === "foreground-validator-only";
   const failClosedBash = exactReadOnlyValidator
     ? !liveSandbox
-    : registry.sandboxBash && detected !== "none" && !liveSandbox;
+    : registry.sandboxBash && detected !== "none" && !liveSandbox && !transientSrt;
   const unconfinedAuto = registry.mode === "auto" && bashCallable &&
     !exactReadOnlyValidator && (!registry.sandboxBash || detected === "none");
   const sandboxedBash = liveSandbox && registry.sandboxAutoApprove;
@@ -74,7 +78,9 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     : !registry.sandboxBash
     ? "off (host/unconfined)"
     : liveSandbox
-      ? `${detected} live (writes confined to workspace/temp; host reads remain available; network ${network})`
+      ? `${detected} live (writes confined to workspace/temp plus explicit additional_write_roots; host reads remain available; network ${network})`
+      : transientSrt
+        ? "srt behavioral probe timed out under host load; bash will still attempt the exact SRT boundary once and will never fall back unconfined"
       : detected === "none"
         ? "requested but unavailable (host/unconfined)"
       : `${detected} present but unhealthy in the latest snapshot (bash FAILS CLOSED; no host fallback; a later bash call re-checks SRT health after the bounded failure cache expires)`;
@@ -113,6 +119,26 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
   registry.childSecretEnvNames = cfg.childSecretEnvNames;
   registry.allowDangerousBash = cfg.allowDangerousBash;
   registry.readOutsideRoot = cfg.readOutsideRoot;
+  const researchRoot = resolve(cfg.researchWriteRoot);
+  registry.additionalWriteRoots = cfg.additionalWriteRoots.map((rawRoot) => {
+    const requested = resolve(rawRoot);
+    if (!existsSync(requested)) {
+      if (requested !== researchRoot) {
+        throw new Error(`additional_write_roots directory does not exist: ${rawRoot}`);
+      }
+      mkdirSync(requested, { recursive: true });
+    }
+    const stat = lstatSync(requested);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error(`additional_write_roots must name a canonical directory: ${rawRoot}`);
+    }
+    const canonical = realpathSync(requested);
+    const same = process.platform === "win32"
+      ? canonical.toLowerCase() === requested.toLowerCase()
+      : canonical === requested;
+    if (!same) throw new Error(`additional_write_roots must not traverse a symlink or junction: ${rawRoot}`);
+    return canonical;
+  });
   registry.bashTimeoutCapMs = cfg.bashTimeoutCapMs;
   registry.sandboxBash = cfg.sandbox;
   registry.sandboxAllowNetwork = cfg.sandboxNetwork;
@@ -151,6 +177,7 @@ export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRe
   target.loadSkill = source.loadSkill;
   target.allowDangerousBash = source.allowDangerousBash;
   target.readOutsideRoot = source.readOutsideRoot;
+  target.additionalWriteRoots = [...source.additionalWriteRoots];
   target.bashTimeoutCapMs = source.bashTimeoutCapMs;
   target.sandboxBash = source.sandboxBash;
   target.sandboxAllowNetwork = source.sandboxAllowNetwork;

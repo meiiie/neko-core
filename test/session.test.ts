@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, setSessionsDir } from "../src/adapters/session.ts";
+import { acquireSessionLease, isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, setSessionsDir } from "../src/adapters/session.ts";
 
 // Isolate from the user's real ~/.neko-core: these tests WRITE session files. Pointing HOME at a
 // temp dir was the old way, but env mutation across bun test files is racy (see bun-test-env-races)
@@ -48,6 +48,68 @@ test("save / load / list round-trip", () => {
   } finally {
     rmSync(join(TEST_DIR, `${id}.json`), { force: true });
   }
+});
+
+test("durable metadata round-trips and a corrupt primary falls back to the last good checkpoint", () => {
+  const id = `${newSessionId()}-durable`;
+  const now = new Date().toISOString();
+  saveSession({
+    schemaVersion: 2,
+    id,
+    createdAt: now,
+    updatedAt: now,
+    cwd: "/tmp/durable",
+    provider: "openai_compat",
+    model: "model-a",
+    profile: "profile-a",
+    mode: "plan",
+    reasoningEffort: "high",
+    revision: 1,
+    messages: [{ role: "user", content: "checkpoint one" }],
+    turnState: { status: "running", activeToolCallIds: ["call-1"] },
+    usage: {
+      promptTokens: 10, completionTokens: 2, totalTokens: 12, cachedTokens: 3, cacheWriteTokens: 0,
+      calls: 1, lastPrompt: 10, lastCompletion: 2, lastCached: 3, lastCacheWrite: 0,
+    },
+  });
+  const newer = loadSession(id)!;
+  newer.revision = 2;
+  newer.messages.push({ role: "assistant", content: "checkpoint two" });
+  newer.turnState = { status: "idle", activeToolCallIds: [] };
+  saveSession(newer);
+  expect(loadSession(id)?.revision).toBe(2);
+  expect(existsSync(join(TEST_DIR, `${id}.json.bak`))).toBe(true);
+
+  writeFileSync(join(TEST_DIR, `${id}.json`), "{broken", "utf8");
+  const recovered = loadSession(id)!;
+  expect(recovered.revision).toBe(1);
+  expect(recovered.messages.at(-1)?.content).toBe("checkpoint one");
+  expect(listSessionMetas().find((meta) => meta.id === id)).toMatchObject({
+    provider: "openai_compat",
+    profile: "profile-a",
+    mode: "plan",
+    revision: 1,
+  });
+  rmSync(join(TEST_DIR, `${id}.json`), { force: true });
+  rmSync(join(TEST_DIR, `${id}.json.bak`), { force: true });
+});
+
+test("session writer leases reject overlap, release cleanly, and recover a dead owner", () => {
+  const id = `${newSessionId()}-lease`;
+  const first = acquireSessionLease(id);
+  expect(() => acquireSessionLease(id)).toThrow("active writer");
+  first.release();
+  const second = acquireSessionLease(id);
+  second.release();
+
+  writeFileSync(join(TEST_DIR, `${id}.json.lock`), JSON.stringify({
+    pid: 2_147_483_647,
+    token: "stale",
+    acquiredAt: new Date().toISOString(),
+  }), "utf8");
+  const recovered = acquireSessionLease(id);
+  recovered.release();
+  expect(existsSync(join(TEST_DIR, `${id}.json.lock`))).toBe(false);
 });
 
 test("save refuses an oversized UTF-8 session without replacing its last readable checkpoint", () => {

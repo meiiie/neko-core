@@ -3,7 +3,7 @@
  * agents / commands / capabilities registries + a policy audit of the safe/gated boundary.
  */
 import type { NekoConfig } from "./config.ts";
-import { detectSandbox, sandboxActive, type SandboxKind } from "../core/sandbox.ts";
+import { detectSandbox, sandboxActive, srtHealth, transientSrtHealthFailure, type SandboxKind } from "../core/sandbox.ts";
 import { GATED, listTools, SAFE } from "../core/tools.ts";
 
 export const READ_ONLY = "read-only";
@@ -150,7 +150,7 @@ export function collectCapabilities(config: NekoConfig): Capability[] {
     { name: "model_completion", klass: "agent", status: "enabled", detail: `${config.provider}: ${config.model || "(model unset)"}` },
     { name: "file_read", klass: "tool", status: "enabled", detail: "read_file + search + glob + ls (safe, no approval)" },
     { name: "disk_cleanup_scan", klass: "tool", status: process.platform === "win32" ? "enabled" : "unavailable", detail: "bounded Windows cleanup/cache metadata only; no file contents or deletion; independent of bash" },
-    { name: "file_write", klass: "tool", status: "enabled", detail: "write_file + edit (gated: needs approval)" },
+    { name: "file_write", klass: "tool", status: "enabled", detail: "write_file + edit (gated; project plus explicit additional_write_roots; built-in ~/.neko-core/research ledger)" },
     {
       name: "shell",
       klass: "tool",
@@ -158,7 +158,7 @@ export function collectCapabilities(config: NekoConfig): Capability[] {
       // "Gated-but-sandboxed" is a NAMED state like mode=auto: the gate stays in the contract,
       // the prompt is skipped only while confinement is LIVE (primitive + provisioning).
       detail: config.sandbox && config.sandboxAutoApprove && sandboxActive()
-        ? `bash (gated; explicitly auto-approved while OS-sandboxed: writes confined to workspace/temp, host reads remain available; sandbox_auto_approve=false to prompt)`
+        ? `bash (gated; explicitly auto-approved while OS-sandboxed: writes confined to workspace/temp plus explicit additional_write_roots, host reads remain available; sandbox_auto_approve=false to prompt)`
         : "bash (gated: needs approval)",
     },
     { name: "permission_modes", klass: "agent", status: "enabled", detail: "default / accept-edits / plan / auto (Shift+Tab to cycle in chat)" },
@@ -210,6 +210,8 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
   const sandboxKind = sandboxRuntime?.kind ?? detectSandbox();
   const sandboxLive = config.mode === "auto" && config.sandbox && sandboxKind !== "none" &&
     (sandboxRuntime?.live ?? sandboxActive());
+  const transientSrt = config.mode === "auto" && config.sandbox && sandboxKind === "srt" && !sandboxLive &&
+    transientSrtHealthFailure(sandboxRuntime ? (sandboxRuntime.detail ?? "") : srtHealth().detail);
 
   checkUnique("tool", tools.map((t) => t.name), findings);
   checkUnique("agent", agents.map((a) => a.name), findings);
@@ -258,6 +260,13 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
         subject: "mode+sandbox",
         message: "UNCONFINED AUTO: bash runs without approval and no live OS sandbox contains it. The catastrophic-command seatbelt remains, but it is not confinement.",
       });
+    } else if (!sandboxLive && transientSrt) {
+      findings.push({
+        severity: "info",
+        code: "auto_srt_probe_timed_out",
+        subject: "bash+sandbox",
+        message: "The bounded SRT behavioral probe timed out under host load. Bash still attempts the exact SRT boundary once and never falls back to an unconfined host shell; the actual launch result remains authoritative.",
+      });
     } else if (!sandboxLive) {
       findings.push({
         severity: "warn",
@@ -277,7 +286,7 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
     });
   }
 
-  // Reads reaching outside the project is a deliberate default, not a leak: writes stay confined and
+  // Reads reaching outside the project is a deliberate default, not a leak: writes stay path-scoped and
   // credential paths are refused either way. It is reported so the boundary stays something you can
   // read off a command rather than something you have to trust.
   if (config.readOutsideRoot) {
@@ -285,9 +294,18 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
       severity: "info",
       code: "reads_outside_root",
       subject: "read_outside_root",
-      message: "Reads may resolve outside the project directory. Structured writes and edits stay project-confined; bash confinement requires a live OS sandbox. Credential paths (SSH, .env, key material, browser stores) stay refused. Set read_outside_root:false for a hard read wall.",
+      message: "Reads may resolve outside the project directory. Structured writes and sandboxed bash stay confined to the project plus explicit additional_write_roots (including the built-in ~/.neko-core/research ledger). Credential paths (SSH, .env, key material, browser stores) stay refused. Set read_outside_root:false for a hard read wall.",
     });
   }
+
+  findings.push({
+    severity: "info",
+    code: "additional_write_roots",
+    subject: "filesystem",
+    message: `Additional write capabilities: ${config.additionalWriteRoots
+      .map((path) => path === config.researchWriteRoot ? "~/.neko-core/research" : path)
+      .join(", ")}. Auto mode skips prompts inside these exact roots; it does not grant machine-wide writes.`,
+  });
 
   const verdict = findings.some((f) => f.severity === "fail")
     ? "fail"
