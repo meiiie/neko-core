@@ -119,6 +119,8 @@ interface ChatProps {
    * instead of mutating NEKO_FULLSCREEN, which is racy under bun's CI test scheduling (shared process.env
    * across file interleavings made inline tests randomly mount fullscreen on GitHub runners). */
   fullscreen?: boolean;
+  /** TESTS ONLY: isolate OSC-title observations from other mounted ChatApp instances. */
+  titleDriver?: { set: (name: string, busy: boolean) => void; stop: () => void };
   voiceFactory?: (options: ChatGptVoiceOptions) => ChatGptVoiceControl;
   browserVoiceFactory?: (options: BrowserVoiceOptions) => ChatGptVoiceControl;
   openUrl?: (url: string) => void;
@@ -150,7 +152,7 @@ export const STREAM_PUMP_SCROLLED_MS = 300;
 export const shouldStreamPump = (now: number, lastPump: number, scrolledAway: boolean): boolean =>
   now - lastPump >= (scrolledAway ? STREAM_PUMP_SCROLLED_MS : STREAM_PUMP_MS);
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, bridgeHolder }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, bridgeHolder }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -186,6 +188,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const voiceModeRef = useRef("voice");
   const [rcOn, setRcOn] = useState(false);
   const cfg = useRef(loadConfig({ profile })).current;
+  const tabTitle = titleDriver?.set ?? setTabTitle;
+  const stopTabTitle = titleDriver?.stop ?? stopTitleDriver;
   // The registry is built below after approval callbacks exist. Use a conservative startup catalog
   // for the pre-mount resume decision; configured/loaded schemas replace it everywhere thereafter.
   const startupToolSchemas = useMemo(() => [...toolSchemas(), ...(mcpHub?.toolSchemas() ?? [])], [mcpHub]);
@@ -332,8 +336,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // The driver then owns it: a blinking dot while busy, and (on Windows) a keeper re-assert against
   // console-title clobbers (see title.ts) until unmount.
   useEffect(() => {
-    setTabTitle(titleTaskRef.current || "Neko Core", false);
-    return stopTitleDriver;
+    tabTitle(titleTaskRef.current || "Neko Core", false);
+    return stopTabTitle;
   }, []);
   // Effective UI fps: env > config > /fps pref > detected display Hz > 60. Auto mode probes the display
   // in the background on first run (subprocess, never blocks startup): the scroll glide adapts LIVE this
@@ -817,7 +821,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     titleLockedRef.current = !!target.title;
     pinnedTitleRef.current = target.title ?? "";
     titleTaskRef.current = tname ? trunc(tname, 40) : "";
-    setTabTitle(titleTaskRef.current || "Neko Core", busyRef.current);
+    tabTitle(titleTaskRef.current || "Neko Core", busyRef.current);
     relayRef.current?.refresh();
     const todos = recoverTodos(target.messages); // from the FULL thread, before any compaction
     registryRef.current!.todos = todos;
@@ -974,7 +978,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     titleLockedRef.current = true;
     pinnedTitleRef.current = name;
     titleTaskRef.current = trunc(name, 40);
-    setTabTitle(titleTaskRef.current, busyRef.current);
+    tabTitle(titleTaskRef.current, busyRef.current);
     relayRef.current?.refresh();
     addLine("info", `session + tab named "${trunc(name, 60)}"`);
   };
@@ -2235,7 +2239,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       const controller = new AbortController();
       controllerRef.current = controller;
       if (!titleLockedRef.current && !titleTaskRef.current) titleTaskRef.current = trunc(skillInstruction, 40);
-      setTabTitle(titleTaskRef.current || "Neko Core", true);
+      tabTitle(titleTaskRef.current || "Neko Core", true);
       turnInStartRef.current = agentRef.current!.cost.promptTokens;
       turnOutStartRef.current = agentRef.current!.cost.completionTokens;
       turnCallsStartRef.current = agentRef.current!.cost.calls;
@@ -2341,7 +2345,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       turnStartedAtRef.current = 0;
       setBusy(false);
       relayRef.current?.refresh();
-      setTabTitle(titleTaskRef.current || "Neko Core", false); // the cat returns, the dot stops
+      tabTitle(titleTaskRef.current || "Neko Core", false); // the cat returns, the dot stops
       if (inflightRef.current.length) { inflightRef.current = []; syncInflight(); } // drop any un-resulted (aborted) blinking lines
       controllerRef.current = null;
       try {

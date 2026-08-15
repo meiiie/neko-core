@@ -14,6 +14,7 @@ import { toolResultDisplayLines, TranscriptLine, type Line } from "../src/ui/tra
 import { TranscriptViewer } from "../src/ui/transcript-viewer.tsx";
 import { RichView } from "../src/ui/rich-transcript.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
+import { createTitleDriver } from "../src/ui/title.ts";
 
 const CFG = new NekoConfig({}, null, {}, "");
 
@@ -43,9 +44,11 @@ class Echo implements Provider {
 }
 
 class Reasoner implements Provider {
+  private releaseReasoning: (() => void) | null = null;
+  release(): void { this.releaseReasoning?.(); }
   async complete(_m: any, _t: any, onDelta?: (t: string, k?: "content" | "reasoning") => void): Promise<ProviderResponse> {
     onDelta?.("let me think hard", "reasoning");
-    await tick(60);
+    await new Promise<void>((resolve) => { this.releaseReasoning = resolve; });
     onDelta?.("the answer");
     return { content: "the answer", tool_calls: [] };
   }
@@ -523,24 +526,22 @@ test("input footer: the prompt is BOXED by a rule above AND below, status beneat
 
 test("tab title is the session NAME (first message), stable - not each per-turn prompt", async () => {
   const captured: string[] = [];
-  const origWrite = process.stdout.write, origTTY = (process.stdout as any).isTTY;
-  (process.stdout as any).isTTY = true;
-  (process.stdout as any).write = ((s: any) => { captured.push(String(s)); return true; }) as any;
-  const titleOf = () => { const m = [...captured.join("").matchAll(/\x1b\]2;([^\x07]*)\x07/g)].pop(); return m ? m[1] : ""; };
+  const titleDriver = createTitleDriver({ write: (title) => captured.push(title), keepIdle: false });
+  const titleOf = () => captured.at(-1) ?? "";
   const pollTitle = async (pred: (t: string) => boolean, ms = 1500) => { for (let w = 0; w < ms; w += 25) { if (pred(titleOf())) return true; await tick(25); } return pred(titleOf()); };
+  let c: ReturnType<typeof render> | null = null;
   try {
-    const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
+    c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} titleDriver={titleDriver} />);
     await tick(60);
     c.stdin.write("first message here"); await tick(20); c.stdin.write("\r");   // first turn NAMES the session
     expect(await pollTitle((t) => t.includes("first message here"))).toBe(true);
     captured.length = 0;
     c.stdin.write("second different prompt"); await tick(20); c.stdin.write("\r"); // a later turn must NOT rename it
-    await tick(250);
-    expect(titleOf()).toContain("first message here");        // still the session name...
+    expect(await pollTitle((t) => t.includes("first message here"))).toBe(true); // still the session name...
     expect(titleOf()).not.toContain("second different prompt"); // ...not the new prompt
-    c.unmount();
   } finally {
-    (process.stdout as any).write = origWrite; (process.stdout as any).isTTY = origTTY;
+    c?.unmount();
+    titleDriver.stop();
   }
 });
 
@@ -604,16 +605,19 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
   });
 
 test("reasoning shows live while busy, clears when done", async () => {
-  const c = render(<ChatApp fullscreen={false} yolo provider={new Reasoner()} />);
+  const provider = new Reasoner();
+  const c = render(<ChatApp fullscreen={false} yolo provider={provider} />);
   try {
     await tick();
     c.stdin.write("go");
     await tick(20);
     c.stdin.write("\r");
     expect(await until(c, (f) => f.includes("let me think hard"))).toBe(true); // shown mid-turn
+    provider.release();
     expect(await until(c, (f) => f.includes("the answer"))).toBe(true); // final answer lands
     expect(strip(c.lastFrame())).not.toContain("let me think hard"); // thinking cleared when done
   } finally {
+    provider.release();
     c.unmount();
   }
 }, 15_000);
