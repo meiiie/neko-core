@@ -31,7 +31,7 @@ export function isMode(value: string): value is PermissionMode {
 export function decide(
   mode: PermissionMode,
   spec: ToolSpec,
-  args: Record<string, any> = {},
+  args: any = {},
   opts: { sandboxedBash?: boolean } = {},
 ): Decision {
   // Desktop control crosses out of the workspace/sandbox and acts as the logged-in user. `auto`

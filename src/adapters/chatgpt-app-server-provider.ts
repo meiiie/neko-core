@@ -204,7 +204,7 @@ export class ChatGptAppServerProvider implements Provider {
     active.heartbeat = heartbeat;
     try {
       const input = toUserInput(messages.at(-1)?.content);
-      const params: Record<string, any> = { threadId, input, model: this.cfg.model };
+      const params: any = { threadId, input, model: this.cfg.model };
       const effort = requestEffort(this.cfg.effort, opts.reasoningEffort);
       if (effort) params.effort = effort;
       params.summary = "auto";
@@ -480,7 +480,7 @@ async function waitForSettlement(done: Promise<void>, timeoutMs: number): Promis
 /** One usage shape from a codex tokenUsage record ({input,output,total,cachedInput}Tokens). */
 function readTokenUsage(raw: any): { prompt: number; completion: number; total: number; cached: number } | null {
   if (!isObject(raw)) return null;
-  const n = (v: unknown) => { const x = Number(v ?? 0); return Number.isFinite(x) && x > 0 ? Math.floor(x) : 0; };
+  const n = (v: any) => { const x = Number(v ?? 0); return Number.isFinite(x) && x > 0 ? Math.floor(x) : 0; };
   return { prompt: n(raw.inputTokens), completion: n(raw.outputTokens), total: n(raw.totalTokens), cached: n(raw.cachedInputTokens) };
 }
 
@@ -510,7 +510,7 @@ function toUserInput(content: any): any[] {
   return input.length ? input : [{ type: "text", text: "", text_elements: [] }];
 }
 
-function toolResultContent(observation: string | any[]): { contentItems: any[]; success: boolean } {
+function toolResultContent(observation: string | any[]) {
   const failed = isText(observation) && (/^Error running\b/.test(observation) || /^\[denied\]/.test(observation));
   if (isText(observation)) return { contentItems: [{ type: "inputText", text: observation || "(no output)" }], success: !failed };
   const contentItems: any[] = [];
@@ -527,7 +527,7 @@ function textContent(content: any): string {
   return content.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join("\n");
 }
 
-function isObject(value: unknown): value is Record<string, any> {
+function isObject(value: any): value is any {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 

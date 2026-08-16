@@ -25,7 +25,7 @@ const fmtResults = (rs: SearchResult[]): string =>
   rs.length ? rs.slice(0, 8).map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ""}`).join("\n") : "No results.";
 
 /** Local copy of the tiny argument validator (adapter must not import core helpers back). */
-function requireArg(args: Record<string, any>, key: string): string {
+function requireArg(args: any, key: string): string {
   const value = args[key];
   if (value === undefined || value === null || value === "") {
     throw new Error(`missing required argument: ${key}`);
@@ -205,7 +205,7 @@ function cacheWeb(url: string, md: string): void {
 /** Fetch a URL and return its FULL content as compact Markdown (HTML) or text. Cached briefly so pagination
  * (page 2, 3...) serves from memory. NOT truncated here - the caller paginates on demand (save locally +
  * page, don't silently lose content). */
-async function toolWebFetch(_root: string, args: Record<string, any>, backend = ""): Promise<string> {
+async function toolWebFetch(_root: string, args: any, backend = ""): Promise<string> {
   const url = requireArg(args, "url");
   if (!/^https?:\/\//i.test(url)) return "Error: url must start with http:// or https://";
   const hit = webCache.get(url);
@@ -218,7 +218,7 @@ async function toolWebFetch(_root: string, args: Record<string, any>, backend = 
   let contentType: string;
   try {
     const signal = AbortSignal.timeout(jina ? 45000 : 20000);
-    const headers: Record<string, string> = { ...WEB_HEADERS };
+    const headers: any = { ...WEB_HEADERS };
     if (jina && process.env.JINA_API_KEY) headers["Authorization"] = "Bearer " + process.env.JINA_API_KEY;
     if (jina) headers["X-Return-Format"] = "markdown";
     let fetchUrl = url;
@@ -415,7 +415,7 @@ export const webPort: WebPort = {
     // schema-guided extraction: a JSON Schema forces the extractor to fill a shape (e.g. enumerate
     // every variant) instead of collapsing to one value - far more reliable than a freeform prompt.
     // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-    const schema = isObjectValue(args.schema) ? (args.schema as Record<string, any>) : undefined;
+    const schema = isObjectValue(args.schema) ? (args.schema as any) : undefined;
     // Skip the model when the page is small enough to just read (Hermes-style: no LLM call when it adds
     // nothing - most pages). A prompt/schema on a LARGE page still gets the single-pass extractor, now
     // over clean markdown rather than raw HTML.

@@ -51,12 +51,12 @@ try {
     ],
   });
 
-  const expectedText: Record<string, string[]> = {
+  const expectedText: any = {
     "neko-office.docx": ["Neko Core Office verification", "Typed batch"],
     "neko-office.xlsx": ["Metric", "Value", "Verified"],
     "neko-office.pptx": ["Neko Core Office", "Verified artifact workflow"],
   };
-  const evidence: Record<string, unknown> = {};
+  const evidence: any = {};
   for (const file of ["neko-office.docx", "neko-office.xlsx", "neko-office.pptx"]) {
     const validate = JSON.parse(await tools.call("mcp__neko_office__inspect", { operation: "validate", file }));
     const outline = JSON.parse(await tools.call("mcp__neko_office__inspect", { operation: "outline", file }));
@@ -70,7 +70,7 @@ try {
     }
     evidence[file] = { sha256: validate.sha256, bytes: statSync(join(root, file)).size, semantic: expectedText[file] };
   }
-  const renders: Record<string, unknown> = {};
+  const renders: any = {};
   for (const file of ["neko-office.docx", "neko-office.xlsx", "neko-office.pptx"]) {
     const stem = file.slice(0, file.lastIndexOf("."));
     const png = join(root, "evidence", `${stem}-${file.slice(-4)}.png`);
@@ -81,7 +81,7 @@ try {
     renders[file] = { file: png, bytes: statSync(png).size };
   }
   evidence.render = renders;
-  const crossRenders: Record<string, unknown> = {};
+  const crossRenders: any = {};
   if (libreOffice.state === "ready") {
     for (const file of ["neko-office.docx", "neko-office.xlsx", "neko-office.pptx"]) {
       const stem = file.slice(0, file.lastIndexOf("."));

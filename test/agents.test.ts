@@ -7,7 +7,7 @@ import { AGENTS as REGISTRY_AGENTS } from "../src/adapters/registry.ts";
 
 const roots: string[] = [];
 
-function fixture(): { root: string; home: string } {
+function fixture() {
   const base = mkdtempSync(join(tmpdir(), "neko-agents-"));
   roots.push(base);
   const root = join(base, "project");

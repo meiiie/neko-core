@@ -149,7 +149,7 @@ export function newOracleId(now = new Date()): string {
 }
 
 /** Mask credential-shaped values in place. Returns the text and how many values were masked. */
-export function maskCredentials(text: string): { text: string; masked: number } {
+export function maskCredentials(text: string) {
   let masked = 0;
   const literals = text.replace(CREDENTIAL_LITERAL, (_match, head: string, value: string, tail: string) => {
     // A reference is not a value. An ALL_CAPS env name, a shell/template expansion, or a template
@@ -187,7 +187,7 @@ function ignored(relPath: string): boolean {
  * Resolve glob patterns against the project root. A `!` prefix excludes. Paths that escape the root are
  * refused rather than silently dropped, matching the tool boundary in core.
  */
-export function selectFiles(root: string, patterns: string[]): { paths: string[]; skipped: SkippedFile[] } {
+export function selectFiles(root: string, patterns: string[]) {
   const skipped: SkippedFile[] = [];
   const includes = patterns.filter((pattern) => !pattern.startsWith("!"));
   const excludes = patterns.filter((pattern) => pattern.startsWith("!")).map((pattern) => pattern.slice(1));

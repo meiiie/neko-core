@@ -116,7 +116,7 @@ test("loads a closed 12-task pack into a deeply frozen immutable snapshot", () =
   });
   Object.defineProperty(Buffer.prototype, "length", {
     configurable: true,
-    get: function(this: unknown) { capturedSnapshot = this; return content.size; },
+    get: function(this: any) { capturedSnapshot = this; return content.size; },
   });
   try {
     safeLength = content.readBytes().length;

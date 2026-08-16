@@ -19,14 +19,14 @@ let snapshot = "";
 // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const term = new (Bun as any).Terminal({
   cols, rows,
-  data(_t: unknown, c: Uint8Array) {
+  data(_t: any, c: Uint8Array) {
     bytes += c.length;
     vt.write(new TextDecoder().decode(c));
     const t = vt.text();
     if (t !== snapshot) { snapshot = t; lastChangeAt = performance.now(); }
   },
 });
-const env: Record<string, string | undefined> = { ...process.env, WT_SESSION: "bench", NEKO_AUTO_UPDATE: "0" };
+const env = { ...process.env, WT_SESSION: "bench", NEKO_AUTO_UPDATE: "0" };
 if (process.env.BENCH_INCR) env.NEKO_INCR = process.env.BENCH_INCR;
 // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const proc = Bun.spawn({ cmd: [exe, "--yolo"], cwd: import.meta.dir + "/..", terminal: term, env } as any);

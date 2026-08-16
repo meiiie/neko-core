@@ -39,7 +39,7 @@ const vt = new VirtualTerminal(cols, rows);
 const term = new (Bun as any).Terminal({
   cols,
   rows,
-  data(_terminal: unknown, chunk: Uint8Array) {
+  data(_terminal: any, chunk: Uint8Array) {
     vt.write(new TextDecoder().decode(chunk));
   },
 });

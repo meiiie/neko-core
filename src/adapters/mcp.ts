@@ -202,7 +202,7 @@ const MCP_WINDOWS_WRAPPER = [
   "exit $LASTEXITCODE",
 ].join("; ");
 
-function explicitMcpEnv(value: unknown, platform: NodeJS.Platform): Record<string, string> {
+function explicitMcpEnv(value: any, platform: NodeJS.Platform) {
   if (value === undefined) return {};
   if (!isJsonObject(value)) throw new Error("MCP stdio env must be an object of string values");
   const entries = Object.entries(value);
@@ -221,7 +221,7 @@ function explicitMcpEnv(value: unknown, platform: NodeJS.Platform): Record<strin
   return out;
 }
 
-function explicitMcpArgs(value: unknown): string[] {
+function explicitMcpArgs(value: any): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 256) throw new Error("MCP stdio args must be an array of at most 256 strings");
   if (value.some((arg) => !isText(arg) || arg.includes("\0") || Buffer.byteLength(arg, "utf8") > 64 * 1024)) {
@@ -309,7 +309,7 @@ export function __resolveMcpStdioLaunchForTest(
   });
 }
 
-function makeTransport(cfg: McpServerConfig, childSecretEnvNames: Iterable<string>): { transport: any; type: string } {
+function makeTransport(cfg: McpServerConfig, childSecretEnvNames: Iterable<string>) {
   if (cfg.url) {
     const url = new URL(cfg.url);
     const init = cfg.headers ? { requestInit: { headers: cfg.headers } } : undefined;
@@ -660,7 +660,7 @@ export class McpHub {
     return this.toolMap.has(name) || this.resourceTools.has(name);
   }
 
-  async call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  async call(name: string, args: any, signal?: AbortSignal): Promise<string> {
     // Synthetic resource reader (mcp__<server>__read_resource).
     const resourceServer = this.resourceTools.get(name);
     if (resourceServer) {
@@ -692,7 +692,7 @@ export class McpHub {
     }
   }
 
-  private async invoke(server: string, tool: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  private async invoke(server: string, tool: string, args: any, signal?: AbortSignal): Promise<string> {
     const client = await this.ensureClient(server); // connects on demand when registered from cache
     const res: any = await client.callTool(
       { name: tool, arguments: args },
@@ -711,7 +711,7 @@ export class McpHub {
     return out;
   }
 
-  async getPrompt(server: string, name: string, args: Record<string, any>): Promise<string> {
+  async getPrompt(server: string, name: string, args: any): Promise<string> {
     if (!this.configs.has(server)) return `Error: no MCP server '${server}'`;
     try {
       const client = await this.ensureClient(server);

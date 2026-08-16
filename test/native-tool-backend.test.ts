@@ -27,7 +27,7 @@ const ATTESTATION: NativeToolBackendAttestation = {
 
 type BackendCall = {
   name: NativeToolName;
-  args: Readonly<Record<string, any>>;
+  args: Readonly<any>;
   context: NativeToolCallContext;
 };
 
@@ -40,7 +40,7 @@ class FakeNativeBackend implements NativeToolBackend {
     readonly attestation: NativeToolBackendAttestation = ATTESTATION,
   ) {}
 
-  async execute(name: NativeToolName, args: Readonly<Record<string, any>>, context: NativeToolCallContext) {
+  async execute(name: NativeToolName, args: Readonly<any>, context: NativeToolCallContext) {
     const call = { name, args, context };
     this.calls.push(call);
     return await this.reply(call);

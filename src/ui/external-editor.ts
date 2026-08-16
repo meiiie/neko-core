@@ -29,7 +29,7 @@ function resolveEditor(): { cmd: string; args: string[] } | null {
 }
 
 /** Add a wait flag so GUI editors block until the window closes (the spawn must be synchronous). */
-function withWaitFlag(cmd: string, args: string[]): { cmd: string; args: string[] } {
+function withWaitFlag(cmd: string, args: string[]) {
   const base = cmd.toLowerCase().replace(/\.exe$/i, "");
   // VS Code family: `code --wait`; Sublime: `subl --wait`. The user's own args come first so they
   // can override (e.g. EDITOR="code --new-window"). Don't add a duplicate wait flag.

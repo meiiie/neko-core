@@ -27,7 +27,7 @@ export class ResponsesProvider implements Provider {
     const scope = providerScope("responses", url, this.cfg.model);
     const { instructions, input } = toResponsesInput(messages, scope);
     const responseTools = toResponsesTools(tools ?? []);
-    const payload: Record<string, any> = {
+    const payload: any = {
       model: this.cfg.model,
       instructions,
       input,
@@ -48,7 +48,7 @@ export class ResponsesProvider implements Provider {
       payload.text = { format: { type: "json_schema", name: "extraction", schema: opts.responseSchema, strict: true } };
     }
 
-    const headers: Record<string, string> = {
+    const headers: any = {
       Accept: "text/event-stream",
       "Content-Type": "application/json",
       "User-Agent": `neko-core/${VERSION}`,
@@ -152,7 +152,7 @@ export class ResponsesProvider implements Provider {
   }
 }
 
-function isRetryableStreamFailure(error: unknown): boolean {
+function isRetryableStreamFailure(error: any): boolean {
   const message = messageOf(error).toLowerCase();
   return message.includes("stream disconnected")
     || message.includes("internal server error")
@@ -181,6 +181,6 @@ function safeError(body: string): string {
   }
 }
 
-function messageOf(error: unknown): string {
+function messageOf(error: any): string {
   return error instanceof Error ? error.message : String(error);
 }

@@ -76,7 +76,7 @@ function kimiDeviceId(): string {
 }
 
 /** Stable host identity required by the official Kimi Code OAuth protocol. */
-export function kimiIdentityHeaders(): Record<string, string> {
+export function kimiIdentityHeaders() {
   return {
     "User-Agent": `NekoCore/${asciiHeader(VERSION)}`,
     "X-Msh-Platform": "kimi_code_cli",
@@ -195,7 +195,7 @@ function accessError(status: number, detail = ""): Error {
 }
 
 /** Convert Kimi OAuth authorization failures into an actionable error without hiding other failures. */
-export function explainKimiAccessError(error: unknown): Error {
+export function explainKimiAccessError(error: any): Error {
   const message = error instanceof Error ? error.message : String(error);
   const match = message.match(/\bHTTP (401|402|403)\b/i);
   return match ? accessError(Number(match[1])) : (error instanceof Error ? error : new Error(message));

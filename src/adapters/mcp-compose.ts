@@ -28,7 +28,7 @@ class CompositeMcpTools implements McpTools {
     const source = this.sourceFor(name);
     return source?.temporal?.(name) ?? false;
   }
-  call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  call(name: string, args: any, signal?: AbortSignal): Promise<string> {
     const matches = this.sources.filter((candidate) => candidate.has(name));
     if (matches.length > 1) return Promise.resolve(`Error: ambiguous external tool name ${name}`);
     const source = matches[0];
@@ -46,7 +46,7 @@ class CompositeMcpTools implements McpTools {
     }
     return prompts;
   }
-  getPrompt(server: string, name: string, args: Record<string, any>): Promise<string> {
+  getPrompt(server: string, name: string, args: any): Promise<string> {
     const matches = this.sources.filter((candidate) =>
       candidate.getPrompt && candidate.promptList?.().some((prompt) => prompt.server === server && prompt.name === name));
     if (matches.length > 1) return Promise.resolve(`Error: ambiguous MCP prompt ${server}:${name}`);

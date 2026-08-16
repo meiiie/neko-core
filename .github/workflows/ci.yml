@@ -36,6 +36,8 @@ jobs:
       - run: bun run typecheck
       - name: cross-check with stable 5.9 (typecheck runs 7.0-rc; drop this step at 7.0 GA)
         run: bun run typecheck:stable
+      - name: anti-slop lint
+        run: bun run lint
       - name: full test suite
         shell: pwsh
         run: |

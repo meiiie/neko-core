@@ -40,7 +40,7 @@ function writeBullets(bullets: string[]): void {
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
 /** The `playbook` tool: read/search + incremental delta edits (ACE Curator). */
-export function playbookTool(args: Record<string, any>): string {
+export function playbookTool(args: any): string {
   const action = String(args.action ?? "").toLowerCase();
   const bullets = readBullets();
   switch (action) {

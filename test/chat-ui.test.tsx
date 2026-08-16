@@ -317,7 +317,7 @@ test("browser side-panel prompts share the terminal FIFO and snapshot existing h
   const provider = new SerialProbeProvider();
   const panelEvents: unknown[] = [];
   const holder: any = {
-    current: { pushPanel: (event: unknown) => panelEvents.push(event) },
+    current: { pushPanel: (event: any) => panelEvents.push(event) },
     onPrompt: null,
     onSnapshot: null,
   };

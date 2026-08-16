@@ -79,7 +79,7 @@ function sentinelCol(row: string): number {
 // bugs (ghost rows) are invisible in unit sims and only reproducible under a real ConPTY; the tap turns
 // a field screenshot into a byte-level timeline. Zero cost when the env is unset.
 const TRACE = process.env.NEKO_TRACE_FRAMES;
-function trace(ev: Record<string, unknown>): void {
+function trace(ev: any): void {
   if (!TRACE) return;
   try { appendFileSync(TRACE, JSON.stringify({ t: Date.now(), ...ev }) + "\n"); } catch { /* diagnostics never break rendering */ }
 }

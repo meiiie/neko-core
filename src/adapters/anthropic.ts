@@ -35,7 +35,7 @@ export class AnthropicProvider implements Provider {
     const url = `${this.cfg.baseUrl.replace(/\/+$/, "")}/v1/messages`;
     const continuationScope = providerScope("anthropic", url, this.cfg.model);
     const { system, msgs } = toAnthropicMessages(messages, continuationScope);
-    const payload: Record<string, any> = {
+    const payload: any = {
       model: this.cfg.model,
       max_tokens: this.cfg.maxTokens > 0 ? this.cfg.maxTokens : ANTHROPIC_DEFAULT_MAX_TOKENS, // Anthropic REQUIRES max_tokens (0 = auto -> generous default, self-heals on the 400 below)
       messages: msgs,
@@ -88,7 +88,7 @@ export class AnthropicProvider implements Provider {
     let cacheOn = this.cfg.promptCache;
     if (cacheOn) addCacheBreakpoints(payload);
 
-    const headers: Record<string, string> = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
+    const headers: any = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
     if (key) {
       headers["x-api-key"] = key;
       if (!officialAnthropic) headers.authorization = `Bearer ${key}`; // Z.ai-compatible endpoints use Bearer
@@ -236,7 +236,7 @@ function wrappedAnthropicContinuation(scope: string, blocks: any[]): any[] | und
   return scope && blocks.length ? [{ type: ANTHROPIC_CONTINUATION, scope, blocks: structuredClone(blocks) }] : undefined;
 }
 
-export function toAnthropicMessages(messages: any[], scope = ""): { system: string; msgs: any[] } {
+export function toAnthropicMessages(messages: any[], scope = ""): any {
   const sys: string[] = [];
   const msgs: any[] = [];
   for (const m of messages) {
@@ -301,7 +301,7 @@ export function toAnthropicTools(tools: any[]): any[] {
  * last message — each request re-reads the previous request's conversation prefix via the API's
  * 20-block lookback, so a 40-step agent turn pays for each step's tail only, not the whole history.
  * A last message that is a plain string is lifted to block form (cache_control is block-only). */
-export function addCacheBreakpoints(payload: Record<string, any>): void {
+export function addCacheBreakpoints(payload: any): void {
   if (isText(payload.system) && payload.system) {
     const boundary = payload.system.indexOf(SESSION_CONTEXT_MARK);
     const blocks = boundary > 0
@@ -335,7 +335,7 @@ export function extractJsonLoose(s: string): string {
 /** A stall AFTER a 200 that's worth retrying: the idle timeout aborts the stream with a TimeoutError (z.ai/GLM
  *  sometimes goes silent on TTFT); non-user AbortErrors count too. A clean "disconnected before message_stop"
  *  does NOT (it's surfaced, not masked). The caller MUST rule out a user abort (signal.aborted) first. */
-export function isRetryableStreamStall(err: unknown): boolean {
+export function isRetryableStreamStall(err: any): boolean {
   return err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError");
 }
 
@@ -351,7 +351,7 @@ export function anthropicMaxTokensLimit(body: string): number | null {
 }
 
 /** Undo addCacheBreakpoints (the self-heal path for endpoints that reject cache_control). */
-export function stripCacheBreakpoints(payload: Record<string, any>): void {
+export function stripCacheBreakpoints(payload: any): void {
   if (Array.isArray(payload.system) && payload.system.every((block: any) => block?.type === "text")) {
     payload.system = payload.system.map((block: any) => String(block.text ?? "")).join("");
   }
@@ -438,7 +438,7 @@ type AnthropicStreamBlock = {
   name?: string;
   json: string;
   argumentBytes: number;
-  raw: Record<string, any>;
+  raw: any;
 };
 
 async function parseStream(
@@ -497,7 +497,7 @@ async function parseStream(
           throw new Error("anthropic stream sent an invalid content_block_start");
         }
         // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-        const raw = structuredClone(ev.content_block) as Record<string, any>;
+        const raw = structuredClone(ev.content_block) as any;
         const block: AnthropicStreamBlock = { type: raw.type, json: "", argumentBytes: 0, raw };
         if (block.type === "tool_use") {
           if (++toolCount > ANTHROPIC_STREAM_LIMITS.maxToolCalls) throw new Error("anthropic streaming tool call count exceeds safety limit");
@@ -632,7 +632,7 @@ function requireMessageStart(started: boolean): void {
   if (!started) throw new Error("anthropic stream content arrived before message_start");
 }
 
-function streamIndex(value: unknown): number {
+function streamIndex(value: any): number {
   // SAFETY: contract of the number type is established by the surrounding validation/boundary.
   if (!Number.isInteger(value) || (value as number) < 0 || (value as number) >= ANTHROPIC_STREAM_LIMITS.maxToolCalls) {
     throw new Error(`anthropic stream content block index out of range: ${String(value).slice(0, 40)}`);
@@ -641,20 +641,20 @@ function streamIndex(value: unknown): number {
   return value as number;
 }
 
-function boundedToolField(value: unknown, label: "id" | "name", maxBytes: number): string {
+function boundedToolField(value: any, label: "id" | "name", maxBytes: number): string {
   if (!isText(value) || Buffer.byteLength(value, "utf8") > maxBytes) {
     throw new Error(`anthropic streaming tool call ${label} was invalid or too large`);
   }
   return value;
 }
 
-function streamUsage(value: unknown): Record<string, number> {
+function streamUsage(value: any): any {
   if (value === undefined || value === null) return {};
   if (!isJsonObject(value)) throw new Error("anthropic stream usage was invalid");
   const out: Record<string, number> = {};
   for (const key of ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]) {
     // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-    const count = (value as Record<string, unknown>)[key];
+    const count = (value as any)[key];
     if (count === undefined || count === null) continue;
     // SAFETY: contract of the number type is established by the surrounding validation/boundary.
     if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("anthropic stream usage was invalid");
@@ -734,4 +734,4 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-function msgOf(e: unknown): string { return e instanceof Error ? e.message : String(e); }
+function msgOf(e: any): string { return e instanceof Error ? e.message : String(e); }

@@ -8,7 +8,7 @@ const sourceLauncher = join(repo, "bin", "neko-source.cjs");
 const safeBunfig = join(repo, "bunfig.neko.toml");
 const tempDirs: string[] = [];
 
-function fixture(prefix: string): { base: string; project: string; home: string; marker: string } {
+function fixture(prefix: string): any {
   const base = mkdtempSync(join(tmpdir(), prefix));
   tempDirs.push(base);
   const project = join(base, "project");
@@ -22,7 +22,7 @@ function fixture(prefix: string): { base: string; project: string; home: string;
   return { base, project, home, marker };
 }
 
-function cleanEnv(home: string): Record<string, string> {
+function cleanEnv(home: string): any {
   // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const env = Object.fromEntries(Object.entries(process.env)
     .filter(([key, value]) => value !== undefined && !key.startsWith("NEKO_") && key !== "BUN_AUTOLOAD_SENTINEL")) as Record<string, string>;

@@ -22,8 +22,8 @@ import { isText } from "../shared/wire.ts";
 interface AcpClient {
   initialize(timeoutMs?: number): Promise<any>;
   authenticate(apiKey?: string, timeoutMs?: number): Promise<any>;
-  request(method: string, params?: unknown, timeoutMs?: number): Promise<any>;
-  notify(method: string, params?: unknown): void;
+  request(method: string, params?: any, timeoutMs?: number): Promise<any>;
+  notify(method: string, params?: any): void;
   close(): void;
 }
 
@@ -280,7 +280,7 @@ function toMcpResult(observation: string | any[]): any {
   return { content: content.length ? content : [{ type: "text", text: "(no output)" }] };
 }
 
-function toAcpPrompt(messages: any[], fresh: boolean, responseSchema?: Record<string, any>): any[] {
+function toAcpPrompt(messages: any[], fresh: boolean, responseSchema?: any): any[] {
   const last = messages.at(-1);
   const blocks: any[] = [];
   let text = textContent(last?.content);
@@ -327,6 +327,6 @@ function toNekoUsage(usage?: GeminiUsageSnapshot): Usage | undefined {
   };
 }
 
-function isObject(value: unknown): value is Record<string, any> {
+function isObject(value: any): value is any {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

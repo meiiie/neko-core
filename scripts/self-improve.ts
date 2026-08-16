@@ -59,7 +59,7 @@ const isRateLimit = (s: string) => /\b429\b|rate.?limit|quota|too many requests|
 const isTransient = (s: string) => /\b(500|502|503|504)\b|network|ETIMEDOUT|fetch failed|socket|EAI_AGAIN|timed out/i.test(s);
 
 /** Verify gate: typecheck + full test suite + policy must all pass. Returns the first failure reason. */
-function verifyGate(): { ok: boolean; why?: string; out?: string } {
+function verifyGate() {
   const tc = sh("bun", ["run", "typecheck"], 180_000);
   if (!tc.ok) return { ok: false, why: "typecheck", out: tc.out.slice(-500) };
   // Tests can be flaky (a timing-sensitive case occasionally times out); retry once so a flake doesn't
@@ -80,7 +80,7 @@ const PEER_REVIEW = arg("--no-review", "") !== "true"; // anti-drift gate, on by
 
 /** A second, INDEPENDENT model reviews the staged diff: "is this a real, safe improvement?" — the DGM
  *  peer-review idea, the guard against drift (changes that pass tests but aren't actually better). */
-function peerReview(): { approve: boolean; verdict: string } {
+function peerReview() {
   const diff = sh("git", ["diff", "--cached"]).out;
   if (!diff.trim()) return { approve: false, verdict: "empty diff" };
   // Dedicated reviewer script: it reads the staged diff itself (no CLI-length limit) with a clean reviewer

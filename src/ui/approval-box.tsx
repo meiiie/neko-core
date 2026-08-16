@@ -36,7 +36,7 @@ export function approvalOptions(toolName: string): string[] {
 
 export interface Approval {
   toolName: string;
-  args: Record<string, any>;
+  args: any;
   resolve: (ok: boolean) => void;
 }
 

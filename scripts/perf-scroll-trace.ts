@@ -14,7 +14,7 @@ import { VirtualTerminal } from "../test/vt.ts";
 
 class FakeTtyOut extends EventEmitter {
   isTTY = true;
-  frames: { t: number; bytes: number; head: string } = [];
+  frames: any[] = [];
   constructor(public columns: number, public rows: number, private vt: VirtualTerminal) { super(); }
   write(s: string): boolean {
     const str = String(s);

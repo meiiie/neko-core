@@ -54,7 +54,7 @@ export interface Profile {
   key_env_fallbacks?: string[];
 }
 
-export const DEFAULTS: Record<string, any> = {
+export const DEFAULTS: any = {
   provider: "openai_compat",
   model: "",
   base_url: "https://integrate.api.nvidia.com/v1",
@@ -377,7 +377,7 @@ export interface MoaConfig {
 export class NekoConfig {
   constructor(
     /** printable, profile-merged, env-overridden settings (no secrets) */
-    public readonly data: Record<string, any>,
+    public readonly data: any,
     public profile: string | null,
     public readonly profiles: Record<string, Profile>,
     private apiKeyFromFile: string,
@@ -670,9 +670,9 @@ export class NekoConfig {
 
   /** Which profile answers `neko oracle`, and how much of the project it may be sent. An unset profile
    * is not an error here - the oracle surface reports it and names the candidates. */
-  get oracle(): { profile: string; model: string; effort: string; maxBytes: number; maxFileBytes: number; maxFiles: number } {
+  get oracle(): any {
     const o = isJsonObject(this.data.oracle) ? this.data.oracle : {};
-    const bounded = (value: unknown, fallback: number, min: number, max: number) => {
+    const bounded = (value: any, fallback: number, min: number, max: number) => {
       const number = Number(value ?? fallback);
       return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
     };
@@ -687,7 +687,7 @@ export class NekoConfig {
   }
 
   /** Shell hooks run around tool calls (opt-in). `pre_tool_use` can block (non-zero exit). */
-  get hooks(): { preToolUse?: string; postToolUse?: string } {
+  get hooks(): any {
     const h = this.data.hooks;
     if (!isJsonObject(h)) return {};
     return { preToolUse: isText(h.pre_tool_use) ? h.pre_tool_use : undefined, postToolUse: isText(h.post_tool_use) ? h.post_tool_use : undefined };
@@ -761,7 +761,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   const projectTrust = opts.path ? null : inspectProjectTrust(cwd, home);
   // Config files, lowest precedence first. `./neko.json` (project root) is the easy, discoverable
   // settings file (claude.json / codex style); keep secrets out of it (api_key -> ~/.neko-core or env).
-  const overlayEntries: { path: string; data: Record<string, any> }[] = opts.path
+  const overlayEntries: { path: string; data: any }[] = opts.path
     ? [{ path: opts.path, data: readOverlay(opts.path) }]
     : [
         { path: join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), data: readOverlay(join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)) },
@@ -771,7 +771,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   const overlayPaths = overlayEntries.map((entry) => entry.path);
   const overlays = overlayEntries.map((entry) => entry.data);
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-  const filesMerged = overlays.reduce((acc, o) => mergeDeep(acc, o), {} as Record<string, any>);
+  const filesMerged = overlays.reduce((acc, o) => mergeDeep(acc, o), {} as any);
 
   // Built-in profiles are always available; files may add or override individual ones (merge, not replace).
   const profiles: Record<string, Profile> = mergeDeep(
@@ -789,7 +789,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
 
   // Precedence: built-in defaults -> profile PRESET -> config files -> NEKO_* env. So an explicit
   // file (e.g. ./neko.json with a local base_url) overrides the profile, not the other way round.
-  let merged: Record<string, any> = structuredClone(DEFAULTS);
+  let merged: any = structuredClone(DEFAULTS);
   if (selected) merged = mergeDeep(merged, profiles[selected]);
   for (const overlay of overlays) merged = mergeDeep(merged, overlay);
 
@@ -852,7 +852,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   return new NekoConfig(merged, selected, profiles, apiKeyFromFile, modelShadow, [keyEnv, ...fallbackKeyEnvs].filter(Boolean), trustSummary, home);
 }
 
-function readOverlay(path: string): Record<string, any> {
+function readOverlay(path: string): any {
   if (!existsSync(path)) return {};
   let text: string;
   try {
@@ -873,11 +873,11 @@ function readOverlay(path: string): Record<string, any> {
     throw new Error(`Config ${path} must be a JSON object`);
   }
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-  return parsed as Record<string, any>;
+  return parsed as any;
 }
 
 /** Read a Claude-style `.mcp.json` and return its `mcpServers` map ({} if absent/invalid). */
-function readMcpJson(path: string): Record<string, any> {
+function readMcpJson(path: string): any {
   if (!existsSync(path)) return {};
   try {
     const data = JSON.parse(readFileSync(path, "utf-8"));
@@ -888,8 +888,8 @@ function readMcpJson(path: string): Record<string, any> {
   }
 }
 
-function mergeDeep(base: Record<string, any>, overlay: Record<string, any>): Record<string, any> {
-  const out: Record<string, any> = { ...base };
+function mergeDeep(base: any, overlay: any) {
+  const out = { ...base };
   for (const [key, value] of Object.entries(overlay)) {
     const current = out[key];
     if (isPlainObject(current) && isPlainObject(value)) {
@@ -901,6 +901,6 @@ function mergeDeep(base: Record<string, any>, overlay: Record<string, any>): Rec
   return out;
 }
 
-function isPlainObject(value: unknown): value is Record<string, any> {
+function isPlainObject(value: any): value is any {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

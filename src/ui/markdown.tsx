@@ -43,13 +43,13 @@ function safeCp(n: number): string {
 // LaTeX -> Unicode for terminal math. A terminal can't render MathML/LaTeX, so `$...$` shows raw. We map
 // the common constructs to readable Unicode instead. Tables are the extension point — add a symbol and it
 // works everywhere (inline + display) with no other change.
-const MATH_GREEK: Record<string, string> = {
+const MATH_GREEK: any = {
   alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", varepsilon: "ε", zeta: "ζ", eta: "η",
   theta: "θ", vartheta: "ϑ", iota: "ι", kappa: "κ", lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π",
   rho: "ρ", sigma: "σ", tau: "τ", upsilon: "υ", phi: "φ", varphi: "φ", chi: "χ", psi: "ψ", omega: "ω",
   Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π", Sigma: "Σ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
 };
-const MATH_OP: Record<string, string> = {
+const MATH_OP: any = {
   times: "×", cdot: "·", div: "÷", pm: "±", mp: "∓", ast: "∗", star: "⋆", circ: "∘",
   leq: "≤", le: "≤", geq: "≥", ge: "≥", neq: "≠", ne: "≠", approx: "≈", equiv: "≡", sim: "∼", propto: "∝",
   ll: "≪", gg: "≫", subset: "⊂", subseteq: "⊆", supset: "⊃", supseteq: "⊇", in: "∈", notin: "∉", cup: "∪", cap: "∩",
@@ -58,8 +58,8 @@ const MATH_OP: Record<string, string> = {
   cdots: "⋯", ldots: "…", dots: "…", vdots: "⋮", angle: "∠", perp: "⊥", parallel: "∥", pm2: "±",
   langle: "⟨", rangle: "⟩", lfloor: "⌊", rfloor: "⌋", lceil: "⌈", rceil: "⌉", vec: "→",
 };
-const SUP: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾", n: "ⁿ", i: "ⁱ", T: "ᵀ", a: "ᵃ", b: "ᵇ", c: "ᶜ" };
-const SUB: Record<string, string> = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉", "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎", i: "ᵢ", j: "ⱼ", n: "ₙ", a: "ₐ", x: "ₓ" };
+const SUP: any = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾", n: "ⁿ", i: "ⁱ", T: "ᵀ", a: "ᵃ", b: "ᵇ", c: "ᶜ" };
+const SUB: any = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉", "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎", i: "ᵢ", j: "ⱼ", n: "ₙ", a: "ₐ", x: "ₓ" };
 const toScript = (s: string, map: Record<string, string>) => [...s].map((c) => map[c] ?? c).join("");
 
 /** Convert a LaTeX math snippet to readable Unicode (bounded, extend via the tables above). */

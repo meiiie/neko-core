@@ -84,7 +84,7 @@ function validTimestamp(value: string): boolean {
   }
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+function exactKeys(value: any, expected: readonly string[]): boolean {
   const keys = Object.keys(value);
   return keys.length === expected.length && expected.every((key) => keys.includes(key));
 }

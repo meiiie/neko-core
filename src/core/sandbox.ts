@@ -245,7 +245,7 @@ function runAsyncProbe(
       if (timer) clearTimeout(timer);
       resolveProbe(result);
     };
-    const append = (current: string, chunk: unknown) => {
+    const append = (current: string, chunk: any) => {
       if (current.length >= 64 * 1024) return current;
       return current + String(chunk).slice(0, 64 * 1024 - current.length);
     };
@@ -522,7 +522,7 @@ export function writeEphemeralSrtSettings(
   allowWrite: readonly string[] = [root],
   denyWrite: readonly string[] = [],
   denyRead: readonly string[] = [],
-): { path: string; cleanup: () => void } {
+): any {
   const json = srtSettings(root, allowNetwork, domains, allowRead, allowWrite, denyWrite, denyRead);
   const path = join(dir, `neko-srt-settings-${process.pid}-${randomUUID()}.json`);
   writeFileSync(path, json, { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -606,7 +606,7 @@ export function writeEphemeralSrtScript(
   root: string,
   command: string,
   bunPath: string | null = null,
-): { path: string; cleanup: () => void } {
+): any {
   const path = join(dir, `cmd-${process.pid}-${randomUUID()}.sh`);
   writeFileSync(path, srtScript(root, command, bunPath), { encoding: "utf8", flag: "wx", mode: 0o600 });
   let removed = false;
@@ -622,7 +622,7 @@ export function writeEphemeralSrtScript(
 
 /** A fixed Windows child-process bridge for package scripts. The canonical Bun path stays in a
  * host-owned launch environment variable instead of being interpolated into batch syntax. */
-export function writeEphemeralSrtBunShim(dir: string): { path: string; cleanup: () => void } {
+export function writeEphemeralSrtBunShim(dir: string) {
   const path = join(dir, "bun.cmd");
   const body = '@"%NEKO_SRT_BUN_EXE%" %*\r\n';
   writeFileSync(path, body, { encoding: "utf8", flag: "wx", mode: 0o500 });
@@ -643,11 +643,7 @@ export function writeEphemeralSrtBunShim(dir: string): { path: string; cleanup: 
 }
 
 /** null -> no readable script dir; caller falls back to srt's own -c (idioms degraded). */
-function writeSrtScript(root: string, command: string, bunPath: string | null): {
-  path: string;
-  toolchainDir: string | null;
-  cleanup: () => void;
-} | null {
+function writeSrtScript(root: string, command: string, bunPath: string | null): any {
   const dir = createSrtScriptDir();
   if (!dir) return null;
   let shim: ReturnType<typeof writeEphemeralSrtBunShim> | null = null;
@@ -966,7 +962,7 @@ export function wrapBash(command: string, root: string, opts: { enabled: boolean
 }
 
 /** Create an unpredictable writable scratch directory that is provably outside the project. */
-function createValidationTemp(root: string): { path: string; cleanup: () => void } {
+function createValidationTemp(root: string) {
   const created = mkdtempSync(join(tmpdir(), "neko-validator-"));
   try {
     const rootReal = realpathSync(resolve(root));

@@ -209,7 +209,7 @@ const requestPinned: PublicRequest = (url, address, init) => new Promise((resolv
   request.end();
 });
 
-function redirectedHeaders(headers: Record<string, string>, from: URL, to: URL): Record<string, string> {
+function redirectedHeaders(headers: Record<string, string>, from: URL, to: URL) {
   if (from.origin === to.origin) return headers;
   const next = { ...headers };
   for (const name of Object.keys(next)) {

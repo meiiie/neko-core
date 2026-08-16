@@ -193,7 +193,7 @@ export class GeminiAcpClient {
       : { methodId: "oauth-personal" }, timeoutMs);
   }
 
-  request(method: string, params?: unknown, timeoutMs = RPC_TIMEOUT_MS): Promise<any> {
+  request(method: string, params?: any, timeoutMs = RPC_TIMEOUT_MS): Promise<any> {
     if (this.closed) return Promise.reject(new Error("Gemini CLI ACP is closed"));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
@@ -208,7 +208,7 @@ export class GeminiAcpClient {
     });
   }
 
-  notify(method: string, params?: unknown): void {
+  notify(method: string, params?: any): void {
     this.write({ jsonrpc: "2.0", method, params });
   }
 

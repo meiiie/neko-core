@@ -139,7 +139,7 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
   const resolved = resolveRelease(release, target, minimumVersion);
 
   const current = readCodexSupportPack(home);
-  if (!options.force && current?.protocolVersion === resolved.version && current.assetDigest === resolved.digest) {
+  if (!options.force && current !== null && current.protocolVersion === resolved.version && current.assetDigest === resolved.digest) {
     notify(`GPT-5.6 Support Pack ${resolved.version} is already installed.`);
     return { ...current, alreadyInstalled: true };
   }
@@ -240,14 +240,7 @@ export function removeCodexSupportPack(home = homeDir()): boolean {
   return true;
 }
 
-function resolveRelease(release: GitHubRelease, target: CodexSupportTarget, minimumVersion: string): {
-  version: string;
-  tag: string;
-  digest: string;
-  size: number;
-  url: string;
-  releaseUrl: string;
-} {
+function resolveRelease(release: GitHubRelease, target: CodexSupportTarget, minimumVersion: string): any {
   if (release.draft || release.prerelease) throw new Error("The latest Codex release is not a stable release");
   const tag = String(release.tag_name ?? "");
   const version = tag.match(/^rust-v(\d+\.\d+\.\d+)$/)?.[1];
@@ -318,7 +311,7 @@ function verifyOfficialBinary(path: string, platform: NodeJS.Platform): void {
       windowsHide: true,
       env: { ...process.env, NEKO_CODEX_VERIFY_PATH: path },
     });
-    let signature: { status?: string; subject?: string } = {};
+    let signature: any = {};
     try { signature = JSON.parse(result.stdout || "{}"); } catch { /* reported below */ }
     if (result.status !== 0 || signature.status !== "Valid" || !/\bOpenAI OpCo, LLC\b/i.test(signature.subject ?? "")) {
       throw new Error("Codex App Server does not have a valid OpenAI Windows signature");

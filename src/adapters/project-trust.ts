@@ -79,8 +79,8 @@ export interface ProjectSnapshotFile {
 }
 
 export interface ProjectTrustInspection extends ProjectTrustSummary {
-  configEntries: { path: string; data: Record<string, any> }[];
-  mcpServers: Record<string, any>;
+  configEntries: { path: string; data: any }[];
+  mcpServers: any;
   /** Full bounded manifest used for the fingerprint, including missing markers. */
   fileDigests: Record<string, string>;
   /** Bytes read through the verified descriptor; loaders must not reopen project controls. */
@@ -129,15 +129,15 @@ function trustRecordPath(home: string, projectId: string): string {
   return join(trustStoreDir(home), `${projectId}.json`);
 }
 
-function isObject(value: unknown): value is Record<string, any> {
+function isObject(value: any): value is any {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function nonEmptyExecutableMap(value: unknown): boolean {
+function nonEmptyExecutableMap(value: any): boolean {
   return value !== undefined && (!isObject(value) || Object.keys(value).length > 0);
 }
 
-function hasUnsafeConfigStructure(root: unknown): boolean {
+function hasUnsafeConfigStructure(root: any): boolean {
   const stack: Array<{ value: unknown; depth: number }> = [{ value: root, depth: 0 }];
   let visited = 0;
   while (stack.length) {
@@ -147,13 +147,13 @@ function hasUnsafeConfigStructure(root: unknown): boolean {
     for (const key of Object.keys(value)) {
       if (key === "__proto__" || key === "prototype" || key === "constructor") return true;
       // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-      stack.push({ value: (value as Record<string, unknown>)[key], depth: depth + 1 });
+      stack.push({ value: (value as any)[key], depth: depth + 1 });
     }
   }
   return false;
 }
 
-function hasExecutableProjectConfig(data: Record<string, any>): boolean {
+function hasExecutableProjectConfig(data: any): boolean {
   if (hasUnsafeConfigStructure(data)) return true;
   // A checkout may tune declarative model behavior after exact-cwd trust, but it must never grant
   // itself write authority elsewhere on the host. External write roots are user-global/env policy.
@@ -169,7 +169,7 @@ function hasExecutableProjectConfig(data: Record<string, any>): boolean {
       || nonEmptyExecutableMap(profile.mcpServers)));
 }
 
-function hasExactKeys(value: Record<string, any>, keys: readonly string[]): boolean {
+function hasExactKeys(value: any, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
@@ -181,7 +181,7 @@ function isSafeRelative(value: string): boolean {
     && value.split("/").every((part) => part !== "" && part !== "." && part !== "..");
 }
 
-function validManifest(files: Record<string, any>): files is Record<string, string> {
+function validManifest(files: any): files is Record<string, string> {
   const keys = Object.keys(files);
   if (keys.length > MAX_MANIFEST_ENTRIES) return false;
   for (const name of PROJECT_CONTROL_FILES) {
@@ -210,7 +210,7 @@ function validManifest(files: Record<string, any>): files is Record<string, stri
   return true;
 }
 
-function validateRecord(id: string, raw: unknown): TrustRecord {
+function validateRecord(id: string, raw: any): TrustRecord {
   if (!/^[a-f0-9]{64}$/.test(id) || !isObject(raw)
     || !hasExactKeys(raw, ["root", "fingerprint", "files", "trustedAt"])
     || !isText(raw.root) || !isText(raw.fingerprint)
@@ -533,8 +533,8 @@ function snapshotProject(cwd: string): ProjectTrustInspection {
     return { ...emptyInspection("none"), root, projectId, fileDigests: state.fileDigests };
   }
 
-  const configEntries: { path: string; data: Record<string, any> }[] = [];
-  let mcpServers: Record<string, any> = {};
+  const configEntries: { path: string; data: any }[] = [];
+  let mcpServers: any = {};
   try {
     for (const relativePath of [".neko-core/config.json", "neko.json"] as const) {
       const file = state.projectFiles[relativePath];

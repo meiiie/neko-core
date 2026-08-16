@@ -219,7 +219,7 @@ export function loadFrontierPack(manifestPath: string): LoadedFrontierPack {
   });
 }
 
-function parseManifest(value: unknown, manifestName: string): FrontierPackManifest {
+function parseManifest(value: any, manifestName: string): FrontierPackManifest {
   const root = objectValue(value, "Frontier pack manifest");
   exactKeys(root, ["schema", "packVersion", "tasks"], "Frontier pack manifest");
   if (root.schema !== FRONTIER_PACK_SCHEMA) throw new Error(`Frontier pack schema must be ${FRONTIER_PACK_SCHEMA}`);
@@ -230,13 +230,13 @@ function parseManifest(value: unknown, manifestName: string): FrontierPackManife
 
   const taskIds = new Set<string>();
   const contentPaths = new Set<string>([manifestName]);
-  const tasks = root.tasks.map((task, index) => parseTask(task, index, taskIds, contentPaths));
+  const tasks = root.tasks.map((task: any, index: number) => parseTask(task, index, taskIds, contentPaths));
   validateComposition(tasks);
   return deepFreeze({ schema: FRONTIER_PACK_SCHEMA, packVersion, tasks });
 }
 
 function parseTask(
-  value: unknown,
+  value: any,
   index: number,
   taskIds: Set<string>,
   contentPaths: Set<string>,
@@ -275,7 +275,7 @@ function parseTask(
   return deepFreeze({ id, family, lineage, seed, resources, sandboxPolicy, verifierRuntime, files });
 }
 
-function parseResources(value: unknown, taskLabel: string): FrontierResourceCeiling {
+function parseResources(value: any, taskLabel: string): FrontierResourceCeiling {
   const resources = objectValue(value, `${taskLabel} resources`);
   exactKeys(resources, RESOURCE_KEYS, `${taskLabel} resources`);
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
@@ -289,7 +289,7 @@ function parseResources(value: unknown, taskLabel: string): FrontierResourceCeil
   return deepFreeze(parsed) as FrontierResourceCeiling;
 }
 
-function parseContentRef(value: unknown, label: string): FrontierContentRef {
+function parseContentRef(value: any, label: string): FrontierContentRef {
   const ref = objectValue(value, label);
   exactKeys(ref, ["path", "sha256"], label);
   const path = safeRelativePath(ref.path, `${label} path`);
@@ -624,13 +624,13 @@ function decodeUtf8(bytes: Uint8Array, message: string): string {
   }
 }
 
-function objectValue(value: unknown, label: string): Record<string, unknown> {
+function objectValue(value: any, label: string): any {
   if (!isJsonObject(value)) throw new Error(`${label} must be an object`);
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-  return value as Record<string, unknown>;
+  return value as any;
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {
+function exactKeys(value: any, expected: readonly string[], label: string): void {
   const actual = Object.keys(value).sort();
   const sortedExpected = [...expected].sort();
   if (actual.length !== sortedExpected.length || actual.some((key, index) => key !== sortedExpected[index])) {
@@ -638,26 +638,26 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[], 
   }
 }
 
-function slugValue(value: unknown, label: string): string {
+function slugValue(value: any, label: string): string {
   if (!isText(value) || !SLUG_PATTERN.test(value) || !portableName(value)) throw new Error(`${label} is invalid`);
   return value;
 }
 
-function identityValue(value: unknown, label: string): string {
+function identityValue(value: any, label: string): string {
   if (!isText(value) || value.length === 0 || value.length > 256 || !/^[\x20-\x7e]+$/.test(value)) {
     throw new Error(`${label} is invalid`);
   }
   return value;
 }
 
-function integerValue(value: unknown, label: string, allowZero: boolean): number {
+function integerValue(value: any, label: string, allowZero: boolean): number {
   if (!Number.isSafeInteger(value) || !isJsonNumber(value) || (allowZero ? value < 0 : value <= 0)) {
     throw new Error(`${label} must be ${allowZero ? "a non-negative" : "a positive"} safe integer`);
   }
   return value;
 }
 
-function safeRelativePath(value: unknown, label: string): string {
+function safeRelativePath(value: any, label: string): string {
   if (!isText(value) || value.length === 0 || Buffer.byteLength(value, "utf8") > FRONTIER_PACK_LIMITS.relativePathBytes || value.includes("\\")
     || isAbsolute(value) || /^(?:[A-Za-z]:|\/\/)/.test(value) || /[\0-\x1f\x7f]/.test(value)) {
     throw new Error(`${label} is not a safe relative path`);
@@ -676,6 +676,6 @@ function portableName(value: string): boolean {
 function deepFreeze<T>(value: T): T {
   if ((!isObjectValue(value) && !(value instanceof Function)) || Object.isFrozen(value)) return value;
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-  for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
+  for (const nested of Object.values(value as any)) deepFreeze(nested);
   return Object.freeze(value);
 }

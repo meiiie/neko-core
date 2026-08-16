@@ -48,7 +48,7 @@ function startChild(mode: "mutate" | "resume", root: string, store: string, home
   return { child, messages };
 }
 
-function send(child: ChildProcessWithoutNullStreams, id: number, method: string, params: unknown): void {
+function send(child: ChildProcessWithoutNullStreams, id: number, method: string, params: any): void {
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
 }
 

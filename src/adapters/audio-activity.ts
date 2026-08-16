@@ -119,11 +119,11 @@ function report(ids: string[]): AudioActivityReport {
   };
 }
 
-function parseLines(stdout: string): string[] {
+function parseLines(stdout: string) {
   return stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 40);
 }
 
-function defaultRun(command: string, args: string[]): { status: number | null; stdout: string } {
+function defaultRun(command: string, args: string[]) {
   try {
     const result = spawnSync(command, args, { encoding: "utf8", windowsHide: true, timeout: 5_000, maxBuffer: 1024 * 1024 });
     return { status: result.error ? null : result.status, stdout: result.stdout ?? "" };

@@ -333,7 +333,7 @@ async function runBoundedSandboxTarget(
         treeCleanupConfirmed: confirmed,
       });
     };
-    const capture = (stream: "stdout" | "stderr", chunk: unknown) => {
+    const capture = (stream: "stdout" | "stderr", chunk: any) => {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
       const remaining = Math.max(0, maxOutputBytes - totalBytes);
       if (remaining > 0) {
@@ -429,7 +429,7 @@ function dataModuleUrl(source: string): string {
   return `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
 }
 
-function prepareVerifierModuleSource(source: string, root: string, sourcePath: string, safeAssertUrl: string): string {
+function prepareVerifierModuleSource(source: string, root: string, sourcePath: string, safeAssertUrl: string) {
   let prepared = source.replace(
     /\bimport\s+assert\s+from\s+(["'])node:assert(?:\/strict)?\1\s*;?/g,
     `import assert from ${JSON.stringify(safeAssertUrl)};`,
@@ -446,7 +446,7 @@ function prepareVerifierModuleSource(source: string, root: string, sourcePath: s
 /** Build a stdin supervisor whose output/assertion primitives are captured before candidate code.
  * The verifier itself is an in-memory child module: by the time it initializes, Bun has consumed the
  * supervisor pipe, so candidate code cannot reread the runner or its unpredictable suffix. */
-function attestedVerifierRunner(source: string, root: string, sourcePath: string): { marker: string; source: string } {
+function attestedVerifierRunner(source: string, root: string, sourcePath: string): any {
   const marker = `__NEKO_BENCH_ATTEST_${randomUUID().replaceAll("-", "")}__`;
   const suffix = `\n${marker}\n`;
   const privateId = marker.slice("__NEKO_BENCH_ATTEST_".length, -2);
@@ -473,7 +473,7 @@ function attestedHiddenVerifierRunner(
   program: HiddenBenchProgram,
   root: string,
   sourcePath: string,
-): { marker: string; source: string } {
+): any {
   if (Buffer.byteLength(program.body) > 1 * 1024 * 1024 || program.modules.length > 32) {
     throw new BenchInfrastructureError("hidden benchmark program exceeded its size limit");
   }
@@ -1569,7 +1569,7 @@ interface EvalTargetRefs {
   commands: Map<string, string>;
 }
 
-function parsedCallArguments(call: any): Record<string, any> {
+function parsedCallArguments(call: any): any {
   const raw = call?.arguments ?? {};
   if (!isText(raw)) return isJsonObject(raw) ? raw : {};
   try {
@@ -1578,11 +1578,11 @@ function parsedCallArguments(call: any): Record<string, any> {
   } catch { return {}; }
 }
 
-function traceString(value: unknown): string | undefined {
+function traceString(value: any): string | undefined {
   return isText(value) && value.length ? value : undefined;
 }
 
-function normalizedTracePath(value: unknown, defaultRoot = false): string | undefined {
+function normalizedTracePath(value: any, defaultRoot = false): string | undefined {
   const raw = isText(value)
     ? (value || (defaultRoot ? "." : undefined))
     : (defaultRoot && value === undefined ? "." : undefined);
@@ -1591,7 +1591,7 @@ function normalizedTracePath(value: unknown, defaultRoot = false): string | unde
   return process.platform === "win32" ? portable.toLowerCase() : portable;
 }
 
-function positiveTraceInt(value: unknown, fallback: number | null): number | null {
+function positiveTraceInt(value: any, fallback: number | null): number | null {
   let numeric: number;
   try { numeric = Number(value); } catch { return fallback; }
   if (!Number.isFinite(numeric)) return fallback;
@@ -1599,13 +1599,13 @@ function positiveTraceInt(value: unknown, fallback: number | null): number | nul
   return floored > 0 ? floored : fallback;
 }
 
-function boundedTraceInt(value: unknown, min: number, max: number, fallback: number): number {
+function boundedTraceInt(value: any, min: number, max: number, fallback: number) {
   let numeric: number;
   try { numeric = Number(value); } catch { return fallback; }
   return Number.isFinite(numeric) ? Math.max(min, Math.min(max, Math.floor(numeric))) : fallback;
 }
 
-function traceReadIdentity(name: string, args: Record<string, any>): { key?: string; scope?: string } {
+function traceReadIdentity(name: string, args: any) {
   if (name === "read_file") {
     const scope = normalizedTracePath(args.path);
     if (!scope) return {};
@@ -1645,7 +1645,7 @@ function traceReadIdentity(name: string, args: Record<string, any>): { key?: str
 function opaqueTargetRef(call: any, refs: EvalTargetRefs): string | undefined {
   const args = parsedCallArguments(call);
   const name = isText(call?.name) ? call.name : "";
-  const assign = (map: Map<string, string>, prefix: string, raw: unknown) => {
+  const assign = (map: Map<string, string>, prefix: string, raw: any) => {
     if (!isText(raw) || !raw) return undefined;
     const existing = map.get(raw);
     if (existing) return existing;
@@ -1668,7 +1668,7 @@ function safeEvalToolName(call: any): string {
   return (BENCH_LOCAL_TOOLS as readonly string[]).includes(name) ? name : "<unknown>";
 }
 
-function traceFromCall(call: any, observation: unknown): TraceEntry {
+function traceFromCall(call: any, observation: any): TraceEntry {
   const a = parsedCallArguments(call);
   const name = isText(call?.name) ? call.name : "";
   const read = traceReadIdentity(name, a);
@@ -2109,7 +2109,7 @@ export interface LiftRow { id: string; raw: boolean; harness: boolean; }
 export interface LiftReport { model: string; fingerprint: string; maxSteps: number; rows: LiftRow[]; rawPass: number; harnessPass: number; total: number; seconds: number; }
 
 /** Pull ```filename\n...``` fenced blocks out of a raw model reply (it has no tools, so it must emit files). */
-function parseFileBlocks(text: string): Record<string, string> {
+function parseFileBlocks(text: string) {
   const out: Record<string, string> = {};
   const re = /```([^\n`]*)\n([\s\S]*?)```/g;
   let m: RegExpExecArray | null;

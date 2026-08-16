@@ -52,7 +52,7 @@ class ImageTools implements McpTools {
       : "";
   }
 
-  async call(name: string, args: Record<string, any>): Promise<string> {
+  async call(name: string, args: any): Promise<string> {
     if (name !== NAME) return `Error: unknown image tool ${name}`;
     const available = imageGenerationAvailable();
     if (!available.ok) return `Error: ${available.detail}`;

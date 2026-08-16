@@ -99,7 +99,7 @@ export { ApprovalBox, type Approval }; // re-exported for tests
 
 const PROMPT_ANCHOR_HEIGHT = 1; // mounted only while scrolling; live-tail height stays untouched
 
-const MODE_COLOR: Record<PermissionMode, string> = {
+const MODE_COLOR = {
   default: "gray",
   "accept-edits": "yellow",
   plan: "blue",
@@ -534,7 +534,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   // Serialized so concurrent (parallel sub-agent) tool calls prompt one at a time, not at once.
   const gateChain = useRef<Promise<unknown>>(Promise.resolve());
-  const gate = (toolName: string, args: Record<string, any>): boolean | Promise<boolean> => {
+  const gate = (toolName: string, args: any): boolean | Promise<boolean> => {
     if (alwaysApproved.current.has(toolName)) return true;
     const next = gateChain.current.then(() => new Promise<boolean>((resolve) => {
       const request = { toolName, args, resolve };
@@ -2589,7 +2589,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           else addLine("info", "(cancelled)");
           return true;
         }
-        const item = waiting.overlay.items.find((candidate) => candidate.id === action.itemId);
+        const item = waiting.overlay.items.find((candidate: any) => candidate.id === action.itemId);
         if (!item) return false;
         remoteOverlayRef.current = null;
         waiting.overlay.onSelect(item);
@@ -2716,7 +2716,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     const id = promptJumpLineRef.current;
     if (id == null) return;
-    const span = ansiProjection.spans.find((candidate) => candidate.line.id === id);
+    const span = ansiProjection.spans.find((candidate: any) => candidate.line.id === id);
     if (!span) { promptJumpLineRef.current = null; return; }
     const visibleStart = Math.max(0, bandRowCount - rowScroll.dist - viewH);
     if (visibleStart !== span.start) rowScroll.toRow(span.start);
@@ -2749,7 +2749,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // repaint through the differ directly - no Ink render involved. Find mode hands the band back to Ink.
   // Rows get the same left gutter the Ink tree gives everything else (the differ paints at column 1;
   // unpadded rows sat flush against the edge). Padded once per rows-change, never per scroll frame.
-  const paddedRows = useMemo(() => ansiRows.map((r) => (r.length ? "  " + r : r)), [ansiRows]);
+  const paddedRows = useMemo(() => ansiRows.map((r: any) => (r.length ? "  " + r : r)), [ansiRows]);
   paddedRowsRef.current = paddedRows;
   bandActiveRef.current = fullscreen && !search;
   // The STREAMING reply lives IN the band, right under the committed rows - text appears where it will
@@ -2768,7 +2768,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // so the hidden commit is synchronous and the frame is real. clearTimeout coalesces rapid deltas.
     const id = setTimeout(() => {
       const rows = renderNodeRows(<Box marginTop={1} flexDirection="column"><Markdown text={md} width={contentCols - 2} compact /></Box>, contentCols);
-      setStreamRows(rows.map((r) => (r.length ? "  " + r : r))); // left gutter, matching the committed rows
+      setStreamRows(rows.map((r: any) => (r.length ? "  " + r : r))); // left gutter, matching the committed rows
     }, 0);
     return () => clearTimeout(id);
   }, [fullscreen, stream, contentCols, viewH]);
@@ -3352,7 +3352,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   );
 }
 
-export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean; resumeId?: string }): Promise<void> {
+export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean; resumeId?: string }) {
   // FIRST thing, before ANY await (MCP hub build, config load can take a beat): clear mouse tracking a
   // previous session left stuck on the terminal, so it stops spamming "[<...M" the instant neko runs -
   // not only after startup finishes. (bin/neko.ts also does this at process entry; belt + suspenders.)
@@ -3376,11 +3376,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // Side-panel bridge: a stable holder so ChatApp can mirror its transcript + take panel prompts even
   // though the bridge may be (re)created later by setupBrowser. Wiring onPanelPrompt on each bridge
   // routes panel prompts and snapshot requests to ChatApp's current handlers.
-  const bridgeHolder: {
-    current: BrowserBridge | null;
-    onPrompt: ((prompt: string) => void) | null;
-    onSnapshot: (() => void) | null;
-  } = { current: browserBridge, onPrompt: null, onSnapshot: null };
+  const bridgeHolder: any = { current: browserBridge, onPrompt: null, onSnapshot: null };
   const wireBridge = (b: BrowserBridge | null) => {
     bridgeHolder.current = b;
     b?.onPanelPrompt((p) => bridgeHolder.onPrompt?.(p));

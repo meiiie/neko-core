@@ -42,7 +42,7 @@ export class CostTracker {
 
   add(usage?: Usage): void {
     if (!usage) return;
-    const count = (value: unknown): number => {
+    const count = (value: any): number => {
       const n = Number(value ?? 0);
       return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
     };

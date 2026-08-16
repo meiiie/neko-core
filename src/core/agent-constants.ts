@@ -142,14 +142,14 @@ export function clampObservation(obs: string | any[]): string | any[] {
 export const ESTIMATED_IMAGE_TOKENS = 2048;
 const UTF8 = new TextEncoder();
 
-function estimateTextTokens(value: unknown): number {
+function estimateTextTokens(value: any): number {
   const text = isText(value) ? value : JSON.stringify(value ?? "") ?? "";
   // UTF-8 bytes keep the cheap 4-ASCII-chars/token rule while avoiding a severe underestimate for
   // Vietnamese/CJK text. This remains a safety estimate, never a billing claim.
   return Math.ceil(UTF8.encode(text).byteLength / 4);
 }
 
-function estimateContentTokens(content: unknown): number {
+function estimateContentTokens(content: any): number {
   if (!Array.isArray(content)) return estimateTextTokens(content);
   let tokens = 0;
   for (const part of content) {

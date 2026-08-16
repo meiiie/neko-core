@@ -168,7 +168,7 @@ export async function installOfficeSupportPack(options: InstallOfficeSupportOpti
   const resolved = resolveRelease(await response.json() as GitHubRelease, target);
 
   const current = readOfficeSupportPack(home);
-  if (!options.force && current?.officeVersion === resolved.version && current.assetDigest === resolved.digest) {
+  if (!options.force && current !== null && current.officeVersion === resolved.version && current.assetDigest === resolved.digest) {
     const actual = `sha256:${await sha256File(current.path)}`;
     if (actual === resolved.digest) {
       notify(`Office Support Pack ${resolved.version} is already installed.`);
@@ -246,9 +246,7 @@ export function removeOfficeSupportPack(home = homeDir()): boolean {
   return true;
 }
 
-function resolveRelease(release: GitHubRelease, target: OfficeSupportTarget): {
-  version: string; tag: string; digest: string; size: number; url: string; releaseUrl: string;
-} {
+function resolveRelease(release: GitHubRelease, target: OfficeSupportTarget): any {
   if (release.draft || release.prerelease) throw new Error("The latest OfficeCLI release is not a stable release");
   const tag = String(release.tag_name ?? "");
   const version = tag.match(/^v(\d+\.\d+\.\d+)$/)?.[1];

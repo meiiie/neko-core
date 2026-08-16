@@ -41,7 +41,7 @@ export interface RemoteRelay {
   /** Push the latest E2E-sealed title/model/busy metadata to paired clients. */
   refresh: () => void;
   /** Publish one semantic TUI event. Durable events replay after reconnect; reset starts a fresh mirror. */
-  publish: (event: unknown, opts?: { durable?: boolean; reset?: boolean }) => void;
+  publish: (event: any, opts?: { durable?: boolean; reset?: boolean }) => void;
   stop: () => void;
 }
 
@@ -165,7 +165,7 @@ export async function startRemoteRelay(
   let mode: "ws" | "poll" = v2 ? "ws" : "poll";
   let ws: WebSocket | null = null;
 
-  const decrypt = (payload: unknown): string | null => {
+  const decrypt = (payload: any): string | null => {
     // E2E, STRICT once paired: a session with a secret accepts ONLY sealed payloads. The old
     // `isSealed(...) ? open(...) : String(payload)` was a plaintext DOWNGRADE - anyone holding the
     // bearer token but not the secret could send an unsealed command and the host would run it,
@@ -184,7 +184,7 @@ export async function startRemoteRelay(
   // One instruction at a time regardless of transport: every job enters a FIFO and a single drainer
   // runs them (WS frames can arrive mid-turn; they must queue, not overlap the running turn).
   const jobs: { id: string; message: unknown }[] = [];
-  let send: (frame: Record<string, unknown>) => void = () => {};
+  let send: (frame: any) => void = () => {};
   let draining = false;
   const drain = async () => {
     if (draining) return;
@@ -212,7 +212,7 @@ export async function startRemoteRelay(
       const bump = () => { if (!timer) timer = setTimeout(flush, opts.partialMs ?? 600); };
       const onDelta = mode === "ws" ? (d: string) => { buf += d; bump(); } : undefined;
       const onAct = mode === "ws" ? (line: string) => { act.push(line); bump(); } : undefined;
-      let result: { reply?: string; tokens?: number; ms?: number };
+      let result: any;
       try {
         result = await handlers.run(message, onDelta, onAct);
       } catch (e) {
@@ -270,9 +270,9 @@ export async function startRemoteRelay(
   };
 
   // ---- v2 transport: hibernation-friendly WebSocket with reconnect ----
-  const outbox: Record<string, unknown>[] = []; // frames to deliver once the socket is back
+  const outbox: any[] = []; // frames to deliver once the socket is back
   let failures = 0; // consecutive connects that never opened
-  const wsSend = (f: Record<string, unknown>) => {
+  const wsSend = (f: any) => {
     if (ws && ws.readyState === 1) {
       try { ws.send(JSON.stringify(f)); return; } catch { /* fall through to outbox */ }
     }

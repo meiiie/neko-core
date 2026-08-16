@@ -85,7 +85,7 @@ export function clearChatGptCredentials(): string {
   return "ChatGPT sign-in removed.";
 }
 
-export function parseJwtClaims(token: string): Record<string, any> | null {
+export function parseJwtClaims(token: string): any | null {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   try { return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")); } catch { return null; }
@@ -141,7 +141,7 @@ export async function validChatGptCredentials(fetchImpl: typeof fetch = fetch, i
   return refreshInFlight;
 }
 
-function pkce(): { verifier: string; challenge: string } {
+function pkce() {
   const verifier = randomBytes(48).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
   return { verifier, challenge };

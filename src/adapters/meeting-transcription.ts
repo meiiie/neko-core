@@ -495,7 +495,7 @@ export async function extractChannelWav(source: string, destination: string, cha
 
 
 /** Minimal RIFF/WAVE reader: enough to find the PCM16 payload written by the capture bridge. */
-export function readWavFormat(path: string): { sampleRate: number; channels: number; dataOffset: number; dataBytes: number } {
+export function readWavFormat(path: string): any {
   const head = Buffer.alloc(4_096);
   const fd = openSync(path, "r");
   let read = 0;
@@ -571,7 +571,7 @@ export function normalizeLanguage(value: string): string {
   if (!match) throw new Error("invalid transcription language; use vi, en, a full locale such as vi-VN, or auto");
   const base = match[1].toLowerCase();
   if (match[2]) return `${base}-${match[2].toUpperCase()}`;
-  const DEFAULT_REGION: Record<string, string> = {
+  const DEFAULT_REGION: any = {
     vi: "VN", en: "US", ja: "JP", ko: "KR", zh: "CN", th: "TH", id: "ID", ms: "MY",
     fr: "FR", de: "DE", es: "ES", pt: "PT", it: "IT", ru: "RU", hi: "IN", ar: "SA", nl: "NL", pl: "PL",
   };
@@ -588,7 +588,7 @@ function outOfScript(text: string): boolean {
   return false;
 }
 
-function seconds(value: unknown, offsetMs = 0): number | null {
+function seconds(value: any, offsetMs = 0): number | null {
   return isJsonNumber(value) && Number.isFinite(value) && value >= 0 ? Math.round(value * 1000) + offsetMs : null;
 }
 
@@ -596,6 +596,6 @@ function cleanEngineError(value: string): string {
   return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(-1_000) || "no diagnostic output";
 }
 
-function boundedError(error: unknown): string {
+function boundedError(error: any): string {
   return (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").slice(0, 1_000);
 }

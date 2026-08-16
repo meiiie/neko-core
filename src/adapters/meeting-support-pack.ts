@@ -269,7 +269,7 @@ export async function installMeetingSupportPack(options: InstallMeetingSupportOp
       if (!executablePath) throw new Error(`parakeet.cpp archive is missing ${target.executableName}`);
       try { chmodSync(executablePath, 0o755); } catch { /* Windows executable ACLs. */ }
       const version = (options.versionOf ?? parakeetVersion)(executablePath);
-      if (version !== release.version) throw new Error(`parakeet.cpp binary version ${version ?? "unknown"} does not match ${release.version}`);
+      if (version === null || version !== release.version) throw new Error(`parakeet.cpp binary version ${version ?? "unknown"} does not match ${release.version}`);
       const executableSha256 = await sha256File(executablePath);
       engine = {
         version,
@@ -336,9 +336,7 @@ export function removeMeetingSupportPack(home = homeDir()): boolean {
   return true;
 }
 
-function resolveRelease(release: GitHubRelease, target: MeetingSupportTarget): {
-  version: string; tag: string; assetName: string; digest: string; size: number; url: string; releaseUrl: string;
-} {
+function resolveRelease(release: GitHubRelease, target: MeetingSupportTarget): any {
   if (release.draft || release.prerelease) throw new Error("The latest parakeet.cpp release is not stable");
   const tag = String(release.tag_name ?? "");
   const version = tag.match(/^v(\d+\.\d+\.\d+)$/)?.[1];

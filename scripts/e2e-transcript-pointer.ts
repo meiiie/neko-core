@@ -50,7 +50,7 @@ let raw = "";
 const term = new Terminal({
   cols,
   rows,
-  data(_terminal: unknown, chunk: Uint8Array) {
+  data(_terminal: any, chunk: Uint8Array) {
     const text = new TextDecoder().decode(chunk);
     raw += text;
     vt.write(text);

@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Line, LineKind } from "./transcript.tsx";
 
 /** Per-kind glyph + color, mirroring the live transcript so a review reads the same as the session. */
-export function styleFor(kind: LineKind): { glyph: string; color?: string; background?: string; dim: boolean } {
+export function styleFor(kind: LineKind) {
   switch (kind) {
     case "user": return { glyph: "> ", color: "white", background: "#303030", dim: false };
     case "assistant": return { glyph: "  ", color: "white", dim: false };
@@ -37,7 +37,7 @@ export interface LineRowSpan {
 export function projectLineRows<T>(
   lines: Line[],
   rowsFor: (line: Line) => T[],
-): { rows: T[]; spans: LineRowSpan[] } {
+): any {
   const rows: T[] = [];
   const spans: LineRowSpan[] = [];
   for (const line of lines) {

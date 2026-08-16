@@ -175,7 +175,7 @@ function searchMemories(query: string, home: string = homeDir()): { name: string
 }
 
 /** The `memory` tool: list | read | write | append | delete | search, scoped to ~/.neko-core/memory/. */
-export function memoryTool(args: Record<string, any>): string {
+export function memoryTool(args: any): string {
   const action = String(args.action ?? "").toLowerCase();
   const dir = memDir();
   if (!memoryEnabled()) return "Memory is off. The user can re-enable it with /memory on.";

@@ -529,7 +529,7 @@ export class CodexAppServerClient {
     });
   }
 
-  notify(method: string, params?: unknown): void {
+  notify(method: string, params?: any): void {
     this.write({ method, params });
   }
 

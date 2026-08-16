@@ -196,7 +196,7 @@ export interface SandboxRuntimeStatus {
 
 const MUST_BE_GATED = new Set(["write_file", "edit", "multi_edit", "bash", "computer", "task"]);
 const MUST_BE_SAFE = new Set(["read_file", "search", "glob", "ls", "disk_cleanup_scan", "web_search", "web_fetch", "skill"]);
-const MUST_GATE_ACTIONS: Record<string, string[]> = {
+const MUST_GATE_ACTIONS = {
   memory: ["write", "append", "delete"],
   workflow: ["write", "delete"],
   playbook: ["add", "revise", "remove"],

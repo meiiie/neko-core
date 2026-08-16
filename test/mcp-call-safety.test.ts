@@ -31,7 +31,7 @@ test("MCP transport failure is outcome-unknown and never replayed automatically"
   let requestOptions: any;
   const hub = new McpHub();
   const internal = installTool(hub, {
-    async callTool(_params: unknown, _schema: unknown, options: unknown) {
+    async callTool(_params: any, _schema: any, options: any) {
       calls++;
       requestOptions = options;
       throw new Error("response was lost");
@@ -212,7 +212,7 @@ test("MCP call forwards cancellation to the SDK request", async () => {
   const didStart = new Promise<void>((resolve) => { started = resolve; });
   const hub = new McpHub();
   installTool(hub, {
-    callTool(_params: unknown, _schema: unknown, options: { signal?: AbortSignal }) {
+    callTool(_params: any, _schema: any, options: { signal?: AbortSignal }) {
       calls++;
       started();
       return new Promise((_resolve, reject) => {

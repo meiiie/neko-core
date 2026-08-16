@@ -8,6 +8,7 @@ import { Readable, Writable } from "node:stream";
 import { classifyToolObservation } from "../core/agent.ts";
 import type { ToolCall } from "../core/ports.ts";
 import type { PermissionMode } from "../core/permissions.ts";
+import type { JsonValue } from "../shared/wire.ts";
 import { describeToolCall } from "../core/tools.ts";
 import { VERSION } from "../shared/version.ts";
 import { buildAgentRuntime, type AgentRuntime } from "./agent-runtime.ts";
@@ -93,7 +94,7 @@ function toolKind(name: string): acp.ToolKind {
   return "other";
 }
 
-function toolLocations(root: string, args: Record<string, any>): acp.ToolCallLocation[] | undefined {
+function toolLocations(root: string, args: any): acp.ToolCallLocation[] | undefined {
   const raw = isText(args.path) ? args.path : isText(args.file_path) ? args.file_path : "";
   if (!raw) return undefined;
   return [{ path: isAbsolute(raw) ? resolve(raw) : resolve(root, raw) }];
@@ -111,12 +112,12 @@ function toolUpdate(root: string, call: ToolCall, status: acp.ToolCallStatus = "
   };
 }
 
-function observationText(value: unknown): string {
+function observationText(value: any): string {
   if (isText(value)) return value;
   try { return JSON.stringify(value); } catch { return String(value); }
 }
 
-function promptText(blocks: acp.ContentBlock[]): { text: string; images: string[] } {
+function promptText(blocks: acp.ContentBlock[]) {
   const text: string[] = [];
   const images: string[] = [];
   for (const block of blocks) {
@@ -213,7 +214,7 @@ function normalizeCoreToolCall(value: any): ToolCall | null {
   return { id: String(value.id ?? name), name, arguments: args };
 }
 
-function textContent(content: unknown): string {
+function textContent(content: any): string {
   if (isText(content)) return content;
   if (!Array.isArray(content)) return content == null ? "" : observationText(content);
   return content.map((part: any) => {
@@ -494,7 +495,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       sendChain = sendChain.then(() => client.notify(acp.methods.client.session.update, { sessionId: record.id, update }));
       void sendChain.catch(() => session.pending?.abort());
     };
-    const approval = async (name: string, args: Record<string, any>): Promise<boolean> => {
+    const approval = async (name: string, args: { [key: string]: JsonValue }): Promise<boolean> => {
       if (alwaysReject.has(name)) return false;
       if (alwaysAllow.has(name)) return true;
       const permissionClient = session.permissionClient;

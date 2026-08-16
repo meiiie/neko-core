@@ -102,7 +102,7 @@ export class BrowserMeetingSession {
     this.stoppedPromise = new Promise((resolve) => { this.resolveStopped = resolve; });
   }
 
-  snapshot(): { state: BrowserMeetingState; meeting: MeetingManifest; audioBytes: number; durationMs: number } {
+  snapshot() {
     return {
       state: this.state,
       meeting: readMeeting(this.meeting.id, this.home) ?? this.meeting,
@@ -389,7 +389,7 @@ export class BrowserMeetingSession {
     if (message?.consent !== true) throw new Error("recording consent was not confirmed");
     const sampleRate = Number(message.sampleRate);
     if (!Number.isInteger(sampleRate) || sampleRate < 8_000 || sampleRate > 96_000) throw new Error("browser returned an unsupported sample rate");
-    const sources = Array.isArray(message.sources) ? message.sources.filter((value: unknown) => value === "microphone" || value === "system") : [];
+    const sources = Array.isArray(message.sources) ? message.sources.filter((value: any) => value === "microphone" || value === "system") : [];
     if (!sources.includes("system")) throw new Error("share a source with audio enabled before recording");
     this.rawPath = join(meetingDir(this.meeting.id, this.home), ".capture.pcm");
     this.rawStream = createWriteStream(this.rawPath, { flags: "wx", mode: 0o600 });
@@ -449,7 +449,7 @@ function safeEqual(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function boundedMessage(value: unknown): string {
+function boundedMessage(value: any): string {
   return (value instanceof Error ? value.message : String(value ?? "error")).replace(/\s+/g, " ").slice(0, 1_000);
 }
 

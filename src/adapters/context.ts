@@ -233,7 +233,7 @@ const envSnapshot = new Map<string, string>();
 /** Render external metadata as inert text inside the XML-shaped prompt envelope. Cwd and Git refs
  * are repository-controlled data: Git permits angle brackets in refs on POSIX, so raw interpolation
  * could close `<env>` and manufacture higher-priority-looking instructions. */
-function promptMetadata(value: unknown, maxChars: number): string {
+function promptMetadata(value: any, maxChars: number): string {
   const source = Array.from(String(value ?? "")).slice(0, maxChars).join("");
   return source
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`)

@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 
 import { ToolRegistry, autoApprove, deniedOutsideRoot } from "../src/core/tool-runtime.ts";
 
-function workspace(): { root: string; outside: string; clean: () => void } {
+function workspace() {
   const base = mkdtempSync(join(tmpdir(), "neko-scope-"));
   const root = join(base, "project");
   const outside = join(base, "elsewhere");
@@ -52,7 +52,7 @@ test("writing outside the root stays refused, allowed reads or not", async () =>
       ["edit", { path: join(outside, "SKILL.md"), old_string: "skill", new_string: "no" }],
     ] as const) {
       // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
-      const result = await registry.execute(call[0], call[1] as Record<string, any>);
+      const result = await registry.execute(call[0], call[1] as any);
       expect(String(result)).toContain("escapes project root"); // ...and writes are not
     }
   } finally {

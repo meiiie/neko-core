@@ -16,13 +16,13 @@ let raw = "";
 const term = new (Bun as any).Terminal({
   cols,
   rows,
-  data(_terminal: unknown, chunk: Uint8Array) {
+  data(_terminal: any, chunk: Uint8Array) {
     const text = new TextDecoder().decode(chunk);
     raw += text;
     vt.write(text);
   },
 });
-const env: Record<string, string | undefined> = {
+const env = {
   ...process.env,
   NEKO_AUTO_UPDATE: "0",
   WT_SESSION: "composer-e2e",

@@ -117,7 +117,7 @@ class OfficeTools implements McpTools {
     return "Neko Office tools are local, workspace-bounded, and optional. Load the office-artifacts skill before Office work. Read/validate is safe; apply/render remains approval-gated. PDF render uses an isolated installed LibreOffice as independent evidence.";
   }
 
-  async call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  async call(name: string, args: any, signal?: AbortSignal): Promise<string> {
     const action = name.slice(TOOL_PREFIX.length);
     if (action === "inspect") return await this.inspect(args, signal);
     if (action === "apply") return await this.apply(args, signal);
@@ -170,7 +170,7 @@ class OfficeTools implements McpTools {
     return status;
   }
 
-  private async inspect(args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  private async inspect(args: any, signal?: AbortSignal): Promise<string> {
     const operation = String(args.operation ?? "");
     if (operation === "status") {
       const status = this.options.executable === undefined
@@ -236,7 +236,7 @@ class OfficeTools implements McpTools {
     }
   }
 
-  private async apply(args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  private async apply(args: any, signal?: AbortSignal): Promise<string> {
     const executable = await this.executable();
     const output = this.officeFile(String(args.output ?? ""), false);
     const source = args.source ? this.officeFile(String(args.source), true) : undefined;
@@ -288,7 +288,7 @@ class OfficeTools implements McpTools {
     }
   }
 
-  private async render(args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  private async render(args: any, signal?: AbortSignal): Promise<string> {
     const file = this.officeFile(String(args.file ?? ""), true);
     const mode = String(args.mode ?? "");
     if (mode !== "screenshot" && mode !== "html" && mode !== "pdf") throw new Error("Office render mode must be screenshot, html, or pdf");
@@ -409,12 +409,12 @@ async function runOffice(executable: string, args: string[], options: { cwd: str
   });
 }
 
-function normalizeCommands(value: unknown, root: string): Record<string, unknown>[] {
+function normalizeCommands(value: any, root: string): any[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 500) throw new Error("Office commands must contain 1 to 500 batch objects");
   return value.map((entry, index) => {
     if (!isJsonObject(entry)) throw new Error(`Office command ${index + 1} must be an object`);
     // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-    const command = structuredClone(entry) as Record<string, unknown>;
+    const command = structuredClone(entry) as any;
     const op = String(command.op ?? command.command ?? "").toLowerCase();
     if (!ALLOWED_BATCH_OPS.has(op)) throw new Error(`Office command ${index + 1} uses forbidden operation '${op || "missing"}'; allowed: add, set, remove, move, swap`);
     validateNestedResources(command, root);
@@ -422,7 +422,7 @@ function normalizeCommands(value: unknown, root: string): Record<string, unknown
   });
 }
 
-function validateNestedResources(value: unknown, root: string, key = "", parentKey = ""): void {
+function validateNestedResources(value: any, root: string, key = "", parentKey = ""): void {
   if (isText(value)) {
     const resource = key === "src" || key === "poster" || (parentKey === "props" && key === "path");
     if (!resource || /^data:/i.test(value)) return;
@@ -436,7 +436,7 @@ function validateNestedResources(value: unknown, root: string, key = "", parentK
   if (Array.isArray(value)) return value.forEach((item) => validateNestedResources(item, root, key, parentKey));
   if (isObjectValue(value)) {
     // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-    for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) validateNestedResources(child, root, childKey, key);
+    for (const [childKey, child] of Object.entries(value as any)) validateNestedResources(child, root, childKey, key);
   }
 }
 
@@ -461,7 +461,7 @@ function resolveInRoot(root: string, raw: string): string {
   return resolved;
 }
 
-function realpathNearest(path: string): string {
+function realpathNearest(path: string) {
   let probe = path;
   while (probe !== dirname(probe) && !existsSync(probe)) probe = dirname(probe);
   try {
@@ -470,7 +470,7 @@ function realpathNearest(path: string): string {
   } catch { return path; }
 }
 
-function copyOfficeSnapshot(file: string): { dir: string; file: string } {
+function copyOfficeSnapshot(file: string) {
   const dir = mkdtempSync(join(tmpdir(), "neko-office-snapshot-"));
   const snapshot = join(dir, basename(file));
   try {
@@ -495,7 +495,7 @@ async function sha256File(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-function boundedInteger(value: unknown, min: number, max: number, label: string): string {
+function boundedInteger(value: any, min: number, max: number, label: string): string {
   const number = Number(value);
   if (!Number.isInteger(number) || number < min || number > max) throw new Error(`${label} must be an integer from ${min} to ${max}`);
   return String(number);

@@ -40,7 +40,7 @@ export function isToolFailure(obs: string): boolean {
     || /^\(offset \d+ is beyond end of file\b/i.test(text);
 }
 
-const short = (value: unknown, cap = 80) => {
+const short = (value: any, cap = 80) => {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   return text.length > cap ? `${text.slice(0, Math.max(0, cap - 3))}...` : text;
 };
@@ -65,7 +65,7 @@ export function countNewActivities(lines: Line[], from = 0): number {
 export function resultSummary(
   name: string | undefined,
   obs: string,
-  args: Record<string, any> = {},
+  args: any = {},
 ): string | undefined {
   if (!name || isToolFailure(obs) || ALWAYS_EXPANDED_TOOLS.has(name)) return undefined;
   const background = obs.match(/^Running in background \[([^\]]+)\]:\s*(.+)$/m);
@@ -123,7 +123,7 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
   const resume = options.mode === "resume";
   const columns = Math.max(20, Math.floor(options.columns ?? 80));
   const maxMessageRows = Math.max(4, Math.floor(options.maxMessageRows ?? RESUME_MESSAGE_MAX_ROWS));
-  const toolById = new Map<string, { name: string; args: Record<string, any>; line: Line }>();
+  const toolById = new Map<string, { name: string; args: any; line: Line }>();
   let hiddenProgress = 0;
   const screenText = (text: string) => resume && wrappedRows(text, columns) > maxMessageRows
     ? tailByRows(text, maxMessageRows, columns)
@@ -141,7 +141,7 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
         else out.push({ id: nextId(), kind: "assistant", text: screenText(t) });
       }
       for (const tc of calls) {
-        let args: Record<string, any> = {};
+        let args: any = {};
         try { args = isText(tc.function?.arguments) ? JSON.parse(tc.function.arguments) : (tc.function?.arguments ?? {}); } catch { /* keep {} */ }
         const name = tc.function?.name ?? "";
         const line: Line = { id: nextId(), kind: "tool_call", text: describeToolCall(name, args) };

@@ -135,7 +135,7 @@ test("usage mapping: cache reads/writes fold back into prompt_tokens (Anthropic 
 });
 
 test("addCacheBreakpoints: system + last message get cache_control; strip restores the payload", () => {
-  const payload: Record<string, any> = {
+  const payload: any = {
     system: "SYS",
     messages: [
       { role: "user", content: "hi" },
@@ -159,17 +159,17 @@ test("addCacheBreakpoints: system + last message get cache_control; strip restor
 });
 
 test("addCacheBreakpoints: a plain-string last message is lifted to block form; empty content is left alone", () => {
-  const p1: Record<string, any> = { system: "S", messages: [{ role: "user", content: "hello" }] };
+  const p1: any = { system: "S", messages: [{ role: "user", content: "hello" }] };
   addCacheBreakpoints(p1);
   expect(p1.messages[0].content).toEqual([{ type: "text", text: "hello", cache_control: { type: "ephemeral" } }]);
-  const p2: Record<string, any> = { system: "", messages: [] };
+  const p2: any = { system: "", messages: [] };
   addCacheBreakpoints(p2); // no system text, no messages -> no crash, nothing marked
   expect(p2.system).toBe("");
 });
 
 test("cache breakpoints preserve a stable base when session context changes", () => {
   const original = `BASE${SESSION_CONTEXT_MARK}volatile todos`;
-  const payload: Record<string, any> = { system: original, messages: [{ role: "user", content: "go" }] };
+  const payload: any = { system: original, messages: [{ role: "user", content: "go" }] };
   addCacheBreakpoints(payload);
   expect(payload.system).toHaveLength(2);
   expect(payload.system[0]).toEqual({ type: "text", text: "BASE", cache_control: { type: "ephemeral" } });

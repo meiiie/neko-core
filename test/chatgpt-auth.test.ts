@@ -27,7 +27,7 @@ function isolatedHome(): string {
   return tempHome;
 }
 
-function jwt(claims: Record<string, any>): string {
+function jwt(claims: any): string {
   return `e30.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
 }
 

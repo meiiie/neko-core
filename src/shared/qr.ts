@@ -106,7 +106,7 @@ function placeAlign(m: Grid, fn: boolean[][], cr: number, cc: number) {
   }
 }
 
-function buildFunctionPatterns(v: Ver): { m: Grid; fn: boolean[][] } {
+function buildFunctionPatterns(v: Ver) {
   const size = v.size;
   const m = blank(size);
   const fn = Array.from({ length: size }, () => new Array(size).fill(false));

@@ -89,7 +89,7 @@ export function installAltScreenGuard(out: Writable = process.stdout, opts: { mo
   const onExit = () => restore();
   const onSigint = () => { restore(); process.kill(process.pid, "SIGINT"); };
   const onSigterm = () => { restore(); process.kill(process.pid, "SIGTERM"); };
-  const onFatal = (err: unknown) => { restore(); throw err; }; // restore first, then let it crash normally
+  const onFatal = (err: any) => { restore(); throw err; }; // restore first, then let it crash normally
 
   enterAltScreen(out);
   if (opts.mouse) enableMouse(out);

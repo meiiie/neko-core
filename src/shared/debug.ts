@@ -31,7 +31,7 @@ export function debugChannel(channel: string): boolean {
 
 /** Safe string of any thrown value (Error -> message, else String(v)); never throws. Shared so each
  * module does not redefine its own. */
-export function messageOf(error: unknown): string {
+export function messageOf(error: any): string {
   if (error instanceof Error) return error.message;
   try {
     return String(error);

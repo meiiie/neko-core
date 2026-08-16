@@ -16,7 +16,7 @@ import { isText } from "../shared/wire.ts";
 /** Parse one diff result line into its parts. Two formats are produced by tool-runtime.ts:
  *  Write: "+ <code>" / "- <code>"; Edit: "NNNN <sign> <code>" (right-padded line number, then +/-/space).
  *  marker "" means a plain (non-diff) result line -> the caller leaves it un-highlighted. */
-function parseDiffLine(l: string): { lineNo?: string; marker: "+" | "-" | " " | ""; code: string } {
+function parseDiffLine(l: string) {
   const edit = l.match(/^(\s*\d+) ([+\- ]) (.*)$/);
   // SAFETY: marker capture group is constrained to the +|-|space alternation in the regex above.
   if (edit) {

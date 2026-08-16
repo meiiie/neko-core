@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const entry = join(import.meta.dir, "..", "bin", "neko.ts");
 
-function runDiagnostic(command: "doctor" | "policy"): { status: number; output: string } {
+function runDiagnostic(command: "doctor" | "policy") {
   const home = mkdtempSync(join(tmpdir(), "neko-yolo-diag-"));
   try {
     const result = Bun.spawnSync([process.execPath, entry, "--yolo", command], {

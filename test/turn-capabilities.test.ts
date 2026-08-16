@@ -23,7 +23,7 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function fixture(): { root: string; home: string; prompt: string } {
+function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "neko-turn-root-")));
   const home = realpathSync(mkdtempSync(join(tmpdir(), "neko-turn-home-")));
   tempDirs.push(root, home);

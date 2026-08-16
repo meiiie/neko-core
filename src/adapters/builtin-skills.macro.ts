@@ -2,7 +2,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
-export function readBuiltinSkillFiles(): Record<string, string> {
+export function readBuiltinSkillFiles() {
   const root = join(import.meta.dir, "..", "..", "skills");
   const files: Record<string, string> = {};
   let total = 0;

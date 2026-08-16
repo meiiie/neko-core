@@ -36,7 +36,7 @@ export function isValidationBashCommand(raw: string): boolean {
 
 /** A shell's aggregate zero is validator evidence only when composition cannot mask the validator's
  * failure. `&&` preserves failure; pipes, `||`, sequencing, redirection, and background execution do not. */
-export function hasAuthoritativeValidatorExit(raw: string, args?: Record<string, any>): boolean {
+export function hasAuthoritativeValidatorExit(raw: string, args?: any): boolean {
   if (args?.run_in_background === true) return false;
   const command = String(raw);
   if (/\|\||[|;\r\n<>]/.test(command)) return false;
@@ -80,7 +80,7 @@ function isBuildValidatorSegment(segment: string): boolean {
 
 /** Exact-file turns may run validators, never a validator followed by a hidden mutation. Every `&&`
  * segment must independently be a non-mutating validator, and command/process substitution is refused. */
-export function isForegroundValidatorOnlyCommand(raw: string, args?: Record<string, any>): boolean {
+export function isForegroundValidatorOnlyCommand(raw: string, args?: any): boolean {
   const command = String(raw).trim();
   if (!command || !hasAuthoritativeValidatorExit(command, args)) return false;
   if (/\$\(|@\(|`|<\(|>\(/.test(command)) return false;

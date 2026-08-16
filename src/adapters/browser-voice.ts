@@ -195,7 +195,7 @@ export class BrowserVoiceSession implements ChatGptVoiceControl {
   }
 }
 
-function boundedText(value: unknown, max: number): string {
+function boundedText(value: any, max: number): string {
   return String(value ?? "").trim().slice(0, max);
 }
 

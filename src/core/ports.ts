@@ -7,7 +7,7 @@ import type { Usage } from "./cost.ts";
 export interface ToolCall {
   id: string;
   name: string;
-  arguments: Record<string, any>;
+  arguments: any;
 }
 
 export interface ProviderResponse {
@@ -28,7 +28,7 @@ export type DeltaHook = (text: string, kind?: "content" | "reasoning" | "tool") 
  * (native `response_format` where the endpoint supports it) so an extraction reliably fills a shape -
  * e.g. enumerating every product variant instead of collapsing to one value. */
 export interface CompleteOptions {
-  responseSchema?: Record<string, any>;
+  responseSchema?: any;
   /** Optional per-call compute tier selected by the host. Adapters keep the saved user effort as an
    * upper bound, so an adaptive controller can spend less on mechanical steps but never more. */
   reasoningEffort?: string;
@@ -56,14 +56,14 @@ export interface Provider {
 export interface McpTools {
   toolSchemas(): any[];
   has(name: string): boolean;
-  call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string>;
+  call(name: string, args: any, signal?: AbortSignal): Promise<string>;
   /** External adapters may explicitly mark read-only calls safe. Unknown tools stay gated. */
   permission?(name: string): "safe" | "gated";
   /** True when an equal call observes a new time interval rather than repeating the same operation. */
   temporal?(name: string): boolean;
   /** MCP prompts (optional): list templates and render one to text. */
   promptList?(): { server: string; name: string }[];
-  getPrompt?(server: string, name: string, args: Record<string, any>): Promise<string>;
+  getPrompt?(server: string, name: string, args: any): Promise<string>;
   /** Lazy tool loading (optional): pull tool schemas on demand instead of all upfront. */
   loadTools?(names: string[]): string;
   indexBlock?(): string;
@@ -74,8 +74,8 @@ export interface WebPort {
   search(query: string, opts: { searxngUrl: string; backend: string; keepaliveMin?: number; tavilyKey?: string }): Promise<string>;
   fetch(
     root: string,
-    args: Record<string, any>,
+    args: any,
     backend: string,
-    summarize?: (instruction: string, content: string, schema?: Record<string, any>) => Promise<string>,
+    summarize?: (instruction: string, content: string, schema?: any) => Promise<string>,
   ): Promise<string>;
 }

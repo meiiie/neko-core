@@ -85,7 +85,7 @@ export async function listChatGptModelCatalog(fetchImpl: typeof fetch = fetch): 
       : [];
     const contextWindow = Number(raw?.context_window);
     const inputModalities = Array.isArray(raw?.input_modalities)
-      ? raw.input_modalities.map((modality: unknown) => String(modality).trim().toLowerCase()).filter(Boolean)
+      ? raw.input_modalities.map((modality: any) => String(modality).trim().toLowerCase()).filter(Boolean)
       : [];
     models.push({
       slug,
@@ -150,7 +150,7 @@ async function chatGptGetJson(url: string | URL, label: string, fetchImpl: typeo
   let forceRefresh = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     const credentials = await validChatGptCredentials(fetchImpl, undefined, forceRefresh);
-    const headers: Record<string, string> = {
+    const headers: any = {
       Authorization: `Bearer ${credentials.accessToken}`,
       Accept: "application/json",
       originator: "neko",
@@ -220,7 +220,7 @@ export class ChatGptProvider implements Provider {
     const continuationScope = providerScope("responses", CHATGPT_CODEX_RESPONSES_URL, modelId);
     const { instructions, input } = toResponsesInput(messages, continuationScope);
     const responseTools = toResponsesTools(tools ?? []);
-    const payload: Record<string, any> = {
+    const payload: any = {
       model: modelId,
       instructions,
       input,
@@ -254,7 +254,7 @@ export class ChatGptProvider implements Provider {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
       const credentials = await validChatGptCredentials(fetch, undefined, forceRefresh);
       forceRefresh = false;
-      const headers: Record<string, string> = {
+      const headers: any = {
         Authorization: `Bearer ${credentials.accessToken}`,
         Accept: "text/event-stream",
         "Content-Type": "application/json",
@@ -336,7 +336,7 @@ function fallbackDirectModel(slug: string): ChatGptModelInfo {
   };
 }
 
-function isRetryableStreamFailure(error: unknown): boolean {
+function isRetryableStreamFailure(error: any): boolean {
   const message = messageOf(error).toLowerCase();
   return message.includes("stream disconnected")
     || message.includes("error occurred while processing")
@@ -354,7 +354,7 @@ function responsesContinuation(providerData: any, scope: string): any[] {
 }
 
 /** Convert Neko's Chat-Completions-shaped history into Responses input items. */
-export function toResponsesInput(messages: any[], scope = ""): { instructions: string; input: any[] } {
+export function toResponsesInput(messages: any[], scope = ""): any {
   const systems: string[] = [];
   const input: any[] = [];
   for (const message of messages) {
@@ -449,7 +449,7 @@ export async function parseResponsesStream(
   const calls = new Map<string, { id: string; name: string; arguments: string; argumentBytes: number }>();
   const callKeysByIndex = new Map<number, string>();
   const emitted = new Set<string>();
-  const appendOutput = (delta: unknown, emit: boolean): void => {
+  const appendOutput = (delta: any, emit: boolean): void => {
     if (!isText(delta)) throw new Error("Responses streaming output delta was not text");
     if (!delta) return;
     outputBytes += Buffer.byteLength(delta, "utf8");
@@ -457,7 +457,7 @@ export async function parseResponsesStream(
     content += delta;
     if (emit) onDelta?.(delta, "content");
   };
-  const appendReasoning = (delta: unknown): void => {
+  const appendReasoning = (delta: any): void => {
     if (!isText(delta)) throw new Error("Responses streaming reasoning delta was not text");
     if (!delta) return;
     reasoningBytes += Buffer.byteLength(delta, "utf8");
@@ -478,7 +478,7 @@ export async function parseResponsesStream(
       return next;
     }
   };
-  const setArguments = (item: { arguments: string; argumentBytes: number }, incoming: unknown, append = false): void => {
+  const setArguments = (item: { arguments: string; argumentBytes: number }, incoming: any, append = false): void => {
     if (incoming == null) return;
     if (!isText(incoming)) throw new Error("Responses streaming tool arguments were not text");
     const next = append ? item.arguments + incoming : mergeArguments(item.arguments, incoming);
@@ -487,7 +487,7 @@ export async function parseResponsesStream(
     item.arguments = next;
     item.argumentBytes = bytes;
   };
-  const resolveCallKey = (rawId: unknown, rawIndex: unknown): string => {
+  const resolveCallKey = (rawId: any, rawIndex: any): any => {
     const itemId = boundedResponsesToolField(rawId, "id", RESPONSES_STREAM_LIMITS.maxToolIdBytes);
     const index = responsesToolIndex(rawIndex);
     if (index !== null) {
@@ -505,7 +505,7 @@ export async function parseResponsesStream(
     if (itemId) return `id:${itemId}`;
     throw new Error("Responses streaming tool call was missing an id or index");
   };
-  const ensureCall = (key: string): { id: string; name: string; arguments: string; argumentBytes: number } => {
+  const ensureCall = (key: string): any => {
     const existing = calls.get(key);
     if (existing) return existing;
     if (calls.size >= RESPONSES_STREAM_LIMITS.maxToolCalls) throw new Error("Responses streaming tool call count exceeds safety limit");
@@ -513,7 +513,7 @@ export async function parseResponsesStream(
     calls.set(key, item);
     return item;
   };
-  const updateCallIdentity = (item: { id: string; name: string }, rawId: unknown, rawName: unknown): void => {
+  const updateCallIdentity = (item: { id: string; name: string }, rawId: any, rawName: any): any => {
     const id = boundedResponsesToolField(rawId, "id", RESPONSES_STREAM_LIMITS.maxToolIdBytes);
     const name = boundedResponsesToolField(rawName, "name", RESPONSES_STREAM_LIMITS.maxToolNameBytes);
     if (id) item.id = id;
@@ -521,7 +521,7 @@ export async function parseResponsesStream(
   };
   const materializeCall = (item: { id: string; name: string; arguments: string }, force = false): ToolCall | null => {
     if (!item.id || !item.name) return null;
-    let args: Record<string, any>;
+    let args: any;
     try {
       args = item.arguments ? JSON.parse(item.arguments) : {};
       if (!isJsonObject(args)) throw new Error("not an object");
@@ -540,7 +540,7 @@ export async function parseResponsesStream(
     try { onToolCallReady?.(call); } catch { /* eager execution must not break the stream */ }
     return call;
   };
-  const keepContinuation = (raw: unknown, fallbackIndex: unknown): void => {
+  const keepContinuation = (raw: any, fallbackIndex: any): any => {
     const item = reasoningContinuation(raw);
     if (!item) return;
     const key = item.id
@@ -680,7 +680,7 @@ function reasoningContinuation(item: any): any | null {
   };
 }
 
-function boundedResponsesToolField(value: unknown, field: "id" | "name", maxBytes: number): string {
+function boundedResponsesToolField(value: any, field: "id" | "name", maxBytes: number): string {
   if (value == null) return "";
   if (!isText(value) || Buffer.byteLength(value, "utf8") > maxBytes) {
     throw new Error(`Responses streaming tool ${field} was invalid or too large`);
@@ -688,7 +688,7 @@ function boundedResponsesToolField(value: unknown, field: "id" | "name", maxByte
   return value;
 }
 
-function responsesToolIndex(value: unknown): number | null {
+function responsesToolIndex(value: any): number | null {
   if (value == null) return null;
   // SAFETY: contract of the number type is established by the surrounding validation/boundary.
   if (!Number.isInteger(value) || (value as number) < 0 || (value as number) >= RESPONSES_STREAM_LIMITS.maxToolCalls) {
@@ -781,4 +781,4 @@ function safeError(body: string): string {
   }
 }
 
-function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+function messageOf(error: any): string { return error instanceof Error ? error.message : String(error); }

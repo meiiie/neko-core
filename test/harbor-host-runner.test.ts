@@ -122,7 +122,7 @@ function hello(
 
 type Fixture = {
   input: AsyncBytes;
-  frames: Record<string, any>[];
+  frames: any[];
   diagnostics: string[];
   protocol: HarborHostProtocol;
   hello: HarborHello;
@@ -130,10 +130,10 @@ type Fixture = {
 
 async function fixture(
   helloFrame = hello(),
-  onFrame: (frame: Record<string, any>, input: AsyncBytes) => void | Promise<void> = () => {},
+  onFrame: (frame: any, input: AsyncBytes) => void | Promise<void> = () => {},
 ): Promise<Fixture> {
   const input = new AsyncBytes();
-  const frames: Record<string, any>[] = [];
+  const frames: any[] = [];
   const diagnostics: string[] = [];
   const io: HarborProtocolIo = {
     input,
@@ -251,7 +251,7 @@ test("host session exposes one copy of each native schema and preserves read-edi
   };
   const f = await fixture(hello("public"), (frame, input) => {
     if (frame.type === "request") {
-      const replies: Record<string, string> = {
+      const replies: any = {
         read_file: "1: const enabled = false;",
         edit: "Edited src/x.ts  (+1 -1)",
         bash: "(exit 0)\n1 pass",
@@ -1208,7 +1208,7 @@ test("peer EOF aborts an in-flight request write before it crosses the protocol"
   const started = new Promise<void>((resolve) => { requestWriteStarted = resolve; });
   let releaseWrite!: () => void;
   let writeObservedAbort = false;
-  const crossed: Record<string, any>[] = [];
+  const crossed: any[] = [];
   const protocol = new HarborHostProtocol({
     input,
     write: (wire, signal) => {
@@ -1274,7 +1274,7 @@ test("transport EOF fails closed and never falls back to the host workspace", as
 
 test("unknown hello fields and duplicate replies are fatal protocol errors", async () => {
   const badInput = new AsyncBytes();
-  const badFrames: Record<string, any>[] = [];
+  const badFrames: any[] = [];
   const bad = new HarborHostProtocol({
     input: badInput,
     write: (wire) => { badFrames.push(decodeHarborFrameForTest(wire)); },
@@ -1382,7 +1382,7 @@ test("outbound frame writes and input shutdown have abortable hard deadlines", a
   expect(writeCloseCalls).toBe(1);
 
   const closeInput = new AsyncBytes();
-  const frames: Record<string, any>[] = [];
+  const frames: any[] = [];
   let closeAborted = false;
   const blockedClose = new HarborHostProtocol({
     input: closeInput,
@@ -1583,7 +1583,7 @@ async function listen(server: Server): Promise<number> {
   return address.port;
 }
 
-async function* childFrames(child: ChildProcessWithoutNullStreams): AsyncGenerator<Record<string, any>> {
+async function* childFrames(child: ChildProcessWithoutNullStreams): AsyncGenerator<any> {
   let buffered = Buffer.alloc(0);
   for await (const chunk of child.stdout) {
     buffered = buffered.length ? Buffer.concat([buffered, Buffer.from(chunk)]) : Buffer.from(chunk);
@@ -1609,7 +1609,7 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
   const tempHome = mkdtempSync(join(tmpdir(), "neko-harbor-subprocess-"));
   const buildA = mkdtempSync(join(tmpdir(), "neko-harbor-build-a-"));
   const buildB = mkdtempSync(join(tmpdir(), "neko-harbor-build-b-"));
-  const protocolFrames: Record<string, any>[] = [];
+  const protocolFrames: any[] = [];
   const authHeaders: string[] = [];
   let providerCalls = 0;
   const server = createServer(async (request, response) => {
@@ -1704,7 +1704,7 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
       const frame = next.value;
       protocolFrames.push(frame);
       if (frame.type === "request") {
-        const replies: Record<string, string> = {
+        const replies: any = {
           read_file: "1: a",
           edit: "Edited src/x.ts  (+1 -1)",
           bash: "(exit 0)\n1 pass",
@@ -1747,7 +1747,7 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
 
     providerCalls = 0;
     authHeaders.length = 0;
-    const failureFrames: Record<string, any>[] = [];
+    const failureFrames: any[] = [];
     child = spawn(runnerA, [], {
       cwd: tempHome,
       windowsHide: true,

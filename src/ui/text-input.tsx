@@ -25,7 +25,7 @@ import { CARET_SENTINEL } from "./frame-diff.ts";
 /** Caret glyph styles for the EOL/empty caret (config `caret_glyph` / NEKO_CARET). Mid-text the
  * caret is an inverse-video overlay instead - a glyph there would shift the line sideways. */
 export type CaretStyle = "thin-block" | "bar" | "block" | "underline";
-export const CARET_GLYPHS: Record<CaretStyle, string> = {
+export const CARET_GLYPHS = {
   "thin-block": "\u258f", // ▏ LEFT ONE EIGHTH BLOCK - hugs the left edge of its cell (default)
   bar: "\u2502", // │ BOX DRAWINGS LIGHT VERTICAL - centred in its cell
   block: "\u2588", // █ FULL BLOCK - covers the cell

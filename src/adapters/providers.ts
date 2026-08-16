@@ -84,15 +84,15 @@ export function normalizeToolResultImages(messages: any[]): any[] {
 
 const OPENAI_COMPAT_METADATA = "openai_compat_message_metadata";
 
-function record(value: any): Record<string, any> {
+function record(value: any): any {
   return isJsonObject(value) ? value : {};
 }
 
-function omit(value: any, keys: Set<string>): Record<string, any> {
+function omit(value: any, keys: Set<string>): any {
   return Object.fromEntries(Object.entries(record(value)).filter(([key]) => !keys.has(key)));
 }
 
-function mergeRecords(base: Record<string, any>, overlay: Record<string, any>): Record<string, any> {
+function mergeRecords(base: any, overlay: any): any {
   const out = { ...base };
   for (const [key, value] of Object.entries(overlay)) {
     out[key] = Object.keys(record(out[key])).length && Object.keys(record(value)).length
@@ -102,13 +102,13 @@ function mergeRecords(base: Record<string, any>, overlay: Record<string, any>): 
   return out;
 }
 
-function messageMetadata(message: any, keepReasoning = false): Record<string, any> {
+function messageMetadata(message: any, keepReasoning = false): any {
   const omitted = new Set(["role", "content", "tool_calls"]);
   if (!keepReasoning) { omitted.add("reasoning"); omitted.add("reasoning_content"); }
   return omit(message, omitted);
 }
 
-function toolCallMetadata(call: any): Record<string, any> {
+function toolCallMetadata(call: any): any {
   const metadata = omit(call, new Set(["index", "id", "type", "function"]));
   const functionMetadata = omit(call?.function, new Set(["name", "arguments"]));
   if (Object.keys(functionMetadata).length) metadata.function = functionMetadata;
@@ -117,8 +117,8 @@ function toolCallMetadata(call: any): Record<string, any> {
 
 function metadataContinuation(
   origin: string,
-  message: Record<string, any>,
-  calls: Array<{ id: string; index: number; fields: Record<string, any> }>,
+  message: any,
+  calls: Array<{ id: string; index: number; fields: any }>,
 ): any[] | undefined {
   const keptCalls = calls.filter((call) => Object.keys(call.fields).length);
   if (!origin || (!Object.keys(message).length && !keptCalls.length)) return undefined;
@@ -206,7 +206,7 @@ async function listKimiModelOptions(config: NekoConfig): Promise<ModelOption[]> 
       const contextWindow = Number(model?.context_length ?? 0);
       if (!id) return [];
       const efforts = Array.isArray(model?.think_efforts?.valid_efforts)
-        ? model.think_efforts.valid_efforts.filter((value: unknown): value is string => typeof value === "string")
+        ? model.think_efforts.valid_efforts.filter((value: any): value is string => typeof value === "string")
         : undefined;
       const features = [model?.supports_reasoning ? "thinking" : "", model?.supports_image_in ? "vision" : "", model?.supports_video_in ? "video" : ""]
         .filter(Boolean).join(", ");
@@ -416,7 +416,7 @@ export class OpenAICompatProvider implements Provider {
     const cacheAwareMessages = isOfficialOpenAI(this.cfg.baseUrl)
       ? withOpenAICacheBreakpoint(normalizedMessages, this.cfg.model)
       : normalizedMessages;
-    const payload: Record<string, any> = {
+    const payload: any = {
       model: this.cfg.model,
       messages: imgTag ? toImgTagMessages(cacheAwareMessages) : cacheAwareMessages,
       temperature: this.cfg.temperature,
@@ -446,7 +446,7 @@ export class OpenAICompatProvider implements Provider {
     }
 
     const url = `${this.cfg.baseUrl}/chat/completions`;
-    const headers: Record<string, string> = { ...(await this.resolveHeaders()), "Content-Type": "application/json" };
+    const headers: any = { ...(await this.resolveHeaders()), "Content-Type": "application/json" };
     if (key) headers.Authorization = `Bearer ${key}`; // local servers need no auth
 
     // HTTP errors (429/5xx) retry a bounded number of times. A LOST CONNECTION (fetch throws -
@@ -622,7 +622,7 @@ export function parseOpenAIMessage(data: any, origin = ""): ProviderResponse {
   const toolCalls: ToolCall[] = [];
   for (const call of message.tool_calls ?? []) {
     const fn = call.function ?? {};
-    let args: Record<string, any>;
+    let args: any;
     try {
       args = isText(fn.arguments) ? JSON.parse(fn.arguments) : (fn.arguments ?? {});
     } catch {
@@ -678,7 +678,7 @@ export function makeThinkSplitter(onContent: (s: string) => void, onReasoning: (
 }
 
 /** Pull <think>...</think> out of a non-streamed message body into reasoning. */
-function splitThink(text: string | null | undefined): { content: string | null; reasoning: string } {
+function splitThink(text: string | null | undefined): any {
   if (!text) return { content: text ?? null, reasoning: "" };
   let reasoning = "";
   const content = text.replace(/<think>([\s\S]*?)<\/think>/g, (_m, t) => { reasoning += t; return ""; });
@@ -709,8 +709,8 @@ async function parseStream(
   let reasoning = "";
   let usage: Usage | undefined;
   let reasoningField: "reasoning_content" | "reasoning" | null = null;
-  const acc: { id: string; name: string; argString: string; argBytes: number; sawArgumentBytes: boolean; metadata: Record<string, any> }[] = [];
-  let streamedMessageMetadata: Record<string, any> = {};
+  const acc: { id: string; name: string; argString: string; argBytes: number; sawArgumentBytes: boolean; metadata: any }[] = [];
+  let streamedMessageMetadata: any = {};
   let sawDone = false;
   let sawValidChoice = false;
   let sawFinish = false;
@@ -741,7 +741,7 @@ async function parseStream(
     // eager-finalize after at least one argument byte; genuinely zero-argument calls finalize at
     // [DONE] via the force path below.
     if (!force && !t.sawArgumentBytes) return;
-    let args: Record<string, any>;
+    let args: any;
     try {
       const parsed = t.argString ? JSON.parse(t.argString) : {};
       if (!isJsonObject(parsed)) throw new Error("arguments must be an object");
@@ -940,7 +940,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-function messageOf(error: unknown): string {
+function messageOf(error: any): string {
   return error instanceof Error ? error.message : String(error);
 }
 

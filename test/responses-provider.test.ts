@@ -77,9 +77,9 @@ test("Responses continuation replays only to the exact endpoint and model", () =
   };
   const same = toResponsesInput([message], scope).input;
   const switched = toResponsesInput([message], providerScope("responses", "https://api.x.ai/v1/responses", "grok-build-0.1")).input;
-  expect(same.some((item) => item.type === "reasoning")).toBe(true);
-  expect(switched.some((item) => item.type === "reasoning")).toBe(false);
-  expect(switched.some((item) => item.role === "assistant")).toBe(true);
+  expect(same.some((item: any) => item.type === "reasoning")).toBe(true);
+  expect(switched.some((item: any) => item.type === "reasoning")).toBe(false);
+  expect(switched.some((item: any) => item.role === "assistant")).toBe(true);
 });
 
 test("Responses effort negotiates the highest advertised compatible tier before using model default", async () => {

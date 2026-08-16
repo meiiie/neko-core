@@ -63,7 +63,7 @@ export interface ChatGptVoiceOptions {
   inputDevice?: string;
   tools?: any[];
   history?: any[];
-  executeTool?: (call: { id: string; name: string; arguments: Record<string, any> }) => Promise<string | any[]>;
+  executeTool?: (call: { id: string; name: string; arguments: any }) => Promise<string | any[]>;
   onEvent?: (event: VoiceEvent) => void;
   clientFactory?: VoiceCodexClientFactory;
   audioFactory?: (options: NativeVoiceAudioOptions) => NativeVoiceAudio;
@@ -578,7 +578,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
   }
 }
 
-function toolResultContent(observation: string | any[]): { contentItems: any[]; success: boolean } {
+function toolResultContent(observation: string | any[]) {
   const failed = isText(observation) && (/^Error running\b/.test(observation) || /^\[denied\]/.test(observation) || /^Denied by user:/i.test(observation));
   if (isText(observation)) return { contentItems: [{ type: "inputText", text: observation || "(no output)" }], success: !failed };
   const contentItems: any[] = [];
@@ -645,11 +645,11 @@ function dynamicToolAudioUrl(part: any): string | null {
   return /^data:audio\/(?:wav|mpeg|mp3|mp4|x-m4a|webm|ogg);base64,[a-z0-9+/]+={0,2}$/i.test(value) ? value : null;
 }
 
-function isObject(value: unknown): value is Record<string, any> {
+function isObject(value: any): value is any {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function isRealtimeAudioChunk(value: unknown): value is RealtimePcmChunk {
+function isRealtimeAudioChunk(value: any): value is RealtimePcmChunk {
   if (!isObject(value)) return false;
   return typeof value.data === "string"
     && Number.isInteger(value.sampleRate)
@@ -662,7 +662,7 @@ function safeEqual(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function friendlyVoiceError(error: unknown): string {
+export function friendlyVoiceError(error: any): string {
   const raw = error instanceof Error ? error.message : String(error);
   if (/ffmpeg|ffplay|microphone input|audio device/i.test(raw)) return `${raw}. Choose browser compatibility from /voice if native audio is unavailable.`;
   if (/microphone|permission|notallowederror|denied/i.test(raw)) return "Microphone access was denied or unavailable. Check Windows microphone privacy settings, then run /voice again.";

@@ -65,7 +65,7 @@ class OracleTools implements McpTools {
       : "Neko Oracle (second opinion from a stronger model) is present but not configured; consulting it will report how to turn it on.";
   }
 
-  async call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  async call(name: string, args: any, signal?: AbortSignal): Promise<string> {
     const action = name.slice(PREFIX.length);
     try {
       if (action === "sessions") return this.sessions(args);
@@ -77,7 +77,7 @@ class OracleTools implements McpTools {
     }
   }
 
-  private sessions(args: Record<string, any>): string {
+  private sessions(args: any): string {
     const operation = String(args.operation ?? "");
     if (operation === "list") {
       const sessions = listOracleSessions();
@@ -102,7 +102,7 @@ class OracleTools implements McpTools {
     return "Error: operation must be 'list' or 'read'";
   }
 
-  private async consult(args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  private async consult(args: any, signal?: AbortSignal): Promise<string> {
     const oracle = resolveOracle(this.cfg);
     const files = Array.isArray(args.files) ? args.files.map(String).filter(Boolean) : [];
     const consultation = await consultOracle(oracle.provider, { profile: oracle.profile, model: oracle.model }, {

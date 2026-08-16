@@ -17,7 +17,7 @@ afterEach(() => {
   workspace = "";
 });
 
-function setup(): { raw: string; dir: string } {
+function setup() {
   workspace = mkdtempSync(join(tmpdir(), "neko-live-test-"));
   const raw = join(workspace, "audio.pcm");
   writeFileSync(raw, Buffer.alloc(0));

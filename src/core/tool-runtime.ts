@@ -52,7 +52,7 @@ export { deniedCredentialPath as deniedOutsideRoot } from "./read-policy.ts";
 
 /** An approval gate: given (toolName, the tool's args) -> approve? (may be async).
  * Receiving args lets a UI render a preview/diff before approving. */
-export type ApprovalGate = (toolName: string, args: Record<string, any>) => boolean | Promise<boolean>;
+export type ApprovalGate = (toolName: string, args: any) => boolean | Promise<boolean>;
 
 /** A host-owned, ephemeral capability intersection for exactly one agent turn. It can only remove
  * tools from the configured/role-restricted registry; it never grants a capability. */
@@ -130,7 +130,7 @@ export interface NativeToolBackend {
   readonly attestation: NativeToolBackendAttestation;
   execute(
     name: NativeToolName,
-    args: Readonly<Record<string, any>>,
+    args: Readonly<any>,
     context: NativeToolCallContext,
   ): Promise<string | any[]>;
 }
@@ -203,7 +203,7 @@ export function __windowsDescendantSnapshotForTest(
   rows: WindowsProcessRow[],
   rootPid: number,
   limit = MAX_WINDOWS_TREE_PIDS,
-): { pids: number[]; complete: boolean } {
+): any {
   const children = new Map<number, number[]>();
   for (const row of rows) {
     if (!Number.isSafeInteger(row.pid) || row.pid <= 0 || !Number.isSafeInteger(row.parentPid) || row.parentPid < 0) continue;
@@ -240,7 +240,7 @@ function trustedWindowsPowerShell(script: string): string | null {
 
 /** Capture descendants before the graceful attempt. If that attempt removes the leader but leaves a
  * child alive, the saved PIDs still let the force phase address the child directly. */
-function snapshotWindowsBashTree(rootPid: number): { pids: number[]; complete: boolean } {
+function snapshotWindowsBashTree(rootPid: number): any {
   const output = trustedWindowsPowerShell(
     "Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { [Console]::Out.WriteLine(('{0},{1}' -f $_.ProcessId, $_.ParentProcessId)) }",
   );
@@ -460,10 +460,7 @@ function isNativeBackendToolName(name: string): name is NativeToolName {
   return NATIVE_BACKEND_TOOL_NAMES.has(name as NativeToolName);
 }
 
-function normalizeNativeBackend(backend?: NativeToolBackend): {
-  tools: ReadonlySet<NativeToolName>;
-  attestation?: Readonly<NativeToolBackendAttestation>;
-} {
+function normalizeNativeBackend(backend?: NativeToolBackend): any {
   if (!backend) return { tools: new Set() };
   const attestation = backend.attestation;
   if (attestation?.protocol !== "neko-native-posix-v1"
@@ -538,11 +535,11 @@ export class ToolRegistry {
   /** Spawns an isolated sub-agent (set by the host); enables the `task` tool. */
   subagent?: (prompt: string, type?: string, signal?: AbortSignal) => Promise<string>;
   /** One-shot model call (set by the host); lets web_fetch extract per a prompt (Claude-style). */
-  summarize?: (instruction: string, content: string, schema?: Record<string, any>) => Promise<string>;
+  summarize?: (instruction: string, content: string, schema?: any) => Promise<string>;
   /** Web content acquisition (set by the host; core can't import the web adapter). */
   web?: WebPort;
   /** Opt-in adversarial review of auto-approved mutating actions (set by the host). */
-  checkAction?: (toolName: string, args: Record<string, any>) => Promise<{ ok: boolean; reason: string }>;
+  checkAction?: (toolName: string, args: any) => Promise<{ ok: boolean; reason: string }>;
   /** Appended to every denial observation (set by the host). A non-interactive `neko run` sets this so
    * the model learns the FIRST time a gated call bounces that no approval can ever arrive - otherwise it
    * quietly retries or falls back to a text answer and the caller never learns why the file wasn't
@@ -558,7 +555,7 @@ export class ToolRegistry {
    * Windows UIA/PowerShell path in runComputer. A deterministic simulated GUI world sets this to drive
    * the long-horizon computer-use eval in-process (any OS, no desktop); a future remote/other-OS backend
    * would plug in the same way. Returns the same shape as the real path: a string, or image content parts. */
-  computerHandler?: (args: Record<string, any>) => string | any[];
+  computerHandler?: (args: any) => string | any[];
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
   /** Maximum foreground bash timeout. Product default is 10min; bounded evals can fail fast. */
@@ -849,7 +846,7 @@ export class ToolRegistry {
       : undefined;
   }
 
-  private bashTimeoutMs(args: Record<string, any>): number {
+  private bashTimeoutMs(args: any): number {
     return Math.min(
       Math.max(Math.floor(Number(args.timeout) || BASH_TIMEOUT_MS), 1000),
       Math.min(600_000, Math.max(1_000, this.bashTimeoutCapMs)),
@@ -881,7 +878,7 @@ export class ToolRegistry {
     return null;
   }
 
-  private async runBash(args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  private async runBash(args: any, signal?: AbortSignal): Promise<string> {
     const command = requireArg(args, "command");
     if (args.run_in_background === true && this.turnToolPolicy?.allowBackgroundBash === false) {
       return `Error: background bash is unavailable for this turn (${this.turnToolPolicy.name}).`;
@@ -1022,7 +1019,7 @@ export class ToolRegistry {
   private async runNativeBackend(
     backend: NativeToolBackend,
     name: NativeToolName,
-    args: Record<string, any>,
+    args: any,
     signal?: AbortSignal,
   ): Promise<string | any[]> {
     const attestation = this.nativeBackendAttestation;
@@ -1065,7 +1062,7 @@ export class ToolRegistry {
 
   /** Progressive disclosure: return a skill's full instructions on demand so the model can go deep on
    * a domain it just decided is relevant, without that body ever sitting in context unused. */
-  private runSkill(args: Record<string, any>): string {
+  private runSkill(args: any): string {
     const name = String(requireArg(args, "name"));
     const unavailable = this.skillUnavailableReason(name);
     if (unavailable) return `(skill '${name}' is unavailable for this turn: ${unavailable})`;
@@ -1138,7 +1135,7 @@ export class ToolRegistry {
     return schema;
   }
 
-  async execute(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string | any[]> {
+  async execute(name: string, args: any, signal?: AbortSignal): Promise<string | any[]> {
     if (!isJsonObject(args)) {
       return `Error: arguments for ${name} must be an object`;
     }
@@ -1404,7 +1401,7 @@ export class ToolRegistry {
 
   /** read_file with media awareness: images -> vision content (if enabled), PDFs -> extracted text,
    * everything else -> the line-numbered text path. */
-  private async runReadFile(args: Record<string, any>, signal?: AbortSignal): Promise<string | any[]> {
+  private async runReadFile(args: any, signal?: AbortSignal): Promise<string | any[]> {
     const raw = requireArg(args, "path");
     const path = resolveForRead(this.root, raw, this.readOutsideRoot);
     if (!existsSync(path)) return `Error: no such file: ${raw}`;
@@ -1430,7 +1427,7 @@ export class ToolRegistry {
   /** First-class desktop/GUI control (Windows): dispatches to the computer-use skill's accessibility-tree
    * scripts. Reads/acts on a window BY NAME (no vision); pointer acts use touch injection (no mouse hijack).
    * Unicode element names go through a temp UTF-8 file (@file) -- the cp1252 console mangles non-ASCII args. */
-  private async runComputer(args: Record<string, any>, signal?: AbortSignal): Promise<string | any[]> {
+  private async runComputer(args: any, signal?: AbortSignal): Promise<string | any[]> {
     // An injected backend (e.g. the simulated GUI world in the long-horizon eval) takes over the whole
     // tool: it needs no real desktop, so it also bypasses the Windows-only guard below. Default unset.
     if (this.computerHandler) return this.computerHandler(args);
@@ -1473,8 +1470,8 @@ export class ToolRegistry {
       }
       case "stroke": {
         const nums = Array.isArray(args.points) ? args.points.map((n: any) => Number(n)) : [];
-        if (nums.length < 4 || nums.length % 2 !== 0 || nums.some((n) => !Number.isFinite(n))) return "Error: computer stroke needs an even 'points' array of NUMBERS [x1,y1,x2,y2,...] (>= 2 points).";
-        script = "inject.ps1"; sa = ["stroke", ...nums.map((n) => String(Math.round(n)))]; break;
+        if (nums.length < 4 || nums.length % 2 !== 0 || nums.some((n: number) => !Number.isFinite(n))) return "Error: computer stroke needs an even 'points' array of NUMBERS [x1,y1,x2,y2,...] (>= 2 points).";
+        script = "inject.ps1"; sa = ["stroke", ...nums.map((n: number) => String(Math.round(n)))]; break;
       }
       case "type": {
         if (!isText(args.text) || !args.text.length) return "Error: computer type needs non-empty 'text'.";
@@ -1609,7 +1606,7 @@ export class ToolRegistry {
   }
 
   /** post_tool_use hook: ordered after the tool, but asynchronous so rendering/input stay live. */
-  private async runPostHook(name: string, args: Record<string, any>, result: string, signal?: AbortSignal): Promise<void> {
+  private async runPostHook(name: string, args: any, result: string, signal?: AbortSignal): Promise<void> {
     if (!this.hooks?.postToolUse) return;
     try {
       const outcome = await runResponsiveChild(this.hooks.postToolUse, [], {
@@ -1625,7 +1622,7 @@ export class ToolRegistry {
   }
 }
 
-async function toolReadFile(root: string, args: Record<string, any>, opts: ToolOpts): Promise<string> {
+async function toolReadFile(root: string, args: any, opts: ToolOpts): Promise<string> {
   const raw = requireArg(args, "path");
   const path = resolveForRead(root, raw, opts.readOutsideRoot);
   if (!existsSync(path)) return `Error: no such file: ${raw}`;
@@ -1648,7 +1645,7 @@ async function toolReadFile(root: string, args: Record<string, any>, opts: ToolO
 }
 
 /** Open one already-resolved path without following a last-moment link or blocking on a device/FIFO. */
-function openRegularFile(path: string, raw: string): { fd: number; size: number } {
+function openRegularFile(path: string, raw: string): any {
   const before = lstatSync(path);
   if (!before.isFile()) throw new Error(`not a regular file: ${raw}`);
   if (before.nlink !== 1) throw new Error(`not a single-link regular file: ${raw}`);
@@ -1843,7 +1840,7 @@ function renderImageFile(buf: Buffer, raw: string, ext: string, vision: boolean)
 async function readPdfFile(
   bytes: Buffer,
   raw: string,
-  args: Record<string, any>,
+  args: any,
   root: string,
   childSecretEnvNames: Iterable<string>,
   signal?: AbortSignal,
@@ -1902,7 +1899,7 @@ function imageDims(buf: Buffer, ext: string): { w: number; h: number } | null {
   return null;
 }
 
-async function toolSearch(root: string, args: Record<string, any>, opts: ToolOpts): Promise<string> {
+async function toolSearch(root: string, args: any, opts: ToolOpts): Promise<string> {
   const pattern = requireArg(args, "pattern");
   // Search through descriptor-verified reads. A recursive external process cannot prove that an
   // innocently named file is not a hard-link alias to a credential inode.
@@ -1928,7 +1925,7 @@ export function formatRipgrepResult(status: number | null, stdout: string, stder
 }
 
 /** Built-in regex walk — the fallback when ripgrep isn't installed. Also supports glob/case/context. */
-async function jsSearch(root: string, pattern: string, args: Record<string, any>, opts: ToolOpts): Promise<string> {
+async function jsSearch(root: string, pattern: string, args: any, opts: ToolOpts): Promise<string> {
   let regex: RegExp;
   try {
     regex = new RegExp(pattern, args.case_insensitive ? "i" : "");
@@ -1984,7 +1981,7 @@ async function jsSearch(root: string, pattern: string, args: Record<string, any>
   return matches.length ? matches.join("\n") : "(no matches)";
 }
 
-async function toolGlob(root: string, args: Record<string, any>, opts: ToolOpts): Promise<string> {
+async function toolGlob(root: string, args: any, opts: ToolOpts): Promise<string> {
   const pattern = requireArg(args, "pattern");
   const base = resolveForRead(root, args.path || ".", opts.readOutsideRoot);
   const rootResolved = resolve(root);
@@ -2010,7 +2007,7 @@ async function toolGlob(root: string, args: Record<string, any>, opts: ToolOpts)
   return results.length ? results.sort().join("\n") : "(no files)";
 }
 
-async function toolLs(root: string, args: Record<string, any>, opts: ToolOpts): Promise<string> {
+async function toolLs(root: string, args: any, opts: ToolOpts): Promise<string> {
   const raw = args.path || ".";
   const path = resolveForRead(root, raw, opts.readOutsideRoot);
   let info;
@@ -2026,7 +2023,7 @@ async function toolLs(root: string, args: Record<string, any>, opts: ToolOpts): 
   return out;
 }
 
-function toolWriteFile(root: string, args: Record<string, any>, opts: ToolOpts): string {
+function toolWriteFile(root: string, args: any, opts: ToolOpts): string {
   const raw = requireArg(args, "path");
   const content = args.content;
   if (content === undefined || content === null) throw new Error("missing required argument: content");
@@ -2061,7 +2058,7 @@ function editDiff(path: string, origLines: string[], startLine: number, removed:
   return out.join("\n");
 }
 
-function toolEdit(root: string, args: Record<string, any>, opts: ToolOpts): string {
+function toolEdit(root: string, args: any, opts: ToolOpts): string {
   const raw = requireArg(args, "path");
   const oldStr = args.old_string;
   const newStr = args.new_string;
@@ -2115,7 +2112,7 @@ function toolEdit(root: string, args: Record<string, any>, opts: ToolOpts): stri
 }
 
 /** Apply several exact-match edits to one file, in order, atomically (writes only if all succeed). */
-function toolMultiEdit(root: string, args: Record<string, any>, opts: ToolOpts): string {
+function toolMultiEdit(root: string, args: any, opts: ToolOpts): string {
   const raw = requireArg(args, "path");
   const edits = args.edits;
   if (!Array.isArray(edits) || edits.length === 0) return "Error: multi_edit needs a non-empty 'edits' array";
@@ -2164,7 +2161,7 @@ function capOutput(s: string): string {
   return s.length > MAX_OUTPUT_CHARS ? s.slice(0, MAX_OUTPUT_CHARS) + `\n... (truncated at ${MAX_OUTPUT_CHARS} chars)` : s;
 }
 
-function requireArg(args: Record<string, any>, key: string): string {
+function requireArg(args: any, key: string): string {
   const value = args[key];
   if (value === undefined || value === null || value === "") {
     throw new Error(`missing required argument: ${key}`);
@@ -2340,7 +2337,7 @@ export function todosContextBlock(todos: { content: string; status: string }[]):
   return todos.length ? `Current plan (todos):\n${renderTodos(todos)}` : "";
 }
 
-function describe(name: string, args: Record<string, any>): string {
+function describe(name: string, args: any): string {
   if (name === "write_file") return `write ${args.path ?? "?"}`;
   if (name === "edit") return `edit ${args.path ?? "?"}`;
   if (name === "bash") return `run: ${args.command ?? "?"}`;
@@ -2358,7 +2355,7 @@ export interface ToolOpts {
   signal?: AbortSignal;
 }
 
-const DISPATCH: Record<string, (root: string, args: Record<string, any>, opts: ToolOpts) => string | Promise<string>> = {
+const DISPATCH: any = {
   read_file: toolReadFile,
   search: toolSearch,
   glob: toolGlob,
@@ -2368,7 +2365,7 @@ const DISPATCH: Record<string, (root: string, args: Record<string, any>, opts: T
   multi_edit: toolMultiEdit,
   // bash is handled by ToolRegistry.runBash (needs instance state for Ctrl+B backgrounding).
   // web_search + web_fetch are handled in execute() (need backend config / a summarizer).
-  memory: (_root, args) => memoryTool(args),
-  workflow: (_root, args) => workflowTool(args),
-  playbook: (_root, args) => playbookTool(args),
+  memory: (_root: string, args: any) => memoryTool(args),
+  workflow: (_root: string, args: any) => workflowTool(args),
+  playbook: (_root: string, args: any) => playbookTool(args),
 };

@@ -16,7 +16,7 @@ import {
   type RpcTransport,
 } from "../src/adapters/codex-app-server.ts";
 
-function fakeTransport(): { transport: RpcTransport; toServer: PassThrough; fromServer: PassThrough } {
+function fakeTransport(): any {
   const toServer = new PassThrough();
   const fromServer = new PassThrough();
   return {

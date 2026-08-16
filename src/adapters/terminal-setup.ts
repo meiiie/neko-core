@@ -81,7 +81,7 @@ export function stripJsonc(src: string): string {
 }
 
 /** Compute the patched settings text, or explain why the file is left untouched. Pure. */
-export function patchSettings(raw: string): { out?: string; note: string } {
+export function patchSettings(raw: string) {
   if (/shift\+enter/i.test(raw)) return { note: "a shift+enter binding already exists - left untouched" };
   let obj: any;
   try {

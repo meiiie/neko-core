@@ -23,7 +23,7 @@ let screen = "";
 const term = new Terminal({
   cols: 100,
   rows: 30,
-  data(_t: unknown, chunk: Uint8Array) {
+  data(_t: any, chunk: Uint8Array) {
     screen += new TextDecoder().decode(chunk);
   },
 });

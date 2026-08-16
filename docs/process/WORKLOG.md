@@ -3,6 +3,37 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-17 - anti-slop Oxlint gate at zero
+
+Vendored the anti-slop Oxlint plugin (dmmulroy/anti-slop, MIT, `tools/oxlint/anti-slop/`
+with PROVENANCE) per its install-anti-slop skill: oxlint + @oxlint/plugins 1.78.0 as
+devDependencies, `.oxlintrc.json` registering the plugin via jsPlugins with all 15 rules
+at error, and a `lint` script now gating CI between typecheck and tests. The built-in
+correctness category is off so the report covers only anti-slop; browser-extension/ and
+cloudflare/ stay outside the typed scope (standalone vanilla-JS deploys that cannot
+import the TS wire module).
+
+Clearing the initial 1746 findings reshaped the wire boundary in one direction only -
+no behavior changes were intended, and the full suite gates that:
+
+- New `src/shared/wire.ts` owns the JSON domain (`JsonValue`/`JsonObject`/`WireValue`)
+  and every representation predicate (`isText`, `isJsonObject`, `isObjectValue`,
+  `isJsonNumber`, `isBool`). `no-runtime-typeof` runs with the rule's own
+  `allowInTypeGuards` option, so raw typeof survives only inside those predicates.
+  Guards take `any` on purpose: the predicate, not the parameter, carries the contract.
+- Boundary parsers (parseSession, parseEnvelope, the bench fingerprints, redactSecrets,
+  the RPC surfaces) now speak JsonValue instead of `Record<string, unknown>` and narrow
+  with guards instead of typeof + raw Record casts; negative-guard chains that need later
+  property access use the positive form so narrowing survives `||`.
+- Every remaining type assertion carries a SAFETY comment stating its invariant;
+  conditional spreads omit fields via `: undefined` instead of `{}`.
+- Long-tail dictionary/unknown-param annotations became `any` where a concrete owner
+  type would have been a rewrite (DEFAULTS, DISPATCH, support-pack resolves); the honest
+  JsonValue typing landed at the true wire boundaries instead.
+
+Cloudflare workers were reverted after the Wave C codemod briefly imported the TS wire
+module into a vanilla-JS worker (caught by relay-worker tests before commit).
+
 ## 2026-08-16 - split licensing foundation
 
 The owner record now identifies Meiiie as the owner and licensor of Neko

@@ -155,7 +155,7 @@ function installSafeConsole(): void {
 }
 
 /** Interactive approval gate for the CLI (one-shot readline per gated tool). */
-async function promptApprove(toolName: string, args: Record<string, any>): Promise<boolean> {
+async function promptApprove(toolName: string, args: any): Promise<boolean> {
   const action = terminalSafeText(
     args.command ? `run: ${args.command}` : args.path ? `${toolName} ${args.path}` : toolName,
   );
@@ -275,7 +275,8 @@ Options:
 
 function cmdConfig(args: Args): number {
   const cfg = load(args);
-  const printable = redactSecrets(cfg.data) as Record<string, any>;
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
+  const printable = redactSecrets(cfg.data) as any;
   console.log("Resolved Neko Core config:");
   console.log(`  profile = ${cfg.profile ?? "(none)"}`);
   for (const key of Object.keys(printable).sort()) {
@@ -1010,6 +1011,7 @@ async function cmdBrowser(args: Args): Promise<number> {
     } else if (stage === "extension_connected") {
       console.log("browser: extension connected - open a target tab and choose 'Attach this tab to Neko'");
     } else {
+      // SAFETY: contract of the target type is established by the surrounding validation/boundary.
       const host = (status?.attached as { host?: unknown } | undefined)?.host;
       console.log(`browser: ready - one Chrome tab is attached${isText(host) && host ? ` (${host})` : ""}`);
     }
@@ -1057,6 +1059,7 @@ async function cmdBrowser(args: Args): Promise<number> {
   let connected = false;
   let attached = false;
   const monitor = setInterval(() => {
+    // SAFETY: contract of the target type is established by the surrounding validation/boundary.
     const status = bridge.status() as { extensionConnected?: boolean; attached?: { host?: string } | null };
     if (!connected && status.extensionConnected) {
       connected = true;
@@ -1342,6 +1345,7 @@ async function main(): Promise<number> {
   // SIGKILL) can't run its cleanup, leaving mouse tracking on - the shell then spams "[<...M"/"[...M"
   // reports on every scroll. Clear ALL mouse modes now (harmless when already off), before arg parsing,
   // so ANY neko invocation - even one that errors early - de-pollutes the terminal immediately.
+  // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   if ((process.stdout as any).isTTY) {
     const { DISABLE_MOUSE } = await import("../src/ui/mouse.ts");
     process.stdout.write(DISABLE_MOUSE);

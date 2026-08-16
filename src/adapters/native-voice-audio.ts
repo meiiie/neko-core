@@ -219,6 +219,6 @@ export class FfmpegNativeVoiceAudio implements NativeVoiceAudio {
   }
 }
 
-function integerInRange(value: unknown, min: number, max: number): number | null {
+function integerInRange(value: any, min: number, max: number): number | null {
   return Number.isInteger(value) && Number(value) >= min && Number(value) <= max ? Number(value) : null;
 }

@@ -15,7 +15,7 @@ export function hasTerminalControl(value: string): boolean {
   return CONTROL.test(value);
 }
 
-export function terminalSafeText(value: unknown, options: TerminalTextOptions = {}): string {
+export function terminalSafeText(value: any, options: TerminalTextOptions = {}): string {
   const maxChars = options.maxChars ?? Number.POSITIVE_INFINITY;
   const limit = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : Number.POSITIVE_INFINITY;
   const suffix = "... [truncated]";
@@ -48,7 +48,7 @@ export function terminalSafeText(value: unknown, options: TerminalTextOptions = 
  */
 export function writeTerminalSafe(
   stream: Pick<NodeJS.WriteStream, "write">,
-  value: unknown,
+  value: any,
   options: TerminalTextOptions = { preserveLineBreaks: true },
 ): void {
   stream.write(terminalSafeText(value, options));

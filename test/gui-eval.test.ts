@@ -11,9 +11,9 @@ class ScriptedProvider {
     return this.script[this.index++] ?? { content: "stop", tool_calls: [] };
   }
 }
-const call = (name: string, args: Record<string, any>) => ({ content: null, tool_calls: [{ id: `c${Math.random()}`, name, arguments: args }] });
-const computer = (args: Record<string, any>) => call("computer", args);
-const computerBatch = (...actions: Record<string, any>[]) => ({
+const call = (name: string, args: any) => ({ content: null, tool_calls: [{ id: `c${Math.random()}`, name, arguments: args }] });
+const computer = (args: any) => call("computer", args);
+const computerBatch = (...actions: any[]) => ({
   content: null,
   tool_calls: actions.map((arguments_, i) => ({ id: `b${i}`, name: "computer", arguments: arguments_ })),
 });

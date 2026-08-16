@@ -24,9 +24,9 @@ afterEach(() => {
   if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
 });
 
-function factory(overrides: { capability?: boolean; itemStatus?: string } = {}): { factory: ImageClientFactory; requests: string[]; threadStart: Record<string, any> } {
+function factory(overrides: { capability?: boolean; itemStatus?: string } = {}) {
   const requests: string[] = [];
-  const threadStart: Record<string, any> = {};
+  const threadStart: any = {};
   const make: ImageClientFactory = (handlers: CodexAppServerHandlers) => ({
     initialize: async () => ({}),
     close: () => {},

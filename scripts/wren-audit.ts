@@ -39,7 +39,7 @@ const root = mkdtempSync(join(tmpdir(), "neko-audit-work-"));
 const outsideDir = mkdtempSync(join(tmpdir(), "neko-audit-outside-"));
 const outsideFile = join(outsideDir, "MUST-NOT-BE-WRITTEN.txt");
 
-function runSandboxed(cmd: string, allowNetwork = false): { status: number | null; out: string } {
+function runSandboxed(cmd: string, allowNetwork = false) {
   const t = wrapBash(cmd, root, { enabled: true, allowNetwork, domains: allowNetwork ? ["example.com"] : [] });
   const r = spawnSync(t.file, t.args, { shell: t.shell, cwd: root, encoding: "utf-8", timeout: 90_000 });
   return { status: r.status, out: ((r.stdout || "") + (r.stderr || "")).trim().slice(0, 200) };

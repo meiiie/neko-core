@@ -74,7 +74,7 @@ const MAX_PORT_HOPS = 10;
 const MAX_BODY = 1_000_000; // 1 MB cap on request bodies (a buggy/hostile local process can't OOM us)
 
 /** Constant-time token check (no early-exit timing leak), Bearer header only. */
-function authorized(req: { headers: Record<string, any> }, token: string): boolean {
+function authorized(req: { headers: any }, token: string): boolean {
   // SAFETY: contract of the string | undefined type is established by the surrounding validation/boundary.
   const auth = req.headers.authorization as string | undefined;
   // SAFETY: contract of the string | undefined type is established by the surrounding validation/boundary.
@@ -95,7 +95,7 @@ export async function startRemoteControl(handlers: RemoteHandlers, port = 4517, 
       res.end("unauthorized");
       return;
     }
-    const json = (code: number, obj: unknown) => {
+    const json = (code: number, obj: any) => {
       res.statusCode = code;
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify(obj));

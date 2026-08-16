@@ -28,7 +28,7 @@ const work = join(root, "work");
 mkdirSync(work, { recursive: true });
 
 const encoder = new TextEncoder();
-const sse = (value: unknown) => encoder.encode(`data: ${isText(value) ? value : JSON.stringify(value)}\n\n`);
+const sse = (value: any) => encoder.encode(`data: ${isText(value) ? value : JSON.stringify(value)}\n\n`);
 let requestCount = 0;
 let partialObserved = false;
 let heldController: ReadableStreamDefaultController<Uint8Array> | null = null;
@@ -94,7 +94,7 @@ for (const [key, value] of Object.entries(process.env)) {
   if (value === undefined || key.startsWith("NEKO_") || /API_KEY|TOKEN|SECRET|PASSWORD/i.test(key)) continue;
   inheritedEnv[key] = value;
 }
-const childEnv: Record<string, string> = {
+const childEnv = {
   ...inheritedEnv,
   USERPROFILE: home,
   HOME: home,
@@ -117,7 +117,7 @@ function pty(command: string[]) {
   const term = new Terminal({
     cols: 120,
     rows: 34,
-    data(_terminal: unknown, chunk: Uint8Array) { raw += new TextDecoder().decode(chunk); },
+    data(_terminal: any, chunk: Uint8Array) { raw += new TextDecoder().decode(chunk); },
   });
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const proc = Bun.spawn({ cmd: command, cwd: work, terminal: term, env: childEnv } as any);

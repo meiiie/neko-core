@@ -85,7 +85,7 @@ export interface HarborEvalIdentity {
   model: string;
 }
 
-const PASSTHROUGH_VALUE_FLAGS: Record<string, { canonical: string; kind: "selection" | "positive-integer" }> = {
+const PASSTHROUGH_VALUE_FLAGS: any = {
   "--include-task-name": { canonical: "--include-task-name", kind: "selection" },
   "-i": { canonical: "--include-task-name", kind: "selection" },
   "--exclude-task-name": { canonical: "--exclude-task-name", kind: "selection" },
@@ -97,7 +97,7 @@ const PASSTHROUGH_VALUE_FLAGS: Record<string, { canonical: string; kind: "select
   "--n-concurrent-agents": { canonical: "--n-concurrent-agents", kind: "positive-integer" },
 };
 
-const PASSTHROUGH_BOOLEAN_FLAGS: Record<string, string> = {
+const PASSTHROUGH_BOOLEAN_FLAGS: any = {
   "--yes": "--yes",
   "-y": "--yes",
 };
@@ -193,7 +193,7 @@ function samePath(left: string, right: string): boolean {
   return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
-function stableFileSha256(rawPath: string, label: string, requireSingleLink: boolean): { path: string; sha256: string } {
+function stableFileSha256(rawPath: string, label: string, requireSingleLink: boolean): any {
   const requested = resolve(rawPath);
   let canonical: string;
   try {
@@ -239,7 +239,7 @@ function runAclTool(
   command: string,
   args: string[],
   extraEnv: NodeJS.ProcessEnv = {},
-): { exitCode: number; stdout: string; stderr: string } {
+): any {
   const result = Bun.spawnSync([command, ...args], {
     env: { ...minimalWindowsSystemEnv(), ...extraEnv },
     stdin: "ignore",
@@ -322,7 +322,7 @@ export function hardenPrivateHarborRoot(root: string): string {
   return canonical;
 }
 
-function writePrivateJson(path: string, value: unknown): void {
+function writePrivateJson(path: string, value: any): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
   if (process.platform !== "win32") chmodSync(path, 0o600);
 }
@@ -536,7 +536,7 @@ export function buildTrustedExecutablePath(
 export function gitProvenanceEnv(
   source: NodeJS.ProcessEnv,
   trustedPath: string,
-): Record<string, string> {
+): any {
   if (!trustedPath) throw new Error("Trusted executable PATH cannot be empty.");
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(source)) {
@@ -653,7 +653,7 @@ export function collectBuildIdentity(
   return identity;
 }
 
-function readUserConfig(): Record<string, any> {
+function readUserConfig(): any {
   try {
     const value = JSON.parse(readFileSync(join(homedir(), ".neko-core", "config.json"), "utf8"));
     return isObjectValue(value) ? value : {};
@@ -680,7 +680,7 @@ function assertEvalIdentity(identity: HarborEvalIdentity): void {
 
 export function resolveEvalIdentity(
   options: HarborEvalOptions,
-  config: Record<string, any> = readUserConfig(),
+  config: any = readUserConfig(),
   env: NodeJS.ProcessEnv = process.env,
 ): HarborEvalIdentity {
   const profile = options.profile?.trim() || env.NEKO_PROFILE?.trim()
@@ -753,14 +753,14 @@ export function harborProcessEnv(
   runtimeRoot: string,
   grant?: HarborHostGrant,
   dockerProgramFiles?: string,
-): Record<string, string> {
+): any {
   if (!trustedPath) throw new Error("Trusted executable PATH cannot be empty.");
   const runtime = realpathSync.native(resolve(runtimeRoot));
-  const value = (name: string): string | undefined => {
+  const value = (name: string): any => {
     const match = Object.entries(source).find(([key, entry]) => entry !== undefined && key.toUpperCase() === name);
     return match?.[1];
   };
-  const env: Record<string, string> = {
+  const env: any = {
     PATH: trustedPath,
     HOME: runtime,
     USERPROFILE: runtime,

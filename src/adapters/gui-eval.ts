@@ -84,7 +84,7 @@ export class GuiWorld {
   }
 
   /** The ToolRegistry.computerHandler entry point: one `computer` tool call -> a text observation. */
-  act(args: Record<string, any>): string {
+  act(args: any): string {
     this.steps++;
     const action = String(args.action ?? "");
     const screen = this.screens.get(this.screenId)!;

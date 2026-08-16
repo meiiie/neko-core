@@ -128,38 +128,38 @@ function sessionPath(id: string): string | null {
   return dirname(path) === dir ? path : null;
 }
 
-function validMessage(value: unknown): boolean {
+function validMessage(value: any): boolean {
   if (!isJsonObject(value)) return false;
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-  const message = value as Record<string, unknown>;
+  const message = value as any;
   if (!new Set(["system", "user", "assistant", "tool"]).has(String(message.role ?? ""))) return false;
   if (message._neko_internal !== undefined && !isBool(message._neko_internal)) return false;
   return isText(message.content) || message.content === null || Array.isArray(message.content);
 }
 
-function validMetadataText(value: unknown, maxBytes: number): value is string {
+function validMetadataText(value: any, maxBytes: number): value is string {
   return typeof value === "string"
     && Buffer.byteLength(value, "utf8") <= maxBytes
     && !hasTerminalControl(value);
 }
 
-function validTurnState(value: unknown): value is SessionTurnState {
+function validTurnState(value: any): value is SessionTurnState {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-  const state = value as Record<string, unknown>;
+  const state = value as any;
   if (!new Set(["idle", "running", "interrupted"]).has(String(state.status ?? ""))) return false;
   if (state.startedAt !== undefined && !validMetadataText(state.startedAt, MAX_SESSION_TIME_BYTES)) return false;
   if (state.recoveredAt !== undefined && !validMetadataText(state.recoveredAt, MAX_SESSION_TIME_BYTES)) return false;
   if (state.lastStopReason !== undefined && !validMetadataText(state.lastStopReason, MAX_SESSION_TITLE_BYTES)) return false;
   return state.activeToolCallIds === undefined || (Array.isArray(state.activeToolCallIds)
     && state.activeToolCallIds.length <= 256
-    && state.activeToolCallIds.every((id) => validMetadataText(id, MAX_SESSION_TITLE_BYTES)));
+    && state.activeToolCallIds.every((id: any) => validMetadataText(id, MAX_SESSION_TITLE_BYTES)));
 }
 
-function validUsage(value: unknown): value is SessionUsage {
+function validUsage(value: any): value is SessionUsage {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-  const usage = value as Record<string, unknown>;
+  const usage = value as any;
   const keys = ["promptTokens", "completionTokens", "totalTokens", "cachedTokens", "cacheWriteTokens",
     "calls", "lastPrompt", "lastCompletion", "lastCached", "lastCacheWrite"];
   return keys.every((key) => Number.isSafeInteger(usage[key]) && Number(usage[key]) >= 0);
@@ -353,7 +353,7 @@ export async function saveSessionAsync(session: Session): Promise<void> {
 interface SessionSaveWaiter {
   generation: number;
   resolve(): void;
-  reject(error: unknown): void;
+  reject(error: any): void;
 }
 
 /** Latest-wins checkpoint queue. A long save never creates an unbounded 750ms checkpoint backlog;
@@ -387,7 +387,7 @@ export class AsyncSessionWriter {
     return this.latest;
   }
 
-  private settle(generation: number, ok: boolean, error?: unknown): void {
+  private settle(generation: number, ok: boolean, error?: any): void {
     for (let index = this.waiters.length - 1; index >= 0; index--) {
       const waiter = this.waiters[index];
       if (waiter.generation > generation) continue;
@@ -515,10 +515,10 @@ function metaOf(session: Session, mtime: number, fsize: number): SessionMeta {
   };
 }
 
-function validMeta(value: unknown, expectedId: string): value is SessionMeta {
+function validMeta(value: any, expectedId: string): value is SessionMeta {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-  const meta = value as Record<string, unknown>;
+  const meta = value as any;
   return meta.id === expectedId
     && isValidSessionId(expectedId)
     && validMetadataText(meta.createdAt, MAX_SESSION_TIME_BYTES)

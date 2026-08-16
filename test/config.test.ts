@@ -18,7 +18,7 @@ function tmpConfig(data: any): string {
   return path;
 }
 
-function configAtHome(data: Record<string, any>, home: string): NekoConfig {
+function configAtHome(data: any, home: string): NekoConfig {
   return new NekoConfig(data, null, {}, "", null, [], { state: "none", files: [] }, home);
 }
 

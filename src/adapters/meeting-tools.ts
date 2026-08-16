@@ -89,7 +89,7 @@ class MeetingTools implements McpTools {
     return "Neko Meeting tools capture only after explicit user/browser consent and keep audio/transcripts local. Load the meeting-notes skill before meeting work. Start/transcribe/delete are gated; emergency stop and bounded inspection are safe. System audio is a channel, not verified person-level diarization.";
   }
 
-  async call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  async call(name: string, args: any, signal?: AbortSignal): Promise<string> {
     const action = name.slice(PREFIX.length);
     if (action === "inspect") return this.inspect(args);
     if (action === "start") {
@@ -144,7 +144,7 @@ class MeetingTools implements McpTools {
     throw new Error(`unknown meeting tool ${name}`);
   }
 
-  private inspect(args: Record<string, any>): string {
+  private inspect(args: any): string {
     const operation = String(args.operation ?? "");
     if (operation === "status") {
       const active = activeBrowserMeeting()?.snapshot();
@@ -220,7 +220,7 @@ class MeetingTools implements McpTools {
     throw new Error("meeting inspect operation must be status, list, read, or live");
   }
 
-  private resolveMeeting(value: unknown): MeetingManifest {
+  private resolveMeeting(value: any): MeetingManifest {
     const id = String(value ?? "latest").trim();
     const meeting = !id || id === "latest" ? latestMeeting(this.home) : readMeeting(id, this.home);
     if (!meeting) throw new Error(id === "latest" || !id ? "no local meeting was found" : `meeting ${id} was not found`);
@@ -269,7 +269,7 @@ function codeSwitchHint(segments: MeetingTranscriptSegment[]): string | null {
   return `${Math.round((uncertain / words) * 100)}% of recent words were low-confidence, which usually means English technical terms inside Vietnamese speech. Local ASR renders those unreliably; do not quote them as exact wording, and tell the user if a decision depends on one.`;
 }
 
-function summarize(meeting: MeetingManifest): Record<string, unknown> {
+function summarize(meeting: MeetingManifest) {
   return {
     id: meeting.id,
     title: meeting.title,
@@ -283,7 +283,7 @@ function summarize(meeting: MeetingManifest): Record<string, unknown> {
   };
 }
 
-function boundedInt(value: unknown, min: number, max: number, fallback: number): number {
+function boundedInt(value: any, min: number, max: number, fallback: number): number {
   if (value == null) return fallback;
   const number = Number(value);
   if (!Number.isInteger(number) || number < min || number > max) throw new Error(`expected an integer from ${min} to ${max}`);

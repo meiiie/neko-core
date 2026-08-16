@@ -54,7 +54,7 @@ export function ensureBrowserCapability(rotate = false, port = DEFAULT_BROWSER_B
   return capability;
 }
 
-export function readBrowserBridgeStatus(): Record<string, unknown> | undefined {
+export function readBrowserBridgeStatus(): any | undefined {
   try {
     const value = JSON.parse(readFileSync(STATUS_FILE(), "utf8"));
     if (!isJsonObject(value)) return undefined;
@@ -68,7 +68,7 @@ export type BrowserBridgeStage = "not_configured" | "offline" | "bridge_online" 
 /** Report only states Neko can verify; local extension files alone do not mean Chrome installed them. */
 export function browserBridgeStage(
   capability: BrowserCapability | null = readBrowserCapability(),
-  status: Record<string, unknown> | undefined = readBrowserBridgeStatus(),
+  status: any | undefined = readBrowserBridgeStatus(),
 ): BrowserBridgeStage {
   if (!capability) return "not_configured";
   if (!status?.online) return "offline";
@@ -108,7 +108,7 @@ class BrowserBridgeTools implements McpTools {
   }
   temporal(name: string): boolean { return name === "mcp__neko_browser__watch"; }
   indexBlock(): string { return "Neko Browser Bridge tools are local-only and control only the single visible tab attached by the extension."; }
-  async call(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+  async call(name: string, args: any, signal?: AbortSignal): Promise<string> {
     const action = name.replace("mcp__neko_browser__", "");
     const requestedDuration = Number(args.durationMs);
     const watchDuration = Number.isFinite(requestedDuration)
@@ -341,7 +341,7 @@ export function startBrowserBridge(options: {
     session: capability.session,
     status: publicStatus,
     command,
-    pushPanel(event: unknown) {
+    pushPanel(event: any) {
       if (client?.readyState === 1) { try { client.send(JSON.stringify({ type: "panel", event })); } catch { /* client dropped mid-send */ } }
     },
     onPanelPrompt(handler: (prompt: string) => void) { panelHandler = handler; },

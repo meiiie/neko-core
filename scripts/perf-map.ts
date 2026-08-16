@@ -35,7 +35,7 @@ class FakeTtyOut extends EventEmitter {
   reset() { this.frames = []; }
   setSize(c: number, r: number) { this.columns = c; this.rows = r; this.vt.resize(c, r); this.emit("resize"); }
   // count writes/bytes within the last window
-  window(): { writes: number; bytes: number } {
+  window() {
     return { writes: this.frames.length, bytes: this.frames.reduce((a, f) => a + f.bytes, 0) };
   }
 }

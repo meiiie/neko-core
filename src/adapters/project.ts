@@ -15,7 +15,7 @@ import { isBool, isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
 
 const userConfigPath = () => join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME);
 
-function readUserConfig(): Record<string, any> {
+function readUserConfig(): any {
   const path = userConfigPath();
   if (!existsSync(path)) return {};
   // A parse failure must NOT silently become {} here: every caller writes this back, so that would
@@ -31,13 +31,13 @@ function readUserConfig(): Record<string, any> {
 }
 
 /** Read-modify-write that aborts (never overwrites) if the existing config is malformed. */
-function updateUserConfig(mutate: (data: Record<string, any>) => void): void {
+function updateUserConfig(mutate: (data: any) => void): void {
   const data = readUserConfig();
   mutate(data);
   writeUserConfig(data);
 }
 
-function writeUserConfig(data: Record<string, any>): void {
+function writeUserConfig(data: any): void {
   const path = userConfigPath();
   mkdirSync(dirname(path), { recursive: true });
   // Atomic: this file holds the API key — a crash mid-write must never truncate it into invalid JSON
@@ -151,12 +151,12 @@ export function clearApiKey(profile?: string): string {
 }
 
 /** Merge top-level keys into the user config (preserves api_key / mcp_servers / etc.). Key-safe. */
-export function patchUserConfig(patch: Record<string, any>): void {
+export function patchUserConfig(patch: any): void {
   updateUserConfig((d) => { for (const [k, v] of Object.entries(patch)) d[k] = v; });
 }
 
 /** Add/replace an MCP server in the user config (~/.neko-core/config.json). */
-export function addMcpServer(name: string, server: Record<string, any>): string {
+export function addMcpServer(name: string, server: any): string {
   try {
     updateUserConfig((d) => {
       d.mcp_servers = d.mcp_servers ?? {};
@@ -172,7 +172,7 @@ export function addMcpServer(name: string, server: Record<string, any>): string 
 /** Remove an MCP server from the user config. */
 export function removeMcpServer(name: string): string {
   if (!existsSync(userConfigPath())) return "no user config (~/.neko-core/config.json)";
-  let data: Record<string, any>;
+  let data: any;
   try {
     data = readUserConfig();
   } catch (e) {
@@ -247,7 +247,7 @@ export function initProject(force = false): string {
   return `${cfgMsg}\n${mdMsg}`;
 }
 
-function write(target: string, template: unknown, force: boolean): string {
+function write(target: string, template: any, force: boolean): string {
   if (existsSync(target) && !force) {
     return `Existing config kept: ${target} (use --force to overwrite)`;
   }

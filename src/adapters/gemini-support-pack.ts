@@ -378,7 +378,7 @@ function extractArchive(archive: string, destination: string, zipped: boolean): 
   if (result.status !== 0) throw new Error(`Could not unpack Support Pack: ${(result.stderr || `${command} failed`).trim()}`);
 }
 
-function validateEntries(entries: string[]): void {
+function validateEntries(entries: string[]) {
   if (!entries.length || entries.length > 4000) throw new Error("Support Pack archive has an invalid file count");
   for (const entry of entries) {
     const normalized = entry.replace(/\/$/, "");
@@ -387,7 +387,7 @@ function validateEntries(entries: string[]): void {
   }
 }
 
-function realVersions(runtime: string, entry: string): { node: string | null; gemini: string | null } {
+function realVersions(runtime: string, entry: string) {
   const node = spawnSync(runtime, ["--version"], { encoding: "utf8", timeout: 10_000, windowsHide: true });
   const gemini = spawnSync(runtime, [entry, "--version"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
   return {

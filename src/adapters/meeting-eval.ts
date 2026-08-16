@@ -43,7 +43,7 @@ export interface MeetingEvalReport {
   };
 }
 
-export function evaluateMeetingAsr(input: unknown): MeetingEvalReport {
+export function evaluateMeetingAsr(input: any): MeetingEvalReport {
   if (!Array.isArray(input) || input.length < 1 || input.length > 10_000) throw new Error("meeting eval requires an array of 1 to 10000 cases");
   const seen = new Set<string>();
   const cases: MeetingEvalCaseResult[] = [];
@@ -53,7 +53,7 @@ export function evaluateMeetingAsr(input: unknown): MeetingEvalReport {
   for (const [index, raw] of input.entries()) {
     if (!isJsonObject(raw)) throw new Error(`meeting eval case ${index + 1} must be an object`);
     // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
-    const value = raw as Record<string, unknown>;
+    const value = raw as any;
     const id = String(value.id ?? `case-${index + 1}`).trim().slice(0, 200);
     if (!id || seen.has(id)) throw new Error(`meeting eval case id is missing or duplicated: ${id || index + 1}`);
     seen.add(id);
@@ -158,19 +158,19 @@ function editDistance<T>(left: T[], right: T[]): number {
   return previous[left.length];
 }
 
-function boundedText(value: unknown, label: string): string {
+function boundedText(value: any, label: string): string {
   if (!isText(value) || value.length > 2_000_000) throw new Error(`meeting eval ${label} must be a string up to 2000000 characters`);
   return value;
 }
 
-function optionalPositive(value: unknown, label: string, zeroAllowed = false): number | undefined {
+function optionalPositive(value: any, label: string, zeroAllowed = false): number | undefined {
   if (value == null) return undefined;
   const number = Number(value);
   if (!Number.isFinite(number) || number < (zeroAllowed ? 0 : Number.EPSILON)) throw new Error(`meeting eval ${label} must be a positive finite number`);
   return number;
 }
 
-function normalizeSource(value: unknown): string {
+function normalizeSource(value: any): string {
   const source = String(value ?? "").trim().toLowerCase();
   if (!new Set(["microphone", "system", "unknown"]).has(source)) throw new Error(`invalid meeting source label: ${source || "missing"}`);
   return source;

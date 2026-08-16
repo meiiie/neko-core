@@ -41,7 +41,7 @@ export function listWorkflows(): { name: string; summary: string }[] {
 }
 
 /** The `workflow` tool: list | read | write | delete | search, scoped to ~/.neko-core/workflows/. */
-export function workflowTool(args: Record<string, any>): string {
+export function workflowTool(args: any): string {
   const action = String(args.action ?? "").toLowerCase();
   const dir = wfDir();
   switch (action) {

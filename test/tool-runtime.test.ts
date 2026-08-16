@@ -257,7 +257,7 @@ test("an external adapter can declare an attached-tab observation safe", async (
     toolSchemas: () => [],
     has: (name: string) => name === "mcp__neko_browser__watch",
     permission: () => "safe",
-    call: async (_name: string, _args: Record<string, any>, signal?: AbortSignal) => {
+    call: async (_name: string, _args: any, signal?: AbortSignal) => {
       receivedSignal = signal;
       return "watched";
     },

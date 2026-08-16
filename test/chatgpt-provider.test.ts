@@ -38,10 +38,10 @@ test("Responses conversion preserves system instructions, function calls, tool o
     { role: "tool", tool_call_id: "call-1", content: [{ type: "text", text: "ok" }, { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } }] },
   ]);
   expect(converted.instructions).toBe("Be precise.");
-  expect(converted.input.some((item) => item.type === "reasoning" && item.encrypted_content === "opaque")).toBe(true);
-  expect(converted.input.some((item) => item.type === "function_call" && item.call_id === "call-1")).toBe(true);
-  expect(converted.input.some((item) => item.type === "function_call_output" && item.output === "ok")).toBe(true);
-  expect(converted.input.some((item) => item.content?.[0]?.type === "input_image")).toBe(true);
+  expect(converted.input.some((item: any) => item.type === "reasoning" && item.encrypted_content === "opaque")).toBe(true);
+  expect(converted.input.some((item: any) => item.type === "function_call" && item.call_id === "call-1")).toBe(true);
+  expect(converted.input.some((item: any) => item.type === "function_call_output" && item.output === "ok")).toBe(true);
+  expect(converted.input.some((item: any) => item.content?.[0]?.type === "input_image")).toBe(true);
   expect(toResponsesTools([{ function: { name: "read_file", description: "Read", parameters: { type: "object" } } }])[0]).toEqual({
     type: "function", name: "read_file", description: "Read", parameters: { type: "object" }, strict: false,
   });

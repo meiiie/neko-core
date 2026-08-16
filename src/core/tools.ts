@@ -20,14 +20,18 @@ const READ_ONLY_SUBAGENT_TOOLS: ReadonlyMap<string, readonly string[]> = new Map
 
 /** Named subagents whose runtime authority is provably read-only. Unknown/custom workers inherit
  * the parent authority and therefore remain gated like any other potentially mutating action. */
-export function subagentToolAllowlist(type: unknown): readonly string[] | undefined {
+export function subagentToolAllowlist(type: any): readonly string[] | undefined {
   if (!isText(type)) return undefined;
   return READ_ONLY_SUBAGENT_TOOLS.get(type.trim().toLowerCase());
 }
 
-export function taskDelegatesReadOnly(args: Record<string, any> = {}): boolean {
+export function taskDelegatesReadOnly(args: any = {}) {
   return subagentToolAllowlist(args.subagent_type) !== undefined;
 }
+
+/** One JSON-schema parameter definition: type/description plus optional items/enum/maxItems extras. */
+import type { JsonValue } from "../shared/wire.ts";
+export type ToolParam = { type: string; description?: string; [key: string]: JsonValue | undefined };
 
 export interface ToolSpec {
   name: string;
@@ -35,7 +39,7 @@ export interface ToolSpec {
   /** Actions that mutate state when the tool otherwise has read-only actions. */
   gatedActions?: string[];
   summary: string;
-  parameters: Record<string, any>; // JSON-schema properties (type/description, plus items/enum)
+  parameters: Record<string, ToolParam>; // JSON-schema properties (type/description, plus items/enum)
   required: string[];
 }
 
@@ -290,14 +294,14 @@ export function listTools(platform: NodeJS.Platform = process.platform): ToolSpe
 }
 
 /** Resolve action-sensitive permission without making read/list operations prompt. */
-export function effectivePermission(spec: ToolSpec, args: Record<string, any> = {}): typeof SAFE | typeof GATED {
+export function effectivePermission(spec: ToolSpec, args: any = {}) {
   if (spec.name === "task" && taskDelegatesReadOnly(args)) return SAFE;
   if (spec.permission === GATED) return GATED;
   return spec.gatedActions?.includes(String(args.action ?? "").toLowerCase()) ? GATED : SAFE;
 }
 
 /** Human-facing verb for each tool in the transcript (Claude-style: Read/Update/Search...). */
-const TOOL_LABELS: Record<string, string> = {
+const TOOL_LABELS: any = {
   read_file: "Read",
   write_file: "Write",
   edit: "Update",
@@ -320,7 +324,7 @@ const TOOL_LABELS: Record<string, string> = {
 };
 
 /** A compact "Label(primary-arg)" for a tool call, e.g. `Read(src/app.ts)` or `Bash(bun test)`. */
-export function describeToolCall(name: string, args: Record<string, any>): string {
+export function describeToolCall(name: string, args: any): string {
   const label = TOOL_LABELS[name] ?? name;
   const a = args ?? {};
   const primary = name === "memory" || name === "workflow" || name === "playbook"
@@ -345,7 +349,7 @@ export function resolveTool(name: string): ToolSpec {
 }
 
 /** Render a ToolSpec as an OpenAI-style function tool (for the provider call). */
-export function toOpenAISchema(spec: ToolSpec): Record<string, any> {
+export function toOpenAISchema(spec: ToolSpec): any {
   return {
     type: "function",
     function: {
@@ -356,7 +360,7 @@ export function toOpenAISchema(spec: ToolSpec): Record<string, any> {
   };
 }
 
-export function toolSchemas(platform: NodeJS.Platform = process.platform): Record<string, any>[] {
+export function toolSchemas(platform: NodeJS.Platform = process.platform): any[] {
   return listTools(platform).map(toOpenAISchema);
 }
 

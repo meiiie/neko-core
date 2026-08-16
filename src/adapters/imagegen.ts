@@ -31,7 +31,7 @@ export interface ImageGenResult {
 }
 
 /** Is the subscription image route available on this machine? (No network probe - binary + login.) */
-export function imageGenerationAvailable(): { ok: boolean; detail: string } {
+export function imageGenerationAvailable() {
   const support = discoverCodexSupport();
   if (support.state !== "ready" || !support.executable) {
     return { ok: false, detail: `image_gen needs the Codex support component (${support.detail}). Install Codex CLI >= 0.144.0 or the Neko GPT-5.6 Support Pack.` };

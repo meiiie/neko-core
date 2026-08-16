@@ -19,7 +19,7 @@ const entry = join(import.meta.dir, "..", "bin", "neko.ts");
 const tempDirs: string[] = [];
 let savedNekoEnv: Record<string, string | undefined> = {};
 
-function fixture(): { root: string; home: string } {
+function fixture() {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-project-trust-")));
   tempDirs.push(base);
   const root = join(base, "project");
@@ -29,14 +29,14 @@ function fixture(): { root: string; home: string } {
   return { root, home };
 }
 
-function writeJson(path: string, value: unknown): string {
+function writeJson(path: string, value: any): string {
   mkdirSync(dirname(path), { recursive: true });
   const text = JSON.stringify(value);
   writeFileSync(path, text);
   return text;
 }
 
-function cleanEnv(home: string): Record<string, string> {
+function cleanEnv(home: string) {
   // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const env = Object.fromEntries(Object.entries(process.env)
     .filter(([key, value]) => value !== undefined && !key.startsWith("NEKO_")
@@ -44,13 +44,13 @@ function cleanEnv(home: string): Record<string, string> {
   return { ...env, HOME: home, USERPROFILE: home, NEKO_AUTO_UPDATE: "0" };
 }
 
-function readRecordStore(home: string): string {
+function readRecordStore(home: string) {
   const dir = join(home, ".neko-core", "trusted-projects.d");
   return readdirSync(dir).filter((name) => name.endsWith(".json"))
     .map((name) => readFileSync(join(dir, name), "utf8")).join("\n");
 }
 
-function runCli(root: string, home: string, ...args: string[]): { status: number; output: string } {
+function runCli(root: string, home: string, ...args: string[]) {
   const result = Bun.spawnSync([process.execPath, entry, ...args], {
     cwd: root,
     env: cleanEnv(home),

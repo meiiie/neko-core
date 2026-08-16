@@ -120,7 +120,7 @@ export type ToolObservationClass = "productive" | "empty" | "failed";
 
 /** Classify a tool observation without retaining its payload. This is shared by the loop guards and
  * benchmark telemetry so an eval cannot report a failed/empty call as productive. */
-export function classifyToolObservation(obs: unknown): ToolObservationClass {
+export function classifyToolObservation(obs: any): ToolObservationClass {
   if (!isText(obs)) return "productive";
   if (/\(exit \d+ -- command FAILED\)/.test(obs)
     || /^\(timed out/.test(obs)
@@ -268,7 +268,7 @@ export class Agent {
   }
 
   async executeExternalTool(
-    call: { id?: string; name: string; arguments: Record<string, any> },
+    call: { id?: string; name: string; arguments: any },
     signal?: AbortSignal,
   ): Promise<string | any[]> {
     this.emit("tool_call", call);
@@ -525,7 +525,7 @@ export class Agent {
      * `url`, or any executor that throws) becomes an error OBSERVATION the model can recover from, instead of
      * rejecting the whole turn. The loop is built on "feed errors back so the model adapts" — this enforces it
      * for every tool, not just the ones already wrapped inside execute(). */
-    private async safeExecute(call: { name: string; arguments: Record<string, any> }, signal?: AbortSignal): Promise<string | any[]> {
+    private async safeExecute(call: { name: string; arguments: any }, signal?: AbortSignal): Promise<string | any[]> {
       const args = unwrapToolArgs(call.arguments); // tolerate _raw / JSON-string arg wrappers from some models
       // Pre-flight argument validation (Gecko, arXiv 2602.19218): a call missing a REQUIRED key
       // would execute, throw, and burn the round-trip on a vague error - catch it BEFORE execution
@@ -552,7 +552,7 @@ export class Agent {
      * differs, so the exact guard never trips), and (2) re-running a failing bash command N times with tiny
      * tweaks. Returns a ONE-TIME nudge string when the per-path edit cap is first reached (the caller runs
      * the edit anyway and APPENDS this as a warning — it never blocks a legit edit), else null. */
-    private broadLoopNudge(call: { name: string; arguments: Record<string, any> }): string | null {
+    private broadLoopNudge(call: { name: string; arguments: any }): string | null {
       if (EDIT_TOOLS.has(call.name)) {
         const p = String(call.arguments?.path ?? "");
         if (p) {
@@ -570,7 +570,7 @@ export class Agent {
 
     /** A bash/test result "failed" if it carries a non-zero exit tag (see tool-runtime.ts: `(exit N -- command FAILED)`),
      * a timeout, or an explicit error. Used to count CONSECUTIVE failing runs for the broad guard. */
-    private static isFailedRunResult(obs: unknown): boolean {
+    private static isFailedRunResult(obs: any): boolean {
       return classifyToolObservation(obs) === "failed";
     }
 
@@ -578,25 +578,25 @@ export class Agent {
      * results back-to-back are the signature of a doom-loop of selector probes on an obfuscated page (e.g. a
      * Facebook feed) - the exact-repeat guard misses it because every selector differs. Handles the MCP
      * "### Result\n[]" wrapper as well as a bare value. */
-    private static isUnproductiveResult(obs: unknown): boolean {
+    private static isUnproductiveResult(obs: any): boolean {
       return classifyToolObservation(obs) !== "productive";
     }
 
-    private static isToolchainCommand(call: { name: string; arguments?: Record<string, any> }): boolean {
+    private static isToolchainCommand(call: { name: string; arguments?: any }): boolean {
       if (call.name.toLowerCase() !== "bash") return false;
       return /\b(?:bun|node|npm|npx|pnpm|yarn|deno)(?:\.exe)?\b/i.test(String(call.arguments?.command ?? ""));
     }
 
     private static isToolchainCapabilityFailure(
-      call: { name: string; arguments?: Record<string, any> },
-      observation: unknown,
+      call: { name: string; arguments?: any },
+      observation: any,
     ): boolean {
       if (!Agent.isToolchainCommand(call) || !isText(observation) || !Agent.isFailedRunResult(observation)) return false;
       return /(command not found|not recognized as|no such file|cannot find|permission denied|access is denied|operation not permitted|network (?:is )?(?:blocked|denied)|\b403\b)/i
         .test(observation);
     }
 
-    private static isStateChangingCall(call: { name: string; arguments?: Record<string, any> }): boolean {
+    private static isStateChangingCall(call: { name: string; arguments?: any }): boolean {
       const name = call.name.toLowerCase();
       if (name === "task") return !taskDelegatesReadOnly(call.arguments);
       if (name === "bash") return !Agent.isClearlyReadOnlyBash(call.arguments);
@@ -619,7 +619,7 @@ export class Agent {
      * approvals or execution. A tiny whitelist avoids charging an extra model round for commands such
      * as `echo ok`; any shell composition, substitution, redirection, backgrounding, or unknown command
      * remains state-changing because it may alter files/processes or user-visible state. */
-    private static isClearlyReadOnlyBash(args?: Record<string, any>): boolean {
+    private static isClearlyReadOnlyBash(args?: any): boolean {
       if (args?.run_in_background === true) return false;
       const command = String(args?.command ?? "").trim();
       if (!command || /[\r\n;&|<>`()]/.test(command) || /\$\(|@\(/.test(command)) return false;
@@ -635,7 +635,7 @@ export class Agent {
       return new Set(["status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "describe"]).has(subcommand);
     }
 
-    private isMechanicalReadCall(call: { name: string; arguments?: Record<string, any> }): boolean {
+    private isMechanicalReadCall(call: { name: string; arguments?: any }): boolean {
       const name = call.name.toLowerCase();
       if (name === "bash") return Agent.isClearlyReadOnlyBash(call.arguments);
       if (new Set(["read_file", "search", "glob", "ls", "disk_cleanup_scan", "web_search", "web_fetch", "mcp_load"]).has(name)) return true;
@@ -647,7 +647,7 @@ export class Agent {
 
     /** Waiting for the next event is intentionally repeatable: equal arguments observe a different time
      * interval. The ordinary exact-call guard still protects every non-temporal tool. */
-    private isRepeatableWaitCall(call: { name: string; arguments?: Record<string, any> }): boolean {
+    private isRepeatableWaitCall(call: { name: string; arguments?: any }): boolean {
       const name = call.name.toLowerCase();
       if (name === "computer") {
         return new Set(["watch", "wait"]).has(String(call.arguments?.action ?? "").toLowerCase());
@@ -655,7 +655,7 @@ export class Agent {
       return this.tools.mcp?.permission?.(name) === "safe" && this.tools.mcp.temporal?.(name) === true;
     }
 
-    private static isVerificationEvidenceCall(call: { name: string; arguments?: Record<string, any> }, observation: unknown): boolean {
+    private static isVerificationEvidenceCall(call: { name: string; arguments?: any }, observation: any): boolean {
       if ((isText(observation) && Agent.isUnproductiveResult(observation)) || observation == null) return false;
       const name = call.name.toLowerCase();
       if (name === "computer") {
@@ -736,7 +736,7 @@ export class Agent {
     let consecutiveReadSteps = 0; // adaptive effort: only lower reasoning on a SUSTAINED all-read pattern
     let toolchainCapabilityFailures = 0;
     let toolchainCircuitOpen = false;
-    const noteTool = (call: { name: string; arguments?: Record<string, any> }, observation: unknown) => {
+    const noteTool = (call: { name: string; arguments?: any }, observation: any) => {
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
       const failed = observation == null || Agent.isUnproductiveResult(observation);
@@ -809,10 +809,10 @@ export class Agent {
       // are never eager (approval semantics untouched), everything runs under the same abort signal,
       // and results are consumed by key below - never re-executed.
       const eager = new Map<string, Promise<string | any[]>>();
-      const eagerKey = (c: { id?: string; name: string; arguments?: Record<string, any> }) =>
+      const eagerKey = (c: { id?: string; name: string; arguments?: any }) =>
         c.id || `${c.name}:${JSON.stringify(c.arguments ?? {})}`;
       let eagerOk = true;
-      const onToolCallReady = (call: { id: string; name: string; arguments: Record<string, any> }) => {
+      const onToolCallReady = (call: { id: string; name: string; arguments: any }) => {
         const adapterSafe = this.tools.mcp?.permission?.(call.name) === "safe";
         if (!EAGER_SAFE.has(call.name) && !adapterSafe) { eagerOk = false; return; }
         if (!eagerOk || signal?.aborted || eager.has(eagerKey(call))) return;
@@ -869,7 +869,7 @@ export class Agent {
         return message;
       };
       let managedToolChain: Promise<void> = Promise.resolve();
-      const executeTool = (call: { id: string; name: string; arguments: Record<string, any> }): Promise<string | any[]> => {
+      const executeTool = (call: { id: string; name: string; arguments: any }): Promise<string | any[]> => {
         managedTrace = true;
         // Provider callbacks can arrive concurrently. Serialize the canonical trajectory so each
         // assistant(function_call) is followed by its own tool(function_call_output) before the next
@@ -1230,7 +1230,7 @@ export class Agent {
 
 /** Only silence/stall failures are safe to resume automatically. Authentication, validation, policy,
  * and ordinary provider errors still surface immediately instead of being hidden behind retries. */
-function isRecoverableProviderStall(error: unknown): boolean {
+function isRecoverableProviderStall(error: any): boolean {
   return error instanceof Error && (
     error.name === "TimeoutError"
     || /\b(?:idle timeout|produced no activity)\b/i.test(error.message)
@@ -1256,7 +1256,7 @@ function assistantToolMessage(content: string | null, toolCalls: ToolCall[], con
  * endpoint): a single `_raw`/`arguments`/`input`/`parameters`/`args` wrapper key, or the raw JSON string.
  * Left unfixed these fail required-arg validation and wedge the turn in a re-emit loop. A legitimate call
  * never has exactly one of those wrapper keys, so unwrapping is safe. */
-export function unwrapToolArgs(raw: any): Record<string, any> {
+export function unwrapToolArgs(raw: any): any {
   let a: any = raw;
   if (isText(a)) { try { a = JSON.parse(a); } catch { return {}; } }
   if (!isJsonObject(a)) return {};

@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { dockerAvailable, SearxngSidecar, type Exec } from "../src/adapters/sidecar.ts";
 
 /** A scriptable docker CLI: state -> inspect answer; records every call. */
-function fakeExec(world: { state: string; startFails?: boolean }): { exec: Exec; calls: string[][] } {
+function fakeExec(world: { state: string; startFails?: boolean }) {
   const calls: string[][] = [];
   const exec: Exec = (cmd, args) => {
     calls.push([cmd, ...args]);
