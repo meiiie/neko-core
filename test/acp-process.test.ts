@@ -88,6 +88,7 @@ test("ACP survives a forced mid-mutation process kill and does not execute the m
     send(first.child, 1, "initialize", { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
     expect((await response(first.messages, 1)).error).toBeUndefined();
     send(first.child, 2, "session/new", { cwd: root, mcpServers: [] });
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const sessionId = (await response(first.messages, 2)).result.sessionId as string;
     send(first.child, 3, "session/prompt", {
       sessionId,

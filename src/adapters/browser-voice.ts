@@ -76,6 +76,7 @@ export class BrowserVoiceSession implements ChatGptVoiceControl {
       if (this.now() - this.lastHeartbeat > BRIDGE_LIVENESS_TIMEOUT_MS) { void this.stop("browser heartbeat lost"); return; }
       this.socket?.send(JSON.stringify({ type: "ping" }));
     }, 5_000);
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (this.heartbeat as any).unref?.();
     const url = `${this.origin}/#${this.token}`;
     this.emitState("waiting");

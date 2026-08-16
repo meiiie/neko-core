@@ -540,6 +540,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           if (kind !== "reasoning" && last?.role === "assistant" && !last._neko_acp_message_id) {
             last._neko_acp_message_id = session.liveAgentMessageId;
           }
+          // SAFETY: the enqueue payload is built here as the ACP sessionUpdate contract requires.
           enqueue({
             sessionUpdate: kind === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk",
             ...(kind === "reasoning" ? undefined : { messageId: session.liveAgentMessageId }),
@@ -548,11 +549,14 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         },
         onEvent: (kind, data) => {
           if (kind === "tool_call") {
+            // SAFETY: contract of the ToolCall type is established by the surrounding validation/boundary.
             const update = toolUpdate(root, data as ToolCall);
             toolCalls.set(update.toolCallId, update);
             session.activeToolCallIds.add(update.toolCallId);
+            // SAFETY: contract of the acp.SessionUpdate type is established by the surrounding validation/boundary.
             enqueue({ sessionUpdate: "tool_call", ...update } as acp.SessionUpdate);
           } else if (kind === "tool_result") {
+            // SAFETY: contract of the ToolCall type is established by the surrounding validation/boundary.
             const call = data.call as ToolCall;
             const text = observationText(data.observation);
             const status = classifyToolObservation(data.observation) === "failed" ? "failed" : "completed";
@@ -762,6 +766,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     const session = sessions.get(params.sessionId);
     if (!session) throw new acp.RequestError(-32002, "ACP session not found.");
     if (!MODE_IDS.has(params.modeId)) throw new acp.RequestError(-32602, "Unknown Neko permission mode.");
+    // SAFETY: contract of the PermissionMode type is established by the surrounding validation/boundary.
     session.runtime.registry.mode = params.modeId as PermissionMode;
     await persist(session, session.record.turnState);
     await client.notify(acp.methods.client.session.update, {

@@ -135,6 +135,7 @@ export class BrowserMeetingSession {
       if (this.now() - this.lastHeartbeat > 20_000) { void this.stop("browser heartbeat lost"); return; }
       this.socket.send(JSON.stringify({ type: "ping" }));
     }, 5_000);
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (this.heartbeat as any).unref?.();
     const url = `${this.origin}/#${this.token}`;
     this.emitState("waiting");
@@ -365,6 +366,7 @@ export class BrowserMeetingSession {
     if (!this.live) return;
     this.live.start();
     this.liveTimer = setInterval(() => { void this.live?.drain(); }, this.options.liveIntervalMs ?? 5_000);
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (this.liveTimer as any).unref?.();
   }
 
@@ -401,6 +403,7 @@ export class BrowserMeetingSession {
       startedAt: new Date().toISOString(),
       sampleRate,
       channels: 2,
+      // SAFETY: contract of the Array<"microphone" | "system"> type is established by the surrounding validation/boundary.
       sources: [...new Set(sources)] as Array<"microphone" | "system">,
       videoStored: false,
     };

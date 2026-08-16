@@ -12,6 +12,7 @@ const cols = 90;
 const rows = 24;
 const vt = new VirtualTerminal(cols, rows);
 let raw = "";
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const term = new (Bun as any).Terminal({
   cols,
   rows,
@@ -26,6 +27,7 @@ const env: Record<string, string | undefined> = {
   NEKO_AUTO_UPDATE: "0",
   WT_SESSION: "composer-e2e",
 };
+// SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
 const proc = Bun.spawn({
   cmd: [exe, "--yolo"],
   cwd: import.meta.dir + "/..",

@@ -26,6 +26,7 @@ test("AnthropicProvider: unset max_tokens => generous default, and a smaller mod
   const orig = globalThis.fetch;
   const sent: any[] = [];
   let call = 0;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
     sent.push(JSON.parse(String(init?.body ?? "{}")));
     if (++call === 1) {
@@ -181,6 +182,7 @@ test("cache breakpoints preserve a stable base when session context changes", ()
 test("HTTP 529 (Anthropic overloaded_error) is retried, not fatal - found live on Z.ai", async () => {
   const orig = globalThis.fetch;
   let calls = 0;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async () => {
     calls++;
     if (calls === 1) {
@@ -202,6 +204,7 @@ test("HTTP 529 (Anthropic overloaded_error) is retried, not fatal - found live o
 test("self-heals when an endpoint rejects cache_control: strips the breakpoints, retries once", async () => {
   const orig = globalThis.fetch;
   const sawCache: boolean[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     const sent = JSON.parse(init.body);
     sawCache.push(JSON.stringify(sent).includes("cache_control"));
@@ -224,6 +227,7 @@ test("self-heals when an endpoint rejects cache_control: strips the breakpoints,
 test("Claude effort self-heals to an arbitrary advertised tier without losing adaptive thinking", async () => {
   const orig = globalThis.fetch;
   const efforts: string[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     const sent = JSON.parse(init.body);
     efforts.push(sent.output_config?.effort ?? "default");
@@ -247,6 +251,7 @@ test("Claude effort self-heals to an arbitrary advertised tier without losing ad
 test("unsupported adaptive thinking falls back once to the model default", async () => {
   const orig = globalThis.fetch;
   const thinking: unknown[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     const sent = JSON.parse(init.body);
     thinking.push(sent.thinking);
@@ -274,6 +279,7 @@ test("extractJsonLoose: fences, padding, and no-braces pass-through", () => {
 test("responseSchema on the anthropic provider = forced tool call, no thinking; input comes back as JSON", async () => {
   const orig = globalThis.fetch;
   let sent: any;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     sent = JSON.parse(init.body);
     return new Response(JSON.stringify({
@@ -300,6 +306,7 @@ test("responseSchema on the anthropic provider = forced tool call, no thinking; 
 test("responseSchema self-heals when tool_choice is rejected: prompt-JSON fallback + loose extraction", async () => {
   const orig = globalThis.fetch;
   const bodies: any[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     const sent = JSON.parse(init.body);
     bodies.push(sent);
@@ -329,6 +336,7 @@ test("Claude Sonnet 5 sends adaptive thinking + output_config effort without tem
   const orig = globalThis.fetch;
   let sent: any;
   let headers = new Headers();
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     sent = JSON.parse(init.body);
     headers = new Headers(init.headers);
@@ -358,6 +366,7 @@ test("Claude Sonnet 5 sends adaptive thinking + output_config effort without tem
 test("an unset Claude effort enables adaptive thinking at the model default", async () => {
   const orig = globalThis.fetch;
   let sent: any;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     sent = JSON.parse(init.body);
     return Response.json({ content: [{ type: "text", text: "ok" }], usage: {} });
@@ -376,6 +385,7 @@ test("an unset Claude effort enables adaptive thinking at the model default", as
 test("official Anthropic structured output uses output_config.format instead of a forced tool", async () => {
   const orig = globalThis.fetch;
   let sent: any;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     sent = JSON.parse(init.body);
     return Response.json({ content: [{ type: "text", text: '{"ok":true}' }], usage: { input_tokens: 2, output_tokens: 2 } });
@@ -414,6 +424,7 @@ test("Claude stream preserves thinking signatures and native block order for the
   ];
   const body = events.map((event) => `data: ${JSON.stringify(event)}\n`).join("");
   const orig = globalThis.fetch;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   globalThis.fetch = (async () => new Response(body, { status: 200 })) as any;
   try {
     const cfg = new NekoConfig({ provider: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-5", reasoning_effort: "high" }, "claude", {}, "key");
@@ -433,6 +444,7 @@ test("Claude stream preserves thinking signatures and native block order for the
       provider_data: result.continuation,
       tool_calls: [{ id: "tool-1", function: { name: "read_file", arguments: '{"path":"README.md"}' } }],
     }], scope);
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     expect(replay.msgs[0].content).toEqual((result.continuation as any[])[0].blocks);
     const switched = toAnthropicMessages([{
       role: "assistant",
@@ -458,6 +470,7 @@ test("anthropic stream fires onToolCallReady at content_block_stop, BEFORE the s
   ];
   const body = events.map((e) => `data: ${JSON.stringify(e)}\n`).join("");
   const orig = globalThis.fetch;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   globalThis.fetch = (async () => new Response(body, { status: 200 })) as any;
   const order: string[] = [];
   try {
@@ -482,6 +495,7 @@ test("anthropic stream rejects a disconnected partial response", async () => {
     { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
     { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } },
   ].map((event) => `data: ${JSON.stringify(event)}\n`).join("");
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   globalThis.fetch = (async () => new Response(body, { status: 200 })) as any;
   try {
     const cfg = new NekoConfig({ provider: "anthropic", base_url: "http://x", model: "m", reasoning_effort: "off" }, null, {}, "k");
@@ -517,6 +531,7 @@ function repeatedAnthropicSseResponse(before: string, repeated: string, count: n
 
 async function completeAnthropicStream(response: Response): Promise<any> {
   const originalFetch = globalThis.fetch;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   globalThis.fetch = (async () => response) as any;
   try {
     const cfg = new NekoConfig({

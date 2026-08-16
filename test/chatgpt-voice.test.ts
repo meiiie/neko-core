@@ -148,6 +148,7 @@ test("subscription voice keeps consent in the browser and negotiates WebRTC thro
   expect(script).not.toBe("");
   expect(() => new Function(script)).not.toThrow();
 
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const ws = new WebSocket(`${origin.replace("http:", "ws:")}/bridge`, { headers: { origin } } as any);
   await new Promise<void>((resolve, reject) => {
     ws.addEventListener("open", () => resolve(), { once: true });
@@ -385,6 +386,7 @@ test("subscription voice survives a control-socket drop mid-call and accepts a r
   const token = parsed.hash.slice(1);
   const origin = parsed.origin;
   const open = async () => {
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const ws = new WebSocket(`${origin.replace("http:", "ws:")}/bridge`, { headers: { origin } } as any);
     await new Promise<void>((resolve, reject) => {
       ws.addEventListener("open", () => resolve(), { once: true });

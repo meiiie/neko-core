@@ -69,9 +69,12 @@ const out = new Out(110, 32, vt);
 const stdin = new In();
 const differ = new FrameDiffer();
 process.env.NEKO_FULLSCREEN = "1";
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
 const app = render(
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "", tool_calls: [] }) }, sessionId: "bench", frameDiffer: differ, preAltDispose }),
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
 );
 await tick(400);

@@ -37,6 +37,7 @@ function writeJson(path: string, value: unknown): string {
 }
 
 function cleanEnv(home: string): Record<string, string> {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const env = Object.fromEntries(Object.entries(process.env)
     .filter(([key, value]) => value !== undefined && !key.startsWith("NEKO_")
       && !["OPENAI_API_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"].includes(key))) as Record<string, string>;

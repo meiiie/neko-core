@@ -113,6 +113,7 @@ test("device sign-in polls, exchanges the code, and persists the account", async
   isolatedHome();
   const calls: string[] = [];
   let polls = 0;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const mockFetch = (async (input: string | URL | Request) => {
     const url = String(input); calls.push(url);
     if (url.endsWith("/api/accounts/deviceauth/usercode")) return Response.json({ device_auth_id: "dev", user_code: "ABCD", interval: "1" });

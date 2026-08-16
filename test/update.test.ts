@@ -68,10 +68,16 @@ test("normalizeTag: bare or v-prefixed x.y.z -> vX.Y.Z; junk -> null", () => {
 test("latestVersion falls back to GitHub's official redirect when the public API is rate-limited", async () => {
   const original = globalThis.fetch;
   const calls: string[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (input: any) => {
     const url = String(input);
     calls.push(url);
-    if (url.includes("api.github.com")) return { ok: false, status: 403 } as Response;
+    // SAFETY: partial runtime-API stub; only the members used by the code under test are provided.
+    if (url.includes("api.github.com")) {
+      // SAFETY: partial Response stub; only `ok` and `status` are read by the code under test.
+      return { ok: false, status: 403 } as Response;
+    }
+    // SAFETY: partial runtime-API stub; only the members used by the code under test are provided.
     return { ok: true, url: "https://github.com/meiiie/neko-core/releases/tag/v0.11.3" } as Response;
   }) as typeof fetch;
   try {
@@ -90,10 +96,12 @@ test("an 'up to date' check is re-asked the same day, so a release minutes later
   process.env.USERPROFILE = home; process.env.HOME = home;
   require("node:fs").mkdirSync(join(home, ".neko-core"), { recursive: true });
   const cache = join(home, ".neko-core", ".update-check.json");
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const current = require("../src/shared/version.ts").VERSION as string;
   const [major, minor] = current.split(".").map(Number);
   const shipped = `v${major}.${minor + 1}.0`;
   let apiCalls = 0;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (input: any) => {
     apiCalls++;
     // SAFETY: partial Response stubs; only `ok`, `json`, and `url` are read by the update checker under test.
@@ -145,14 +153,17 @@ test("release downloads use an idle-progress watchdog instead of one total deadl
     },
   }));
   const progress: number[] = [];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await downloadReleaseBytes("https://release.invalid/neko", (n: number) => progress.push(n), moving as any, 80)).toString())
     .toBe(chunks.join("")); // total wall time >80ms, but each chunk resets the watchdog
   expect(progress).toEqual([5, 9, 15]);
 
   const stalled = async () => new Response(new ReadableStream({ start() { /* never produces bytes */ } }));
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   await expect(downloadReleaseBytes("https://release.invalid/neko", undefined, stalled as any, 40)).rejects.toThrow(/no progress/i);
 
   const oversized = async () => new Response("123456", { headers: { "content-length": "6" } });
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   await expect(downloadReleaseBytes("https://release.invalid/neko", undefined, oversized as any, 40, 5)).rejects.toThrow(/250 MB safety limit/i);
 });
 

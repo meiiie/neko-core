@@ -51,6 +51,7 @@ test("writing outside the root stays refused, allowed reads or not", async () =>
       ["write_file", { path: join(outside, "new.txt"), content: "no" }],
       ["edit", { path: join(outside, "SKILL.md"), old_string: "skill", new_string: "no" }],
     ] as const) {
+      // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
       const result = await registry.execute(call[0], call[1] as Record<string, any>);
       expect(String(result)).toContain("escapes project root"); // ...and writes are not
     }

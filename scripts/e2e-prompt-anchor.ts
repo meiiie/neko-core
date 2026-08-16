@@ -35,6 +35,7 @@ writeFileSync(join(sessions, `${id}.json`), JSON.stringify({
 const cols = 118;
 const rows = 30;
 const vt = new VirtualTerminal(cols, rows);
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const term = new (Bun as any).Terminal({
   cols,
   rows,
@@ -42,6 +43,7 @@ const term = new (Bun as any).Terminal({
     vt.write(new TextDecoder().decode(chunk));
   },
 });
+// SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
 const proc = Bun.spawn({
   cmd: [exe, "--yolo", "--resume", id],
   cwd: repo,

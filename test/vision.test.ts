@@ -22,6 +22,7 @@ test("describeImage sends the grounded read prompt + the image to the VISION mod
     },
   };
   const cfg = cfgWith({ vision_model: "test/vlm", base_url: "https://x/v1" });
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const out = await describeImage(cfg, "data:image/jpeg;base64,QUJD", undefined, provider as any);
   expect(out).toContain("error TS2304");
   expect(seen).toHaveLength(1);
@@ -34,6 +35,7 @@ test("describeImage is honest about failure modes (no model / empty reply)", asy
   expect(describeImage(none, "data:image/png;base64,QQ==")).rejects.toThrow(/no vision_model/);
   const cfg = cfgWith({ vision_model: "test/vlm", base_url: "https://x/v1" });
   const empty = { complete: async () => ({ content: "  ", tool_calls: [] }) };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(describeImage(cfg, "data:image/png;base64,QQ==", undefined, empty as any)).rejects.toThrow(/returned no text/);
 });
 

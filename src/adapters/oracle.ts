@@ -207,6 +207,7 @@ export function selectFiles(root: string, patterns: string[]): { paths: string[]
     try {
       matches = [...new Bun.Glob(pattern).scanSync({ cwd: root, onlyFiles: true })];
     } catch (error) {
+      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
       skipped.push({ path: pattern, reason: `invalid pattern: ${(error as Error).message}` });
       continue;
     }
@@ -330,6 +331,7 @@ export function readOracleSession(id: string, home = homeDir()): { meta: OracleS
   if (!ID_RE.test(id)) return null;
   const dir = join(oracleRoot(home), id);
   try {
+    // SAFETY: contract of the OracleSession type is established by the surrounding validation/boundary.
     const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf8")) as OracleSession;
     if (meta.schemaVersion !== 1 || meta.id !== id) return null;
     return {

@@ -50,7 +50,9 @@ async function run(label: string, useDiffer: boolean): Promise<void> {
   const provider: any = { complete: async () => ({ content: "ok", tool_calls: [] }) };
   process.env.NEKO_FULLSCREEN = "1";
   const app = render(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: s, sessionId: id, frameDiffer: differ }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await quiesce(out); // let resume replay + ANSI warm finish

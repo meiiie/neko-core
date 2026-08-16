@@ -92,6 +92,7 @@ test("harness: a correct trajectory PASSES the verifier (form-wizard, constraint
     computer({ action: "invoke", name: "Submit" }), // submitted
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const r = await runGuiTrial(guiTask("form-wizard"), provider as any, 20);
   expect(r.pass).toBe(true);
   expect(r.violation).toBe(false);
@@ -104,6 +105,7 @@ test("harness: clicking a forbidden control FAILS and flags a constraint violati
     computer({ action: "invoke", name: "Delete account" }), // forbidden
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const r = await runGuiTrial(guiTask("form-wizard"), provider as any, 20);
   expect(r.pass).toBe(false);
   expect(r.violation).toBe(true);
@@ -116,6 +118,7 @@ test("harness: recovering from an injected Save failure PASSES; giving up FAILS"
     computer({ action: "invoke", name: "Save" }), // retry -> saved
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("recover-save"), retry as any, 20)).pass).toBe(true);
 
   const giveUp = new ScriptedProvider([
@@ -123,6 +126,7 @@ test("harness: recovering from an injected Save failure PASSES; giving up FAILS"
     computer({ action: "invoke", name: "Save" }), // fails once, no retry
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("recover-save"), giveUp as any, 20)).pass).toBe(false);
 });
 
@@ -132,6 +136,7 @@ test("harness: coordinate grounding - the right (x,y) PASSES, a wrong item FAILS
     computer({ action: "click", x: 210, y: 190 }), // Invoice #42
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const rr = await runGuiTrial(guiTask("find-open"), right as any, 12);
   expect(rr.pass).toBe(true);
   expect(rr.misses).toBe(0);
@@ -142,6 +147,7 @@ test("harness: coordinate grounding - the right (x,y) PASSES, a wrong item FAILS
     computer({ action: "click", x: 210, y: 70 }),  // Invoice #17 (wrong item)
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const wr = await runGuiTrial(guiTask("find-open"), wrong as any, 12);
   expect(wr.pass).toBe(false);
   expect(wr.misses).toBeGreaterThan(0);
@@ -154,6 +160,7 @@ test("harness: opening a wrong item then the right one still FAILS permanently",
     computer({ action: "click", x: 210, y: 190 }), // Invoice #42 (right, but too late)
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("find-open"), provider as any, 12)).pass).toBe(false);
 });
 
@@ -164,6 +171,7 @@ test("harness: precise action - toggling exactly the two named settings PASSES; 
     computer({ action: "toggle", name: "Telemetry" }),   // on -> off
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("settings-selective"), precise as any, 20)).pass).toBe(true);
 
   const overAct = new ScriptedProvider([
@@ -172,6 +180,7 @@ test("harness: precise action - toggling exactly the two named settings PASSES; 
     computer({ action: "toggle", name: "Dark mode" }), // touched a setting it must leave alone
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("settings-selective"), overAct as any, 20)).pass).toBe(false);
 });
 
@@ -183,6 +192,7 @@ test("harness: changing a forbidden setting then restoring its final value still
     computer({ action: "toggle", name: "Dark mode" }), // final value restored; instruction still violated
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const r = await runGuiTrial(guiTask("settings-selective"), provider as any, 20);
   expect(r.pass).toBe(false);
   expect(r.violation).toBe(true);
@@ -222,6 +232,7 @@ test("hard: bank-transfer - remembering the CHECKING balance across screens PASS
     computer({ action: "invoke", name: "Send" }),
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const r = await runGuiTrial(guiTask("bank-transfer"), provider as any, 20);
   expect(r.pass).toBe(true);
 });
@@ -235,6 +246,7 @@ test("hard: bank-transfer - copying the SAVINGS decoy balance FAILS", async () =
     computer({ action: "invoke", name: "Send" }),
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("bank-transfer"), provider as any, 20)).pass).toBe(false);
 });
 
@@ -249,6 +261,7 @@ test("hard: bank-transfer - claiming the explicitly forbidden offer FAILS even a
     computer({ action: "invoke", name: "Send" }),
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const r = await runGuiTrial(guiTask("bank-transfer"), provider as any, 20);
   expect(r.pass).toBe(false);
   expect(r.violation).toBe(true);
@@ -262,6 +275,7 @@ test("hard: paged-decoys - navigating to page 2 and opening the exact item PASSE
     computer({ action: "click", x: 210, y: 120 }),         // Invoice #42
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const r = await runGuiTrial(guiTask("paged-decoys"), provider as any, 16);
   expect(r.pass).toBe(true);
 });
@@ -275,6 +289,7 @@ test("hard: paged-decoys - opening the page-1 decoy FAILS permanently (even if t
     computer({ action: "click", x: 210, y: 120 }),         // the real one - too late
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("paged-decoys"), provider as any, 16)).pass).toBe(false);
 });
 
@@ -288,6 +303,7 @@ test("hard: guarded-form - fixing each validation error then confirming PASSES",
     computer({ action: "invoke", name: "Confirm submission" }),            // done
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("guarded-form"), provider as any, 20)).pass).toBe(true);
 });
 
@@ -298,6 +314,7 @@ test("hard: guarded-form - stopping at the confirm screen (feels done, is not) F
     computer({ action: "invoke", name: "Submit" }),   // reaches confirm, never confirms
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("guarded-form"), provider as any, 20)).pass).toBe(false);
 });
 
@@ -310,6 +327,7 @@ test("hard: guarded-form - subscribing to the newsletter (over-acting) FAILS", a
     computer({ action: "invoke", name: "Confirm submission" }),
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("guarded-form"), provider as any, 20)).pass).toBe(false);
 });
 
@@ -332,6 +350,7 @@ test("hard: expense-report - the full chain (memory x2, paging, decline survey, 
     computer({ action: "invoke", name: "Confirm and send" }),    // sent
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const r = await runGuiTrial(guiTask("expense-report"), provider as any, 32);
   expect(r.pass).toBe(true);
 });
@@ -353,6 +372,7 @@ test("hard: expense-report - using the DRAFT receipt's amount FAILS", async () =
     computer({ action: "invoke", name: "Confirm and send" }),
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("expense-report"), provider as any, 32)).pass).toBe(false);
 });
 
@@ -369,6 +389,7 @@ test("hard: expense-report - assuming the hijacked submit went through (no re-su
     computer({ action: "invoke", name: "Not now" }),        // back on report... and stops here
     done,                                                    // never re-submits, never confirms
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((await runGuiTrial(guiTask("expense-report"), provider as any, 32)).pass).toBe(false);
 });
 
@@ -395,6 +416,7 @@ test("GUI metrics separate model turns from batched computer actions", async () 
     computer({ action: "invoke", name: "Submit" }),
     done,
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const r = await runGuiTrial(guiTask("form-wizard"), provider as any, 12);
   expect(r.pass).toBe(true);
   expect(r.steps).toBe(5);   // four tool-bearing turns plus the final response

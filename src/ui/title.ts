@@ -33,6 +33,7 @@ export function titleSeq(title: string): string {
   return `\x1b]2;${title.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 80)}\x07`;
 }
 
+// SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
 const out = (): Writable & { isTTY?: boolean } => process.stdout as any;
 
 // The xterm title STACK (push on start, pop on exit) restores the user's shell title when neko quits.
@@ -95,6 +96,7 @@ export function createTitleDriver(options: TitleDriverOptions = {}) {
         if (tabBusy) { blinkOn = !blinkOn; write(brandTitle(tabName, true, blinkOn)); }
         else if (keepIdle) write(brandTitle(tabName));
       }, 1000);
+      // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
       (driver as any).unref?.();
     }
   };

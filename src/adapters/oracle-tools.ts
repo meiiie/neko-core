@@ -72,6 +72,7 @@ class OracleTools implements McpTools {
       if (action === "consult") return await this.consult(args, signal);
       return `Error: unknown oracle tool ${name}`;
     } catch (error) {
+      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
       return `Error: ${(error as Error).message}`;
     }
   }

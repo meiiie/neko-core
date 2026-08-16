@@ -2,14 +2,19 @@ import { expect, test } from "bun:test";
 import { canFullscreen, CLEAR_HOME, ENTER_ALT, HIDE_CURSOR, installAltScreenGuard, KITTY_POP, KITTY_PUSH, LEAVE_ALT, SHOW_CURSOR, enterAltScreen, leaveAltScreen } from "../src/ui/altscreen.ts";
 
 test("canFullscreen: TTY with room only", () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(canFullscreen({ isTTY: true, rows: 40, columns: 120 } as any)).toBe(true);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(canFullscreen({ isTTY: false, rows: 40, columns: 120 } as any)).toBe(false); // piped / not a TTY
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(canFullscreen({ isTTY: true, rows: 5, columns: 120 } as any)).toBe(false);   // too short
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(canFullscreen({ isTTY: true, rows: 40, columns: 20 } as any)).toBe(false);   // too narrow
 });
 
 function fakeOut() {
   const writes: string[] = [];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   return { out: { write: (s: any) => { writes.push(String(s)); return true; } } as any, writes };
 }
 

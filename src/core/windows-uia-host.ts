@@ -161,8 +161,11 @@ export class ResidentUiaHost {
     // The pending request timer keeps short-lived `neko run` alive while work is in flight. Once idle,
     // the resident helper must not pin the parent process forever.
     child.unref();
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (child.stdin as any).unref?.();
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (child.stdout as any).unref?.();
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (child.stderr as any).unref?.();
     return child;
   }

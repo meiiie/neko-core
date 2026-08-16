@@ -33,6 +33,7 @@ test("native voice reports missing dependencies without touching an audio device
 test("ffmpeg audio streams bounded PCM frames, supports mute, playback, interruption, and stop", async () => {
   const children: any[] = [];
   const launches: Array<{ command: string; args: string[] }> = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const fakeSpawn = ((command: string, args: string[]) => {
     const child: any = new EventEmitter();
     child.stdin = new PassThrough();

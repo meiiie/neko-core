@@ -199,6 +199,7 @@ async function listKimiModelOptions(config: NekoConfig): Promise<ModelOption[]> 
     let response = await request();
     if (response.status === 401 && config.usesKimiAuth) response = await request(true);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    // SAFETY: provider list JSON; entries are re-validated as they are consumed below.
     const payload = await response.json() as { data?: any[] };
     const live = (payload.data ?? []).flatMap((model): ModelOption[] => {
       const id = isText(model?.id) ? model.id : "";
@@ -306,6 +307,7 @@ export async function listModelOptions(config: NekoConfig, codexSupport?: CodexS
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    // SAFETY: provider list entries are untyped JSON; each id is coerced to a display string here.
     const live = ((data?.data ?? []) as any[]).map((m) => String(m?.id ?? "")).filter(Boolean).sort().map((id) => ({ id, label: id }));
     if (!live.length) return configured;
     // Compatible model-list endpoints can lag a documented rollout (Z.AI listed only through
@@ -972,7 +974,7 @@ export class MoaProvider implements Provider {
     const refs = await Promise.all(this.references.map((r) =>
       r.provider.complete(refMessages, undefined, undefined, signal)
         .then((res) => ({ label: r.label, content: (res.content ?? "").trim(), usage: res.usage }))
-        .catch((e) => ({ label: r.label, content: `(unavailable: ${messageOf(e)})`, usage: undefined as Usage | undefined })),
+        .catch((e) => ({ label: r.label, content: `(unavailable: ${messageOf(e)})`, usage: undefined })),
     ));
     if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
 

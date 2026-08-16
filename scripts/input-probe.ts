@@ -12,6 +12,7 @@
  */
 const target = process.argv[2] ?? (process.platform === "win32" ? "dist/neko.exe" : "dist/neko");
 
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const Terminal = (Bun as any).Terminal;
 if (!(Terminal instanceof Function)) {
   console.error("input-probe: this Bun has no Bun.Terminal (PTY) API - cannot probe. Failing closed.");
@@ -27,6 +28,7 @@ const term = new Terminal({
   },
 });
 
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const proc = Bun.spawn({ cmd: [target, "doctor", "keys"], terminal: term } as any);
 
 // Wait for a screen condition with a deadline (the child renders asynchronously through the PTY).

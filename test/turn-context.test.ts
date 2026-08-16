@@ -29,6 +29,7 @@ test("production turn context follows registry root/home and restores full catal
       call: async () => "",
       indexBlock: () => "MCP_INDEX_SENTINEL",
     };
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const registry = new ToolRegistry(root, "auto", () => true, mcp as any);
     registry.loadSkill = () => null;
     registry.todos = [{ content: "TODO_CONTEXT_SENTINEL", status: "pending" }];
@@ -79,6 +80,7 @@ test("production turn context follows registry root/home and restores full catal
 test("a preparation throw closes the turn lease and removes provider-only context", async () => {
   const registry = new ToolRegistry(".", "auto", () => true);
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { complete: async () => ({ content: "unused" }) } as any,
     tools: registry,
   });

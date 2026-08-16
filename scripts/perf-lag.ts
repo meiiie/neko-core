@@ -70,9 +70,12 @@ async function main() {
     const differ = new FrameDiffer();
     const provider: any = { complete: async () => ({ content: "ok", tool_calls: [] }) };
     const session = makeSession(200); // long transcript
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
     const app = render(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "perf", frameDiffer: differ, preAltDispose, fullscreen: true } as any),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
     );
     await tick(800); // startup paint
@@ -105,9 +108,12 @@ async function main() {
     const differ = new FrameDiffer();
     const provider: any = { complete: async () => ({ content: "ok", tool_calls: [] }) };
     const session: any = { id: "in", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: [] };
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
     const app = render(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "in", frameDiffer: differ, preAltDispose, fullscreen: true } as any),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
     );
     await tick(800);

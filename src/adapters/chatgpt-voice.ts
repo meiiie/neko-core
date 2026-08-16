@@ -155,7 +155,9 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
     let client: RpcClient | null = null;
     try {
       client = clientFactory({
+        // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
         onNotification: (method, params) => this.onNotification(method, params as any),
+        // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
         onRequest: (method, params) => this.onRequest(method, params as any),
       });
       this.client = client;
@@ -347,6 +349,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
       if (now - this.lastHeartbeat > BRIDGE_LIVENESS_TIMEOUT_MS) { void this.stop("browser heartbeat lost"); return; }
       this.socket?.send(JSON.stringify({ type: "ping" }));
     }, 5_000);
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (this.heartbeat as any).unref?.();
     return `${this.origin}/#${this.token}`;
   }
@@ -454,6 +457,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
       return await answer;
     } catch (error) {
       this.realtimeStarted = false;
+      // SAFETY: contract of the ChatGptVoiceSession["sdpWaiter" type is established by the surrounding validation/boundary.
       const waiter = this.sdpWaiter as ChatGptVoiceSession["sdpWaiter"];
       if (waiter) clearTimeout(waiter.timer);
       this.sdpWaiter = null;

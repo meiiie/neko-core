@@ -302,6 +302,7 @@ function acquireTranscriptionLock(id: string, home: string): () => void {
 
 function transcriptionOwnerIsAlive(path: string): boolean {
   try {
+    // SAFETY: lock file JSON written by this module's own writer; fields read defensively below.
     const lock = JSON.parse(readFileSync(path, "utf8")) as { pid?: number; startedAt?: string };
     const age = Date.now() - Date.parse(String(lock.startedAt ?? ""));
     if (!Number.isInteger(lock.pid) || lock.pid! <= 0 || !Number.isFinite(age) || age > 24 * 60 * 60_000) return false;
@@ -339,7 +340,11 @@ export function parseMeetingTranscript(
   },
 ): MeetingTranscript {
   let parsed: ParakeetJson;
-  try { parsed = JSON.parse(json) as ParakeetJson; }
+  // SAFETY: contract of the ParakeetJson type is established by the surrounding validation/boundary.
+  try {
+    // SAFETY: engine output JSON; the words/segments arrays are validated immediately below.
+    parsed = JSON.parse(json) as ParakeetJson;
+  }
   catch { throw new Error("transcription engine returned malformed JSON"); }
   if (!Array.isArray(parsed.words)) throw new Error("transcription engine JSON is missing words");
   const source = provenance.source ?? "unknown";

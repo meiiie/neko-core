@@ -28,7 +28,9 @@ test("a selection splits a range into at most three runs", () => {
 test("an empty, inverted, or absent selection leaves the range whole", () => {
   const v = "hello world";
   for (const sel of [null, undefined, { from: 4, to: 4 }, { from: 9, to: 2 }]) {
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     expect(renderRuns(v, 0, 11, sel as any)).toBe("hello world");
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     expect(selectionRuns(0, 11, sel as any).length).toBe(1);
   }
   // A selection entirely outside the range does not touch it either — this is what clips a highlight

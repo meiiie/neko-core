@@ -295,6 +295,7 @@ test("resume re-renders the prior conversation", () => {
     id: "s1", createdAt: "", updatedAt: "", cwd: process.cwd(), model: "m",
     messages: [{ role: "user", content: "hello before" }, { role: "assistant", content: "earlier reply" }],
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const { lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} resumedSession={resumed as any} sessionId="s1" />);
   const out = lastFrame() ?? "";
   expect(out).toContain("hello before"); // prior user turn replayed
@@ -325,6 +326,7 @@ test("browser side-panel prompts share the terminal FIFO and snapshot existing h
     messages: [{ role: "user", content: "old question" }, { role: "assistant", content: "old answer" }],
   };
   const { unmount } = render(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     <ChatApp fullscreen={false} yolo provider={provider} resumedSession={resumed as any} sessionId="panel-session" bridgeHolder={holder} />,
   );
   holder.onSnapshot();
@@ -901,6 +903,7 @@ test("/voice prefers native GPT-Live when available and keeps browser/official f
     stdin.write("\r");
     const browserStarted = await until(() => /services\s+may\s+process\s+audio\s+online/.test(frames.join("\n")));
     if (!browserStarted) throw new Error(`browser voice did not start:\n${frames.slice(-8).join("\n---\n")}`);
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     expect(await (options as BrowserVoiceOptions).onUtterance("xin chào bằng giọng nói")).toBe("xin chào từ Neko");
     expect(await until(() => frames.join("\n").includes("xin chào bằng giọng nói"))).toBe(true);
     stdin.write("/voice stop"); await tick(20); stdin.write("\r");
@@ -1046,6 +1049,7 @@ test("/usage shows ChatGPT subscription windows and credits without making a mod
   process.env.HOME = home; process.env.USERPROFILE = home;
   saveChatGptCredentials({ accessToken: "access", refreshToken: "refresh", expiresAt: Date.now() + 3_600_000, accountId: "acct" });
   let requested = "";
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (input: string | URL | Request) => {
     requested = String(input);
     return Response.json({ plan_type: "pro", rate_limit: { allowed: false, limit_reached: true,
@@ -1078,6 +1082,7 @@ test("/effort uses the selected compatible model catalog", async () => {
   process.env.HOME = home; process.env.USERPROFILE = home;
   saveChatGptCredentials({ accessToken: "access", refreshToken: "refresh", expiresAt: Date.now() + 3_600_000, accountId: "acct" });
   setModel("gpt-5.5", "chatgpt");
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) => Response.json({ models: [{
     slug: "gpt-5.5", display_name: "GPT-5.5", visibility: "list", default_reasoning_level: "medium", use_responses_lite: false,
     input_modalities: ["text", "image"],
@@ -1183,6 +1188,7 @@ test("resumed session: ctx% reflects loaded context (not a misleading 0%) + disp
   }
   const sess = { id: "s-long", createdAt: "", updatedAt: new Date().toISOString(), cwd: process.cwd(), model: "glm-5.2", messages: msgs };
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const { lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} resumedSession={sess as any} sessionId="s-long" />);
   await tick(120);
   const f = (lastFrame() ?? "").replace(/\x1b\[[0-9;]*m/g, "");

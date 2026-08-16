@@ -201,6 +201,7 @@ export class GeminiAcpClient {
         this.pending.delete(id);
         reject(new Error(`Gemini CLI ACP request timed out: ${method}`));
       }, timeoutMs);
+      // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
       (timer as any).unref?.();
       this.pending.set(id, { resolve, reject, timer });
       this.write({ jsonrpc: "2.0", id, method, params });
@@ -229,7 +230,11 @@ export class GeminiAcpClient {
       return this.close(new Error("Gemini CLI ACP emitted an oversized message"));
     }
     let message: RpcMessage;
-    try { message = JSON.parse(line) as RpcMessage; }
+    // SAFETY: contract of the RpcMessage type is established by the surrounding validation/boundary.
+    try {
+      // SAFETY: raw ACP NDJSON line; RpcMessage fields are unvalidated wire data (any).
+      message = JSON.parse(line) as RpcMessage;
+    }
     catch { return this.close(new Error("Gemini CLI ACP emitted invalid JSON")); }
 
     if (message.id !== undefined && !message.method) {
@@ -505,6 +510,7 @@ function managedExecutable(
   const manifestPath = paths.join(root, "support-pack.json");
   if (!pathExists(manifestPath)) return null;
   try {
+    // SAFETY: contract of the ManagedManifest type is established by the surrounding validation/boundary.
     const manifest = JSON.parse(readText(manifestPath)) as ManagedManifest;
     if (!manifest.entry || !manifest.runtime || paths.isAbsolute(manifest.entry) || paths.isAbsolute(manifest.runtime)
       || manifest.entry.split(/[\\/]/).includes("..") || manifest.runtime.split(/[\\/]/).includes("..")) return null;

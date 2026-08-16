@@ -135,6 +135,7 @@ describe("Office Support Pack", () => {
 });
 
 function fixtureFetch(binary: Buffer, digest: string, onDownload: () => void = () => {}): typeof fetch {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   return (async (input: string | URL | Request) => {
     const url = String(input);
     if (url.includes("api.github.com")) return Response.json({

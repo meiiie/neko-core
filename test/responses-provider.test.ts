@@ -22,6 +22,7 @@ test("official Responses provider sends the xAI contract and keeps encrypted rea
   let url = "";
   let sent: any;
   let headers = new Headers();
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     url = String(input);
     sent = JSON.parse(String(init?.body));
@@ -87,6 +88,7 @@ test("Responses effort negotiates the highest advertised compatible tier before 
     reasoning_effort: "max", effort_ceiling: "ultra", max_retries: 0,
   }, null, {}, "key");
   const efforts: string[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
     const sent = JSON.parse(String(init?.body));
     efforts.push(sent.reasoning?.effort ?? "default");

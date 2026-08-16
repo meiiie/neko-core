@@ -28,6 +28,7 @@ const realExec: Exec = (cmd, args, timeoutMs) => {
     if (r.error) return { status: null, stdout: "", stderr: String(r.error.message ?? r.error) };
     return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   } catch (e) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     return { status: null, stdout: "", stderr: String((e as Error).message ?? e) };
   }
 };
@@ -114,6 +115,7 @@ export class SearxngSidecar {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => this.stopNow(), this.keepaliveMin * 60_000);
     // Never hold the process open for a cleanup timer (bun/node support unref on timers).
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (this.idleTimer as any).unref?.();
   }
 

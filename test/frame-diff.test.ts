@@ -122,6 +122,7 @@ test("resize wipe composes the new frame and never replays the stale pre-wipe fr
 test("a skipped geometry refresh cannot publish hit targets from an unpainted frame", () => {
   setHitTargets([{ row: 7, col: 3 }]);
   try {
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const d = new FrameDiffer() as any;
     d.setWriter(() => {});
     d.prev = ["painted"];

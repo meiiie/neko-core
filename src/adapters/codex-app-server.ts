@@ -216,6 +216,7 @@ function managedExecutable(
   const manifestPath = paths.join(root, "support-pack.json");
   if (!pathExists(manifestPath)) return null;
   try {
+    // SAFETY: contract of the ManagedManifest type is established by the surrounding validation/boundary.
     const manifest = JSON.parse(readText(manifestPath)) as ManagedManifest;
     const file = manifest.executable || (platform === "win32" ? "codex-app-server.exe" : "codex-app-server");
     if (paths.isAbsolute(file) || paths.basename(file) !== file) return null;
@@ -521,6 +522,7 @@ export class CodexAppServerClient {
         this.pending.delete(id);
         reject(new Error(`Codex App Server request timed out: ${method}`));
       }, timeoutMs);
+      // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
       (timer as any).unref?.();
       this.pending.set(id, { resolve, reject, timer });
       this.write({ id, method, params });

@@ -157,6 +157,7 @@ export function meetingSupportRoot(home = homeDir()): string {
 export function readMeetingSupportPack(home = homeDir()): MeetingSupportPackInfo | null {
   const root = meetingSupportRoot(home);
   try {
+    // SAFETY: contract of the MeetingSupportManifest type is established by the surrounding validation/boundary.
     const manifest = JSON.parse(readFileSync(join(root, "support-pack.json"), "utf8")) as MeetingSupportManifest;
     if (manifest.schemaVersion !== 1 || !manifest.model || !isSafeRelative(manifest.model.file)) return null;
     const modelPath = join(root, manifest.model.file);
@@ -255,6 +256,7 @@ export async function installMeetingSupportPack(options: InstallMeetingSupportOp
         signal: AbortSignal.timeout(30_000),
       });
       if (!response.ok) throw new Error(`Could not read the official parakeet.cpp release (HTTP ${response.status})`);
+      // SAFETY: contract of the GitHubRelease type is established by the surrounding validation/boundary.
       const release = resolveRelease(await response.json() as GitHubRelease, target);
       const archive = join(staging, release.assetName);
       notify(`Downloading ${formatMiB(release.size)} local transcription engine...`);
@@ -388,6 +390,7 @@ export async function downloadVerified(
       callback(null, chunk);
     },
   });
+  // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   await pipeline(Readable.fromWeb(response.body as any), meter, createWriteStream(path, { flags: "wx", mode: 0o600 }));
   if (received !== expectedBytes) throw new Error(`${label} download was incomplete (${received}/${expectedBytes} bytes)`);
   const digest = hash.digest("hex");

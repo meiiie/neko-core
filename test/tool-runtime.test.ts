@@ -369,6 +369,7 @@ test("structured writes refuse existing multiply-linked regular files", async ()
       const [tool, args] = cases[index]!;
       if (index === 1) reg.mode = "auto";
       const external = join(outside, `${tool}.ts`);
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       const linked = join(root, String((args as any).path));
       writeFileSync(external, "original\n");
       try {
@@ -377,6 +378,7 @@ test("structured writes refuse existing multiply-linked regular files", async ()
         if (["EPERM", "EACCES", "EXDEV", "ENOTSUP", "ENOSYS"].includes(String(error?.code))) return;
         throw error;
       }
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       const result = String(await reg.execute(tool, args as any));
       expect(result).toContain("multiply-linked structured-write target");
       expect(readFileSync(external, "utf8")).toBe("original\n");
@@ -847,6 +849,7 @@ test("read_file: image returns metadata by default, vision content (data URL) wh
   reg.vision = true;
   const content = await reg.execute("read_file", { path: "logo.png" });
   expect(Array.isArray(content)).toBe(true);
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const parts = content as any[];
   expect(parts.find((p) => p.type === "image_url").image_url.url).toContain("data:image/png;base64,");
   expect(parts.find((p) => p.type === "text").text).toContain("120x80");
@@ -857,6 +860,7 @@ test("read_file: a PDF is routed to text extraction and degrades gracefully", as
   writeFileSync(join(root, "doc.pdf"), "not a real pdf");
   const out = await reg.execute("read_file", { path: "doc.pdf" });
   expect(isText(out)).toBe(true);
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   expect(out as string).toMatch(/PDF|extract|text/i); // never a thrown crash
 }, { timeout: 35_000 }); // production intentionally gives the external extractor up to 30s
 

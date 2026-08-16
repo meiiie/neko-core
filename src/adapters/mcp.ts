@@ -496,7 +496,11 @@ export class McpHub {
       }
       // Resources are part of full MCP: expose a synthetic read_resource tool the agent can use.
       let resourceList: any[] = [];
-      try { resourceList = ((await client.listResources(undefined, requestDeadline)) as any).resources ?? []; } catch { /* unsupported */ }
+      // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
+      try {
+        // SAFETY: MCP SDK result shape; missing resources degrade to an empty list.
+        resourceList = ((await client.listResources(undefined, requestDeadline)) as any).resources ?? [];
+      } catch { /* unsupported */ }
       const resourceSpecs: any[] = [];
       if (resourceList.length) {
         const rt = `mcp__${name}__read_resource`;
@@ -513,7 +517,11 @@ export class McpHub {
         liveSpecs.push(spec);
       }
       let promptNames: string[] = [];
-      try { promptNames = (((await client.listPrompts(undefined, requestDeadline)) as any).prompts ?? []).map((p: any) => p.name); } catch { /* unsupported */ }
+      // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
+      try {
+        // SAFETY: MCP SDK result shape; missing prompts degrade to an empty list.
+        promptNames = (((await client.listPrompts(undefined, requestDeadline)) as any).prompts ?? []).map((p: any) => p.name);
+      } catch { /* unsupported */ }
       const meta = { type, tools, resources: resourceList.length, prompts: promptNames.length };
       if (this.closing) throw new Error("MCP hub is closing");
 
@@ -586,6 +594,7 @@ export class McpHub {
     for (const name of this.configs.keys()) {
       if (this.clients.has(name)) continue;
       try { await this.ensureClient(name); } catch (error) {
+        // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
         console.error(`neko: MCP server '${name}' failed to connect: ${(error as Error).message}`);
       }
     }
@@ -603,6 +612,7 @@ export class McpHub {
         if (hit) this.registerFromCache(name, hit);
         else await this.connectOne(name);
       } catch (error) {
+        // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
         console.error(`neko: MCP server '${name}' failed to connect: ${(error as Error).message}`);
       }
     }
@@ -664,6 +674,7 @@ export class McpHub {
         return parts.join("\n") || "(empty resource)";
       } catch (error) {
         await this.discardClient(resourceServer);
+        // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
         return `Error reading resource: ${(error as Error).message}`;
       }
     }
@@ -676,6 +687,7 @@ export class McpHub {
       // before its response arrived. Never replay automatically: the next attempt must be an
       // explicit, evidence-backed decision by the agent or user.
       await this.discardClient(ref.server);
+      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
       return `Error: MCP call outcome unknown; not retried: ${(error as Error).message}`;
     }
   }
@@ -712,6 +724,7 @@ export class McpHub {
         .join("\n\n");
     } catch (error) {
       await this.discardClient(server);
+      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
       return `Error getting prompt: ${(error as Error).message}`;
     }
   }

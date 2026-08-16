@@ -127,6 +127,7 @@ export function geminiSupportRoot(home = homeDir()): string {
 export function readGeminiSupportPack(home = homeDir()): GeminiSupportPackInfo | null {
   const root = geminiSupportRoot(home);
   try {
+    // SAFETY: contract of the GeminiSupportManifest type is established by the surrounding validation/boundary.
     const manifest = JSON.parse(readFileSync(join(root, "support-pack.json"), "utf8")) as GeminiSupportManifest;
     if (manifest.protocolVersion !== "1" || !safeRelative(manifest.entry) || !safeRelative(manifest.runtime)) return null;
     const entryPath = join(root, manifest.entry);
@@ -249,6 +250,7 @@ async function resolveGeminiRelease(fetchImpl: typeof fetch): Promise<{
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`Could not read the official Gemini release (HTTP ${response.status})`);
+  // SAFETY: contract of the GitHubRelease type is established by the surrounding validation/boundary.
   const release = await response.json() as GitHubRelease;
   if (release.draft || release.prerelease) throw new Error("The latest Gemini CLI release is not stable");
   const tag = String(release.tag_name ?? "");
@@ -272,6 +274,7 @@ async function resolveNodeRelease(fetchImpl: typeof fetch, platform: NodeJS.Plat
 }> {
   const response = await fetchImpl(NODE_INDEX, { headers: { "User-Agent": "neko-core-gemini-support" }, signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`Could not read official Node releases (HTTP ${response.status})`);
+  // SAFETY: contract of the NodeRelease[ type is established by the surrounding validation/boundary.
   const releases = await response.json() as NodeRelease[];
   const candidates = releases.filter((item) => item.lts && /^v\d+\.\d+\.\d+$/.test(String(item.version ?? "")))
     .sort((a, b) => compareGeminiVersions(String(b.version).slice(1), String(a.version).slice(1)));
@@ -325,6 +328,7 @@ async function download(
       callback(null, chunk);
     },
   });
+  // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   await pipeline(Readable.fromWeb(response.body as any), meter, createWriteStream(path, { flags: "wx", mode: 0o600 }));
   if (expectedBytes && received !== expectedBytes) throw new Error(`${label} download was incomplete (${received}/${expectedBytes} bytes)`);
   const digest = await sha256File(path);

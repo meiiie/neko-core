@@ -17,6 +17,7 @@ const cols = 118, rows = 30;
 const vt = new VirtualTerminal(cols, rows);
 let raw = "";
 let answeredDecrqm = false;
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const term = new (Bun as any).Terminal({
   cols, rows,
   data(_t: unknown, chunk: Uint8Array) {
@@ -34,6 +35,7 @@ const term = new (Bun as any).Terminal({
 // NEKO_E2E_WT=0 runs the child WITHOUT it (a generic ConPTY host) for A/B triangulation.
 const childEnv: Record<string, string | undefined> = { ...process.env, WT_SESSION: "e2e-harness" };
 if (process.env.NEKO_E2E_WT === "0") delete childEnv.WT_SESSION;
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const proc = Bun.spawn({ cmd: [exe, "--yolo"], cwd: import.meta.dir + "/..", terminal: term, env: childEnv } as any);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

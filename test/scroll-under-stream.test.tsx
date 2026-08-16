@@ -67,9 +67,12 @@ test("streaming while SCROLLED AWAY throttles the pump and engages reading mode"
     id: "lag", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: Array.from({ length: 40 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `lich su ${i}` })),
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = render(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { fullscreen: true, yolo: true, provider, resumedSession: session, sessionId: "lag", frameDiffer: differ, preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
   );
   try {

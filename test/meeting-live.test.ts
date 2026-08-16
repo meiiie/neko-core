@@ -408,6 +408,7 @@ test("a live log never jumps backwards in time when one channel runs ahead", asy
     workDir: dir,
     windowMs: 30_000,
     minWindowMs: 6_000,
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     onSegments: (segments) => emitted.push(...segments.map((s) => [s.source, s.startMs] as [string, number])),
     transcribeWindow: async (window) => {
       // The mic speaks a second later than the room, so commit order and time order disagree.

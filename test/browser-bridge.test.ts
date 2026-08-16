@@ -70,6 +70,7 @@ function nextMessage(ws: WebSocket): Promise<any> {
 test("browser bridge pairs one extension origin and routes a capability-scoped command", async () => {
   const capability: BrowserCapability = { version: 1, host: "127.0.0.1", port: 0, session: "session-test", token: "token-test" };
   const bridge = startBrowserBridge({ capability, extensionOrigin: origin, pairingMs: 10_000, persistStatus: false });
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const ws = new WebSocket(`ws://127.0.0.1:${bridge.port}/bridge`, { headers: { origin } } as any);
   await new Promise<void>((resolve, reject) => { ws.addEventListener("open", () => resolve(), { once: true }); ws.addEventListener("error", reject, { once: true }); });
 
@@ -97,6 +98,7 @@ test("side panel: pushPanel reaches the client and a panel-in prompt fires the h
   const prompts: string[] = [];
   let snapshots = 0;
   bridge.onPanelPrompt((p) => prompts.push(p));
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const ws = new WebSocket(`ws://127.0.0.1:${bridge.port}/bridge`, { headers: { origin } } as any);
   await new Promise<void>((resolve, reject) => { ws.addEventListener("open", () => resolve(), { once: true }); ws.addEventListener("error", reject, { once: true }); });
   ws.send(JSON.stringify({ type: "pair" }));
@@ -127,6 +129,7 @@ test("side panel: pushPanel reaches the client and a panel-in prompt fires the h
 test("a resumed authenticated session may request autonomous attach again", async () => {
   const capability: BrowserCapability = { version: 1, host: "127.0.0.1", port: 0, session: "session-test", token: "token-test" };
   const bridge = startBrowserBridge({ capability, extensionOrigin: origin, pairingMs: 10_000, persistStatus: false });
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const ws = new WebSocket(`ws://127.0.0.1:${bridge.port}/bridge`, { headers: { origin } } as any);
   await new Promise<void>((resolve, reject) => { ws.addEventListener("open", () => resolve(), { once: true }); ws.addEventListener("error", reject, { once: true }); });
   ws.send(JSON.stringify({ type: "hello", session: "session-test", token: "token-test" }));
@@ -147,11 +150,13 @@ test("browser bridge accepts only explicitly configured extension origins", asyn
   const capability: BrowserCapability = { version: 1, host: "127.0.0.1", port: 0, session: "session-test", token: "token-test" };
   const second = "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   const bridge = startBrowserBridge({ capability, extensionOrigins: [origin, second], persistStatus: false });
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const denied = new WebSocket(`ws://127.0.0.1:${bridge.port}/bridge`, {
     headers: { origin: "chrome-extension://cccccccccccccccccccccccccccccccc" },
   } as any);
   const closeCode = await new Promise<number>((resolve) => denied.addEventListener("close", (event) => resolve(event.code), { once: true }));
   expect(closeCode).not.toBe(1000);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const accepted = new WebSocket(`ws://127.0.0.1:${bridge.port}/bridge`, { headers: { origin: second } } as any);
   await new Promise<void>((resolve, reject) => { accepted.addEventListener("open", () => resolve(), { once: true }); accepted.addEventListener("error", reject, { once: true }); });
   accepted.close();
@@ -182,6 +187,7 @@ test("browser install chooses Store when configured and prepares a pinned local 
       sourceRoot: temp,
       destination,
       version: "0.11.5",
+      // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
       fetchImpl: (async (input: string | URL | Request) => {
         requests++;
         const asset = String(input).split("/browser-extension/")[1];

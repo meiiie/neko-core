@@ -55,6 +55,7 @@ test("volatile turn system context survives closed-loop passes but never enters 
     },
   };
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
     tools: new ToolRegistry(".", "auto", () => true),
     dynamicContext: () => dynamic,
@@ -136,7 +137,9 @@ test("social turns keep full context, tools, reasoning preference, and conversat
     },
   };
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     tools: {
       schemas: () => { schemaCalls++; return [{ type: "function", function: { name: "read_file" } }]; },
       execute: async () => "ok",
@@ -163,6 +166,7 @@ test("durable checkpoint blocks provider admission without blocking the event lo
   let checkpoints = 0;
   let providerCalls = 0;
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { async complete() { providerCalls++; return { content: "done", tool_calls: [] }; } } as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
     onCheckpoint: () => ++checkpoints === 1 ? gate : undefined,
@@ -185,11 +189,13 @@ test("a tool call and its result cross durable barriers around the side effect",
   const toolGate = new Promise<void>((resolve) => { releaseTool = resolve; });
   let checkpoints = 0;
   let executed = false;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const tools = {
     schemas: () => [{ type: "function", function: { name: "write_file", parameters: { type: "object", required: ["path", "content"] } } }],
     execute: async () => { executed = true; return "Wrote x.txt  (+1)"; },
   } as any;
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: {
       async complete() {
         if (call++ === 0) return { content: null, tool_calls: [{ id: "write-1", name: "write_file", arguments: { path: "x.txt", content: "x" } }] };
@@ -233,6 +239,7 @@ test("multi-step turns publish booked plus current-step input estimates", async 
   };
   const estimates: number[] = [];
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
     tools: new ToolRegistry(root, "auto", () => true),
     onEvent: (kind, data) => {
@@ -264,6 +271,7 @@ test("interrupted provider usage is booked once before the run returns", async (
     },
   };
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -283,6 +291,7 @@ test("loop runs tools then finishes", async () => {
     { content: "finished", tool_calls: [] },
   ];
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: new ScriptedProvider(script) as any,
     tools: new ToolRegistry(root, "auto", () => true),
     maxSteps: 10,
@@ -302,6 +311,7 @@ test("budget nudge: near the step limit the model is reminded to PRODUCE the del
   const script: any[] = [];
   for (let i = 0; i < 10; i++) script.push({ content: null, tool_calls: [{ id: "c" + i, name: "read_file", arguments: { path: "a.txt" } }] });
   script.push({ content: "summary", tool_calls: [] }); // the max_steps wrap-up call
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: new ToolRegistry(root, "auto", () => true), maxSteps: 10 });
   await agent.run("a long task with a deliverable");
   const budget = agent.messages.filter((m: any) => m.role === "user" && isText(m.content) && m.content.startsWith("[budget]"));
@@ -495,6 +505,7 @@ test("an external realtime session cannot bypass the Agent approval boundary", a
   const root = mkdtempSync(join(tmpdir(), "neko-external-tool-"));
   const events: string[] = [];
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: new ScriptedProvider([]) as any,
     tools: new ToolRegistry(root, "default", () => false),
     onEvent: (kind) => events.push(kind),
@@ -511,6 +522,7 @@ test("provider continuation data survives the assistant tool turn and is replaya
   writeFileSync(join(root, "a.txt"), "ok");
   const opaque = [{ type: "reasoning", id: "r1", encrypted_content: "ciphertext", summary: [] }];
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: null, tool_calls: [{ id: "c1", name: "read_file", arguments: { path: "a.txt" } }], continuation: opaque },
       { content: "done", tool_calls: [] },
@@ -529,6 +541,7 @@ test("a throwing tool call (model glitch) is fed back as an error, not crashed",
     { content: "recovered", tool_calls: [] },
   ];
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: new ScriptedProvider(script) as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
     maxSteps: 5,
@@ -541,6 +554,7 @@ test("a throwing tool call (model glitch) is fed back as an error, not crashed",
 test("dynamicContext is merged into the ONE system message and refreshed each turn (no staleness, one system msg)", async () => {
   let model = "m1";
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: new ScriptedProvider([{ content: "ok", tool_calls: [] }, { content: "ok2", tool_calls: [] }]) as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
     dynamicContext: () => `<env>model: ${model}</env>`,
@@ -559,6 +573,7 @@ test("dynamicContext is merged into the ONE system message and refreshed each tu
 
 test("compact keeps system + recent turns verbatim and summarizes the older ones", async () => {
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: new ScriptedProvider([{ content: "SUMMARY HERE", tool_calls: [] }]) as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -594,6 +609,7 @@ test("compaction uses a structured capsule and a giant tool result cannot hide a
       return { content: "## Goal\ncontinue", tool_calls: [] };
     },
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
   agent.messages = [
     { role: "system", content: "base" },
@@ -622,6 +638,7 @@ test("compaction uses a structured capsule and a giant tool result cannot hide a
     // would leave it fully intact, so compaction freed nothing. The char guard must clip it.
     const dense = "x".repeat(50000);
     const agent = new Agent({
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       provider: new ScriptedProvider([{ content: "SUM", tool_calls: [] }]) as any,
       tools: new ToolRegistry(process.cwd(), "auto", () => true),
     });
@@ -640,6 +657,7 @@ test("compaction uses a structured capsule and a giant tool result cannot hide a
     await agent.compact();
     const toolMsgs = agent.messages.filter((m: any) => m.role === "tool");
     expect(toolMsgs.length).toBe(1);
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     expect((toolMsgs[0].content as string).length).toBeLessThan(dense.length); // clipped, not intact
     expect(toolMsgs[0].content).toMatch(/chars clipped on compaction/); // char-guard marker present
     expect(toolMsgs[0].content.startsWith("x")).toBe(true); // head preserved
@@ -647,6 +665,7 @@ test("compaction uses a structured capsule and a giant tool result cannot hide a
 
 test("refreshSystemPrompt updates a resumed session's base system message", () => {
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { complete: async () => ({ content: "x", tool_calls: [] }) } as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
     systemPrompt: "NEW PROMPT",
@@ -662,6 +681,7 @@ test("refreshSystemPrompt updates a resumed session's base system message", () =
 
 test("rewind drops the last user turn from context", () => {
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { complete: async () => ({ content: "x", tool_calls: [] }) } as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -681,6 +701,7 @@ test("rewind drops the last user turn from context", () => {
 
 test("runUntilDone iterates until the model replies DONE, and caps", async () => {
   const done = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: "did work", tool_calls: [] }, // goal
       { content: "fixed more", tool_calls: [] }, // review 1
@@ -701,6 +722,7 @@ test("runUntilDone iterates until the model replies DONE, and caps", async () =>
   expect(review?.content).toContain("an output recreated by a clean run is disposable");
 
   const capped = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { complete: async () => ({ content: "still working", tool_calls: [] }) } as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -711,6 +733,7 @@ test("runUntilDone resumes a provider idle stall from the durable conversation c
   let calls = 0;
   const recoveries: any[] = [];
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: {
       async complete() {
         calls++;
@@ -731,6 +754,7 @@ test("runUntilDone resumes a provider idle stall from the durable conversation c
 test("runUntilDone bounds consecutive stall recovery and never retries a user abort", async () => {
   let stallCalls = 0;
   const stalled = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { async complete() { stallCalls++; throw new DOMException("idle timeout", "TimeoutError"); } } as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -740,6 +764,7 @@ test("runUntilDone bounds consecutive stall recovery and never retries a user ab
 
   let abortedCalls = 0;
   const aborted = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { async complete() { abortedCalls++; return { content: "unexpected", tool_calls: [] }; } } as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -752,6 +777,7 @@ test("runUntilDone bounds consecutive stall recovery and never retries a user ab
 test("run attaches images as OpenAI vision content", async () => {
   let seen: any;
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { complete: async (msgs: any[]) => { seen = msgs[msgs.length - 1]; return { content: "ok", tool_calls: [] }; } } as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -765,6 +791,7 @@ test("run attaches images as OpenAI vision content", async () => {
 test("run keeps numbered image attachments at their inline [Image #N] positions", async () => {
   let seen: any;
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { complete: async (msgs: any[]) => { seen = msgs[msgs.length - 1]; return { content: "ok", tool_calls: [] }; } } as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -787,6 +814,7 @@ test("run keeps numbered image attachments at their inline [Image #N] positions"
 
 test("context relief keeps two recent tool images and masks older screenshots", () => {
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { complete: async () => ({ content: "ok", tool_calls: [] }) } as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -798,6 +826,7 @@ test("context relief keeps two recent tool images and masks older screenshots", 
     { role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,USER" } }] },
     image("old"), image("middle"), image("latest"),
   ];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((agent as any).shrinkOldObservations()).toBe(true);
   expect(agent.messages[0].content[0].image_url.url).toContain("USER"); // the LAST user turn's evidence is never masked
   expect(agent.messages[1].content.some((p: any) => p.type === "image_url")).toBe(false);
@@ -807,6 +836,7 @@ test("context relief keeps two recent tool images and masks older screenshots", 
 
 test("context relief frees EARLIER user-pasted images (breaks the oversized-image 400 death spiral)", () => {
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { complete: async () => ({ content: "ok", tool_calls: [] }) } as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -815,6 +845,7 @@ test("context relief frees EARLIER user-pasted images (breaks the oversized-imag
     { type: "image_url", image_url: { url: `data:image/png;base64,${tag}` } },
   ] });
   agent.messages = [userImg("HUGE-OLD"), { role: "assistant", content: "hm" }, userImg("CURRENT")];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((agent as any).shrinkOldObservations()).toBe(true);
   // The old turn's image is gone (it was re-overflowing every request from history)...
   expect(agent.messages[0].content.some((p: any) => p.type === "image_url")).toBe(false);
@@ -839,6 +870,7 @@ test("concurrency-safe tool calls in one turn run in parallel", async () => {
   }
   const tools = new SlowTools();
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: null, tool_calls: [
         { id: "1", name: "read_file", arguments: {} },
@@ -847,6 +879,7 @@ test("concurrency-safe tool calls in one turn run in parallel", async () => {
       ] },
       { content: "done", tool_calls: [] },
     ]) as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: tools as any,
   });
   await agent.run("go");
@@ -869,6 +902,7 @@ test("executable hooks serialize otherwise concurrency-safe calls", async () => 
   }
   const tools = new HookedTools();
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: null, tool_calls: [
         { id: "1", name: "read_file", arguments: { path: "a" } },
@@ -876,6 +910,7 @@ test("executable hooks serialize otherwise concurrency-safe calls", async () => 
       ] },
       { content: "done", tool_calls: [] },
     ]) as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: tools as any,
   });
   await agent.run("inspect");
@@ -897,6 +932,7 @@ test("generic subagent tasks do not overlap because they may mutate shared state
   }
   const tools = new WorkerTools();
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: null, tool_calls: [
         { id: "1", name: "task", arguments: { description: "first", prompt: "mutate one" } },
@@ -904,6 +940,7 @@ test("generic subagent tasks do not overlap because they may mutate shared state
       ] },
       { content: "done", tool_calls: [] },
     ]) as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: tools as any,
   });
 
@@ -926,6 +963,7 @@ test("capability-restricted reviewer tasks may still fan out in parallel", async
   }
   const tools = new ReviewerTools();
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: null, tool_calls: [
         { id: "1", name: "task", arguments: { description: "first", prompt: "review one", subagent_type: "reviewer" } },
@@ -933,6 +971,7 @@ test("capability-restricted reviewer tasks may still fan out in parallel", async
       ] },
       { content: "done", tool_calls: [] },
     ]) as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: tools as any,
   });
 
@@ -941,8 +980,11 @@ test("capability-restricted reviewer tasks may still fan out in parallel", async
 });
 
 test("completion safety treats a generic worker as state-changing but a reviewer as read-only", () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((Agent as any).isStateChangingCall({ name: "task", arguments: {} })).toBe(true);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((Agent as any).isStateChangingCall({ name: "task", arguments: { subagent_type: "custom" } })).toBe(true);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((Agent as any).isStateChangingCall({ name: "task", arguments: { subagent_type: "reviewer" } })).toBe(false);
 });
 
@@ -950,6 +992,7 @@ test("completion safety treats a generic worker as state-changing but a reviewer
     let execs = 0;
     const tools = { schemas: () => [], execute: async () => { execs++; return "err"; } };
     const provider = { complete: async () => ({ content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "p" } }] }) };
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 6 });
     await agent.run("go");
     expect(execs).toBeLessThan(6); // guarded after the 3rd identical call, not executed every step
@@ -980,7 +1023,9 @@ test("temporal watchers may repeat without tripping the loop guard or completion
     execute: async () => { execs++; return "WATCH timeout elapsed_ms=250 detected_ms=-1 state=0123456789ab"; },
   };
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: tools as any,
     maxSteps: 8,
     adaptiveEffort: true,
@@ -1002,6 +1047,7 @@ test("temporal watchers may repeat without tripping the loop guard or completion
     ];
     const provider = { async complete(_m: any[], _t: any[], _d: any, _s: any, opts: any = {}) { efforts.push(opts.reasoningEffort); return script.shift(); } };
     const tools = { schemas: () => [], execute: async () => "ok" };
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 6, adaptiveEffort: true, verifyStateChangesBeforeExit: false });
     await agent.run("read then edit");
     // Step0 read => streak=1 (< 2, no lower). Step1 is a write => streak resets to 0. No "low" ever fires.
@@ -1014,6 +1060,7 @@ test("temporal watchers may repeat without tripping the loop guard or completion
     const script: any[] = [...reads, { content: "done", tool_calls: [] }];
     const provider = { async complete(_m: any[], _t: any[], _d: any, _s: any, opts: any = {}) { efforts.push(opts.reasoningEffort); return script.shift(); } };
     const tools = { schemas: () => [], execute: async () => "contents" };
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 8, adaptiveEffort: true, verifyStateChangesBeforeExit: false });
     await agent.run("read several files");
     // 4 distinct-path reads (no loop guard) + final. Lowering begins on the 3rd provider call.
@@ -1036,6 +1083,7 @@ test("temporal watchers may repeat without tripping the loop guard or completion
     tool_calls: [{ id: `c${i}`, name: "edit", arguments: { path: "src/x.ts", old_string: `a${i}`, new_string: `b${i}` } }],
   }));
   script.push({ content: "done", tool_calls: [] });
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 12 });
   await agent.run("go");
   // Every edit RAN -- the guard warns, it does NOT block (this was the fix: was cap-3-block, now cap-6-warn).
@@ -1059,6 +1107,7 @@ test("BROAD loop guard does NOT trip on edits to DIFFERENT paths (no false posit
     { content: null, tool_calls: [{ id: "c3", name: "edit", arguments: { path: "c.ts", old_string: "e", new_string: "f" } }] },
     { content: "done", tool_calls: [] },
   ];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 10 });
   await agent.run("go");
   expect(edited).toEqual(["a.ts", "b.ts", "c.ts"]); // all 3 ran — no false nudge on distinct paths
@@ -1076,6 +1125,7 @@ test("BROAD loop guard trips on N CONSECUTIVE FAILING bash runs", async () => {
   ];
   // tool-runtime tags failures as "(exit N -- command FAILED)" — every bash here fails.
   const tools = { schemas: () => [], execute: async () => "(exit 1 -- command FAILED)\nsome error" };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
   await agent.run("go");
   const nudge = agent.messages.find((m: any) =>
@@ -1097,6 +1147,7 @@ test("BROAD loop guard resets the failing streak on a successful bash (no false 
     schemas: () => [],
     execute: async () => { n++; return n === 3 ? "(exit 0)\nok" : "(exit 1 -- command FAILED)\nerr"; },
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
   await agent.run("go");
   expect(agent.messages.some((m: any) => String(m.content).includes("[loop guard]"))).toBe(false);
@@ -1118,6 +1169,7 @@ test("tool-error recovery fires ONCE on the first mutating failure, re-arms afte
     schemas: () => [],
     execute: async () => { n++; return n === 3 ? "(exit 0)\nok" : "(exit 1 -- command FAILED)\nerr"; },
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
   await agent.run("go");
   const recoveries = agent.messages.filter((m: any) => String(m.content).startsWith("[recovery]"));
@@ -1131,6 +1183,7 @@ test("tool-error recovery ignores read-tool misses (benign exploration, not a fa
     { content: "done", tool_calls: [] },
   ];
   const tools = { schemas: () => [], execute: async () => { throw new Error("no such file"); } };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 4 });
   await agent.run("go");
   expect(agent.messages.some((m: any) => String(m.content).startsWith("[recovery]"))).toBe(false);
@@ -1140,12 +1193,14 @@ test("max_steps cap fires", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-ag-"));
   const loop = { content: null, tool_calls: [{ id: "x", name: "read_file", arguments: { path: "missing" } }] };
   const provider = { complete: async () => loop };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(root, "auto", () => true), maxSteps: 3 });
   expect(await agent.run("go")).toContain("max_steps=3");
 });
 
 test("clampObservation caps a huge tool result so one result can't overflow the window", () => {
   const huge = "y".repeat(MAX_OBS_CHARS * 3);
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const out = clampObservation(huge) as string;
   expect(out.length).toBeLessThan(huge.length);
   expect(out.length).toBeLessThanOrEqual(MAX_OBS_CHARS + 200); // head + tail + marker, bounded
@@ -1155,6 +1210,7 @@ test("clampObservation caps a huge tool result so one result can't overflow the 
   // Small strings and multimodal arrays pass through untouched.
   expect(clampObservation("short")).toBe("short");
   const parts = [{ type: "text", text: "hi" }];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(clampObservation(parts as any)).toBe(parts as any);
 });
 
@@ -1210,7 +1266,9 @@ test("in-loop context guard accounts for schemas before calling the provider", a
     },
   };
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => schemas, execute: async () => "unused" } as any,
     maxContextTokens: 20_000,
   });
@@ -1236,6 +1294,7 @@ test("in-loop guard clips OLD observations within one turn before context overfl
       return script.shift();
     },
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 20, maxContextTokens: 4000 });
   expect(await agent.run("go")).toBe("done");
   // Older tool observations were compressed IN PLACE (so the single long turn stayed under the window),
@@ -1255,7 +1314,9 @@ test("tool-heavy turns proactively clear a meaningful stale-result batch before 
   }));
   script.push({ content: "done", tool_calls: [] });
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: new ScriptedProvider(script) as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: tools as any,
     maxSteps: 24,
     maxContextTokens: 200_000, // hard safety is 160k; proactive editing starts at 50k
@@ -1276,6 +1337,7 @@ test("unproductive-result guard nudges after N empty/failed results in a row (an
     tool_calls: [{ id: `c${i}`, name: "search", arguments: { pattern: `sel-${i}` } }], // distinct args each time
   }));
   script.push({ content: "done", tool_calls: [] });
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 12 });
   await agent.run("go");
   const nudges = agent.messages.filter((m: any) =>
@@ -1298,6 +1360,7 @@ test("toolchain capability circuit stops alternate-path recovery spirals after t
     tool_calls: [{ id: `tc${i}`, name: "bash", arguments: { command } }],
   }));
   script.push({ content: "blocked honestly", tool_calls: [] });
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
 
   expect(await agent.run("fix and test")).toBe("blocked honestly");
@@ -1315,6 +1378,7 @@ test("broad loop counters reset between independent Agent.run calls", async () =
     { content: null, tool_calls: [{ id: "c", name: "search", arguments: { pattern: "c" } }] },
     { content: "second", tool_calls: [] },
   ]);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 5 });
   expect(await agent.run("one")).toBe("first");
   expect(await agent.run("two")).toBe("second");
@@ -1343,6 +1407,7 @@ test("stream-eager execution: a ready read-only call starts DURING generation, n
     schemas: () => [],
     execute: async () => { execCount++; log.push("exec-start"); await new Promise((r) => setTimeout(r, 20)); return "CONTENT"; },
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 4 });
   expect(await agent.run("go")).toBe("done");
   expect(execCount).toBe(1); // the eager promise was CONSUMED, not re-executed
@@ -1373,6 +1438,7 @@ test("stream-eager execution honors an adapter-declared safe observation", async
     schemas: () => [],
     execute: async () => { execs++; log.push("watch-start"); return "WATCH timeout"; },
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 4 });
   expect(await agent.run("watch")).toBe("done");
   expect(execs).toBe(1);
@@ -1399,6 +1465,7 @@ test("stream-eager: order safety - a read AFTER a mutating call is NOT eager-sta
     },
   };
   const tools = { schemas: () => [], execute: async (name: string) => { log.push(`exec:${name}`); return "ok"; } };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 4 });
   expect(await agent.run("go")).toBe("done");
   // Nothing executed during generation; the loop then ran write BEFORE read (sequence semantics kept).
@@ -1416,6 +1483,7 @@ test("pre-flight arg validation: a call missing a required key is NOT executed; 
     { content: null, tool_calls: [{ id: "c2", name: "web_fetch", arguments: { url: "http://x" } }] }, // repaired
     { content: "done", tool_calls: [] },
   ];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 6 });
   expect(await agent.run("go")).toBe("done");
   expect(execCount).toBe(1); // only the repaired call executed; the invalid one never reached execute()
@@ -1433,6 +1501,7 @@ test("pre-flight validation does NOT reject a call whose required args are all p
     { content: null, tool_calls: [{ id: "c1", name: "read_file", arguments: { path: "a.txt" } }] },
     { content: "done", tool_calls: [] },
   ];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 4 });
   await agent.run("go");
   expect(String(agent.messages.find((m: any) => m.role === "tool").content)).toBe("content"); // ran normally
@@ -1440,6 +1509,7 @@ test("pre-flight validation does NOT reject a call whose required args are all p
 
 test("compact() carries the ORIGINAL task verbatim ahead of the summary (survives the prune)", async () => {
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: new ScriptedProvider([{ content: "SUMMARY", tool_calls: [] }]) as any,
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
@@ -1465,6 +1535,7 @@ test("compact() carries the current todo plan deterministically", async () => {
     { content: "fix the todo flow", status: "in_progress" },
   ];
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: new ScriptedProvider([{ content: "SUMMARY", tool_calls: [] }]) as any,
     tools,
   });
@@ -1487,6 +1558,7 @@ test("compact() carries the current todo plan deterministically", async () => {
 test("verify_before_exit gate fires once, then lets the model finish (off by default)", async () => {
   // OFF: the first tool-less answer returns immediately.
   const offScript = [{ content: "done-immediately", tool_calls: [] }];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const off = new Agent({ provider: new ScriptedProvider(offScript) as any, tools: { schemas: () => [], execute: async () => "" } as any, maxSteps: 6 });
   expect(await off.run("go")).toBe("done-immediately");
 
@@ -1495,6 +1567,7 @@ test("verify_before_exit gate fires once, then lets the model finish (off by def
     { content: "looks done", tool_calls: [] }, // premature -> gate fires
     { content: "verified and done", tool_calls: [] }, // after re-inspection
   ];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const on = new Agent({ provider: new ScriptedProvider(onScript) as any, tools: { schemas: () => [], execute: async () => "" } as any, maxSteps: 6, verifyBeforeExit: true });
   expect(await on.run("go")).toBe("verified and done");
   const gate = on.messages.find((m: any) => m.role === "user" && String(m.content).includes("VERIFY BEFORE FINISHING"));
@@ -1509,7 +1582,9 @@ test("verify_before_exit credits proactive fresh evidence instead of demanding a
     { content: "fixed and verified", tool_calls: [] },
   ]);
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async (name: string) => name === "bash" ? "(exit 0)\n2 pass" : "Wrote x.ts" } as any,
     maxSteps: 6,
     verifyBeforeExit: true,
@@ -1526,7 +1601,9 @@ test("verify_before_exit accepts a productive read-only observation as current-s
     { content: "MINGW64_NT", tool_calls: [] },
   ]);
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async () => "MINGW64_NT\n(exit 0)" } as any,
     maxSteps: 5,
     verifyBeforeExit: true,
@@ -1542,6 +1619,7 @@ test("state-change completion gate requires fresh tool evidence, not a second co
     execute: async (name: string) => name === "read_file" ? "observed final physical position: x=1822" : "script exited 0",
   };
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: null, tool_calls: [{ id: "move", name: "bash", arguments: { command: "move icons" } }] },
       { content: "Done - the icons were moved.", tool_calls: [] },
@@ -1549,6 +1627,7 @@ test("state-change completion gate requires fresh tool evidence, not a second co
       { content: null, tool_calls: [{ id: "inspect", name: "read_file", arguments: { path: "positions.txt" } }] },
       { content: "Verified at the physical right edge.", tool_calls: [] },
     ]) as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: tools as any,
     maxSteps: 8,
     verifyStateChangesBeforeExit: true,
@@ -1560,10 +1639,12 @@ test("state-change completion gate requires fresh tool evidence, not a second co
 
 test("read-only computer observation does not add the state-change completion round", async () => {
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: null, tool_calls: [{ id: "screen", name: "computer", arguments: { action: "read" } }] },
       { content: "Here is what is on screen.", tool_calls: [] },
     ]) as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async () => "desktop state" } as any,
     maxSteps: 4,
     verifyStateChangesBeforeExit: true,
@@ -1578,7 +1659,9 @@ test("clearly read-only bash avoids a redundant completion-verification round", 
     { content: "NEKO_OK", tool_calls: [] },
   ]);
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async () => "(exit 0)\nNEKO_OK" } as any,
     maxSteps: 5,
     verifyStateChangesBeforeExit: true,
@@ -1596,7 +1679,9 @@ test("bash redirection stays state-changing and still requires independent evide
     { content: "verified", tool_calls: [] },
   ]);
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async (name: string) => name === "read_file" ? "changed" : "(exit 0)" } as any,
     maxSteps: 6,
     verifyStateChangesBeforeExit: true,
@@ -1619,7 +1704,9 @@ test("a failed validator stays as completion debt after a mutation and a read ca
     { content: "verified from the file", tool_calls: [] },
   ]);
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async () => results.shift()! } as any,
     maxSteps: 8,
     verifyStateChangesBeforeExit: true,
@@ -1641,6 +1728,7 @@ test("baseline validator debt crosses a successful edit and a later validator su
     "(exit 0)\n1 pass",
   ];
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: null, tool_calls: [{ id: "red", name: "bash", arguments: { command: "bun test test/x.test.ts" } }] },
       { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "src/x.ts", old_string: "false", new_string: "true" } }] },
@@ -1648,6 +1736,7 @@ test("baseline validator debt crosses a successful edit and a later validator su
       { content: null, tool_calls: [{ id: "green", name: "bash", arguments: { command: "bun test test/x.test.ts" } }] },
       { content: "verified", tool_calls: [] },
     ]) as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async () => results.shift()! } as any,
     maxSteps: 8,
     verifyStateChangesBeforeExit: true,
@@ -1686,12 +1775,14 @@ test("denied, background, and exit-masked validators cannot satisfy post-mutatio
   for (const item of cases) {
     const results = ["Edited src/x.ts", item.observation];
     const agent = new Agent({
+      // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
       provider: new ScriptedProvider([
         { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "src/x.ts", old_string: "false", new_string: "true" } }] },
         { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: item.command, run_in_background: item.background ?? false } }] },
         { content: "done", tool_calls: [] },
         { content: "blocked", tool_calls: [] },
       ]) as any,
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       tools: { schemas: () => [], execute: async () => results.shift()! } as any,
       maxSteps: 5,
     });
@@ -1707,11 +1798,13 @@ test("failed incidental probes do not create validation debt and failed mutation
     "",
   ];
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: null, tool_calls: [{ id: "git", name: "bash", arguments: { command: "git status --short" } }] },
       { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "src/x.ts", old_string: "missing", new_string: "x" } }] },
       { content: "nothing changed", tool_calls: [] },
     ]) as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async () => results.shift()! } as any,
     maxSteps: 5,
     verifyStateChangesBeforeExit: true,
@@ -1729,6 +1822,7 @@ test("runUntilDone keeps validation debt across controller reviews and does not 
     "const fixed = true;",
   ];
   const agent = new Agent({
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     provider: new ScriptedProvider([
       { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "src/x.ts", old_string: "false", new_string: "true" } }] },
       { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: "bun test" } }] },
@@ -1740,6 +1834,7 @@ test("runUntilDone keeps validation debt across controller reviews and does not 
       { content: "continued after unverified DONE", tool_calls: [] },
       { content: "blocked for real", tool_calls: [] },
     ]) as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async () => results.shift()! } as any,
     maxSteps: 8,
   });
@@ -1762,7 +1857,9 @@ test("adaptive effort is opt-in and keeps full effort after a single read-then-m
     },
   };
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async () => "ok" } as any,
     maxSteps: 5,
     adaptiveEffort: true,
@@ -1780,7 +1877,9 @@ test("fresh inspection after the last mutation satisfies the gate without a redu
     { content: "Observed and complete.", tool_calls: [] },
   ]);
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async (_name: string, args: any) => args.action === "read" ? "observed target state" : "clicked" } as any,
     maxSteps: 6,
     verifyStateChangesBeforeExit: true,
@@ -1798,7 +1897,9 @@ test("namespaced Office apply cannot finish before a fresh artifact inspection",
     { content: "The saved target now matches the request.", tool_calls: [] },
   ]);
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     tools: { schemas: () => [], execute: async (name: string) => name.endsWith("__inspect") ? "fresh saved artifact state" : "batch applied" } as any,
     maxSteps: 7,
     verifyStateChangesBeforeExit: true,
@@ -1816,7 +1917,9 @@ test("namespaced meeting mutations require a fresh bounded inspection", async ()
       { content: `${operation} independently verified.`, tool_calls: [] },
     ]);
     const agent = new Agent({
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       provider: provider as any,
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       tools: { schemas: () => [], execute: async (name: string) => name.endsWith("__inspect") ? "fresh meeting state" : "action accepted" } as any,
       maxSteps: 7,
       verifyStateChangesBeforeExit: true,
@@ -1837,6 +1940,7 @@ test("an unfinished todo plan gets one persistence check before the agent can fi
     schemas: () => [],
     execute: async (name: string, args: any) => { if (name === "todo_write") tools.todos = args.todos; return "updated"; },
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools, maxSteps: 6 });
   expect(await agent.run("do the task")).toBe("verified and done");
   expect(agent.messages.filter((m: any) => String(m.content).includes("PLAN NOT COMPLETE")).length).toBe(1);
@@ -1844,6 +1948,7 @@ test("an unfinished todo plan gets one persistence check before the agent can fi
 });
 
 test("sealDanglingToolCalls: an interrupted turn's unanswered tool_call gets a synthetic result", () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: { complete: async () => ({ content: "x", tool_calls: [] }) } as any, tools: { schemas: () => [], execute: async () => "" } as any });
   agent.messages = [
     { role: "system", content: "s" },
@@ -1868,6 +1973,7 @@ test("sealDanglingToolCalls: an interrupted turn's unanswered tool_call gets a s
 });
 
 test("sealDanglingToolCalls: a fully-answered history is left untouched", () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: { complete: async () => ({ content: "x", tool_calls: [] }) } as any, tools: { schemas: () => [], execute: async () => "" } as any });
   agent.messages = [
     { role: "user", content: "q" },

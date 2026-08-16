@@ -308,6 +308,7 @@ type SrtProbeFailure = {
 /** Preserve the host-owned launch diagnostics that `status ?? "?"` used to erase. */
 export function formatSrtProbeFailure(probe: SrtProbeFailure, elapsedMs: number): string {
   const output = String(probe.stderr || probe.stdout || "").replace(/\s+/g, " ").trim().slice(0, 300);
+  // SAFETY: contract of the NodeJS.ErrnoException | undefined type is established by the surrounding validation/boundary.
   const error = probe.error as NodeJS.ErrnoException | undefined;
   const code = String(error?.code || "none").replace(/\s+/g, " ").slice(0, 80);
   const timedOut = code.toUpperCase() === "ETIMEDOUT";

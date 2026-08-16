@@ -113,6 +113,7 @@ export function officeSupportRoot(home = homeDir()): string {
 export function readOfficeSupportPack(home = homeDir()): OfficeSupportPackInfo | null {
   const root = officeSupportRoot(home);
   try {
+    // SAFETY: contract of the OfficeSupportManifest type is established by the surrounding validation/boundary.
     const manifest = JSON.parse(readFileSync(join(root, "support-pack.json"), "utf8")) as OfficeSupportManifest;
     if (!manifest.executable || isAbsolute(manifest.executable) || /[\\/]/.test(manifest.executable)) return null;
     const path = join(root, manifest.executable);
@@ -163,6 +164,7 @@ export async function installOfficeSupportPack(options: InstallOfficeSupportOpti
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`Could not read the official OfficeCLI release (HTTP ${response.status})`);
+  // SAFETY: contract of the GitHubRelease type is established by the surrounding validation/boundary.
   const resolved = resolveRelease(await response.json() as GitHubRelease, target);
 
   const current = readOfficeSupportPack(home);
@@ -284,6 +286,7 @@ async function downloadAsset(fetchImpl: typeof fetch, url: string, path: string,
       callback(null, chunk);
     },
   });
+  // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   await pipeline(Readable.fromWeb(response.body as any), meter, createWriteStream(path, { flags: "wx", mode: 0o600 }));
   if (received !== expectedBytes) throw new Error(`Office Support Pack download was incomplete (${received}/${expectedBytes} bytes)`);
   return received;

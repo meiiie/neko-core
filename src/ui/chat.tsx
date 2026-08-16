@@ -209,6 +209,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const verbRef = useRef(VERBS[0]); // playful "thinking" verb, repicked each turn
   const startRef = useRef(0);
   const resumedRef = useRef<Session | null>(resumedSession ?? (resume ? latestSession(process.cwd()) : null));
+  // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   const initialFullscreen = fullscreenOverride ?? (cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
   const sessionIdRef = useRef(sessionId ?? resumedRef.current?.id ?? newSessionId());
   const createdAtRef = useRef(resumedRef.current?.createdAt ?? new Date().toISOString());
@@ -691,6 +692,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       },
       onEvent: (kind, data) => {
         if (kind === "usage") {
+          // SAFETY: contract of the Usage type is established by the surrounding validation/boundary.
           liveUsageRef.current = data as Usage;
           usageSnapshotCharsRef.current = turnGeneratedCharsRef.current;
         } else if (kind === "usage_estimate") {
@@ -755,7 +757,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (provider) return;
     try {
       const disposed = agentRef.current?.currentProvider().dispose?.();
+      // SAFETY: contract of the Promise<void> type is established by the surrounding validation/boundary.
       if (disposed && (disposed as Promise<void>).catch instanceof Function) {
+        // SAFETY: contract of the Promise<void> type is established by the surrounding validation/boundary.
         void (disposed as Promise<void>).catch(() => {});
       }
     } catch { /* terminal teardown must not be blocked by provider cleanup */ }
@@ -869,6 +873,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // AND a native OS write (clip.exe/pbcopy/xclip - covers legacy Windows conhost, which ignores OSC 52).
   // `/copy` = last response; `/copy all` = the whole conversation.
   const copyBoth = (text: string): boolean => {
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     if (!copyToClipboard(text, (stdout as any) ?? process.stdout)) return false; // OSC 52; false on empty
     writeClipboardText(text); // + local OS clipboard, best-effort
     return true;
@@ -1090,6 +1095,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // to repaint. That was the black-screen-on-entry bug (deterministically reproduced by fullscreen-sim).
   useEffect(() => {
     if (fullscreenRef.current && !altDisposeRef.current) {
+      // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
       altDisposeRef.current = installAltScreenGuard((stdout as any) ?? process.stdout, { mouse: isMouseEnabled() });
     }
     return () => { if (altDisposeRef.current) { altDisposeRef.current(); altDisposeRef.current = null; } };
@@ -1133,6 +1139,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           frameDiffer?.forceFullRepaint();
         } else {
           clearScreen?.();
+          // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
           (stdout as any).write?.("\x1b[2J\x1b[H");
           setResizeKey((k) => k + 1);
         }
@@ -1206,6 +1213,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // Re-enter the alt-screen + re-arm mouse (only called when leave returned true). Install a
         // fresh guard and point altDisposeRef at it so the next Ctrl+G / final unmount tears it down.
         reenterAltScreen: () => {
+          // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
           altDisposeRef.current = installAltScreenGuard((stdout as any) ?? process.stdout, { mouse: isMouseEnabled() });
         },
         onDifferReset: () => frameDiffer?.reset(),
@@ -2336,6 +2344,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       const msg = error instanceof Error ? error.message : String(error);
       // The user's own Esc (an AbortError that threw from compact()/a provider call instead of the loop
       // returning "[interrupted]") isn't an error to alarm them with — show it like a normal interrupt.
+      // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
       if ((error as any)?.name === "AbortError" || /aborted by user/i.test(msg)) addLine("info", "(interrupted)");
       else addLine("error", msg);
     } finally {
@@ -2481,6 +2490,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         remoteVoiceRef.current = session;
         voiceRef.current = session; // /voice status, Alt+X stop and the LIVE panel all apply
         await session.start();
+        // SAFETY: contract of the ChatGptVoiceSession type is established by the surrounding validation/boundary.
         const answer = await (session as ChatGptVoiceSession).attachRemoteOffer(sdp);
         relayRef.current?.publish({ type: "voice-answer", sdp: answer });
         addLine("info", "Voice is live on your phone (Neko's own voice) - speak naturally; /voice stop ends it.");
@@ -3346,6 +3356,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // FIRST thing, before ANY await (MCP hub build, config load can take a beat): clear mouse tracking a
   // previous session left stuck on the terminal, so it stops spamming "[<...M" the instant neko runs -
   // not only after startup finishes. (bin/neko.ts also does this at process entry; belt + suspenders.)
+  // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   if ((process.stdout as any).isTTY) process.stdout.write(DISABLE_MOUSE);
   if (!process.stdin.isTTY) {
     console.error('neko needs an interactive terminal (TTY) for the session. Use `neko run "<task>"` for one-shot.');

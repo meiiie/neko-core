@@ -1329,12 +1329,15 @@ test("frame, argument, and result bounds fail closed before unbounded data cross
     context(),
   )).rejects.toThrow("invalid_tool_request");
   expect(argsFixture.frames).toHaveLength(0);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   await expect(argsFixture.protocol.finish({ ...EMPTY_METRICS, surprise: true } as any))
     .rejects.toThrow("invalid_final_metrics");
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   await expect(argsFixture.protocol.finish({
     ...EMPTY_METRICS,
     providerReportedModelCalls: 0,
   } as any)).rejects.toThrow("invalid_final_metrics");
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   await expect(argsFixture.protocol.finish({
     ...EMPTY_METRICS,
     toolCalls: { ...EMPTY_METRICS.toolCalls, surprise: 1 },
@@ -1499,6 +1502,7 @@ test("Harbor ChatGPT access leases are refreshless and cover the fixed run deadl
     expect(() => verifyHarborCredentialLease(config, {
       leaseMode: "1",
       now,
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       loadCredentials: () => invalid as any,
     })).toThrow("credential_lease_invalid");
   }
@@ -1686,6 +1690,7 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
     });
     let stderr = "";
     child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const exited = once(child, "exit") as Promise<[number | null, NodeJS.Signals | null]>;
     const frames = childFrames(child)[Symbol.asyncIterator]();
     child.stdin.write(Buffer.from(encodeHarborFrame(hello("public"))));
@@ -1770,6 +1775,7 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
     });
     let failureStderr = "";
     child.stderr.on("data", (chunk) => { failureStderr += String(chunk); });
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const failureExit = once(child, "exit") as Promise<[number | null, NodeJS.Signals | null]>;
     const failureStream = childFrames(child)[Symbol.asyncIterator]();
     child.stdin.write(Buffer.from(encodeHarborFrame(hello("public"))));

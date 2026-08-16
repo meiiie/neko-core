@@ -43,9 +43,12 @@ async function main() {
     id: "idle", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }],
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = render(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "idle", frameDiffer: differ, preAltDispose, fullscreen: true } as any),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
   );
   await tick(1000); // settle

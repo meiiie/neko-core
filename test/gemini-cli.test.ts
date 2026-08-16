@@ -26,6 +26,7 @@ test("Gemini consumer OAuth deprecation becomes an actionable supported-route er
 });
 
 test("Gemini CLI discovery verifies ACP-capable versions and reports old installs", () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const env = { PATH: "C:\\bin", NEKO_GEMINI_PATH: "" } as NodeJS.ProcessEnv;
   const ready = discoverGeminiCli({
     env,

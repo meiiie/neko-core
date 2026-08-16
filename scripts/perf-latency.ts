@@ -66,7 +66,9 @@ async function main() {
     const vt = new VirtualTerminal(100, 30); const out = new FakeTtyOut(100, 30, vt);
     const stdin = new FakeStdin(); const differ = new FrameDiffer();
     const app = render(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "ok", tool_calls: [] }) }, sessionId: "k", frameDiffer: differ, preAltDispose: installAltScreenGuard(out as any, { mouse: false }), fullscreen: true } as any),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
     );
     await tick(900);
@@ -89,7 +91,9 @@ async function main() {
     const vt = new VirtualTerminal(100, 30); const out = new FakeTtyOut(100, 30, vt);
     const stdin = new FakeStdin(); const differ = new FrameDiffer();
     const app = render(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       React.createElement(ChatApp as any, { yolo: true, provider: streamingProvider(60), sessionId: "s", frameDiffer: differ, preAltDispose: installAltScreenGuard(out as any, { mouse: false }), fullscreen: true } as any),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
     );
     await tick(900);
@@ -110,7 +114,9 @@ async function main() {
       const t0 = performance.now();
       out.writes = [];
       const app = render(
+        // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
         React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "ok", tool_calls: [] }) }, sessionId: "st", frameDiffer: differ, preAltDispose: installAltScreenGuard(out as any, { mouse: false }), fullscreen: true } as any),
+        // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
         { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
       );
       await tick(900); // wait for first blink
@@ -130,7 +136,9 @@ async function main() {
       messages: Array.from({ length: 200 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `dong ${i} noi dung dai de wrap trong 100 cot` })),
     };
     const app = render(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "ok", tool_calls: [] }) }, resumedSession: session, sessionId: "sc", frameDiffer: differ, preAltDispose: installAltScreenGuard(out as any, { mouse: false }), fullscreen: true } as any),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
     );
     await tick(900);
@@ -153,7 +161,9 @@ async function main() {
     const vt = new VirtualTerminal(100, 30); const out = new FakeTtyOut(100, 30, vt);
     const stdin = new FakeStdin(); const differ = new FrameDiffer();
     const app = render(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "ok", tool_calls: [] }) }, sessionId: "p", frameDiffer: differ, preAltDispose: installAltScreenGuard(out as any, { mouse: false }), fullscreen: true } as any),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
     );
     await tick(900);

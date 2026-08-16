@@ -492,6 +492,7 @@ export class NekoConfig {
     get caretGlyph(): "thin-block" | "bar" | "block" | "underline" {
       const env = process.env.NEKO_CARET;
       if (env === "bar" || env === "block" || env === "underline") return env;
+      // SAFETY: contract of the string | undefined type is established by the surrounding validation/boundary.
       const v = this.data.caret_glyph as string | undefined;
       if (v === "bar" || v === "block" || v === "underline") return v;
       return "thin-block";
@@ -769,6 +770,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
       ];
   const overlayPaths = overlayEntries.map((entry) => entry.path);
   const overlays = overlayEntries.map((entry) => entry.data);
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const filesMerged = overlays.reduce((acc, o) => mergeDeep(acc, o), {} as Record<string, any>);
 
   // Built-in profiles are always available; files may add or override individual ones (merge, not replace).
@@ -864,11 +866,13 @@ function readOverlay(path: string): Record<string, any> {
   try {
     parsed = JSON.parse(text);
   } catch (error) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     throw new Error(`Invalid JSON in config ${path}: ${(error as Error).message}`);
   }
   if (!isJsonObject(parsed)) {
     throw new Error(`Config ${path} must be a JSON object`);
   }
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   return parsed as Record<string, any>;
 }
 

@@ -68,6 +68,7 @@ test("/rewind reports and preserves a file changed after Neko's last write", asy
   const root = mkdtempSync(join(tmpdir(), "neko-rewind-conflict-"));
   const registry = new ToolRegistry(root, "auto", () => true);
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: { complete: async () => ({ content: "ok", tool_calls: [] }) } as any,
     tools: registry,
   });
@@ -83,6 +84,7 @@ test("/rewind reports and preserves a file changed after Neko's last write", asy
   writeFileSync(path, "user after agent\n");
   const lines: string[] = [];
 
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   await runSlashCommand("/rewind", {
     agent,
     registry,
@@ -105,6 +107,7 @@ test("/retry resubmits the last human message rather than a controller prompt", 
   ];
   const reruns: Array<{ text: string; internal: boolean | undefined }> = [];
 
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   await runSlashCommand("/retry", {
     agent,
     addLine: () => {},
@@ -117,6 +120,7 @@ test("/retry resubmits the last human message rather than a controller prompt", 
 
 test("/continue identifies its generated instruction as a controller turn", async () => {
   const runs: Array<{ text: string; internal: boolean | undefined }> = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   await runSlashCommand("/continue", {
     agent: makeAgent(),
     runText: (text: string, internal?: boolean) => runs.push({ text, internal }),

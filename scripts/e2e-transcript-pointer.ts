@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { VirtualTerminal } from "../test/vt.ts";
 
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const Terminal = (Bun as any).Terminal;
 if (!(Terminal instanceof Function)) throw new Error("Bun.Terminal is required for the transcript pointer E2E");
 
@@ -55,6 +56,7 @@ const term = new Terminal({
     vt.write(text);
   },
 });
+// SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
 const proc = Bun.spawn({
   cmd: [exe, "--yolo", "--resume", id],
   cwd: repo,

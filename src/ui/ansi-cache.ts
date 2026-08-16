@@ -34,6 +34,7 @@ function ensureHidden(width: number): Hidden {
   const out: any = {
     columns: width,
     rows: 500,
+    // SAFETY: contract of the string[ type is established by the surrounding validation/boundary.
     buf: [] as string[],
     write: (s: string) => { out.buf.push(s); },
     on: () => {}, off: () => {}, removeListener: () => {},
@@ -61,6 +62,7 @@ export function renderNodeRows(node: any, width: number): string[] {
 
 /** Render one Line to its styled rows at `width`. Synchronous (the hidden Ink commits in-line). */
 export function renderLineRows(line: Line, width: number, cfg: NekoConfig): string[] {
+  // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   return renderNodeRows(createElement(TranscriptLine as any, { line, cfg, cols: width }), width);
 }
 

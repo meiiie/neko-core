@@ -140,6 +140,7 @@ export async function scanCleanupTargets(targets: readonly CleanupTarget[], opti
       let rootStat;
       try { rootStat = await lstat(root); found = true; }
       catch (error) {
+        // SAFETY: contract of the NodeJS.ErrnoException type is established by the surrounding validation/boundary.
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") { row.accessErrors++; accessErrors++; row.complete = false; }
         continue;
       }

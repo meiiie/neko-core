@@ -23,6 +23,7 @@ function fixture(prefix: string): { base: string; project: string; home: string;
 }
 
 function cleanEnv(home: string): Record<string, string> {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const env = Object.fromEntries(Object.entries(process.env)
     .filter(([key, value]) => value !== undefined && !key.startsWith("NEKO_") && key !== "BUN_AUTOLOAD_SENTINEL")) as Record<string, string>;
   return { ...env, HOME: home, USERPROFILE: home, NEKO_AUTO_UPDATE: "0" };

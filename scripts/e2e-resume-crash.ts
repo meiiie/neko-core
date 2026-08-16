@@ -14,6 +14,7 @@ import { isAbsolute, join, resolve } from "node:path";
 
 import { isText } from "../src/shared/wire.ts";
 
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const Terminal = (Bun as any).Terminal;
 if (!(Terminal instanceof Function)) throw new Error("Bun.Terminal is required for the crash-resume E2E");
 
@@ -118,6 +119,7 @@ function pty(command: string[]) {
     rows: 34,
     data(_terminal: unknown, chunk: Uint8Array) { raw += new TextDecoder().decode(chunk); },
   });
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const proc = Bun.spawn({ cmd: command, cwd: work, terminal: term, env: childEnv } as any);
   return { term, proc, raw: () => raw };
 }

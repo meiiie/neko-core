@@ -29,6 +29,7 @@ afterAll(() => {
 
 /** The slice of CommandCtx the /resume path touches, with capture hooks. */
 function mockCtx() {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const calls = { overlays: [] as any[], lines: [] as string[], resumed: [] as string[] };
   const ctx: any = {
     cfg: {}, agent: { messages: [] },

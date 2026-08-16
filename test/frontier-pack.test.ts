@@ -123,7 +123,11 @@ test("loads a closed 12-task pack into a deeply frozen immutable snapshot", () =
   } finally {
     Object.defineProperty(Uint8Array, "from", { configurable: true, writable: true, value: originalFrom });
     if (originalBufferLength) Object.defineProperty(Buffer.prototype, "length", originalBufferLength);
-    else delete (Buffer.prototype as any).length; // SAFETY: test-only prototype teardown of a stubbed property.
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+    else {
+      // SAFETY: test-only prototype teardown of a stubbed property.
+      delete (Buffer.prototype as any).length;
+    }
   }
   expect(intercepted).toBe(false);
   expect(capturedSnapshot).toBeUndefined();
@@ -159,6 +163,7 @@ test("rejects referenced content that no longer matches its declared SHA-256", (
 
 test("rejects unknown manifest fields and unsafe content paths", () => {
   const unknown = makePack();
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const withUnknown = unknown.manifest as SyntheticManifest & { unexpected?: boolean };
   withUnknown.unexpected = true;
   writeManifest(unknown);
@@ -242,6 +247,7 @@ test("enforces family balance and fixture-lineage diversity", () => {
 });
 
 test("bounds every declared resource ceiling before a runner can consume it", () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const keys = Object.keys(FRONTIER_RESOURCE_MAXIMA) as Array<keyof typeof FRONTIER_RESOURCE_MAXIMA>;
   const atLimit = makePack();
   for (const key of keys) atLimit.manifest.tasks[0]!.resources[key] = FRONTIER_RESOURCE_MAXIMA[key];
@@ -355,6 +361,7 @@ function makePack(taskCount = 12): PackFixture {
   const tasks: SyntheticTask[] = [];
   for (let index = 0; index < taskCount; index++) {
     const id = `task-${String(index + 1).padStart(2, "0")}`;
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const files = Object.create(null) as Record<FrontierContentRole, SyntheticRef>;
     for (const role of ROLES) {
       const fileRole = role.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);

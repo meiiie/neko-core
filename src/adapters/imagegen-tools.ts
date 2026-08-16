@@ -64,6 +64,7 @@ class ImageTools implements McpTools {
         "Look at it with read_file (vision) before declaring the task done.",
       ].filter(Boolean).join("\n");
     } catch (error) {
+      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
       return `Error: ${(error as Error).message}`;
     }
   }

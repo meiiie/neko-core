@@ -156,6 +156,7 @@ export async function startRemoteRelay(
     meta: sealedMeta(),
   }) });
   if (!reg.ok) throw new Error(`relay register failed: HTTP ${reg.status}${reg.status === 401 ? " (session bound to another token - try /relay new)" : ""}`);
+  // SAFETY: relay capability JSON; the version defaults to 1 when absent.
   const v2 = Number(((await reg.json().catch(() => ({}))) as { v?: number }).v ?? 1) >= 2;
 
   let running = true;
@@ -246,13 +247,18 @@ export async function startRemoteRelay(
           const r = await fetch(`${base}/pull?session=${encodeURIComponent(session)}&host=${encodeURIComponent(hostId)}`, { headers, signal: ctrl.signal });
           if (!running) break;
           if (r.status === 401) { running = false; break; } // hub was revoked/rotated; do not poll forever
-          if (r.ok) job = (await r.json()) as { id?: string; message?: unknown };
+          // SAFETY: relay job JSON; fields are optional and checked before use.
+          if (r.ok) {
+        // SAFETY: relay job JSON; fields are optional and checked before use.
+        job = (await r.json()) as { id?: string; message?: unknown };
+      }
         } catch {
           if (!running) break;
           await sleep(idleMs); // backoff on a network error
           continue;
         }
         if (job?.id) {
+          // SAFETY: only jobs whose id was verified above are collected.
           jobs.push(job as { id: string; message: unknown });
           await drain();
         } else if (running) {
@@ -303,7 +309,11 @@ export async function startRemoteRelay(
       if (m?.t === "control") {
         const raw = decrypt(m.control);
         if (raw === null) return;
-        try { handlers.control?.(JSON.parse(raw) as RemoteAction); } catch { /* malformed/stale control */ }
+        // SAFETY: contract of the RemoteAction type is established by the surrounding validation/boundary.
+        try {
+          // SAFETY: relay control JSON; malformed actions are discarded by the catch below.
+          handlers.control?.(JSON.parse(raw) as RemoteAction);
+        } catch { /* malformed/stale control */ }
         return;
       }
       if (m?.id) { jobs.push(m); void drain(); }
@@ -316,6 +326,7 @@ export async function startRemoteRelay(
       const backoff = opts.backoffMs ?? 1000;
       const delay = opened ? backoff : Math.min(backoff * 2 ** failures, 30_000);
       const t = setTimeout(connect, delay);
+      // SAFETY: typing gap: the Node timer's unref exists at runtime; the call is optional-chained.
       (t as { unref?: () => void }).unref?.();
     };
   };

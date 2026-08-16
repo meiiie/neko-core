@@ -413,6 +413,7 @@ function normalizeCommands(value: unknown, root: string): Record<string, unknown
   if (!Array.isArray(value) || value.length < 1 || value.length > 500) throw new Error("Office commands must contain 1 to 500 batch objects");
   return value.map((entry, index) => {
     if (!isJsonObject(entry)) throw new Error(`Office command ${index + 1} must be an object`);
+    // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
     const command = structuredClone(entry) as Record<string, unknown>;
     const op = String(command.op ?? command.command ?? "").toLowerCase();
     if (!ALLOWED_BATCH_OPS.has(op)) throw new Error(`Office command ${index + 1} uses forbidden operation '${op || "missing"}'; allowed: add, set, remove, move, swap`);
@@ -434,6 +435,7 @@ function validateNestedResources(value: unknown, root: string, key = "", parentK
   }
   if (Array.isArray(value)) return value.forEach((item) => validateNestedResources(item, root, key, parentKey));
   if (isObjectValue(value)) {
+    // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
     for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) validateNestedResources(child, root, childKey, key);
   }
 }

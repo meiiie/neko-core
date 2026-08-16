@@ -66,6 +66,7 @@ test("complete sends response_format json_schema only when a responseSchema is g
   const realFetch = globalThis.fetch;
   const realKey = process.env.NEKO_API_KEY;
   process.env.NEKO_API_KEY = "k"; // key is read on-demand from env
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: any, init: any) => {
     sent = JSON.parse(init.body);
     return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -88,6 +89,7 @@ test("complete sends response_format json_schema only when a responseSchema is g
 test("official OpenAI chat completions use a stable key, stable-prefix breakpoint, and per-call effort", async () => {
   const originalFetch = globalThis.fetch;
   const bodies: any[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: RequestInit) => {
     bodies.push(JSON.parse(String(init.body)));
     return Response.json({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 10, completion_tokens: 1 } });
@@ -135,6 +137,7 @@ test("idle timeout resets per chunk: a slow-but-active stream is NOT aborted (lo
   const realKey = process.env.NEKO_API_KEY;
   process.env.NEKO_API_KEY = "k";
   const sse = (t: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async () => {
     const enc = new TextEncoder();
     const parts = ["Hel", "lo ", "lan", "ding", " page"]; // 5 chunks * 120ms = 600ms > 400ms idle budget
@@ -177,6 +180,7 @@ test("factory returns the standard Responses provider", () => {
 test("official Anthropic model discovery never sends the API key as a Bearer token", async () => {
   const originalFetch = globalThis.fetch;
   let sentHeaders: Headers | undefined;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init?: RequestInit) => {
     sentHeaders = new Headers(init?.headers);
     return Response.json({ data: [{ id: "claude-sonnet-5" }] });
@@ -207,6 +211,7 @@ function netCfg(offlineSeconds: number) {
 test("network-resilient: keeps retrying a dropped connection, then resumes", async () => {
   const orig = globalThis.fetch;
   let calls = 0;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async () => {
     calls++;
     if (calls < 3) throw new TypeError("fetch failed"); // offline twice (laptop asleep)
@@ -223,11 +228,13 @@ test("network-resilient: keeps retrying a dropped connection, then resumes", asy
 
 test("network-resilient: gives up once the offline budget is exhausted", async () => {
   const orig = globalThis.fetch;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   globalThis.fetch = (async () => { throw new TypeError("fetch failed"); }) as any; // never comes back
   try {
     await new OpenAICompatProvider(netCfg(0)).complete([{ role: "user", content: "hi" }]);
     throw new Error("should have thrown");
   } catch (e) {
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     expect(String((e as Error).message)).toContain("completion failed");
   } finally {
     globalThis.fetch = orig;
@@ -237,6 +244,7 @@ test("network-resilient: gives up once the offline budget is exhausted", async (
 test("self-heals when an endpoint rejects reasoning_effort: drops the field, retries, remembers", async () => {
   const orig = globalThis.fetch;
   const sentEffort: (string | undefined)[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     const sent = JSON.parse(init.body);
     sentEffort.push(sent.reasoning_effort);
@@ -276,6 +284,7 @@ test("clampEffort maps a configured effort down to the endpoint ceiling (extensi
 test("MoA: references analyze WITHOUT tools, aggregator acts WITH tools + their advice, cost summed", async () => {
   const orig = globalThis.fetch;
   const calls: { model: string; hasTools: boolean; sys: string }[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     const body = JSON.parse(init.body);
     const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
@@ -313,6 +322,7 @@ test("MoA: references analyze WITHOUT tools, aggregator acts WITH tools + their 
 
 test("MoA: a failing reference degrades to a noted gap; the turn still completes", async () => {
   const orig = globalThis.fetch;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     const body = JSON.parse(init.body);
     if (body.model === "bad") return new Response("boom", { status: 500 });
@@ -331,6 +341,7 @@ test("MoA: a failing reference degrades to a noted gap; the turn still completes
 test("effort_ceiling clamps 'max' to 'high' UP FRONT (single request, no 400 round-trip)", async () => {
   const orig = globalThis.fetch;
   const sentEffort: (string | undefined)[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     sentEffort.push(JSON.parse(init.body).reasoning_effort);
     return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: {} }), { status: 200, headers: { "content-type": "application/json" } });
@@ -347,6 +358,7 @@ test("effort_ceiling clamps 'max' to 'high' UP FRONT (single request, no 400 rou
 test("clamps reasoning_effort 'max' to 'high' on an endpoint that caps at high (intent preserved, not dropped)", async () => {
   const orig = globalThis.fetch;
   const sentEffort: (string | undefined)[] = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string, init: any) => {
     const sent = JSON.parse(init.body);
     sentEffort.push(sent.reasoning_effort);
@@ -414,6 +426,7 @@ test("parse captures usage", () => {
 
 async function completeOpenAIResponse(response: Response, onToolCallReady?: (call: any) => void) {
   const originalFetch = globalThis.fetch;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   globalThis.fetch = (async () => response) as any;
   try {
     const config = new NekoConfig({ provider: "openai_compat", base_url: "http://x/v1", model: "m", reasoning_effort: "off" }, null, {}, "k");
@@ -553,6 +566,7 @@ test("openai stream finalizes tool call i when the index advances (onToolCallRea
   ];
   const body = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n";
   const orig = globalThis.fetch;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   globalThis.fetch = (async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })) as any;
   const ready: string[] = [];
   try {
@@ -584,6 +598,7 @@ test("openai stream accumulates interleaved parallel tool-call deltas by index",
   ];
   const body = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n";
   const orig = globalThis.fetch;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   globalThis.fetch = (async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })) as any;
   const ready: any[] = [];
   try {
@@ -613,6 +628,7 @@ test("OpenAI-compatible tool metadata replays only to the endpoint and model tha
   const stream = `data: ${JSON.stringify(firstChunk)}\n\ndata: [DONE]\n\n`;
   const sent: Array<{ url: string; body: any }> = [];
   const realFetch = globalThis.fetch;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (url: string, init: any) => {
     sent.push({ url: String(url), body: JSON.parse(init.body) });
     if (sent.length === 1) return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -672,6 +688,7 @@ test("DeepSeek V4 sends current thinking controls and replays tool-turn reasonin
   const orig = globalThis.fetch;
   const sent: any[] = [];
   let calls = 0;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
     sent.push(JSON.parse(String(init?.body ?? "{}")));
     calls++;
@@ -718,6 +735,7 @@ test("DeepSeek V4 sends current thinking controls and replays tool-turn reasonin
 test("OpenAI-compat omits the token cap when max_tokens is unset (0 = auto -> the model's full output budget)", async () => {
   const orig = globalThis.fetch;
   let body: any;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
     body = JSON.parse(String(init?.body ?? "{}"));
     return Response.json({ choices: [{ message: { role: "assistant", content: "ok" } }] });
@@ -740,6 +758,7 @@ test("Kimi API route uses the official completion budget and thinking wire witho
   const orig = globalThis.fetch;
   let body: any;
   let authorization = "";
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
     body = JSON.parse(String(init?.body ?? "{}"));
     authorization = new Headers(init?.headers).get("authorization") ?? "";

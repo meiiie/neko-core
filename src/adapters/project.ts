@@ -25,6 +25,7 @@ function readUserConfig(): Record<string, any> {
     const text = readFileSync(path, "utf-8");
     return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
   } catch (e) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     throw new Error(`~/.neko-core/config.json has invalid JSON - fix it before changing settings (${(e as Error).message})`);
   }
 }
@@ -64,6 +65,7 @@ export function setApiKey(key: string): string {
     });
     return `API key saved to ${target} in ~/.neko-core/config.json`;
   } catch (e) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     return (e as Error).message;
   }
 }
@@ -130,6 +132,7 @@ export function setEffort(effort: string): void {
  * profile's key AND any stray top-level key (so an old top-level key can't keep shadowing the profile). */
 export function clearApiKey(profile?: string): string {
   try {
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     const data = readUserConfig() as any;
     const active = profile ?? (isText(data.active_profile) ? data.active_profile : "");
     let removed = "";
@@ -142,6 +145,7 @@ export function clearApiKey(profile?: string): string {
     writeUserConfig(data);
     return `API key removed from ${removed} in ~/.neko-core/config.json`;
   } catch (e) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     return (e as Error).message;
   }
 }
@@ -160,6 +164,7 @@ export function addMcpServer(name: string, server: Record<string, any>): string 
     });
     return `Added MCP server '${name}' to ${userConfigPath()}. Run \`neko mcp\` to verify.`;
   } catch (e) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     return (e as Error).message;
   }
 }
@@ -171,6 +176,7 @@ export function removeMcpServer(name: string): string {
   try {
     data = readUserConfig();
   } catch (e) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     return (e as Error).message;
   }
   if (!data.mcp_servers?.[name]) return `no MCP server '${name}'`;

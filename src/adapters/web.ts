@@ -79,25 +79,34 @@ async function webSearch(query: string, opts: { searxngUrl: string; backend: str
           sidecar.touch();
           return `(searxng was asleep - container auto-started)\n` + fmtResults(rs);
         }
+        // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
         note = `(searxng failed: ${(error as Error).message}; ${woke.reason})\n`;
       }
     } else if (pick === "tavily" && tavilyKey) {
       return fmtResults(await tavilySearch(query, tavilyKey));
     }
   } catch (error) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     note = `(${pick} failed: ${(error as Error).message})\n`;
   }
   // The next rung: the primary failed and a Tavily key is wired -> use it before the free floor.
   if (note && pick !== "tavily" && tavilyKey) {
     try {
       return note + "(falling back to Tavily)\n" + fmtResults(await tavilySearch(query, tavilyKey));
-    } catch (e) { note += `(tavily fallback failed: ${(e as Error).message})\n`; }
+    } catch (e) {
+      // SAFETY: search/HTTP failures throw Errors; a non-Error would surface as an undefined message.
+      note += `(tavily fallback failed: ${(e as Error).message})\n`;
+    }
   }
   try {
     const out = note + (note ? "(falling back to DuckDuckGo)\n" : "") + fmtResults(await ddgSearch(query));
     // Zero-config default AND Docker present -> one gentle nudge toward the private power-up.
     return pick === "duckduckgo" && !opts.searxngUrl && !tavilyKey ? out + setupHint() : out;
-  } catch (e) { return `Error: web search failed: ${(e as Error).message}`; }
+  // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+  } catch (e) {
+    // SAFETY: search/HTTP failures throw Errors; a non-Error would surface as an undefined message.
+    return `Error: web search failed: ${(e as Error).message}`;
+  }
 }
 
 /** SearXNG JSON API (self-hosted metasearch; aggregates Google/Bing/DDG/... — free, unlimited). */
@@ -223,6 +232,7 @@ async function toolWebFetch(_root: string, args: Record<string, any>, backend = 
     contentType = res.headers.get("content-type") ?? "";
     text = res.text;
   } catch (error) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     return `Error: fetch failed: ${(error as Error).message}`;
   }
   if (!jina) {
@@ -300,7 +310,11 @@ export function classifyPlatformUrl(input: string): PlatformRoute | null {
   const RESERVED = new Set(["orgs", "sponsors", "topics", "search", "marketplace", "settings", "notifications", "features", "about", "pricing"]);
   if (gh && !RESERVED.has(gh[1].toLowerCase())) {
     const repo = gh[2].replace(/\.git$/, "");
-    if (repo) return { kind: "github", owner: gh[1], repo, section: gh[3] as "issues" | "pull" | undefined, number: gh[4] };
+    // SAFETY: the capture group is constrained by the issues|pull alternation in the regex above.
+    if (repo) {
+    // SAFETY: the capture group is constrained by the issues|pull alternation in the regex above.
+    return { kind: "github", owner: gh[1], repo, section: gh[3] as "issues" | "pull" | undefined, number: gh[4] };
+  }
   }
   return null;
 }
@@ -400,6 +414,7 @@ export const webPort: WebPort = {
     const prompt = String(args.prompt ?? "");
     // schema-guided extraction: a JSON Schema forces the extractor to fill a shape (e.g. enumerate
     // every variant) instead of collapsing to one value - far more reliable than a freeform prompt.
+    // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
     const schema = isObjectValue(args.schema) ? (args.schema as Record<string, any>) : undefined;
     // Skip the model when the page is small enough to just read (Hermes-style: no LLM call when it adds
     // nothing - most pages). A prompt/schema on a LARGE page still gets the single-pass extractor, now

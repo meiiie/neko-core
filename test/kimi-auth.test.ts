@@ -47,6 +47,7 @@ test("Kimi device OAuth polls, persists, and never prints the device credential"
   isolatedHome();
   let polls = 0;
   const calls: Array<{ url: string; headers: Headers }> = [];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const mockFetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     calls.push({ url, headers: new Headers(init?.headers) });
@@ -86,6 +87,7 @@ test("Kimi device OAuth polls, persists, and never prints the device credential"
 
 test("Kimi login does not persist a token when the coding membership is rejected", async () => {
   isolatedHome();
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const mockFetch = (async (input: string | URL | Request) => {
     const url = String(input);
     if (url.endsWith("/device_authorization")) return Response.json({
@@ -117,6 +119,7 @@ test("Kimi OAuth completion uses the stable device identity and explains members
   const originalFetch = globalThis.fetch;
   let headers = new Headers();
   let body: any;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
     headers = new Headers(init?.headers);
     body = JSON.parse(String(init?.body ?? "{}"));
@@ -153,6 +156,7 @@ test("expired Kimi OAuth refreshes atomically and retains an unrotated refresh t
   isolatedHome();
   saveKimiCredentials({ accessToken: "old", refreshToken: "refresh-old", expiresAt: 1, expiresIn: 3600 });
   let sent = "";
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const mockFetch = (async (_input: string | URL | Request, init?: RequestInit) => {
     sent = String(init?.body ?? "");
     return Response.json({ access_token: "new", expires_in: 3600 });

@@ -102,6 +102,7 @@ test("computer screenshot embeds vision bytes, while text-only mode keeps the he
   tools.vision = true;
   const result = await tools.execute("computer", { action: "screenshot" });
   expect(Array.isArray(result)).toBe(true);
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const parts = result as any[];
   expect(parts.find((p) => p.type === "text").text).toContain("captured view=1x1 screen=1x1 scale=1");
   expect(parts.find((p) => p.type === "image_url").image_url.url).toContain("data:image/gif;base64,");

@@ -78,7 +78,9 @@ test("source plan rejects an empty or non-identifier SKU", async () => {
   for (const value of ["", "   ", "laptop", "RTX5070", "RTX-5070-TI", "CORE-I7-14700K", "12345678", "31990000"]) {
     expect(() => buildSkuSourcePlan(value, "laptop")).toThrow("SKU");
   }
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   expect(() => buildSkuSourcePlan("83KY001VVN", "__proto__" as never)).toThrow("Danh mục");
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   expect(() => buildSkuSourcePlan("83KY001VVN", "laptop", [], "__proto__" as never)).toThrow("Loại định danh");
   expect(() => buildSkuSourcePlan("RTX-5070-TI", "laptop", [], "mpn")).toThrow("SKU/MPN/GTIN");
 });

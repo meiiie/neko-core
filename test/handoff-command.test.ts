@@ -48,8 +48,10 @@ function session(label: string, model = "test-model"): string {
 }
 
 function commandCtx(currentSessionId: string) {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const calls = { lines: [] as Array<{ kind: string; text: string }>, persisted: 0 };
   const agent = { messages: [{ role: "user", content: "LIVE_TRANSCRIPT_MUST_NOT_RECEIVE_HANDOFF" }] };
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const ctx = {
     cfg: {},
     agent,

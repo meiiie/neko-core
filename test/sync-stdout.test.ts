@@ -2,12 +2,17 @@ import { expect, test } from "bun:test";
 import { BSU, ESU, isSyncOutputSupported, parseDecrpm2026, syncOutputDecision, wrapStdoutForSync } from "../src/ui/sync-stdout.ts";
 
 test("syncOutputDecision: yes/no are DECIDED (never probed); only true unknowns probe", () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(syncOutputDecision({ TERM_PROGRAM: "WezTerm" } as any)).toBe("yes");
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(syncOutputDecision({ NEKO_SYNC: "0", TERM_PROGRAM: "WezTerm" } as any)).toBe("no"); // forced off = no probe
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(syncOutputDecision({ WT_SESSION: "1" } as any)).toBe("no");  // WT advertises 2026 but corrupts under it
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(syncOutputDecision({ TMUX: "/tmp/x" } as any)).toBe("no");
   // A bare unknown terminal: on Windows the answer is decided ("no" - conhost has no 2026, and the
   // probe itself has hurt stdin); elsewhere it is genuinely unknown (SSH) and MAY be probed.
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(syncOutputDecision({ TERM: "xterm-256color" } as any)).toBe(process.platform === "win32" ? "no" : "unknown");
 });
 
@@ -21,13 +26,21 @@ test("parseDecrpm2026: DECRPM reply -> supported/unsupported/none", () => {
 test("isSyncOutputSupported: env allowlist + overrides", () => {
   // Windows Terminal advertises 2026 but corrupts under it at Neko's write cadence (the duplicated
   // footer ghost, images #77/#78) - deliberately EXCLUDED; NEKO_SYNC=1 remains the force-on hatch.
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isSyncOutputSupported({ WT_SESSION: "1" } as any)).toBe(false);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isSyncOutputSupported({ TERM: "xterm-kitty" } as any)).toBe(true);   // kitty
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isSyncOutputSupported({ TERM_PROGRAM: "iTerm.app" } as any)).toBe(true);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isSyncOutputSupported({ VTE_VERSION: "6800" } as any)).toBe(true);   // VTE 0.68+
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isSyncOutputSupported({ TERM: "xterm-256color" } as any)).toBe(false); // unknown
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isSyncOutputSupported({ TMUX: "/tmp/x", WT_SESSION: "1" } as any)).toBe(false); // tmux opts out
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isSyncOutputSupported({ NEKO_SYNC: "0", WT_SESSION: "1" } as any)).toBe(false); // forced off
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isSyncOutputSupported({ NEKO_SYNC: "1" } as any)).toBe(true);        // forced on
 });
 
@@ -44,6 +57,7 @@ function fakeTty(isTTY: boolean) {
 
 test("wrapStdoutForSync: brackets each write in BSU..ESU when supported", () => {
   const { stream, writes } = fakeTty(true);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const wrapped = wrapStdoutForSync(stream, { env: { TERM_PROGRAM: "WezTerm" } as any });
   wrapped.write("frame-A");
   wrapped.write("frame-B");
@@ -53,9 +67,12 @@ test("wrapStdoutForSync: brackets each write in BSU..ESU when supported", () => 
 
 test("wrapStdoutForSync: no-op when unsupported or not a TTY; probe override wins", () => {
   const a = fakeTty(true);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(wrapStdoutForSync(a.stream, { env: { TERM: "dumb" } as any })).toBe(a.stream); // unsupported -> same object
   const b = fakeTty(false);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(wrapStdoutForSync(b.stream, { env: { TERM_PROGRAM: "WezTerm" } as any })).toBe(b.stream); // not a TTY -> same object
   const c = fakeTty(true);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(wrapStdoutForSync(c.stream, { env: { TERM: "dumb" } as any, supported: true })).not.toBe(c.stream); // probe says yes
 });

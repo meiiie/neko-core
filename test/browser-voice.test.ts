@@ -44,6 +44,7 @@ test("browser voice keeps consent in the page and routes transcript through Neko
   expect(page.headers.get("content-security-policy")).toContain("default-src 'none'");
   expect(() => new Function(html.match(/<script>([\s\S]+)<\/script>/)?.[1] ?? "")).not.toThrow();
 
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const ws = new WebSocket(`${parsed.origin.replace("http:", "ws:")}/bridge`, { headers: { origin: parsed.origin } } as any);
   await new Promise<void>((resolve, reject) => {
     ws.addEventListener("open", () => resolve(), { once: true });
@@ -74,6 +75,7 @@ test("browser voice survives a control-socket drop and accepts a reconnect", asy
   const parsed = new URL(url);
   const token = parsed.hash.slice(1);
   const open = async () => {
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const ws = new WebSocket(`${parsed.origin.replace("http:", "ws:")}/bridge`, { headers: { origin: parsed.origin } } as any);
     await new Promise<void>((resolve, reject) => {
       ws.addEventListener("open", () => resolve(), { once: true });
@@ -115,6 +117,7 @@ test("browser voice rejects a websocket without the fragment capability", async 
   active = new BrowserVoiceSession({ onUtterance: async () => "ok", openUrl: () => {} });
   const { url } = await active.start();
   const parsed = new URL(url);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const ws = new WebSocket(`${parsed.origin.replace("http:", "ws:")}/bridge`, { headers: { origin: parsed.origin } } as any);
   await new Promise<void>((resolve, reject) => {
     ws.addEventListener("open", () => resolve(), { once: true });

@@ -40,6 +40,7 @@
     "LICENSES/",
     "sdk/",
     "skills/",
-    "browser-extension/"
+    "browser-extension/",
+    "cloudflare/"
   ]
 }

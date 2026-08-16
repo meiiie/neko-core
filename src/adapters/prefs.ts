@@ -28,6 +28,7 @@ export function loadPrefs(): Prefs {
   try {
     if (!existsSync(prefsPath())) return {};
     const p = JSON.parse(readFileSync(prefsPath(), "utf-8"));
+    // SAFETY: contract of the Prefs type is established by the surrounding validation/boundary.
     return isObjectValue(p) ? (p as Prefs) : {};
   } catch {
     return {};

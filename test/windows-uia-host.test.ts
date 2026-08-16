@@ -24,6 +24,7 @@ async function spawnWpfFixture(source: string) {
     } catch (error) {
       // A heavily loaded Windows desktop may transiently refuse process creation even for the
       // canonical System32 binary. Bound the fixture retry; every other error still fails at once.
+      // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
       if ((error as NodeJS.ErrnoException).code !== "EPERM" || attempt >= 6) throw error;
       await Bun.sleep(attempt * 500);
     }

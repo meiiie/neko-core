@@ -107,6 +107,7 @@ export function codexSupportRoot(home = homeDir()): string {
 export function readCodexSupportPack(home = homeDir()): CodexSupportPackInfo | null {
   const root = codexSupportRoot(home);
   try {
+    // SAFETY: contract of the SupportPackManifest type is established by the surrounding validation/boundary.
     const manifest = JSON.parse(readFileSync(join(root, "support-pack.json"), "utf8")) as SupportPackManifest;
     if (!manifest.executable || isAbsolute(manifest.executable) || /[\\/]/.test(manifest.executable)) return null;
     const path = join(root, manifest.executable);
@@ -133,6 +134,7 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
     signal: AbortSignal.timeout(30_000),
   });
   if (!releaseResponse.ok) throw new Error(`Could not read the official Codex release (HTTP ${releaseResponse.status})`);
+  // SAFETY: contract of the GitHubRelease type is established by the surrounding validation/boundary.
   const release = await releaseResponse.json() as GitHubRelease;
   const resolved = resolveRelease(release, target, minimumVersion);
 
@@ -285,6 +287,7 @@ async function downloadAsset(fetchImpl: typeof fetch, url: string, path: string,
       callback(null, chunk);
     },
   });
+  // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   await pipeline(Readable.fromWeb(response.body as any), meter, createWriteStream(path, { flags: "wx", mode: 0o600 }));
   if (received !== expectedBytes) throw new Error(`Codex Support Pack download was incomplete (${received}/${expectedBytes} bytes)`);
   return received;

@@ -184,6 +184,7 @@ test("an exact single-file microtask skips generic process skills through Agent 
     },
   };
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
     tools: registry,
     dynamicContext: () => skillsContextBlock(registry, root, home),

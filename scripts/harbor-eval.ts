@@ -664,7 +664,7 @@ function readUserConfig(): Record<string, any> {
 
 function evalProfileBinding(profile: string): (typeof EVAL_PROFILE_BINDINGS)[HarborEvalProfile] | undefined {
   return Object.hasOwn(EVAL_PROFILE_BINDINGS, profile)
-    ? EVAL_PROFILE_BINDINGS[profile as HarborEvalProfile]
+    ? EVAL_PROFILE_BINDINGS[/* SAFETY: hasOwn above proves the key exists in the typed binding map. */ profile as HarborEvalProfile]
     : undefined;
 }
 
@@ -696,6 +696,7 @@ export function resolveEvalIdentity(
   let model = options.model?.trim() || configuredModel || binding.defaultModel;
   if (!model.includes("/")) model = `${binding.modelPrefix}/${model}`;
   const identity: HarborEvalIdentity = {
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     profile: profile as HarborEvalProfile,
     provider: binding.provider,
     model,

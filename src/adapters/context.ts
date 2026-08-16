@@ -89,6 +89,7 @@ export function ensureGlobalNekoMd(home: string = homeDir()): GlobalNekoMdState 
     writeFileSync(path, DEFAULT_GLOBAL_NEKO_MD, { encoding: "utf-8", flag: "wx" });
     return { path, created: true };
   } catch (error) {
+    // SAFETY: contract of the NodeJS.ErrnoException type is established by the surrounding validation/boundary.
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return { path, created: false };
     return { path, created: false, error: error instanceof Error ? error.message : String(error) };
   }

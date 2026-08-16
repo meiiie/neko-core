@@ -178,6 +178,7 @@ test("Hybrid disposal attempts both providers and preserves the first cleanup er
     async complete() { return { content: "unused", tool_calls: [] }; },
     dispose() { calls.push("direct"); throw first; },
   });
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   (hybrid as any).bridge = {
     async dispose() { calls.push("bridge"); throw new Error("bridge cleanup failed"); },
   };
@@ -196,6 +197,7 @@ test("Hybrid model switch waits for the GPT-5.6 sidecar before using the direct 
   const hybrid = new HybridChatGptProvider(cfg, {
     async complete() { calls.push("direct"); return { content: "direct", tool_calls: [] }; },
   });
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   (hybrid as any).bridge = {
     async dispose() { calls.push("bridge"); await closed; },
   };
@@ -250,6 +252,7 @@ test("prior conversation is injected as Codex-valid response items with an expli
 
   const inject = requests.find((request) => request.method === "thread/inject_items");
   expect(inject).toBeDefined();
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const items = inject!.params.items as any[];
   // The exact failure the user hit: items[0] reached Codex with no `type`.
   expect(items.every((item) => isText(item.type) && item.type.length > 0)).toBe(true);

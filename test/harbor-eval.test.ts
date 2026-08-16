@@ -405,6 +405,7 @@ describe("Harbor evaluation launcher", () => {
     const privateRoot = join(realpathSync.native(tmpdir()), "neko-harbor-private-cleanup-fixture");
     const buildRoot = join(realpathSync.native(tmpdir()), "neko-harbor-eval-cleanup-fixture");
     const attempted: string[] = [];
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const remove = ((target: Parameters<typeof rmSync>[0]) => {
       attempted.push(String(target));
       if (String(target) === privateRoot) throw new Error("sensitive cleanup detail");
@@ -421,6 +422,7 @@ describe("Harbor evaluation launcher", () => {
     const attempted: string[] = [];
     const delays: number[] = [];
     let buildFailures = 3;
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const remove = ((target: Parameters<typeof rmSync>[0], options: Parameters<typeof rmSync>[1]) => {
       attempted.push(String(target));
       expect(options).toMatchObject({ recursive: true, force: true, maxRetries: 0, retryDelay: 0 });
@@ -439,6 +441,7 @@ describe("Harbor evaluation launcher", () => {
       join(realpathSync.native(tmpdir()), "neko-harbor-private-"),
     ]) {
       let attempted = false;
+      // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
       const remove = (() => { attempted = true; }) as typeof rmSync;
       expect(() => cleanupHarborStaging(invalid, "", remove))
         .toThrow("Harbor temporary staging cleanup failed.");

@@ -8,12 +8,14 @@ import { TranscriptLine } from "../src/ui/transcript.tsx";
 import { isText } from "../src/shared/wire.ts";
 
 const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const cfg = {} as any;
 
 /** The color a given token was highlighted as (a colored token is a <Text color=...>word</Text>);
  * plain tokens are raw strings, so an unhighlighted word returns undefined. */
 function colorOf(nodes: ReturnType<typeof highlightLine>, word: string): string | undefined {
   for (const n of nodes) {
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const props = (n as ReactElement | null)?.props as { children?: unknown; color?: string } | undefined;
     if (props && props.children === word) return props.color;
   }
@@ -50,9 +52,11 @@ test("highlightLine colors keyword/type/string/number/function per token", () =>
 test("highlightLine breaks a template literal open at ${...} interpolations", () => {
   const nodes = highlightLine("`hi ${name} there`");
   // The interpolated identifier is highlighted as CODE, not swallowed by the string...
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const flat = nodes.map((n) => (isText(n) ? n : (n as any).props?.children)).join("|");
   expect(flat).toContain("name");                 // the expression is a separate node
   // ...and the literal parts stay green strings.
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(nodes.some((n) => (n as any)?.props?.color === "green" && String((n as any).props.children).includes("hi"))).toBe(true);
   // A plain (non-template) string is still ONE green token.
   const plain = highlightLine("x = 'just text'");

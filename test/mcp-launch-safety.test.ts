@@ -25,6 +25,7 @@ function fakeWindows(files: string[], directories: string[], aliases: Record<str
     workspace: "C:\\repo",
     home: "C:\\Users\\Alice",
     processExecPath: "C:\\Trusted\\bun.exe",
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     env: {} as NodeJS.ProcessEnv,
     realpath,
     kind(path: string) {
@@ -171,6 +172,7 @@ test("MCP default runtime cwd rejects a junction back into the workspace and use
 test("MCP rejects malformed or oversized explicit args and env", () => {
   const checks = fakeWindows(WINDOWS_FILES, WINDOWS_DIRS);
   checks.env = { PATH: "C:\\Trusted" };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(() => __resolveMcpStdioLaunchForTest({ command: "node", args: [1 as any] }, checks))
     .toThrow("bounded strings");
   expect(() => __resolveMcpStdioLaunchForTest({ command: "node", env: { BAD: "x".repeat(24 * 1024) } }, checks))

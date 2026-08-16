@@ -108,6 +108,7 @@ export class ChatGptAppServerProvider implements Provider {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
     } catch (error) {
       signal?.removeEventListener("abort", abortStartup);
+      // SAFETY: contract of the Promise<void> | null type is established by the surrounding validation/boundary.
       const pendingStartup = startupCleanup as Promise<void> | null;
       if (pendingStartup) await pendingStartup.catch(() => {});
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
@@ -160,6 +161,7 @@ export class ChatGptAppServerProvider implements Provider {
     }
     } catch (error) {
       signal?.removeEventListener("abort", abortStartup);
+      // SAFETY: contract of the Promise<void> | null type is established by the surrounding validation/boundary.
       const pendingStartup = startupCleanup as Promise<void> | null;
       if (pendingStartup) await pendingStartup.catch(() => {});
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
@@ -196,6 +198,7 @@ export class ChatGptAppServerProvider implements Provider {
           "TimeoutError",
         ));
       }, idleMs);
+      // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
       (watchdog as any).unref?.();
     };
     active.heartbeat = heartbeat;
@@ -234,7 +237,9 @@ export class ChatGptAppServerProvider implements Provider {
     } finally {
       if (abort) signal?.removeEventListener("abort", abort);
       stopWatchdog();
+      // SAFETY: contract of the Promise<void> | null type is established by the surrounding validation/boundary.
       const pendingAbort = abortCleanup as Promise<void> | null;
+      // SAFETY: contract of the Promise<void> | null type is established by the surrounding validation/boundary.
       const pendingForced = forcedCleanup as Promise<void> | null;
       if (pendingAbort) await pendingAbort.catch(() => {});
       if (pendingForced) await pendingForced.catch(() => {});
@@ -271,6 +276,7 @@ export class ChatGptAppServerProvider implements Provider {
       if (this.active) this.armIdleStop();
       else void this.dispose().catch(() => {});
     }, this.cfg.codexKeepalive * 60_000);
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (this.idleTimer as any).unref?.();
   }
 
@@ -317,7 +323,9 @@ export class ChatGptAppServerProvider implements Provider {
       let client: RpcClient | null = null;
       try {
         client = this.clientFactory({
+          // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
           onNotification: (method, params) => this.onNotification(method, params as any),
+          // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
           onRequest: (method, params) => this.onRequest(method, params as any),
         });
         this.client = client;
@@ -460,6 +468,7 @@ async function waitForSettlement(done: Promise<void>, timeoutMs: number): Promis
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<boolean>((resolve) => {
     timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (timer as any).unref?.();
   });
   const settled = done.then(() => true, () => true);

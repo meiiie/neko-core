@@ -211,6 +211,7 @@ test("session round-trip preserves validated local message markers", () => {
   });
   try {
     expect(loadSession(id)?.messages.map((message) => message._neko_internal)).toEqual([false, true]);
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     expect(() => saveSession({
       id: `${id}-invalid`,
       createdAt: new Date().toISOString(), updatedAt: "", cwd: "/tmp", model: "m",
@@ -321,6 +322,7 @@ test("rename enforces metadata controls and the 64 MiB atomic publish boundary",
     session.bytes = JSON.stringify(session.messages).length;
     const current = Buffer.byteLength(JSON.stringify(session, null, 2), "utf8");
     const delta = targetBytes - current;
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const content = session.messages[0].content as string;
     session.messages[0].content = delta >= 0 ? content + "x".repeat(delta) : content.slice(0, delta);
   }
@@ -352,6 +354,7 @@ test("listSessionMetas: lightweight metadata, mtime-cached index, self-heals on 
     expect(m).toBeTruthy();
     expect(m.msgCount).toBe(2);
     expect(m.titleText).toBe("first question here"); // precomputed title, no messages array on the meta
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     expect((m as any).messages).toBeUndefined(); // it's metadata only
 
     // The index file was written; a 2nd call reads it (mtime cache) and still returns the entry.

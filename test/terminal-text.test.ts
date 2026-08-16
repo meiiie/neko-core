@@ -16,6 +16,7 @@ describe("terminal-safe text", () => {
     const stream = { write(chunk: string) { output += chunk; return true; } };
 
     for (const chunk of ["safe\u001b", "]52;c;payload", "\u0007then\u001b[", "31mred"]) {
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       writeTerminalSafe(stream as any, chunk);
     }
 

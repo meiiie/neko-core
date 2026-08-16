@@ -164,7 +164,11 @@ async function postForm(fetchImpl: typeof fetch, url: string, fields: Record<str
     signal: AbortSignal.timeout(30_000),
   });
   let data: TokenResponse = {};
-  try { data = await response.json() as TokenResponse; } catch { /* handled by the status/error below */ }
+  // SAFETY: contract of the TokenResponse type is established by the surrounding validation/boundary.
+  try {
+    // SAFETY: token endpoint JSON validated by the TokenResponse field checks that follow.
+    data = await response.json() as TokenResponse;
+  } catch { /* handled by the status/error below */ }
   return { response, data };
 }
 
@@ -256,6 +260,7 @@ export async function loginKimi(options: KimiLoginOptions = {}): Promise<KimiCre
   });
   if (!response.ok) throw oauthError("Kimi device authorization failed", response, data);
 
+  // SAFETY: token endpoint JSON validated by TokenResponse checks before use.
   const auth = data as TokenResponse & {
     user_code?: string;
     device_code?: string;

@@ -18,9 +18,17 @@ import { isText } from "../shared/wire.ts";
  *  marker "" means a plain (non-diff) result line -> the caller leaves it un-highlighted. */
 function parseDiffLine(l: string): { lineNo?: string; marker: "+" | "-" | " " | ""; code: string } {
   const edit = l.match(/^(\s*\d+) ([+\- ]) (.*)$/);
-  if (edit) return { lineNo: edit[1], marker: edit[2] as "+" | "-" | " ", code: edit[3] };
+  // SAFETY: marker capture group is constrained to the +|-|space alternation in the regex above.
+  if (edit) {
+    // SAFETY: marker capture group is constrained to the +|-|space alternation in the regex above.
+    return { lineNo: edit[1], marker: edit[2] as "+" | "-" | " ", code: edit[3] };
+  }
   const write = l.match(/^([+\-]) (.*)$/);
-  if (write) return { marker: write[1] as "+" | "-", code: write[2] };
+  // SAFETY: marker capture group is constrained to the +|- alternation in the regex above.
+  if (write) {
+    // SAFETY: marker capture group is constrained to the +|- alternation in the regex above.
+    return { marker: write[1] as "+" | "-", code: write[2] };
+  }
   return { marker: "", code: l };
 }
 

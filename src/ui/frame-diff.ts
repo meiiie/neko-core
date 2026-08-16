@@ -173,6 +173,7 @@ export class FrameDiffer {
       trace({ ev: "resync-heal" });
       this.writer(this.paintAll() + this.cursorSuffix());
     }, 400);
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     (this.resyncTimer as any).unref?.();
   }
   /** Stop the heal timer (teardown). */

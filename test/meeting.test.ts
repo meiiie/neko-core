@@ -96,6 +96,7 @@ test("browser capture requires consent, accepts bounded stereo PCM, and never st
     expect(await (await fetch(`${url.origin}/meeting-worklet.js`)).text()).toContain("AudioWorkletProcessor");
 
     const stopped = new Promise<void>((resolve, reject) => {
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
       socketTimer = setTimeout(() => reject(new Error("meeting websocket timeout")), 10_000);
       socket.binaryType = "arraybuffer";
@@ -121,6 +122,7 @@ test("browser capture requires consent, accepts bounded stereo PCM, and never st
     expect(wav.readUInt16LE(22)).toBe(2);
   } finally {
     if (socketTimer) clearTimeout(socketTimer);
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const activeSocket = socket as WebSocket | null;
     if (activeSocket) {
       activeSocket.onopen = null;
@@ -155,6 +157,7 @@ test("live transcript runs during capture and the agent can read it mid-meeting"
   const url = new URL(opened);
 
   const recording = new Promise<void>((resolve, reject) => {
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
     const timer = setTimeout(() => reject(new Error("meeting websocket timeout")), 5_000);
     socket.onopen = () => socket.send(JSON.stringify({ type: "hello", token: url.hash.slice(1) }));
@@ -202,6 +205,7 @@ test("a quiet room is proposed as ended, never stopped, and speech resets it", a
     onEvent: (event) => { if (event.type === "notice" && event.message) notices.push(event.message); },
   });
   const url = new URL(opened);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
   const recording = new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("meeting websocket timeout")), 5_000);
@@ -273,6 +277,7 @@ test("a loud but wordless room is reported as quiet, because the transcript deci
   });
   const url = new URL(opened);
 
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("meeting websocket timeout")), 5_000);
@@ -317,6 +322,7 @@ test("capture still records when no live engine is available", async () => {
   const started = await session.start();
   const url = new URL(started.url);
   const done = new Promise<void>((resolve, reject) => {
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const socket = new WebSocket(`ws://${url.host}/bridge`, { headers: { origin: url.origin } } as any);
     const timer = setTimeout(() => reject(new Error("meeting websocket timeout")), 5_000);
     socket.onopen = () => socket.send(JSON.stringify({ type: "hello", token: url.hash.slice(1) }));
@@ -584,6 +590,7 @@ describe("meeting support and tools", () => {
     expect(meetingSupportTarget("linux", "arm64")?.assetSuffix).toContain("arm64");
     expect(meetingSupportTarget("darwin", "arm64")?.assetSuffix).toContain("metal");
     expect(meetingSupportTarget("win32", "arm64")).toBeNull();
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     expect(meetingSupportTarget("freebsd" as NodeJS.Platform, "x64")).toBeNull();
     expect(() => validateMeetingArchiveEntries(["engine/parakeet-cli"], ["-rwxr-xr-x engine/parakeet-cli"])).not.toThrow();
     expect(() => validateMeetingArchiveEntries(["engine/lib.so"], ["lrwxrwxrwx engine/lib.so -> lib.so.1"])).not.toThrow();

@@ -571,6 +571,7 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
   await tick(80);
   const before = c.frames.length;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   (c.stdout as any).emit("resize"); // terminal resized (e.g. maximized)
   // Poll (not a fixed sleep): the 150ms debounce + remount render can land late under suite load.
   expect(await until(c, () => {

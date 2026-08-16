@@ -73,6 +73,7 @@ test("turn lease intersects disabled, role, and ephemeral tool authority, then r
   expect(await registry.execute("edit", { path: "src/target.ts", old_string: "41", new_string: "42" })).toContain("disabled");
   expect(await registry.execute("bash", { command: "echo test", run_in_background: true })).toContain("background bash is unavailable for this turn");
   let detached = 0;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   (registry as any).detachCurrent = () => { detached++; };
   expect(registry.detachRunningBash()).toBe(false);
   expect(detached).toBe(0);

@@ -78,6 +78,7 @@ function parseHttpUrl(input: string): URL {
 
 const systemLookup: PublicLookup = async (hostname) => {
   const rows = await dnsLookup(hostname, { all: true, verbatim: true });
+  // SAFETY: dns.lookup returns literal 4/6; the union only widens for the call signature.
   return rows.map((row) => ({ address: row.address, family: row.family as 4 | 6 }));
 };
 
@@ -107,7 +108,7 @@ async function resolvePublic(url: URL, lookup: PublicLookup, signal?: AbortSigna
   const hostname = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
   const literalFamily = isIP(hostname);
   const rows = literalFamily
-    ? [{ address: hostname, family: literalFamily as 4 | 6 }]
+    ? [{ address: hostname, family: /* SAFETY: the literal branch implies the family constant named beside it. */ literalFamily as 4 | 6 }]
     : await waitForLookup(lookup(hostname), signal);
   throwIfAborted(signal);
   if (rows.length === 0) throw new Error(`no address found for ${hostname}`);

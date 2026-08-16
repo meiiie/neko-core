@@ -130,6 +130,7 @@ export function diarizationRoot(home = homeDir()): string {
 export function readSpeechTools(home = homeDir()): SpeechToolsPack | null {
   const root = diarizationRoot(home);
   try {
+    // SAFETY: contract of the DiarizationManifest type is established by the surrounding validation/boundary.
     const manifest = JSON.parse(readFileSync(join(root, "diarization.json"), "utf8")) as DiarizationManifest;
     if (manifest.schemaVersion !== 1) return null;
     const file = (relativePath?: string) => (relativePath ? join(root, relativePath) : undefined);
@@ -152,6 +153,7 @@ export function readSpeechTools(home = homeDir()): SpeechToolsPack | null {
 /** The pack, but only when the optional speaker models are present too. */
 export function readDiarizationPack(home = homeDir()): DiarizationPack | null {
   const pack = readSpeechTools(home);
+  // SAFETY: contract of the DiarizationPack type is established by the surrounding validation/boundary.
   return pack?.segmentation && pack.embedding ? (pack as DiarizationPack) : null;
 }
 
@@ -182,6 +184,7 @@ export async function installSpeechTools(options: InstallDiarizationOptions = {}
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) throw new Error(`Could not read the sherpa-onnx release (HTTP ${response.status})`);
+    // SAFETY: GitHub release JSON; each asset field is read defensively downstream.
     const release = await response.json() as { assets?: Array<{ name?: string; size?: number; digest?: string; browser_download_url?: string }> };
     const asset = release.assets?.find((candidate) => candidate.name === target.assetName);
     const digest = String(asset?.digest ?? "").toLowerCase();

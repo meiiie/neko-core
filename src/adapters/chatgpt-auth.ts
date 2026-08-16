@@ -131,6 +131,7 @@ export async function validChatGptCredentials(fetchImpl: typeof fetch = fetch, i
         body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: current.refreshToken, client_id: CLIENT_ID }),
       });
       if (!response.ok) throw new Error(`ChatGPT token refresh failed (HTTP ${response.status}). Run \`neko login chatgpt\` again.`);
+      // SAFETY: contract of the TokenResponse type is established by the surrounding validation/boundary.
       const refreshed = fromTokenResponse(await response.json() as TokenResponse, current.refreshToken);
       if (!refreshed.accountId) refreshed.accountId = current.accountId;
       saveChatGptCredentials(refreshed);
@@ -169,6 +170,7 @@ async function exchangeCode(code: string, verifier: string, redirectUri: string,
     body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: CLIENT_ID, code_verifier: verifier }),
   });
   if (!response.ok) throw new Error(`ChatGPT token exchange failed (HTTP ${response.status}).`);
+  // SAFETY: contract of the TokenResponse type is established by the surrounding validation/boundary.
   return fromTokenResponse(await response.json() as TokenResponse);
 }
 
@@ -237,6 +239,7 @@ async function deviceLogin(options: LoginOptions): Promise<ChatGptCredentials> {
     body: JSON.stringify({ client_id: CLIENT_ID }),
   });
   if (!start.ok) throw new Error(`Could not start ChatGPT device sign-in (HTTP ${start.status}).`);
+  // SAFETY: device-auth JSON from OpenAI; required fields are validated immediately below.
   const data = await start.json() as { device_auth_id?: string; user_code?: string; interval?: string | number };
   if (!data.device_auth_id || !data.user_code) throw new Error("ChatGPT device sign-in returned an invalid response.");
   options.notify?.(`Open ${issuer}/codex/device and enter code: ${data.user_code}`);
@@ -251,6 +254,7 @@ async function deviceLogin(options: LoginOptions): Promise<ChatGptCredentials> {
       body: JSON.stringify({ device_auth_id: data.device_auth_id, user_code: data.user_code }),
     });
     if (poll.ok) {
+      // SAFETY: device-auth poll JSON; required fields are validated immediately below.
       const code = await poll.json() as { authorization_code?: string; code_verifier?: string };
       if (!code.authorization_code || !code.code_verifier) throw new Error("ChatGPT device authorization returned an invalid response.");
       return exchangeCode(code.authorization_code, code.code_verifier, `${issuer}/deviceauth/callback`, fetchImpl, issuer);

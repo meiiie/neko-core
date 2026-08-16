@@ -34,8 +34,6 @@
 import CLIENT_HTML from "./client.html";
 import CAMERA_HTML from "./camera.html";
 
-import { isText } from "../shared/wire.ts";
-
 const LONG_POLL_MS = 25_000;
 const KEEP_RESULTS = 20; // ring of stored results per session (a phone may re-poll after a reconnect)
 const KEEP_MIRROR_EVENTS = 400;
@@ -166,7 +164,7 @@ async function safeEqual(a, b) {
     crypto.subtle.digest("SHA-256", enc.encode(String(b || ""))),
   ]);
   const av = new Uint8Array(ah), bv = new Uint8Array(bh);
-  if ((crypto.subtle.timingSafeEqual instanceof Function)) {
+  if (typeof crypto.subtle.timingSafeEqual === "function") {
     return crypto.subtle.timingSafeEqual(av, bv) && !!a && !!b;
   }
   // Bun/older local runtimes may not expose the Workers-only primitive yet.
@@ -442,7 +440,7 @@ export class RelaySession {
   /** Host WebSocket frames: {t:"reply"|"partial", id, reply, tokens?, ms?}. */
   async webSocketMessage(ws, raw) {
     let m;
-    const text = isText(raw) ? raw : new TextDecoder().decode(raw);
+    const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
     if (new TextEncoder().encode(text).byteLength > MAX_WS_FRAME_BYTES) {
       try { ws.close(1009, "frame too large"); } catch { /* already closed */ }
       return;

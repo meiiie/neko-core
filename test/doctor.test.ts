@@ -9,10 +9,15 @@ import { collectChecks, collectTerminalChecks, srtToolchainCheck, terminalName }
 import { saveKimiCredentials } from "../src/adapters/kimi-auth.ts";
 
 test("terminalName identifies the host from the env, most-specific first", () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(terminalName({ TERM_PROGRAM: "WezTerm", WT_SESSION: "x" } as any)).toBe("WezTerm");
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(terminalName({ WT_SESSION: "guid" } as any)).toBe("Windows Terminal");
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(terminalName({ ConEmuANSI: "ON" } as any)).toBe("ConEmu/Cmder");
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(terminalName({ TERM: "xterm-256color" } as any)).toBe("xterm-256color");
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const bare = terminalName({} as any);
   expect(bare === "legacy console (conhost)" || bare === "unknown").toBe(true); // platform-dependent
 });

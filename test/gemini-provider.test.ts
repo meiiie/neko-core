@@ -25,6 +25,7 @@ test("Gemini provider streams through ACP and proxies tools back through Neko's 
         if (method === "session/prompt") {
           const mcp = requests.find((request) => request.method === "session/new")!.params.mcpServers[0];
           const headers = { "content-type": "application/json", accept: "application/json, text/event-stream", Authorization: mcp.headers[0].value };
+          // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
           const rpc = async (body: any) => (await fetch(mcp.url, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...body }) })).json() as any;
           await rpc({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "gemini-test", version: "1" } } });
           const listed = await rpc({ id: 2, method: "tools/list", params: {} });

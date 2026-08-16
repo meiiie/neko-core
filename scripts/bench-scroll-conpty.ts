@@ -16,6 +16,7 @@ const vt = new VirtualTerminal(cols, rows);
 let bytes = 0;
 let lastChangeAt = 0;
 let snapshot = "";
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const term = new (Bun as any).Terminal({
   cols, rows,
   data(_t: unknown, c: Uint8Array) {
@@ -27,6 +28,7 @@ const term = new (Bun as any).Terminal({
 });
 const env: Record<string, string | undefined> = { ...process.env, WT_SESSION: "bench", NEKO_AUTO_UPDATE: "0" };
 if (process.env.BENCH_INCR) env.NEKO_INCR = process.env.BENCH_INCR;
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const proc = Bun.spawn({ cmd: [exe, "--yolo"], cwd: import.meta.dir + "/..", terminal: term, env } as any);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred: () => boolean, ms: number) => {

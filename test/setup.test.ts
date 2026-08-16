@@ -25,6 +25,7 @@ test("browser setup makes durable auth the default and keeps attach/isolated exp
   const logs: string[] = [];
 
   expect(await setupWeb("browser", (line) => logs.push(line))).toBe(0);
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   let args = config(home).mcp_servers.browser.args as string[];
   expect(args).toContain("--user-data-dir");
   expect(args).toContain(join(home, ".neko-core", "browser", "default"));

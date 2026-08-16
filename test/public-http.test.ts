@@ -85,7 +85,11 @@ test("publicHttpFetch aborts while a DNS resolver is hung", async () => {
     publicHttpFetch("https://hung.example/", { signal }, {
       lookup: async () => new Promise(() => {}),
       request: async () => { requests++; return ok("must-not-run"); },
-    }).then(() => "resolved", (error) => (error as Error).name + ": " + (error as Error).message),
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
+    }).then(() => "resolved", (error) => {
+      // SAFETY: the rejection under test is always an Error thrown by the bounded fetch path.
+      return (error as Error).name + ": " + (error as Error).message;
+    }),
     new Promise<string>((resolve) => setTimeout(() => resolve("still-pending"), 250)),
   ]);
   expect(outcome).not.toBe("still-pending");
@@ -127,7 +131,11 @@ test("publicHttpFetch applies the same deadline to redirect DNS", async () => {
         requests++;
         return { status: 302, headers: new Headers({ location: "https://hung.example/" }), body: Buffer.alloc(0) };
       },
-    }).then(() => "resolved", (error) => (error as Error).name + ": " + (error as Error).message),
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
+    }).then(() => "resolved", (error) => {
+      // SAFETY: the rejection under test is always an Error thrown by the bounded fetch path.
+      return (error as Error).name + ": " + (error as Error).message;
+    }),
     new Promise<string>((resolve) => setTimeout(() => resolve("still-pending"), 250)),
   ]);
   expect(outcome).not.toBe("still-pending");

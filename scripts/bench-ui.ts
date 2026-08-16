@@ -57,10 +57,15 @@ await new Promise<void>((resolve) => {
 const allRows = resumeLines.flatMap((line) => getCachedRows(line, 100) ?? fallbackRows(line));
 console.log(`warm resume viewport (${Math.min(WARM_WINDOW, resumeLines.length)}/${resumeLines.length} lines): ${ms(t0)} (${allRows.length} current rows)`);
 t0 = performance.now();
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const rv = render(React.createElement(RichView, { rows: allRows, dist: 0, viewH: 30, width: 100 }) as any);
 console.log(`RichView mount (viewH=30, cached rows): ${ms(t0)}`);
 t0 = performance.now();
-for (let i = 1; i <= 10; i++) rv.rerender(React.createElement(RichView, { rows: allRows, dist: i * 3, viewH: 30, width: 100 }) as any);
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+for (let i = 1; i <= 10; i++) {
+  // SAFETY: benchmark rerenders a real mounted component; the Ink render result object is opaque here.
+  rv.rerender(React.createElement(RichView, { rows: allRows, dist: i * 3, viewH: 30, width: 100 }) as any);
+}
 console.log(`RichView 10 scroll re-renders: ${ms(t0)} (avg ${((performance.now() - t0) / 10).toFixed(1)}ms/frame)`);
 rv.unmount();
 
@@ -68,6 +73,7 @@ rv.unmount();
 process.env.NEKO_FULLSCREEN = "1";
 const provider: any = { complete: async () => ({ content: "ok", tool_calls: [] }) };
 t0 = performance.now();
+// SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const app = render(React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: s, sessionId: id }) as any);
 await tick(80);
 console.log(`ChatApp fullscreen mount+settle: ${ms(t0)} (${app.stdout.frames.length} frames)`);

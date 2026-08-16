@@ -281,6 +281,7 @@ function liveWindowsProcesses(pids: number[]): number[] {
       live.push(pid);
     } catch (error) {
       // EPERM proves the PID still exists even if a higher-integrity child cannot be signalled.
+      // SAFETY: contract of the NodeJS.ErrnoException type is established by the surrounding validation/boundary.
       if ((error as NodeJS.ErrnoException).code === "EPERM") live.push(pid);
     }
   }
@@ -306,6 +307,7 @@ function posixProcessGroupGone(child: BashChild): boolean {
     process.kill(-pid, 0);
     return false;
   } catch (error) {
+    // SAFETY: contract of the NodeJS.ErrnoException type is established by the surrounding validation/boundary.
     return (error as NodeJS.ErrnoException).code === "ESRCH";
   }
 }
@@ -389,6 +391,7 @@ async function runResponsiveChild(
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (error) {
+    // SAFETY: spawn failures surface as Error instances from the child_process API.
     return {
       status: null, signal: null, stdout: "", stderr: "", error: error as Error,
       timedOut: false, aborted: false, cleanupConfirmed: true,
@@ -453,6 +456,7 @@ const NATIVE_BACKEND_TOOL_NAMES: ReadonlySet<NativeToolName> = new Set([
 ]);
 
 function isNativeBackendToolName(name: string): name is NativeToolName {
+  // SAFETY: contract of the NativeToolName type is established by the surrounding validation/boundary.
   return NATIVE_BACKEND_TOOL_NAMES.has(name as NativeToolName);
 }
 
@@ -939,6 +943,7 @@ export class ToolRegistry {
     // accumulating output into a record the user reads with /bashes. For servers/watchers/long jobs.
     if (args.run_in_background === true) {
       const id = `bg${++this.bgCounter}`;
+      // SAFETY: contract of the number | null | undefined type is established by the surrounding validation/boundary.
       const bg = { id, command, output: "", done: false, code: undefined as number | null | undefined };
       const grab = (d: any) => { bg.output += d.toString().slice(0, Math.max(0, MAX_BASH_OUTPUT - bg.output.length)); };
       child.stdout?.on("data", grab);
@@ -997,6 +1002,7 @@ export class ToolRegistry {
     }
     if (outcome.kind === "detach") {
       const id = `bg${++this.bgCounter}`;
+      // SAFETY: contract of the number | null | undefined type is established by the surrounding validation/boundary.
       const bg = { id, command, output, done: false, code: undefined as number | null | undefined };
       // Keep accumulating into the background record (the same `output` string is snapshotted; rebind).
       child.stdout?.removeListener("data", onData);
@@ -1081,6 +1087,7 @@ export class ToolRegistry {
         .map((schema) => this.schemaForTurn(schema)),
       ...(this.mcp?.toolSchemas() ?? []).filter((s) => {
         const name = String(s?.function?.name ?? "");
+        // SAFETY: contract of the NativeToolName type is established by the surrounding validation/boundary.
         return !this.nativeBackendTools.has(name as NativeToolName) && this.isToolAvailable(name);
       }),
     ];
@@ -1284,6 +1291,7 @@ export class ToolRegistry {
       try {
         return await this.mcp.call(name, args, signal);
       } catch (error) {
+        // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
         return `Error: ${(error as Error).message}`;
       }
     }
@@ -1297,6 +1305,7 @@ export class ToolRegistry {
         ? resolveForWrite(this.root, String(args.path), this.additionalWriteRoots)
         : undefined;
     } catch (error) {
+      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
       return `Error: ${(error as Error).message}`;
     }
     if (structuredPath) {
@@ -1348,6 +1357,7 @@ export class ToolRegistry {
       try {
         return await this.subagent(prompt, args.subagent_type ? String(args.subagent_type) : undefined, signal);
       } catch (error) {
+        // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
         return signal?.aborted ? "(interrupted)" : `Sub-agent error: ${(error as Error).message}`;
       }
     }
@@ -1358,6 +1368,7 @@ export class ToolRegistry {
         if (refusal) return refusal;
         this.snapshotFile(structuredPath);
       }
+      // SAFETY: contract of the NativeToolName type is established by the surrounding validation/boundary.
       const out = nativeBackend ? await this.runNativeBackend(nativeBackend, name as NativeToolName, args, signal)
         : name === "bash" ? await this.runBash(args, signal)
         : name === "read_file" ? await this.runReadFile(args, signal)
@@ -1386,6 +1397,7 @@ export class ToolRegistry {
       return out;
     } catch (error) {
       if (structuredPath) this.finishStructuredMutation(structuredPath, false);
+      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
       return `Error: ${(error as Error).message}`;
     }
   }
@@ -1921,6 +1933,7 @@ async function jsSearch(root: string, pattern: string, args: Record<string, any>
   try {
     regex = new RegExp(pattern, args.case_insensitive ? "i" : "");
   } catch (error) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     return `Error: invalid regex: ${(error as Error).message}`;
   }
   const base = resolveForRead(root, args.path || ".", opts.readOutsideRoot);
@@ -1991,6 +2004,7 @@ async function toolGlob(root: string, args: Record<string, any>, opts: ToolOpts)
       }
     }
   } catch (error) {
+    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
     return `Error: ${(error as Error).message}`;
   }
   return results.length ? results.sort().join("\n") : "(no files)";

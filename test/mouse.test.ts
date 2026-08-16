@@ -44,8 +44,11 @@ test("parseClick: left-button press coordinates; wheel and other buttons rejecte
 });
 
 test("isMouseEnabled: on by default, off with NEKO_DISABLE_MOUSE", () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isMouseEnabled({} as any)).toBe(true);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isMouseEnabled({ NEKO_DISABLE_MOUSE: "1" } as any)).toBe(false);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(isMouseEnabled({ NEKO_DISABLE_MOUSE: "true" } as any)).toBe(false);
 });
 
@@ -74,7 +77,12 @@ test("title driver: blinks while busy and re-asserts idle without sharing global
   const driver = createTitleDriver({
     write: (title: string) => writes.push(title),
     keepIdle: true,
-    schedule: (tick: () => void) => { heartbeat = tick; return 0 as never; },
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
+    schedule: (tick: () => void) => {
+      heartbeat = tick;
+      // SAFETY: jsdom's scheduler contract accepts any handle; 0 is never dereferenced here.
+      return 0 as never;
+    },
     cancel: () => { cancelled = true; },
   });
 
@@ -96,15 +104,22 @@ test("title driver: blinks while busy and re-asserts idle without sharing global
 test("title stack push is SKIPPED on Windows (its restore reverts the tab mid-session)", async () => {
   const { saveTitle } = await import("../src/ui/title.ts");
   const writes: string[] = [];
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const orig = process.stdout.write, origTTY = (process.stdout as any).isTTY;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   (process.stdout as any).isTTY = true;
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   (process.stdout as any).write = (s: any) => { writes.push(String(s)); return true; };
   try {
     saveTitle();
     if (process.platform === "win32") expect(writes.join("")).toBe("");           // no push -> nothing to revert to
     else expect(writes.join("")).toBe("\x1b[22;0t");                              // other terminals still get the stack
   } finally {
-    (process.stdout as any).write = orig; (process.stdout as any).isTTY = origTTY;
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+    // SAFETY: test restores the raw stdout surface it patched.
+    (process.stdout as any).write = orig;
+    // SAFETY: test restores the raw stdout surface it patched.
+    (process.stdout as any).isTTY = origTTY;
   }
 });
 

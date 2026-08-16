@@ -112,7 +112,9 @@ test("describe reports the managed lifecycle state for doctor", async () => {
 });
 
 test("dockerAvailable is a fast boolean probe", () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   expect(dockerAvailable(((_c: string, _a: string[]) => ({ status: 0, stdout: "27.0", stderr: "" })) as Exec)).toBe(true);
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   expect(dockerAvailable(((_c: string, _a: string[]) => ({ status: null, stdout: "", stderr: "not found" })) as Exec)).toBe(false);
 });
 

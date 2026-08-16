@@ -130,6 +130,7 @@ function sessionPath(id: string): string | null {
 
 function validMessage(value: unknown): boolean {
   if (!isJsonObject(value)) return false;
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const message = value as Record<string, unknown>;
   if (!new Set(["system", "user", "assistant", "tool"]).has(String(message.role ?? ""))) return false;
   if (message._neko_internal !== undefined && !isBool(message._neko_internal)) return false;
@@ -144,6 +145,7 @@ function validMetadataText(value: unknown, maxBytes: number): value is string {
 
 function validTurnState(value: unknown): value is SessionTurnState {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const state = value as Record<string, unknown>;
   if (!new Set(["idle", "running", "interrupted"]).has(String(state.status ?? ""))) return false;
   if (state.startedAt !== undefined && !validMetadataText(state.startedAt, MAX_SESSION_TIME_BYTES)) return false;
@@ -156,6 +158,7 @@ function validTurnState(value: unknown): value is SessionTurnState {
 
 function validUsage(value: unknown): value is SessionUsage {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const usage = value as Record<string, unknown>;
   const keys = ["promptTokens", "completionTokens", "totalTokens", "cachedTokens", "cacheWriteTokens",
     "calls", "lastPrompt", "lastCompletion", "lastCached", "lastCacheWrite"];
@@ -514,6 +517,7 @@ function metaOf(session: Session, mtime: number, fsize: number): SessionMeta {
 
 function validMeta(value: unknown, expectedId: string): value is SessionMeta {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const meta = value as Record<string, unknown>;
   return meta.id === expectedId
     && isValidSessionId(expectedId)

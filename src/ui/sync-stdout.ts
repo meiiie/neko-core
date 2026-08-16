@@ -151,10 +151,14 @@ export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: Nod
   // `supported` from a runtime probe (SSH) wins; otherwise fall back to the env allowlist.
   const supported = opts.supported ?? isSyncOutputSupported(env);
   const differ = opts.differ;
-  if (!(base as any).isTTY || (!supported && !differ)) return base;
+  // SAFETY: sync wrappers reach the raw stream surface (isTTY/write) that Node's Writable union hides.
+  const rawBase = base as any;
+  if (!rawBase.isTTY || (!supported && !differ)) return base;
   // Imperative band repaints (scroll/append/warm) bypass Ink entirely: the differ writes straight to
   // the base stream, atomically bracketed like everything else.
-  (differ as any)?.setWriter?.((s: string) => { if (s) { const out = supported ? BSU + s + ESU : s; traceWrite("imperative", out); (base as any).write(out); } });
+  // SAFETY: the differ's writer hook is an imperative Ink bypass; guarded by the optional call.
+  const imperativeDiffer = differ as any;
+  imperativeDiffer?.setWriter?.((s: string) => { if (s) { const out = supported ? BSU + s + ESU : s; traceWrite("imperative", out); rawBase.write(out); } });
 
   const wrappedWrite = (chunk: any, ...args: any[]): boolean => {
     if (isText(chunk) && chunk.length > 0) {
@@ -182,8 +186,10 @@ export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: Nod
       }
       const final = supported ? BSU + out + ESU : out;
       traceWrite(out === chunk ? "passthru" : "frame", final);
+      // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
       return (base as any).write(final, ...args);
     }
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     return (base as any).write(chunk, ...args);
   };
 

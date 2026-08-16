@@ -31,6 +31,7 @@ describe("Codex Support Pack", () => {
     const archive = Buffer.from("synthetic archive");
     const digest = createHash("sha256").update(archive).digest("hex");
     let assetDownloads = 0;
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const fetchImpl = (async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("api.github.com")) return Response.json({
@@ -77,6 +78,7 @@ describe("Codex Support Pack", () => {
     const home = mkdtempSync(join(tmpdir(), "neko-support-test-"));
     homes.push(home);
     let assetDownloads = 0;
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const fetchImpl = (async (input: string | URL | Request) => {
       if (String(input).includes("api.github.com")) return Response.json({
         tag_name: "rust-v0.144.1",
@@ -106,6 +108,7 @@ describe("Codex Support Pack", () => {
     const root = codexSupportRoot(home);
     const previous = await installFixture(home, "0.144.0");
     const archive = Buffer.from("tampered");
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const fetchImpl = (async (input: string | URL | Request) => {
       if (String(input).includes("api.github.com")) return Response.json({
         tag_name: "rust-v0.144.1",
@@ -140,6 +143,7 @@ describe("Codex Support Pack", () => {
     const previous = await installFixture(home, "0.144.0");
     const archive = Buffer.from("valid synthetic archive");
     const digest = createHash("sha256").update(archive).digest("hex");
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const fetchImpl = (async (input: string | URL | Request) => {
       if (String(input).includes("api.github.com")) return Response.json({
         tag_name: "rust-v0.144.1",
@@ -171,6 +175,7 @@ describe("Codex Support Pack", () => {
     homes.push(home);
     const archive = Buffer.from("valid synthetic archive");
     const digest = createHash("sha256").update(archive).digest("hex");
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const fetchImpl = (async (input: string | URL | Request) => {
       if (String(input).includes("api.github.com")) return Response.json({
         tag_name: "rust-v0.144.1",
@@ -211,6 +216,7 @@ describe("Codex Support Pack", () => {
     const previous = await installFixture(home, "0.144.0");
     const archive = Buffer.from("valid synthetic archive");
     const digest = createHash("sha256").update(archive).digest("hex");
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     const fetchImpl = (async (input: string | URL | Request) => {
       if (String(input).includes("api.github.com")) return Response.json({
         tag_name: "rust-v0.144.1",

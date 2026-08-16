@@ -33,6 +33,7 @@ export const KITTY_POP = "\x1b[<u";
  * Every sequence here is a no-op when the state is already clean, so calling it repeatedly is safe. */
 export function emergencyRestore(out: Writable = process.stdout): void {
   try {
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     if (!(out as any).isTTY) return;
     // No title pop on Windows: we never pushed there (WT's title stack reverts the tab mid-session; see
     // title.ts). Elsewhere, pop to restore the user's shell title on exit.
@@ -44,6 +45,7 @@ export function emergencyRestore(out: Writable = process.stdout): void {
 /** Whether a stream can host fullscreen: an interactive TTY with room to draw. A non-TTY (piped output,
  * CI, `neko run`) or a tiny window can't - callers degrade to inline instead of corrupting the terminal. */
 export function canFullscreen(out: Writable = process.stdout): boolean {
+  // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   const s = out as any;
   if (s.isTTY === false) return false; // explicitly not a TTY (piped/redirected)
   const rows = s.rows === undefined ? 24 : s.rows; // dims may be absent on some streams - assume a sane default

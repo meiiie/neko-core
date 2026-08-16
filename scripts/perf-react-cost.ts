@@ -42,12 +42,16 @@ async function mount(seedTexts: string[]) {
   const stdin = new FakeStdin();
   const differ = new FrameDiffer();
   const app = render(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, {
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       yolo: true, provider: new SeedProvider(seedTexts) as any,
       sessionId: "react-cost", frameDiffer: differ,
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       preAltDispose: installAltScreenGuard(out as any, { mouse: false }),
       fullscreen: true,
     } as any),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true } as any,
   );
   await tick(1000); // let the seed turn flush

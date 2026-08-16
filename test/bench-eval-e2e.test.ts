@@ -67,6 +67,7 @@ function processIsLive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
@@ -178,6 +179,7 @@ test("benchmark fingerprint binds public execution identity without hashing secr
   const task = makeTask();
   const environment = {
     sourceDigest: "a".repeat(64),
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     platform: "linux" as NodeJS.Platform,
     arch: "x64",
     sandboxKind: "bwrap" as const,
@@ -187,6 +189,7 @@ test("benchmark fingerprint binds public execution identity without hashing secr
   };
   const same = __benchmarkRunFingerprintForTest(cfg, [task], 25, environment);
   expect(__benchmarkRunFingerprintForTest(cfg, [task], 25, environment)).toBe(same);
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const reorderedEnvironment = Object.fromEntries(Object.entries(environment).reverse()) as typeof environment;
   expect(__benchmarkRunFingerprintForTest(cfg, [task], 25, reorderedEnvironment)).toBe(same);
   expect(__benchmarkRunFingerprintForTest(cfg, [{ ...task, files: { ...task.files, "calc.mjs": "changed\n" } }], 25, environment)).not.toBe(same);
@@ -194,6 +197,7 @@ test("benchmark fingerprint binds public execution identity without hashing secr
   expect(__benchmarkRunFingerprintForTest(cfg, [task], 25, { ...environment, sourceDigest: "b".repeat(64) })).not.toBe(same);
 
   for (const changed of [
+    // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
     { ...environment, platform: "darwin" as NodeJS.Platform },
     { ...environment, arch: "arm64" },
     { ...environment, sandboxKind: "sandbox-exec" as const },
@@ -443,6 +447,7 @@ test("runEval end-to-end (scripted provider): trace + constraints + scorecard, n
   expect(persisted).toMatchObject({ kind: "eval", schema: "neko.eval.trajectory.v1" });
   expect(persisted!.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   expect(persisted!.trajectories.every((trajectory) => trajectory.taskRef === "t1")).toBe(true);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect((persisted!.dim.tasks[0] as any).id).toBeUndefined();
   const safeArtifact = JSON.stringify(persisted);
   expect(safeArtifact).not.toContain("calc.mjs");

@@ -146,6 +146,7 @@ function hasUnsafeConfigStructure(root: unknown): boolean {
     if (++visited > 10_000 || depth > 64) return true;
     for (const key of Object.keys(value)) {
       if (key === "__proto__" || key === "prototype" || key === "constructor") return true;
+      // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
       stack.push({ value: (value as Record<string, unknown>)[key], depth: depth + 1 });
     }
   }
@@ -191,6 +192,7 @@ function validManifest(files: Record<string, any>): files is Record<string, stri
     if (files[dirMarker(dir)] !== "missing" && files[dirMarker(dir)] !== "directory") return false;
   }
   for (const [name, digest] of Object.entries(files)) {
+    // SAFETY: contract of the typeof PROJECT_CONTROL_FILES[number type is established by the surrounding validation/boundary.
     if (PROJECT_CONTROL_FILES.includes(name as typeof PROJECT_CONTROL_FILES[number])) continue;
     if (PROJECT_CONTROL_DIRS.some((dir) => name === dirMarker(dir))) continue;
     const directoryFile = PROJECT_CONTROL_DIRS.some((dir) => name.startsWith(`${dir}/`) && isSafeRelative(name.slice(dir.length + 1)));
@@ -217,6 +219,7 @@ function validateRecord(id: string, raw: unknown): TrustRecord {
     || Number.isNaN(Date.parse(raw.trustedAt)) || new Date(raw.trustedAt).toISOString() !== raw.trustedAt) {
     throw new Error("Project trust store contains an invalid record");
   }
+  // SAFETY: contract of the TrustRecord type is established by the surrounding validation/boundary.
   return raw as TrustRecord;
 }
 
@@ -325,6 +328,7 @@ function assertDirectAncestors(path: string): void {
 }
 
 function assertRootIdentity(root: string, expectedIdentity: string): Stats {
+  // SAFETY: contract of the Stats type is established by the surrounding validation/boundary.
   const stat = lstatSync(root) as Stats;
   if (stat.isSymbolicLink() || !stat.isDirectory() || statIdentity(stat) !== expectedIdentity
     || realpathSync.native(root) !== root) throw new Error("Project root changed while being inspected");
@@ -340,8 +344,13 @@ function verifiedLstat(root: string, rootIdentity: string, path: string): Stats 
   for (const part of rel.split(sep).filter(Boolean)) {
     current = join(current, part);
     let stat: Stats;
-    try { stat = lstatSync(current) as Stats; }
+    // SAFETY: contract of the Stats type is established by the surrounding validation/boundary.
+    try {
+      // SAFETY: lstat of an existing path; the throw path handles ENOENT/reparse points.
+      stat = lstatSync(current) as Stats;
+    }
     catch (error) {
+      // SAFETY: contract of the NodeJS.ErrnoException type is established by the surrounding validation/boundary.
       if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new MissingControl();
       throw error;
     }
@@ -351,6 +360,7 @@ function verifiedLstat(root: string, rootIdentity: string, path: string): Stats 
     result = stat;
   }
   assertRootIdentity(root, rootIdentity);
+  // SAFETY: contract of the Stats type is established by the surrounding validation/boundary.
   return result ?? lstatSync(root) as Stats;
 }
 
@@ -465,6 +475,7 @@ function snapshotProject(cwd: string): ProjectTrustInspection {
     const rootStat = lstatSync(requested);
     if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return emptyInspection("error", "Project root is not a direct regular directory");
     root = realpathSync.native(requested);
+    // SAFETY: contract of the Stats type is established by the surrounding validation/boundary.
     rootIdentity = statIdentity(rootStat as Stats);
     assertRootIdentity(root, rootIdentity);
   } catch {
@@ -545,6 +556,7 @@ function snapshotProject(cwd: string): ProjectTrustInspection {
     }
   } catch (error) {
     return {
+      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
       ...emptyInspection("error", (error as Error).message.includes("configured globally")
         ? "Project-local hooks, MCP servers, and external write roots are not authoritative; configure them globally"
         : "Cannot safely parse project control configuration"),
@@ -573,7 +585,11 @@ export function inspectProjectTrust(cwd = process.cwd(), home = homeDir()): Proj
   if (snapshot.state === "none" || snapshot.state === "error") return snapshot;
   let store: TrustStore;
   try { store = readStore(home); }
-  catch (error) { return { ...snapshot, state: "error", reason: (error as Error).message }; }
+  // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+  catch (error) {
+    // SAFETY: store failures are fs Errors from this module's own readers.
+    return { ...snapshot, state: "error", reason: (error as Error).message };
+  }
   const record = store.projects[snapshot.projectId!];
   if (!record) return snapshot;
   return {

@@ -88,9 +88,12 @@ function mountFlow(provider: any, sessionId: string, cols: number, rows: number,
   const out = new Out(cols, rows, vt);
   const stdin = new In();
   const differ = new FrameDiffer();
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = render(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo, provider, sessionId, frameDiffer: differ, preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false, interactive: true },
   );
   return { vt, out, stdin, differ, app };

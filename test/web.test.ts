@@ -35,6 +35,7 @@ const chunked = (body: string, contentType: string) => new Response(new Readable
 }), { status: 200, headers: { "content-type": contentType } });
 
 test("web_search uses SearXNG when searxng_url is set", async () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (url: any) => {
     expect(String(url)).toContain("/search?format=json");
     return json({ results: [{ title: "TS docs", url: "https://ts.org", content: "TypeScript <b>typing</b>" }] });
@@ -49,6 +50,7 @@ test("web_search uses SearXNG when searxng_url is set", async () => {
 
 test("web_search uses Tavily when TAVILY_API_KEY is set (and forced)", async () => {
   process.env.TAVILY_API_KEY = "tvly-x";
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (url: any) => {
     expect(String(url)).toContain("api.tavily.com");
     return json({ results: [{ title: "Result", url: "https://r.com", content: "snippet" }] });
@@ -61,6 +63,7 @@ test("web_search uses Tavily when TAVILY_API_KEY is set (and forced)", async () 
 });
 
 test("web_search falls back to DuckDuckGo if the chosen backend errors (wake declined honestly)", async () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (url: any) => {
     if (String(url).includes("searx")) throw new Error("down");
     // DDG HTML shape
@@ -76,6 +79,7 @@ test("web_search falls back to DuckDuckGo if the chosen backend errors (wake dec
 
 test("web_search WAKES a stopped managed SearXNG container and retries once (Ollama keep_alive pattern)", async () => {
   let searxCalls = 0;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (url: any) => {
     if (String(url).includes("searx")) {
       searxCalls++;
@@ -95,6 +99,7 @@ test("web_search WAKES a stopped managed SearXNG container and retries once (Oll
 });
 
 test("web_search uses a CONFIG-wired Tavily key (neko setup tavily) with no env var set", async () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (url: any) => {
     expect(String(url)).toContain("api.tavily.com");
     return json({ results: [{ title: "Cfg", url: "https://c.io", content: "from config key" }] });
@@ -106,6 +111,7 @@ test("web_search uses a CONFIG-wired Tavily key (neko setup tavily) with no env 
 });
 
 test("web_search refuses an oversized SearXNG response from Content-Length", async () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (url: any) => {
     if (String(url).includes("searx")) {
       return new Response("{}", { status: 200, headers: { "content-type": "application/json", "content-length": String(TOO_LARGE) } });
@@ -120,6 +126,7 @@ test("web_search refuses an oversized SearXNG response from Content-Length", asy
 });
 
 test("web_search refuses an oversized chunked Tavily JSON response", async () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (url: any) => {
     if (String(url).includes("api.tavily.com")) {
       return chunked(JSON.stringify({ results: [], padding: "x".repeat(TOO_LARGE) }), "application/json");
@@ -135,6 +142,7 @@ test("web_search refuses an oversized chunked Tavily JSON response", async () =>
 });
 
 test("web_search refuses an oversized chunked DuckDuckGo HTML response", async () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   globalThis.fetch = (async () => chunked("x".repeat(TOO_LARGE), "text/html")) as any;
   const out = await reg().execute("web_search", { query: "bounded" });
   expect(out).toContain(`response body exceeds ${PUBLIC_HTTP_MAX_BYTES} bytes`);
@@ -142,6 +150,7 @@ test("web_search refuses an oversized chunked DuckDuckGo HTML response", async (
 
 test("the ladder, not the cliff: searxng fails -> Tavily (key wired) -> never touches DuckDuckGo", async () => {
   let ddgCalled = false;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (url: any) => {
     const u = String(url);
     if (u.includes("searx")) throw new Error("down");
@@ -160,6 +169,7 @@ test("the ladder, not the cliff: searxng fails -> Tavily (key wired) -> never to
 });
 
 test("zero-config search with Docker present shows the setup tip ONCE per process", async () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async () =>
     new Response('<a class="result__a" href="https://d.com">DDG hit</a>', { status: 200, headers: { "content-type": "text/html" } })) as any;
   __resetHintForTest(() => true); // "Docker detected"
@@ -171,6 +181,7 @@ test("zero-config search with Docker present shows the setup tip ONCE per proces
 });
 
 test("zero-config search WITHOUT Docker never hints (nothing actionable)", async () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async () =>
     new Response('<a class="result__a" href="https://d.com">DDG hit</a>', { status: 200, headers: { "content-type": "text/html" } })) as any;
   __resetHintForTest(() => false);

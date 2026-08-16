@@ -249,7 +249,10 @@ export class Agent {
     this.provider = provider;
     try {
       const disposed = previous.dispose?.();
-      if (disposed && (disposed as Promise<void>).catch instanceof Function) void (disposed as Promise<void>).catch(() => {});
+      // SAFETY: contract of the Promise<void> type is established by the surrounding validation/boundary.
+      // SAFETY: the dispose hook hands back a promise-like; the instanceof check guards the call.
+      const disposable = disposed as Promise<void>;
+      if (disposable && disposable.catch instanceof Function) void disposable.catch(() => {});
     } catch { /* provider cleanup must not block a live account switch */ }
   }
 

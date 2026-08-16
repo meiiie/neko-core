@@ -66,6 +66,7 @@ test("the split is offered only where a verified binary exists", () => {
   expect(diarizationTarget("linux", "x64")?.assetName).toContain("linux-x64");
   expect(diarizationTarget("darwin", "arm64")?.assetName).toContain("osx-arm64");
   expect(diarizationTarget("linux", "arm64")).toBeNull();
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   expect(diarizationTarget("win32", "ia32" as NodeJS.Architecture)).toBeNull();
 });
 

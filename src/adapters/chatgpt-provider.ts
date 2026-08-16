@@ -67,6 +67,7 @@ export interface ChatGptUsageReport {
 export async function listChatGptModelCatalog(fetchImpl: typeof fetch = fetch): Promise<ChatGptModelInfo[]> {
   const url = new URL(CHATGPT_CODEX_MODELS_URL);
   url.searchParams.set("client_version", CHATGPT_CODEX_COMPAT_VERSION);
+  // SAFETY: fetched catalog JSON; the models array shape is validated immediately below.
   const data = await chatGptGetJson(url, "model catalog", fetchImpl) as { models?: any[] };
   if (!Array.isArray(data.models)) throw new Error("ChatGPT model catalog returned an invalid response");
   const seen = new Set<string>();
@@ -113,6 +114,7 @@ export function resolveChatGptEffort(requested: string, model?: { efforts?: Chat
 
 /** Read ChatGPT subscription windows/credits. This endpoint is read-only and does not consume model quota. */
 export async function getChatGptUsage(fetchImpl: typeof fetch = fetch): Promise<ChatGptUsageReport> {
+  // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   const raw = await chatGptGetJson(CHATGPT_CODEX_USAGE_URL, "usage", fetchImpl) as any;
   const limits: ChatGptUsageLimit[] = [];
   const addLimit = (id: string, name: string, value: any) => {
@@ -688,9 +690,11 @@ function boundedResponsesToolField(value: unknown, field: "id" | "name", maxByte
 
 function responsesToolIndex(value: unknown): number | null {
   if (value == null) return null;
+  // SAFETY: contract of the number type is established by the surrounding validation/boundary.
   if (!Number.isInteger(value) || (value as number) < 0 || (value as number) >= RESPONSES_STREAM_LIMITS.maxToolCalls) {
     throw new Error(`Responses streaming tool call index out of range: ${String(value).slice(0, 40)}`);
   }
+  // SAFETY: contract of the number type is established by the surrounding validation/boundary.
   return value as number;
 }
 

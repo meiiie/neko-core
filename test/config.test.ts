@@ -365,6 +365,7 @@ test("invalid boolean NEKO_* override fails clearly", () => {
 });
 
 test("redactSecrets recursively masks MCP headers and env values", () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const shown = redactSecrets({
     model: "m",
     mcp_servers: {

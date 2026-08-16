@@ -704,6 +704,7 @@ test("ACP checkpoints redact the resolved provider credential without losing ord
   const home = tempRoot();
   const cfg = loadConfig({ cwd: root, home });
   const secret = "neko-test-provider-secret-123456789";
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   (cfg as any).apiKeyFromFile = secret;
   const app = createNekoAcpAgent({
     config: cfg,

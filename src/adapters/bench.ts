@@ -578,6 +578,7 @@ async function runVerifierSource(
       );
       if (checked.error || checked.status !== 0 || checked.signal || checked.timedOut
         || checked.outputExceeded || !checked.treeCleanupConfirmed) {
+        // SAFETY: contract of the NodeJS.ErrnoException | undefined type is established by the surrounding validation/boundary.
         const code = (checked.error as NodeJS.ErrnoException | undefined)?.code ?? "none";
         throw new BenchInfrastructureError(
           `benchmark verifier infrastructure unavailable: toolchain preflight failed (status=${checked.status ?? "null"}, signal=${checked.signal ?? "none"}, code=${code}, timeout=${checked.timedOut}, output_cap=${checked.outputExceeded}, tree_cleanup=${checked.treeCleanupConfirmed})`,
@@ -600,6 +601,7 @@ async function runVerifierSource(
       sandbox, root, oracleChildEnv(sandbox.env), 30_000, 8 * 1024 * 1024,
       terminateProcessTree, srtInput ? undefined : runner.source,
     );
+    // SAFETY: contract of the NodeJS.ErrnoException | undefined type is established by the surrounding validation/boundary.
     const code = (launched.error as NodeJS.ErrnoException | undefined)?.code;
     if (launched.error) {
       throw new BenchInfrastructureError(
@@ -1662,6 +1664,7 @@ function opaqueTargetRef(call: any, refs: EvalTargetRefs): string | undefined {
 
 function safeEvalToolName(call: any): string {
   const name = isText(call?.name) ? call.name : "";
+  // SAFETY: contract of the readonly string[ type is established by the surrounding validation/boundary.
   return (BENCH_LOCAL_TOOLS as readonly string[]).includes(name) ? name : "<unknown>";
 }
 
@@ -1770,6 +1773,7 @@ function artifactTrajectory(trajectory: EvalTrialTrajectory, index: number): Eva
     const result = event.result === "empty" || event.result === "failed" ? event.result : "productive";
     return {
       round: Math.max(1, artifactCount(event.round)),
+      // SAFETY: contract of the readonly string[ type is established by the surrounding validation/boundary.
       tool: (BENCH_LOCAL_TOOLS as readonly string[]).includes(event.tool) ? event.tool : "<unknown>",
       ...(targetRef ? { targetRef } : undefined),
       result,
@@ -1785,6 +1789,7 @@ function artifactTrajectory(trajectory: EvalTrialTrajectory, index: number): Eva
     trial: Math.max(1, artifactCount(trajectory.trial)),
     outcome,
     failureSignals: trajectory.failureSignals.filter((signal) => EVAL_FAILURE_SIGNALS.has(signal)),
+    // SAFETY: contract of the EvalArtifactTrialTrajectory["verifier" type is established by the surrounding validation/boundary.
     verifier: verifier as EvalArtifactTrialTrajectory["verifier"],
     completionGate,
     ms: artifactNumber(trajectory.ms),

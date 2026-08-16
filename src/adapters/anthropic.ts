@@ -496,6 +496,7 @@ async function parseStream(
         if (!isJsonObject(ev.content_block) || !isText(ev.content_block.type) || !ev.content_block.type) {
           throw new Error("anthropic stream sent an invalid content_block_start");
         }
+        // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
         const raw = structuredClone(ev.content_block) as Record<string, any>;
         const block: AnthropicStreamBlock = { type: raw.type, json: "", argumentBytes: 0, raw };
         if (block.type === "tool_use") {
@@ -632,9 +633,11 @@ function requireMessageStart(started: boolean): void {
 }
 
 function streamIndex(value: unknown): number {
+  // SAFETY: contract of the number type is established by the surrounding validation/boundary.
   if (!Number.isInteger(value) || (value as number) < 0 || (value as number) >= ANTHROPIC_STREAM_LIMITS.maxToolCalls) {
     throw new Error(`anthropic stream content block index out of range: ${String(value).slice(0, 40)}`);
   }
+  // SAFETY: contract of the number type is established by the surrounding validation/boundary.
   return value as number;
 }
 
@@ -650,9 +653,12 @@ function streamUsage(value: unknown): Record<string, number> {
   if (!isJsonObject(value)) throw new Error("anthropic stream usage was invalid");
   const out: Record<string, number> = {};
   for (const key of ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]) {
+    // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
     const count = (value as Record<string, unknown>)[key];
     if (count === undefined || count === null) continue;
+    // SAFETY: contract of the number type is established by the surrounding validation/boundary.
     if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("anthropic stream usage was invalid");
+    // SAFETY: contract of the number type is established by the surrounding validation/boundary.
     out[key] = count as number;
   }
   return out;

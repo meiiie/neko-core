@@ -134,6 +134,7 @@ test("remote-relay E2E: the relay only ever sees ciphertext (zero-knowledge)", a
 /** A v2 relay double: /register advertises v:2 and the host connects a WebSocket (token in the
  * subprotocol). Mirrors the Cloudflare Worker's /ws contract so the WS path is proven end-to-end. */
 function makeWsDouble(port: number, opts: { refuseWs?: boolean } = {}) {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const state = { connections: 0, frames: [] as any[], sockets: [] as any[], token: "", queue: [] as any[], replies: new Map<string, any>() };
   let counter = 0;
   const server = Bun.serve({
@@ -147,7 +148,11 @@ function makeWsDouble(port: number, opts: { refuseWs?: boolean } = {}) {
         const protos = (req.headers.get("sec-websocket-protocol") ?? "").split(",").map((s) => s.trim());
         const t = (protos.find((p) => p.startsWith("t.")) ?? "").slice(2);
         if (t !== state.token) return new Response("unauthorized", { status: 401 });
-        if (srv.upgrade(req, { headers: { "sec-websocket-protocol": "neko-relay" } })) return undefined as any;
+        // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+        if (srv.upgrade(req, { headers: { "sec-websocket-protocol": "neko-relay" } })) {
+          // SAFETY: test handler never returns a Response on the upgrade path; undefined satisfies the caller.
+          return undefined as any;
+        }
         return new Response("no upgrade", { status: 426 });
       }
       // v1 endpoints (the WSS-blocked fallback lands here)

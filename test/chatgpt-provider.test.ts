@@ -58,6 +58,7 @@ test("ChatGPT provider uses only the fixed Codex backend and parses streamed tex
     { type: "response.output_item.done", output_index: 1, item: { id: "fc-1", type: "function_call", call_id: "call-1", name: "read_file", arguments: '{"path":"README.md"}' } },
     { type: "response.completed", response: { usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25, input_tokens_details: { cached_tokens: 7 } }, output: [] } },
   ];
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     url = String(input); sent = JSON.parse(String(init?.body)); headers = new Headers(init?.headers);
     const body = events.map((event) => `data: ${JSON.stringify(event)}\r\n\r\n`).join("") + "data: [DONE]\r\n\r\n";
@@ -240,6 +241,7 @@ test("a backend 401 forces one token refresh and retries with the new bearer", a
   let backendCalls = 0, refreshCalls = 0;
   const bearers: string[] = [];
   const access = `e30.${Buffer.from(JSON.stringify({ chatgpt_account_id: "acct-2" })).toString("base64url")}.sig`;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/oauth/token")) {
@@ -264,6 +266,7 @@ test("a backend 401 forces one token refresh and retries with the new bearer", a
 test("ChatGPT model picker uses the live account catalog and hides non-list models", async () => {
   setup();
   let url = "", account = "";
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const mockFetch = (async (input: string | URL | Request, init?: RequestInit) => {
     url = String(input);
     account = new Headers(init?.headers).get("chatgpt-account-id") ?? "";
@@ -289,6 +292,7 @@ test("ChatGPT model picker uses the live account catalog and hides non-list mode
 
 test("live model options expose GPT-5.6 for the optional App Server route", async () => {
   const cfg = setup();
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) => Response.json({ models: [
     { slug: "gpt-5.6-luna", display_name: "GPT-5.6-Luna", visibility: "list", use_responses_lite: true, tool_mode: "code_mode_only", input_modalities: ["text", "image"] },
     { slug: "gpt-5.5", display_name: "GPT-5.5", visibility: "list", use_responses_lite: false, input_modalities: ["text", "image"] },
@@ -307,6 +311,7 @@ test("the direct adapter still self-heals an accidental 5.6 request instead of s
   const cfg = setup();
   cfg.data.model = "gpt-5.6-luna";
   let sent: any;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     if (String(input).includes("/models")) return Response.json({ models: [
       { slug: "gpt-5.6-luna", visibility: "list", use_responses_lite: true, tool_mode: "code_mode_only", input_modalities: ["text", "image"] },
@@ -330,6 +335,7 @@ test("a retryable SSE failure before output retries once without duplicating vis
   cfg.data.max_retries = 1;
   cfg.data.retry_base_delay_seconds = 0;
   let calls = 0;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) => {
     calls++;
     if (calls === 1) return new Response(`data: ${JSON.stringify({ type: "response.failed", response: { error: { message: "An error occurred while processing your request." } } })}\n\n`, { status: 200 });
@@ -347,6 +353,7 @@ test("an HTML HTTP 520 is retried and never leaks markup into the terminal error
   cfg.data.max_retries = 1;
   cfg.data.retry_base_delay_seconds = 0;
   let calls = 0;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) => {
     calls++;
     return new Response(
@@ -381,6 +388,7 @@ test("saved max effort on GPT-5.4 is resolved from the catalog before the Respon
   const cfg = setup();
   cfg.data.reasoning_effort = "max";
   let sent: any;
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/models")) return Response.json({ models: [{
@@ -400,6 +408,7 @@ test("saved max effort on GPT-5.4 is resolved from the catalog before the Respon
 test("ChatGPT usage parses plan, primary/weekly windows, extra model limits, and credits", async () => {
   setup();
   let url = "", account = "";
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   const mockFetch = (async (input: string | URL | Request, init?: RequestInit) => {
     url = String(input); account = new Headers(init?.headers).get("chatgpt-account-id") ?? "";
     return Response.json({
@@ -423,6 +432,7 @@ test("ChatGPT usage parses plan, primary/weekly windows, extra model limits, and
 
 test("ChatGPT model picker falls back to the configured catalog when the live endpoint fails", async () => {
   setup();
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) =>
     new Response(JSON.stringify({ detail: "temporary failure" }), { status: 503 })) as typeof fetch;
   const cfg = new NekoConfig(
@@ -435,6 +445,7 @@ test("ChatGPT model picker falls back to the configured catalog when the live en
 });
 
 test("a stale compatible-provider catalog cannot hide a profile-confirmed newer model", async () => {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (input: string | URL | Request) => {
     expect(String(input)).toBe("https://api.z.ai/api/anthropic/v1/models");
     return Response.json({ data: [

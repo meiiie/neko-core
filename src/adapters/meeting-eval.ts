@@ -52,6 +52,7 @@ export function evaluateMeetingAsr(input: unknown): MeetingEvalReport {
   let sourceLabels = 0, sourceCorrect = 0;
   for (const [index, raw] of input.entries()) {
     if (!isJsonObject(raw)) throw new Error(`meeting eval case ${index + 1} must be an object`);
+    // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
     const value = raw as Record<string, unknown>;
     const id = String(value.id ?? `case-${index + 1}`).trim().slice(0, 200);
     if (!id || seen.has(id)) throw new Error(`meeting eval case id is missing or duplicated: ${id || index + 1}`);

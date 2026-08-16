@@ -68,9 +68,12 @@ test("fullscreen sim: startup, typing, grow and shrink never leave a black scree
     id: "sim", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: Array.from({ length: 8 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `noi dung sim ${i}` })),
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false }); // runChat's pre-render alt entry
   const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "sim", frameDiffer: differ, preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await tick(600); // alt-screen + first composed paint + warm
@@ -106,9 +109,12 @@ test("resize after a completed turn keeps the input row empty", async () => {
   const stdin = new FakeStdin();
   const differ = new FrameDiffer();
   const provider: any = { complete: async () => ({ content: "final answer", tool_calls: [] }) };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider, sessionId: "resize-after-turn", frameDiffer: differ, preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await tick(300);
@@ -139,9 +145,12 @@ test("STARTUP-fullscreen sim: alt entered BEFORE the first render - content visi
     id: "boot", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: [{ role: "user", content: "boot-marker cau hoi" }, { role: "assistant", content: "boot-marker tra loi" }],
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false }); // runChat's pre-render order
   const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "boot", frameDiffer: differ, preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await tick(500); // startup + warm settle - NO input at all
@@ -163,9 +172,12 @@ test("sticky prompt survives FrameDiffer composition and its first-row click jum
     messages.push({ role: "assistant", content: `answer ${i}` });
   }
   const session: any = { id: "anchor", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "", tool_calls: [] }) }, resumedSession: session, sessionId: "anchor", frameDiffer: differ, preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   try {
@@ -175,19 +187,23 @@ test("sticky prompt survives FrameDiffer composition and its first-row click jum
       for (let step = 0; step < 8; step++) {
         for (let waited = 0; waited < 500; waited += 25) {
           anchor = vt.lines()[0]?.trim() ?? "";
+          // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
           if ((differ as any).band?.top === 2 && /^> ANCHOR PROMPT \d+$/.test(anchor)) break;
           await tick(25);
         }
+        // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
         if ((differ as any).band?.top === 2 && /^> ANCHOR PROMPT \d+$/.test(anchor)) break;
         stdin.push("\x1b[1;5A"); // move one content row older until the current prompt is fully above the band
       }
       expect(anchor).toMatch(/^> ANCHOR PROMPT \d+$/);
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       expect((differ as any).band?.top).toBe(2); // row 1 belongs to the sticky header, band begins below it
 
     stdin.push("\x1b[<0;5;1M");
     let jumped = false;
     for (let waited = 0; waited < 3000; waited += 25) {
       const rows = vt.lines();
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       if ((differ as any).band?.top === 1 && rows.slice(0, 4).some((row) => row.trim() === anchor)) { jumped = true; break; }
       await tick(25);
     }
@@ -210,9 +226,12 @@ test("successful web tool replay is one compact line with full output hidden by 
       { role: "tool", tool_call_id: "fetch-1", content: `${"\n".repeat(12)}FETCH RESULT\n\nBODY${"\n".repeat(12)}` },
     ],
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "", tool_calls: [] }) }, resumedSession: session, sessionId: "tool-gap", preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await tick(650);
@@ -234,9 +253,12 @@ test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for
     id: "sel", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: [{ role: "user", content: "SELECTME a unique line" }, { role: "assistant", content: "a reply here" }],
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "sel", frameDiffer: differ, preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   for (let waited = 0; waited < 2000 && !vt.text().includes("SELECTME"); waited += 25) await tick(25);
@@ -285,9 +307,12 @@ test("todo flow shows the current plan once while the next step is running", asy
       return { content: "done", tool_calls: [] };
     },
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider, sessionId: "todo-flow", frameDiffer: differ, preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await tick(300);
@@ -315,9 +340,12 @@ test("approval decision keys never leak into the prompt", async () => {
         ? { content: null, tool_calls: [{ id: "deny", name: "bash", arguments: { command: "echo should-not-run" } }] }
         : { content: "denied safely", tool_calls: [] },
     };
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
     const app = renderFS(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       React.createElement(ChatApp as any, { yolo: false, provider, sessionId: "approval-key", frameDiffer: differ, preAltDispose }),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
     );
     await tick(300);
@@ -363,8 +391,10 @@ test("voice panel mouse controls mute and stop the active session", async () => 
       options.onEvent?.({ type: "state", snapshot });
     },
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, {
       yolo: true,
       provider,
@@ -373,6 +403,7 @@ test("voice panel mouse controls mute and stop the active session", async () => 
       preAltDispose,
       browserVoiceFactory: (next: any) => { options = next; return control; },
     }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await tick(350);
@@ -426,9 +457,12 @@ test("slash menu on a SHORT window keeps the input row + first items (chrome nev
   const msgs: any[] = [];
   for (let i = 0; i < 10; i++) msgs.push({ role: "user", content: `q${i}` }, { role: "assistant", content: `a${i}` });
   const session: any = { id: "slash", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "slash", frameDiffer: differ, preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await tick(400);
@@ -470,9 +504,12 @@ test("/resume picker while SCROLLED UP renders names intact (no flex-squash, no 
     const msgs: any[] = [];
     for (let i = 0; i < 30; i++) msgs.push({ role: "user", content: `cau hoi ${i}` }, { role: "assistant", content: `tra loi dai dong so ${i}` });
     const session: any = { id: "cur", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
     const app = renderFS(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       React.createElement(ChatApp as any, { yolo: true, provider: { complete: async () => ({ content: "", tool_calls: [] }) }, resumedSession: session, sessionId: "cur", frameDiffer: differ, preAltDispose }),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
     );
     await tick(500);
@@ -503,9 +540,12 @@ test("DIFFER-LESS fullscreen (the Windows default): renders, types, and scrolls 
     id: "nodiff", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m",
     messages: Array.from({ length: 40 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `noi dung dong ${i}` })),
   };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
   const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     React.createElement(ChatApp as any, { yolo: true, provider, resumedSession: session, sessionId: "nodiff", preAltDispose }),
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { stdout: wrapStdoutForSync(out as any, { supported: true }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await tick(600);

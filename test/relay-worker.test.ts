@@ -39,6 +39,7 @@ const post = (path: string, body: any) => new Request(`https://relay.test${path}
 
 test("relay hub lists and independently routes multiple encrypted Neko sessions", async () => {
   const ctx = makeContext();
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const relay = new RelaySession(ctx as any);
   await relay.fetch(post("/register", { session: "hub", hostId: "alpha", meta: { iv: "a", ct: "A" } }));
   await relay.fetch(post("/register", { session: "hub", hostId: "beta", meta: { iv: "b", ct: "B" } }));
@@ -66,6 +67,7 @@ test("relay hub lists and independently routes multiple encrypted Neko sessions"
 
 test("relay hub keeps offline queues isolated per host", async () => {
   const ctx = makeContext();
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const relay = new RelaySession(ctx as any);
   await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
   await relay.fetch(post("/register", { session: "hub", hostId: "beta" }));
@@ -80,10 +82,12 @@ test("relay bounds public request bodies and each host's offline queue", async (
     method: "POST",
     headers: { "content-length": "1050001" },
     body: "x",
-  }), {} as any);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+  }), { });
   expect(oversized.status).toBe(413);
 
   const ctx = makeContext();
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const relay = new RelaySession(ctx as any);
   await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
   for (let i = 0; i < 100; i++) expect((await relay.fetch(post("/send", { session: "hub", hostId: "alpha", message: String(i) }))).status).toBe(200);
@@ -93,6 +97,7 @@ test("relay bounds public request bodies and each host's offline queue", async (
 
 test("relay forwards opaque out-of-band controls only to an online matching host", async () => {
   const ctx = makeContext();
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const relay = new RelaySession(ctx as any);
   await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
   const offline = await relay.fetch(post("/control", { session: "hub", hostId: "alpha", control: { iv: "i", ct: "c" } }));
@@ -104,6 +109,7 @@ test("relay forwards opaque out-of-band controls only to an online matching host
 });
 
 test("relay refuses to bind a capability without a token", async () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const relay = new RelaySession(makeContext() as any);
   const request = new Request("https://relay.test/register", {
     method: "POST",
@@ -122,6 +128,7 @@ test("relay public client is non-cacheable and locked to a per-response CSP nonc
 
 test("relay v4 persists and broadcasts opaque mirror events per host", async () => {
   const ctx = makeContext();
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const relay = new RelaySession(ctx as any);
   await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
   const host = new SocketDouble(["host", "host:alpha"]); host.attachment = { role: "host", hostId: "alpha" };
@@ -129,16 +136,19 @@ test("relay v4 persists and broadcasts opaque mirror events per host", async () 
   ctx.sockets.push(host, client);
 
   const ciphertext = { iv: "opaque-iv", ct: "opaque-event" };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   await relay.webSocketMessage(host as any, JSON.stringify({ t: "event", event: ciphertext, durable: true, reset: true }));
   expect(client.sent).toEqual([{ t: "mirror_reset" }, expect.objectContaining({ t: "event", seq: 1, event: ciphertext })]);
   expect(await ctx.storage.get("mirror:alpha")).toEqual([expect.objectContaining({ seq: 1, event: ciphertext })]);
 
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   await relay.webSocketMessage(client as any, JSON.stringify({ t: "event", event: "client-must-not-publish", durable: true }));
   expect(await ctx.storage.get("mirror:alpha")).toHaveLength(1);
 });
 
 test("relay broadcasts encrypted host presence to the matching mirror", async () => {
   const ctx = makeContext();
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const relay = new RelaySession(ctx as any);
   await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
   const host = new SocketDouble(["host", "host:alpha"]); host.attachment = { role: "host", hostId: "alpha" };
@@ -147,20 +157,24 @@ test("relay broadcasts encrypted host presence to the matching mirror", async ()
   ctx.sockets.push(host, alpha, beta);
 
   const meta = { iv: "opaque-iv", ct: "opaque-presence" };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   await relay.webSocketMessage(host as any, JSON.stringify({ t: "presence", meta }));
   expect(alpha.sent).toEqual([{ t: "presence", meta }]);
   expect(beta.sent).toEqual([]);
 });
 
 test("relay closes an oversized WebSocket frame instead of parsing it", async () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const relay = new RelaySession(makeContext() as any);
   const host = new SocketDouble(["host", "host:alpha"]); host.attachment = { role: "host", hostId: "alpha" };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   await relay.webSocketMessage(host as any, "x".repeat(1_050_001));
   expect(host.closed).toBe(true);
 });
 
 test("relay hub revocation closes every host and invalidates the old phone token", async () => {
   const ctx = makeContext();
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const relay = new RelaySession(ctx as any);
   await relay.fetch(post("/register", { session: "hub", hostId: "alpha" }));
   const socket = new SocketDouble(["host", "host:alpha"]);

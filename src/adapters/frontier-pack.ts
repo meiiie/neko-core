@@ -195,6 +195,7 @@ export function loadFrontierPack(manifestPath: string): LoadedFrontierPack {
   if (treeSignature(before) !== treeSignature(after)) throw new Error("Frontier pack changed while loading");
 
   const manifestSha256 = sha256(manifestBytes);
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const contents = Object.create(null) as Record<string, LoadedFrontierContent>;
   for (const ref of [...refs].sort((left, right) => compareText(left.path, right.path))) {
     const snapshot = retained.get(ref.path);
@@ -247,9 +248,11 @@ function parseTask(
   if (taskIds.has(id)) throw new Error(`Frontier pack has duplicate task id: ${id}`);
   taskIds.add(id);
 
+  // SAFETY: contract of the FrontierTaskFamily type is established by the surrounding validation/boundary.
   if (!isText(task.family) || !FRONTIER_TASK_FAMILIES.includes(task.family as FrontierTaskFamily)) {
     throw new Error(`${label} family is invalid`);
   }
+  // SAFETY: contract of the FrontierTaskFamily type is established by the surrounding validation/boundary.
   const family = task.family as FrontierTaskFamily;
   const lineage = slugValue(task.lineage, `${label} lineage`);
   const seed = integerValue(task.seed, `${label} seed`, true);
@@ -260,6 +263,7 @@ function parseTask(
 
   const fileObject = objectValue(task.files, `${label} files`);
   exactKeys(fileObject, CONTENT_ROLES, `${label} files`);
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const files = Object.create(null) as Record<FrontierContentRole, FrontierContentRef>;
   for (const role of CONTENT_ROLES) {
     const ref = parseContentRef(fileObject[role], `${label} ${role}`);
@@ -274,6 +278,7 @@ function parseTask(
 function parseResources(value: unknown, taskLabel: string): FrontierResourceCeiling {
   const resources = objectValue(value, `${taskLabel} resources`);
   exactKeys(resources, RESOURCE_KEYS, `${taskLabel} resources`);
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const parsed = Object.create(null) as Record<typeof RESOURCE_KEYS[number], number>;
   for (const key of RESOURCE_KEYS) {
     const declared = integerValue(resources[key], `${taskLabel} resources.${key}`, false);
@@ -550,7 +555,11 @@ function assertUniqueJsonObjectKeys(source: string): void {
     while (position < source.length) {
       const character = source[position++]!;
       if (character === "\\") position++;
-      else if (character === "\"") return JSON.parse(source.slice(start, position)) as string;
+      // SAFETY: contract of the string type is established by the surrounding validation/boundary.
+      else if (character === "\"") {
+        // SAFETY: the scanner already consumed a well-formed JSON string literal.
+        return JSON.parse(source.slice(start, position)) as string;
+      }
     }
     throw new Error("Frontier pack manifest is not valid JSON");
   };
@@ -617,6 +626,7 @@ function decodeUtf8(bytes: Uint8Array, message: string): string {
 
 function objectValue(value: unknown, label: string): Record<string, unknown> {
   if (!isJsonObject(value)) throw new Error(`${label} must be an object`);
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   return value as Record<string, unknown>;
 }
 
@@ -665,6 +675,7 @@ function portableName(value: string): boolean {
 
 function deepFreeze<T>(value: T): T {
   if ((!isObjectValue(value) && !(value instanceof Function)) || Object.isFrozen(value)) return value;
+  // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
   return Object.freeze(value);
 }

@@ -91,6 +91,7 @@ describe("Gemini Support Pack", () => {
 });
 
 function fixtureFetch(bundle: Buffer, node: Buffer, bundleDigest: string, nodeDigest: string, onDownload = () => {}): typeof fetch {
+  // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   return (async (input: string | URL | Request) => {
     const url = String(input);
     if (url.includes("api.github.com")) return Response.json({

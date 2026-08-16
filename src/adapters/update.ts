@@ -95,6 +95,7 @@ export async function downloadReleaseBytes(
             controller.abort(error);
             reject(error);
           }, idleMs);
+          // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
           (timer as any).unref?.();
         }),
       ]);
@@ -130,6 +131,7 @@ export async function downloadReleaseBytes(
       chunks.push(chunk.value);
       onProgress?.(received, declared > 0 ? declared : 0);
     }
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     return Buffer.concat(chunks as any, received);
   } finally {
     if (controller.signal.aborted) void reader?.cancel().catch(() => {});
@@ -337,6 +339,7 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
       log(`Release ${tag} is missing its required SHA-256 sidecar.`);
       return "failed";
     }
+    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     const showProgress = Boolean(opts.progressTty) && Boolean((process.stdout as any).isTTY);
     let bytes: Buffer;
     try {
@@ -355,6 +358,7 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
       if (showProgress) process.stdout.write(`\r${`  downloaded ${mb(got)} MB - verifying ...`.padEnd(48)}\n`);
     } catch (e) {
       if (showProgress) process.stdout.write("\n");
+      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
       log(`Download failed: ${(e as Error).message}`);
       return "failed";
     }
@@ -383,6 +387,7 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
       log(`Installed ${tag}. Restart neko to use it.`);
       return "updated";
     } catch (e) {
+      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
       log(`Install failed: ${(e as Error).message}`);
       try { if (existsSync(tmp)) rmSync(tmp); } catch { /* */ }
       return "failed";

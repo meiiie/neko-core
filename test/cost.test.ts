@@ -61,6 +61,7 @@ test("CostTracker counts cached tokens from both usage shapes and reports the hi
   expect(t.lastCached).toBe(150);
   t.add({ prompt_tokens: 100, completion_tokens: 10, prompt_cache_hit_tokens: 60 }); // DeepSeek shape
   expect(t.cachedTokens).toBe(290);
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   t.add({ prompt_tokens: 100, completion_tokens: 10, prompt_tokens_details: null as any }); // NVIDIA sends null details -> safe 0
   expect(t.cachedTokens).toBe(290);
   t.add({ prompt_tokens: 50, completion_tokens: 5 }); // no cache info -> lastCached resets, total holds

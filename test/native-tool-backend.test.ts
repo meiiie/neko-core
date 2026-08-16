@@ -67,6 +67,7 @@ test("backend construction fails closed without the full confinement and quiesce
   const backend = new FakeNativeBackend(
     ["read_file"],
     () => "should not run",
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     { ...ATTESTATION, deadlineAndCancellation: "best-effort" } as any,
   );
   const root = mkdtempSync(join(tmpdir(), "neko-native-invalid-attestation-"));
@@ -213,6 +214,7 @@ test("remote native observations preserve Agent edit and validator completion ac
   ];
   const provider = { async complete() { return providerReplies.shift()!; } };
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: provider as any,
     tools: registry(backend),
     maxSteps: 5,
