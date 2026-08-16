@@ -79,6 +79,6 @@ export function matchedTurnContext(
   return {
     text: blocks.join("\n\n"),
     skills,
-    ...(workflow ? { workflow: workflow.name } : {}),
+    ...(workflow ? { workflow: workflow.name } : undefined),
   };
 }

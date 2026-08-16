@@ -303,7 +303,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
         includeStartupContext: true,
         flushTranscriptTailOnSessionEnd: true,
         codexResponseHandoffMode: "bemTags",
-        ...(initialItems.length ? { initialItems } : {}),
+        ...(initialItems.length ? { initialItems } : undefined),
         prompt: VOICE_REALTIME_PROMPT,
       }, 30_000);
       await ready;
@@ -447,7 +447,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
         includeStartupContext: true,
         flushTranscriptTailOnSessionEnd: true,
         codexResponseHandoffMode: "bemTags",
-        ...(initialItems.length ? { initialItems } : {}),
+        ...(initialItems.length ? { initialItems } : undefined),
         prompt: VOICE_REALTIME_PROMPT,
         transport: { type: "webrtc", sdp },
       }, 30_000);

@@ -474,7 +474,7 @@ export async function consultOracle(
       files: bundle.files.map((file) => file.path),
       skipped: bundle.skipped,
       bytes: bundle.bytes,
-      ...(prior ? { parent: prior.meta.id } : {}),
+      ...(prior ? { parent: prior.meta.id } : undefined),
     },
     bundle.text,
     answer,

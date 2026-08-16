@@ -297,7 +297,7 @@ export async function installMeetingSupportPack(options: InstallMeetingSupportOp
     const manifest: MeetingSupportManifest = {
       schemaVersion: 1,
       installedAt: new Date().toISOString(),
-      ...(engine ? { engine } : {}),
+      ...(engine ? { engine } : undefined),
       model: {
         tier,
         id: model.id,

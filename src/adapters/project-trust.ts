@@ -112,7 +112,7 @@ const emptyInspection = (state: ProjectTrustState, reason?: string): ProjectTrus
   mcpServers: {},
   fileDigests: {},
   projectFiles: {},
-  ...(reason ? { reason } : {}),
+  ...(reason ? { reason } : undefined),
 });
 
 function trustStorePath(home: string): string {

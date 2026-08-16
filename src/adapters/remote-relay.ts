@@ -144,7 +144,7 @@ export async function startRemoteRelay(
   const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
   const sealedMeta = (busy?: boolean) => {
     if (!opts.secret) return undefined; // keep cwd/title opaque; paired /relay always has a secret
-    return seal(opts.secret, JSON.stringify({ ...handlers.status(), ...(busy === undefined ? {} : { busy }), updatedAt: Date.now() }));
+    return seal(opts.secret, JSON.stringify({ ...handlers.status(), ...(busy === undefined ? undefined : { busy }), updatedAt: Date.now() }));
   };
 
   // Register (outbound). Throw if the relay is unreachable so /relay can report it to the user.

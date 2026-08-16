@@ -1771,7 +1771,7 @@ function artifactTrajectory(trajectory: EvalTrialTrajectory, index: number): Eva
     return {
       round: Math.max(1, artifactCount(event.round)),
       tool: (BENCH_LOCAL_TOOLS as readonly string[]).includes(event.tool) ? event.tool : "<unknown>",
-      ...(targetRef ? { targetRef } : {}),
+      ...(targetRef ? { targetRef } : undefined),
       result,
       redundant: Boolean(event.redundant),
     };
@@ -1953,7 +1953,7 @@ export async function runEval(
                 events.push({
                   round: Math.max(1, round),
                   tool: safeEvalToolName(data.call),
-                  ...(targetRef ? { targetRef } : {}),
+                  ...(targetRef ? { targetRef } : undefined),
                   result: observationClass,
                   redundant: false,
                 });

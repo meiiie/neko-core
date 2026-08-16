@@ -109,8 +109,8 @@ export function evaluateMeetingAsr(input: unknown): MeetingEvalReport {
       characters,
       characterErrors,
       cer: ratio(characterErrors, characters),
-      ...(timingCases ? { audioDurationMs, processingMs, rtf: processingMs / audioDurationMs } : {}),
-      ...(sourceLabels ? { sourceLabels, sourceCorrect, sourceAccuracy: sourceCorrect / sourceLabels } : {}),
+      ...(timingCases ? { audioDurationMs, processingMs, rtf: processingMs / audioDurationMs } : undefined),
+      ...(sourceLabels ? { sourceLabels, sourceCorrect, sourceAccuracy: sourceCorrect / sourceLabels } : undefined),
     },
   };
 }

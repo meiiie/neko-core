@@ -195,7 +195,7 @@ export class LiveMeetingTranscriber {
       segments: this.collected.length,
       skippedMs: this.skippedMs,
       windows: this.windows,
-      ...(this.lastError ? { lastError: this.lastError } : {}),
+      ...(this.lastError ? { lastError: this.lastError } : undefined),
     };
   }
 

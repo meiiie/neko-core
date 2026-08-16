@@ -785,17 +785,17 @@ export class ToolRegistry {
     this.turnToolPolicy = {
       generation,
       name: String(policy.name || "turn"),
-      ...(policy.allowedTools ? { allowedTools: new Set(policy.allowedTools) } : {}),
+      ...(policy.allowedTools ? { allowedTools: new Set(policy.allowedTools) } : undefined),
       allowBackgroundBash: policy.allowBackgroundBash !== false,
       ...(editTarget ? {
         editTarget: {
           display: editTarget.replaceAll("\\", "/"),
           // Never ask the host OS to resolve a path in a remote POSIX workspace. A supporting
           // backend receives the raw target and attests that it compares canonical identities.
-          ...(remoteEdit ? {} : { absolute: canonicalRegularFileForWrite(this.root, editTarget, this.additionalWriteRoots) }),
+          ...(remoteEdit ? undefined : { absolute: canonicalRegularFileForWrite(this.root, editTarget, this.additionalWriteRoots) }),
         },
-      } : {}),
-      ...(policy.bashPolicy ? { bashPolicy: policy.bashPolicy } : {}),
+      } : undefined),
+      ...(policy.bashPolicy ? { bashPolicy: policy.bashPolicy } : undefined),
       reason: String(policy.reason ?? "").trim(),
     };
     let closed = false;
@@ -814,8 +814,8 @@ export class ToolRegistry {
     if (!policy) return undefined;
     return Object.freeze({
       name: policy.name,
-      ...(policy.editTarget ? { editTarget: policy.editTarget.display } : {}),
-      ...(policy.bashPolicy ? { bashPolicy: policy.bashPolicy } : {}),
+      ...(policy.editTarget ? { editTarget: policy.editTarget.display } : undefined),
+      ...(policy.bashPolicy ? { bashPolicy: policy.bashPolicy } : undefined),
       strictEditMatch: Boolean(policy.editTarget),
     });
   }
@@ -1025,15 +1025,15 @@ export class ToolRegistry {
     }
     const exactValidator = name === "bash" && this.turnToolPolicy?.bashPolicy === "foreground-validator-only";
     const context: NativeToolCallContext = {
-      ...(signal ? { signal } : {}),
-      ...(name === "bash" ? { deadlineAt: Date.now() + this.bashTimeoutMs(args) } : {}),
+      ...(signal ? { signal } : undefined),
+      ...(name === "bash" ? { deadlineAt: Date.now() + this.bashTimeoutMs(args) } : undefined),
       workspace: Object.freeze({
         canonicalPosixRoot: attestation.canonicalPosixRoot,
         readOutsideRoot: this.readOutsideRoot,
         strictEditMatch: name === "edit" && Boolean(this.turnToolPolicy?.editTarget),
         ...(name === "edit" && this.turnToolPolicy?.editTarget
           ? { exactEditTarget: this.turnToolPolicy.editTarget.display }
-          : {}),
+          : undefined),
       }),
       sandbox: Object.freeze({
         enabled: this.sandboxBash,

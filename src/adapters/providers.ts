@@ -186,7 +186,7 @@ async function listKimiModelOptions(config: NekoConfig): Promise<ModelOption[]> 
     const token = force && config.usesKimiAuth ? await validKimiAccessToken({ force: true }) : key;
     return fetch(`${config.baseUrl}/models`, {
       headers: {
-        ...(config.usesKimiAuth ? kimiIdentityHeaders() : {}),
+        ...(config.usesKimiAuth ? kimiIdentityHeaders() : undefined),
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
       },
@@ -432,7 +432,7 @@ export class OpenAICompatProvider implements Provider {
       payload.reasoning_effort = effort;
       if (this.cfg.thinkingWire) payload.thinking = {
         type: "enabled",
-        ...(this.cfg.thinkingWire === "effort" ? { effort } : {}),
+        ...(this.cfg.thinkingWire === "effort" ? { effort } : undefined),
       };
     }
     // Schema-constrained structured output: the endpoint fills the given JSON Schema (constrained

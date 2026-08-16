@@ -202,7 +202,7 @@ export class RelaySession {
     id = hostId(id);
     const hosts = (await this.ctx.storage.get("hosts")) ?? {};
     const previous = hosts[id] ?? { id };
-    hosts[id] = { ...previous, id, ...(meta !== undefined ? { meta } : {}), lastSeen: Date.now() };
+    hosts[id] = { ...previous, id, ...(meta !== undefined ? { meta } : undefined), lastSeen: Date.now() };
     const ordered = Object.values(hosts).sort((a, b) => (b.lastSeen ?? 0) - (a.lastSeen ?? 0));
     for (const stale of ordered.slice(MAX_HOSTS)) {
       delete hosts[stale.id];

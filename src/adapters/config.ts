@@ -793,7 +793,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   if (!opts.path) {
     const fromMcpJson = {
       ...readMcpJson(join(home, ".mcp.json")),
-      ...(projectTrust?.state === "trusted" ? projectTrust.mcpServers : {}),
+      ...(projectTrust?.state === "trusted" ? projectTrust.mcpServers : undefined),
     };
     if (Object.keys(fromMcpJson).length) merged.mcp_servers = { ...(merged.mcp_servers ?? {}), ...fromMcpJson };
   }

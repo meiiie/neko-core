@@ -226,14 +226,14 @@ export class Agent {
         ok: false,
         reason: "validation_failed",
         command: current.command,
-        ...(current.detail ? { detail: current.detail } : {}),
+        ...(current.detail ? { detail: current.detail } : undefined),
       };
     }
     return {
       ok: false,
       reason: "validation_missing",
-      ...(this.validationResult?.command ? { command: this.validationResult.command } : {}),
-      ...(this.validationResult?.detail ? { detail: this.validationResult.detail } : {}),
+      ...(this.validationResult?.command ? { command: this.validationResult.command } : undefined),
+      ...(this.validationResult?.detail ? { detail: this.validationResult.detail } : undefined),
     };
   }
 
@@ -750,7 +750,7 @@ export class Agent {
           authoritative,
           ...((failed || !authoritative) && typeof observation === "string"
             ? { detail: observation.replace(/\s+/g, " ").trim().slice(0, 500) }
-            : {}),
+            : undefined),
         };
       }
       // Only a SUCCESSFUL state-changing call advances the epoch. A rejected edit or a sandbox
@@ -928,7 +928,7 @@ export class Agent {
             onToolCallReady,
             executeTool,
             onUsage: publishUsage,
-            ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : {}),
+            ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : undefined),
           },
         );
       } catch (error) {
@@ -1244,7 +1244,7 @@ function assistantToolMessage(content: string | null, toolCalls: ToolCall[], con
       type: "function",
       function: { name: call.name, arguments: JSON.stringify(call.arguments ?? {}) },
     })),
-    ...(continuation?.length ? { provider_data: continuation } : {}),
+    ...(continuation?.length ? { provider_data: continuation } : undefined),
   };
 }
 

@@ -80,7 +80,7 @@ test("doctor does not claim Kimi account access before the first request verifie
 test("doctor distinguishes durable, attached, and ephemeral browser sessions", () => {
   const check = (args?: string[]) => collectChecks(new NekoConfig({
     provider: "openai_compat", model: "test", base_url: "http://localhost",
-    ...(args ? { mcp_servers: { browser: { command: "bunx", args } } } : {}),
+    ...(args ? { mcp_servers: { browser: { command: "bunx", args } } } : undefined),
   }, null, {}, "")).find((item) => item.name === "browser")!;
   expect(check(["@playwright/mcp", "--user-data-dir", "C:/neko-browser"])).toMatchObject({ status: "ok", detail: expect.stringContaining("persistent") });
   expect(check(["@playwright/mcp", "--extension"])).toMatchObject({ status: "ok", detail: expect.stringContaining("existing Chrome") });

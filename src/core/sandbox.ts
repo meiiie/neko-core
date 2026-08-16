@@ -795,7 +795,7 @@ export function buildSandbox(
       file: primitiveExe ?? "sandbox-exec",
       args: ["-p", profile, options.shellExe ?? "bash", "-c", command],
       shell: false,
-      ...(options.denyChildProcesses ? { treeContainedOnClose: true } : {}),
+      ...(options.denyChildProcesses ? { treeContainedOnClose: true } : undefined),
     };
   }
   if (kind === "srt" && srt) {
@@ -809,7 +809,7 @@ export function buildSandbox(
       args: ["--settings", srt.settingsPath, "-c", inner],
       shell: false,
       treeContainedOnClose: true,
-      ...(srt.cleanup ? { cleanup: srt.cleanup } : {}),
+      ...(srt.cleanup ? { cleanup: srt.cleanup } : undefined),
     };
   }
   return noneTarget(command); // none: git-bash on Windows, else the platform shell (seatbelt + gate still apply)

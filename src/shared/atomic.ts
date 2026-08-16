@@ -14,7 +14,7 @@ let counter = 0;
 export function atomicWriteFileSync(path: string, data: string, mode?: number): void {
   const tmp = `${path}.tmp-${process.pid}-${counter++}`;
   try {
-    writeFileSync(tmp, data, { encoding: "utf-8", ...(mode === undefined ? {} : { mode }) });
+    writeFileSync(tmp, data, { encoding: "utf-8", ...(mode === undefined ? undefined : { mode }) });
     renameSync(tmp, path);
   } catch (err) {
     try { rmSync(tmp, { force: true }); } catch { /* best effort cleanup */ }
@@ -27,7 +27,7 @@ export function atomicWriteFileSync(path: string, data: string, mode?: number): 
 export async function atomicWriteFile(path: string, data: string, mode?: number): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${counter++}`;
   try {
-    await writeFile(tmp, data, { encoding: "utf-8", ...(mode === undefined ? {} : { mode }) });
+    await writeFile(tmp, data, { encoding: "utf-8", ...(mode === undefined ? undefined : { mode }) });
     await rename(tmp, path);
   } catch (err) {
     try { await rm(tmp, { force: true }); } catch { /* best effort cleanup */ }

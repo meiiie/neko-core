@@ -441,7 +441,7 @@ test("ACP durable sessions survive a process boundary, list/load replays, and re
                 content: providerRequests.length === 1 ? "durable answer" : "continued with context",
                 tool_calls: [],
                 usage: { prompt_tokens: 11, completion_tokens: 3, total_tokens: 14 },
-                ...(providerRequests.length === 1 ? { continuation: [{ type: "opaque-test", signature: "round-trip-only" }] } : {}),
+                ...(providerRequests.length === 1 ? { continuation: [{ type: "opaque-test", signature: "round-trip-only" }] } : undefined),
               };
             },
           },

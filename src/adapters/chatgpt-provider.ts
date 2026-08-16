@@ -667,7 +667,7 @@ function reasoningContinuation(item: any): any | null {
   const id = boundedResponsesToolField(item.id, "id", RESPONSES_STREAM_LIMITS.maxToolIdBytes);
   return {
     type: "reasoning",
-    ...(id ? { id } : {}),
+    ...(id ? { id } : undefined),
     encrypted_content: item.encrypted_content,
     summary: Array.isArray(item.summary) ? item.summary : [],
   };

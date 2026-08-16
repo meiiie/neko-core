@@ -227,9 +227,9 @@ async function transcribeMeetingLocked(id: string, options: TranscribeMeetingOpt
         modelSha256: transcriber.modelSha256,
       },
       segments: renumber(segments.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs)),
-      ...(voices > 0 ? { voices } : {}),
-      ...(dropped.length ? { droppedOutOfScript: dropped } : {}),
-      ...(gated ? { speechGated: true } : {}),
+      ...(voices > 0 ? { voices } : undefined),
+      ...(dropped.length ? { droppedOutOfScript: dropped } : undefined),
+      ...(gated ? { speechGated: true } : undefined),
     };
     writeMeetingTranscript(transcript, home);
     meeting.state = "ready";
@@ -358,8 +358,8 @@ export function parseMeetingTranscript(
       speaker,
       source,
       text: words.map((word) => word.text).join(" "),
-      ...(confidences.length ? { confidence: confidences.reduce((sum, value) => sum + value, 0) / confidences.length } : {}),
-      ...(uncertain.length ? { uncertain } : {}),
+      ...(confidences.length ? { confidence: confidences.reduce((sum, value) => sum + value, 0) / confidences.length } : undefined),
+      ...(uncertain.length ? { uncertain } : undefined),
     });
     words = [];
   };
@@ -398,7 +398,7 @@ export function parseMeetingTranscript(
       model: provenance.model,
       modelSha256: provenance.modelSha256,
     },
-    ...(dropped.length ? { droppedOutOfScript: dropped } : {}),
+    ...(dropped.length ? { droppedOutOfScript: dropped } : undefined),
     segments,
   };
 }

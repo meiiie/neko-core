@@ -142,7 +142,7 @@ export function readSpeechTools(home = homeDir()): SpeechToolsPack | null {
     const speakers = segmentation && embedding && existsSync(segmentation) && existsSync(embedding);
     return {
       root, executable, vad, version: manifest.engine.version,
-      ...(speakers ? { segmentation, embedding } : {}),
+      ...(speakers ? { segmentation, embedding } : undefined),
     };
   } catch {
     return null;
@@ -247,7 +247,7 @@ export async function installSpeechTools(options: InstallDiarizationOptions = {}
           embedding: relative(staging, embedding).replace(/\\/g, "/"),
           segmentationSha256: MODELS.segmentation.sha256,
           embeddingSha256: MODELS.embedding.sha256,
-        } : {}),
+        } : undefined),
       },
     };
     writeFileSync(join(staging, "diarization.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });

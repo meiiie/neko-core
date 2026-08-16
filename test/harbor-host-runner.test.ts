@@ -153,8 +153,8 @@ function context(
   options: { signal?: AbortSignal; deadlineAt?: number; allowNetwork?: boolean; domains?: string[] } = {},
 ): NativeToolCallContext {
   return {
-    ...(options.signal ? { signal: options.signal } : {}),
-    ...(options.deadlineAt ? { deadlineAt: options.deadlineAt } : {}),
+    ...(options.signal ? { signal: options.signal } : undefined),
+    ...(options.deadlineAt ? { deadlineAt: options.deadlineAt } : undefined),
     workspace: {
       canonicalPosixRoot: "/workspace",
       readOutsideRoot: false,

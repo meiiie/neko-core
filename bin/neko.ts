@@ -1293,7 +1293,7 @@ async function cmdBench(args: Args): Promise<number> {
     console.log(`Running Neko multi-dim eval${selected.label} against ${cfg.model} (${trials} trial(s)/task: CLEAR + pass^k + redundancy)...`);
     const report = await runEval(cfg, {
       trials,
-      ...(selected.tasks ? { tasks: selected.tasks } : {}),
+      ...(selected.tasks ? { tasks: selected.tasks } : undefined),
       suite: selected.suite,
       maxSteps: args.maxSteps,
     }, (m) => console.log(m));
@@ -1321,7 +1321,7 @@ async function cmdBench(args: Args): Promise<number> {
   console.log(`Running Neko-bench${selected.label} against ${cfg.model} (${trials} trial(s)/task, auto-approve)...`);
   const report = await runBench(cfg, {
     trials,
-    ...(selected.tasks ? { tasks: selected.tasks } : {}),
+    ...(selected.tasks ? { tasks: selected.tasks } : undefined),
     suite: selected.suite,
     maxSteps: args.maxSteps,
   }, (m) => console.log(m));

@@ -128,8 +128,8 @@ class MeetingTools implements McpTools {
         meetingId: meeting.id,
         language: transcript.language,
         segments: transcript.segments.length,
-        ...(transcript.voices ? { voices: transcript.voices, speakerCaveat: DIARIZATION_CAVEAT } : {}),
-        ...(diarize && !transcript.voices ? { speakerNote: "Speaker separation did not run; every remote voice is still labelled Meeting audio." } : {}),
+        ...(transcript.voices ? { voices: transcript.voices, speakerCaveat: DIARIZATION_CAVEAT } : undefined),
+        ...(diarize && !transcript.voices ? { speakerNote: "Speaker separation did not run; every remote voice is still labelled Meeting audio." } : undefined),
         next: "Read transcript segments in bounded pages, then ground every summary/action item in timestamp citations.",
       }, null, 2);
     }
@@ -155,7 +155,7 @@ class MeetingTools implements McpTools {
       const listening = active ? null : detectMicrophoneUsers();
       return JSON.stringify({
         capture: active ? { state: active.state, meeting: summarize(active.meeting), audioBytes: active.audioBytes, durationMs: active.durationMs } : { state: "idle" },
-        ...(listening ? { microphoneInUse: listening } : {}),
+        ...(listening ? { microphoneInUse: listening } : undefined),
         transcription: { state: support.state, detail: support.detail },
         latest: latest ? summarize(latest) : null,
         install: { tui: "/support meeting", cli: "neko support meeting install" },
@@ -182,8 +182,8 @@ class MeetingTools implements McpTools {
               endedHint: `No speech for ${Math.round(quietMs / 60_000)} min${quietSource === "energy" ? " (signal energy only - no transcript engine, so a quiet fan or a muted video can fool this)" : " of transcribed audio"}. Ask the user whether the meeting ended - never stop the recording on this signal alone.`,
               quietSource,
             }
-          : {}),
-        ...(mixed ? { codeSwitchHint: mixed } : {}),
+          : undefined),
+        ...(mixed ? { codeSwitchHint: mixed } : undefined),
         live: live
           ? { ...live, note: "Provisional: windows can clip a word and audio may be skipped under load. The finalized transcription after stop is canonical." }
           : { note: "No live transcript engine is attached; install the Meeting Support Pack to hear the meeting as it happens." },

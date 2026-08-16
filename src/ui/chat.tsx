@@ -1515,7 +1515,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           addLine(role, `(voice) ${text}`);
           // Voice owns a separate App Server thread while it is live. Mirror finalized transcripts
           // into Neko's session so a later text turn or resumed session keeps the conversation.
-          agentRef.current!.messages.push({ role, content: text, ...(role === "user" ? { _neko_internal: false } : {}) });
+          agentRef.current!.messages.push({ role, content: text, ...(role === "user" ? { _neko_internal: false } : undefined) });
           queuePersist();
         }
       },
@@ -2471,7 +2471,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             if (text) {
               const role = event.role === "user" ? "user" : "assistant";
               addLine(role, `(voice · phone) ${text}`);
-              agentRef.current!.messages.push({ role, content: text, ...(role === "user" ? { _neko_internal: false } : {}) });
+              agentRef.current!.messages.push({ role, content: text, ...(role === "user" ? { _neko_internal: false } : undefined) });
               queuePersist();
             }
           },

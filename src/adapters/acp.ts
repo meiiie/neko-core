@@ -289,7 +289,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     let cfg: NekoConfig;
     if (options.configForRoot) cfg = options.configForRoot(root, record?.profile);
     else if (baseConfig) cfg = baseConfig;
-    else cfg = loadConfig({ cwd: root, ...(record?.profile ? { profile: record.profile } : {}) });
+    else cfg = loadConfig({ cwd: root, ...(record?.profile ? { profile: record.profile } : undefined) });
     // Never let one ACP session mutate a caller-owned/base config object shared with another session.
     cfg = cfg.withModel(cfg.model).withEffort(cfg.effort);
     if (record?.profile && cfg.profile !== record.profile) {
@@ -540,7 +540,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           }
           enqueue({
             sessionUpdate: kind === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk",
-            ...(kind === "reasoning" ? {} : { messageId: session.liveAgentMessageId }),
+            ...(kind === "reasoning" ? undefined : { messageId: session.liveAgentMessageId }),
             content: { type: "text", text },
           } as acp.SessionUpdate);
         },
@@ -722,7 +722,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           revision: meta.revision ?? 0,
         },
       })),
-      ...(offset + pageSize < all.length ? { nextCursor: encodeCursor(offset + pageSize) } : {}),
+      ...(offset + pageSize < all.length ? { nextCursor: encodeCursor(offset + pageSize) } : undefined),
     };
   });
 

@@ -336,7 +336,7 @@ class OfficeTools implements McpTools {
         source: relative(this.root, file),
         evidence: [relative(this.root, output)],
         result: mode === "pdf" ? { exported: true } : parseOutput(rendered.stdout.split(stage).join(output)),
-        ...(rendered.stderr.trim() ? { warnings: cap(rendered.stderr.trim()) } : {}),
+        ...(rendered.stderr.trim() ? { warnings: cap(rendered.stderr.trim()) } : undefined),
         next: mode === "screenshot"
           ? "Open every listed PNG with the vision tool; schema validation alone is not visual proof."
           : mode === "html"
@@ -369,9 +369,9 @@ class OfficeTools implements McpTools {
       success: true,
       backend: backendLabel(executable),
       operation,
-      ...(file ? { file: relative(this.root, file), sha256 } : {}),
+      ...(file ? { file: relative(this.root, file), sha256 } : undefined),
       result: parseOutput(result.stdout),
-      ...(result.stderr.trim() ? { warnings: cap(result.stderr.trim()) } : {}),
+      ...(result.stderr.trim() ? { warnings: cap(result.stderr.trim()) } : undefined),
     }, null, 2);
   }
 }
