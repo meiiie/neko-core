@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { acquireSessionLease, AsyncSessionWriter, isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, saveSessionAsync, setSessionsDir } from "../src/adapters/session.ts";
+import { isJsonNumber } from "../src/shared/wire.ts";
 
 // Isolate from the user's real ~/.neko-core: these tests WRITE session files. Pointing HOME at a
 // temp dir was the old way, but env mutation across bun test files is racy (see bun-test-env-races)
@@ -376,7 +377,7 @@ test("listSessionMetas: lightweight metadata, mtime-cached index, self-heals on 
     writeFileSync(idxPath, JSON.stringify(idx));
     expect(listSessionMetas().find((x) => x.id === id)?.msgCount).toBe(3); // still served
     const migrated = JSON.parse(readFileSync(idxPath, "utf-8"));
-    expect(typeof migrated.metas[id].fsize).toBe("number"); // ...and the entry was stamped in place
+    expect(isJsonNumber(migrated.metas[id].fsize)).toBe(true); // ...and the entry was stamped in place
   } finally {
     rmSync(join(TEST_DIR, `${id}.json`), { force: true });
   }

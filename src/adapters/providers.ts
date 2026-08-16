@@ -24,6 +24,8 @@ import { SESSION_CONTEXT_MARK } from "../core/agent-constants.ts";
 import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
+import { isJsonNumber, isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
+
 // Re-export the port types so callers can keep importing them from the provider adapter.
 export type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
@@ -83,7 +85,7 @@ export function normalizeToolResultImages(messages: any[]): any[] {
 const OPENAI_COMPAT_METADATA = "openai_compat_message_metadata";
 
 function record(value: any): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return isJsonObject(value) ? value : {};
 }
 
 function omit(value: any, keys: Set<string>): Record<string, any> {
@@ -126,7 +128,7 @@ function metadataContinuation(
 /** Replay opaque Chat Completions metadata only to the endpoint that produced it. Gemini uses this for
  * encrypted thought signatures on multi-turn tool calls; a provider switch must not leak those fields. */
 function restoreOpenAICompatMetadata(message: any, origin: string): any {
-  if (!message || typeof message !== "object" || !("provider_data" in message)) return message;
+  if (!isObjectValue(message) || !("provider_data" in message)) return message;
   const { provider_data: providerData, ...portable } = message;
   const metadata = Array.isArray(providerData)
     ? providerData.find((item) => item?.type === OPENAI_COMPAT_METADATA && item?.origin === origin)
@@ -199,7 +201,7 @@ async function listKimiModelOptions(config: NekoConfig): Promise<ModelOption[]> 
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json() as { data?: any[] };
     const live = (payload.data ?? []).flatMap((model): ModelOption[] => {
-      const id = typeof model?.id === "string" ? model.id : "";
+      const id = isText(model?.id) ? model.id : "";
       const contextWindow = Number(model?.context_length ?? 0);
       if (!id) return [];
       const efforts = Array.isArray(model?.think_efforts?.valid_efforts)
@@ -209,9 +211,9 @@ async function listKimiModelOptions(config: NekoConfig): Promise<ModelOption[]> 
         .filter(Boolean).join(", ");
       return [{
         id,
-        label: typeof model?.display_name === "string" ? model.display_name : id,
+        label: isText(model?.display_name) ? model.display_name : id,
         description: features || undefined,
-        defaultEffort: typeof model?.think_efforts?.default_effort === "string" ? model.think_efforts.default_effort : undefined,
+        defaultEffort: isText(model?.think_efforts?.default_effort) ? model.think_efforts.default_effort : undefined,
         efforts: efforts?.map((effort: string) => ({ effort, description: "" })),
         contextWindow: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : config.contextWindow,
         vision: Boolean(model?.supports_image_in),
@@ -355,7 +357,7 @@ function withOpenAICacheBreakpoint(messages: any[], model: string): any[] {
   if (major < 5 || (major === 5 && minor < 6)) return messages;
   let marked = false;
   return messages.map((message) => {
-    if (marked || message?.role !== "system" || typeof message.content !== "string") return message;
+    if (marked || message?.role !== "system" || !isText(message.content)) return message;
     const seam = message.content.indexOf(SESSION_CONTEXT_MARK);
     if (seam <= 0) return message;
     marked = true;
@@ -603,7 +605,7 @@ export function parseOpenAIMessage(data: any, origin = ""): ProviderResponse {
   const choices = data?.choices;
   if (!choices || !choices.length) {
     const error = data?.error;
-    const detail = error && typeof error === "object" ? error.message : (error ?? JSON.stringify(data));
+    const detail = isJsonObject(error) ? error.message : (error ?? JSON.stringify(data));
     throw new Error(`unexpected API response: ${String(detail).slice(0, 300)}`);
   }
   const choice = choices[0];
@@ -611,7 +613,7 @@ export function parseOpenAIMessage(data: any, origin = ""): ProviderResponse {
   if (finishReason !== undefined && finishReason !== null && !["stop", "tool_calls", "function_call"].includes(finishReason)) {
     throw new Error(`API returned non-success finish_reason: ${String(finishReason).slice(0, 100)}`);
   }
-  if (!choice?.message || typeof choice.message !== "object" || Array.isArray(choice.message)) {
+  if (!isJsonObject(choice?.message)) {
     throw new Error("unexpected API response: missing assistant message");
   }
   const message = choice.message;
@@ -620,7 +622,7 @@ export function parseOpenAIMessage(data: any, origin = ""): ProviderResponse {
     const fn = call.function ?? {};
     let args: Record<string, any>;
     try {
-      args = typeof fn.arguments === "string" ? JSON.parse(fn.arguments) : (fn.arguments ?? {});
+      args = isText(fn.arguments) ? JSON.parse(fn.arguments) : (fn.arguments ?? {});
     } catch {
       args = { _raw: fn.arguments };
     }
@@ -740,7 +742,7 @@ async function parseStream(
     let args: Record<string, any>;
     try {
       const parsed = t.argString ? JSON.parse(t.argString) : {};
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("arguments must be an object");
+      if (!isJsonObject(parsed)) throw new Error("arguments must be an object");
       args = parsed;
     } catch {
       if (!force) return;
@@ -778,7 +780,7 @@ async function parseStream(
       throw new Error("streaming API sent malformed SSE data");
     }
     if ((chunk?.error !== undefined && chunk.error !== null) || chunk?.type === "error") {
-      const detail = typeof chunk.error === "object" ? chunk.error.message : chunk.error ?? chunk.message ?? chunk.type;
+      const detail = isJsonObject(chunk.error) ? chunk.error.message : chunk.error ?? chunk.message ?? chunk.type;
       throw new Error(`streaming API error: ${String(detail ?? JSON.stringify(chunk.error)).slice(0, 300)}`);
     }
     if (["ping", "keepalive", "heartbeat"].includes(String(chunk?.type ?? "").toLowerCase()) && chunk?.choices === undefined) continue;
@@ -790,12 +792,12 @@ async function parseStream(
       throw new Error("streaming API data had no valid choice");
     }
     const choice = chunk.choices[0];
-    if (!choice || typeof choice !== "object" || Array.isArray(choice)) {
+    if (!isJsonObject(choice)) {
       throw new Error("streaming API data had no valid choice");
     }
     sawValidChoice = true;
     const finishReason = choice.finish_reason;
-    if (finishReason !== undefined && finishReason !== null && !["stop", "tool_calls", "function_call"].includes(finishReason)) {
+    if (finishReason !== undefined && finishReason !== null && !["stop", "tool_calls", "function_call"].includes(String(finishReason))) {
       throw new Error(`streaming API returned non-success finish_reason: ${String(finishReason).slice(0, 100)}`);
     }
     if (finishReason !== undefined && finishReason !== null) sawFinish = true;
@@ -804,16 +806,16 @@ async function parseStream(
       if (finishReason !== undefined && finishReason !== null) continue;
       throw new Error("streaming API choice had no delta or finish reason");
     }
-    if (typeof delta !== "object" || Array.isArray(delta)) throw new Error("streaming API choice delta was invalid");
+    if (!isJsonObject(delta)) throw new Error("streaming API choice delta was invalid");
     streamedMessageMetadata = mergeRecords(streamedMessageMetadata, messageMetadata(delta));
     if (delta.content !== undefined && delta.content !== null) {
-      if (typeof delta.content !== "string") throw new Error("streaming content delta was not text");
+      if (!isText(delta.content)) throw new Error("streaming content delta was not text");
       if (delta.content) think.push(delta.content); // routes <think>..</think> -> reasoning, rest -> content
     }
     if (delta.reasoning_content !== undefined) reasoningField = "reasoning_content";
     else if (delta.reasoning !== undefined) reasoningField = "reasoning";
     const r = delta.reasoning_content ?? delta.reasoning;
-    if (r !== undefined && r !== null && typeof r !== "string") throw new Error("streaming reasoning delta was not text");
+    if (r !== undefined && r !== null && !isText(r)) throw new Error("streaming reasoning delta was not text");
     if (r) {
       reasoningBytes += Buffer.byteLength(r, "utf8");
       if (reasoningBytes > OPENAI_STREAM_LIMITS.maxReasoningBytes) throw new Error("streaming reasoning exceeds safety limit");
@@ -823,25 +825,25 @@ async function parseStream(
     if (delta.tool_calls !== undefined && !Array.isArray(delta.tool_calls)) throw new Error("streaming tool_calls delta was invalid");
     if ((delta.tool_calls?.length ?? 0) > OPENAI_STREAM_LIMITS.maxToolCalls) throw new Error("streaming tool call count exceeds safety limit");
     for (const tc of delta.tool_calls ?? []) {
-      if (!tc || typeof tc !== "object" || Array.isArray(tc)) throw new Error("streaming tool call delta was invalid");
-      const i = tc.index ?? 0;
+      if (!isJsonObject(tc)) throw new Error("streaming tool call delta was invalid");
+      const i = isJsonNumber(tc.index) ? tc.index : tc.index == null ? 0 : Number.NaN;
       if (!Number.isInteger(i) || i < 0 || i >= OPENAI_STREAM_LIMITS.maxToolCalls) {
         throw new Error(`streaming tool call index out of range: ${String(i).slice(0, 40)}`);
       }
       acc[i] ??= { id: "", name: "", argString: "", argBytes: 0, sawArgumentBytes: false, metadata: {} };
       acc[i].metadata = mergeRecords(acc[i].metadata, toolCallMetadata(tc));
       if (tc.id !== undefined && tc.id !== null) {
-        if (typeof tc.id !== "string" || Buffer.byteLength(tc.id, "utf8") > OPENAI_STREAM_LIMITS.maxToolIdBytes) {
+        if (!isText(tc.id) || Buffer.byteLength(tc.id, "utf8") > OPENAI_STREAM_LIMITS.maxToolIdBytes) {
           throw new Error("streaming tool call id was invalid or too large");
         }
         if (tc.id) acc[i].id = tc.id;
       }
-      if (tc.function !== undefined && (typeof tc.function !== "object" || tc.function === null || Array.isArray(tc.function))) {
+      if (tc.function !== undefined && (!isJsonObject(tc.function))) {
         throw new Error("streaming tool function delta was invalid");
       }
       const nameDelta = tc.function?.name;
       if (nameDelta !== undefined && nameDelta !== null) {
-        if (typeof nameDelta !== "string" || Buffer.byteLength(nameDelta, "utf8") > OPENAI_STREAM_LIMITS.maxToolNameBytes) {
+        if (!isText(nameDelta) || Buffer.byteLength(nameDelta, "utf8") > OPENAI_STREAM_LIMITS.maxToolNameBytes) {
           throw new Error("streaming tool name was invalid or too large");
         }
         if (nameDelta) {
@@ -851,7 +853,7 @@ async function parseStream(
       }
       const argumentDelta = tc.function?.arguments;
       if (argumentDelta !== undefined && argumentDelta !== null) {
-        if (typeof argumentDelta !== "string") throw new Error("streaming tool arguments delta was not text");
+        if (!isText(argumentDelta)) throw new Error("streaming tool arguments delta was not text");
         if (argumentDelta) {
           acc[i].argBytes += Buffer.byteLength(argumentDelta, "utf8");
           if (acc[i].argBytes > OPENAI_STREAM_LIMITS.maxToolArgumentBytes) throw new Error("streaming tool arguments exceed safety limit");
@@ -997,7 +999,7 @@ export class MoaProvider implements Provider {
  * messages, and tool_calls payloads (strict providers 400 on orphan tool messages). Falls back to the
  * last user turn if everything was stripped. */
 function advisoryMessages(messages: any[]): any[] {
-  const textOf = (c: any): string => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((p) => p?.type === "text").map((p) => p.text).join(" ") : "");
+  const textOf = (c: any): string => (isText(c) ? c : Array.isArray(c) ? c.filter((p) => p?.type === "text").map((p) => p.text).join(" ") : "");
   const trimmed: any[] = [];
   for (const m of messages) {
     if (m.role !== "user" && m.role !== "assistant") continue; // drop system + tool-result roles
@@ -1024,7 +1026,7 @@ function moaSubConfig(cfg: NekoConfig, ref: MoaRef, temperature: number): NekoCo
 function withSystemAppendix(messages: any[], text: string): any[] {
   const copy = messages.map((m) => ({ ...m }));
   const sys = copy.find((m) => m.role === "system");
-  if (sys && typeof sys.content === "string") {
+  if (sys && isText(sys.content)) {
     sys.content = `${sys.content}\n\n${text}`;
     return copy;
   }

@@ -112,7 +112,7 @@ test("looking up an index does not move the caret; clicking does, and says where
     />,
   );
   await tick();
-  expect(typeof indexAt).toBe("function");
+  expect(indexAt).toBeInstanceOf(Function);
   // Two identical lookups agree, because the first did not move the origin the second measures from.
   // A drag depends on this: it samples the pointer many times before the caret is allowed to move.
   expect(indexAt!(0, -6)).toBe(5);

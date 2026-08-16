@@ -5,6 +5,8 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 
+import { isText } from "../src/shared/wire.ts";
+
 const endpoint = new URL("http://127.0.0.1/v1internal:generateContent");
 assert.equal(endpoint.hostname, "127.0.0.1");
 
@@ -41,7 +43,7 @@ await new Promise<void>((resolve) => server.once("listening", resolve));
 
 try {
   const address = server.address();
-  assert(address && typeof address !== "string");
+  assert(address && !isText(address));
   endpoint.port = String(address.port);
   const response = await fetch(endpoint, {
     method: "POST",

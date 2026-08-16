@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
-import { type JsonValue } from "../shared/wire.ts";
+import { isText, type JsonValue } from "../shared/wire.ts";
 import { validChatGptCredentials, hasChatGptCredentials } from "./chatgpt-auth.ts";
 import { discoverCodexSupport, startCodexAppServer, type CodexAppServerHandlers } from "./codex-app-server.ts";
 
@@ -127,8 +127,8 @@ export async function generateImage(
       itemPromise,
       new Promise((_, no) => setTimeout(() => no(new Error("image generation timed out")), timeoutMs)),
     ]);
-    let saved: string = typeof item.savedPath === "string" ? item.savedPath : "";
-    if (typeof item.result === "string" && item.result.length) {
+    let saved: string = isText(item.savedPath) ? item.savedPath : "";
+    if (isText(item.result) && item.result.length) {
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, Buffer.from(item.result, "base64"));
       saved = target;

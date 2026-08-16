@@ -1569,19 +1569,19 @@ interface EvalTargetRefs {
 
 function parsedCallArguments(call: any): Record<string, any> {
   const raw = call?.arguments ?? {};
-  if (typeof raw !== "string") return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  if (!isText(raw)) return isJsonObject(raw) ? raw : {};
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    return isJsonObject(parsed) ? parsed : {};
   } catch { return {}; }
 }
 
 function traceString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length ? value : undefined;
+  return isText(value) && value.length ? value : undefined;
 }
 
 function normalizedTracePath(value: unknown, defaultRoot = false): string | undefined {
-  const raw = typeof value === "string"
+  const raw = isText(value)
     ? (value || (defaultRoot ? "." : undefined))
     : (defaultRoot && value === undefined ? "." : undefined);
   if (!raw) return undefined;
@@ -1642,9 +1642,9 @@ function traceReadIdentity(name: string, args: Record<string, any>): { key?: str
 
 function opaqueTargetRef(call: any, refs: EvalTargetRefs): string | undefined {
   const args = parsedCallArguments(call);
-  const name = typeof call?.name === "string" ? call.name : "";
+  const name = isText(call?.name) ? call.name : "";
   const assign = (map: Map<string, string>, prefix: string, raw: unknown) => {
-    if (typeof raw !== "string" || !raw) return undefined;
+    if (!isText(raw) || !raw) return undefined;
     const existing = map.get(raw);
     if (existing) return existing;
     const next = `${prefix}${map.size + 1}`;
@@ -1661,13 +1661,13 @@ function opaqueTargetRef(call: any, refs: EvalTargetRefs): string | undefined {
 }
 
 function safeEvalToolName(call: any): string {
-  const name = typeof call?.name === "string" ? call.name : "";
+  const name = isText(call?.name) ? call.name : "";
   return (BENCH_LOCAL_TOOLS as readonly string[]).includes(name) ? name : "<unknown>";
 }
 
 function traceFromCall(call: any, observation: unknown): TraceEntry {
   const a = parsedCallArguments(call);
-  const name = typeof call?.name === "string" ? call.name : "";
+  const name = isText(call?.name) ? call.name : "";
   const read = traceReadIdentity(name, a);
   return {
     name,
@@ -1764,7 +1764,7 @@ function artifactTrajectory(trajectory: EvalTrialTrajectory, index: number): Eva
     : "not_run";
   const completionGate = trajectory.completionGate === "passed" ? "passed" : "failed";
   const events = trajectory.events.slice(0, MAX_EVAL_EVENTS_PER_TRIAL).map((event): EvalArtifactToolEvent => {
-    const targetRef = typeof event.targetRef === "string" && /^[pqc]\d{1,4}$/.test(event.targetRef)
+    const targetRef = isText(event.targetRef) && /^[pqc]\d{1,4}$/.test(event.targetRef)
       ? event.targetRef
       : undefined;
     const result = event.result === "empty" || event.result === "failed" ? event.result : "productive";

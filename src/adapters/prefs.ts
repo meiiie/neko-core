@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
+import { isObjectValue } from "../shared/wire.ts";
 
 export interface Prefs {
   /** "Don't ask again" on the resume-from-summary prompt: resume large sessions in full without asking. */
@@ -27,7 +28,7 @@ export function loadPrefs(): Prefs {
   try {
     if (!existsSync(prefsPath())) return {};
     const p = JSON.parse(readFileSync(prefsPath(), "utf-8"));
-    return p && typeof p === "object" ? (p as Prefs) : {};
+    return isObjectValue(p) ? (p as Prefs) : {};
   } catch {
     return {};
   }

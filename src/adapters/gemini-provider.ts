@@ -17,6 +17,7 @@ import {
   type GeminiAcpHandlers,
   type GeminiUsageSnapshot,
 } from "./gemini-cli.ts";
+import { isText } from "../shared/wire.ts";
 
 interface AcpClient {
   initialize(timeoutMs?: number): Promise<any>;
@@ -89,7 +90,7 @@ class NekoMcpProxy {
       this.server!.listen(0, "127.0.0.1", () => resolve());
     });
     const address = this.server.address();
-    if (!address || typeof address === "string") throw new Error("Neko Gemini MCP proxy did not bind a TCP port");
+    if (!address || isText(address)) throw new Error("Neko Gemini MCP proxy did not bind a TCP port");
     this.url = `http://127.0.0.1:${address.port}/mcp`;
   }
 
@@ -264,7 +265,7 @@ function toMcpTool(tool: any): any {
 }
 
 function toMcpResult(observation: string | any[]): any {
-  if (typeof observation === "string") {
+  if (isText(observation)) {
     const failed = /^Error running\b/.test(observation) || /^\[denied\]/.test(observation);
     return { isError: failed, content: [{ type: "text", text: observation || "(no output)" }] };
   }
@@ -312,7 +313,7 @@ function parseDataUrl(value: string): { mimeType: string; data: string } | null 
 }
 
 function textContent(content: any): string {
-  if (typeof content === "string") return content;
+  if (isText(content)) return content;
   if (!Array.isArray(content)) return String(content ?? "");
   return content.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join("\n");
 }

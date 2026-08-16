@@ -12,6 +12,8 @@ import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { VERSION } from "../shared/version.ts";
 
+import { isText } from "../shared/wire.ts";
+
 export const CHATGPT_ISSUER = "https://auth.openai.com";
 export const CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 export const CHATGPT_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
@@ -53,12 +55,12 @@ export function loadChatGptCredentials(): ChatGptCredentials | null {
   if (!existsSync(path)) return null;
   try {
     const value = JSON.parse(readFileSync(path, "utf8"));
-    if (!value || typeof value.accessToken !== "string" || typeof value.refreshToken !== "string" || !Number.isFinite(value.expiresAt)) return null;
+    if (!value || !isText(value.accessToken) || !isText(value.refreshToken) || !Number.isFinite(value.expiresAt)) return null;
     return {
       accessToken: value.accessToken,
       refreshToken: value.refreshToken,
       expiresAt: value.expiresAt,
-      accountId: typeof value.accountId === "string" && value.accountId ? value.accountId : undefined,
+      accountId: isText(value.accountId) && value.accountId ? value.accountId : undefined,
     };
   } catch {
     return null;
@@ -94,7 +96,7 @@ export function accountIdFromTokens(tokens: Pick<TokenResponse, "id_token" | "ac
     if (!token) continue;
     const claims = parseJwtClaims(token);
     const id = claims?.chatgpt_account_id ?? claims?.["https://api.openai.com/auth"]?.chatgpt_account_id ?? claims?.organizations?.[0]?.id;
-    if (typeof id === "string" && id) return id;
+    if (isText(id) && id) return id;
   }
   return undefined;
 }

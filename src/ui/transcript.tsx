@@ -11,6 +11,8 @@ import { fileUri, linkSegments, osc8 } from "./links.ts";
 import { Logo } from "./logo.tsx";
 import { Markdown } from "./markdown.tsx";
 
+import { isText } from "../shared/wire.ts";
+
 /** Parse one diff result line into its parts. Two formats are produced by tool-runtime.ts:
  *  Write: "+ <code>" / "- <code>"; Edit: "NNNN <sign> <code>" (right-padded line number, then +/-/space).
  *  marker "" means a plain (non-diff) result line -> the caller leaves it un-highlighted. */
@@ -32,7 +34,7 @@ function LinkedText({ text }: { text: string }) {
   return (
     <>
       {linkSegments(text).map((seg, k) =>
-        typeof seg === "string" ? seg : <Text key={k} color="cyan" underline>{osc8(seg.uri, seg.text)}</Text>,
+        isText(seg) ? seg : <Text key={k} color="cyan" underline>{osc8(seg.uri, seg.text)}</Text>,
       )}
     </>
   );

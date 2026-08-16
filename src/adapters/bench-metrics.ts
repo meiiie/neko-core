@@ -15,6 +15,8 @@
  *   - READ-ONLY telemetry: traces come from Agent.onEvent, never alter the agent loop or prompt.
  */
 
+import { isText } from "../shared/wire.ts";
+
 // ---- Inputs (what the harness captures per trial) -------------------------------------------
 
 export type ToolName = string;
@@ -73,8 +75,8 @@ const MUTATING_TOOLS = new Set(["edit", "write_file", "multi_edit"]);
 
 function readIdentity(e: TraceEntry): string | undefined {
   if (e.readKey) return e.readKey;
-  const path = typeof e.path === "string" ? e.path : undefined;
-  const pattern = typeof e.pattern === "string" ? e.pattern : undefined;
+  const path = isText(e.path) ? e.path : undefined;
+  const pattern = isText(e.pattern) ? e.pattern : undefined;
   if (!path && !pattern && e.name !== "ls") return undefined;
   // Include the tool and both legacy fields so search/glob calls sharing one directory but using
   // different patterns never collide. New live traces use the richer tool-specific `readKey`.
@@ -82,14 +84,14 @@ function readIdentity(e: TraceEntry): string | undefined {
 }
 
 function readMutationScope(e: TraceEntry): string | undefined {
-  if (typeof e.readScope === "string" && e.readScope) return e.readScope;
-  if (typeof e.path === "string" && e.path) return e.path;
+  if (isText(e.readScope) && e.readScope) return e.readScope;
+  if (isText(e.path) && e.path) return e.path;
   return e.name === "search" || e.name === "glob" || e.name === "ls" ? "." : undefined;
 }
 
 /** Does a mutation to `mutPath` affect the thing `readTarget` was read at? Conservative: exact / prefix. */
-function mutationTouches(mutPath: string, readAt: string): boolean {
-  if (typeof mutPath !== "string" || typeof readAt !== "string" || !mutPath || !readAt) return false;
+function mutationTouches(mutPath: string | undefined, readAt: string | undefined): boolean {
+  if (!isText(mutPath) || !isText(readAt) || !mutPath || !readAt) return false;
   if (mutPath === readAt) return true;
   if (mutPath === "." || readAt === ".") return true;
   // `ls dir/` is invalidated by any write under dir/
@@ -122,7 +124,7 @@ export function redundantCallMask(trace: TraceEntry[]): boolean[] {
           let mutated = false;
           for (let j = previous.index + 1; j < i; j++) {
             const m = trace[j];
-            if (MUTATING_TOOLS.has(m.name) && typeof m.path === "string" && previous.scope
+            if (MUTATING_TOOLS.has(m.name) && isText(m.path) && previous.scope
               && mutationTouches(m.path, previous.scope)) {
               mutated = true;
               break;
@@ -136,7 +138,7 @@ export function redundantCallMask(trace: TraceEntry[]): boolean[] {
       // An arbitrary command may mutate any workspace path, so no earlier read identity is safe to
       // reuse even when the command itself fails or is malformed.
       lastReadAt.clear();
-      const command = typeof e.cmd === "string" ? e.cmd : "";
+      const command = isText(e.cmd) ? e.cmd : "";
       if (!command) {
         prevBash = "";
       } else {

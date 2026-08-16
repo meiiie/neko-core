@@ -7,6 +7,7 @@ import type { WebPort } from "../core/ports.ts";
 import { MAX_OBS_PAGE_CHARS } from "../core/agent-constants.ts";
 import { assertPublicHttpUrl, publicHttpFetch, readBoundedResponseText } from "./public-http.ts";
 import { dockerAvailable, SearxngSidecar } from "./sidecar.ts";
+import { isObjectValue } from "../shared/wire.ts";
 
 const WEB_HEADERS = { "User-Agent": "Mozilla/5.0 (NekoCore)" };
 let fetchPublic = publicHttpFetch;
@@ -399,7 +400,7 @@ export const webPort: WebPort = {
     const prompt = String(args.prompt ?? "");
     // schema-guided extraction: a JSON Schema forces the extractor to fill a shape (e.g. enumerate
     // every variant) instead of collapsing to one value - far more reliable than a freeform prompt.
-    const schema = args.schema && typeof args.schema === "object" ? (args.schema as Record<string, any>) : undefined;
+    const schema = isObjectValue(args.schema) ? (args.schema as Record<string, any>) : undefined;
     // Skip the model when the page is small enough to just read (Hermes-style: no LLM call when it adds
     // nothing - most pages). A prompt/schema on a LARGE page still gets the single-pass extractor, now
     // over clean markdown rather than raw HTML.

@@ -16,6 +16,8 @@ import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { loadPrefs } from "./prefs.ts";
 
+import { isJsonNumber } from "../shared/wire.ts";
+
 const CACHE_TTL_MS = 7 * 24 * 3600 * 1000; // monitors rarely change; re-probe weekly
 const cachePath = () => join(homeDir(), ".neko-core", ".display.json");
 
@@ -36,7 +38,7 @@ export function cachedRefreshRate(now = Date.now()): number | null {
   try {
     if (!existsSync(cachePath())) return null;
     const c = JSON.parse(readFileSync(cachePath(), "utf-8"));
-    if (typeof c.hz !== "number" || typeof c.at !== "number") return null;
+    if (!isJsonNumber(c.hz) || !isJsonNumber(c.at)) return null;
     if (now - c.at > CACHE_TTL_MS) return null;
     return c.hz >= 30 && c.hz <= 360 ? c.hz : null;
   } catch {
@@ -102,6 +104,6 @@ export function resolveUiFps(configFps: number | null): UiFpsResolution {
   if (Number.isFinite(env) && env > 0) return { fps: clampFps(env), mode: "fixed", detected, source: "NEKO_FPS" };
   if (configFps != null) return { fps: clampFps(configFps), mode: "fixed", detected, source: "config ui_fps" };
   const pref = loadPrefs().uiFps;
-  if (typeof pref === "number") return { fps: clampFps(pref), mode: "fixed", detected, source: "/fps" };
+  if (isJsonNumber(pref)) return { fps: clampFps(pref), mode: "fixed", detected, source: "/fps" };
   return { fps: clampFps(detected ?? 60), mode: "auto", detected, source: detected ? "display (auto)" : "default" };
 }

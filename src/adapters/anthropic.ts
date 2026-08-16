@@ -11,6 +11,8 @@ import { NekoConfig } from "./config.ts";
 import { providerScope } from "./provider-scope.ts";
 import { clampEffort, effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
 
+import { isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
+
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic's documented overloaded_error
 
 // Anthropic REQUIRES max_tokens, so unlike the compat/responses providers it can't omit the field on "auto"
@@ -238,7 +240,7 @@ export function toAnthropicMessages(messages: any[], scope = ""): { system: stri
   const sys: string[] = [];
   const msgs: any[] = [];
   for (const m of messages) {
-    if (m.role === "system") { sys.push(typeof m.content === "string" ? m.content : textOf(m.content)); continue; }
+    if (m.role === "system") { sys.push(isText(m.content) ? m.content : textOf(m.content)); continue; }
     if (m.role === "tool") {
       // Anthropic tool_result blocks accept nested text/image blocks. Preserve multimodal tool
       // observations (read_file images and computer screenshots) instead of stringifying them to
@@ -259,11 +261,11 @@ export function toAnthropicMessages(messages: any[], scope = ""): { system: stri
         continue;
       }
       const content: any[] = [];
-      const text = typeof m.content === "string" ? m.content : textOf(m.content);
+      const text = isText(m.content) ? m.content : textOf(m.content);
       if (text) content.push({ type: "text", text });
       for (const tc of m.tool_calls ?? []) {
         let input: any = {};
-        try { input = typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments) : (tc.function?.arguments ?? {}); } catch { input = {}; }
+        try { input = isText(tc.function?.arguments) ? JSON.parse(tc.function.arguments) : (tc.function?.arguments ?? {}); } catch { input = {}; }
         content.push({ type: "tool_use", id: tc.id, name: tc.function?.name, input });
       }
       msgs.push({ role: "assistant", content: content.length ? content : [{ type: "text", text: " " }] });
@@ -300,7 +302,7 @@ export function toAnthropicTools(tools: any[]): any[] {
  * 20-block lookback, so a 40-step agent turn pays for each step's tail only, not the whole history.
  * A last message that is a plain string is lifted to block form (cache_control is block-only). */
 export function addCacheBreakpoints(payload: Record<string, any>): void {
-  if (typeof payload.system === "string" && payload.system) {
+  if (isText(payload.system) && payload.system) {
     const boundary = payload.system.indexOf(SESSION_CONTEXT_MARK);
     const blocks = boundary > 0
       ? [payload.system.slice(0, boundary), payload.system.slice(boundary)]
@@ -311,7 +313,7 @@ export function addCacheBreakpoints(payload: Record<string, any>): void {
   }
   const last = payload.messages?.[payload.messages.length - 1];
   if (!last) return;
-  if (typeof last.content === "string") {
+  if (isText(last.content)) {
     if (last.content) last.content = [{ type: "text", text: last.content, cache_control: { type: "ephemeral" } }];
   } else if (Array.isArray(last.content) && last.content.length) {
     const b = last.content[last.content.length - 1];
@@ -354,7 +356,7 @@ export function stripCacheBreakpoints(payload: Record<string, any>): void {
     payload.system = payload.system.map((block: any) => String(block.text ?? "")).join("");
   }
   for (const m of payload.messages ?? []) {
-    if (Array.isArray(m.content)) for (const b of m.content) if (b && typeof b === "object") delete b.cache_control;
+    if (Array.isArray(m.content)) for (const b of m.content) if (isJsonObject(b)) delete b.cache_control;
   }
 }
 
@@ -394,7 +396,7 @@ export function thinkingBudget(effort: string): number {
 }
 
 function textOf(content: any): string {
-  return typeof content === "string" ? content : Array.isArray(content) ? content.filter((p) => p?.type === "text").map((p) => p.text).join(" ") : "";
+  return isText(content) ? content : Array.isArray(content) ? content.filter((p) => p?.type === "text").map((p) => p.text).join(" ") : "";
 }
 
 /** Non-streamed Anthropic message -> ProviderResponse. */
@@ -468,14 +470,14 @@ async function parseStream(
   };
 
   stream: for await (const ev of sseEvents(res, onActivity)) {
-    if (!ev || typeof ev !== "object" || Array.isArray(ev) || typeof ev.type !== "string" || !ev.type) {
+    if (!isJsonObject(ev) || !isText(ev.type) || !ev.type) {
       throw new Error("anthropic stream data was not a valid event");
     }
     switch (ev.type) {
       case "ping":
         break;
       case "message_start": {
-        if (sawMessageStart || !ev.message || typeof ev.message !== "object" || Array.isArray(ev.message)) {
+        if (sawMessageStart || !isJsonObject(ev.message)) {
           throw new Error("anthropic stream sent an invalid message_start");
         }
         sawMessageStart = true;
@@ -491,7 +493,7 @@ async function parseStream(
         requireMessageStart(sawMessageStart);
         const index = streamIndex(ev.index);
         if (blocks.has(index)) throw new Error(`anthropic stream repeated content block index ${index}`);
-        if (!ev.content_block || typeof ev.content_block !== "object" || Array.isArray(ev.content_block) || typeof ev.content_block.type !== "string" || !ev.content_block.type) {
+        if (!isJsonObject(ev.content_block) || !isText(ev.content_block.type) || !ev.content_block.type) {
           throw new Error("anthropic stream sent an invalid content_block_start");
         }
         const raw = structuredClone(ev.content_block) as Record<string, any>;
@@ -501,17 +503,17 @@ async function parseStream(
           block.id = boundedToolField(raw.id, "id", ANTHROPIC_STREAM_LIMITS.maxToolIdBytes);
           block.name = boundedToolField(raw.name, "name", ANTHROPIC_STREAM_LIMITS.maxToolNameBytes);
           if (raw.input !== undefined) {
-            if (!raw.input || typeof raw.input !== "object" || Array.isArray(raw.input)) throw new Error("anthropic streaming tool input was not an object");
+            if (!isJsonObject(raw.input)) throw new Error("anthropic streaming tool input was not an object");
             const inputBytes = Buffer.byteLength(JSON.stringify(raw.input), "utf8");
             if (inputBytes > ANTHROPIC_STREAM_LIMITS.maxToolArgumentBytes) throw new Error("anthropic streaming tool arguments exceed safety limit");
           }
         }
         blocks.set(index, block);
         if (block.type === "text" && raw.text !== undefined) {
-          if (typeof raw.text !== "string") throw new Error("anthropic streaming text block was invalid");
+          if (!isText(raw.text)) throw new Error("anthropic streaming text block was invalid");
           addContent(raw.text);
         } else if (block.type === "thinking" && raw.thinking !== undefined) {
-          if (typeof raw.thinking !== "string") throw new Error("anthropic streaming thinking block was invalid");
+          if (!isText(raw.thinking)) throw new Error("anthropic streaming thinking block was invalid");
           addReasoning(raw.thinking);
         }
         break;
@@ -521,25 +523,25 @@ async function parseStream(
         const index = streamIndex(ev.index);
         const d = ev.delta;
         const b = blocks.get(index);
-        if (!b || completedBlocks.has(index) || !d || typeof d !== "object" || Array.isArray(d) || typeof d.type !== "string" || !d.type) {
+        if (!b || completedBlocks.has(index) || !isJsonObject(d) || !isText(d.type) || !d.type) {
           throw new Error("anthropic stream sent an invalid content_block_delta");
         }
         if (d?.type === "text_delta") {
-          if (b.type !== "text" || typeof d.text !== "string") throw new Error("anthropic streaming text delta was invalid");
+          if (b.type !== "text" || !isText(d.text)) throw new Error("anthropic streaming text delta was invalid");
           addContent(d.text);
           b.raw.text = `${b.raw.text ?? ""}${d.text}`;
         }
         else if (d?.type === "thinking_delta") {
-          if (b.type !== "thinking" || typeof d.thinking !== "string") throw new Error("anthropic streaming thinking delta was invalid");
+          if (b.type !== "thinking" || !isText(d.thinking)) throw new Error("anthropic streaming thinking delta was invalid");
           addReasoning(d.thinking);
           b.raw.thinking = `${b.raw.thinking ?? ""}${d.thinking}`;
         }
         else if (d?.type === "signature_delta") {
-          if (b.type !== "thinking" || typeof d.signature !== "string") throw new Error("anthropic streaming signature delta was invalid");
+          if (b.type !== "thinking" || !isText(d.signature)) throw new Error("anthropic streaming signature delta was invalid");
           b.raw.signature = `${b.raw.signature ?? ""}${d.signature}`;
         }
         else if (d?.type === "input_json_delta") {
-          if (b.type !== "tool_use" || typeof d.partial_json !== "string") throw new Error("anthropic streaming tool arguments delta was invalid");
+          if (b.type !== "tool_use" || !isText(d.partial_json)) throw new Error("anthropic streaming tool arguments delta was invalid");
           if (d.partial_json) {
             b.argumentBytes += Buffer.byteLength(d.partial_json, "utf8");
             if (b.argumentBytes > ANTHROPIC_STREAM_LIMITS.maxToolArgumentBytes) throw new Error("anthropic streaming tool arguments exceed safety limit");
@@ -548,7 +550,7 @@ async function parseStream(
           }
         }
         else if (d?.type === "citations_delta") {
-          if (b.type !== "text" || !d.citation || typeof d.citation !== "object" || Array.isArray(d.citation)) {
+          if (b.type !== "text" || !isJsonObject(d.citation)) {
             throw new Error("anthropic streaming citation delta was invalid");
           }
           const citations = Array.isArray(b.raw.citations) ? b.raw.citations : [];
@@ -568,7 +570,7 @@ async function parseStream(
           let input: any = {};
           try {
             input = b.json ? JSON.parse(b.json) : (b.raw.input ?? {});
-            if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("arguments must be an object");
+            if (!isJsonObject(input)) throw new Error("arguments must be an object");
           } catch { input = { _raw: b.json }; }
           b.raw.input = input;
           if (!b.id || !b.name) throw new Error("anthropic streaming tool call was missing an id or name");
@@ -583,7 +585,7 @@ async function parseStream(
       }
       case "message_delta": {
         requireMessageStart(sawMessageStart);
-        if (ev.delta !== undefined && (!ev.delta || typeof ev.delta !== "object" || Array.isArray(ev.delta))) {
+        if (ev.delta !== undefined && (!isJsonObject(ev.delta))) {
           throw new Error("anthropic stream sent an invalid message_delta");
         }
         const u = streamUsage(ev.usage);
@@ -592,7 +594,7 @@ async function parseStream(
           usage.prompt_tokens = u.input_tokens + (usage.cached_tokens ?? 0) + (usage.cache_write_tokens ?? 0);
         }
         const stopReason = ev.delta?.stop_reason;
-        if (stopReason != null && (typeof stopReason !== "string" || !["end_turn", "stop_sequence", "tool_use"].includes(stopReason))) {
+        if (stopReason != null && (!isText(stopReason) || !["end_turn", "stop_sequence", "tool_use"].includes(stopReason))) {
           throw new Error(`anthropic stream returned non-success stop reason: ${String(stopReason).slice(0, 100)}`);
         }
         break;
@@ -637,7 +639,7 @@ function streamIndex(value: unknown): number {
 }
 
 function boundedToolField(value: unknown, label: "id" | "name", maxBytes: number): string {
-  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > maxBytes) {
+  if (!isText(value) || Buffer.byteLength(value, "utf8") > maxBytes) {
     throw new Error(`anthropic streaming tool call ${label} was invalid or too large`);
   }
   return value;
@@ -645,7 +647,7 @@ function boundedToolField(value: unknown, label: "id" | "name", maxBytes: number
 
 function streamUsage(value: unknown): Record<string, number> {
   if (value === undefined || value === null) return {};
-  if (typeof value !== "object" || Array.isArray(value)) throw new Error("anthropic stream usage was invalid");
+  if (!isJsonObject(value)) throw new Error("anthropic stream usage was invalid");
   const out: Record<string, number> = {};
   for (const key of ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]) {
     const count = (value as Record<string, unknown>)[key];

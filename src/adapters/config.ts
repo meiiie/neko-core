@@ -17,7 +17,8 @@ import { homeDir } from "../shared/home.ts";
 import { delimiter, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 import { isMode, type PermissionMode } from "../core/permissions.ts";
-import { isJsonArray, isJsonObject, type JsonValue } from "../shared/wire.ts";
+import { isJsonArray, isJsonObject, isObjectValue, isText, type JsonValue } from "../shared/wire.ts";
+import type { McpServerConfig } from "./mcp.ts";
 import { inspectProjectTrust, type ProjectTrustSummary } from "./project-trust.ts";
 
 export const LOCAL_CONFIG_DIR = ".neko-core";
@@ -448,7 +449,8 @@ export class NekoConfig {
   get contextWindow(): number {
     const perModel = this.data.model_context;
     const m = this.model;
-    if (perModel && typeof perModel === "object" && m && perModel[m] != null) return Number(perModel[m]);
+    const perModelMap = isJsonObject(perModel) ? perModel : null;
+    if (perModelMap && m && perModelMap[m] != null) return Number(perModelMap[m]);
     return Number(this.data.context_window ?? 131072);
   }
   /** User reasoning preference. Common and provider-defined tiers are negotiated per model; "" = model default. */
@@ -512,8 +514,8 @@ export class NekoConfig {
    * the base endpoint, or {model, profile} to pull base_url/key from a named profile. null if unset. */
   get moa(): MoaConfig | null {
     const m = this.data.moa;
-    if (!m || typeof m !== "object") return null;
-    const norm = (x: any): MoaRef => (typeof x === "string" ? { model: x } : { model: String(x?.model ?? ""), profile: x?.profile ? String(x.profile) : undefined });
+    if (!isJsonObject(m)) return null;
+    const norm = (x: any): MoaRef => (isText(x) ? { model: x } : { model: String(x?.model ?? ""), profile: x?.profile ? String(x.profile) : undefined });
     const references = Array.isArray(m.references) ? m.references.map(norm).filter((r: MoaRef) => r.model) : [];
     const aggregator = norm(m.aggregator);
     if (!references.length || !aggregator.model) return null;
@@ -535,7 +537,7 @@ export class NekoConfig {
     const raw = this.data.additional_write_roots;
     const configured = Array.isArray(raw)
       ? raw.map(String)
-      : typeof raw === "string"
+      : isText(raw)
         ? raw.split(delimiter)
         : [];
     const research = this.researchWriteRoot;
@@ -668,7 +670,7 @@ export class NekoConfig {
   /** Which profile answers `neko oracle`, and how much of the project it may be sent. An unset profile
    * is not an error here - the oracle surface reports it and names the candidates. */
   get oracle(): { profile: string; model: string; effort: string; maxBytes: number; maxFileBytes: number; maxFiles: number } {
-    const o = this.data.oracle && typeof this.data.oracle === "object" ? this.data.oracle : {};
+    const o = isJsonObject(this.data.oracle) ? this.data.oracle : {};
     const bounded = (value: unknown, fallback: number, min: number, max: number) => {
       const number = Number(value ?? fallback);
       return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
@@ -686,8 +688,8 @@ export class NekoConfig {
   /** Shell hooks run around tool calls (opt-in). `pre_tool_use` can block (non-zero exit). */
   get hooks(): { preToolUse?: string; postToolUse?: string } {
     const h = this.data.hooks;
-    if (!h || typeof h !== "object") return {};
-    return { preToolUse: h.pre_tool_use, postToolUse: h.post_tool_use };
+    if (!isJsonObject(h)) return {};
+    return { preToolUse: isText(h.pre_tool_use) ? h.pre_tool_use : undefined, postToolUse: isText(h.post_tool_use) ? h.post_tool_use : undefined };
   }
   get timeoutSeconds(): number { return Number(this.data.timeout_seconds ?? 300); } // idle window; see DEFAULTS.timeout_seconds
   get bashTimeoutCapMs(): number {
@@ -714,9 +716,10 @@ export class NekoConfig {
   }
 
   /** Declared MCP servers: name -> stdio {command,args?,env?} OR remote {url, type?:http|sse, headers?}. */
-  get mcpServers(): Record<string, { command?: string; args?: string[]; env?: Record<string, string>; cwd?: string; type?: "stdio" | "http" | "sse"; url?: string; headers?: Record<string, string>; oauth?: boolean }> {
+  get mcpServers(): Record<string, McpServerConfig> {
     const raw = this.data.mcp_servers;
-    return raw && typeof raw === "object" ? raw : {};
+    // SAFETY: config-declared server entries; McpHub validates each entry's fields before launch.
+    return isJsonObject(raw) ? (raw as Record<string, McpServerConfig>) : {};
   }
 
   /** Read on demand; NEVER stored in `data` (so it can't leak via `neko config`). */
@@ -771,7 +774,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   // Built-in profiles are always available; files may add or override individual ones (merge, not replace).
   const profiles: Record<string, Profile> = mergeDeep(
     structuredClone(DEFAULTS.profiles),
-    filesMerged.profiles && typeof filesMerged.profiles === "object" ? filesMerged.profiles : {},
+    isObjectValue(filesMerged.profiles) ? filesMerged.profiles : {},
   );
 
   // Profile selection: explicit arg > NEKO_PROFILE > files' active_profile > built-in default.
@@ -863,7 +866,7 @@ function readOverlay(path: string): Record<string, any> {
   } catch (error) {
     throw new Error(`Invalid JSON in config ${path}: ${(error as Error).message}`);
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  if (!isJsonObject(parsed)) {
     throw new Error(`Config ${path} must be a JSON object`);
   }
   return parsed as Record<string, any>;
@@ -875,7 +878,7 @@ function readMcpJson(path: string): Record<string, any> {
   try {
     const data = JSON.parse(readFileSync(path, "utf-8"));
     const servers = data?.mcpServers ?? data?.mcp_servers;
-    return servers && typeof servers === "object" ? servers : {};
+    return isObjectValue(servers) ? servers : {};
   } catch {
     return {};
   }

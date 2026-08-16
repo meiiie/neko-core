@@ -21,6 +21,8 @@ import { deniedCredentialPath } from "../core/read-policy.ts";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 
+import { isObjectValue, isText } from "../shared/wire.ts";
+
 const SCHEMA_VERSION = 1;
 const MAX_CONTROL_FILE_BYTES = 1024 * 1024;
 const MAX_MANIFEST_FILE_BYTES = 4 * 1024 * 1024;
@@ -140,7 +142,7 @@ function hasUnsafeConfigStructure(root: unknown): boolean {
   let visited = 0;
   while (stack.length) {
     const { value, depth } = stack.pop()!;
-    if (typeof value !== "object" || value === null) continue;
+    if (!isObjectValue(value)) continue;
     if (++visited > 10_000 || depth > 64) return true;
     for (const key of Object.keys(value)) {
       if (key === "__proto__" || key === "prototype" || key === "constructor") return true;
@@ -209,8 +211,8 @@ function validManifest(files: Record<string, any>): files is Record<string, stri
 function validateRecord(id: string, raw: unknown): TrustRecord {
   if (!/^[a-f0-9]{64}$/.test(id) || !isObject(raw)
     || !hasExactKeys(raw, ["root", "fingerprint", "files", "trustedAt"])
-    || typeof raw.root !== "string" || typeof raw.fingerprint !== "string"
-    || typeof raw.trustedAt !== "string" || !isObject(raw.files) || !validManifest(raw.files)
+    || !isText(raw.root) || !isText(raw.fingerprint)
+    || !isText(raw.trustedAt) || !isObject(raw.files) || !validManifest(raw.files)
     || projectIdFor(raw.root) !== id || fingerprintFor(raw.root, raw.files) !== raw.fingerprint
     || Number.isNaN(Date.parse(raw.trustedAt)) || new Date(raw.trustedAt).toISOString() !== raw.trustedAt) {
     throw new Error("Project trust store contains an invalid record");

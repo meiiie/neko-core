@@ -10,9 +10,11 @@
 import { describeToolCall } from "../core/tools.ts";
 import type { Line } from "./transcript.tsx";
 
+import { isText } from "../shared/wire.ts";
+
 /** Flatten a message's content (string or vision-array) to display text. */
 export function contentToText(c: any): string {
-  if (typeof c === "string") return c;
+  if (isText(c)) return c;
   if (Array.isArray(c)) return c.map((p) => (p?.text ?? (p?.type === "image_url" ? "[image]" : ""))).join("");
   return String(c ?? "");
 }
@@ -140,7 +142,7 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
       }
       for (const tc of calls) {
         let args: Record<string, any> = {};
-        try { args = typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments) : (tc.function?.arguments ?? {}); } catch { /* keep {} */ }
+        try { args = isText(tc.function?.arguments) ? JSON.parse(tc.function.arguments) : (tc.function?.arguments ?? {}); } catch { /* keep {} */ }
         const name = tc.function?.name ?? "";
         const line: Line = { id: nextId(), kind: "tool_call", text: describeToolCall(name, args) };
         if (tc.id) toolById.set(tc.id, { name, args, line });

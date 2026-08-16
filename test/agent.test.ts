@@ -7,6 +7,8 @@ import { Agent, clampObservation, classifyToolObservation, estimateRequestTokens
 import { COMPACTION_PROMPT, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent-constants.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
+import { isText } from "../src/shared/wire.ts";
+
 test("tool observation classification is shared by loop guards and eval telemetry", () => {
   expect(classifyToolObservation("(exit 1 -- command FAILED)\nboom")).toBe("failed");
   expect(classifyToolObservation("Blocked: approval required")).toBe("failed");
@@ -149,7 +151,7 @@ test("social turns keep full context, tools, reasoning preference, and conversat
   expect(seen[0].messages[0].content).toContain("FULL PROJECT CONTEXT");
   expect(seen[0].tools).toHaveLength(1);
   expect(seen[0].opts.reasoningEffort).toBeUndefined();
-  expect(typeof seen[0].opts.executeTool).toBe("function");
+  expect(seen[0].opts.executeTool instanceof Function).toBe(true);
   expect(seen[1].messages).toContainEqual({ role: "assistant", content: "first greeting" });
   expect(DEFAULT_SYSTEM_PROMPT).toContain("one continuous Neko");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("repeated greetings");
@@ -302,7 +304,7 @@ test("budget nudge: near the step limit the model is reminded to PRODUCE the del
   script.push({ content: "summary", tool_calls: [] }); // the max_steps wrap-up call
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: new ToolRegistry(root, "auto", () => true), maxSteps: 10 });
   await agent.run("a long task with a deliverable");
-  const budget = agent.messages.filter((m: any) => m.role === "user" && typeof m.content === "string" && m.content.startsWith("[budget]"));
+  const budget = agent.messages.filter((m: any) => m.role === "user" && isText(m.content) && m.content.startsWith("[budget]"));
   expect(budget.length).toBeGreaterThanOrEqual(1); // fired at ~66% and ~85%
 });
 
@@ -1238,7 +1240,7 @@ test("in-loop guard clips OLD observations within one turn before context overfl
   expect(await agent.run("go")).toBe("done");
   // Older tool observations were compressed IN PLACE (so the single long turn stayed under the window),
   // while the most recent ones were kept full.
-  const clipped = agent.messages.filter((m: any) => typeof m.content === "string" && m.content.includes("chars elided to fit context"));
+  const clipped = agent.messages.filter((m: any) => isText(m.content) && m.content.includes("chars elided to fit context"));
   expect(clipped.length).toBeGreaterThan(0);
   const fullRecent = agent.messages.filter((m: any) => m.role === "tool" && m.content === big);
   expect(fullRecent.length).toBeGreaterThan(0); // recent observations untouched
@@ -1259,7 +1261,7 @@ test("tool-heavy turns proactively clear a meaningful stale-result batch before 
     maxContextTokens: 200_000, // hard safety is 160k; proactive editing starts at 50k
   });
   expect(await agent.run("go")).toBe("done");
-  const clipped = agent.messages.filter((m: any) => typeof m.content === "string" && m.content.includes("chars elided to fit context"));
+  const clipped = agent.messages.filter((m: any) => isText(m.content) && m.content.includes("chars elided to fit context"));
   expect(clipped.length).toBeGreaterThan(0);
   expect(estimateTokens(agent.messages)).toBeLessThan(100_000); // never needed the hard 160k overflow path
 });

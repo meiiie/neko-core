@@ -252,7 +252,7 @@ export class SessionHandoffStore {
     const source = requireSession(sourceSessionId, "source");
     const target = requireSession(targetSessionId, "target");
     validateSourceMetadata(source);
-    if (typeof summary !== "string" || summary.trim().length === 0) throw new Error("Handoff summary is required");
+    if (!isText(summary) || summary.trim().length === 0) throw new Error("Handoff summary is required");
     if (UNSAFE_CONTROL.test(summary)) throw new Error("Handoff summary contains unsafe control characters");
     if (utf8Bytes(summary) > MAX_SUMMARY_BYTES) throw new Error("Handoff summary exceeds 16 KiB");
 

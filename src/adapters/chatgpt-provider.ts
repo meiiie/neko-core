@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 import { VERSION } from "../shared/version.ts";
-import { type JsonValue } from "../shared/wire.ts";
+import { isJsonObject, isObjectValue, isText, type JsonValue } from "../shared/wire.ts";
 import type { NekoConfig } from "./config.ts";
 import { providerScope } from "./provider-scope.ts";
 import { effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
@@ -95,8 +95,8 @@ export async function listChatGptModelCatalog(fetchImpl: typeof fetch = fetch): 
       contextWindow: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : undefined,
       inputModalities,
       useResponsesLite: raw?.use_responses_lite === true,
-      toolMode: typeof raw?.tool_mode === "string" ? raw.tool_mode : undefined,
-      minimalClientVersion: typeof raw?.minimal_client_version === "string" ? raw.minimal_client_version : undefined,
+      toolMode: isText(raw?.tool_mode) ? raw.tool_mode : undefined,
+      minimalClientVersion: isText(raw?.minimal_client_version) ? raw.minimal_client_version : undefined,
     });
   }
   return models;
@@ -135,12 +135,12 @@ export async function getChatGptUsage(fetchImpl: typeof fetch = fetch): Promise<
   return {
     planType: String(raw?.plan_type ?? "unknown"),
     limits,
-    credits: credits && typeof credits === "object" ? {
+    credits: isJsonObject(credits) ? {
       hasCredits: credits.has_credits === true,
       unlimited: credits.unlimited === true,
       balance: credits.balance == null ? undefined : String(credits.balance),
     } : undefined,
-    reachedType: typeof reached === "string" ? reached : String(reached?.type ?? "") || undefined,
+    reachedType: isText(reached) ? reached : String(reached?.type ?? "") || undefined,
   };
 }
 
@@ -167,7 +167,7 @@ async function chatGptGetJson(url: string | URL, label: string, fetchImpl: typeo
 }
 
 function usageWindow(raw: any): ChatGptUsageWindow | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
+  if (!isJsonObject(raw)) return undefined;
   const usedPercent = Number(raw.used_percent ?? raw.usedPercent);
   const windowSeconds = Number(raw.limit_window_seconds ?? raw.window_seconds ?? raw.windowSeconds ?? 0);
   const resetsAt = Number(raw.reset_at ?? raw.resets_at ?? raw.resetsAt);
@@ -369,7 +369,7 @@ export function toResponsesInput(messages: any[], scope = ""): { instructions: s
           type: "function_call",
           call_id: call.id,
           name: call.function?.name ?? "",
-          arguments: typeof call.function?.arguments === "string" ? call.function.arguments : JSON.stringify(call.function?.arguments ?? {}),
+          arguments: isText(call.function?.arguments) ? call.function.arguments : JSON.stringify(call.function?.arguments ?? {}),
         });
       }
       continue;
@@ -407,7 +407,7 @@ function responseContent(content: any): any[] {
 }
 
 function textContent(content: any): string {
-  if (typeof content === "string") return content;
+  if (isText(content)) return content;
   return Array.isArray(content) ? content.filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? "")).join("\n") : "";
 }
 
@@ -448,7 +448,7 @@ export async function parseResponsesStream(
   const callKeysByIndex = new Map<number, string>();
   const emitted = new Set<string>();
   const appendOutput = (delta: unknown, emit: boolean): void => {
-    if (typeof delta !== "string") throw new Error("Responses streaming output delta was not text");
+    if (!isText(delta)) throw new Error("Responses streaming output delta was not text");
     if (!delta) return;
     outputBytes += Buffer.byteLength(delta, "utf8");
     if (outputBytes > RESPONSES_STREAM_LIMITS.maxOutputBytes) throw new Error("Responses streaming output exceeds safety limit");
@@ -456,7 +456,7 @@ export async function parseResponsesStream(
     if (emit) onDelta?.(delta, "content");
   };
   const appendReasoning = (delta: unknown): void => {
-    if (typeof delta !== "string") throw new Error("Responses streaming reasoning delta was not text");
+    if (!isText(delta)) throw new Error("Responses streaming reasoning delta was not text");
     if (!delta) return;
     reasoningBytes += Buffer.byteLength(delta, "utf8");
     if (reasoningBytes > RESPONSES_STREAM_LIMITS.maxReasoningBytes) throw new Error("Responses streaming reasoning exceeds safety limit");
@@ -469,8 +469,8 @@ export async function parseResponsesStream(
     try {
       const before = JSON.parse(current);
       const after = JSON.parse(next);
-      const beforeKeys = before && typeof before === "object" && !Array.isArray(before) ? Object.keys(before).length : -1;
-      const afterKeys = after && typeof after === "object" && !Array.isArray(after) ? Object.keys(after).length : -1;
+      const beforeKeys = isJsonObject(before) ? Object.keys(before).length : -1;
+      const afterKeys = isJsonObject(after) ? Object.keys(after).length : -1;
       return beforeKeys > afterKeys ? current : next;
     } catch {
       return next;
@@ -478,7 +478,7 @@ export async function parseResponsesStream(
   };
   const setArguments = (item: { arguments: string; argumentBytes: number }, incoming: unknown, append = false): void => {
     if (incoming == null) return;
-    if (typeof incoming !== "string") throw new Error("Responses streaming tool arguments were not text");
+    if (!isText(incoming)) throw new Error("Responses streaming tool arguments were not text");
     const next = append ? item.arguments + incoming : mergeArguments(item.arguments, incoming);
     const bytes = append ? item.argumentBytes + Buffer.byteLength(incoming, "utf8") : Buffer.byteLength(next, "utf8");
     if (bytes > RESPONSES_STREAM_LIMITS.maxToolArgumentBytes) throw new Error("Responses streaming tool arguments exceed safety limit");
@@ -522,7 +522,7 @@ export async function parseResponsesStream(
     let args: Record<string, any>;
     try {
       args = item.arguments ? JSON.parse(item.arguments) : {};
-      if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("not an object");
+      if (!isJsonObject(args)) throw new Error("not an object");
     } catch {
       if (!force) return null;
       args = { _raw: item.arguments };
@@ -554,7 +554,7 @@ export async function parseResponsesStream(
 
   for await (const event of responseEvents(response, onActivity)) {
     if (event === RESPONSES_STREAM_DONE) { sawDone = true; break; }
-    if (!event || typeof event !== "object" || Array.isArray(event) || typeof event.type !== "string" || !event.type) {
+    if (!isJsonObject(event) || !isText(event.type) || !event.type) {
       throw new Error("Responses streaming SSE data was not a valid Responses event");
     }
     const type = event.type;
@@ -563,48 +563,50 @@ export async function parseResponsesStream(
       throw new Error("Responses streaming SSE data was not a valid Responses event");
     }
     sawValidEvent = true;
+    const evItem = isJsonObject(event.item) ? event.item : undefined;
+    const errObj = isJsonObject(event.error) ? event.error : null;
     if (event.error != null && type !== "response.failed" && type !== "error") {
-      throw new Error(`Responses request failed: ${String(event.error?.message ?? event.error).slice(0, 300)}`);
+      throw new Error(`Responses request failed: ${String(errObj?.message ?? event.error).slice(0, 300)}`);
     }
     if ((type === "response.output_item.added" || type === "response.output_item.done")
-      && (!event.item || typeof event.item !== "object" || Array.isArray(event.item) || typeof event.item.type !== "string" || !event.item.type)) {
+      && (!isJsonObject(evItem) || !isText(evItem.type) || !evItem.type)) {
       throw new Error("Responses stream sent an invalid output item event");
     }
     if (type === "response.output_text.delta") {
       appendOutput(event.delta, true);
     } else if (type === "response.reasoning_summary_text.delta" || type === "response.reasoning_text.delta") {
       appendReasoning(event.delta);
-    } else if (type === "response.output_item.added" && event.item?.type === "function_call") {
-      const key = resolveCallKey(event.item.id, event.output_index);
+    } else if (type === "response.output_item.added" && evItem?.type === "function_call") {
+      const key = resolveCallKey(evItem.id, event.output_index);
       const item = ensureCall(key);
-      updateCallIdentity(item, event.item.call_id ?? event.item.id, event.item.name);
-      setArguments(item, event.item.arguments);
+      updateCallIdentity(item, evItem.call_id ?? evItem.id, evItem.name);
+      setArguments(item, evItem.arguments);
       if (item.name) onDelta?.(`preparing ${item.name}...`, "reasoning");
     } else if (type === "response.function_call_arguments.delta") {
       const key = resolveCallKey(event.item_id ?? event.call_id, event.output_index);
       const item = ensureCall(key);
       updateCallIdentity(item, event.call_id ?? (!item.id ? event.item_id : null), event.name);
       setArguments(item, event.delta, true);
-      if (event.delta) onDelta?.(event.delta, "tool");
+      if (isText(event.delta)) onDelta?.(event.delta, "tool");
       emitCall(key);
     } else if (type === "response.function_call_arguments.done") {
-      if (typeof event.arguments !== "string") throw new Error("Responses streaming tool arguments were not text");
+      if (!isText(event.arguments)) throw new Error("Responses streaming tool arguments were not text");
       const key = resolveCallKey(event.item_id ?? event.call_id, event.output_index);
       const item = ensureCall(key);
       updateCallIdentity(item, event.call_id ?? (!item.id ? event.item_id : null), event.name);
       setArguments(item, event.arguments);
       emitCall(key, true);
-    } else if (type === "response.output_item.done" && event.item?.type === "reasoning") {
-      keepContinuation(event.item, event.output_index);
-    } else if (type === "response.output_item.done" && event.item?.type === "function_call") {
-      const key = resolveCallKey(event.item.id ?? event.item.call_id, event.output_index);
+    } else if (type === "response.output_item.done" && evItem?.type === "reasoning") {
+      keepContinuation(evItem, event.output_index);
+    } else if (type === "response.output_item.done" && evItem?.type === "function_call") {
+      const key = resolveCallKey(evItem.id ?? evItem.call_id, event.output_index);
       const item = ensureCall(key);
-      updateCallIdentity(item, event.item.call_id ?? (!item.id ? event.item.id : null), event.item.name);
-      setArguments(item, event.item.arguments);
+      updateCallIdentity(item, evItem.call_id ?? (!item.id ? evItem.id : null), evItem.name);
+      setArguments(item, evItem.arguments);
       emitCall(key, true);
     } else if (type === "response.completed") {
       if (completed) throw new Error("Responses stream sent duplicate response.completed events");
-      if (!event.response || typeof event.response !== "object" || Array.isArray(event.response)) {
+      if (!isJsonObject(event.response)) {
         throw new Error("Responses stream sent an invalid response.completed event");
       }
       if (event.response.status != null && event.response.status !== "completed") {
@@ -617,7 +619,7 @@ export async function parseResponsesStream(
       const output = event.response.output ?? [];
       for (let outputIndex = 0; outputIndex < output.length; outputIndex++) {
         const item = output[outputIndex];
-        if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Responses stream sent an invalid completed output item");
+        if (!isJsonObject(item)) throw new Error("Responses stream sent an invalid completed output item");
         if (item?.type === "reasoning") {
           keepContinuation(item, outputIndex);
           continue;
@@ -626,7 +628,7 @@ export async function parseResponsesStream(
           if (item.content != null && !Array.isArray(item.content)) throw new Error("Responses stream sent invalid completed message content");
           if (!content) {
             for (const part of item.content ?? []) {
-              if (!part || typeof part !== "object" || Array.isArray(part)) throw new Error("Responses stream sent invalid completed message content");
+              if (!isJsonObject(part)) throw new Error("Responses stream sent invalid completed message content");
               if (part.type === "output_text") appendOutput(part.text, false);
             }
           }
@@ -641,7 +643,10 @@ export async function parseResponsesStream(
       }
       completed = true;
     } else if (type === "response.failed" || type === "response.incomplete" || type === "error") {
-      throw new Error(`Responses request failed: ${String(event.response?.error?.message ?? event.response?.incomplete_details?.reason ?? event.error?.message ?? event.message ?? "unknown error").slice(0, 300)}`);
+      const resp = isJsonObject(event.response) ? event.response : null;
+      const respError = resp && isJsonObject(resp.error) ? resp.error : null;
+      const incomplete = resp && isJsonObject(resp.incomplete_details) ? resp.incomplete_details : null;
+      throw new Error(`Responses request failed: ${String(respError?.message ?? incomplete?.reason ?? errObj?.message ?? event.message ?? "unknown error").slice(0, 300)}`);
     }
   }
   if (!sawValidEvent) throw new Error("Responses stream ended without a valid event");
@@ -663,7 +668,7 @@ export async function parseResponsesStream(
 
 function reasoningContinuation(item: any): any | null {
   if (!item || item.type !== "reasoning" || !item.encrypted_content) return null;
-  if (typeof item.encrypted_content !== "string") throw new Error("Responses streaming continuation was invalid");
+  if (!isText(item.encrypted_content)) throw new Error("Responses streaming continuation was invalid");
   const id = boundedResponsesToolField(item.id, "id", RESPONSES_STREAM_LIMITS.maxToolIdBytes);
   return {
     type: "reasoning",
@@ -675,7 +680,7 @@ function reasoningContinuation(item: any): any | null {
 
 function boundedResponsesToolField(value: unknown, field: "id" | "name", maxBytes: number): string {
   if (value == null) return "";
-  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > maxBytes) {
+  if (!isText(value) || Buffer.byteLength(value, "utf8") > maxBytes) {
     throw new Error(`Responses streaming tool ${field} was invalid or too large`);
   }
   return value;
@@ -762,7 +767,7 @@ function safeError(body: string): string {
   try {
     const parsed = JSON.parse(body);
     const detail = parsed?.error?.message ?? parsed?.message ?? parsed?.detail;
-    return (typeof detail === "string" ? detail : JSON.stringify(detail ?? "request failed")).slice(0, 300);
+    return (isText(detail) ? detail : JSON.stringify(detail ?? "request failed")).slice(0, 300);
   }
   catch {
     if (/<(?:!doctype|html|head|body|meta|style|script)\b/i.test(body)) {

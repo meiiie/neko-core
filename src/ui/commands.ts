@@ -40,6 +40,8 @@ import { discoverMeetingSupport, installMeetingSupportPack, readMeetingSupportPa
 import { deleteMeeting, formatMeetingTime, latestMeeting, listMeetings, readMeeting, readMeetingTranscript, type MeetingManifest } from "../adapters/meeting.ts";
 import { transcribeMeeting } from "../adapters/meeting-transcription.ts";
 
+import { isBool, isText } from "../shared/wire.ts";
+
 export const HELP = [
   "Commands:",
   "  /help /cost /usage /voice /model /provider /support /browser /meeting /tools /skill(s) /init /clear /compact /transcript /reset /exit",
@@ -200,7 +202,7 @@ function openResumePicker(ctx: CommandCtx, scope: "smart" | "cwd" | "all", all =
       const s = loadSession(it.id);
       if (!s) return "(could not load)";
       return s.messages
-        .filter((m: any) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+        .filter((m: any) => (m.role === "user" || m.role === "assistant") && isText(m.content))
         .slice(-4)
         .map((m: any) => (m.role === "user" ? "> " : "  ") + terminalSafeText(trunc(String(m.content), 100), { maxChars: 120 }))
         .join("\n") || "(no text messages)";
@@ -283,7 +285,7 @@ function applyModelSelection(ctx: CommandCtx, selected: ModelOption): void {
   const { cfg, addLine } = ctx;
   cfg.data.model = selected.id;
   if (selected.contextWindow) cfg.data.model_context = { ...(cfg.data.model_context ?? {}), [selected.id]: selected.contextWindow };
-  if (typeof selected.vision === "boolean") cfg.data.vision = selected.vision;
+  if (isBool(selected.vision)) cfg.data.vision = selected.vision;
   setModel(selected.id, cfg.profile, selected.contextWindow, selected.vision);
   ctx.agent.setMaxContextTokens(cfg.contextWindow);
   const before = cfg.effort;
@@ -1199,7 +1201,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       // Re-run the last human turn (after a transient error / a bad result). rewind() drops that turn and
       // its response from context, then we resubmit the same text so it runs fresh.
       const lastUser = agent.lastUserMessage();
-      const text = typeof lastUser?.content === "string" ? lastUser.content
+      const text = isText(lastUser?.content) ? lastUser.content
         : Array.isArray(lastUser?.content) ? lastUser!.content.map((p: any) => p?.text ?? "").join("") : "";
       if (!text.trim()) return addLine("info", "nothing to retry");
       agent.rewind();

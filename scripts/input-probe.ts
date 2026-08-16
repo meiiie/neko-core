@@ -13,7 +13,7 @@
 const target = process.argv[2] ?? (process.platform === "win32" ? "dist/neko.exe" : "dist/neko");
 
 const Terminal = (Bun as any).Terminal;
-if (typeof Terminal !== "function") {
+if (!(Terminal instanceof Function)) {
   console.error("input-probe: this Bun has no Bun.Terminal (PTY) API - cannot probe. Failing closed.");
   process.exit(1);
 }

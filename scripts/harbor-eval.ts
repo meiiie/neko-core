@@ -24,6 +24,7 @@ import { validChatGptCredentials, type ChatGptCredentials } from "../src/adapter
 import { trustedGitExecutable } from "../src/adapters/trusted-git.ts";
 import { executableOnPath } from "../src/core/sandbox.ts";
 import { minimalWindowsSystemEnv, resolveWindowsSystemExecutable } from "../src/shared/windows-system.ts";
+import { isObjectValue } from "../src/shared/wire.ts";
 
 export const HARBOR_VERSION = "0.20.0";
 export const TERMINAL_BENCH_2_1_DATASET =
@@ -655,7 +656,7 @@ export function collectBuildIdentity(
 function readUserConfig(): Record<string, any> {
   try {
     const value = JSON.parse(readFileSync(join(homedir(), ".neko-core", "config.json"), "utf8"));
-    return value && typeof value === "object" ? value : {};
+    return isObjectValue(value) ? value : {};
   } catch {
     return {};
   }

@@ -11,7 +11,7 @@ import { atomicWriteFile, atomicWriteFileSync } from "../shared/atomic.ts";
 import { hasTerminalControl, terminalSafeText } from "../shared/terminal-text.ts";
 import { trustedGitOutput, trustedGitOutputAsync } from "./trusted-git.ts";
 import { homeDir } from "../shared/home.ts";
-import { isJsonNumber, isJsonObject, type JsonObject } from "../shared/wire.ts";
+import { isBool, isJsonNumber, isJsonObject, isText, type JsonObject } from "../shared/wire.ts";
 import { dirname, join, resolve } from "node:path";
 
 export type SessionTurnStatus = "idle" | "running" | "interrupted";
@@ -129,11 +129,11 @@ function sessionPath(id: string): string | null {
 }
 
 function validMessage(value: unknown): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (!isJsonObject(value)) return false;
   const message = value as Record<string, unknown>;
   if (!new Set(["system", "user", "assistant", "tool"]).has(String(message.role ?? ""))) return false;
-  if (message._neko_internal !== undefined && typeof message._neko_internal !== "boolean") return false;
-  return typeof message.content === "string" || message.content === null || Array.isArray(message.content);
+  if (message._neko_internal !== undefined && !isBool(message._neko_internal)) return false;
+  return isText(message.content) || message.content === null || Array.isArray(message.content);
 }
 
 function validMetadataText(value: unknown, maxBytes: number): value is string {
@@ -625,7 +625,7 @@ export function recoverSessionTodos(messages: any[]): { content: string; status:
     for (const call of messages[i]?.tool_calls ?? []) {
       if (call?.function?.name !== "todo_write") continue;
       try {
-        const args = typeof call.function.arguments === "string"
+        const args = isText(call.function.arguments)
           ? JSON.parse(call.function.arguments)
           : call.function.arguments;
         if (Array.isArray(args?.todos)) {

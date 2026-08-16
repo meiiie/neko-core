@@ -35,6 +35,7 @@ import {
   type EventHook,
   type AgentOptions,
 } from "./agent-constants.ts";
+import { isJsonObject, isText } from "../shared/wire.ts";
 
 export {
   DEFAULT_SYSTEM_PROMPT,
@@ -68,7 +69,7 @@ const LEGACY_INTERNAL_USER_PREFIXES = [
 
 function isInternalUserMessage(message: any): boolean {
   if (message?._neko_internal === true) return true;
-  if (message?._neko_internal === false || message?.role !== "user" || typeof message.content !== "string") return false;
+  if (message?._neko_internal === false || message?.role !== "user" || !isText(message.content)) return false;
   const content = message.content.trimStart();
   return LEGACY_INTERNAL_USER_PREFIXES.some((prefix) => content.startsWith(prefix));
 }
@@ -96,7 +97,7 @@ function compactionSource(messages: any[], budget = 40_000): string {
     return `${raw.slice(0, limit - tail)}\n... [${omitted} chars omitted for compaction] ...\n${raw.slice(-tail)}`;
   };
   const source = messages.map((message) => {
-    const raw = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+    const raw = isText(message.content) ? message.content : JSON.stringify(message.content);
     const roleCap = message.role === "tool" ? 1200 : 3000;
     return `${message.role}: ${clip(raw, Math.min(roleCap, perMessage))}`;
   }).join("\n");
@@ -120,7 +121,7 @@ export type ToolObservationClass = "productive" | "empty" | "failed";
 /** Classify a tool observation without retaining its payload. This is shared by the loop guards and
  * benchmark telemetry so an eval cannot report a failed/empty call as productive. */
 export function classifyToolObservation(obs: unknown): ToolObservationClass {
-  if (typeof obs !== "string") return "productive";
+  if (!isText(obs)) return "productive";
   if (/\(exit \d+ -- command FAILED\)/.test(obs)
     || /^\(timed out/.test(obs)
     || /^(?:Error(?: running [^:]+)?:|Blocked(?::| by)|Denied by user:|Refused:|The user did NOT approve\b|Tool '[^']+' is (?:disabled|not available)|Sub-agents? (?:are|is) not available\b|Sub-agent error:|\[denied\]|\[capability circuit\]|\[loop guard\]|\(interrupted\))/mi.test(obs)) {
@@ -139,7 +140,7 @@ export function classifyToolObservation(obs: unknown): ToolObservationClass {
  * Plain string attachments are CLI `--image` inputs and keep the legacy text-then-images layout. */
 export function imageContent(instruction: string, images: ImageAttachment[]): any[] {
   const numbered = new Map<number, NumberedImageAttachment>();
-  for (const image of images) if (typeof image !== "string") numbered.set(image.id, image);
+  for (const image of images) if (!isText(image)) numbered.set(image.id, image);
   const used = new Set<number>();
   const parts: any[] = [];
   let cursor = 0;
@@ -156,7 +157,7 @@ export function imageContent(instruction: string, images: ImageAttachment[]): an
   const tail = instruction.slice(cursor);
   if (tail || !parts.length) parts.push({ type: "text", text: tail });
   for (const image of images) {
-    if (typeof image === "string") parts.push({ type: "image_url", image_url: { url: image } });
+    if (isText(image)) parts.push({ type: "image_url", image_url: { url: image } });
     else if (!used.has(image.id)) parts.push({ type: "image_url", image_url: { url: image.url } });
   }
   return parts;
@@ -248,7 +249,7 @@ export class Agent {
     this.provider = provider;
     try {
       const disposed = previous.dispose?.();
-      if (disposed && typeof (disposed as Promise<void>).catch === "function") void (disposed as Promise<void>).catch(() => {});
+      if (disposed && (disposed as Promise<void>).catch instanceof Function) void (disposed as Promise<void>).catch(() => {});
     } catch { /* provider cleanup must not block a live account switch */ }
   }
 
@@ -308,7 +309,7 @@ export class Agent {
       // base64, packed log lines) which is long in chars yet short in lines and would otherwise slip
       // through unclipped, freeing no context.
       const leanTail = tail.map((m) => {
-        if (m.role !== "tool" || typeof m.content !== "string") return m;
+        if (m.role !== "tool" || !isText(m.content)) return m;
         const lines = m.content.split("\n");
         if (lines.length > 40) return { ...m, content: lines.slice(0, 40).join("\n") + `\n... (${lines.length - 40} more lines clipped on compaction)` };
         if (m.content.length > LEAN_TAIL_CHARS) {
@@ -322,7 +323,7 @@ export class Agent {
     // 2603.05344). Deterministic code, not a summarizer promise: when the first user turn is in the
     // summarized head, carry its text (clipped) ahead of the model summary.
     const firstUser = head.find((m) => m.role === "user");
-    const task = typeof firstUser?.content === "string" ? firstUser.content.slice(0, 600) : "";
+    const task = isText(firstUser?.content) ? firstUser.content.slice(0, 600) : "";
     const plan = todosContextBlock(this.tools.todos);
     this.messages = [
       ...sys,
@@ -352,7 +353,7 @@ export class Agent {
       .map((m, i) => (m.role === "user" && i !== lastUser && Array.isArray(m.content) && m.content.some((p: any) => p?.type === "image_url") ? i : -1))
       .filter((i) => i >= 0);
     const toolIdx = this.messages
-      .map((m, i) => (m.role === "tool" && typeof m.content === "string" ? i : -1))
+      .map((m, i) => (m.role === "tool" && isText(m.content) ? i : -1))
       .filter((i) => i >= 0);
     const oldTextIdx = toolIdx.slice(0, Math.max(0, toolIdx.length - keepRecent))
       .filter((i) => this.messages[i].content.length > CLIP + 80 && !this.messages[i].content.includes(MARK));
@@ -403,7 +404,7 @@ export class Agent {
   providerHistory(): any[] {
     const clean = cleanProviderMessages(this.messages);
     if (!this.turnSystemContext) return clean;
-    const system = clean.find((message) => message?.role === "system" && typeof message.content === "string");
+    const system = clean.find((message) => message?.role === "system" && isText(message.content));
     if (system) system.content = `${system.content}\n\n${this.turnSystemContext}`;
     return clean;
   }
@@ -490,7 +491,7 @@ export class Agent {
     if (!this.dynamicContext) return;
     this.messages = this.messages.filter((m) => !m.dynamic); // migrate legacy two-system sessions
     const sys = this.messages.find((m) => m.role === "system");
-    if (!sys || typeof sys.content !== "string") return;
+    if (!sys || !isText(sys.content)) return;
     const base = sys.content.split(SESSION_CONTEXT_MARK)[0];
     const text = this.dynamicContext();
     sys.content = text ? `${base}${SESSION_CONTEXT_MARK}${text}` : base;
@@ -500,7 +501,7 @@ export class Agent {
    * to a RESUMED session (whose saved messages bake in whatever prompt was current when it ran). */
   refreshSystemPrompt(): void {
     const sys = this.messages.find((m) => m.role === "system");
-    if (!sys || typeof sys.content !== "string") return;
+    if (!sys || !isText(sys.content)) return;
     const dyn = sys.content.split(SESSION_CONTEXT_MARK)[1]; // preserve any live session-context tail
     sys.content = this.systemPrompt + (dyn !== undefined ? SESSION_CONTEXT_MARK + dyn : "");
   }
@@ -509,7 +510,7 @@ export class Agent {
    * tail so the next refresh doesn't strip it. Seeds the base prompt if there's no system message. */
   appendSystem(text: string): void {
     const sys = this.messages.find((m) => m.role === "system");
-    if (!sys || typeof sys.content !== "string") {
+    if (!sys || !isText(sys.content)) {
       this.messages.unshift({ role: "system", content: this.systemPrompt + "\n\n" + text });
       return;
     }
@@ -587,7 +588,7 @@ export class Agent {
       call: { name: string; arguments?: Record<string, any> },
       observation: unknown,
     ): boolean {
-      if (!Agent.isToolchainCommand(call) || typeof observation !== "string" || !Agent.isFailedRunResult(observation)) return false;
+      if (!Agent.isToolchainCommand(call) || !isText(observation) || !Agent.isFailedRunResult(observation)) return false;
       return /(command not found|not recognized as|no such file|cannot find|permission denied|access is denied|operation not permitted|network (?:is )?(?:blocked|denied)|\b403\b)/i
         .test(observation);
     }
@@ -652,7 +653,7 @@ export class Agent {
     }
 
     private static isVerificationEvidenceCall(call: { name: string; arguments?: Record<string, any> }, observation: unknown): boolean {
-      if ((typeof observation === "string" && Agent.isUnproductiveResult(observation)) || observation == null) return false;
+      if ((isText(observation) && Agent.isUnproductiveResult(observation)) || observation == null) return false;
       const name = call.name.toLowerCase();
       if (name === "computer") {
         return new Set(["list", "read", "get", "watch", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
@@ -740,7 +741,7 @@ export class Agent {
         && isValidationBashCommand(String(call.arguments?.command ?? ""));
       if (validationCommand) {
         const syntaxPreservesExit = hasAuthoritativeValidatorExit(String(call.arguments?.command ?? ""), call.arguments);
-        const foregroundCompleted = typeof observation === "string" && /^\(exit 0\)(?:\r?\n|$)/.test(observation);
+        const foregroundCompleted = isText(observation) && /^\(exit 0\)(?:\r?\n|$)/.test(observation);
         const authoritative = syntaxPreservesExit && (failed || foregroundCompleted);
         this.validationExpected = true;
         this.validationResult = {
@@ -748,7 +749,7 @@ export class Agent {
           command: String(call.arguments?.command ?? "").trim(),
           ok: authoritative && foregroundCompleted && !failed,
           authoritative,
-          ...((failed || !authoritative) && typeof observation === "string"
+          ...((failed || !authoritative) && isText(observation)
             ? { detail: observation.replace(/\s+/g, " ").trim().slice(0, 500) }
             : undefined),
         };
@@ -1110,7 +1111,7 @@ export class Agent {
             // MUTATING tool, tell the model HOW to recover - models otherwise flail (blind re-runs, deleting
             // the partial artifact they still need). Edge-triggered so it never nags: a mutating success
             // re-arms it, and PERSISTENT failure is the unproductive-streak guard's job below (fires at N).
-            const mutFailed = MUTATING_TOOLS.has(call.name) && typeof observation === "string" &&
+            const mutFailed = MUTATING_TOOLS.has(call.name) && isText(observation) &&
               (observation.startsWith(`Error running ${call.name}`) || Agent.isFailedRunResult(observation));
             if (mutFailed && !mutErrored && repeats < 2) {
               this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content:
@@ -1254,13 +1255,13 @@ function assistantToolMessage(content: string | null, toolCalls: ToolCall[], con
  * never has exactly one of those wrapper keys, so unwrapping is safe. */
 export function unwrapToolArgs(raw: any): Record<string, any> {
   let a: any = raw;
-  if (typeof a === "string") { try { a = JSON.parse(a); } catch { return {}; } }
-  if (!a || typeof a !== "object" || Array.isArray(a)) return {};
+  if (isText(a)) { try { a = JSON.parse(a); } catch { return {}; } }
+  if (!isJsonObject(a)) return {};
   const keys = Object.keys(a);
   if (keys.length === 1 && ["_raw", "arguments", "input", "parameters", "args"].includes(keys[0])) {
     let inner: any = a[keys[0]];
-    if (typeof inner === "string") { try { inner = JSON.parse(inner); } catch { /* keep original object */ } }
-    if (inner && typeof inner === "object" && !Array.isArray(inner)) return inner;
+    if (isText(inner)) { try { inner = JSON.parse(inner); } catch { /* keep original object */ } }
+    if (isJsonObject(inner)) return inner;
   }
   return a;
 }

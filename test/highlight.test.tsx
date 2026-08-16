@@ -5,6 +5,8 @@ import type { ReactElement } from "react";
 import { highlightLine } from "../src/ui/highlight.tsx";
 import { TranscriptLine } from "../src/ui/transcript.tsx";
 
+import { isText } from "../src/shared/wire.ts";
+
 const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
 const cfg = {} as any;
 
@@ -48,7 +50,7 @@ test("highlightLine colors keyword/type/string/number/function per token", () =>
 test("highlightLine breaks a template literal open at ${...} interpolations", () => {
   const nodes = highlightLine("`hi ${name} there`");
   // The interpolated identifier is highlighted as CODE, not swallowed by the string...
-  const flat = nodes.map((n) => (typeof n === "string" ? n : (n as any).props?.children)).join("|");
+  const flat = nodes.map((n) => (isText(n) ? n : (n as any).props?.children)).join("|");
   expect(flat).toContain("name");                 // the expression is a separate node
   // ...and the literal parts stay green strings.
   expect(nodes.some((n) => (n as any)?.props?.color === "green" && String((n as any).props.children).includes("hi"))).toBe(true);

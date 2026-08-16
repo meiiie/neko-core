@@ -11,6 +11,8 @@ import { spawnSync } from "node:child_process";
 import { homeDir } from "../shared/home.ts";
 import { VERSION } from "../shared/version.ts";
 
+import { isJsonNumber, isText } from "../shared/wire.ts";
+
 const REPO = "meiiie/neko-core";
 const STABLE_TAG = /^v\d+\.\d+\.\d+$/;
 const DOWNLOAD_IDLE_MS = 60_000;
@@ -45,7 +47,7 @@ export async function latestVersion(): Promise<string | null> {
     });
     if (res.ok) {
       const data: any = await res.json();
-      if (typeof data.tag_name === "string" && STABLE_TAG.test(data.tag_name) && !data.draft && !data.prerelease) {
+      if (isText(data.tag_name) && STABLE_TAG.test(data.tag_name) && !data.draft && !data.prerelease) {
         return data.tag_name;
       }
     }
@@ -210,7 +212,7 @@ export function acquireUpdateLock(now = Date.now(), isAlive: (pid: number) => bo
 
   try {
     const held = JSON.parse(readFileSync(path, "utf-8"));
-    const fresh = typeof held.at === "number" && now - held.at < LOCK_STALE_MS;
+    const fresh = isJsonNumber(held.at) && now - held.at < LOCK_STALE_MS;
     const live = isAlive(held.pid);
     if (fresh && live) return false;
   } catch {
@@ -253,7 +255,7 @@ export async function checkForUpdate(now = Date.now()): Promise<string | null> {
     const c = JSON.parse(readFileSync(cachePath(), "utf-8"));
     const cachedNewer = Boolean(c.latest) && isNewer(c.latest, VERSION);
     const ttl = cachedNewer ? UPDATE_RECHECK_MS.found : UPDATE_RECHECK_MS.upToDate;
-    if (typeof c.at === "number" && now - c.at < ttl) return cachedNewer ? c.latest : null;
+    if (isJsonNumber(c.at) && now - c.at < ttl) return cachedNewer ? c.latest : null;
   } catch {
     /* no/!valid cache -> fetch fresh */
   }

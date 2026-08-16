@@ -25,6 +25,7 @@ import {
   TERMINAL_BENCH_2_1_DATASET,
   type HarborBuildIdentity,
 } from "../scripts/harbor-eval.ts";
+import { isBool } from "../src/shared/wire.ts";
 
 const digest = (character: string) => character.repeat(64);
 const buildIdentity: HarborBuildIdentity = {
@@ -249,7 +250,7 @@ describe("Harbor evaluation launcher", () => {
       expect(identity.hostAgentSha256).toBe(sha256(join(root, "evals", "harbor", "neko_host_agent.py")));
       expect(identity.remoteToolsSha256).toBe(sha256(join(root, "evals", "harbor", "remote_tools.py")));
       expect(identity.sourceRevision).toMatch(/^[a-f0-9]{40,64}$/);
-      expect(typeof identity.sourceDirty).toBe("boolean");
+      expect(isBool(identity.sourceDirty)).toBe(true);
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }

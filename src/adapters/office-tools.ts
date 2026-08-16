@@ -17,7 +17,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from "node:p
 import { tmpdir } from "node:os";
 
 import type { McpTools } from "../core/ports.ts";
-import { type JsonValue } from "../shared/wire.ts";
+import { isJsonObject, isObjectValue, isText, type JsonValue } from "../shared/wire.ts";
 import { composeMcpTools } from "./mcp-compose.ts";
 import {
   discoverLibreOffice,
@@ -412,7 +412,7 @@ async function runOffice(executable: string, args: string[], options: { cwd: str
 function normalizeCommands(value: unknown, root: string): Record<string, unknown>[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 500) throw new Error("Office commands must contain 1 to 500 batch objects");
   return value.map((entry, index) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`Office command ${index + 1} must be an object`);
+    if (!isJsonObject(entry)) throw new Error(`Office command ${index + 1} must be an object`);
     const command = structuredClone(entry) as Record<string, unknown>;
     const op = String(command.op ?? command.command ?? "").toLowerCase();
     if (!ALLOWED_BATCH_OPS.has(op)) throw new Error(`Office command ${index + 1} uses forbidden operation '${op || "missing"}'; allowed: add, set, remove, move, swap`);
@@ -422,7 +422,7 @@ function normalizeCommands(value: unknown, root: string): Record<string, unknown
 }
 
 function validateNestedResources(value: unknown, root: string, key = "", parentKey = ""): void {
-  if (typeof value === "string") {
+  if (isText(value)) {
     const resource = key === "src" || key === "poster" || (parentKey === "props" && key === "path");
     if (!resource || /^data:/i.test(value)) return;
     if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[a-z]:[\\/]/i.test(value)) {
@@ -433,7 +433,7 @@ function validateNestedResources(value: unknown, root: string, key = "", parentK
     return;
   }
   if (Array.isArray(value)) return value.forEach((item) => validateNestedResources(item, root, key, parentKey));
-  if (value && typeof value === "object") {
+  if (isObjectValue(value)) {
     for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) validateNestedResources(child, root, childKey, key);
   }
 }

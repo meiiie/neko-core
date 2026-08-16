@@ -40,6 +40,8 @@ import {
 } from "../evals/harbor/host_runner.ts";
 import { discoverCodexSupport } from "../src/adapters/codex-app-server.ts";
 
+import { isText } from "../src/shared/wire.ts";
+
 const ATTESTATION: NativeToolBackendAttestation = {
   protocol: "neko-native-posix-v1",
   canonicalPosixRoot: "/workspace",
@@ -329,7 +331,7 @@ test("the Harbor finalization reserve cancels an active tool and denies later re
   const provider: Provider = {
     async complete(messages) {
       for (const message of messages) {
-        if (message.role === "tool" && typeof message.content === "string") {
+        if (message.role === "tool" && isText(message.content)) {
           observedToolResults.set(String(message.tool_call_id), message.content);
         }
       }
@@ -1573,7 +1575,7 @@ async function listen(server: Server): Promise<number> {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("fake provider did not bind TCP");
+  if (!address || isText(address)) throw new Error("fake provider did not bind TCP");
   return address.port;
 }
 

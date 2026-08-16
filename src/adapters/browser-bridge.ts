@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import type { McpTools } from "../core/ports.ts";
 import { composeMcpTools } from "./mcp-compose.ts";
 import { homeDir } from "../shared/home.ts";
-import { type JsonValue, type WireValue } from "../shared/wire.ts";
+import { isJsonObject, isObjectValue, isText, type JsonValue, type WireValue } from "../shared/wire.ts";
 
 export const NEKO_BROWSER_EXTENSION_ID = "koalaflndbcddboachbdfmppdeblldje";
 export const NEKO_BROWSER_ORIGIN = `chrome-extension://${NEKO_BROWSER_EXTENSION_ID}`;
@@ -33,7 +33,7 @@ export function readBrowserCapability(): BrowserCapability | null {
   try {
     const value = JSON.parse(readFileSync(DISCOVERY_FILE(), "utf8"));
     if (value?.version !== 1 || value.host !== "127.0.0.1" || !Number.isInteger(value.port)
-      || typeof value.session !== "string" || typeof value.token !== "string") return null;
+      || !isText(value.session) || !isText(value.token)) return null;
     return value as BrowserCapability;
   } catch { return null; }
 }
@@ -56,7 +56,7 @@ export function ensureBrowserCapability(rotate = false, port = DEFAULT_BROWSER_B
 export function readBrowserBridgeStatus(): Record<string, unknown> | undefined {
   try {
     const value = JSON.parse(readFileSync(STATUS_FILE(), "utf8"));
-    if (!value || typeof value !== "object") return undefined;
+    if (!isJsonObject(value)) return undefined;
     if (value.online && Date.now() - Number(value.updatedAt ?? 0) > 30_000) return { ...value, online: false, stale: true };
     return value;
   } catch { return undefined; }
@@ -257,7 +257,7 @@ export function startBrowserBridge(options: {
       if (Number(req.headers.get("content-length") ?? 0) > 65_536) return new Response("body too large", { status: 413 });
       let body: any;
       try { body = await req.json(); } catch { return new Response("invalid JSON", { status: 400 }); }
-      if (typeof body?.action !== "string" || !BRIDGE_SCHEMAS.some((spec) => spec.function.name.endsWith(`__${body.action}`))) {
+      if (!isText(body?.action) || !BRIDGE_SCHEMAS.some((spec) => spec.function.name.endsWith(`__${body.action}`))) {
         return new Response("unknown browser action", { status: 400 });
       }
       try { return Response.json(await command(body.action, body.args ?? {})); }
@@ -265,7 +265,7 @@ export function startBrowserBridge(options: {
     },
     websocket: {
       message(ws, raw) {
-        if (typeof raw !== "string" || raw.length > 65_536) return ws.close(1009, "message too large");
+        if (!isText(raw) || raw.length > 65_536) return ws.close(1009, "message too large");
         let message: any;
         try { message = JSON.parse(raw); } catch { return ws.close(1003, "invalid JSON"); }
         if (!ws.data.authenticated) {
@@ -286,7 +286,7 @@ export function startBrowserBridge(options: {
         }
         // Side-panel prompt: the user typed in the panel; the service worker forwarded it. Route it
         // to the host's turn loop. Bounded like every other input; ignored if no handler is wired.
-        if (message?.type === "panel-in" && typeof message.prompt === "string") {
+        if (message?.type === "panel-in" && isText(message.prompt)) {
           const prompt = message.prompt.slice(0, 100_000);
           if (prompt.trim()) panelHandler?.(prompt);
           return;
@@ -306,7 +306,7 @@ export function startBrowserBridge(options: {
           attached = null;
           record("detach", String(message.reason ?? "user"));
           persistStatus();
-        } else if (message?.type === "result" && typeof message.id === "string") {
+        } else if (message?.type === "result" && isText(message.id)) {
           const call = pending.get(message.id);
           if (!call) return;
           clearTimeout(call.timer);

@@ -57,6 +57,8 @@ import { VERSION } from "../src/shared/version.ts";
 import { terminalSafeText, writeTerminalSafe } from "../src/shared/terminal-text.ts";
 import { headlessRunOutcome } from "../src/adapters/run-outcome.ts";
 
+import { isObjectValue, isText } from "../src/shared/wire.ts";
+
 interface Args {
   command?: string;
   positionals: string[];
@@ -279,7 +281,7 @@ function cmdConfig(args: Args): number {
   for (const key of Object.keys(printable).sort()) {
     if (key.startsWith("_")) continue; // skip _comment/_hint annotations
     const value = printable[key];
-    console.log(`  ${key} = ${value && typeof value === "object" ? JSON.stringify(value) : value}`);
+    console.log(`  ${key} = ${isObjectValue(value) ? JSON.stringify(value) : value}`);
   }
   // The API key is a secret - only ever report presence, never the value.
   if (cfg.usesChatGptAuth) console.log(`  chatgpt_auth = ${hasChatGptCredentials() ? "signed in" : "missing"} (API billing disabled)`);
@@ -302,7 +304,7 @@ function cmdDoctor(args: Args): number {
  */
 async function cmdDoctorKeys(): Promise<number> {
   const stdin: any = process.stdin;
-  if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
+  if (!stdin.isTTY || !(stdin.setRawMode instanceof Function)) {
     console.log("keys probe needs an interactive terminal (raw-capable TTY stdin).");
     return 1;
   }
@@ -1009,7 +1011,7 @@ async function cmdBrowser(args: Args): Promise<number> {
       console.log("browser: extension connected - open a target tab and choose 'Attach this tab to Neko'");
     } else {
       const host = (status?.attached as { host?: unknown } | undefined)?.host;
-      console.log(`browser: ready - one Chrome tab is attached${typeof host === "string" && host ? ` (${host})` : ""}`);
+      console.log(`browser: ready - one Chrome tab is attached${isText(host) && host ? ` (${host})` : ""}`);
     }
     console.log(`extension files: ${browserExtensionPath()}`);
     return 0;

@@ -93,6 +93,8 @@ import {
 } from "./chat-lines.ts";
 import { describeToolCall, toolSchemas } from "../core/tools.ts";
 
+import { isText } from "../shared/wire.ts";
+
 export { ApprovalBox, type Approval }; // re-exported for tests
 
 const PROMPT_ANCHOR_HEIGHT = 1; // mounted only while scrolling; live-tail height stays untouched
@@ -365,7 +367,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const titleLockedRef = useRef(!!resumedSession?.title); // a resumed /title name stays pinned
   const titleTaskRef = useRef((() => {
     const fu = resumedSession?.messages?.find((m) => m.role === "user");
-    const name = resumedSession?.title || (typeof fu?.content === "string" ? fu.content.replace(/\s+/g, " ").trim() : "");
+    const name = resumedSession?.title || (isText(fu?.content) ? fu.content.replace(/\s+/g, " ").trim() : "");
     return name ? trunc(name, 40) : "";
   })());
   const pinnedTitleRef = useRef(resumedSession?.title ?? ""); // full persisted /title; tab text stays truncated separately
@@ -753,7 +755,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (provider) return;
     try {
       const disposed = agentRef.current?.currentProvider().dispose?.();
-      if (disposed && typeof (disposed as Promise<void>).catch === "function") {
+      if (disposed && (disposed as Promise<void>).catch instanceof Function) {
         void (disposed as Promise<void>).catch(() => {});
       }
     } catch { /* terminal teardown must not be blocked by provider cleanup */ }
@@ -817,7 +819,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // The tab follows the SWITCH: this is now the resumed session, so retitle to ITS name (saved /title
     // name, pinned - or its first user message) instead of keeping the previous session's (image #59).
     const fu = target.messages.find((m) => m.role === "user");
-    const tname = target.title || (typeof fu?.content === "string" ? fu.content.replace(/\s+/g, " ").trim() : "");
+    const tname = target.title || (isText(fu?.content) ? fu.content.replace(/\s+/g, " ").trim() : "");
     titleLockedRef.current = !!target.title;
     pinnedTitleRef.current = target.title ?? "";
     titleTaskRef.current = tname ? trunc(tname, 40) : "";
@@ -2259,7 +2261,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const path = mention.slice(1).replace(/[)\].,;:]+$/, "");
         if (!path) continue;
         const result = await registryRef.current!.execute("read_file", { path }, controller.signal);
-        toSend += `\n\n[@${path}]\n${typeof result === "string" ? result : "[image attachment]"}`;
+        toSend += `\n\n[@${path}]\n${isText(result) ? result : "[image attachment]"}`;
       }
 
       // Images travel as inline tokens. Captioning cannot affect capability or skill/workflow routing.
@@ -2371,7 +2373,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       await handle(text);
       const added = agentRef.current!.messages.slice(before);
       const reply = [...added].reverse().find((message) => message.role === "assistant")?.content;
-      return typeof reply === "string" ? reply : reply ? contentToText(reply) : "";
+      return isText(reply) ? reply : reply ? contentToText(reply) : "";
     } finally {
       voiceTurnRef.current = false;
     }
@@ -2528,7 +2530,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // was the old behavior and read as broken from the phone.
         const grew = agentRef.current!.messages.length > msgs0;
         const last = agentRef.current!.messages.filter((m) => m.role === "assistant").pop()?.content;
-        const reply = grew && typeof last === "string" && last ? last : infoLines.join("\n") || (remoteOverlayRef.current ? "Choose an option below." : "(done - no output)");
+        const reply = grew && isText(last) && last ? last : infoLines.join("\n") || (remoteOverlayRef.current ? "Choose an option below." : "(done - no output)");
         return { reply, tokens: agentRef.current!.cost.totalTokens - tok0, ms: Date.now() - t0 };
       } finally {
         remoteSinkRef.current = null;

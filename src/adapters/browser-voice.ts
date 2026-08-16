@@ -5,6 +5,8 @@ import { spawn } from "node:child_process";
 import { BRIDGE_LIVENESS_TIMEOUT_MS, type ChatGptVoiceControl, type VoiceEvent, type VoiceSnapshot, type VoiceState } from "./chatgpt-voice.ts";
 import { VoiceInteractionPolicy } from "./voice-interaction.ts";
 
+import { isText } from "../shared/wire.ts";
+
 export interface BrowserVoiceOptions {
   onUtterance: (text: string) => Promise<string>;
   onInterrupt?: () => void;
@@ -111,7 +113,7 @@ export class BrowserVoiceSession implements ChatGptVoiceControl {
   }
 
   private onSocketMessage(ws: Bun.ServerWebSocket<BrowserVoiceSocketData>, raw: string | Buffer): void {
-    const text = typeof raw === "string" ? raw : raw.toString("utf8");
+    const text = isText(raw) ? raw : raw.toString("utf8");
     if (text.length > 32_768) { ws.close(1009, "message too large"); return; }
     let message: any;
     try { message = JSON.parse(text); } catch { ws.close(1003, "invalid JSON"); return; }

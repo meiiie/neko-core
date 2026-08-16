@@ -8,6 +8,7 @@ import { homeDir } from "../shared/home.ts";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { VERSION } from "../shared/version.ts";
 import { openBrowser } from "./chatgpt-auth.ts";
+import { isJsonObject, isObjectValue } from "../shared/wire.ts";
 
 export const KIMI_OAUTH_HOST = "https://auth.kimi.com";
 export const KIMI_CODE_BASE_URL = "https://api.kimi.com/coding/v1";
@@ -92,7 +93,7 @@ export function loadKimiCredentials(): KimiCredentials | null {
   if (!existsSync(path)) return null;
   try {
     const raw = JSON.parse(readFileSync(path, "utf8"));
-    if (!raw || typeof raw !== "object") return null;
+    if (!isJsonObject(raw)) return null;
     const credentials: KimiCredentials = {
       accessToken: String(raw.access_token ?? raw.accessToken ?? ""),
       refreshToken: String(raw.refresh_token ?? raw.refreshToken ?? ""),

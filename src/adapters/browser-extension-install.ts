@@ -8,6 +8,8 @@ import { NEKO_BROWSER_EXTENSION_ID } from "./browser-bridge.ts";
 import { homeDir } from "../shared/home.ts";
 import { VERSION } from "../shared/version.ts";
 
+import { isObjectValue, isText } from "../shared/wire.ts";
+
 const REPOSITORY = "meiiie/neko-core";
 const MAX_ASSET_BYTES = 2_000_000;
 const ASSETS = [
@@ -88,7 +90,7 @@ export function chromeHasMultipleProfiles(): boolean {
         : join(homeDir(), ".config", "google-chrome", "Local State");
     if (!existsSync(path)) return false;
     const info = JSON.parse(readFileSync(path, "utf8"))?.profile?.info_cache;
-    return !!info && typeof info === "object" && Object.keys(info).length > 1;
+    return !!isObjectValue(info) && Object.keys(info).length > 1;
   } catch {
     return false;
   }
@@ -104,7 +106,7 @@ function extensionId(key: string): string {
 async function validExtensionDirectory(path: string): Promise<boolean> {
   try {
     const manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8"));
-    if (manifest.manifest_version !== 3 || typeof manifest.key !== "string") return false;
+    if (manifest.manifest_version !== 3 || !isText(manifest.key)) return false;
     if (extensionId(manifest.key) !== NEKO_BROWSER_EXTENSION_ID) return false;
     return ASSETS.every((asset) => existsSync(join(path, asset)));
   } catch {

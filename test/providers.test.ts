@@ -4,6 +4,7 @@ import { NekoConfig } from "../src/adapters/config.ts";
 import { clampEffort, getProvider, listModelOptions, makeThinkSplitter, normalizeToolResultImages, OPENAI_STREAM_LIMITS, OpenAICompatProvider, parseOpenAIMessage, toImgTagMessages } from "../src/adapters/providers.ts";
 import { ResponsesProvider } from "../src/adapters/responses-provider.ts";
 import { SESSION_CONTEXT_MARK } from "../src/core/agent-constants.ts";
+import { isText } from "../src/shared/wire.ts";
 
 function cfg(provider: string) {
   return new NekoConfig({ provider }, null, {}, "");
@@ -113,12 +114,12 @@ test("official OpenAI chat completions use a stable key, stable-prefix breakpoin
       { type: "text", text: "stable rules", prompt_cache_breakpoint: { mode: "explicit" } },
       { type: "text", text: `${SESSION_CONTEXT_MARK}volatile cwd` },
     ]);
-    expect(typeof bodies[1].messages[0].content).toBe("string"); // no seam -> ordinary message shape
+    expect(isText(bodies[1].messages[0].content)).toBe(true); // no seam -> ordinary message shape
     const older = new OpenAICompatProvider(new NekoConfig({
       provider: "openai_compat", base_url: "https://api.openai.com/v1", model: "gpt-5.5",
     }, null, {}, "test-key"));
     await older.complete([{ role: "system", content: `stable${SESSION_CONTEXT_MARK}volatile` }]);
-    expect(typeof bodies[2].messages[0].content).toBe("string"); // explicit breakpoints start at GPT-5.6
+    expect(isText(bodies[2].messages[0].content)).toBe(true); // explicit breakpoints start at GPT-5.6
   } finally {
     globalThis.fetch = originalFetch;
   }

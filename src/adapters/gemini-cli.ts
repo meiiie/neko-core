@@ -8,7 +8,7 @@ import type { Readable, Writable } from "node:stream";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { scrubChildEnv } from "../shared/child-env.ts";
 import { homeDir } from "../shared/home.ts";
-import { type JsonValue } from "../shared/wire.ts";
+import { isJsonNumber, isJsonObject, isObjectValue, isText, type JsonValue } from "../shared/wire.ts";
 import { VERSION } from "../shared/version.ts";
 
 export const GEMINI_CLI_MIN_VERSION = "0.38.0";
@@ -233,7 +233,7 @@ export class GeminiAcpClient {
     catch { return this.close(new Error("Gemini CLI ACP emitted invalid JSON")); }
 
     if (message.id !== undefined && !message.method) {
-      const id = typeof message.id === "number" ? message.id : Number(message.id);
+      const id = isJsonNumber(message.id) ? message.id : Number(message.id);
       const pending = this.pending.get(id);
       if (!pending) return;
       this.pending.delete(id);
@@ -540,8 +540,8 @@ export function clearGeminiCredentials(): string {
   if (existsSync(accounts)) {
     try {
       const data = JSON.parse(readFileSync(accounts, "utf8"));
-      if (data && typeof data === "object") {
-        if (typeof data.active === "string" && data.active && Array.isArray(data.old) && !data.old.includes(data.active)) data.old.push(data.active);
+      if (isJsonObject(data)) {
+        if (isText(data.active) && data.active && Array.isArray(data.old) && !data.old.includes(data.active)) data.old.push(data.active);
         data.active = null;
         atomicWriteFileSync(accounts, JSON.stringify(data, null, 2) + "\n");
       }
@@ -651,7 +651,7 @@ export async function listGeminiModels(apiKey?: string): Promise<GeminiModelInfo
     const models = raw.map((model: any) => ({
       id: String(model?.modelId ?? "").trim(),
       name: String(model?.name ?? model?.modelId ?? "").trim(),
-      description: typeof model?.description === "string" ? model.description.trim() : undefined,
+      description: isText(model?.description) ? model.description.trim() : undefined,
     })).filter((model: GeminiModelInfo) => model.id);
     if (models.length) modelCache = { key, at: Date.now(), models };
     return models;

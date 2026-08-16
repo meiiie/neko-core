@@ -9,6 +9,8 @@
 import type { DeltaHook, Provider, ToolCall } from "./ports.ts";
 import type { ToolRegistry } from "./tool-runtime.ts";
 
+import { isText } from "../shared/wire.ts";
+
 /** Separates the stable base prompt from session-specific context inside the one core system message.
  * Provider adapters may use the boundary as a prompt-cache breakpoint without changing semantics. */
 export const SESSION_CONTEXT_MARK = "\n\n<session-context>\n";
@@ -126,7 +128,7 @@ export const LEAN_TAIL_CHARS = 8000;
 export const COMPACT_AT = 0.85;
 export const COMPACT_SAFETY_AT = 0.80;
 export function clampObservation(obs: string | any[]): string | any[] {
-  if (typeof obs !== "string" || obs.length <= MAX_OBS_CHARS) return obs;
+  if (!isText(obs) || obs.length <= MAX_OBS_CHARS) return obs;
   const head = obs.slice(0, MAX_OBS_CHARS - 2000);
   const tail = obs.slice(-2000);
   return `${head}\n... [${obs.length - head.length - 2000} chars truncated to fit the context window] ...\n${tail}`;
@@ -141,7 +143,7 @@ export const ESTIMATED_IMAGE_TOKENS = 2048;
 const UTF8 = new TextEncoder();
 
 function estimateTextTokens(value: unknown): number {
-  const text = typeof value === "string" ? value : JSON.stringify(value ?? "") ?? "";
+  const text = isText(value) ? value : JSON.stringify(value ?? "") ?? "";
   // UTF-8 bytes keep the cheap 4-ASCII-chars/token rule while avoiding a severe underestimate for
   // Vietnamese/CJK text. This remains a safety estimate, never a billing claim.
   return Math.ceil(UTF8.encode(text).byteLength / 4);

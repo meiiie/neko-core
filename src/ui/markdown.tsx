@@ -12,6 +12,8 @@ import { terminalSafeText } from "../shared/terminal-text.ts";
 import { highlightLine } from "./highlight.tsx";
 import { linkSegments, osc8 } from "./links.ts";
 
+import { isText } from "../shared/wire.ts";
+
 /** Decode HTML entities + <br> so they don't show up literally (common in scraped/LLM tables). Also
  * normalize the terminal-hostile emoji that misalign columns: keycaps (1\uFE0F\u20E3) -> "1.", and drop the
  * emoji variation selector that forces an otherwise-plain glyph to render double-width. */
@@ -161,8 +163,8 @@ function firstLinkTarget(raw: string): string | undefined {
   const markdown = decoded.match(/\[[^\]]+\]\(([^)]+)\)/);
   const candidate = markdown?.[1]?.trim();
   if (candidate && (/^https?:\/\//i.test(candidate) || /^file:\/\//i.test(candidate))) return candidate;
-  const bare = linkSegments(decoded).find((segment) => typeof segment !== "string");
-  return typeof bare === "string" || !bare ? undefined : bare.uri;
+  const bare = linkSegments(decoded).find((segment) => !isText(segment));
+  return isText(bare) || !bare ? undefined : bare.uri;
 }
 
 function inline(raw: string): ReactNode[] {
@@ -176,7 +178,7 @@ function inline(raw: string): ReactNode[] {
   // target, so copy keeps working. Zero display width - table/wrap math is unaffected (verified).
   const pushPlain = (t: string) => {
     for (const seg of linkSegments(t)) {
-      if (typeof seg === "string") out.push(seg);
+      if (isText(seg)) out.push(seg);
       else out.push(<Text key={key++} color="cyan" underline>{osc8(seg.uri, seg.text)}</Text>);
     }
   };

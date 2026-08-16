@@ -15,7 +15,7 @@ import type { Readable, Writable } from "node:stream";
 
 import { homeDir } from "../shared/home.ts";
 import { scrubChildEnv } from "../shared/child-env.ts";
-import { type JsonValue } from "../shared/wire.ts";
+import { isJsonNumber, type JsonValue } from "../shared/wire.ts";
 import { VERSION } from "../shared/version.ts";
 
 export const CODEX_APP_SERVER_MIN_VERSION = "0.144.0";
@@ -572,7 +572,7 @@ export class CodexAppServerClient {
     }
 
     if (message.id !== undefined && !message.method) {
-      const id = typeof message.id === "number" ? message.id : Number(message.id);
+      const id = isJsonNumber(message.id) ? message.id : Number(message.id);
       const pending = this.pending.get(id);
       if (!pending) return;
       this.pending.delete(id);

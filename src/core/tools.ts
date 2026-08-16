@@ -8,6 +8,8 @@
  * This module is the declarative source of truth (contracts + JSON schema for the model);
  * tool-runtime.ts attaches the executable callables + the approval gate.
  */
+import { isText } from "../shared/wire.ts";
+
 export const SAFE = "safe";
 export const GATED = "gated";
 
@@ -19,7 +21,7 @@ const READ_ONLY_SUBAGENT_TOOLS: ReadonlyMap<string, readonly string[]> = new Map
 /** Named subagents whose runtime authority is provably read-only. Unknown/custom workers inherit
  * the parent authority and therefore remain gated like any other potentially mutating action. */
 export function subagentToolAllowlist(type: unknown): readonly string[] | undefined {
-  if (typeof type !== "string") return undefined;
+  if (!isText(type)) return undefined;
   return READ_ONLY_SUBAGENT_TOOLS.get(type.trim().toLowerCase());
 }
 

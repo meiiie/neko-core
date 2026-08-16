@@ -18,6 +18,8 @@
 import { appendFileSync } from "node:fs";
 import type { Writable } from "node:stream";
 
+import { isText } from "../shared/wire.ts";
+
 // Diagnostic tap (NEKO_TRACE_FRAMES=<file>): every byte that reaches the REAL stdout, base64 NDJSON.
 // Replaying these bytes through the VirtualTerminal separates "our bytes are wrong" from "the
 // terminal executed correct bytes wrongly" - the discriminator for ghost-row field reports.
@@ -155,7 +157,7 @@ export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: Nod
   (differ as any)?.setWriter?.((s: string) => { if (s) { const out = supported ? BSU + s + ESU : s; traceWrite("imperative", out); (base as any).write(out); } });
 
   const wrappedWrite = (chunk: any, ...args: any[]): boolean => {
-    if (typeof chunk === "string" && chunk.length > 0) {
+    if (isText(chunk) && chunk.length > 0) {
       // FrameDiffer first: shrink Ink's full-frame rerender to the changed lines (or a hardware
       // scroll). "" = frame identical -> skip the write entirely; null = not a standard frame ->
       // pass through untouched (the differ reset itself).

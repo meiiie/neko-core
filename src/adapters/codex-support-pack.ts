@@ -24,6 +24,7 @@ import {
   compareCodexVersions,
   startCodexAppServer,
 } from "./codex-app-server.ts";
+import { isObjectValue } from "../shared/wire.ts";
 
 const RELEASE_API = "https://api.github.com/repos/openai/codex/releases/latest";
 const RELEASE_PAGE = "https://github.com/openai/codex/releases";
@@ -349,7 +350,7 @@ async function removeTemporaryTree(path: string): Promise<void> {
       rmSync(path, { recursive: true, force: true });
       return;
     } catch (error) {
-      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      const code = isObjectValue(error) && "code" in error ? String(error.code) : "";
       const delay = TRANSIENT_IO_RETRY_DELAYS_MS[attempt];
       if ((code !== "EBUSY" && code !== "EPERM") || delay === undefined) throw error;
       await new Promise((resolve) => setTimeout(resolve, delay));
@@ -367,7 +368,7 @@ async function renameWithTransientRetry(
       renamePath(from, to);
       return;
     } catch (error) {
-      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      const code = isObjectValue(error) && "code" in error ? String(error.code) : "";
       const delay = TRANSIENT_IO_RETRY_DELAYS_MS[attempt];
       if ((code !== "EBUSY" && code !== "EPERM") || delay === undefined) throw error;
       await new Promise((resolve) => setTimeout(resolve, delay));

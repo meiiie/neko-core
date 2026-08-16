@@ -6,7 +6,7 @@ import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 import type { NekoConfig } from "./config.ts";
 import { requestEffort } from "./effort.ts";
-import { type JsonValue } from "../shared/wire.ts";
+import { isText, type JsonValue } from "../shared/wire.ts";
 import { validChatGptCredentials } from "./chatgpt-auth.ts";
 import { toResponsesInput } from "./chatgpt-provider.ts";
 import {
@@ -395,8 +395,8 @@ export class ChatGptAppServerProvider implements Provider {
     // only base64 arrives, write it next to the user's work so the answer can point at a real file.
     if (method === "item/completed" && params?.item?.type === "imageGeneration") {
       const item = params.item;
-      let saved: string = typeof item.savedPath === "string" ? item.savedPath : "";
-      if (!saved && typeof item.result === "string" && item.result.length) {
+      let saved: string = isText(item.savedPath) ? item.savedPath : "";
+      if (!saved && isText(item.result) && item.result.length) {
         try {
           saved = joinPath(process.cwd(), `neko-image-${Date.now()}.png`);
           writeFileSync(saved, Buffer.from(item.result, "base64"));
@@ -484,7 +484,7 @@ function readTokenUsage(raw: any): { prompt: number; completion: number; total: 
  */
 function toInjectItems(items: any[]): any[] {
   return items.map((item) => {
-    if (isObject(item) && !("type" in item) && typeof item.role === "string") {
+    if (isObject(item) && !("type" in item) && isText(item.role)) {
       return { type: "message", role: item.role, content: Array.isArray(item.content) ? item.content : [] };
     }
     return item;
@@ -502,8 +502,8 @@ function toUserInput(content: any): any[] {
 }
 
 function toolResultContent(observation: string | any[]): { contentItems: any[]; success: boolean } {
-  const failed = typeof observation === "string" && (/^Error running\b/.test(observation) || /^\[denied\]/.test(observation));
-  if (typeof observation === "string") return { contentItems: [{ type: "inputText", text: observation || "(no output)" }], success: !failed };
+  const failed = isText(observation) && (/^Error running\b/.test(observation) || /^\[denied\]/.test(observation));
+  if (isText(observation)) return { contentItems: [{ type: "inputText", text: observation || "(no output)" }], success: !failed };
   const contentItems: any[] = [];
   for (const part of observation) {
     if (part?.type === "text") contentItems.push({ type: "inputText", text: String(part.text ?? "") });
@@ -513,7 +513,7 @@ function toolResultContent(observation: string | any[]): { contentItems: any[]; 
 }
 
 function textContent(content: any): string {
-  if (typeof content === "string") return content;
+  if (isText(content)) return content;
   if (!Array.isArray(content)) return String(content ?? "");
   return content.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join("\n");
 }

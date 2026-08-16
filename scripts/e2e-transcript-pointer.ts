@@ -14,7 +14,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { VirtualTerminal } from "../test/vt.ts";
 
 const Terminal = (Bun as any).Terminal;
-if (typeof Terminal !== "function") throw new Error("Bun.Terminal is required for the transcript pointer E2E");
+if (!(Terminal instanceof Function)) throw new Error("Bun.Terminal is required for the transcript pointer E2E");
 
 const repo = resolve(import.meta.dir, "..");
 const arg = process.argv[2] ?? (process.platform === "win32" ? "dist/neko.exe" : "dist/neko");

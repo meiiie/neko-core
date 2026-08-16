@@ -1,4 +1,6 @@
 /** Reproducible, model-independent ASR evaluation. Scores user-owned/reference corpora without uploading them. */
+
+import { isJsonObject, isText } from "../shared/wire.ts";
 export interface MeetingEvalCase {
   id: string;
   reference: string;
@@ -49,7 +51,7 @@ export function evaluateMeetingAsr(input: unknown): MeetingEvalReport {
   let audioDurationMs = 0, processingMs = 0, timingCases = 0;
   let sourceLabels = 0, sourceCorrect = 0;
   for (const [index, raw] of input.entries()) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`meeting eval case ${index + 1} must be an object`);
+    if (!isJsonObject(raw)) throw new Error(`meeting eval case ${index + 1} must be an object`);
     const value = raw as Record<string, unknown>;
     const id = String(value.id ?? `case-${index + 1}`).trim().slice(0, 200);
     if (!id || seen.has(id)) throw new Error(`meeting eval case id is missing or duplicated: ${id || index + 1}`);
@@ -156,7 +158,7 @@ function editDistance<T>(left: T[], right: T[]): number {
 }
 
 function boundedText(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length > 2_000_000) throw new Error(`meeting eval ${label} must be a string up to 2000000 characters`);
+  if (!isText(value) || value.length > 2_000_000) throw new Error(`meeting eval ${label} must be a string up to 2000000 characters`);
   return value;
 }
 

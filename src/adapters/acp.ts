@@ -29,6 +29,8 @@ import { applySkillPolicyForTurn } from "./skills.ts";
 import { planTurnCapabilities } from "./turn-capabilities.ts";
 import { matchedTurnContext } from "./turn-context.ts";
 
+import { isJsonObject, isText } from "../shared/wire.ts";
+
 /** Node's toWeb readable and the SDK's web ReadableStream are the same runtime object; only their
  * generic variance differs, so the bridge is an identity pass-through. */
 function webReadable(stream: any): ReadableStream<Uint8Array> { return stream; }
@@ -92,7 +94,7 @@ function toolKind(name: string): acp.ToolKind {
 }
 
 function toolLocations(root: string, args: Record<string, any>): acp.ToolCallLocation[] | undefined {
-  const raw = typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : "";
+  const raw = isText(args.path) ? args.path : isText(args.file_path) ? args.file_path : "";
   if (!raw) return undefined;
   return [{ path: isAbsolute(raw) ? resolve(raw) : resolve(root, raw) }];
 }
@@ -110,7 +112,7 @@ function toolUpdate(root: string, call: ToolCall, status: acp.ToolCallStatus = "
 }
 
 function observationText(value: unknown): string {
-  if (typeof value === "string") return value;
+  if (isText(value)) return value;
   try { return JSON.stringify(value); } catch { return String(value); }
 }
 
@@ -195,24 +197,24 @@ function stableMessageId(sessionId: string, index: number, role: string): string
 }
 
 function messageId(sessionId: string, message: any, index: number): string {
-  return typeof message?._neko_acp_message_id === "string" && message._neko_acp_message_id
+  return isText(message?._neko_acp_message_id) && message._neko_acp_message_id
     ? message._neko_acp_message_id
     : stableMessageId(sessionId, index, String(message?.role ?? "message"));
 }
 
 function normalizeCoreToolCall(value: any): ToolCall | null {
-  const name = typeof value?.name === "string" ? value.name : value?.function?.name;
-  if (typeof name !== "string" || !name) return null;
+  const name = isText(value?.name) ? value.name : value?.function?.name;
+  if (!isText(name) || !name) return null;
   let args = value.arguments ?? value?.function?.arguments ?? {};
-  if (typeof args === "string") {
+  if (isText(args)) {
     try { args = JSON.parse(args); } catch { args = {}; }
   }
-  if (!args || typeof args !== "object" || Array.isArray(args)) args = {};
+  if (!isJsonObject(args)) args = {};
   return { id: String(value.id ?? name), name, arguments: args };
 }
 
 function textContent(content: unknown): string {
-  if (typeof content === "string") return content;
+  if (isText(content)) return content;
   if (!Array.isArray(content)) return content == null ? "" : observationText(content);
   return content.map((part: any) => {
     if (part?.type === "text") return String(part.text ?? "");
@@ -331,7 +333,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     let lastYield = performance.now();
     for (const message of session.runtime.agent.messages) {
       const serialized = JSON.stringify(message, (_key, value) =>
-        typeof value === "string" ? value.split(secret).join("[redacted credential]") : value);
+        isText(value) ? value.split(secret).join("[redacted credential]") : value);
       messages.push(JSON.parse(serialized));
       if (performance.now() - lastYield >= 8) {
         await new Promise<void>((resolveYield) => setTimeout(resolveYield, 0));
@@ -574,7 +576,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           } else if (kind === "max_steps") {
             session.maxStepsHit = true;
           } else if (kind === "final") {
-            const final = typeof data === "string" ? data : "";
+            const final = isText(data) ? data : "";
             const last = runtime!.agent.messages.at(-1);
             if (last?.role === "assistant" && !last._neko_acp_message_id) {
               last._neko_acp_message_id = session.liveAgentMessageId || `msg_${randomUUID()}`;
@@ -773,7 +775,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     const session = sessions.get(params.sessionId);
     if (!session) throw new acp.RequestError(-32002, "ACP session not found.");
     if (session.pending) throw new acp.RequestError(-32000, "Session configuration cannot change during an active prompt.");
-    if (typeof params.value !== "string") throw new acp.RequestError(-32602, "Neko ACP configuration options are selectors.");
+    if (!isText(params.value)) throw new acp.RequestError(-32602, "Neko ACP configuration options are selectors.");
     const current = session.runtime.config;
     let next: NekoConfig;
     if (params.configId === "model") {

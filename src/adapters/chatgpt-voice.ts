@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 
 import { estimateTokens } from "../core/agent-constants.ts";
-import { type JsonValue } from "../shared/wire.ts";
+import { isText, type JsonValue } from "../shared/wire.ts";
 import { validChatGptCredentials } from "./chatgpt-auth.ts";
 import {
   discoverCodexSupport,
@@ -387,7 +387,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
   }
 
   private onSocketMessage(ws: Bun.ServerWebSocket<VoiceSocketData>, raw: string | Buffer): void {
-    const text = typeof raw === "string" ? raw : raw.toString("utf8");
+    const text = isText(raw) ? raw : raw.toString("utf8");
     if (text.length > 16_384) { ws.close(1009, "message too large"); return; }
     let message: any;
     try { message = JSON.parse(text); } catch { ws.close(1003, "invalid JSON"); return; }
@@ -575,8 +575,8 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
 }
 
 function toolResultContent(observation: string | any[]): { contentItems: any[]; success: boolean } {
-  const failed = typeof observation === "string" && (/^Error running\b/.test(observation) || /^\[denied\]/.test(observation) || /^Denied by user:/i.test(observation));
-  if (typeof observation === "string") return { contentItems: [{ type: "inputText", text: observation || "(no output)" }], success: !failed };
+  const failed = isText(observation) && (/^Error running\b/.test(observation) || /^\[denied\]/.test(observation) || /^Denied by user:/i.test(observation));
+  if (isText(observation)) return { contentItems: [{ type: "inputText", text: observation || "(no output)" }], success: !failed };
   const contentItems: any[] = [];
   for (const part of observation) {
     if (part?.type === "text") contentItems.push({ type: "inputText", text: String(part.text ?? "") });
@@ -597,7 +597,7 @@ export function realtimeInitialItems(messages: any[]): Array<{ role: "user" | "a
     const role = messages[index]?.role;
     if (role !== "user" && role !== "assistant") continue;
     const content = messages[index]?.content;
-    const text = (typeof content === "string"
+    const text = (isText(content)
       ? content
       : Array.isArray(content)
         ? content.filter((part: any) => part?.type === "text").map((part: any) => String(part.text ?? "")).join("\n")
@@ -634,7 +634,7 @@ function fitRealtimeText(
 
 function dynamicToolAudioUrl(part: any): string | null {
   let value = part?.type === "audio_url" ? String(part.audio_url?.url ?? "") : "";
-  if (!value && part?.type === "audio" && typeof part.data === "string" && typeof part.mimeType === "string") {
+  if (!value && part?.type === "audio" && isText(part.data) && isText(part.mimeType)) {
     value = `data:${part.mimeType};base64,${part.data}`;
   }
   if (value.length > 70_000_000) return null;

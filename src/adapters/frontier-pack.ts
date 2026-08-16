@@ -20,6 +20,8 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, parse as parsePath, relative, resolve, sep } from "node:path";
 
+import { isJsonNumber, isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
+
 export const FRONTIER_PACK_SCHEMA = "neko.eval.frontier-pack.v2" as const;
 
 export const FRONTIER_TASK_FAMILIES = Object.freeze([
@@ -145,7 +147,7 @@ const RESOURCE_KEYS = Object.freeze([
  * The returned fingerprint identifies bytes but does not authenticate their curator.
  */
 export function loadFrontierPack(manifestPath: string): LoadedFrontierPack {
-  if (typeof manifestPath !== "string" || manifestPath.length === 0 || manifestPath.includes("\0")) {
+  if (!isText(manifestPath) || manifestPath.length === 0 || manifestPath.includes("\0")) {
     throw new Error("Frontier pack manifest path is invalid");
   }
   const requestedManifest = resolve(manifestPath);
@@ -245,7 +247,7 @@ function parseTask(
   if (taskIds.has(id)) throw new Error(`Frontier pack has duplicate task id: ${id}`);
   taskIds.add(id);
 
-  if (typeof task.family !== "string" || !FRONTIER_TASK_FAMILIES.includes(task.family as FrontierTaskFamily)) {
+  if (!isText(task.family) || !FRONTIER_TASK_FAMILIES.includes(task.family as FrontierTaskFamily)) {
     throw new Error(`${label} family is invalid`);
   }
   const family = task.family as FrontierTaskFamily;
@@ -286,7 +288,7 @@ function parseContentRef(value: unknown, label: string): FrontierContentRef {
   const ref = objectValue(value, label);
   exactKeys(ref, ["path", "sha256"], label);
   const path = safeRelativePath(ref.path, `${label} path`);
-  if (typeof ref.sha256 !== "string" || !DIGEST_PATTERN.test(ref.sha256)) {
+  if (!isText(ref.sha256) || !DIGEST_PATTERN.test(ref.sha256)) {
     throw new Error(`${label} SHA-256 is invalid`);
   }
   return Object.freeze({ path, sha256: ref.sha256 });
@@ -614,7 +616,7 @@ function decodeUtf8(bytes: Uint8Array, message: string): string {
 }
 
 function objectValue(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  if (!isJsonObject(value)) throw new Error(`${label} must be an object`);
   return value as Record<string, unknown>;
 }
 
@@ -627,26 +629,26 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[], 
 }
 
 function slugValue(value: unknown, label: string): string {
-  if (typeof value !== "string" || !SLUG_PATTERN.test(value) || !portableName(value)) throw new Error(`${label} is invalid`);
+  if (!isText(value) || !SLUG_PATTERN.test(value) || !portableName(value)) throw new Error(`${label} is invalid`);
   return value;
 }
 
 function identityValue(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0 || value.length > 256 || !/^[\x20-\x7e]+$/.test(value)) {
+  if (!isText(value) || value.length === 0 || value.length > 256 || !/^[\x20-\x7e]+$/.test(value)) {
     throw new Error(`${label} is invalid`);
   }
   return value;
 }
 
 function integerValue(value: unknown, label: string, allowZero: boolean): number {
-  if (!Number.isSafeInteger(value) || typeof value !== "number" || (allowZero ? value < 0 : value <= 0)) {
+  if (!Number.isSafeInteger(value) || !isJsonNumber(value) || (allowZero ? value < 0 : value <= 0)) {
     throw new Error(`${label} must be ${allowZero ? "a non-negative" : "a positive"} safe integer`);
   }
   return value;
 }
 
 function safeRelativePath(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0 || Buffer.byteLength(value, "utf8") > FRONTIER_PACK_LIMITS.relativePathBytes || value.includes("\\")
+  if (!isText(value) || value.length === 0 || Buffer.byteLength(value, "utf8") > FRONTIER_PACK_LIMITS.relativePathBytes || value.includes("\\")
     || isAbsolute(value) || /^(?:[A-Za-z]:|\/\/)/.test(value) || /[\0-\x1f\x7f]/.test(value)) {
     throw new Error(`${label} is not a safe relative path`);
   }
@@ -662,7 +664,7 @@ function portableName(value: string): boolean {
 }
 
 function deepFreeze<T>(value: T): T {
-  if ((typeof value !== "object" && typeof value !== "function") || value === null || Object.isFrozen(value)) return value;
+  if ((!isObjectValue(value) && !(value instanceof Function)) || Object.isFrozen(value)) return value;
   for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
   return Object.freeze(value);
 }

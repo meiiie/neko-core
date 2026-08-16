@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 
 import { __formatBashExitForTest, __taskkillResultSucceededForTest, __windowsDescendantSnapshotForTest, type ApprovalGate, ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
 import type { PermissionMode } from "../src/core/permissions.ts";
+import { isText } from "../src/shared/wire.ts";
 
 function makeReg(mode: PermissionMode = "auto", prompt: ApprovalGate = () => true) {
   const root = mkdtempSync(join(tmpdir(), "neko-tr-"));
@@ -840,7 +841,7 @@ test("read_file: image returns metadata by default, vision content (data URL) wh
   png.writeUInt32BE(80, 20); // height
   writeFileSync(join(root, "logo.png"), png);
   const meta = await reg.execute("read_file", { path: "logo.png" });
-  expect(typeof meta).toBe("string");
+  expect(isText(meta)).toBe(true);
   expect(meta).toContain("120x80"); // dimensions parsed from the header
   expect(meta).toContain("vision"); // hint to enable it
   reg.vision = true;
@@ -855,7 +856,7 @@ test("read_file: a PDF is routed to text extraction and degrades gracefully", as
   const { root, reg } = makeReg();
   writeFileSync(join(root, "doc.pdf"), "not a real pdf");
   const out = await reg.execute("read_file", { path: "doc.pdf" });
-  expect(typeof out).toBe("string");
+  expect(isText(out)).toBe(true);
   expect(out as string).toMatch(/PDF|extract|text/i); // never a thrown crash
 }, { timeout: 35_000 }); // production intentionally gives the external extractor up to 30s
 

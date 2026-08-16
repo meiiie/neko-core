@@ -11,6 +11,8 @@ import { dirname, join } from "node:path";
 import { LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME } from "./config.ts";
 import { ensureNekoHome } from "./context.ts";
 
+import { isBool, isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
+
 const userConfigPath = () => join(homeDir(), LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME);
 
 function readUserConfig(): Record<string, any> {
@@ -50,10 +52,10 @@ export function setApiKey(key: string): string {
   try {
     let target = "the top-level key";
     updateUserConfig((d: any) => {
-      const active = typeof d.active_profile === "string" ? d.active_profile : "";
+      const active = isText(d.active_profile) ? d.active_profile : "";
       if (active) {
-        if (!d.profiles || typeof d.profiles !== "object") d.profiles = {};
-        if (!d.profiles[active] || typeof d.profiles[active] !== "object") d.profiles[active] = {};
+        if (!isObjectValue(d.profiles)) d.profiles = {};
+        if (!isJsonObject(d.profiles[active])) d.profiles[active] = {};
         d.profiles[active].api_key = key.trim();
         target = `profile "${active}"`;
       } else {
@@ -79,7 +81,7 @@ export function setModel(model: string, profile?: string | null, contextWindow?:
         d.profiles[profile].model_context ??= {};
         d.profiles[profile].model_context[model.trim()] = contextWindow;
       }
-      if (typeof vision === "boolean") d.profiles[profile].vision = vision;
+      if (isBool(vision)) d.profiles[profile].vision = vision;
       delete d.model; // a stale top-level model would keep shadowing every profile
     } else {
       d.model = model.trim();
@@ -87,7 +89,7 @@ export function setModel(model: string, profile?: string | null, contextWindow?:
         d.model_context ??= {};
         d.model_context[model.trim()] = contextWindow;
       }
-      if (typeof vision === "boolean") d.vision = vision;
+      if (isBool(vision)) d.vision = vision;
     }
   });
 }
@@ -104,10 +106,10 @@ export function setAutoUpdate(on: boolean): void {
  * Also drops any stray top-level model/api_key so the profile's own endpoint+key+model take effect cleanly. */
 export function setActiveProfile(name: string): void {
   updateUserConfig((d: any) => {
-    const previous = typeof d.active_profile === "string" ? d.active_profile : "";
+    const previous = isText(d.active_profile) ? d.active_profile : "";
     if (previous && d.api_key) {
-      if (!d.profiles || typeof d.profiles !== "object") d.profiles = {};
-      if (!d.profiles[previous] || typeof d.profiles[previous] !== "object") d.profiles[previous] = {};
+      if (!isObjectValue(d.profiles)) d.profiles = {};
+      if (!isJsonObject(d.profiles[previous])) d.profiles[previous] = {};
       if (!d.profiles[previous].api_key) d.profiles[previous].api_key = d.api_key;
     }
     d.active_profile = name;
@@ -129,7 +131,7 @@ export function setEffort(effort: string): void {
 export function clearApiKey(profile?: string): string {
   try {
     const data = readUserConfig() as any;
-    const active = profile ?? (typeof data.active_profile === "string" ? data.active_profile : "");
+    const active = profile ?? (isText(data.active_profile) ? data.active_profile : "");
     let removed = "";
     if (active && data.profiles && data.profiles[active] && data.profiles[active].api_key) {
       delete data.profiles[active].api_key;

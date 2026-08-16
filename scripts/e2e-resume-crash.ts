@@ -12,8 +12,10 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
+import { isText } from "../src/shared/wire.ts";
+
 const Terminal = (Bun as any).Terminal;
-if (typeof Terminal !== "function") throw new Error("Bun.Terminal is required for the crash-resume E2E");
+if (!(Terminal instanceof Function)) throw new Error("Bun.Terminal is required for the crash-resume E2E");
 
 const arg = process.argv[2] ?? (process.platform === "win32" ? "dist/neko.exe" : "dist/neko");
 const exe = isAbsolute(arg) ? arg : resolve(arg);
@@ -25,7 +27,7 @@ const work = join(root, "work");
 mkdirSync(work, { recursive: true });
 
 const encoder = new TextEncoder();
-const sse = (value: unknown) => encoder.encode(`data: ${typeof value === "string" ? value : JSON.stringify(value)}\n\n`);
+const sse = (value: unknown) => encoder.encode(`data: ${isText(value) ? value : JSON.stringify(value)}\n\n`);
 let requestCount = 0;
 let partialObserved = false;
 let heldController: ReadableStreamDefaultController<Uint8Array> | null = null;

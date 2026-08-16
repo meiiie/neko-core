@@ -35,6 +35,8 @@ import { NekoConfig } from "../src/adapters/config.ts";
 import type { Provider } from "../src/core/ports.ts";
 import { sandboxActive } from "../src/core/sandbox.ts";
 
+import { isText } from "../src/shared/wire.ts";
+
 function requiredOracleSandboxAvailable(
   live = sandboxActive(),
   required = process.env.NEKO_REQUIRE_SANDBOX_TESTS === "1",
@@ -721,7 +723,7 @@ test("runEval matches the toolful headless verify-before-exit default", async ()
   const providerFactory = (): Provider => ({
     complete: async (messages) => {
       calls++;
-      sawNudge ||= messages.some((message) => typeof message.content === "string"
+      sawNudge ||= messages.some((message) => isText(message.content)
         && message.content.includes("VERIFY BEFORE FINISHING"));
       return {
         content: calls === 1 ? "Looks finished." : "Verified final answer.",

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { terminalSafeText } from "../shared/terminal-text.ts";
 import { fmtTok } from "./format.ts";
 
+import { isJsonNumber } from "../shared/wire.ts";
+
 /** Playful "thinking" verbs (one picked per turn), Claude-style. */
 export const VERBS = [
   "Thinking", "Pondering", "Cogitating", "Pouncing", "Prowling", "Noodling",
@@ -98,7 +100,7 @@ export function CompactingLine({ start, expectedMs = 15000 }: { start: number; e
  * then dim meta in parens. Self-animated (own 80ms clock; unmounts when idle). */
 export interface LiveTokenCount { value: number; approximate?: boolean }
 const tokenCount = (value: number | LiveTokenCount): LiveTokenCount =>
-  typeof value === "number" ? { value, approximate: false } : value;
+  isJsonNumber(value) ? { value, approximate: false } : value;
 
 export function ThinkingLine(props: { verb: string; elapsed: number; step: number; queued: number; effort?: string; liveIn: () => number | LiveTokenCount; liveOut: () => number | LiveTokenCount }) {
   const { verb, elapsed, step, queued, effort } = props;

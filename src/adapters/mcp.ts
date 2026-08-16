@@ -20,6 +20,8 @@ import { VERSION } from "../shared/version.ts";
 import { resolveWindowsSystemExecutable } from "../shared/windows-system.ts";
 import { connectWithOAuth } from "./mcp-oauth.ts";
 
+import { isJsonObject, isText } from "../shared/wire.ts";
+
 /** A local (stdio: command+args) or remote (url: http/sse) MCP server. */
 export interface McpServerConfig {
   command?: string;
@@ -165,7 +167,7 @@ function resolveMcpCommand(
 function trustedMcpCwd(configured: string | undefined, workspace: string, checks: McpLaunchChecks): string {
   const paths = checks.platform === "win32" ? win32 : posix;
   if (configured !== undefined) {
-    if (typeof configured !== "string" || !configured || !paths.isAbsolute(configured) || configured.includes("\0")) {
+    if (!isText(configured) || !configured || !paths.isAbsolute(configured) || configured.includes("\0")) {
       throw new Error("MCP stdio cwd must be an absolute existing directory");
     }
     const explicit = canonicalPath(configured, "directory", checks);
@@ -202,13 +204,13 @@ const MCP_WINDOWS_WRAPPER = [
 
 function explicitMcpEnv(value: unknown, platform: NodeJS.Platform): Record<string, string> {
   if (value === undefined) return {};
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("MCP stdio env must be an object of string values");
+  if (!isJsonObject(value)) throw new Error("MCP stdio env must be an object of string values");
   const entries = Object.entries(value);
   if (entries.length > 256) throw new Error("MCP stdio env has too many entries");
   const out: Record<string, string> = {};
   let totalBytes = 0;
   for (const [key, item] of entries) {
-    if (!key || key.length > 256 || /[\0=]/.test(key) || typeof item !== "string" || item.includes("\0") || Buffer.byteLength(item, "utf8") > 16 * 1024) {
+    if (!key || key.length > 256 || /[\0=]/.test(key) || !isText(item) || item.includes("\0") || Buffer.byteLength(item, "utf8") > 16 * 1024) {
       throw new Error("MCP stdio env contains an invalid key or value");
     }
     const normalizedKey = platform === "win32" ? key.toUpperCase() : key;
@@ -222,7 +224,7 @@ function explicitMcpEnv(value: unknown, platform: NodeJS.Platform): Record<strin
 function explicitMcpArgs(value: unknown): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 256) throw new Error("MCP stdio args must be an array of at most 256 strings");
-  if (value.some((arg) => typeof arg !== "string" || arg.includes("\0") || Buffer.byteLength(arg, "utf8") > 64 * 1024)) {
+  if (value.some((arg) => !isText(arg) || arg.includes("\0") || Buffer.byteLength(arg, "utf8") > 64 * 1024)) {
     throw new Error("MCP stdio args must contain only bounded strings without NUL bytes");
   }
   return [...value];
@@ -247,7 +249,7 @@ function resolveMcpStdioLaunch(
   const env = { ...explicitEnv };
   deleteEnv(env, "PATH");
   env.PATH = trustedPath.join(checks.platform === "win32" ? ";" : ":");
-  if (typeof cfg.command !== "string") throw new Error("MCP stdio server needs a command");
+  if (!isText(cfg.command)) throw new Error("MCP stdio server needs a command");
   const resolved = resolveMcpCommand(cfg.command, trustedPath, workspace, checks);
   const cwd = trustedMcpCwd(cfg.cwd, workspace, checks);
   let command = resolved;
@@ -706,7 +708,7 @@ export class McpHub {
         { timeout: MCP_CALL_TIMEOUT_MS, maxTotalTimeout: MCP_CALL_TIMEOUT_MS },
       );
       return (res.messages ?? [])
-        .map((m: any) => (typeof m.content === "string" ? m.content : m.content?.text ?? JSON.stringify(m.content)))
+        .map((m: any) => (isText(m.content) ? m.content : m.content?.text ?? JSON.stringify(m.content)))
         .join("\n\n");
     } catch (error) {
       await this.discardClient(server);

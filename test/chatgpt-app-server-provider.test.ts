@@ -12,6 +12,8 @@ import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
 import type { CodexAppServerHandlers } from "../src/adapters/codex-app-server.ts";
 
+import { isText } from "../src/shared/wire.ts";
+
 const oldHome = process.env.HOME;
 const oldProfile = process.env.USERPROFILE;
 let tempHome = "";
@@ -250,7 +252,7 @@ test("prior conversation is injected as Codex-valid response items with an expli
   expect(inject).toBeDefined();
   const items = inject!.params.items as any[];
   // The exact failure the user hit: items[0] reached Codex with no `type`.
-  expect(items.every((item) => typeof item.type === "string" && item.type.length > 0)).toBe(true);
+  expect(items.every((item) => isText(item.type) && item.type.length > 0)).toBe(true);
   expect(items[0]).toEqual({ type: "message", role: "user", content: [{ type: "input_text", text: "Improve the DB plan." }] });
   expect(items).toContainEqual({ type: "message", role: "assistant", content: [{ type: "output_text", text: "On it." }] });
   expect(items).toContainEqual({ type: "function_call", call_id: "call-1", name: "read_file", arguments: "{}" });

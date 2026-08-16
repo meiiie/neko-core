@@ -20,6 +20,8 @@ import { attributeSpeakers, diarizeMono, readDiarizationPack, readSpeechTools, s
 import { detectSpeechRegions, sliceWav, speechCoverage, wavDurationMs, type SpeechRegion } from "./meeting-vad.ts";
 import { homeDir } from "../shared/home.ts";
 
+import { isJsonNumber } from "../shared/wire.ts";
+
 export const MEETING_ENGINE_NAME = "parakeet.cpp";
 
 export interface TranscribeMeetingOptions {
@@ -350,7 +352,7 @@ export function parseMeetingTranscript(
   const emit = () => {
     if (!words.length) return;
     const confidences = words.map((word) => word.conf).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-    const uncertain = words.filter((word) => typeof word.conf === "number" && word.conf < UNCERTAIN_BELOW).map((word) => word.text);
+    const uncertain = words.filter((word) => isJsonNumber(word.conf) && word.conf < UNCERTAIN_BELOW).map((word) => word.text);
     segments.push({
       id: `seg_${String(segments.length + 1).padStart(5, "0")}`,
       startMs: words[0].startMs,
@@ -582,7 +584,7 @@ function outOfScript(text: string): boolean {
 }
 
 function seconds(value: unknown, offsetMs = 0): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value * 1000) + offsetMs : null;
+  return isJsonNumber(value) && Number.isFinite(value) && value >= 0 ? Math.round(value * 1000) + offsetMs : null;
 }
 
 function cleanEngineError(value: string): string {

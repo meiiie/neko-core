@@ -46,6 +46,8 @@ import { deniedCredentialPath } from "./read-policy.ts";
 import { isForegroundValidatorOnlyCommand } from "./validation-command.ts";
 import { runDiskCleanupScan } from "./disk-cleanup.ts";
 
+import { isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
+
 export { deniedCredentialPath as deniedOutsideRoot } from "./read-policy.ts";
 
 /** An approval gate: given (toolName, the tool's args) -> approve? (may be async).
@@ -1045,7 +1047,7 @@ export class ToolRegistry {
     };
     try {
       const out = await backend.execute(name, Object.freeze({ ...args }), context);
-      if (typeof out !== "string" && !Array.isArray(out)) {
+      if (!isText(out) && !Array.isArray(out)) {
         throw new Error("returned an invalid native observation");
       }
       return out;
@@ -1130,7 +1132,7 @@ export class ToolRegistry {
   }
 
   async execute(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string | any[]> {
-    if (typeof args !== "object" || args === null) {
+    if (!isJsonObject(args)) {
       return `Error: arguments for ${name} must be an object`;
     }
     const nativeBackend = this.nativeBackendFor(name);
@@ -1373,14 +1375,14 @@ export class ToolRegistry {
           signal,
         });
       if (structuredPath) {
-        const succeeded = typeof out === "string" && (name === "write_file" ? out.startsWith("Wrote ") : out.startsWith("Edited "));
+        const succeeded = isText(out) && (name === "write_file" ? out.startsWith("Wrote ") : out.startsWith("Edited "));
         this.finishStructuredMutation(structuredPath, succeeded);
       }
       if (nativeBackend && (name === "write_file" || name === "edit" || name === "multi_edit")) {
-        const succeeded = typeof out === "string" && (name === "write_file" ? out.startsWith("Wrote ") : out.startsWith("Edited "));
+        const succeeded = isText(out) && (name === "write_file" ? out.startsWith("Wrote ") : out.startsWith("Edited "));
         if (succeeded) this.remoteMutationPaths.add(String(args.path ?? "(unknown path)"));
       }
-      await this.runPostHook(name, args, typeof out === "string" ? out : "[image]", signal);
+      await this.runPostHook(name, args, isText(out) ? out : "[image]", signal);
       return out;
     } catch (error) {
       if (structuredPath) this.finishStructuredMutation(structuredPath, false);
@@ -1463,7 +1465,7 @@ export class ToolRegistry {
         script = "inject.ps1"; sa = ["stroke", ...nums.map((n) => String(Math.round(n)))]; break;
       }
       case "type": {
-        if (typeof args.text !== "string" || !args.text.length) return "Error: computer type needs non-empty 'text'.";
+        if (!isText(args.text) || !args.text.length) return "Error: computer type needs non-empty 'text'.";
         if (args.text.length > 20_000) return "Error: computer type is limited to 20000 characters; use a file or programmatic path for larger content.";
         const name = String(args.name ?? "");
         script = "input.ps1"; sa = ["type", atFile(args.text), "1", name ? atFile(name) : ""]; break;
@@ -1577,7 +1579,7 @@ export class ToolRegistry {
         // grounded coordinates must map back to physical pixels. The temp image is removed in finally
         // after its bytes have been embedded in the result.
         const observation = renderImageFile(readFileSync(capturePath), "desktop screenshot", "gif", this.vision);
-        if (typeof observation === "string") return [out, observation].filter(Boolean).join("\n");
+        if (isText(observation)) return [out, observation].filter(Boolean).join("\n");
         const info = out.replace(/^saved\s+.*?\s+(?=view=)/i, "captured ");
         let annotated = false;
         return observation.map((part: any) => {
@@ -2112,10 +2114,10 @@ function toolMultiEdit(root: string, args: Record<string, any>, opts: ToolOpts):
   let removed = 0;
   for (let k = 0; k < edits.length; k++) {
     const edit = edits[k];
-    if (!edit || typeof edit !== "object" || typeof edit.old_string !== "string") {
+    if (!isJsonObject(edit) || !isText(edit.old_string)) {
       return `Error: edit ${k + 1} needs string old_string (no change written)`;
     }
-    if (!Object.prototype.hasOwnProperty.call(edit, "new_string") || typeof edit.new_string !== "string") {
+    if (!Object.prototype.hasOwnProperty.call(edit, "new_string") || !isText(edit.new_string)) {
       return `Error: edit ${k + 1} needs string new_string (no change written)`;
     }
     const oldStr = edit.old_string;

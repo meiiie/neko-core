@@ -64,7 +64,7 @@ export function terminalName(env: NodeJS.ProcessEnv = process.env): string {
  * (the probe shows the bytes). These checks surface the facts a bug report needs. */
 export function collectTerminalChecks(): Check[] {
   const stdinTty = !!process.stdin.isTTY;
-  const rawOk = stdinTty && typeof (process.stdin as any).setRawMode === "function";
+  const rawOk = stdinTty && (process.stdin as any).setRawMode instanceof Function;
   const r = resolveUiFps(null);
   const hz = cachedRefreshRate();
   return [

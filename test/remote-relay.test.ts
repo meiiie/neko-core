@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { RemoteHandlers } from "../src/adapters/remote-control.ts";
 import { open, seal } from "../src/adapters/relay-crypto.ts";
 import { loadOrCreatePairing, loadOrCreateSessionPairing, relaySessionCode, revokeRemoteRelay, secretKid, startRemoteRelay } from "../src/adapters/remote-relay.ts";
+import { isText } from "../src/shared/wire.ts";
 
 /** A tiny in-memory relay double standing in for the Cloudflare Worker, so we can prove the host
  * (agent) side end-to-end: the host dials OUT and long-polls; a client submits an instruction; the
@@ -204,7 +205,7 @@ test("remote-relay v2: a WRONG-SECRET message gets a PLAINTEXT actionable error 
       relay.state.sockets[0].send(JSON.stringify({ id: "j1", message: seal("phone-DIFFERENT-secret", "hello") }));
       await until(() => relay.state.frames.some((f) => f.t === "reply"));
       const final = relay.state.frames.find((f) => f.t === "reply");
-      expect(typeof final.reply).toBe("string"); // NOT a sealed {iv,ct} blob - the phone can read it
+      expect(isText(final.reply)).toBe(true); // NOT a sealed {iv,ct} blob - the phone can read it
       expect(final.reply).toContain("pairing secret doesn't match");
       expect(final.reply).toContain("/relay");
     } finally { rc.stop(); }

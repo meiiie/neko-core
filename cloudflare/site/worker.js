@@ -1,4 +1,6 @@
 /**
+
+import { isJsonNumber, isText } from "../shared/wire.ts";
  * neko.holilihu.online — the landing page, the two paths that must never change, and the version
  * numbers that must never be stale.
  *
@@ -49,7 +51,7 @@ async function latestRelease(ctx) {
     // Cache-Control. v0.18.0 shipped and this endpoint kept answering 0.17.1 in one region while
     // another was already correct: the entry was outliving its max-age, and each expiry re-read a
     // still-cached upstream and re-primed the same stale answer for another interval.
-    if (cached && typeof cached.at === "number" && Date.now() - cached.at < RELEASE_TTL * 1000) return cached;
+    if (cached && isJsonNumber(cached.at) && Date.now() - cached.at < RELEASE_TTL * 1000) return cached;
   }
 
   let res;
@@ -71,15 +73,15 @@ async function latestRelease(ctx) {
   if (!res.ok) return null;
 
   const data = await res.json().catch(() => null);
-  if (!data || typeof data.tag_name !== "string") return null;
+  if (!data || !isText(data.tag_name)) return null;
 
   const info = {
     at: Date.now(),
     version: data.tag_name.replace(/^v/, ""),
-    url: typeof data.html_url === "string" ? data.html_url : `https://github.com/${REPO}/releases`,
+    url: isText(data.html_url) ? data.html_url : `https://github.com/${REPO}/releases`,
     sizes: Object.fromEntries(
       (Array.isArray(data.assets) ? data.assets : [])
-        .filter((a) => a && typeof a.name === "string" && typeof a.size === "number" && !a.name.endsWith(".sha256"))
+        .filter((a) => a && isText(a.name) && isJsonNumber(a.size) && !a.name.endsWith(".sha256"))
         .map((a) => [a.name, megabytes(a.size)]),
     ),
   };

@@ -12,6 +12,7 @@
  */
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isJsonObject } from "../shared/wire.ts";
 
 // ESC (0x1b) + CR (0x0d). Ink parses that to return+meta, which TextInput maps to a newline.
 // Built from char codes so the source carries no raw control byte and no ambiguous escape.
@@ -88,7 +89,7 @@ export function patchSettings(raw: string): { out?: string; note: string } {
   } catch (e) {
     return { note: `could not parse it (${e instanceof Error ? e.message : String(e)}) - left untouched` };
   }
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return { note: "unexpected settings shape - left untouched" };
+  if (!isJsonObject(obj)) return { note: "unexpected settings shape - left untouched" };
   // Legacy inline {keys, command} in "actions" is accepted by every WT that also knows the newer
   // actions/keybindings split (WT migrates it) - one form covers all versions.
   const actions = Array.isArray(obj.actions) ? obj.actions : (obj.actions = []);

@@ -8,6 +8,8 @@ import { parseResponsesStream, toResponsesInput, toResponsesTools } from "./chat
 import { providerScope } from "./provider-scope.ts";
 import { clampEffort, effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
 
+import { isText } from "../shared/wire.ts";
+
 const RETRYABLE = new Set([429, 500, 502, 503, 504, 529]);
 
 export class ResponsesProvider implements Provider {
@@ -173,7 +175,7 @@ function safeError(body: string): string {
   try {
     const parsed = JSON.parse(body);
     const detail = parsed?.error?.message ?? parsed?.message ?? parsed?.detail;
-    return (typeof detail === "string" ? detail : JSON.stringify(detail ?? "request failed")).slice(0, 300);
+    return (isText(detail) ? detail : JSON.stringify(detail ?? "request failed")).slice(0, 300);
   } catch {
     return body.replace(/[\r\n]+/g, " ").slice(0, 300) || "request failed";
   }
