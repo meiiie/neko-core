@@ -63,8 +63,8 @@ const PRIVATE_KEY_BLOCK = /-----BEGIN[A-Z ]*PRIVATE KEY-----/;
 const CREDENTIAL_LITERAL =
   /((?:api[_-]?key|secret|password|passwd|token|credential|authorization|private[_-]?key)["']?\s*[:=]\s*["'`])([^"'`\n]{12,})(["'`])/gi;
 
-/** Published key shapes, which are unmistakable wherever they appear. */
-const KEY_SHAPES =
+/** Published key patterns, which are unmistakable wherever they appear. */
+const KEY_PATTERNS =
   /\b(sk-[A-Za-z0-9_-]{16,}|sk-ant-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AIza[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|nvapi-[A-Za-z0-9_-]{16,})\b/g;
 
 const ID_RE = /^orc_\d{8}T\d{6}_[a-z0-9]{6}$/;
@@ -160,7 +160,7 @@ export function maskCredentials(text: string): { text: string; masked: number } 
     return `${head}<redacted>${tail}`;
   });
   return {
-    text: literals.replace(KEY_SHAPES, () => { masked++; return "<redacted>"; }),
+    text: literals.replace(KEY_PATTERNS, () => { masked++; return "<redacted>"; }),
     masked,
   };
 }

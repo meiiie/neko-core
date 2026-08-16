@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 import { VERSION } from "../shared/version.ts";
+import { type JsonValue } from "../shared/wire.ts";
 import type { NekoConfig } from "./config.ts";
 import { providerScope } from "./provider-scope.ts";
 import { effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
@@ -143,7 +144,7 @@ export async function getChatGptUsage(fetchImpl: typeof fetch = fetch): Promise<
   };
 }
 
-async function chatGptGetJson(url: string | URL, label: string, fetchImpl: typeof fetch): Promise<unknown> {
+async function chatGptGetJson(url: string | URL, label: string, fetchImpl: typeof fetch): Promise<JsonValue> {
   let forceRefresh = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     const credentials = await validChatGptCredentials(fetchImpl, undefined, forceRefresh);

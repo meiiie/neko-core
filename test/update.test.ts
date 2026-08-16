@@ -96,8 +96,9 @@ test("an 'up to date' check is re-asked the same day, so a release minutes later
   let apiCalls = 0;
   globalThis.fetch = (async (input: any) => {
     apiCalls++;
+    // SAFETY: partial Response stubs; only `ok`, `json`, and `url` are read by the update checker under test.
     return String(input).includes("api.github.com")
-      ? { ok: true, json: async () => ({ tag_name: shipped, draft: false, prerelease: false }) } as unknown as Response
+      ? { ok: true, json: async () => ({ tag_name: shipped, draft: false, prerelease: false }) } as Response
       : { ok: true, url: `https://github.com/meiiie/neko-core/releases/tag/${shipped}` } as Response;
   }) as typeof fetch;
   try {

@@ -12,6 +12,7 @@ import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep 
 import { pathToFileURL } from "node:url";
 
 import { homeDir } from "../shared/home.ts";
+import { isJsonArray, isJsonObject, isText, type JsonValue } from "../shared/wire.ts";
 
 import { Agent, classifyToolObservation, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
 import type { Provider } from "../core/ports.ts";
@@ -179,31 +180,29 @@ function benchmarkEnvironmentIdentity(): BenchmarkEnvironmentIdentity {
   };
 }
 
-function canonicalFingerprintValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalFingerprintValue);
-  if (!value || typeof value !== "object") return value;
+/** Accepts any plain config/task graph (typed interfaces included); the walk only follows JSON-shaped members. */
+function canonicalFingerprintValue(value: any): JsonValue {
+  if (isJsonArray(value)) return value.map(canonicalFingerprintValue);
+  if (!isJsonObject(value)) return value;
   return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => compareCodeUnits(left, right))
-      .map(([key, child]) => [key, canonicalFingerprintValue(child)]),
+    Object.keys(value)
+      .sort(compareCodeUnits)
+      .map((key) => [key, canonicalFingerprintValue(value[key])]),
   );
 }
 
-function benchmarkResolvedConfigIdentity(cfg: NekoConfig): unknown {
+function benchmarkResolvedConfigIdentity(cfg: NekoConfig): JsonValue {
   const redacted = redactSecrets(cfg.data);
-  if (!redacted || typeof redacted !== "object" || Array.isArray(redacted)) {
-    return canonicalFingerprintValue(redacted);
-  }
-  return canonicalFingerprintValue({ ...redacted as Record<string, unknown>, base_url: cfg.baseUrl });
+  if (!isJsonObject(redacted)) return redacted;
+  return canonicalFingerprintValue({ ...redacted, base_url: cfg.baseUrl });
 }
 
-function benchmarkSelectedProfileIdentity(cfg: NekoConfig): unknown {
+function benchmarkSelectedProfileIdentity(cfg: NekoConfig): JsonValue {
   const selected = redactSecrets(cfg.profile ? cfg.profiles[cfg.profile] ?? null : null);
-  if (!selected || typeof selected !== "object" || Array.isArray(selected)) {
-    return canonicalFingerprintValue(selected);
-  }
-  const profile = { ...selected as Record<string, unknown> };
-  if (typeof profile.base_url === "string") profile.base_url = profile.base_url.replace(/\/+$/, "");
+  if (!isJsonObject(selected)) return selected;
+  const profile = { ...selected };
+  const baseUrl = profile.base_url;
+  if (isText(baseUrl)) profile.base_url = baseUrl.replace(/\/+$/, "");
   return canonicalFingerprintValue(profile);
 }
 

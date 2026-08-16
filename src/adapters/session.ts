@@ -11,6 +11,7 @@ import { atomicWriteFile, atomicWriteFileSync } from "../shared/atomic.ts";
 import { hasTerminalControl, terminalSafeText } from "../shared/terminal-text.ts";
 import { trustedGitOutput, trustedGitOutputAsync } from "./trusted-git.ts";
 import { homeDir } from "../shared/home.ts";
+import { isJsonNumber, isJsonObject, type JsonObject } from "../shared/wire.ts";
 import { dirname, join, resolve } from "node:path";
 
 export type SessionTurnStatus = "idle" | "running" | "interrupted";
@@ -161,9 +162,9 @@ function validUsage(value: unknown): value is SessionUsage {
   return keys.every((key) => Number.isSafeInteger(usage[key]) && Number(usage[key]) >= 0);
 }
 
-function parseSession(value: unknown, expectedId: string): Session | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const session = value as Record<string, unknown>;
+function parseSession(value: any, expectedId: string): Session | null {
+  const session = isJsonObject(value) ? value : null;
+  if (session === null) return null;
   if (session.id !== expectedId || !isValidSessionId(expectedId)) return null;
   if (!validMetadataText(session.createdAt, MAX_SESSION_TIME_BYTES)
     || !validMetadataText(session.updatedAt, MAX_SESSION_TIME_BYTES)
@@ -172,7 +173,7 @@ function parseSession(value: unknown, expectedId: string): Session | null {
   if (!Array.isArray(session.messages) || !session.messages.every(validMessage)) return null;
   if (session.title !== undefined && !validMetadataText(session.title, MAX_SESSION_TITLE_BYTES)) return null;
   if (session.branch !== undefined && !validMetadataText(session.branch, MAX_SESSION_BRANCH_BYTES)) return null;
-  if (session.bytes !== undefined && (typeof session.bytes !== "number" || !Number.isFinite(session.bytes))) return null;
+  if (session.bytes !== undefined && !isJsonNumber(session.bytes)) return null;
   if (session.schemaVersion !== undefined && session.schemaVersion !== 2) return null;
   if (session.provider !== undefined && !validMetadataText(session.provider, MAX_SESSION_PROVIDER_BYTES)) return null;
   if (session.profile !== undefined && session.profile !== null && !validMetadataText(session.profile, MAX_SESSION_PROFILE_BYTES)) return null;
@@ -182,7 +183,8 @@ function parseSession(value: unknown, expectedId: string): Session | null {
   if (session.turnState !== undefined && !validTurnState(session.turnState)) return null;
   if (session.usage !== undefined && !validUsage(session.usage)) return null;
   if (session.contextFingerprint !== undefined && !validMetadataText(session.contextFingerprint, MAX_SESSION_FINGERPRINT_BYTES)) return null;
-  return session as unknown as Session;
+  // SAFETY: every field above is validated against the session schema before this cast.
+  return value as Session;
 }
 
 function readSessionPath(path: string, expectedId: string): Session | null {

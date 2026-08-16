@@ -15,6 +15,7 @@ import type { Readable, Writable } from "node:stream";
 
 import { homeDir } from "../shared/home.ts";
 import { scrubChildEnv } from "../shared/child-env.ts";
+import { type JsonValue } from "../shared/wire.ts";
 import { VERSION } from "../shared/version.ts";
 
 export const CODEX_APP_SERVER_MIN_VERSION = "0.144.0";
@@ -466,9 +467,9 @@ function discoverCodexSupportUncached(options: DiscoveryOptions): CodexSupportSt
 export interface RpcMessage {
   id?: number | string;
   method?: string;
-  params?: unknown;
-  result?: unknown;
-  error?: { code?: number; message?: string; data?: unknown };
+  params?: any;
+  result?: any;
+  error?: { code?: number; message?: string; data?: any };
 }
 
 export interface RpcTransport {
@@ -480,12 +481,12 @@ export interface RpcTransport {
 }
 
 export interface CodexAppServerHandlers {
-  onNotification?: (method: string, params: unknown) => void;
-  onRequest?: (method: string, params: unknown) => Promise<unknown>;
+  onNotification?: (method: string, params: JsonValue) => void;
+  onRequest?: (method: string, params: JsonValue) => Promise<JsonValue>;
 }
 
 interface PendingRequest {
-  resolve: (value: unknown) => void;
+  resolve: (value: JsonValue) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -502,7 +503,7 @@ export class CodexAppServerClient {
     this.reader.on("close", () => this.failAll(new Error(`Codex App Server closed${this.stderr()}`)));
   }
 
-  async initialize(timeoutMs = 60_000): Promise<unknown> {
+  async initialize(timeoutMs = 60_000): Promise<JsonValue> {
     const result = await this.request("initialize", {
       clientInfo: { name: "neko_core", title: "Neko Core", version: VERSION },
       capabilities: { experimentalApi: true },
@@ -511,7 +512,8 @@ export class CodexAppServerClient {
     return result;
   }
 
-  request(method: string, params?: unknown, timeoutMs = RPC_TIMEOUT_MS): Promise<any> {
+  /** Outgoing params are call-site payloads (typed interfaces allowed); they must be JSON-serializable. */
+  request(method: string, params?: any, timeoutMs = RPC_TIMEOUT_MS): Promise<any> {
     if (this.closed) return Promise.reject(new Error("Codex App Server is closed"));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
@@ -560,8 +562,10 @@ export class CodexAppServerClient {
       return this.close();
     }
     let message: RpcMessage;
-    try { message = JSON.parse(line) as RpcMessage; }
-    catch {
+    try {
+      // SAFETY: raw JSON-RPC line from the App Server; RpcMessage fields are unvalidated wire data (any).
+      message = JSON.parse(line) as RpcMessage;
+    } catch {
       this.failAll(new Error("Codex App Server emitted invalid JSON"));
       this.close();
       return;

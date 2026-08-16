@@ -178,7 +178,8 @@ test("immutable publication never overwrites an existing destination", () => {
   const sent = store.send(source, target, "original");
   const path = join(PENDING, `${sent.id}.json`);
   const sentinel = readFileSync(path, "utf8");
-  const internals = store as unknown as { writeImmutable(path: string, serialized: string): void };
+  // SAFETY: the test deliberately drives the store's private immutable-write path to prove it refuses.
+  const internals = store as any;
 
   expect(() => internals.writeImmutable(path, "replacement")).toThrow();
   expect(readFileSync(path, "utf8")).toBe(sentinel);

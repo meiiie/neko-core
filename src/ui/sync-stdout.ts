@@ -186,10 +186,11 @@ export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: Nod
   };
 
   return new Proxy(base, {
-    get(target, prop, receiver) {
+    get(target, prop) {
       if (prop === "write") return wrappedWrite;
-      const v = Reflect.get(target, prop, receiver);
-      return typeof v === "function" ? v.bind(target) : v;
+      // SAFETY: forwarding the wrapped stream's full public surface by dynamic key; only `write` is replaced.
+      const v = (target as any)[prop];
+      return v instanceof Function ? v.bind(target) : v;
     },
   });
 }

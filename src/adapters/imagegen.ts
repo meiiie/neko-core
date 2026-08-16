@@ -12,12 +12,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
+import { type JsonValue } from "../shared/wire.ts";
 import { validChatGptCredentials, hasChatGptCredentials } from "./chatgpt-auth.ts";
 import { discoverCodexSupport, startCodexAppServer, type CodexAppServerHandlers } from "./codex-app-server.ts";
 
 interface RpcClient {
-  initialize(timeoutMs?: number): Promise<unknown>;
-  request(method: string, params?: unknown, timeoutMs?: number): Promise<any>;
+  initialize(timeoutMs?: number): Promise<JsonValue>;
+  /** Outgoing params are call-site payloads; they must be JSON-serializable. */
+  request(method: string, params?: any, timeoutMs?: number): Promise<any>;
   close(): void;
 }
 

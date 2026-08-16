@@ -3,6 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 
 import { estimateTokens } from "../core/agent-constants.ts";
+import { type JsonValue } from "../shared/wire.ts";
 import { validChatGptCredentials } from "./chatgpt-auth.ts";
 import {
   discoverCodexSupport,
@@ -26,8 +27,9 @@ const REALTIME_VERSION = "v3" as const;
 export const BRIDGE_LIVENESS_TIMEOUT_MS = 90_000;
 
 interface RpcClient {
-  initialize(timeoutMs?: number): Promise<unknown>;
-  request(method: string, params?: unknown, timeoutMs?: number): Promise<any>;
+  initialize(timeoutMs?: number): Promise<JsonValue>;
+  /** Outgoing params are call-site payloads (typed PCM chunks included); they must be JSON-serializable. */
+  request(method: string, params?: any, timeoutMs?: number): Promise<any>;
   close(): void;
 }
 
@@ -459,7 +461,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
     }
   }
 
-  private async onRequest(method: string, params: any): Promise<unknown> {
+  private async onRequest(method: string, params: any): Promise<JsonValue> {
     if (method === "account/chatgptAuthTokens/refresh") {
       const credentials = await validChatGptCredentials(fetch, undefined, true);
       if (!credentials.accountId) throw new Error("refreshed ChatGPT credentials do not include an account id");

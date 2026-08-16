@@ -11,8 +11,13 @@ type PrivateHub = {
   connectOne: (server: string) => Promise<any>;
 };
 
+/** Tests reach McpHub's private wiring on purpose; this is the typed view of that internal state. */
+function privateView(hub: any): PrivateHub {
+  return hub;
+}
+
 function installTool(hub: McpHub, client: any): PrivateHub {
-  const internal = hub as unknown as PrivateHub;
+  const internal = privateView(hub);
   internal.toolMap.set("mcp__test__mutate", { server: "test", tool: "mutate" });
   internal.clients.set("test", client);
   internal.configs.set("test", { command: "unused" });
@@ -97,7 +102,7 @@ test("a failed real connect keeps the cached tool surface retryable", async () =
   let connects = 0;
   let failedCloses = 0;
   const hub = new McpHub();
-  const internal = hub as unknown as PrivateHub;
+  const internal = privateView(hub);
   internal.toolMap.set("mcp__test__mutate", { server: "test", tool: "mutate" });
   internal.configs.set("test", { command: "unused" });
   internal.makeClient = async () => {
@@ -134,7 +139,7 @@ test("a failed real connect keeps the cached tool surface retryable", async () =
 
 test("resource and prompt failures evict dead clients for later explicit retries", async () => {
   const resourceHub = new McpHub();
-  const resource = resourceHub as unknown as PrivateHub;
+  const resource = privateView(resourceHub);
   resource.resourceTools.set("mcp__test__read_resource", "test");
   resource.configs.set("test", { command: "unused" });
   resource.clients.set("test", {
@@ -151,7 +156,7 @@ test("resource and prompt failures evict dead clients for later explicit retries
   expect(await resourceHub.call("mcp__test__read_resource", { uri: "x:" })).toBe("resource recovered");
 
   const promptHub = new McpHub();
-  const prompt = promptHub as unknown as PrivateHub;
+  const prompt = privateView(promptHub);
   prompt.configs.set("test", { command: "unused" });
   prompt.clients.set("test", {
     async getPrompt() { throw new Error("dead prompt transport"); },
@@ -170,7 +175,7 @@ test("resource and prompt failures evict dead clients for later explicit retries
 test("parallel first-use MCP calls share one lazy connection", async () => {
   let connects = 0;
   const hub = new McpHub();
-  const internal = hub as unknown as PrivateHub;
+  const internal = privateView(hub);
   internal.toolMap.set("mcp__test__one", { server: "test", tool: "one" });
   internal.toolMap.set("mcp__test__two", { server: "test", tool: "two" });
   internal.configs.set("test", { command: "unused" });

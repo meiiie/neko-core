@@ -13,6 +13,9 @@ import {
   validChatGptCredentials,
 } from "../src/adapters/chatgpt-auth.ts";
 
+/** Test fetch stand-ins are partial on purpose; this bridges them to the full fetch contract. */
+function asFetch(impl: any): typeof fetch { return impl; }
+
 const oldHome = process.env.HOME;
 const oldProfile = process.env.USERPROFILE;
 let tempHome = "";
@@ -70,10 +73,11 @@ test("expired ChatGPT credentials refresh and retain the old refresh token when 
   isolatedHome();
   saveChatGptCredentials({ accessToken: "old", refreshToken: "refresh-old", expiresAt: 1, accountId: "acct-old" });
   let sent = "";
-  const mockFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+  // Test fetch stand-ins are partial on purpose; asFetch bridges them to the full fetch contract.
+  const mockFetch = asFetch(async (_url: string | URL | Request, init?: RequestInit) => {
     sent = String(init?.body ?? "");
     return Response.json({ access_token: jwt({ chatgpt_account_id: "acct-new" }), expires_in: 3600 });
-  }) as unknown as typeof fetch;
+  });
   const refreshed = await validChatGptCredentials(mockFetch, "https://issuer.test");
   expect(sent).toContain("grant_type=refresh_token");
   expect(sent).toContain("refresh_token=refresh-old");
@@ -93,10 +97,11 @@ test("an access-only Harbor lease refuses refresh locally without changing its b
   const path = join(home, ".neko-core", "chatgpt-auth.json");
   const before = readFileSync(path);
   let fetchCalls = 0;
-  const mockFetch = (async () => {
+  // Test fetch stand-ins are partial on purpose; asFetch bridges them to the full fetch contract.
+  const mockFetch = asFetch(async () => {
     fetchCalls++;
     throw new Error("must not fetch");
-  }) as unknown as typeof fetch;
+  });
   expect((await validChatGptCredentials(mockFetch)).accessToken).toBe("bounded-access");
   expect(fetchCalls).toBe(0);
   await expect(validChatGptCredentials(mockFetch, "https://issuer.test", true)).rejects.toThrow("cannot be refreshed");

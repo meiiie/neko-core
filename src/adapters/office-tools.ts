@@ -17,6 +17,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from "node:p
 import { tmpdir } from "node:os";
 
 import type { McpTools } from "../core/ports.ts";
+import { type JsonValue } from "../shared/wire.ts";
 import { composeMcpTools } from "./mcp-compose.ts";
 import {
   discoverLibreOffice,
@@ -498,7 +499,7 @@ function boundedInteger(value: unknown, min: number, max: number, label: string)
   return String(number);
 }
 
-function parseOutput(stdout: string): unknown {
+function parseOutput(stdout: string): JsonValue {
   const text = cap(stdout.trim());
   if (!text) return null;
   try { return JSON.parse(text); } catch { return text; }

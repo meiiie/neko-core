@@ -47,7 +47,7 @@ import { clearKimiCredentials, hasKimiCredentials, loginKimi } from "../adapters
 import { installGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
 import { compareCodexVersions, discoverCodexSupport } from "../adapters/codex-app-server.ts";
 import { installCodexSupportPack } from "../adapters/codex-support-pack.ts";
-import { discoverOfficeCli, installOfficeSupportPack, type OfficeSupportStatus } from "../adapters/office-support-pack.ts";
+import { discoverOfficeCli, installOfficeSupportPack, type OfficeSupportPackInfo, type OfficeSupportStatus } from "../adapters/office-support-pack.ts";
 import { ChatGptVoiceSession, CODEX_VOICE_MIN_VERSION, type ChatGptVoiceControl, type ChatGptVoiceOptions, type VoiceSnapshot } from "../adapters/chatgpt-voice.ts";
 import { discoverNativeVoiceAudio } from "../adapters/native-voice-audio.ts";
 import { BrowserVoiceSession, type BrowserVoiceOptions } from "../adapters/browser-voice.ts";
@@ -127,7 +127,7 @@ interface ChatProps {
   browserHint?: boolean;
   setupBrowser?: () => Promise<string>;
   officeSupportStatus?: () => OfficeSupportStatus;
-  installOfficeSupport?: (options: { force?: boolean; notify: (message: string) => void }) => Promise<unknown>;
+  installOfficeSupport?: (options: { force?: boolean; notify: (message: string) => void }) => Promise<OfficeSupportPackInfo | void>;
   /** Mutable bridge holder so the side panel can mirror Neko's transcript and drive turns. */
   bridgeHolder?: {
     current: BrowserBridge | null;

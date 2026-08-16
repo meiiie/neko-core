@@ -11,7 +11,11 @@ child.stderr.setEncoding("utf8");
 child.stderr.on("data", (chunk) => { stderr += chunk; });
 
 const output = Writable.toWeb(child.stdin);
-const input = Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>;
+// SAFETY: Node's toWeb stream and the SDK's web ReadableStream are the same runtime object;
+// their generic variance differs only in type-argument defaults.
+const input = webReadable(Readable.toWeb(child.stdout));
+
+function webReadable(stream: any): ReadableStream<Uint8Array> { return stream; }
 
 try {
   const initialized = await acp.client({ name: "neko-acp-smoke" }).connectWith(

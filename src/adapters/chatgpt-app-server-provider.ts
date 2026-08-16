@@ -6,6 +6,7 @@ import type { Usage } from "../core/cost.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 import type { NekoConfig } from "./config.ts";
 import { requestEffort } from "./effort.ts";
+import { type JsonValue } from "../shared/wire.ts";
 import { validChatGptCredentials } from "./chatgpt-auth.ts";
 import { toResponsesInput } from "./chatgpt-provider.ts";
 import {
@@ -17,8 +18,9 @@ import {
 } from "./codex-app-server.ts";
 
 interface RpcClient {
-  initialize(timeoutMs?: number): Promise<unknown>;
-  request(method: string, params?: unknown, timeoutMs?: number): Promise<any>;
+  initialize(timeoutMs?: number): Promise<JsonValue>;
+  /** Outgoing params are call-site payloads; they must be JSON-serializable. */
+  request(method: string, params?: any, timeoutMs?: number): Promise<any>;
   close(): void;
   closeAndWait?(reason?: Error, timeoutMs?: number): Promise<void>;
 }
@@ -340,7 +342,7 @@ export class ChatGptAppServerProvider implements Provider {
     return ready;
   }
 
-  private async onRequest(method: string, params: any): Promise<unknown> {
+  private async onRequest(method: string, params: any): Promise<JsonValue> {
     if (method === "account/chatgptAuthTokens/refresh") {
       const credentials = await validChatGptCredentials(fetch, undefined, true);
       if (!credentials.accountId) throw new Error("refreshed ChatGPT credentials do not include an account id");

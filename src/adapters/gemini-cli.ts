@@ -8,6 +8,7 @@ import type { Readable, Writable } from "node:stream";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { scrubChildEnv } from "../shared/child-env.ts";
 import { homeDir } from "../shared/home.ts";
+import { type JsonValue } from "../shared/wire.ts";
 import { VERSION } from "../shared/version.ts";
 
 export const GEMINI_CLI_MIN_VERSION = "0.38.0";
@@ -150,7 +151,7 @@ export interface RpcMessage {
 
 export interface GeminiAcpHandlers {
   onNotification?: (method: string, params: any) => void;
-  onRequest?: (method: string, params: any) => Promise<unknown>;
+  onRequest?: (method: string, params: any) => Promise<JsonValue>;
 }
 
 interface RpcTransport {

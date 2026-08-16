@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import type { McpTools } from "../core/ports.ts";
 import { composeMcpTools } from "./mcp-compose.ts";
 import { homeDir } from "../shared/home.ts";
+import { type JsonValue, type WireValue } from "../shared/wire.ts";
 
 export const NEKO_BROWSER_EXTENSION_ID = "koalaflndbcddboachbdfmppdeblldje";
 export const NEKO_BROWSER_ORIGIN = `chrome-extension://${NEKO_BROWSER_EXTENSION_ID}`;
@@ -20,7 +21,7 @@ export interface BrowserCapability {
 }
 
 type SocketData = { authenticated: boolean };
-type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
+type Pending = { resolve: (value: JsonValue) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 
 function safeEqual(a: string, b: string): boolean {
   const aa = Buffer.from(a);
@@ -141,11 +142,11 @@ export function withBrowserBridge(source?: McpTools): McpTools | undefined {
 export interface BrowserBridge {
   readonly port: number;
   readonly session: string;
-  status(): Record<string, unknown>;
-  command(action: string, args?: Record<string, unknown>): Promise<unknown>;
+  status(): Record<string, JsonValue>;
+  command(action: string, args?: Record<string, WireValue>): Promise<JsonValue>;
   /** Push a Neko-side event (a transcript line, a stream delta, a snapshot) to the extension so the
    * side panel can render Neko's conversation. Sent as {type:"panel", event}; a no-op if no client. */
-  pushPanel(event: unknown): void;
+  pushPanel(event: WireValue): void;
   /** Register the handler for a prompt the user typed in the side panel (arrives as {type:"panel-in"}).
    * The host wires this to its turn loop so the panel can DRIVE Neko, not just watch it. */
   onPanelPrompt(handler: (prompt: string) => void): void;
@@ -223,7 +224,7 @@ export function startBrowserBridge(options: {
       updatedAt: Date.now(),
     }), { encoding: "utf8", mode: 0o600 });
   };
-  const command = async (action: string, args: Record<string, unknown> = {}): Promise<unknown> => {
+  const command = async (action: string, args: Record<string, WireValue> = {}): Promise<JsonValue> => {
     if (action === "status") return publicStatus();
     if (!client || !attached) throw new Error("no browser tab is attached");
     const id = randomUUID();

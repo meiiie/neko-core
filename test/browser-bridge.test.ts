@@ -8,6 +8,9 @@ import { browserExtensionSetupMessage, browserStoreUrl, prepareBrowserExtension 
 
 const origin = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+/** Test fetch stand-ins are partial on purpose; this bridges them to the full fetch contract. */
+function asFetch(impl: any): typeof fetch { return impl; }
+
 test("browser onboarding distinguishes files, connection, and an attached tab", () => {
   const capability: BrowserCapability = { version: 1, host: "127.0.0.1", port: 8766, session: "session-test", token: "token-test" };
   expect(browserBridgeStage(null, undefined)).toBe("not_configured");
@@ -189,7 +192,8 @@ test("browser install chooses Store when configured and prepares a pinned local 
     expect(requests).toBe(12); // 10 core assets + sidepanel.html + sidepanel.js
     expect(JSON.parse(readFileSync(join(path, "manifest.json"), "utf8")).manifest_version).toBe(3);
     expect(readFileSync(join(path, ".neko-version"), "utf8").trim()).toBe("0.11.5");
-    await prepareBrowserExtension({ sourceRoot: temp, destination, version: "0.11.5", fetchImpl: (() => { throw new Error("cache missed"); }) as unknown as typeof fetch });
+    // The throwing stand-in proves the version-cache path; asFetch bridges the partial mock.
+    await prepareBrowserExtension({ sourceRoot: temp, destination, version: "0.11.5", fetchImpl: asFetch(() => { throw new Error("cache missed"); }) });
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }

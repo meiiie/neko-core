@@ -40,8 +40,8 @@ export const CARET_SENTINEL = "⁠";
  * differ strips it and records its screen cell into ui/hit-targets.ts for pointer hit-testing. */
 export const HIT_SENTINEL = "⁣";
 const SGR_RE = /\x1b\[[0-9;]*m/g;
-/** DECSCUSR shape for the hardware caret: NEKO_CARET picks it, default a BLINKING BAR (like Claude Code). */
-function caretShape(): string {
+/** DECSCUSR style for the hardware caret: NEKO_CARET picks it, default a BLINKING BAR (like Claude Code). */
+function caretStyle(): string {
   switch ((process.env.NEKO_CARET || "").toLowerCase()) {
     case "block": return `${ESC}1 q`;      // blinking block
     case "underline": return `${ESC}3 q`;  // blinking underline
@@ -256,7 +256,7 @@ export class FrameDiffer {
     // Ink does not re-hide it on the next frame - we must, or the blinking bar lingers in the
     // corner over the menu (the stray `|` under the browser-setup picker). Idempotent.
     if (!this.caretActive || !this.cursorPos) return `${ESC}?25l`;
-    return `${ESC}?25h` + caretShape() + `${ESC}${this.cursorPos.row};${this.cursorPos.col}H`;
+    return `${ESC}?25h` + caretStyle() + `${ESC}${this.cursorPos.row};${this.cursorPos.col}H`;
   }
 
   /** Re-compose the last raw frame under the CURRENT band geometry and paint the delta (absolute rows). */

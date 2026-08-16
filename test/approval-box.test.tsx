@@ -13,8 +13,9 @@ const plan = `## Plan
 - bullet one
 - bullet two with a fairly long line that should wrap nicely within the terminal width column`;
 
+// SAFETY: fixture literal built by this test; the omitted members are unused by the component under test.
 const makeApproval = (): Approval =>
-  ({ toolName: "exit_plan_mode", args: { plan }, resolve: () => {} }) as unknown as Approval;
+  ({ toolName: "exit_plan_mode", args: { plan }, resolve: () => {} }) as Approval;
 
 /** A plan box must NEVER overflow the terminal width: every rendered line <= the passed width.
  * Regression: Markdown defaulted to 80 cols, so the box was always ~84 wide and overflowed narrow

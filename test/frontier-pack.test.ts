@@ -123,7 +123,7 @@ test("loads a closed 12-task pack into a deeply frozen immutable snapshot", () =
   } finally {
     Object.defineProperty(Uint8Array, "from", { configurable: true, writable: true, value: originalFrom });
     if (originalBufferLength) Object.defineProperty(Buffer.prototype, "length", originalBufferLength);
-    else delete (Buffer.prototype as unknown as Record<string, unknown>).length;
+    else delete (Buffer.prototype as any).length; // SAFETY: test-only prototype teardown of a stubbed property.
   }
   expect(intercepted).toBe(false);
   expect(capturedSnapshot).toBeUndefined();

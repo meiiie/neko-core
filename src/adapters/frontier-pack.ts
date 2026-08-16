@@ -278,7 +278,8 @@ function parseResources(value: unknown, taskLabel: string): FrontierResourceCeil
     if (declared > FRONTIER_RESOURCE_MAXIMA[key]) throw new Error(`${taskLabel} resources.${key} exceeds its hard maximum`);
     parsed[key] = declared;
   }
-  return deepFreeze(parsed) as unknown as FrontierResourceCeiling;
+  // SAFETY: exactKeys plus the per-key integer/maxima checks above fill every ceiling field.
+  return deepFreeze(parsed) as FrontierResourceCeiling;
 }
 
 function parseContentRef(value: unknown, label: string): FrontierContentRef {

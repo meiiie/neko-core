@@ -7,7 +7,7 @@ const tick = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 const frame = (c: { lastFrame: () => string | undefined }) => (c.lastFrame() ?? "").replace(/\x1b\[[0-9;]*m/g, "");
 
 /** Runs, rendered as the text they cover, with the selected one wrapped in brackets. */
-function shape(value: string, start: number, end: number, sel: { from: number; to: number } | null) {
+function renderRuns(value: string, start: number, end: number, sel: { from: number; to: number } | null) {
   const cps = [...value];
   return selectionRuns(start, end, sel)
     .map((r) => (r.on ? "[" : "") + cps.slice(r.from, r.to).join("") + (r.on ? "]" : ""))
@@ -16,10 +16,10 @@ function shape(value: string, start: number, end: number, sel: { from: number; t
 
 test("a selection splits a range into at most three runs", () => {
   const v = "hello world";
-  expect(shape(v, 0, 11, { from: 6, to: 11 })).toBe("hello [world]");
-  expect(shape(v, 0, 11, { from: 0, to: 5 })).toBe("[hello] world");
-  expect(shape(v, 0, 11, { from: 3, to: 8 })).toBe("hel[lo wo]rld");
-  expect(shape(v, 0, 11, { from: 0, to: 11 })).toBe("[hello world]");
+  expect(renderRuns(v, 0, 11, { from: 6, to: 11 })).toBe("hello [world]");
+  expect(renderRuns(v, 0, 11, { from: 0, to: 5 })).toBe("[hello] world");
+  expect(renderRuns(v, 0, 11, { from: 3, to: 8 })).toBe("hel[lo wo]rld");
+  expect(renderRuns(v, 0, 11, { from: 0, to: 11 })).toBe("[hello world]");
   // Never more than three, whatever the range — the component relies on this to keep each visual line
   // a handful of flat strings rather than a per-codepoint fan-out.
   expect(selectionRuns(0, 11, { from: 3, to: 8 }).length).toBe(3);
@@ -28,13 +28,13 @@ test("a selection splits a range into at most three runs", () => {
 test("an empty, inverted, or absent selection leaves the range whole", () => {
   const v = "hello world";
   for (const sel of [null, undefined, { from: 4, to: 4 }, { from: 9, to: 2 }]) {
-    expect(shape(v, 0, 11, sel as any)).toBe("hello world");
+    expect(renderRuns(v, 0, 11, sel as any)).toBe("hello world");
     expect(selectionRuns(0, 11, sel as any).length).toBe(1);
   }
   // A selection entirely outside the range does not touch it either — this is what clips a highlight
   // to one visual line of a wrapped value.
-  expect(shape(v, 0, 5, { from: 6, to: 11 })).toBe("hello");
-  expect(shape(v, 6, 11, { from: 0, to: 5 })).toBe("world");
+  expect(renderRuns(v, 0, 5, { from: 6, to: 11 })).toBe("hello");
+  expect(renderRuns(v, 6, 11, { from: 0, to: 5 })).toBe("world");
 });
 
 test("a selection spanning visual lines is clipped to each of them", () => {
@@ -42,9 +42,9 @@ test("a selection spanning visual lines is clipped to each of them", () => {
   // first line, all of the second, and the head of the third.
   const v = "alpha bravo charlie";
   const sel = { from: 3, to: 15 };
-  expect(shape(v, 0, 6, sel)).toBe("alp[ha ]");
-  expect(shape(v, 6, 12, sel)).toBe("[bravo ]");
-  expect(shape(v, 12, 19, sel)).toBe("[cha]rlie");
+  expect(renderRuns(v, 0, 6, sel)).toBe("alp[ha ]");
+  expect(renderRuns(v, 6, 12, sel)).toBe("[bravo ]");
+  expect(renderRuns(v, 12, 19, sel)).toBe("[cha]rlie");
 });
 
 test("an empty range yields nothing at all", () => {

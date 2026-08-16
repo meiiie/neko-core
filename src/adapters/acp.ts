@@ -29,6 +29,10 @@ import { applySkillPolicyForTurn } from "./skills.ts";
 import { planTurnCapabilities } from "./turn-capabilities.ts";
 import { matchedTurnContext } from "./turn-context.ts";
 
+/** Node's toWeb readable and the SDK's web ReadableStream are the same runtime object; only their
+ * generic variance differs, so the bridge is an identity pass-through. */
+function webReadable(stream: any): ReadableStream<Uint8Array> { return stream; }
+
 const MODES: acp.SessionMode[] = [
   { id: "default", name: "Default", description: "Prompt before gated writes and commands." },
   { id: "accept-edits", name: "Accept edits", description: "Approve Neko file edits; other gated actions still prompt." },
@@ -961,7 +965,9 @@ export async function runAcpServer(options: AcpRuntimeFactoryOptions = {}): Prom
   console.warn = (...values: unknown[]) => stderrLog(...values);
   try {
     const output = Writable.toWeb(process.stdout);
-    const input = Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>;
+    // SAFETY: Node's toWeb stream and the SDK's web ReadableStream are the same runtime object;
+    // their generic variance differs only in type-argument defaults.
+    const input = webReadable(Readable.toWeb(process.stdin));
     const cleanupTasks: Promise<void>[] = [];
     const connection = createNekoAcpAgent({
       ...options,

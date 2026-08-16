@@ -24,6 +24,7 @@ import {
 import { isAbsolute, join, relative } from "node:path";
 
 import { homeDir } from "../shared/home.ts";
+import { isJsonObject, isText, type JsonObject } from "../shared/wire.ts";
 import { isValidSessionId, loadSession, type Session } from "./session.ts";
 
 const SCHEMA = "neko.session-handoff/v1" as const;
@@ -93,26 +94,27 @@ function isWriterTemp(file: string): boolean {
   return !!match && UUID_V4.test(match[1]) && UUID_V4.test(match[2]);
 }
 
-function parseEnvelope(value: unknown, expectedId: string): SessionHandoff | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const envelope = value as Record<string, unknown>;
+function parseEnvelope(value: any, expectedId: string): SessionHandoff | null {
+  const envelope = isJsonObject(value) ? value : null;
+  if (envelope === null) return null;
   if (!exactKeys(envelope, ENVELOPE_KEYS)) return null;
   if (envelope.schema !== SCHEMA || envelope.kind !== KIND || envelope.provenance !== PROVENANCE) return null;
-  if (envelope.id !== expectedId || typeof envelope.id !== "string" || !UUID_V4.test(envelope.id)) return null;
-  if (typeof envelope.createdAt !== "string" || !validTimestamp(envelope.createdAt)) return null;
-  if (typeof envelope.targetSessionId !== "string" || !isValidSessionId(envelope.targetSessionId)) return null;
-  if (!envelope.source || typeof envelope.source !== "object" || Array.isArray(envelope.source)) return null;
-  const source = envelope.source as Record<string, unknown>;
+  if (envelope.id !== expectedId || !isText(envelope.id) || !UUID_V4.test(envelope.id)) return null;
+  if (!isText(envelope.createdAt) || !validTimestamp(envelope.createdAt)) return null;
+  if (!isText(envelope.targetSessionId) || !isValidSessionId(envelope.targetSessionId)) return null;
+  const source = envelope.source;
+  if (!isJsonObject(source)) return null;
   if (!exactKeys(source, SOURCE_KEYS)) return null;
-  if (typeof source.sessionId !== "string" || !isValidSessionId(source.sessionId)) return null;
+  if (!isText(source.sessionId) || !isValidSessionId(source.sessionId)) return null;
   if (source.sessionId === envelope.targetSessionId) return null;
-  if (typeof source.updatedAt !== "string" || !validTimestamp(source.updatedAt)) return null;
-  if (typeof source.cwd !== "string" || !safeMetadata(source.cwd)) return null;
-  if (typeof source.model !== "string" || !safeMetadata(source.model)) return null;
+  if (!isText(source.updatedAt) || !validTimestamp(source.updatedAt)) return null;
+  if (!isText(source.cwd) || !safeMetadata(source.cwd)) return null;
+  if (!isText(source.model) || !safeMetadata(source.model)) return null;
   if (!Number.isSafeInteger(source.messageCount) || Number(source.messageCount) < 0) return null;
-  if (typeof envelope.summary !== "string" || envelope.summary.trim().length === 0) return null;
+  if (!isText(envelope.summary) || envelope.summary.trim().length === 0) return null;
   if (UNSAFE_CONTROL.test(envelope.summary) || utf8Bytes(envelope.summary) > MAX_SUMMARY_BYTES) return null;
-  return envelope as unknown as SessionHandoff;
+  // SAFETY: exactKeys plus the per-field validations above establish the SessionHandoff contract.
+  return value as SessionHandoff;
 }
 
 function requireSession(id: string, role: "source" | "target"): Session {

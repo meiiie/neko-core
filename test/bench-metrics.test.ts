@@ -126,9 +126,11 @@ describe("redundantCalls (RedundancyBench axis)", () => {
   });
 
   test("malformed mutation paths cannot crash telemetry", () => {
+    // SAFETY: deliberately malformed fixture (wrong `path` type); telemetry must survive it.
+    const malformed: any = { name: "edit", path: 7, ok: false };
     const trace = [
       rd("read_file", { path: "a.mjs" }),
-      { name: "edit", path: 7, ok: false } as unknown as TraceEntry,
+      malformed,
       rd("read_file", { path: "a.mjs" }),
     ];
     expect(redundantCallMask(trace)).toEqual([false, false, true]);

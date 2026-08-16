@@ -135,7 +135,7 @@ function nonEmptyExecutableMap(value: unknown): boolean {
   return value !== undefined && (!isObject(value) || Object.keys(value).length > 0);
 }
 
-function hasUnsafeConfigShape(root: unknown): boolean {
+function hasUnsafeConfigStructure(root: unknown): boolean {
   const stack: Array<{ value: unknown; depth: number }> = [{ value: root, depth: 0 }];
   let visited = 0;
   while (stack.length) {
@@ -151,7 +151,7 @@ function hasUnsafeConfigShape(root: unknown): boolean {
 }
 
 function hasExecutableProjectConfig(data: Record<string, any>): boolean {
-  if (hasUnsafeConfigShape(data)) return true;
+  if (hasUnsafeConfigStructure(data)) return true;
   // A checkout may tune declarative model behavior after exact-cwd trust, but it must never grant
   // itself write authority elsewhere on the host. External write roots are user-global/env policy.
   if (Object.hasOwn(data, "additional_write_roots")) return true;
@@ -535,7 +535,7 @@ function snapshotProject(cwd: string): ProjectTrustInspection {
     if (mcp) {
       const parsed = JSON.parse(mcp.bytes.toString("utf-8").replace(/^\uFEFF/, ""));
       if (!isObject(parsed)) throw new Error("Project MCP config must contain a JSON object");
-      if (hasUnsafeConfigShape(parsed)) throw new Error("Project executable extensions must be configured globally");
+      if (hasUnsafeConfigStructure(parsed)) throw new Error("Project executable extensions must be configured globally");
       const servers = parsed.mcpServers ?? parsed.mcp_servers;
       if (servers !== undefined && !isObject(servers)) throw new Error("Project MCP servers must be an object");
       if (servers && Object.keys(servers).length) throw new Error("Project MCP servers must be configured globally");

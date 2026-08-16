@@ -17,6 +17,7 @@ import { homeDir } from "../shared/home.ts";
 import { delimiter, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 import { isMode, type PermissionMode } from "../core/permissions.ts";
+import { isJsonArray, isJsonObject, type JsonValue } from "../shared/wire.ts";
 import { inspectProjectTrust, type ProjectTrustSummary } from "./project-trust.ts";
 
 export const LOCAL_CONFIG_DIR = ".neko-core";
@@ -349,16 +350,17 @@ function parseBooleanEnv(envName: string, value: string): boolean {
 const SECRET_KEY = /(api[_-]?key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|secret|password|passwd|cookie|credential|private[_-]?key)/i;
 const SECRET_CONTAINER = /^(headers|env)$/i;
 
-/** Return a printable clone with credentials removed, including arbitrary MCP header/env values. */
-export function redactSecrets(value: unknown, key = "", hideValue = false): unknown {
+/** Return a printable clone with credentials removed, including arbitrary MCP header/env values.
+ * Accepts any plain config graph (typed profile interfaces included); the walk only follows JSON-shaped members. */
+export function redactSecrets(value: any, key = "", hideValue = false): JsonValue {
   if (hideValue || (key && SECRET_KEY.test(key))) return "<redacted>";
-  if (Array.isArray(value)) return value.map((item) => redactSecrets(item));
-  if (!value || typeof value !== "object") return value;
+  if (isJsonArray(value)) return value.map((item) => redactSecrets(item));
+  if (!isJsonObject(value)) return value;
   const hideChildren = SECRET_CONTAINER.test(key);
   return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([childKey, child]) => [
+    Object.keys(value).map((childKey) => [
       childKey,
-      redactSecrets(child, childKey, hideChildren),
+      redactSecrets(value[childKey], childKey, hideChildren),
     ]),
   );
 }
