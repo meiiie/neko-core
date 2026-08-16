@@ -33,6 +33,7 @@
     "lab:antigravity-contract": "bun scripts/antigravity-contract-lab.ts",
     "build": "bun scripts/build.ts && dist/neko __uiprobe && bun scripts/input-probe.ts && bun scripts/acp-smoke.ts",
     "test": "bun test",
+    "lint": "oxlint",
     "eval:office": "bun test/office-value-eval.ts",
     "typecheck": "bun node_modules/typescript/bin/tsc --noEmit",
     "typecheck:stable": "bun node_modules/typescript5/bin/tsc --noEmit",
@@ -40,9 +41,11 @@
     "verify": "bun run typecheck:stable && bun test"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.78.0",
     "@types/bun": "latest",
     "@types/react": "^19.2.17",
     "ink-testing-library": "^4.0.0",
+    "oxlint": "1.78.0",
     "typescript": "7.0.1-rc",
     "typescript5": "npm:typescript@^5.9.3",
     "zod": "^4.4.3"

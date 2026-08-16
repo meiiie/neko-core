@@ -1,0 +1,13 @@
+Vendored copy of the anti-slop Oxlint plugin.
+
+Upstream:    https://github.com/dmmulroy/anti-slop
+Commit:      446268e5d15baa968eaec669ff65358d36ae6259 (main, depth-1 clone)
+Copied from: skills/install-anti-slop/assets/anti-slop/ (the layout the
+             install-anti-slop skill's scripts/install.mjs installs by default)
+License:     MIT (see LICENSE in this directory) - Copyright (c) 2026 Dillon Mulroy
+
+Per LICENSING.md, third-party vendored material keeps its own license notice.
+This is development tooling only: nothing under tools/ is imported by src/,
+bin/, or test/, so it never reaches the compiled neko binary and stays outside
+the tsconfig include set. Re-vendor by re-running the copy from a fresh clone
+and updating the commit hash above; do not hand-edit the rule sources.
