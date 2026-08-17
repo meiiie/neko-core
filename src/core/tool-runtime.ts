@@ -2265,9 +2265,11 @@ function resolveInRoot(root: string, p: string): string {
  * directory. Credential/device paths remain immutable outside the project even when their parent was
  * granted broadly. */
 /** The canonical user policy file (~/.neko-core/config.json). Core computes it from the shared
- * home helper so the admission below never imports adapter config code (dependency rule). */
+ * home helper so the admission below never imports adapter config code (dependency rule).
+ * Canonicalized through the same realpath-nearest pass as the requested target: macOS tempdirs
+ * are symlinked (/var -> /private/var), so a raw join would compare unequal spellings. */
 function nekoUserConfigPath(): string {
-  return join(homeDir(), ".neko-core", "config.json");
+  return realpathNearest(join(homeDir(), ".neko-core", "config.json"));
 }
 
 /** A structured mutation whose canonical target is exactly the user policy file. Admitted only
