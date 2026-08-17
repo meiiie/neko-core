@@ -216,7 +216,7 @@ function managedExecutable(
   const manifestPath = paths.join(root, "support-pack.json");
   if (!pathExists(manifestPath)) return null;
   try {
-    // SAFETY: contract of the ManagedManifest type is established by the surrounding validation/boundary.
+    // SAFETY: manifest written by this module's own installer; digest-checked before read.
     const manifest = JSON.parse(readText(manifestPath)) as ManagedManifest;
     const file = manifest.executable || (platform === "win32" ? "codex-app-server.exe" : "codex-app-server");
     if (paths.isAbsolute(file) || paths.basename(file) !== file) return null;

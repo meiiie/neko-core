@@ -692,7 +692,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       },
       onEvent: (kind, data) => {
         if (kind === "usage") {
-          // SAFETY: contract of the Usage type is established by the surrounding validation/boundary.
+          // SAFETY: usage snapshot emitted by this session's own provider callbacks.
           liveUsageRef.current = data as Usage;
           usageSnapshotCharsRef.current = turnGeneratedCharsRef.current;
         } else if (kind === "usage_estimate") {
@@ -757,9 +757,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (provider) return;
     try {
       const disposed = agentRef.current?.currentProvider().dispose?.();
-      // SAFETY: contract of the Promise<void> type is established by the surrounding validation/boundary.
+      // SAFETY: the host hook hands back a promise-like; member access is guarded before use.
       if (disposed && (disposed as Promise<void>).catch instanceof Function) {
-        // SAFETY: contract of the Promise<void> type is established by the surrounding validation/boundary.
+        // SAFETY: the host hook hands back a promise-like; member access is guarded before use.
         void (disposed as Promise<void>).catch(() => {});
       }
     } catch { /* terminal teardown must not be blocked by provider cleanup */ }
@@ -2490,7 +2490,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         remoteVoiceRef.current = session;
         voiceRef.current = session; // /voice status, Alt+X stop and the LIVE panel all apply
         await session.start();
-        // SAFETY: contract of the ChatGptVoiceSession type is established by the surrounding validation/boundary.
+        // SAFETY: factory returns the session type this panel was built against.
         const answer = await (session as ChatGptVoiceSession).attachRemoteOffer(sdp);
         relayRef.current?.publish({ type: "voice-answer", sdp: answer });
         addLine("info", "Voice is live on your phone (Neko's own voice) - speak naturally; /voice stop ends it.");

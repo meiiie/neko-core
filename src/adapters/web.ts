@@ -79,14 +79,14 @@ async function webSearch(query: string, opts: { searxngUrl: string; backend: str
           sidecar.touch();
           return `(searxng was asleep - container auto-started)\n` + fmtResults(rs);
         }
-        // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+        // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
         note = `(searxng failed: ${(error as Error).message}; ${woke.reason})\n`;
       }
     } else if (pick === "tavily" && tavilyKey) {
       return fmtResults(await tavilySearch(query, tavilyKey));
     }
   } catch (error) {
-    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+    // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
     note = `(${pick} failed: ${(error as Error).message})\n`;
   }
   // The next rung: the primary failed and a Tavily key is wired -> use it before the free floor.
@@ -102,7 +102,7 @@ async function webSearch(query: string, opts: { searxngUrl: string; backend: str
     const out = note + (note ? "(falling back to DuckDuckGo)\n" : "") + fmtResults(await ddgSearch(query));
     // Zero-config default AND Docker present -> one gentle nudge toward the private power-up.
     return pick === "duckduckgo" && !opts.searxngUrl && !tavilyKey ? out + setupHint() : out;
-  // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+  // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
   } catch (e) {
     // SAFETY: search/HTTP failures throw Errors; a non-Error would surface as an undefined message.
     return `Error: web search failed: ${(e as Error).message}`;
@@ -232,7 +232,7 @@ async function toolWebFetch(_root: string, args: any, backend = ""): Promise<str
     contentType = res.headers.get("content-type") ?? "";
     text = res.text;
   } catch (error) {
-    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+    // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
     return `Error: fetch failed: ${(error as Error).message}`;
   }
   if (!jina) {

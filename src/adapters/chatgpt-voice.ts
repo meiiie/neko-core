@@ -457,7 +457,7 @@ export class ChatGptVoiceSession implements ChatGptVoiceControl {
       return await answer;
     } catch (error) {
       this.realtimeStarted = false;
-      // SAFETY: contract of the ChatGptVoiceSession["sdpWaiter" type is established by the surrounding validation/boundary.
+      // SAFETY: waiter is installed by this session's own connect path.
       const waiter = this.sdpWaiter as ChatGptVoiceSession["sdpWaiter"];
       if (waiter) clearTimeout(waiter.timer);
       this.sdpWaiter = null;

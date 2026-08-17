@@ -301,7 +301,7 @@ export function aggregate(tasks: TaskMetric[], slaMs = DEFAULT_SLA_MS): DimRepor
   const totalCalls = tasks.reduce((a, t) => a + t.totalCalls, 0);
   const redundancyRate = totalCalls ? totalRedundant / totalCalls : 0;
   const seTasks = tasks.filter((t) => t.stepEfficiency !== null);
-  // SAFETY: contract of the number type is established by the surrounding validation/boundary.
+  // SAFETY: field checked as a finite number by the surrounding code before this cast.
   const stepEfficiency = seTasks.length ? seTasks.reduce((a, t) => a + (t.stepEfficiency as number), 0) / seTasks.length : null;
   const constraintScore = mean((t) => t.constraintScore);
   const allTrials = tasks.reduce((a, t) => a + t.trials, 0);

@@ -28,7 +28,7 @@ const realExec: Exec = (cmd, args, timeoutMs) => {
     if (r.error) return { status: null, stdout: "", stderr: String(r.error.message ?? r.error) };
     return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   } catch (e) {
-    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+    // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
     return { status: null, stdout: "", stderr: String((e as Error).message ?? e) };
   }
 };

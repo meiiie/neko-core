@@ -25,7 +25,7 @@ function readUserConfig(): any {
     const text = readFileSync(path, "utf-8");
     return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
   } catch (e) {
-    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+    // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
     throw new Error(`~/.neko-core/config.json has invalid JSON - fix it before changing settings (${(e as Error).message})`);
   }
 }
@@ -65,7 +65,7 @@ export function setApiKey(key: string): string {
     });
     return `API key saved to ${target} in ~/.neko-core/config.json`;
   } catch (e) {
-    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+    // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
     return (e as Error).message;
   }
 }
@@ -145,7 +145,7 @@ export function clearApiKey(profile?: string): string {
     writeUserConfig(data);
     return `API key removed from ${removed} in ~/.neko-core/config.json`;
   } catch (e) {
-    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+    // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
     return (e as Error).message;
   }
 }
@@ -164,7 +164,7 @@ export function addMcpServer(name: string, server: any): string {
     });
     return `Added MCP server '${name}' to ${userConfigPath()}. Run \`neko mcp\` to verify.`;
   } catch (e) {
-    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+    // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
     return (e as Error).message;
   }
 }
@@ -176,7 +176,7 @@ export function removeMcpServer(name: string): string {
   try {
     data = readUserConfig();
   } catch (e) {
-    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+    // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
     return (e as Error).message;
   }
   if (!data.mcp_servers?.[name]) return `no MCP server '${name}'`;

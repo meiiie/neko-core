@@ -633,11 +633,11 @@ function requireMessageStart(started: boolean): void {
 }
 
 function streamIndex(value: any): number {
-  // SAFETY: contract of the number type is established by the surrounding validation/boundary.
+  // SAFETY: field checked as a finite number by the surrounding code before this cast.
   if (!Number.isInteger(value) || (value as number) < 0 || (value as number) >= ANTHROPIC_STREAM_LIMITS.maxToolCalls) {
     throw new Error(`anthropic stream content block index out of range: ${String(value).slice(0, 40)}`);
   }
-  // SAFETY: contract of the number type is established by the surrounding validation/boundary.
+  // SAFETY: field checked as a finite number by the surrounding code before this cast.
   return value as number;
 }
 
@@ -656,9 +656,9 @@ function streamUsage(value: any): any {
     // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
     const count = (value as any)[key];
     if (count === undefined || count === null) continue;
-    // SAFETY: contract of the number type is established by the surrounding validation/boundary.
+    // SAFETY: field checked as a finite number by the surrounding code before this cast.
     if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("anthropic stream usage was invalid");
-    // SAFETY: contract of the number type is established by the surrounding validation/boundary.
+    // SAFETY: field checked as a finite number by the surrounding code before this cast.
     out[key] = count as number;
   }
   return out;

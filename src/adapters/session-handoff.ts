@@ -215,7 +215,7 @@ export class SessionHandoffStore {
       if (!existsSync(dir)) {
         try { mkdirSync(dir, { mode: 0o700 }); }
         catch (error) {
-          // SAFETY: contract of the NodeJS.ErrnoException type is established by the surrounding validation/boundary.
+          // SAFETY: fs errors from this module's own typed calls carry the errno contract.
           if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
         }
       }

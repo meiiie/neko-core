@@ -34,10 +34,10 @@ export function procurementSourcePlanCommand(
   try {
     const plan = buildSkuSourcePlan(
       input.identifier,
-      // SAFETY: contract of the ProcurementCategory type is established by the surrounding validation/boundary.
+      // SAFETY: argument was just matched against the category list.
       (input.category ?? "generic") as ProcurementCategory,
       input.domains ?? [],
-      // SAFETY: contract of the ProcurementIdentifierKind type is established by the surrounding validation/boundary.
+      // SAFETY: argument was just matched against the identifier-kind list.
       (input.kind ?? "auto") as ProcurementIdentifierKind,
     );
     return { exitCode: 0, stdout: serializePlan(plan) };

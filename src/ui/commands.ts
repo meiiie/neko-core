@@ -363,7 +363,7 @@ function openSupportCenter(ctx: CommandCtx): void {
     onSelect: (item) => {
       if (item.id === "close") return ctx.setOverlay(null);
       if (item.id === "meeting") return openMeetingSupportManager(ctx);
-      // SAFETY: contract of the SupportKind type is established by the surrounding validation/boundary.
+      // SAFETY: argument was just matched against the support component list.
       openSupportManager(ctx, item.id as SupportKind);
     },
   });

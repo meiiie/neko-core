@@ -309,7 +309,7 @@ export async function startRemoteRelay(
       if (m?.t === "control") {
         const raw = decrypt(m.control);
         if (raw === null) return;
-        // SAFETY: contract of the RemoteAction type is established by the surrounding validation/boundary.
+        // SAFETY: sealed relay control JSON; the handler validates the action before use.
         try {
           // SAFETY: relay control JSON; malformed actions are discarded by the catch below.
           handlers.control?.(JSON.parse(raw) as RemoteAction);

@@ -340,7 +340,7 @@ export function parseMeetingTranscript(
   },
 ): MeetingTranscript {
   let parsed: ParakeetJson;
-  // SAFETY: contract of the ParakeetJson type is established by the surrounding validation/boundary.
+  // SAFETY: engine output JSON; the words array is validated immediately after this cast.
   try {
     // SAFETY: engine output JSON; the words/segments arrays are validated immediately below.
     parsed = JSON.parse(json) as ParakeetJson;

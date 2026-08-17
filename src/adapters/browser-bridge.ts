@@ -34,7 +34,7 @@ export function readBrowserCapability(): BrowserCapability | null {
     const value = JSON.parse(readFileSync(DISCOVERY_FILE(), "utf8"));
     if (value?.version !== 1 || value.host !== "127.0.0.1" || !Number.isInteger(value.port)
       || !isText(value.session) || !isText(value.token)) return null;
-    // SAFETY: contract of the BrowserCapability type is established by the surrounding validation/boundary.
+    // SAFETY: loopback handshake response is token-authenticated before this cast.
     return value as BrowserCapability;
   } catch { return null; }
 }
@@ -124,7 +124,7 @@ class BrowserBridgeTools implements McpTools {
     }).catch((error) => {
       if (signal?.aborted) throw new Error("Neko Browser Bridge request interrupted");
       if (timeoutSignal.aborted) throw new Error("Neko Browser Bridge request timed out");
-      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+      // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
       throw new Error(`Neko Browser Bridge is offline: ${(error as Error).message}`);
     });
     const text = await response.text();
@@ -263,7 +263,7 @@ export function startBrowserBridge(options: {
         return new Response("unknown browser action", { status: 400 });
       }
       try { return Response.json(await command(body.action, body.args ?? {})); }
-      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+      // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
       catch (error) {
         // SAFETY: upgrade failures are WebSocket/HTTP Errors from the typed server surface.
         return new Response((error as Error).message, { status: 409 });

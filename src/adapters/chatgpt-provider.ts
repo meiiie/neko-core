@@ -690,11 +690,11 @@ function boundedResponsesToolField(value: any, field: "id" | "name", maxBytes: n
 
 function responsesToolIndex(value: any): number | null {
   if (value == null) return null;
-  // SAFETY: contract of the number type is established by the surrounding validation/boundary.
+  // SAFETY: field checked as a finite number by the surrounding code before this cast.
   if (!Number.isInteger(value) || (value as number) < 0 || (value as number) >= RESPONSES_STREAM_LIMITS.maxToolCalls) {
     throw new Error(`Responses streaming tool call index out of range: ${String(value).slice(0, 40)}`);
   }
-  // SAFETY: contract of the number type is established by the surrounding validation/boundary.
+  // SAFETY: field checked as a finite number by the surrounding code before this cast.
   return value as number;
 }
 

@@ -594,7 +594,7 @@ export class McpHub {
     for (const name of this.configs.keys()) {
       if (this.clients.has(name)) continue;
       try { await this.ensureClient(name); } catch (error) {
-        // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+        // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
         console.error(`neko: MCP server '${name}' failed to connect: ${(error as Error).message}`);
       }
     }
@@ -612,7 +612,7 @@ export class McpHub {
         if (hit) this.registerFromCache(name, hit);
         else await this.connectOne(name);
       } catch (error) {
-        // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+        // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
         console.error(`neko: MCP server '${name}' failed to connect: ${(error as Error).message}`);
       }
     }
@@ -674,7 +674,7 @@ export class McpHub {
         return parts.join("\n") || "(empty resource)";
       } catch (error) {
         await this.discardClient(resourceServer);
-        // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+        // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
         return `Error reading resource: ${(error as Error).message}`;
       }
     }
@@ -687,7 +687,7 @@ export class McpHub {
       // before its response arrived. Never replay automatically: the next attempt must be an
       // explicit, evidence-backed decision by the agent or user.
       await this.discardClient(ref.server);
-      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+      // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
       return `Error: MCP call outcome unknown; not retried: ${(error as Error).message}`;
     }
   }
@@ -724,7 +724,7 @@ export class McpHub {
         .join("\n\n");
     } catch (error) {
       await this.discardClient(server);
-      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+      // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
       return `Error getting prompt: ${(error as Error).message}`;
     }
   }

@@ -249,7 +249,7 @@ export class Agent {
     this.provider = provider;
     try {
       const disposed = previous.dispose?.();
-      // SAFETY: contract of the Promise<void> type is established by the surrounding validation/boundary.
+      // SAFETY: the host hook hands back a promise-like; member access is guarded before use.
       // SAFETY: the dispose hook hands back a promise-like; the instanceof check guards the call.
       const disposable = disposed as Promise<void>;
       if (disposable && disposable.catch instanceof Function) void disposable.catch(() => {});

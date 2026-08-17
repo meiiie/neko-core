@@ -107,7 +107,7 @@ export function codexSupportRoot(home = homeDir()): string {
 export function readCodexSupportPack(home = homeDir()): CodexSupportPackInfo | null {
   const root = codexSupportRoot(home);
   try {
-    // SAFETY: contract of the SupportPackManifest type is established by the surrounding validation/boundary.
+    // SAFETY: manifest JSON is validated field-by-field right after this parse.
     const manifest = JSON.parse(readFileSync(join(root, "support-pack.json"), "utf8")) as SupportPackManifest;
     if (!manifest.executable || isAbsolute(manifest.executable) || /[\\/]/.test(manifest.executable)) return null;
     const path = join(root, manifest.executable);
@@ -134,7 +134,7 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
     signal: AbortSignal.timeout(30_000),
   });
   if (!releaseResponse.ok) throw new Error(`Could not read the official Codex release (HTTP ${releaseResponse.status})`);
-  // SAFETY: contract of the GitHubRelease type is established by the surrounding validation/boundary.
+  // SAFETY: GitHub API release JSON; required fields are re-validated before use.
   const release = await releaseResponse.json() as GitHubRelease;
   const resolved = resolveRelease(release, target, minimumVersion);
 

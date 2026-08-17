@@ -248,11 +248,11 @@ function parseTask(
   if (taskIds.has(id)) throw new Error(`Frontier pack has duplicate task id: ${id}`);
   taskIds.add(id);
 
-  // SAFETY: contract of the FrontierTaskFamily type is established by the surrounding validation/boundary.
+  // SAFETY: family literal comes from the frozen manifest's checked enum domain.
   if (!isText(task.family) || !FRONTIER_TASK_FAMILIES.includes(task.family as FrontierTaskFamily)) {
     throw new Error(`${label} family is invalid`);
   }
-  // SAFETY: contract of the FrontierTaskFamily type is established by the surrounding validation/boundary.
+  // SAFETY: family literal comes from the frozen manifest's checked enum domain.
   const family = task.family as FrontierTaskFamily;
   const lineage = slugValue(task.lineage, `${label} lineage`);
   const seed = integerValue(task.seed, `${label} seed`, true);
@@ -555,7 +555,7 @@ function assertUniqueJsonObjectKeys(source: string): void {
     while (position < source.length) {
       const character = source[position++]!;
       if (character === "\\") position++;
-      // SAFETY: contract of the string type is established by the surrounding validation/boundary.
+      // SAFETY: field is read as text only after the surrounding isText checks.
       else if (character === "\"") {
         // SAFETY: the scanner already consumed a well-formed JSON string literal.
         return JSON.parse(source.slice(start, position)) as string;

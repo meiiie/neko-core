@@ -108,7 +108,7 @@ export class ChatGptAppServerProvider implements Provider {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
     } catch (error) {
       signal?.removeEventListener("abort", abortStartup);
-      // SAFETY: contract of the Promise<void> | null type is established by the surrounding validation/boundary.
+      // SAFETY: the host hook hands back a promise-like; member access is guarded before use.
       const pendingStartup = startupCleanup as Promise<void> | null;
       if (pendingStartup) await pendingStartup.catch(() => {});
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
@@ -161,7 +161,7 @@ export class ChatGptAppServerProvider implements Provider {
     }
     } catch (error) {
       signal?.removeEventListener("abort", abortStartup);
-      // SAFETY: contract of the Promise<void> | null type is established by the surrounding validation/boundary.
+      // SAFETY: the host hook hands back a promise-like; member access is guarded before use.
       const pendingStartup = startupCleanup as Promise<void> | null;
       if (pendingStartup) await pendingStartup.catch(() => {});
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
@@ -237,9 +237,9 @@ export class ChatGptAppServerProvider implements Provider {
     } finally {
       if (abort) signal?.removeEventListener("abort", abort);
       stopWatchdog();
-      // SAFETY: contract of the Promise<void> | null type is established by the surrounding validation/boundary.
+      // SAFETY: the host hook hands back a promise-like; member access is guarded before use.
       const pendingAbort = abortCleanup as Promise<void> | null;
-      // SAFETY: contract of the Promise<void> | null type is established by the surrounding validation/boundary.
+      // SAFETY: the host hook hands back a promise-like; member access is guarded before use.
       const pendingForced = forcedCleanup as Promise<void> | null;
       if (pendingAbort) await pendingAbort.catch(() => {});
       if (pendingForced) await pendingForced.catch(() => {});

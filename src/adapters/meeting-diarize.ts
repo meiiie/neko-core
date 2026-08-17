@@ -130,7 +130,7 @@ export function diarizationRoot(home = homeDir()): string {
 export function readSpeechTools(home = homeDir()): SpeechToolsPack | null {
   const root = diarizationRoot(home);
   try {
-    // SAFETY: contract of the DiarizationManifest type is established by the surrounding validation/boundary.
+    // SAFETY: manifest JSON is validated field-by-field right after this parse.
     const manifest = JSON.parse(readFileSync(join(root, "diarization.json"), "utf8")) as DiarizationManifest;
     if (manifest.schemaVersion !== 1) return null;
     const file = (relativePath?: string) => (relativePath ? join(root, relativePath) : undefined);
@@ -153,7 +153,7 @@ export function readSpeechTools(home = homeDir()): SpeechToolsPack | null {
 /** The pack, but only when the optional speaker models are present too. */
 export function readDiarizationPack(home = homeDir()): DiarizationPack | null {
   const pack = readSpeechTools(home);
-  // SAFETY: contract of the DiarizationPack type is established by the surrounding validation/boundary.
+  // SAFETY: pack members are digest-verified files of the managed pack.
   return pack?.segmentation && pack.embedding ? (pack as DiarizationPack) : null;
 }
 

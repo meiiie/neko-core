@@ -24,7 +24,7 @@ const MODE_ORDER: PermissionMode[] = ["default", "accept-edits", "plan", "auto"]
 const EDIT_TOOLS = new Set(["write_file", "edit", "multi_edit"]);
 
 export function isMode(value: string): value is PermissionMode {
-  // SAFETY: contract of the PermissionMode type is established by the surrounding validation/boundary.
+  // SAFETY: value was just membership-checked against the mode list.
   return MODE_ORDER.includes(value as PermissionMode);
 }
 

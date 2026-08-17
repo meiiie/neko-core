@@ -403,7 +403,7 @@ export class BrowserMeetingSession {
       startedAt: new Date().toISOString(),
       sampleRate,
       channels: 2,
-      // SAFETY: contract of the Array<"microphone" | "system"> type is established by the surrounding validation/boundary.
+      // SAFETY: sources come from the fixed capture-source union of the consent page.
       sources: [...new Set(sources)] as Array<"microphone" | "system">,
       videoStored: false,
     };

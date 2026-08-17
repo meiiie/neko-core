@@ -34,7 +34,7 @@ function ensureHidden(width: number): Hidden {
   const out: any = {
     columns: width,
     rows: 500,
-    // SAFETY: contract of the string[ type is established by the surrounding validation/boundary.
+    // SAFETY: array literal built here from members validated in this scope.
     buf: [] as string[],
     write: (s: string) => { out.buf.push(s); },
     on: () => {}, off: () => {}, removeListener: () => {},

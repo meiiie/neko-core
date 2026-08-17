@@ -358,7 +358,7 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
       if (showProgress) process.stdout.write(`\r${`  downloaded ${mb(got)} MB - verifying ...`.padEnd(48)}\n`);
     } catch (e) {
       if (showProgress) process.stdout.write("\n");
-      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+      // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
       log(`Download failed: ${(e as Error).message}`);
       return "failed";
     }
@@ -387,7 +387,7 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
       log(`Installed ${tag}. Restart neko to use it.`);
       return "updated";
     } catch (e) {
-      // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+      // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
       log(`Install failed: ${(e as Error).message}`);
       try { if (existsSync(tmp)) rmSync(tmp); } catch { /* */ }
       return "failed";

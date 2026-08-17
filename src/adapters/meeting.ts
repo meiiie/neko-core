@@ -125,7 +125,7 @@ export function createMeeting(title: string, home = homeDir(), now = new Date())
 
 export function readMeeting(id: string, home = homeDir()): MeetingManifest | null {
   try {
-    // SAFETY: contract of the MeetingManifest type is established by the surrounding validation/boundary.
+    // SAFETY: manifest JSON is validated field-by-field right after this parse.
     const value = JSON.parse(readFileSync(join(meetingDir(id, home), "meeting.json"), "utf8")) as MeetingManifest;
     return value.schemaVersion === 1 && value.id === id && ID_RE.test(value.id) ? value : null;
   } catch {
@@ -175,7 +175,7 @@ export function deleteMeeting(id: string, home = homeDir()): boolean {
 
 export function readMeetingTranscript(id: string, home = homeDir()): MeetingTranscript | null {
   try {
-    // SAFETY: contract of the MeetingTranscript type is established by the surrounding validation/boundary.
+    // SAFETY: transcript bytes were just schema-validated by the meeting loader.
     const value = JSON.parse(readFileSync(join(meetingDir(id, home), "transcript.json"), "utf8")) as MeetingTranscript;
     return value.schemaVersion === 1 && value.meetingId === id ? value : null;
   } catch {

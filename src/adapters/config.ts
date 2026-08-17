@@ -492,7 +492,7 @@ export class NekoConfig {
     get caretGlyph(): "thin-block" | "bar" | "block" | "underline" {
       const env = process.env.NEKO_CARET;
       if (env === "bar" || env === "block" || env === "underline") return env;
-      // SAFETY: contract of the string | undefined type is established by the surrounding validation/boundary.
+      // SAFETY: optional wire field; undefined preserves the omitted-key behavior.
       const v = this.data.caret_glyph as string | undefined;
       if (v === "bar" || v === "block" || v === "underline") return v;
       return "thin-block";
@@ -866,7 +866,7 @@ function readOverlay(path: string): any {
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+    // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
     throw new Error(`Invalid JSON in config ${path}: ${(error as Error).message}`);
   }
   if (!isJsonObject(parsed)) {

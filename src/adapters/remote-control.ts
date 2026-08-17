@@ -75,9 +75,9 @@ const MAX_BODY = 1_000_000; // 1 MB cap on request bodies (a buggy/hostile local
 
 /** Constant-time token check (no early-exit timing leak), Bearer header only. */
 function authorized(req: { headers: any }, token: string): boolean {
-  // SAFETY: contract of the string | undefined type is established by the surrounding validation/boundary.
+  // SAFETY: optional wire field; undefined preserves the omitted-key behavior.
   const auth = req.headers.authorization as string | undefined;
-  // SAFETY: contract of the string | undefined type is established by the surrounding validation/boundary.
+  // SAFETY: optional wire field; undefined preserves the omitted-key behavior.
   const provided = auth?.startsWith("Bearer ") ? auth.slice(7) : (req.headers["x-neko-token"] as string | undefined);
   if (!provided) return false;
   const a = Buffer.from(provided);

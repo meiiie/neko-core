@@ -44,6 +44,6 @@ export function open(secret: string, sealed: Sealed): string {
 
 /** True when a value looks like a Sealed payload (so the host can run with or without E2E). */
 export function isSealed(v: any): v is Sealed {
-  // SAFETY: contract of the Sealed type is established by the surrounding validation/boundary.
+  // SAFETY: ciphertext envelope shape produced by this module's own seal function.
   return !!v && typeof v === "object" && typeof (v as Sealed).iv === "string" && typeof (v as Sealed).ct === "string";
 }

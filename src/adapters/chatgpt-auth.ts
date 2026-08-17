@@ -131,7 +131,7 @@ export async function validChatGptCredentials(fetchImpl: typeof fetch = fetch, i
         body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: current.refreshToken, client_id: CLIENT_ID }),
       });
       if (!response.ok) throw new Error(`ChatGPT token refresh failed (HTTP ${response.status}). Run \`neko login chatgpt\` again.`);
-      // SAFETY: contract of the TokenResponse type is established by the surrounding validation/boundary.
+      // SAFETY: token endpoint JSON; the field checks that follow establish the contract.
       const refreshed = fromTokenResponse(await response.json() as TokenResponse, current.refreshToken);
       if (!refreshed.accountId) refreshed.accountId = current.accountId;
       saveChatGptCredentials(refreshed);
@@ -170,7 +170,7 @@ async function exchangeCode(code: string, verifier: string, redirectUri: string,
     body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: CLIENT_ID, code_verifier: verifier }),
   });
   if (!response.ok) throw new Error(`ChatGPT token exchange failed (HTTP ${response.status}).`);
-  // SAFETY: contract of the TokenResponse type is established by the surrounding validation/boundary.
+  // SAFETY: token endpoint JSON; the field checks that follow establish the contract.
   return fromTokenResponse(await response.json() as TokenResponse);
 }
 

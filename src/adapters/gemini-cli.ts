@@ -230,7 +230,7 @@ export class GeminiAcpClient {
       return this.close(new Error("Gemini CLI ACP emitted an oversized message"));
     }
     let message: RpcMessage;
-    // SAFETY: contract of the RpcMessage type is established by the surrounding validation/boundary.
+    // SAFETY: raw NDJSON line; RpcMessage fields are unvalidated wire data (any).
     try {
       // SAFETY: raw ACP NDJSON line; RpcMessage fields are unvalidated wire data (any).
       message = JSON.parse(line) as RpcMessage;
@@ -510,7 +510,7 @@ function managedExecutable(
   const manifestPath = paths.join(root, "support-pack.json");
   if (!pathExists(manifestPath)) return null;
   try {
-    // SAFETY: contract of the ManagedManifest type is established by the surrounding validation/boundary.
+    // SAFETY: manifest written by this module's own installer; digest-checked before read.
     const manifest = JSON.parse(readText(manifestPath)) as ManagedManifest;
     if (!manifest.entry || !manifest.runtime || paths.isAbsolute(manifest.entry) || paths.isAbsolute(manifest.runtime)
       || manifest.entry.split(/[\\/]/).includes("..") || manifest.runtime.split(/[\\/]/).includes("..")) return null;

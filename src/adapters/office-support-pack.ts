@@ -113,7 +113,7 @@ export function officeSupportRoot(home = homeDir()): string {
 export function readOfficeSupportPack(home = homeDir()): OfficeSupportPackInfo | null {
   const root = officeSupportRoot(home);
   try {
-    // SAFETY: contract of the OfficeSupportManifest type is established by the surrounding validation/boundary.
+    // SAFETY: manifest JSON is validated field-by-field right after this parse.
     const manifest = JSON.parse(readFileSync(join(root, "support-pack.json"), "utf8")) as OfficeSupportManifest;
     if (!manifest.executable || isAbsolute(manifest.executable) || /[\\/]/.test(manifest.executable)) return null;
     const path = join(root, manifest.executable);
@@ -164,7 +164,7 @@ export async function installOfficeSupportPack(options: InstallOfficeSupportOpti
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`Could not read the official OfficeCLI release (HTTP ${response.status})`);
-  // SAFETY: contract of the GitHubRelease type is established by the surrounding validation/boundary.
+  // SAFETY: GitHub API release JSON; required fields are re-validated before use.
   const resolved = resolveRelease(await response.json() as GitHubRelease, target);
 
   const current = readOfficeSupportPack(home);

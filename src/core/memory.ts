@@ -74,7 +74,7 @@ export function ensureCoreMemories(home: string = homeDir()): MemoryBootstrapSta
       writeFileSync(join(dir, name), body, { encoding: "utf-8", flag: "wx" });
       created.push(name);
     } catch (error) {
-      // SAFETY: contract of the NodeJS.ErrnoException type is established by the surrounding validation/boundary.
+      // SAFETY: fs errors from this module's own typed calls carry the errno contract.
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") errors.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

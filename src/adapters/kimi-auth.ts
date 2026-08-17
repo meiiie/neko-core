@@ -164,7 +164,7 @@ async function postForm(fetchImpl: typeof fetch, url: string, fields: Record<str
     signal: AbortSignal.timeout(30_000),
   });
   let data: TokenResponse = {};
-  // SAFETY: contract of the TokenResponse type is established by the surrounding validation/boundary.
+  // SAFETY: token endpoint JSON; the field checks that follow establish the contract.
   try {
     // SAFETY: token endpoint JSON validated by the TokenResponse field checks that follow.
     data = await response.json() as TokenResponse;

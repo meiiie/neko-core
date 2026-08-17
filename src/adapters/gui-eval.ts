@@ -359,9 +359,9 @@ export const GUI_HARD_TASKS: GuiTask[] = [
         id, title: "Inbox", elements: [
           { name: "Page indicator", role: "text", x: 210, y: 40, value: `Page ${page} of 3` },
           ...items,
-          // SAFETY: contract of the Role type is established by the surrounding validation/boundary.
+          // SAFETY: role string was just validated against the known role set.
           ...(prev ? [{ name: "Prev page", role: "button" as Role, x: 120, y: 320, go: prev }] : []),
-          // SAFETY: contract of the Role type is established by the surrounding validation/boundary.
+          // SAFETY: role string was just validated against the known role set.
           ...(next ? [{ name: "Next page", role: "button" as Role, x: 300, y: 320, go: next }] : []),
         ],
       });

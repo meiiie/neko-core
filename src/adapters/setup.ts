@@ -129,7 +129,7 @@ async function setupTavily(keyArg: string, log: (m: string) => void): Promise<bo
     });
     if (!res.ok) { log(`  [fail] Tavily rejected the key (HTTP ${res.status}) — nothing written. Check it at https://app.tavily.com.`); return false; }
   } catch (e) {
-    // SAFETY: contract of the Error type is established by the surrounding validation/boundary.
+    // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
     log(`  [fail] could not reach api.tavily.com (${(e as Error).message}) — nothing written; re-run when online.`);
     return false;
   }

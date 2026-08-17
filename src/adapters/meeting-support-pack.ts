@@ -157,7 +157,7 @@ export function meetingSupportRoot(home = homeDir()): string {
 export function readMeetingSupportPack(home = homeDir()): MeetingSupportPackInfo | null {
   const root = meetingSupportRoot(home);
   try {
-    // SAFETY: contract of the MeetingSupportManifest type is established by the surrounding validation/boundary.
+    // SAFETY: manifest JSON is validated field-by-field right after this parse.
     const manifest = JSON.parse(readFileSync(join(root, "support-pack.json"), "utf8")) as MeetingSupportManifest;
     if (manifest.schemaVersion !== 1 || !manifest.model || !isSafeRelative(manifest.model.file)) return null;
     const modelPath = join(root, manifest.model.file);
@@ -256,7 +256,7 @@ export async function installMeetingSupportPack(options: InstallMeetingSupportOp
         signal: AbortSignal.timeout(30_000),
       });
       if (!response.ok) throw new Error(`Could not read the official parakeet.cpp release (HTTP ${response.status})`);
-      // SAFETY: contract of the GitHubRelease type is established by the surrounding validation/boundary.
+      // SAFETY: GitHub API release JSON; required fields are re-validated before use.
       const release = resolveRelease(await response.json() as GitHubRelease, target);
       const archive = join(staging, release.assetName);
       notify(`Downloading ${formatMiB(release.size)} local transcription engine...`);
