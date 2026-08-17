@@ -6,6 +6,28 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.7] — 2026-08-17
+
+### Changed
+
+- **The codebase now ships with an anti-slop lint gate in CI.** An Oxlint plugin
+  (dmmulroy/anti-slop, MIT, vendored under `tools/oxlint/anti-slop/`) runs 15 strict typing rules
+  between typecheck and tests on every PR; the repository passes with zero findings. The binary and
+  all user-facing behavior are unchanged (the full 1.4k-test suite and the release battery — build,
+  UI/input probes, ConPTY ghost e2e, scroll bench — pass unchanged).
+- Provider/session/RPC wire data is typed as JSON (`JsonValue`) at its boundaries instead of
+  `Record<string, unknown>`, with representation checks centralized in `src/shared/wire.ts`
+  predicates. This makes the parsing contract of session files, MCP arguments, and the Codex/Gemini
+  RPC surfaces explicit in the types.
+- Every remaining type assertion documents its invariant in a `// SAFETY:` comment; conditional
+  object spreads omit fields with an explicit `undefined` instead of an empty object.
+
+### Fixed
+
+- Caught before release: a development-time tooling pass briefly imported the TypeScript wire module
+  into the vanilla-JS Cloudflare relay worker and browser-extension service worker. Both were
+  reverted and their trees now stay outside the typed lint scope; shipped bytes were never affected.
+
 ## [0.24.6] — 2026-08-15
 
 ### Fixed

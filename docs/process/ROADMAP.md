@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-15) — v0.24.6 release
+## Current status (2026-08-17) — v0.24.7 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,7 +38,12 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.6 (2026-08-15)** - Long turns keep the terminal responsive
+- **Branch:** `main`. **Current release: v0.24.7 (2026-08-17)** - An anti-slop Oxlint gate now runs in
+  CI (15 strict typing rules, zero findings, vendored MIT plugin under `tools/oxlint/anti-slop/`), and
+  provider/session/RPC wire data carries an explicit `JsonValue` domain from the new
+  `src/shared/wire.ts` instead of `Record<string, unknown>`. No user-facing behavior changed: the
+  full suite, build battery, ConPTY ghost e2e, and scroll bench pass unchanged.
+  Previous (v0.24.6, 2026-08-15): Long turns keep the terminal responsive
   while publishing durable checkpoints, running hooks/helpers, or walking large filesystem surfaces;
   Esc/Ctrl+C remains actionable, and tool side effects still cannot cross an unpersisted call boundary.
   Previous (v0.24.5, 2026-08-15): ACP v1 sessions became durable across
