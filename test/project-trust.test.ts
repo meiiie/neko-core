@@ -119,7 +119,7 @@ test("project controls are quarantined until their exact snapshot is trusted", (
   expect(before.projectTrust.state).toBe("untrusted");
   expect(before.provider).toBe("openai_compat");
   expect(before.model).toBe("");
-  expect(before.mode).toBe("default");
+  expect(before.mode).toBe("auto"); // fresh configs are auto-by-default since 0.24.10
   expect(before.sandbox).toBe(true);
   expect(before.mcpServers.project).toBeUndefined();
   expect(before.apiKey).toBe("");

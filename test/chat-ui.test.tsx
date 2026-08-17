@@ -585,8 +585,11 @@ test("auto mode: a safe tool call + markdown answer render end-to-end", async ()
 test("default mode: gated bash shows the approval box, 'y' approves", async () => {
   // Pin the sandbox OFF so bash PROMPTS regardless of this machine's primitive: with a live
   // sandbox bash auto-approves (the feature), which is exercised by the permissions unit tests.
+  // Pin default MODE explicitly: a fresh config is auto-by-default since 0.24.10.
   const oldSandbox = process.env.NEKO_SANDBOX;
+  const oldMode = process.env.NEKO_MODE;
   process.env.NEKO_SANDBOX = "0";
+  process.env.NEKO_MODE = "default";
   try {
     const provider = new MockProvider([
       { content: null, tool_calls: [{ id: "c1", name: "bash", arguments: { command: "echo hi" } }] },
@@ -607,6 +610,8 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
   } finally {
     if (oldSandbox === undefined) delete process.env.NEKO_SANDBOX;
     else process.env.NEKO_SANDBOX = oldSandbox;
+    if (oldMode === undefined) delete process.env.NEKO_MODE;
+    else process.env.NEKO_MODE = oldMode;
   }
 }, 40000);
 

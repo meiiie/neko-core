@@ -131,3 +131,4 @@ test("looking up an index does not move the caret; clicking does, and says where
   expect(indexAt!(0, -5, 11)).toBe(6);
   c.unmount();
 });
+

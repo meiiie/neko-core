@@ -111,3 +111,53 @@ test("Markdown renders blockquotes and link text (url carried as an OSC 8 hyperl
   const visible = out.replace(/\x1b\]8;;[^\x07]*\x07/g, "");
   expect(visible).not.toContain("http://x.io"); // ...but never rendered as visible text
 });
+
+test("a coalesced text+Enter chunk (loaded terminal) submits instead of being swallowed", async () => {
+  let val = "";
+  // SAFETY: test capture box seeded null; the submit callback assigns the asserted string union.
+  const submitted = { value: null as string | null };
+  function Wrap() {
+    const [v, setV] = useState("");
+    val = v;
+    return <TextInput value={v} onChange={setV} onSubmit={(out: string) => { submitted.value = out; }} {...pasteProps()} />;
+  }
+  const { stdin, unmount } = render(<Wrap />);
+  stdin.write("summarize this repo in one lin");
+  await tick();
+  stdin.write("e\r"); // the final char and Enter delivered in ONE stdin chunk
+  await tick();
+  expect(submitted.value).toBe("summarize this repo in one line");
+  void val; // the controlled value clears in the real ChatApp wrapper, not here
+  unmount();
+});
+
+test("a coalesced '/exit\r' chunk submits the command text", async () => {
+  // SAFETY: test capture box seeded null; the submit callback assigns the asserted string union.
+  const submitted = { value: null as string | null };
+  function Wrap() {
+    const [v, setV] = useState("");
+    return <TextInput value={v} onChange={setV} onSubmit={(out: string) => { submitted.value = out; }} {...pasteProps()} />;
+  }
+  const { stdin, unmount } = render(<Wrap />);
+  stdin.write("/exit\r");
+  await tick();
+  expect(submitted.value).toBe("/exit");
+  unmount();
+});
+
+test("a true multi-line paste (with \n) still inserts without submitting", async () => {
+  let val = "";
+  // SAFETY: test capture box seeded null; the submit callback assigns the asserted string union.
+  const submitted = { value: null as string | null };
+  function Wrap() {
+    const [v, setV] = useState("");
+    val = v;
+    return <TextInput value={v} onChange={setV} onSubmit={(out: string) => { submitted.value = out; }} {...pasteProps()} />;
+  }
+  const { stdin, unmount } = render(<Wrap />);
+  stdin.write("line one\nline two\r");
+  await tick();
+  expect(submitted.value).toBeNull(); // paste does not submit
+  expect(val).toMatch(/Pasted text #1/); // collapsed to the paste placeholder
+  unmount();
+});

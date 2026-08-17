@@ -328,7 +328,9 @@ test("todo flow shows the current plan once while the next step is running", asy
 
 test("approval decision keys never leak into the prompt", async () => {
   const oldSandbox = process.env.NEKO_SANDBOX;
+  const oldSimMode = process.env.NEKO_MODE;
   process.env.NEKO_SANDBOX = "0"; // bash must PROMPT here; live-sandbox auto-approve is unit-tested
+  process.env.NEKO_MODE = "default"; // fresh configs are auto-by-default since 0.24.10; this test exercises the prompt path
   try {
     const vt = new VirtualTerminal(80, 24);
     const out = new FakeTtyOut(80, 24, vt);
@@ -361,6 +363,8 @@ test("approval decision keys never leak into the prompt", async () => {
   } finally {
     if (oldSandbox === undefined) delete process.env.NEKO_SANDBOX;
     else process.env.NEKO_SANDBOX = oldSandbox;
+    if (oldSimMode === undefined) delete process.env.NEKO_MODE;
+    else process.env.NEKO_MODE = oldSimMode;
   }
 }, 30000);
 

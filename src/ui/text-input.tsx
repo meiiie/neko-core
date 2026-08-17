@@ -282,16 +282,34 @@ export function TextInput(props: {
   };
 
   useInput((input, key) => {
+    // Coalesced keystroke burst: a terminal under load (or a bridge/driver) can deliver the last
+    // typed char and the Enter key in ONE stdin chunk ("e\r"). That is typing plus a submit, not a
+    // paste: split the trailing lone \r off, insert the text part, and treat it as the return key.
+    // A chunk containing \n (or an interior \r) is still a true multi-line paste.
+    let data = input;
+    let coalescedReturn = false;
+    if (input.length > 1 && /\r$/.test(input) && !/[\r\n]/.test(input.slice(0, -1))) {
+      data = input.slice(0, -1);
+      coalescedReturn = true;
+    }
+    const isReturn = key.return || coalescedReturn;
     // Ink delivers a paste as one call with the whole string; if it carries a line break, treat it
-    // as a paste (insert, don't submit) rather than an Enter.
-    const isPaste = input.length > 1 && /[\r\n]/.test(input);
+    // as a paste (insert, don't submit) rather than as an Enter.
+    const isPaste = data.length > 1 && /[\r\n]/.test(data);
     // Newline WITHOUT submit (Claude Code parity), three routes because terminals differ:
     // Ink parses kitty-CSI-u Shift+Enter to return+shift and \x1b\r bindings to return+meta;
     // xterm modifyOtherKeys arrives as a raw sequence (MODIFIED_ENTER); and "\" then plain
     // Enter works in EVERY terminal with zero setup (the trailing backslash becomes the break).
     if (MODIFIED_ENTER.test(input)) return insertAtCaret("\n");
-    if (key.return && (key.meta || key.shift) && !isPaste) return insertAtCaret("\n");
-        if (key.return && !isPaste) {
+    if (isReturn && (key.meta || key.shift) && !isPaste) return insertAtCaret("\n");
+        if (isReturn && !isPaste) {
+          if (coalescedReturn && data) { // the coalesced text part is typed input; insert before submit
+            const chars = [...ref.current];
+            chars.splice(cur.current, 0, ...data);
+            cur.current += data.length;
+            ref.current = chars.join("");
+            onChange(ref.current);
+          }
           if (cur.current > 0 && [...ref.current][cur.current - 1] === "\\") {
             const chars = [...ref.current];
             chars.splice(cur.current - 1, 1, "\n"); // 1-for-1 swap: the caret index is unchanged
@@ -351,11 +369,11 @@ export function TextInput(props: {
         }
         return;
       }
-      if (input && !input.startsWith("\x1b") && !isEscapeResidue(input) && !key.ctrl && !key.meta && !key.tab && !key.escape &&
-          !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow) {
+      if (data && !data.startsWith("\x1b") && !isEscapeResidue(data) && !key.ctrl && !key.meta && !key.tab && !key.escape &&
+          !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow && !isReturn) {
         // Never insert a stray escape sequence (mouse report, unknown CSI, etc.) as literal text - Ink may
         // strip the ESC and hand us just the CSI body ("[<64;10;5M"), incl. multi-report bursts.
-        let text = isPaste ? input.replace(/\r\n?/g, "\n") : input;
+        let text = isPaste ? data.replace(/\r\n?/g, "\n") : data;
         // Paste collapse: a long or multi-line paste becomes a compact placeholder so the input box
         // never turns into a one-line windowed blob; the full text is expanded back on submit.
           if (isPaste && shouldCollapsePaste(text)) {

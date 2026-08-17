@@ -77,7 +77,10 @@ export const DEFAULTS: any = {
   retry_max_delay_seconds: 30,
   offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
   codex_keepalive: 15, // GPT-5.6 App Server idle minutes; 0 keeps it alive until logout/exit
-  approval: "prompt", // prompt | auto (--yolo flips gated tools to auto)
+  // NOTE: `approval` is intentionally NOT in DEFAULTS. It is the legacy alias for `mode`, and a
+  // baked default here would make a FRESH install indistinguishable from a user who explicitly
+  // chose prompt-first. The mode getter resolves: explicit mode > approval=auto > approval=prompt
+  // > AUTO (the 2026 product default - bounded autonomy, consequence-gated).
   // Bash OS sandbox ON by default (owner decision, 2026-07-22): machines with a primitive
   // (bwrap / Seatbelt / srt) confine bash out of the box; "none" machines fall back to the
   // seatbelt + gate unchanged. Opt out: "sandbox": false or NEKO_SANDBOX=0.
@@ -717,8 +720,9 @@ export class NekoConfig {
   get mode(): PermissionMode {
     const raw = String(this.data.mode ?? "").trim().toLowerCase();
     if (isMode(raw)) return raw;
-    if (this.approval === "auto") return "auto";
-    return this.data.mode === undefined && this.data.approval === undefined ? "auto" : "default";
+    if (this.data.approval === "auto") return "auto";
+    if (this.data.approval === "prompt") return "default";
+    return "auto";
   }
 
   /** Declared MCP servers: name -> stdio {command,args?,env?} OR remote {url, type?:http|sse, headers?}. */

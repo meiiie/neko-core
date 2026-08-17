@@ -3,6 +3,19 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-17 - v0.24.10: auto-default made true + coalesced-Enter fix
+
+Two defects caught by live multi-purpose probing (Excel create/analyze + web search against the
+real provider): (1) v0.24.9's auto-default never fired on fresh installs because DEFAULTS baked
+the legacy approval:"prompt", making "fresh" indistinguishable from "user chose prompts" - the key
+is removed from DEFAULTS and the mode getter resolves explicit mode > approval=auto >
+approval=prompt > auto. (2) The nondeterministic "Enter does nothing" harness bug is fixed in
+text-input: a stdin chunk ending in a lone  is typed-text-plus-Enter (insert then submit), not
+a paste; multi-line pastes keep inserting. Regression tests drive ink-testing-library with real
+coalesced chunks ("e", "/exit", "line one
+line two"). After the fix, the 3-task probe
+completed 3/3 with a clean exit for the first time (1 MB of transcript, zero approval prompts).
+
 ## 2026-08-17 - auto-by-default permission mode (v0.24.9)
 
 Owner decision following the 2026 industry shift (Claude Code now ships auto-default): a fresh

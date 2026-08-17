@@ -6,6 +6,22 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.10] — 2026-08-17
+
+### Fixed
+
+- **Auto-default now actually applies to fresh installs.** v0.24.9 announced it, but a legacy
+  `approval: "prompt"` baked into the config defaults made every install look like an explicit
+  prompt-first choice; the key is no longer baked, so a fresh install starts in auto (explicit
+  `mode`/`approval` settings keep being honored exactly as before).
+- **Enter no longer randomly does nothing.** When a terminal under load (or any input bridge)
+  delivers the last typed character and the Enter key in one chunk, the input parser classified
+  the burst as a paste and swallowed the submit - turns silently never started and `/exit` hung.
+  A chunk ending in a lone `` is now treated as text plus Enter: the text is inserted and the
+  submit fires. True multi-line pastes (containing `
+`) still insert without submitting.
+
+
 ## [0.24.9] — 2026-08-17
 
 ### Changed
