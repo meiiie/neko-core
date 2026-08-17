@@ -3,6 +3,21 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-17 - SRT Bun bridge for npm-installed Bun (v0.24.8)
+
+Live UX testing of the compiled binary (web-term + ux-probe ConPTY drivers, committed as manual
+tools) surfaced the real cause behind "sandbox blocks network / bun is not installed" reports:
+resolveSrtBunBridge only accepted the running bun.exe (source runs) or a real bun.exe on a
+Windows-style PATH. A compiled Neko has execPath=neko.exe, and npm-installed Bun puts only
+bun.cmd shims on PATH - so the bridge resolved to NULL and the sandbox genuinely had no bun;
+the model then hit the by-design egress block trying to fetch one. The resolver now also probes
+the npm-global node_modules layout and ~/.bun/bin, understands Git-Bash POSIX PATH values, and
+keeps every existing validation (workspace candidates never promoted, exact-file grant only).
+The model-facing runtime block gained a toolchain line plus the network opt-in names, and doctor
+reports the bridge source. Policy stance unchanged: sandbox egress stays default-deny with an
+explicit sandbox_network + sandbox_domains allowlist - the fix is discoverability and honesty,
+not silent allow-all.
+
 ## 2026-08-17 - anti-slop Oxlint gate at zero
 
 Vendored the anti-slop Oxlint plugin (dmmulroy/anti-slop, MIT, `tools/oxlint/anti-slop/`

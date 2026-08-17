@@ -5,7 +5,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
-import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtHealthAsync, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
+import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtHealthAsync, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, windowsSearchDirs, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
 
 test("security executables are resolved from PATH without trusting the workspace", () => {
   const root = mkdtempSync(join(tmpdir(), "neko-path-primitive-"));
@@ -194,14 +194,77 @@ test.skipIf(process.platform !== "win32")("the SRT Bun bridge rejects workspace 
     const external = join(trusted, "bun.exe");
     writeFileSync(spoof, "spoof");
     writeFileSync(external, "trusted");
-    expect(resolveSrtBunBridge(workspace, spoof, "", "win32")).toBeNull();
-    const bridge = resolveSrtBunBridge(workspace, external, "", "win32");
+    // Empty PATH/APPDATA/profile keep the resolution hermetic: only the explicit candidates run.
+    expect(resolveSrtBunBridge(workspace, spoof, "", "win32", "", "")).toBeNull();
+    const bridge = resolveSrtBunBridge(workspace, external, "", "win32", "", "");
     expect(bridge?.path).toBe(external);
     expect(bridge?.source).toBe("runtime");
     expect(Object.isFrozen(bridge)).toBe(true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test.skipIf(process.platform !== "win32")("the SRT Bun bridge resolves npm-shim installs for compiled Neko (bun.cmd on PATH, real exe under node_modules)", () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-srt-bun-npm-"));
+  const workspace = join(root, "repo");
+  const npmBin = join(root, "npm");
+  const nested = join(npmBin, "node_modules", "bun", "bin");
+  try {
+    mkdirSync(workspace, { recursive: true });
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(npmBin, "bun.cmd"), "@echo off\r\n");
+    writeFileSync(join(nested, "bun.exe"), "real");
+    // Git-Bash style PATH (POSIX drive mounts, colon-separated) must resolve identically.
+    const posixPath = npmBin.replace(/^([A-Za-z]):[\\/]/, (_m, drive: string) => `/${drive.toLowerCase()}/`).replace(/\\/g, "/");
+    const compiled = "C:\\neko\\dist\\neko.exe";
+    const bridge = resolveSrtBunBridge(workspace, compiled, posixPath, "win32", "", "");
+    expect(bridge?.path).toBe(nested + "\\bun.exe");
+    expect(bridge?.source).toBe("npm-global");
+    // Windows-style PATH finds the same bridge.
+    const winBridge = resolveSrtBunBridge(workspace, compiled, npmBin, "win32", "", "");
+    expect(winBridge?.source).toBe("npm-global");
+    // APPDATA convention works even when npm is not on PATH at all.
+    const appdataBridge = resolveSrtBunBridge(workspace, compiled, "", "win32", root, "");
+    expect(appdataBridge?.path).toBe(nested + "\\bun.exe");
+    expect(appdataBridge?.source).toBe("npm-global");
+    // A bun.exe inside the workspace is never promoted, even via the npm layout.
+    const wsNpm = join(workspace, "npm");
+    const wsNested = join(wsNpm, "node_modules", "bun", "bin");
+    mkdirSync(wsNested, { recursive: true });
+    writeFileSync(join(wsNpm, "bun.cmd"), "@echo off\r\n");
+    writeFileSync(join(wsNested, "bun.exe"), "spoof");
+    expect(resolveSrtBunBridge(workspace, compiled, `${npmBin}${delimiter}${wsNpm}`, "win32", "", "")?.path).toBe(nested + "\\bun.exe");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(process.platform !== "win32")("the SRT Bun bridge resolves the official installer layout (~/.bun/bin)", () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-srt-bun-official-"));
+  const workspace = join(root, "repo");
+  const bunBin = join(root, "home", ".bun", "bin");
+  try {
+    mkdirSync(workspace, { recursive: true });
+    mkdirSync(bunBin, { recursive: true });
+    writeFileSync(join(bunBin, "bun.exe"), "official");
+    const bridge = resolveSrtBunBridge(workspace, "C:\\neko\\dist\\neko.exe", "", "win32", "", join(root, "home"));
+    expect(bridge?.path).toBe(join(bunBin, "bun.exe"));
+    expect(bridge?.source).toBe("official-installer");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("windowsSearchDirs understands Git-Bash POSIX PATH and Windows PATH", () => {
+  const posix = "/c/Users/Admin/AppData/Roaming/npm:/usr/bin:/mingw64/bin";
+  expect(windowsSearchDirs(posix)).toEqual([
+    "C:\\Users\\Admin\\AppData\\Roaming\\npm",
+    "\\usr\\bin",
+    "\\mingw64\\bin",
+  ]);
+  expect(windowsSearchDirs("C:\\tools;D:\\bin")).toEqual(["C:\\tools", "D:\\bin"]);
+  expect(windowsSearchDirs("")).toEqual([]);
 });
 
 test("a live Windows SRT exposes its exact Bun bridge and cleans all launch material", () => {

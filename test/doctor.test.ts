@@ -168,7 +168,7 @@ test("doctor distinguishes a source-run SRT Bun bridge from compiled Neko withou
   expect(srtToolchainCheck(true, "srt", Object.freeze({ path: "C:\\tools\\bun.exe", source: "runtime" })))
     .toMatchObject({ status: "ok", detail: expect.stringContaining("source-run Bun") });
   expect(srtToolchainCheck(true, "srt", null))
-    .toMatchObject({ status: "warn", detail: expect.stringContaining("compiled Neko") });
+    .toMatchObject({ status: "warn", detail: expect.stringContaining("no bun.exe found for the SRT bridge") });
   expect(srtToolchainCheck(false, "srt", null)).toBeNull();
   expect(srtToolchainCheck(true, "bwrap", null)).toBeNull();
 });

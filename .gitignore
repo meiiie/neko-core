@@ -72,3 +72,5 @@ scripts/_caret_probe.tsx
 # perf/trace artifacts
 *.ndjson
 .zcode/
+.bun-build
+*.bun-build

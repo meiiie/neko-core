@@ -65,18 +65,20 @@ const server = Bun.serve({
       const term = new (Bun as any).Terminal({
         cols: 120,
         rows: 34,
-        data(_t: unknown, chunk: Uint8Array) {
+        data(_t: any, chunk: Uint8Array) {
           const s = decoder.decode(chunk);
           try { vt.write(s); } catch { /* keep the bridge alive */ }
           ws.send(chunk);
         },
         close() { try { ws.close(); } catch { /* already gone */ } },
       });
+      // SAFETY: Bun.Terminal spawn options are typed loosely; this manual tool constructs them.
       const proc = Bun.spawn({ cmd: [resolve("dist/neko.exe"), "--yolo"], cwd, terminal: term, env: process.env } as any);
       state.set(ws, { proc, term, vt });
       proc.exited.then(() => { try { ws.close(); } catch { /* fine */ } });
     },
     message(ws, message) {
+      // SAFETY: the page sends UTF-8 terminal keystrokes as binary WebSocket frames.
       state.get(ws)?.term?.write(decoder.decode(message as ArrayBuffer));
     },
     close(ws) {

@@ -32,7 +32,7 @@ const vt = new VirtualTerminal(COLS, ROWS);
 // SAFETY: test-built PTY bridge; only this probe constructs it.
 const term = new (Bun as any).Terminal({
   cols: COLS, rows: ROWS,
-  data(_t: unknown, chunk: Uint8Array) {
+  data(_t: any, chunk: Uint8Array) {
     const s = decoder.decode(chunk);
     raw += s;
     timeline.push({ t: Date.now() - t0, bytes: chunk.byteLength });
@@ -42,6 +42,7 @@ const term = new (Bun as any).Terminal({
 const workDir = mode === "A"
   ? resolve(".")
   : mkdtempSync(join(tmpdir(), "neko-ux-work-"));
+// SAFETY: Bun.Terminal spawn options are typed loosely; this manual tool constructs them.
 const proc = Bun.spawn({ cmd: [exe, "--yolo"], cwd: workDir, terminal: term, env: process.env } as any);
 mark(`spawn cwd=${workDir}`);
 

@@ -4,7 +4,7 @@ import { platform } from "node:os";
 import { resolve } from "node:path";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { subagentToolAllowlist } from "../core/tools.ts";
-import { detectSandbox, findWindowsBash, srtHealthSnapshot, transientSrtHealthFailure } from "../core/sandbox.ts";
+import { detectSandbox, findWindowsBash, resolveSrtBunBridge, srtHealthSnapshot, transientSrtHealthFailure } from "../core/sandbox.ts";
 import type { NekoConfig } from "./config.ts";
 import { withBrowserBridge } from "./browser-bridge.ts";
 import { withOfficeTools } from "./office-tools.ts";
@@ -70,12 +70,18 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     ? (findWindowsBash() ? "GIT BASH (POSIX)" : "cmd.exe")
     : (liveSandbox ? "bash (POSIX)" : "/bin/sh (POSIX)");
   const network = !registry.sandboxAllowNetwork
-    ? "blocked"
+    ? "blocked (default-deny; the user can enable egress with sandbox_network: true plus a sandbox_domains allowlist)"
     : detected === "srt"
       ? (registry.sandboxDomains.length ? "allowlisted by sandbox_domains" : "blocked (SRT needs explicit sandbox_domains)")
       : detected === "bwrap" || detected === "sandbox-exec"
         ? "allowed (sandbox_domains are not enforced by this primitive)"
         : "host policy unknown";
+  const bunBridge = detected === "srt" ? resolveSrtBunBridge(registry.root) : null;
+  const toolchain = detected === "srt"
+    ? bunBridge
+      ? `bun available in sandbox (bridged from ${bunBridge.source} with an exact-file read grant); node/python resolve from host`
+      : "bun NOT available in sandbox (no bun.exe bridge on this machine) - use node or python for scripts/tests and say so; do not retry bun or try installing it (network in the sandbox is policy-bound)"
+    : "host toolchain";
   const sandbox = exactReadOnlyValidator && !liveSandbox
     ? "required read-only isolation unavailable (exact-turn bash FAILS CLOSED; no host fallback)"
     : exactReadOnlyValidator
@@ -106,6 +112,9 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     bashCallable
       ? `Neko bash dynamic tool: callable; shell=${shell}; sandbox=${sandbox}. Docker/podman host-daemon access is refused or contained unless allow_dangerous_bash explicitly grants that capability.`
       : "Neko bash dynamic tool: unavailable in this request.",
+    bashCallable
+      ? `Sandbox toolchain: ${toolchain}. Treat this as authoritative - do not probe for bun/network inside the sandbox; if a required capability is absent, state the boundary and continue with what is available.`
+      : "",
     failClosedBash
       ? "Do not create a shell script whose only purpose is to wait for unavailable bash. Prefer an independent safe native tool that directly covers the task; otherwise state the boundary or request explicit computer consent before changing files."
       : "",

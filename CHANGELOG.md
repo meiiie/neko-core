@@ -6,6 +6,31 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.8] — 2026-08-17
+
+### Fixed
+
+- **Compiled Neko now finds Bun installed through npm on Windows.** When Bun is installed via
+  `npm i -g bun` (shims `bun.cmd`/`bun.ps1` on PATH, real `bun.exe` nested under
+  `node_modules/bun/bin`), the compiled binary previously could not bridge Bun into the Windows SRT
+  sandbox — inside the sandbox `bun` was simply absent, so agents reported "bun is not installed"
+  and then hit the (by-design) sandbox egress block when trying to fetch it. The bridge now resolves
+  four sources in order — the running Bun, a real `bun.exe` on trusted PATH, the npm-global
+  `node_modules` layout (from PATH shims or `%APPDATA%\npm`), and the official installer's
+  `~/.bun/bin` — all through the same exact-file read grant, with workspace-local candidates still
+  rejected. Git-Bash-style POSIX `PATH` values (`/c/...:...`) are now understood too, so a compiled
+  Neko launched from either shell family resolves tools identically.
+
+### Changed
+
+- **The model is told the sandbox toolchain and network policy up front.** The `NEKO DYNAMIC-TOOL
+  RUNTIME` block now states whether `bun` is bridged into the sandbox (and from which source) or
+  explicitly absent — with an instruction not to probe for it or try installing it — and the network
+  line names the exact user config (`sandbox_network: true` plus a `sandbox_domains` allowlist) that
+  enables egress. Agents stop burning turns discovering these boundaries by trial and error.
+- `neko doctor` reports which bridge source was found (runtime / trusted PATH / npm-global /
+  official installer), and its failure text lists every location searched with the install remedy.
+
 ## [0.24.7] — 2026-08-17
 
 ### Changed

@@ -153,18 +153,34 @@ const WINDOWS_ICACLS = process.platform === "win32" ? resolveWindowsSystemExecut
 
 export interface SrtBunBridge {
   readonly path: string;
-  readonly source: "runtime" | "path";
+  readonly source: "runtime" | "path" | "npm-global" | "official-installer";
+}
+
+/** Split a PATH value into Windows-style directories. Git Bash exports a POSIX-style list
+ * ("/c/...:/usr/bin:...") whose entries a `;` split cannot see, so drive mounts are normalized
+ * first; a compiled Neko launched from either parent shell then resolves tools identically. */
+export function windowsSearchDirs(pathValue: string): string[] {
+  if (!pathValue) return [];
+  if (!pathValue.includes(";") && /(^|:)\/[A-Za-z]\//.test(pathValue)) {
+    return pathValue.split(":").filter(Boolean).map((entry) =>
+      entry.replace(/^\/([A-Za-z])\//, (_match, drive: string) => `${drive.toUpperCase()}:/`).replace(/\//g, "\\"));
+  }
+  return pathValue.split(";");
 }
 
 /** Select one exact Bun executable for Windows SRT. Per-user tool installs are invisible to the
  * sandbox account unless SRT grants them explicitly, but granting a package/profile directory is
- * unnecessarily broad. The running Bun is the strongest source-run identity; a real bun.exe on a
- * trusted PATH is the compiled-Neko fallback. Workspace candidates are never promoted. */
+ * unnecessarily broad. Sources, strongest first: the running Bun (source-run identity); a real
+ * bun.exe on a trusted PATH; the npm-global layout where `bun.cmd` shims sit on PATH but the real
+ * exe lives in node_modules/bun/bin (the common Windows install); the official installer's
+ * ~/.bun/bin. Workspace candidates are never promoted. */
 export function resolveSrtBunBridge(
   workspace = process.cwd(),
   runtimeExecutable = process.execPath,
   pathValue = process.env.PATH ?? "",
   platform = process.platform,
+  appdataValue = process.env.APPDATA ?? "",
+  userProfileValue = process.env.USERPROFILE ?? process.env.HOME ?? "",
 ): SrtBunBridge | null {
   if (platform !== "win32") return null;
   let workspaceRoot: string;
@@ -175,8 +191,17 @@ export function resolveSrtBunBridge(
   if (basename(runtimeExecutable).toLowerCase() === "bun.exe") {
     candidates.push({ path: runtimeExecutable, source: "runtime" });
   }
-  const onPath = executableOnPath("bun.exe", pathValue, workspace, platform);
+  const dirs = windowsSearchDirs(pathValue);
+  const onPath = executableOnPath("bun.exe", dirs.join(delimiter), workspace, platform);
   if (onPath) candidates.push({ path: onPath, source: "path" });
+  // npm shims: `bun.cmd`/`bun.ps1` on PATH without bun.exe -> npm nests the real binary one level down.
+  for (const dir of dirs) {
+    if (existsSync(join(dir, "bun.cmd")) || existsSync(join(dir, "bun.ps1"))) {
+      candidates.push({ path: join(dir, "node_modules", "bun", "bin", "bun.exe"), source: "npm-global" });
+    }
+  }
+  if (appdataValue) candidates.push({ path: join(appdataValue, "npm", "node_modules", "bun", "bin", "bun.exe"), source: "npm-global" });
+  if (userProfileValue) candidates.push({ path: join(userProfileValue, ".bun", "bin", "bun.exe"), source: "official-installer" });
 
   for (const candidate of candidates) {
     try {

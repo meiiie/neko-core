@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-17) — v0.24.7 release
+## Current status (2026-08-17) — v0.24.8 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,7 +38,14 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.7 (2026-08-17)** - An anti-slop Oxlint gate now runs in
+- **Branch:** `main`. **Current release: v0.24.8 (2026-08-17)** - Compiled Neko on Windows now
+  bridges npm-installed Bun into the SRT sandbox (four bridge sources: runtime, trusted PATH,
+  npm-global node_modules layout, official ~/.bun/bin; Git-Bash POSIX PATH understood), and the
+  model-facing runtime block states the sandbox toolchain and the network opt-in
+  (`sandbox_network` + `sandbox_domains`) up front instead of leaving the agent to discover them
+  by trial and error. Verified end-to-end from the rebuilt binary: `bun --version` inside the
+  sandbox returns 1.4.0 exit 0 on the npm-shim machine that previously failed.
+  Previous (v0.24.7, 2026-08-17): An anti-slop Oxlint gate now runs in
   CI (15 strict typing rules, zero findings, vendored MIT plugin under `tools/oxlint/anti-slop/`), and
   provider/session/RPC wire data carries an explicit `JsonValue` domain from the new
   `src/shared/wire.ts` instead of `Record<string, unknown>`. No user-facing behavior changed: the

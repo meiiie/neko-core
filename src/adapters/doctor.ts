@@ -39,13 +39,27 @@ export function srtToolchainCheck(
     return {
       status: "ok",
       name: "sandbox_toolchain",
-      detail: "external Bun on trusted PATH bridged into SRT with a transient exact-file read grant; no directory or user-profile grant",
+      detail: "external bun.exe on trusted PATH bridged into SRT with a transient exact-file read grant; no directory or user-profile grant",
+    };
+  }
+  if (bridge?.source === "npm-global") {
+    return {
+      status: "ok",
+      name: "sandbox_toolchain",
+      detail: "npm-installed Bun (bun.cmd shims on PATH, real bun.exe under node_modules) bridged into SRT with a transient exact-file read grant; no directory or user-profile grant",
+    };
+  }
+  if (bridge?.source === "official-installer") {
+    return {
+      status: "ok",
+      name: "sandbox_toolchain",
+      detail: "official-installer Bun (~/.bun/bin) bridged into SRT with a transient exact-file read grant; no directory or user-profile grant",
     };
   }
   return {
     status: "warn",
     name: "sandbox_toolchain",
-    detail: "compiled Neko remains self-contained, but SRT has no canonical external bun.exe bridge; sandboxed `bun` commands need a real bun.exe outside the workspace on PATH",
+    detail: "no bun.exe found for the SRT bridge (looked at: running runtime, trusted PATH, npm-global node_modules layout, ~/.bun/bin); sandboxed `bun` commands will be unavailable - install Bun (official installer or npm i -g bun) and restart Neko",
   };
 }
 
