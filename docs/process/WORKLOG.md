@@ -3,6 +3,15 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-17 - auto-by-default permission mode (v0.24.9)
+
+Owner decision following the 2026 industry shift (Claude Code now ships auto-default): a fresh
+config resolves permission mode to AUTO. The consequential-surfaces set is unchanged and is the
+whole safety story - host computer control, the policy file itself (consent-gated since this
+morning), the catastrophic-command seatbelt, credential-path refusals, and the outside-workspace
+write wall (research ledger + policy file excepted). "mode": "default" restores the old posture;
+Shift+Tab still cycles; --yolo remains an alias for the now-default state.
+
 ## 2026-08-17 - consent-gated policy writes + quiet consoles
 
 Two owner-directed changes after reviewing 2025-26 permission-model practice (Claude Code lets

@@ -6,6 +6,28 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.9] — 2026-08-17
+
+### Changed
+
+- **Auto is now the default permission mode.** Matching the 2026 industry shift (Claude Code ships
+  auto-default), a fresh install starts in bounded autonomy instead of prompting for every
+  write/command: file edits, searches, and shell commands inside the sandboxed workspace run without
+  approval. Only genuinely consequential surfaces still ask: host computer control, edits to Neko's
+  own policy file (newly consent-gated - see below), catastrophic shell commands (seatbelt),
+  credential paths, and anything outside the workspace. Set \"mode\": \"default\" in
+  ~/.neko-core/config.json to restore the classic prompt-first posture; Shift+Tab still cycles modes.
+- **The agent can now fix Neko's settings for you.** ~/.neko-core/config.json is the one
+  outside-workspace file admitted through the approval gate: when you say "xu ly giup toi", the agent
+  proposes the exact edit, you confirm it once (never auto-approved, even in auto mode), and invalid
+  JSON is refused and rolled back so a consented edit cannot brick the config. A new /sandbox command
+  shows sandbox/network status and turns sandbox egress on with an explicit domain allowlist
+  (restart applies).
+- **No more console-window spam on Windows.** Every spawned helper (bash runs, hooks, benchmark
+  tasks, meeting engines, browser opens) now sets windowsHide, so commands no longer flash terminal
+  windows while Neko works.
+
+
 ## [0.24.8] — 2026-08-17
 
 ### Fixed

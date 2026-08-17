@@ -41,7 +41,7 @@ enforced by `test/architecture.test.ts`).
   `NVIDIA_API_KEY`) or gitignored `~/.neko-core/config.json`. Run `/secret-scan` before any push.
 - **Config-first.** A new model/endpoint is a profile, not a code change.
 - **Windows console is cp1252.** Keep *printed* strings ASCII (an em-dash mojibakes).
-- **Safe-by-default.** `write_file`/`edit`/`bash` are approval-gated; modes are a *named* state.
+- **Auto-by-default, consequence-gated.** The default permission mode is `auto` (bounded autonomy, matching 2026 industry practice); only consequential surfaces ask - host `computer` control, the policy file itself, catastrophic shell (seatbelt), credential paths, and anything outside the workspace. Modes remain a *named* state (Shift+Tab).
 
 ## Verify loop
 

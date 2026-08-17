@@ -709,11 +709,16 @@ export class NekoConfig {
     return v === "auto" ? "auto" : "prompt";
   }
 
-  /** Permission mode: explicit `mode` in config, else derived from legacy `approval`. */
+  /** Permission mode: explicit `mode` in config, else derived from legacy `approval`.
+   * The product default is now AUTO (owner decision, 2026-08-17, matching the 2026 industry
+   * shift Claude Code pioneered): bounded autonomy out of the box, and only genuinely
+   * consequential surfaces still ask — host computer control, the policy file itself,
+   * catastrophic shell (seatbelt), credential paths, and anything outside the workspace. */
   get mode(): PermissionMode {
     const raw = String(this.data.mode ?? "").trim().toLowerCase();
     if (isMode(raw)) return raw;
-    return this.approval === "auto" ? "auto" : "default";
+    if (this.approval === "auto") return "auto";
+    return this.data.mode === undefined && this.data.approval === undefined ? "auto" : "default";
   }
 
   /** Declared MCP servers: name -> stdio {command,args?,env?} OR remote {url, type?:http|sse, headers?}. */

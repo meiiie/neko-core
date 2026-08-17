@@ -18,7 +18,7 @@ running journal of what was done and why.
 ## Product & code
 - **Config-first.** Behaviour lives in config (`DEFAULTS` + profiles + overlays), not code.
   A new model/endpoint is a profile, not a code change.
-- **Provider-agnostic, safe-by-default.** `write_file`/`bash` are approval-gated; `--yolo`
+- **Provider-agnostic, auto-by-default (owner, 2026-08-17).** The default mode is `auto` - bounded autonomy out of the box, matching the 2026 industry shift (Claude Code ships auto-default). Only consequential surfaces ask: host computer control, the policy file, catastrophic shell, credential paths, outside-workspace targets. Set `"mode": "default"` in config to restore the classic prompt-first posture. `--yolo`
   (`approval=auto`) is a *named* bounded-autonomous state, audited by `neko policy`.
 - **`bang_c` is FROZEN.** Read it to port; never edit it. Drop MCQ/contest cruft
   (`rag_*`, `tiered_*`, `rubric`, `profiling`, `pred.csv`).
