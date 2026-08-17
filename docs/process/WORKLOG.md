@@ -3,6 +3,23 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-17 - consent-gated policy writes + quiet consoles
+
+Two owner-directed changes after reviewing 2025-26 permission-model practice (Claude Code lets
+the agent edit ~/.claude/settings.json through the normal approval gate; enforcement layers stay
+at the OS sandbox):
+
+1. ~/.neko-core/config.json is now the ONE outside-workspace structured-write target admitted
+   through the approval gate. When the user says "fix it for me", the agent can propose the exact
+   edit; execute() forces the approval prompt in EVERY mode (auto/yolo never self-approves the
+   policy file), and a result that is not valid JSON is refused and rolled back to the turn's
+   pre-image so a consented edit cannot brick the config. Everything else outside the root stays
+   refused. /sandbox (TUI) shows status and turns sandbox network on/off with an explicit domain
+   list (patchUserConfig, restart applies); the runtime block's network line now names that
+   command instead of describing config keys, and the policy audit documents the exception.
+2. Console-window spam on Windows: every bash/helper/bench/meeting spawn that lacked
+   windowsHide:true flashed a terminal window. All spawn sites now set it.
+
 ## 2026-08-17 - SRT Bun bridge for npm-installed Bun (v0.24.8)
 
 Live UX testing of the compiled binary (web-term + ux-probe ConPTY drivers, committed as manual

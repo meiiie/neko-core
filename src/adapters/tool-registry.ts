@@ -70,7 +70,7 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     ? (findWindowsBash() ? "GIT BASH (POSIX)" : "cmd.exe")
     : (liveSandbox ? "bash (POSIX)" : "/bin/sh (POSIX)");
   const network = !registry.sandboxAllowNetwork
-    ? "blocked (default-deny; the user can enable egress with sandbox_network: true plus a sandbox_domains allowlist)"
+    ? "blocked (default-deny; the user can enable it by running /sandbox network on <domains...> in Neko - or the user can approve a consented structured edit of ~/.neko-core/config.json; a restart applies it)"
     : detected === "srt"
       ? (registry.sandboxDomains.length ? "allowlisted by sandbox_domains" : "blocked (SRT needs explicit sandbox_domains)")
       : detected === "bwrap" || detected === "sandbox-exec"

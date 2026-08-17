@@ -297,7 +297,7 @@ async function runBoundedSandboxTarget(
       cwd: root,
       env,
       detached: process.platform !== "win32",
-      windowsHide: true,
+windowsHide: true,
     });
   } catch (error) {
     return {

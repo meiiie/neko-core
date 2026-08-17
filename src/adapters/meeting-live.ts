@@ -415,14 +415,14 @@ export function parakeetWindowTranscriber(
     const engineDir = dirname(transcriber.executable);
     const json = await new Promise<string>((resolve, reject) => {
       const child = spawn(transcriber.executable, args, {
+        windowsHide: true,
         cwd: engineDir,
         env: {
           ...process.env,
           PATH: `${engineDir}${delimiter}${process.env.PATH ?? ""}`,
           LD_LIBRARY_PATH: [engineDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(delimiter),
         },
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
+stdio: ["ignore", "pipe", "pipe"],
       });
       const chunks: Buffer[] = [];
       let bytes = 0;

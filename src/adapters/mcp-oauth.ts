@@ -25,7 +25,7 @@ export function openBrowser(url: string): void {
   const cmd = win ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
   const args = win ? ["/c", "start", "", url] : [url];
   try {
-    spawn(cmd, args, { stdio: "ignore", detached: true }).unref();
+    spawn(cmd, args, { stdio: "ignore", detached: true, windowsHide: true }).unref();
   } catch {
     /* user can open the URL manually (it's logged) */
   }

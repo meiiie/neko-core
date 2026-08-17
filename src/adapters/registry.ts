@@ -294,7 +294,7 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
       severity: "info",
       code: "reads_outside_root",
       subject: "read_outside_root",
-      message: "Reads may resolve outside the project directory. Structured writes and sandboxed bash stay confined to the project plus explicit additional_write_roots (including the built-in ~/.neko-core/research ledger). Credential paths (SSH, .env, key material, browser stores) stay refused. Set read_outside_root:false for a hard read wall.",
+      message: "Reads may resolve outside the project directory. Structured writes and sandboxed bash stay confined to the project plus explicit additional_write_roots (including the built-in ~/.neko-core/research ledger); the one consent-gated exception is ~/.neko-core/config.json itself, which is approval-prompted in EVERY mode (never auto-approved) and JSON-validated on write. Credential paths (SSH, .env, key material, browser stores) stay refused. Set read_outside_root:false for a hard read wall.",
     });
   }
 

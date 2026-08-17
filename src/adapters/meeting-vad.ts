@@ -55,6 +55,7 @@ export async function detectSpeechRegions(
   try {
     const stdout = await new Promise<string>((resolve, reject) => {
       const child = spawn(vadExecutable, [`--silero-vad-model=${pack.vad}`, audio, scratch], {
+        windowsHide: true,
         cwd: engineDir,
         env: {
           ...process.env,
@@ -62,8 +63,7 @@ export async function detectSpeechRegions(
           LD_LIBRARY_PATH: [engineDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(delimiter),
           DYLD_LIBRARY_PATH: [engineDir, process.env.DYLD_LIBRARY_PATH].filter(Boolean).join(delimiter),
         },
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
+stdio: ["ignore", "pipe", "pipe"],
       });
       // sherpa-onnx-vad prints its region list to STDERR, alongside the config dump - measured, not
       // assumed, after the first version parsed an always-empty stdout.

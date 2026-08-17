@@ -290,6 +290,7 @@ export async function diarizeMono(pack: DiarizationPack, audio: string, options:
   const engineDir = dirname(pack.executable);
   const stdout = await new Promise<string>((resolve, reject) => {
     const child = spawn(pack.executable, args, {
+      windowsHide: true,
       cwd: engineDir,
       env: {
         ...process.env,
@@ -297,8 +298,7 @@ export async function diarizeMono(pack: DiarizationPack, audio: string, options:
         LD_LIBRARY_PATH: [engineDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(delimiter),
         DYLD_LIBRARY_PATH: [engineDir, process.env.DYLD_LIBRARY_PATH].filter(Boolean).join(delimiter),
       },
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
+stdio: ["ignore", "pipe", "pipe"],
     });
     const chunks: Buffer[] = [];
     let bytes = 0;

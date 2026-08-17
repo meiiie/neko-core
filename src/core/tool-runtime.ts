@@ -30,6 +30,7 @@ import { readdir as readdirAsync, rm as rmAsync, stat as statAsync, writeFile as
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
+import { homeDir } from "../shared/home.ts";
 import type { McpTools, WebPort } from "./ports.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
@@ -1324,7 +1325,14 @@ export class ToolRegistry {
     const sandboxedBash = spec.name === "bash" && this.sandboxBash && this.sandboxAutoApprove
       && liveBashSandbox && !destructiveInWorkspace(String(args.command ?? ""))
       && !isDockerCommand(String(args.command ?? "")); // docker runs unsandboxed -> don't sandbox-auto-approve it
-    const decision = decide(this.mode, spec, args, { sandboxedBash });
+    const policyWrite = isPolicyConfigTarget(structuredPath);
+    let decision = decide(this.mode, spec, args, { sandboxedBash });
+    // The user policy file is the one target auto mode may never self-approve: flipping Neko's own
+    // permission/network settings must pass the human gate in EVERY mode (plan still denies above).
+    if (policyWrite && decision === "allow") {
+      decision = "prompt";
+      this.denialNote = this.denialNote ?? "~/.neko-core/config.json is Neko's policy file: this exact change needs your confirmation and a Neko restart to take effect.";
+    }
     if (decision === "deny") {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
     }
@@ -1385,6 +1393,21 @@ export class ToolRegistry {
       if (structuredPath) {
         const succeeded = isText(out) && (name === "write_file" ? out.startsWith("Wrote ") : out.startsWith("Edited "));
         this.finishStructuredMutation(structuredPath, succeeded);
+      }
+      // A consented policy-file write must still leave a LOADABLE config: validate the result and
+      // roll back to the pre-image snapshot if the model produced invalid JSON (config-first
+      // hygiene - a broken policy file would brick the next Neko start).
+      if (policyWrite && isText(out) && (out.startsWith("Wrote ") || out.startsWith("Edited "))) {
+        try {
+          JSON.parse(readFileSync(structuredPath!, "utf-8"));
+        } catch (error) {
+          const snapshot = this.fileSnapshots.get(structuredPath!);
+          try {
+            if (snapshot === undefined || snapshot.before === null) rmSync(structuredPath!, { force: true });
+            else writeFileSync(structuredPath!, snapshot.before);
+          } catch { /* the rollback is best-effort; the error below still names the file */ }
+          return `Error: the policy file ~/.neko-core/config.json was NOT changed: the proposed content is not valid JSON (${messageOf(error)}). Re-propose the complete config as valid JSON.`;
+        }
       }
       if (nativeBackend && (name === "write_file" || name === "edit" || name === "multi_edit")) {
         const succeeded = isText(out) && (name === "write_file" ? out.startsWith("Wrote ") : out.startsWith("Edited "));
@@ -2241,11 +2264,29 @@ function resolveInRoot(root: string, p: string): string {
  * An allowed root is still canonicalized, so a symlink/junction inside it cannot escape to another
  * directory. Credential/device paths remain immutable outside the project even when their parent was
  * granted broadly. */
+/** The canonical user policy file (~/.neko-core/config.json). Core computes it from the shared
+ * home helper so the admission below never imports adapter config code (dependency rule). */
+function nekoUserConfigPath(): string {
+  return join(homeDir(), ".neko-core", "config.json");
+}
+
+/** A structured mutation whose canonical target is exactly the user policy file. Admitted only
+ * through the approval gate; execute() forces the prompt and guards the JSON result. */
+function isPolicyConfigTarget(absPath: string | undefined): boolean {
+  return absPath !== undefined && absPath.toLowerCase() === nekoUserConfigPath().toLowerCase();
+}
+
 function resolveForWrite(root: string, p: string, additionalRoots: readonly string[]): string {
   const primary = resolve(root);
   const resolved = resolve(primary, p);
   if (pathWithin(primary, resolved)) return resolveInRoot(root, p);
   const targetReal = realpathNearest(resolved);
+  // The user-owned policy file is the ONE outside-workspace structured-write target admitted
+  // through the approval gate: when the user asks the agent to fix settings, it may propose the
+  // exact edit, the user confirms it in the normal gate, and execute() additionally (a) forces a
+  // prompt even in auto mode - policy is never silently self-approved - and (b) rejects a result
+  // that is not valid JSON so a consented edit cannot brick the config.
+  if (targetReal.toLowerCase() === nekoUserConfigPath().toLowerCase()) return targetReal;
   for (const rawRoot of additionalRoots) {
     const allowed = resolve(rawRoot);
     const allowedReal = realpathNearest(allowed);

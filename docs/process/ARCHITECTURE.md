@@ -101,7 +101,10 @@ host daemon outside that OS sandbox; auto mode refuses those direct commands unl
 Outside-workspace authority is split deliberately. Safe file readers may traverse ordinary host paths
 when `read_outside_root` is enabled, while structured mutations and ordinary sandboxed Bash share the
 project plus canonical `additional_write_roots`. The sole built-in global write capability is
-`~/.neko-core/research`; broader roots are user policy, not a side effect of `auto`/`--yolo`. Filesystem
+`~/.neko-core/research`; the user policy file `~/.neko-core/config.json` itself is the one
+consent-gated outside-root structured target (prompted in every mode, never auto-approved, and
+JSON-validated on write so a consented edit cannot brick the config); broader roots are user
+policy, not a side effect of `auto`/`--yolo`. Filesystem
 roots, home-wide grants, credential/agent-control capability roots, outside credential targets,
 symlink/junction escapes, and hardlink aliases are refused at the structured boundary. A timed-out SRT health probe may retry one real launch
 through the same exact SRT settings, but never authorizes an unconfined fallback.

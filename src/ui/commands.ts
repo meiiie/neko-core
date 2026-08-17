@@ -9,7 +9,7 @@ import { loadConfig, type NekoConfig } from "../adapters/config.ts";
 import { rememberNote, renderContext } from "../adapters/context.ts";
 import { initProject } from "../adapters/project.ts";
 import { getProvider, listModelOptions, type ModelOption } from "../adapters/providers.ts";
-import { setActiveProfile, setEffort, setModel } from "../adapters/project.ts";
+import { patchUserConfig, setActiveProfile, setEffort, setModel } from "../adapters/project.ts";
 import { fillRecipe, listRecipes, loadRecipe } from "../adapters/recipes.ts";
 import { listSessionMetas, loadSession, renameSession, sessionTitle, type Session } from "../adapters/session.ts";
 import { SessionHandoffStore } from "../adapters/session-handoff.ts";
@@ -99,6 +99,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/bashes", desc: "list background bash tasks (Ctrl+B to background a running one)" },
   { name: "/reset", desc: "reset conversation context" },
   { name: "/exit", desc: "quit" },
+  { name: "/sandbox", desc: "show or set sandbox network policy (consent required)" },
 ];
 
 /** Conservative, model-free routing for tasks that need an interactive or signed-in browser tab. */
@@ -1041,6 +1042,33 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         ? `; preserved newer changes (not overwritten): ${conflicts.map((path) => terminalSafeText(path, { maxChars: 180 })).join(", ")}`
         : "";
       return addLine("info", `(rewound last turn - context restored${files ? `, ${files} file(s) reverted` : ""}${preserved})`);
+    }
+    case "/sandbox": {
+      // User-owned consent surface for the sandbox network policy (the runtime block tells the
+      // agent this command exists, so "turn it on for me" becomes one confirmed step).
+      const [, sub, flag, ...rest] = input.split(/\s+/);
+      if (sub === "network" && flag === "off") {
+        patchUserConfig({ sandbox_network: false });
+        return addLine("info", "sandbox_network=false saved to ~/.neko-core/config.json. Restart Neko to apply.");
+      }
+      if (sub === "network" && flag === "on") {
+        const domains = rest.join(" ").split(/[\s,]+/).map((d) => d.trim().replace(/\/$/, "")).filter(Boolean);
+        if (!domains.length) {
+          return addLine("info", "usage: /sandbox network on <domain ...>  (SRT has no allow-all; list egress domains, e.g. /sandbox network on pypi.org files.pythonhosted.org)");
+        }
+        patchUserConfig({ sandbox_network: true, sandbox_domains: domains });
+        return addLine("info", `sandbox_network=true with domains [${domains.join(", ")}] saved to ~/.neko-core/config.json. Restart Neko to apply.`);
+      }
+      const cfgNow = loadConfig({ profile: ctx.cfg.profile ?? undefined });
+      const network = !cfgNow.data.sandbox_network
+        ? "blocked (default-deny)"
+        : cfgNow.data.sandbox_domains?.length
+          ? `allowlisted [${cfgNow.data.sandbox_domains.join(", ")}]`
+          : "BLOCKED (SRT needs explicit sandbox_domains)";
+      return addLine(
+        "info",
+        `sandbox: ${cfgNow.data.sandbox ? "on" : "off"}\nnetwork: ${network}\nusage: /sandbox network on <domain ...> | /sandbox network off  (restart applies)`,
+      );
     }
     case "/bashes": {
       const bg = ctx.registry.backgrounds;
