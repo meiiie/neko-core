@@ -3,6 +3,21 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-21 - Attention-aware approval feedback (v0.24.15)
+
+Field UI feedback exposed two sides of the same ownership bug: approval replaced the composer but
+inline rendering left the terminal's hardware caret visible in the yellow border, while a background
+approval had no sound to bring the user back. Neko now enables standard DEC focus reporting for the
+interactive session, treats focus as present until the terminal explicitly reports otherwise, and
+plays the existing Neko Bubble exactly once when a new approval arrives in the background. The
+approval surface hides the hardware caret until input returns; emergency teardown disables focus
+reporting so its CSI events cannot leak into the shell. Focused attention/cursor/UI tests passed 60
+tests / 313 assertions, and both TypeScript compilers plus diff hygiene passed before the full release
+gate. The final suite passed 1,446 tests / 8,071 assertions with 12 intentional skips and zero
+failures. Lint, current/stable TypeScript, policy/doctor, the production build, UI probe, real-PTY input,
+ACP smoke, three real ConPTY ghost/typing runs, and the scroll benchmark (6 ms first response / 95 ms
+settle) all passed.
+
 ## 2026-08-21 - Host network diagnostics without unconfined Bash (v0.24.14)
 
 Field feedback exposed a capability/wording mismatch: `--yolo` correctly automated permission

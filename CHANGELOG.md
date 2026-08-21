@@ -6,6 +6,21 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.15] - 2026-08-21
+
+### Added
+
+- **Approval alerts respect your attention.** When a supported terminal reports that its tab or
+  window is in the background, a newly pending approval plays the existing Neko Bubble sound once.
+  Approvals stay silent while the terminal is focused, and terminals without focus reporting default
+  to silence instead of producing false notifications.
+
+### Fixed
+
+- **The approval box no longer contains a stray orange cursor bar.** Neko hides the terminal's
+  hardware caret while approval owns the input surface and restores it when the composer returns,
+  including in inline mode.
+
 ## [0.24.14] - 2026-08-21
 
 ### Added

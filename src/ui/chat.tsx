@@ -25,6 +25,7 @@ import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./th
 import { probeSyncOutput, syncOutputDecision, wrapStdoutForSync } from "./sync-stdout.ts";
 import { FrameDiffer, HIT_SENTINEL } from "./frame-diff.ts";
 import { canFullscreen, emergencyRestore, installAltScreenGuard } from "./altscreen.ts";
+import { setApprovalCursorHidden, setFocusReporting, terminalFocusFromInput } from "./terminal-attention.ts";
 import { flattenLines, projectLineRows, ScrollRegion, stickyPromptAnchor, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, primeAnsiCache, renderNodeRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
@@ -295,6 +296,24 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [approvalFlash, setApprovalFlash] = useState<ApprovalFlash | null>(null);
+  // DEC focus reporting is attention-aware rather than notification-happy: assume the terminal is
+  // being watched until it explicitly reports focus-out. Unsupported terminals therefore stay silent.
+  const terminalFocusedRef = useRef(true);
+  useInput((input) => {
+    const focused = terminalFocusFromInput(input);
+    if (focused !== null) terminalFocusedRef.current = focused;
+  });
+  useEffect(() => {
+    setFocusReporting(stdout, true);
+    return () => setFocusReporting(stdout, false);
+  }, [stdout]);
+  // Inline mode has no FrameDiffer cursor suffix. Hide the terminal's real caret while approval owns
+  // the bottom surface, or it lingers as an orange bar inside the box's last painted border cell.
+  useEffect(() => {
+    if (!approval) return;
+    setApprovalCursorHidden(stdout, true);
+    return () => setApprovalCursorHidden(stdout, false);
+  }, [approval !== null, stdout]);
   // Pointer-hovered option zone in the approval box (index into approvalOptions; null = none).
   const [approvalHover, setApprovalHover] = useState<number | null>(null);
   useEffect(() => { setApprovalHover(null); }, [approval]);
@@ -549,6 +568,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const next = gateChain.current.then(() => new Promise<boolean>((resolve) => {
       const request = { toolName, args, resolve };
       remoteApprovalRef.current = { id: `a${++approvalSeqRef.current}`, approval: request };
+      // Completion is pleasant feedback even while watched; approval is an attention request, so it
+      // sounds only after the terminal has reported that the user switched away.
+      if (cfg.completionSound && !terminalFocusedRef.current) ringCompletion();
       setApproval(request);
     }));
     gateChain.current = next.catch(() => undefined);

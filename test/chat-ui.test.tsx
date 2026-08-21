@@ -612,17 +612,53 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
       { content: null, tool_calls: [{ id: "c1", name: "bash", arguments: { command: "echo hi" } }] },
       { content: "Finished.", tool_calls: [] },
     ]);
-    const { stdin, lastFrame, frames, unmount } = render(<ChatApp fullscreen={false} yolo={false} provider={provider} />);
+    let alerts = 0;
+    const { stdin, lastFrame, frames, unmount } = render(
+      <ChatApp fullscreen={false} yolo={false} provider={provider} completionAlert={() => { alerts++; }} />,
+    );
     const seen = (s: string) => frames.join("\n").replace(/\x1b\[[0-9;]*m/g, "").includes(s);
     stdin.write("run echo");
     await tick(20);
     stdin.write("\r"); // Enter
     expect(await until(() => (lastFrame() ?? "").includes("Approve bash?"))).toBe(true); // approval box appeared
     expect(lastFrame() ?? "").toContain("$ echo hi"); // command preview
+    expect(alerts).toBe(0); // the terminal is visible: approval needs no attention sound
     stdin.write("y"); // approve
     expect(await until(() => seen("Ran shell command: echo hi"))).toBe(true); // compact result appears only after the tool ran
     expect(await until(() => seen("Finished"))).toBe(true); // final answer
+    expect(await until(() => alerts === 1)).toBe(true); // ordinary completion feedback is unchanged
     expect(lastFrame() ?? "").not.toMatch(/^\s*>\s*y\s*$/m); // approval key must not leak into the prompt
+    unmount();
+  } finally {
+    if (oldSandbox === undefined) delete process.env.NEKO_SANDBOX;
+    else process.env.NEKO_SANDBOX = oldSandbox;
+    if (oldMode === undefined) delete process.env.NEKO_MODE;
+    else process.env.NEKO_MODE = oldMode;
+  }
+}, 40000);
+
+test("a pending approval plays one Neko alert only after the terminal reports focus-out", async () => {
+  const oldSandbox = process.env.NEKO_SANDBOX;
+  const oldMode = process.env.NEKO_MODE;
+  process.env.NEKO_SANDBOX = "0";
+  process.env.NEKO_MODE = "default";
+  try {
+    const provider = new MockProvider([
+      { content: null, tool_calls: [{ id: "c1", name: "bash", arguments: { command: "echo hidden" } }] },
+      { content: "Stopped.", tool_calls: [] },
+    ]);
+    let alerts = 0;
+    const { stdin, lastFrame, unmount } = render(
+      <ChatApp fullscreen={false} yolo={false} provider={provider} completionAlert={() => { alerts++; }} />,
+    );
+    stdin.write("\x1b[O"); // DEC focus-out; Ink delivers the stripped [O sequence to useInput
+    await tick(10);
+    stdin.write("request approval"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Approve bash?"))).toBe(true);
+    expect(alerts).toBe(1);
+    await tick(50);
+    expect(alerts).toBe(1); // rerenders while waiting never repeat the alert
+    stdin.write("n");
     unmount();
   } finally {
     if (oldSandbox === undefined) delete process.env.NEKO_SANDBOX;

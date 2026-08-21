@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { canFullscreen, CLEAR_HOME, ENTER_ALT, HIDE_CURSOR, installAltScreenGuard, KITTY_POP, KITTY_PUSH, LEAVE_ALT, SHOW_CURSOR, enterAltScreen, leaveAltScreen } from "../src/ui/altscreen.ts";
+import { canFullscreen, CLEAR_HOME, emergencyRestore, ENTER_ALT, HIDE_CURSOR, installAltScreenGuard, KITTY_POP, KITTY_PUSH, LEAVE_ALT, SHOW_CURSOR, enterAltScreen, leaveAltScreen } from "../src/ui/altscreen.ts";
+import { DISABLE_FOCUS_REPORTING } from "../src/ui/terminal-attention.ts";
 
 test("canFullscreen: TTY with room only", () => {
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
@@ -41,4 +42,11 @@ test("installAltScreenGuard enters and its disposer leaves exactly once (idempot
   expect(writes.join("")).toBe(KITTY_POP + SHOW_CURSOR + LEAVE_ALT);
   dispose(); // second call is a no-op
   expect(writes.join("")).toBe(KITTY_POP + SHOW_CURSOR + LEAVE_ALT);
+});
+
+test("emergency restore disables focus reporting so CSI focus events never leak into the shell", () => {
+  const { out, writes } = fakeOut();
+  out.isTTY = true;
+  emergencyRestore(out);
+  expect(writes.join("")).toContain(DISABLE_FOCUS_REPORTING);
 });

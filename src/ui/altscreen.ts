@@ -12,6 +12,7 @@
  */
 import type { Writable } from "node:stream";
 import { DISABLE_MOUSE, disableMouse, enableMouse } from "./mouse.ts";
+import { DISABLE_FOCUS_REPORTING } from "./terminal-attention.ts";
 
 export const ENTER_ALT = "\x1b[?1049h";
 export const LEAVE_ALT = "\x1b[?1049l";
@@ -38,7 +39,7 @@ export function emergencyRestore(out: Writable = process.stdout): void {
     // No title pop on Windows: we never pushed there (WT's title stack reverts the tab mid-session; see
     // title.ts). Elsewhere, pop to restore the user's shell title on exit.
     const titlePop = process.platform === "win32" ? "" : "\x1b[23;0t";
-    out.write(KITTY_POP + SHOW_CURSOR + DISABLE_MOUSE + LEAVE_ALT + titlePop); // keyboard, cursor, mouse off, main screen, (title)
+    out.write(KITTY_POP + SHOW_CURSOR + DISABLE_FOCUS_REPORTING + DISABLE_MOUSE + LEAVE_ALT + titlePop); // keyboard, cursor, focus/mouse off, main screen, (title)
   } catch { /* stream gone - nothing left to protect */ }
 }
 
