@@ -3,9 +3,18 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, normalizeSandboxDomains, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtHealthAsync, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, windowsSearchDirs, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
+
+// Report unavailable live infrastructure as an actual skip instead of a passing test whose body
+// returned early. The health probe is cached by the production sandbox module for this process.
+const LIVE_WINDOWS_SRT = process.platform === "win32"
+  && detectSandbox() === "srt"
+  && sandboxActive();
+const LIVE_WINDOWS_SRT_BRIDGE = LIVE_WINDOWS_SRT
+  ? resolveSrtBunBridge(process.cwd())
+  : null;
 
 test("one-call network domains are canonical, bounded, and never accept URLs or match-all", () => {
   expect(normalizeSandboxDomains([
@@ -277,14 +286,21 @@ test("windowsSearchDirs understands Git-Bash POSIX PATH and Windows PATH", () =>
   expect(windowsSearchDirs("")).toEqual([]);
 });
 
-test("a live Windows SRT exposes its exact Bun bridge and cleans all launch material", () => {
-  const bridge = process.platform === "win32" ? resolveSrtBunBridge(process.cwd()) : null;
-  if (process.platform !== "win32" || detectSandbox() !== "srt" || !sandboxActive() || !bridge) return;
-  const target = wrapBash("bun --version", process.cwd(), { enabled: true, allowNetwork: false });
+test.skipIf(!LIVE_WINDOWS_SRT_BRIDGE)("a live Windows SRT uses nested scratch, exposes its exact Bun bridge, and cleans all launch material", () => {
+  const bridge = LIVE_WINDOWS_SRT_BRIDGE!;
+  const target = wrapBash("bun --version", process.cwd(), {
+    enabled: true, allowNetwork: false, readOnlyWorkspace: true,
+  });
   const launchDir = target.env?.PATH?.split(delimiter)[0] ?? "";
+  const scratch = target.env?.TEMP ?? "";
+  const scratchParent = dirname(scratch);
   try {
     expect(target.env?.NEKO_SRT_BUN_EXE).toBe(bridge.path);
     expect(target.env?.NoDefaultCurrentDirectoryInExePath).toBe("1");
+    // Windows Known-Folder ACL writes are pathologically slow when the target is an immediate
+    // child of %TEMP%. Keep the SRT-granted scratch one level below a launch-private parent.
+    expect(dirname(scratchParent)).toBe(realpathSync(tmpdir()));
+    expect(scratchParent).not.toBe(realpathSync(tmpdir()));
     expect(readFileSync(join(launchDir, "bun.cmd"), "utf8")).toBe('@"%NEKO_SRT_BUN_EXE%" %*\r\n');
     const result = spawnSync(target.file, target.args, {
       cwd: process.cwd(), encoding: "utf8", timeout: 20_000, windowsHide: true,
@@ -296,6 +312,7 @@ test("a live Windows SRT exposes its exact Bun bridge and cleans all launch mate
     target.cleanup?.();
   }
   expect(existsSync(launchDir)).toBe(false);
+  expect(existsSync(scratchParent)).toBe(false);
 }, 25_000);
 
 test("srt network allow = the sandbox_domains allowlist (no allow-all in srt) + -c without git-bash", () => {
@@ -402,8 +419,7 @@ test("srt settings ignore a poisoned deterministic temp file and clean up unique
   }
 });
 
-test("a live Windows SRT can write an exact additional root without host fallback", () => {
-  if (process.platform !== "win32" || detectSandbox() !== "srt" || !sandboxActive()) return;
+test.skipIf(!LIVE_WINDOWS_SRT)("a live Windows SRT can write an exact additional root without host fallback", () => {
   const extra = mkdtempSync(join(tmpdir(), "neko-srt-extra-write-"));
   const output = join(extra, "canary.txt");
   const posix = output

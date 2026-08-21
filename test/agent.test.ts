@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Agent, clampObservation, classifyToolObservation, estimateRequestTokens, estimateTokens, isValidationBashCommand, MAX_OBS_CHARS, unwrapToolArgs } from "../src/core/agent.ts";
 import { COMPACTION_PROMPT, DEFAULT_SYSTEM_PROMPT } from "../src/core/agent-constants.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
+import { ProviderAttemptError } from "../src/core/ports.ts";
 
 import { isText } from "../src/shared/wire.ts";
 
@@ -746,9 +747,82 @@ test("runUntilDone resumes a provider idle stall from the durable conversation c
   });
   expect(await agent.runUntilDone("finish the task", { maxIters: 1 })).toBe("recovered");
   expect(calls).toBe(2);
-  expect(recoveries).toEqual([{ attempt: 1, max: 2, reason: "provider idle timeout" }]);
+  expect(recoveries).toEqual([{ attempt: 1, max: 2, reason: "stream_timeout" }]);
   expect(agent.messages.some((message: any) => message._neko_internal
-    && String(message.content).includes("AUTONOMY RECOVERY"))).toBe(true);
+    && String(message.content).includes("PROVIDER RECOVERY"))).toBe(true);
+});
+
+test("runResilient continues a committed partial stream from the durable checkpoint", async () => {
+  let calls = 0;
+  let secondHistory: any[] = [];
+  const checkpoints: number[] = [];
+  const recoveries: any[] = [];
+  const agent = new Agent({
+    provider: {
+      async complete(messages: any[], _tools: any, onDelta: any) {
+        calls++;
+        if (calls === 1) {
+          onDelta?.("partial answer");
+          throw new ProviderAttemptError("stream disconnected", "stream_interrupted", {
+            recovery: "continue",
+            semanticActivity: true,
+          });
+        }
+        secondHistory = messages;
+        return { content: "finished", tool_calls: [] };
+      },
+    },
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    onDelta: () => {},
+    onCheckpoint: async () => { checkpoints.push(Date.now()); },
+    onEvent: (kind, data) => { if (kind === "recovery") recoveries.push(data); },
+  });
+
+  expect(await agent.runResilient("build it")).toBe("finished");
+  expect(calls).toBe(2);
+  expect(secondHistory.map((message) => message.role)).toEqual(["system", "user", "assistant", "user"]);
+  expect(secondHistory[2].content).toBe("partial answer");
+  expect(secondHistory[3].content).toContain("PROVIDER RECOVERY (1/2)");
+  expect(recoveries).toEqual([{ attempt: 1, max: 2, reason: "stream_interrupted" }]);
+  expect(checkpoints.length).toBeGreaterThanOrEqual(2);
+});
+
+test("runResilient never converts an exhausted pre-commit replay into a continuation", async () => {
+  let calls = 0;
+  const agent = new Agent({
+    provider: {
+      async complete() {
+        calls++;
+        throw new ProviderAttemptError("no bytes arrived", "stream_interrupted", {
+          recovery: "replay",
+          semanticActivity: false,
+        });
+      },
+    },
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  await expect(agent.runResilient("build it")).rejects.toThrow("no bytes arrived");
+  expect(calls).toBe(1);
+});
+
+test("runResilient lets user abort win before checkpoint continuation", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const agent = new Agent({
+    provider: {
+      async complete() {
+        calls++;
+        throw new ProviderAttemptError("stream disconnected", "stream_interrupted", {
+          recovery: "continue",
+          semanticActivity: true,
+        });
+      },
+    },
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    onEvent: (kind) => { if (kind === "recovery") controller.abort(); },
+  });
+  await expect(agent.runResilient("build it", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+  expect(calls).toBe(1);
 });
 
 test("runUntilDone bounds consecutive stall recovery and never retries a user abort", async () => {

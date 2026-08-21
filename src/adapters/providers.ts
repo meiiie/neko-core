@@ -23,7 +23,15 @@ import { explainKimiAccessError, hasKimiCredentials, kimiIdentityHeaders, validK
 import { clampEffort, effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
 import { SESSION_CONTEXT_MARK } from "../core/agent-constants.ts";
 import type { Usage } from "../core/cost.ts";
-import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
+import {
+  ProviderAttemptError,
+  type CompleteOptions,
+  type DeltaHook,
+  type Provider,
+  type ProviderFailureCode,
+  type ProviderResponse,
+  type ToolCall,
+} from "../core/ports.ts";
 
 import { isJsonNumber, isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
 
@@ -31,13 +39,6 @@ import { isJsonNumber, isJsonObject, isObjectValue, isText } from "../shared/wir
 export type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic-style overloaded_error (Z.ai sends it too)
-
-class RetryableStreamError extends Error {
-  constructor(message: string, readonly semanticActivity: boolean) {
-    super(message);
-    this.name = "RetryableStreamError";
-  }
-}
 
 export { clampEffort } from "./effort.ts";
 
@@ -511,8 +512,25 @@ export class OpenAICompatProvider implements Provider {
     const offlineDeadline = Date.now() + this.cfg.offlineRetrySeconds * 1000;
     let httpAttempt = 0;
     let netAttempt = 0;
+    let wireAttempt = 0;
+    const attemptEvent = async (
+      type: "attempt_started" | "retry_scheduled",
+      reason?: ProviderFailureCode,
+      delayMs?: number,
+      maxRetries?: number,
+    ) => {
+      await opts?.onAttempt?.({
+        type,
+        attempt: wireAttempt,
+        ...(reason ? { reason } : undefined),
+        ...(delayMs !== undefined ? { delayMs } : undefined),
+        ...(maxRetries !== undefined ? { maxRetries } : undefined),
+      });
+    };
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError"); // Esc: stop now
+      wireAttempt++;
+      await attemptEvent("attempt_started");
       // IDLE timeout, not a total one. `timeoutSeconds` bounds a STALL (no bytes), reset on every
       // streamed chunk — so a long-but-healthy generation (a big landing page legitimately streams for
       // minutes) is never killed while tokens keep arriving. `AbortSignal.timeout()` capped the WHOLE
@@ -537,8 +555,10 @@ export class OpenAICompatProvider implements Provider {
         if (signal?.aborted) throw error; // user interrupt, not a network blip
         if (Date.now() >= offlineDeadline) throw new Error(`openai_compat completion failed: ${messageOf(error)}`);
         netAttempt++;
+        const waitMs = this.retryDelayMs(Math.min(netAttempt - 1, 4));
+        await attemptEvent("retry_scheduled", "transport_unavailable", waitMs);
         onDelta?.("(offline - waiting for the network to come back, retrying...)", "reasoning");
-        await sleep(this.retryDelayMs(Math.min(netAttempt - 1, 4)), signal);
+        await sleep(waitMs, signal);
         continue;
       }
       if (res.ok) {
@@ -549,9 +569,13 @@ export class OpenAICompatProvider implements Provider {
             ? await parseStream(res, onDelta!, bumpIdle, opts?.onToolCallReady, continuationScope)
             : parseOpenAIMessage(await res.json(), continuationScope);
         } catch (error) {
-          if (error instanceof RetryableStreamError && !error.semanticActivity && httpAttempt < this.cfg.maxRetries) {
+          if (error instanceof ProviderAttemptError
+            && error.retryable
+            && error.recovery === "replay"
+            && httpAttempt < this.cfg.maxRetries) {
             httpAttempt++;
-            const waitMs = this.retryDelayMs(httpAttempt - 1);
+            const waitMs = error.retryAfterMs ?? this.retryDelayMs(httpAttempt - 1);
+            await attemptEvent("retry_scheduled", error.code, waitMs, this.cfg.maxRetries);
             onDelta?.(`(network interrupted - retrying in ${Math.round(waitMs / 1000)}s, attempt ${httpAttempt}/${this.cfg.maxRetries})`, "reasoning");
             await sleep(waitMs, signal);
             continue;
@@ -569,6 +593,7 @@ export class OpenAICompatProvider implements Provider {
         const ra = res.headers.get("retry-after");
         const waitMs = ra ? this.retryAfterMs(ra) : this.retryDelayMs(httpAttempt - 1);
         const label = res.status === 429 ? "rate limited" : `HTTP ${res.status}`;
+        await attemptEvent("retry_scheduled", res.status === 429 ? "rate_limited" : "server_error", waitMs, this.cfg.maxRetries);
         onDelta?.(`(${label} - retrying in ${Math.round(waitMs / 1000)}s, attempt ${httpAttempt}/${this.cfg.maxRetries})`, "reasoning");
         await sleep(waitMs, signal);
         continue;
@@ -615,7 +640,9 @@ export class OpenAICompatProvider implements Provider {
 
   private retryDelayMs(attempt: number): number {
     const seconds = Math.min(this.cfg.retryMaxDelaySeconds, this.cfg.retryBaseDelaySeconds * 2 ** attempt);
-    return seconds * 1000;
+    const baseMs = seconds * 1000;
+    // Symmetric jitter prevents a fleet of paused/reconnected agents from retrying in lockstep.
+    return Math.max(0, Math.round(baseMs * (0.8 + Math.random() * 0.4)));
   }
 
   /** Parse a Retry-After header (delta-seconds or HTTP date), capped at retryMaxDelaySeconds. */
@@ -781,6 +808,21 @@ async function parseStream(
   let sawFinish = false;
   let contentBytes = 0;
   let reasoningBytes = 0;
+  const semanticActivity = (extra = false) => contentBytes > 0 || reasoningBytes > 0 || acc.length > 0 || extra;
+  const interruption = (
+    message: string,
+    code: ProviderFailureCode = "stream_interrupted",
+    extraActivity = false,
+    cause?: unknown,
+  ) => {
+    const active = semanticActivity(extraActivity);
+    return new ProviderAttemptError(message, code, {
+      retryable: true,
+      recovery: active ? "continue" : "replay",
+      semanticActivity: active,
+      cause,
+    });
+  };
   const announced = new Set<number>(); // tool calls whose name we've already surfaced
   // OpenAI streams index-keyed argument deltas and may interleave several indexes in one chunk. There
   // is no per-call stop marker, so an index switch does NOT mean completion. A call is eager-ready only
@@ -835,7 +877,12 @@ async function parseStream(
     },
   );
 
-  for await (const line of sseLines(res, onActivity)) {
+  for await (const line of sseLines(res, onActivity, (error) => interruption(
+    `streaming response transport failed: ${messageOf(error)}`,
+    error instanceof DOMException && error.name === "TimeoutError" ? "stream_timeout" : "stream_interrupted",
+    false,
+    error,
+  ))) {
     if (!line.startsWith("data:")) continue;
     const data = line.slice(5).trim();
     if (!data || /^(?:ping|keepalive|\[keepalive\])$/i.test(data)) continue;
@@ -848,7 +895,11 @@ async function parseStream(
     }
     if ((chunk?.error !== undefined && chunk.error !== null) || chunk?.type === "error") {
       const detail = isJsonObject(chunk.error) ? chunk.error.message : chunk.error ?? chunk.message ?? chunk.type;
-      throw new Error(`streaming API error: ${String(detail ?? JSON.stringify(chunk.error)).slice(0, 300)}`);
+      const message = String(detail ?? JSON.stringify(chunk.error)).slice(0, 300);
+      if (/overload|rate.?limit|temporar|unavailable|server.?error|network|timeout/i.test(message)) {
+        throw interruption(`streaming API error: ${message}`, "stream_overloaded");
+      }
+      throw new Error(`streaming API error: ${message}`);
     }
     if (["ping", "keepalive", "heartbeat"].includes(String(chunk?.type ?? "").toLowerCase()) && chunk?.choices === undefined) continue;
     if (chunk?.usage !== undefined) usage = chunk.usage;
@@ -873,9 +924,10 @@ async function parseStream(
           || (isText(delta.reasoning) && delta.reasoning.length > 0)
           || (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0)
         ));
-        throw new RetryableStreamError(
+        throw interruption(
           "streaming API returned non-success finish_reason: network_error",
-          contentBytes > 0 || reasoningBytes > 0 || acc.length > 0 || sameChunkActivity,
+          "stream_interrupted",
+          sameChunkActivity,
         );
       }
       throw new Error(`streaming API returned non-success finish_reason: ${String(finishReason).slice(0, 100)}`);
@@ -945,7 +997,14 @@ async function parseStream(
       finalize(i); // eager only when this index now holds a complete JSON object
     }
   }
-  if (!sawDone) throw new Error("streaming response ended before [DONE]");
+  if (!sawDone && !sawFinish) {
+    // A successful finish_reason is already an unambiguous terminal record; some compatible
+    // gateways then close at EOF without the optional [DONE] convenience sentinel. Without either
+    // terminator the stream was truncated. Replaying that truncation is safe only while nothing
+    // model-authored (including a tool call) escaped this attempt; otherwise a retry could duplicate
+    // visible output or side effects.
+    throw interruption("streaming response ended before [DONE]");
+  }
   if (!sawValidChoice) throw new Error("streaming response ended without a valid choice");
   if (!sawFinish) throw new Error("streaming response ended without a successful finish reason");
   think.flush(); // emit any buffered tail (e.g. trailing content with no closing tag)
@@ -965,7 +1024,11 @@ async function parseStream(
 }
 
 /** Yield non-empty lines from an SSE response body. */
-async function* sseLines(res: Response, onActivity?: () => void): AsyncGenerator<string> {
+async function* sseLines(
+  res: Response,
+  onActivity?: () => void,
+  onReadError?: (error: Error) => Error,
+): AsyncGenerator<string> {
   const reader = res.body!.getReader(); // parseStream guards res.body before calling this
   const decoder = new TextDecoder();
   let buffer = "";
@@ -973,8 +1036,16 @@ async function* sseLines(res: Response, onActivity?: () => void): AsyncGenerator
   let lineBytes = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      let done: boolean;
+      let value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await reader.read());
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        throw onReadError?.(failure) ?? failure;
+      }
       if (done) break;
+      if (!value) continue;
       totalBytes += value.byteLength;
       if (totalBytes > OPENAI_STREAM_LIMITS.maxTotalBytes) throw new Error("streaming SSE aggregate exceeds safety limit");
       // Count raw bytes, not JS characters, so multibyte UTF-8 cannot evade the per-line cap.

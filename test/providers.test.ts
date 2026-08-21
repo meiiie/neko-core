@@ -4,6 +4,7 @@ import { NekoConfig } from "../src/adapters/config.ts";
 import { clampEffort, getProvider, listModelOptions, makeThinkSplitter, normalizeToolResultImages, OPENAI_STREAM_LIMITS, OpenAICompatProvider, parseOpenAIMessage, toImgTagMessages } from "../src/adapters/providers.ts";
 import { ResponsesProvider } from "../src/adapters/responses-provider.ts";
 import { SESSION_CONTEXT_MARK } from "../src/core/agent-constants.ts";
+import { ProviderAttemptError, type ProviderAttemptEvent } from "../src/core/ports.ts";
 import { isText } from "../src/shared/wire.ts";
 
 function cfg(provider: string) {
@@ -382,6 +383,116 @@ test("network-resilient: does not replay network_error after semantic stream out
   }
 });
 
+test("network-resilient: retries a truncated stream before semantic output", async () => {
+  const orig = globalThis.fetch;
+  let calls = 0;
+  const attempts: ProviderAttemptEvent[] = [];
+  // SAFETY: test-built fetch fixture; every returned stream frame is constructed below.
+  globalThis.fetch = (async () => {
+    calls++;
+    if (calls === 1) {
+      return new Response("", { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    const chunk = { choices: [{ delta: { content: "recovered" }, finish_reason: "stop" }] };
+    return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  }) as any;
+  try {
+    const config = new NekoConfig({
+      provider: "openai_compat",
+      base_url: "http://localhost:9/v1",
+      model: "m",
+      max_retries: 1,
+      retry_base_delay_seconds: 0.001,
+      retry_max_delay_seconds: 0.001,
+    }, null, {}, "");
+    const result = await new OpenAICompatProvider(config).complete(
+      [{ role: "user", content: "hi" }],
+      undefined,
+      () => {},
+      undefined,
+      { onAttempt: (event) => { attempts.push(event); } },
+    );
+    expect(result.content).toBe("recovered");
+    expect(calls).toBe(2);
+    expect(attempts.map((event) => event.type)).toEqual(["attempt_started", "retry_scheduled", "attempt_started"]);
+    expect(attempts[1].reason).toBe("stream_interrupted");
+    expect(attempts[1].delayMs).toBeGreaterThanOrEqual(0);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("network-resilient: does not replay a truncated stream after semantic output", async () => {
+  const orig = globalThis.fetch;
+  let calls = 0;
+  // SAFETY: test-built fetch fixture; every returned stream frame is constructed below.
+  globalThis.fetch = (async () => {
+    calls++;
+    const chunk = { choices: [{ delta: { content: "partial" } }] };
+    return new Response(`data: ${JSON.stringify(chunk)}\n\n`, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  }) as any;
+  try {
+    const config = new NekoConfig({
+      provider: "openai_compat",
+      base_url: "http://localhost:9/v1",
+      model: "m",
+      max_retries: 1,
+    }, null, {}, "");
+    await expect(new OpenAICompatProvider(config).complete(
+      [{ role: "user", content: "hi" }],
+      undefined,
+      () => {},
+    )).rejects.toThrow("ended before [DONE]");
+    expect(calls).toBe(1);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("network-resilient: does not replay a truncated stream after an eager tool call", async () => {
+  const orig = globalThis.fetch;
+  let calls = 0;
+  let ready = 0;
+  // SAFETY: test-built fetch fixture; every returned stream frame is constructed below.
+  globalThis.fetch = (async () => {
+    calls++;
+    const chunk = { choices: [{ delta: { tool_calls: [{
+      index: 0,
+      id: "call-1",
+      function: { name: "read_file", arguments: '{"path":"x"}' },
+    }] } }] };
+    return new Response(`data: ${JSON.stringify(chunk)}\n\n`, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  }) as any;
+  try {
+    const config = new NekoConfig({
+      provider: "openai_compat",
+      base_url: "http://localhost:9/v1",
+      model: "m",
+      max_retries: 1,
+    }, null, {}, "");
+    await expect(new OpenAICompatProvider(config).complete(
+      [{ role: "user", content: "hi" }],
+      undefined,
+      () => {},
+      undefined,
+      { onToolCallReady: () => { ready++; } },
+    )).rejects.toThrow("ended before [DONE]");
+    expect(calls).toBe(1);
+    expect(ready).toBe(1);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 test("self-heals when an endpoint rejects reasoning_effort: drops the field, retries, remembers", async () => {
   const orig = globalThis.fetch;
   const sentEffort: (string | undefined)[] = [];
@@ -570,7 +681,7 @@ async function completeOpenAIResponse(response: Response, onToolCallReady?: (cal
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   globalThis.fetch = (async () => response) as any;
   try {
-    const config = new NekoConfig({ provider: "openai_compat", base_url: "http://x/v1", model: "m", reasoning_effort: "off" }, null, {}, "k");
+    const config = new NekoConfig({ provider: "openai_compat", base_url: "http://x/v1", model: "m", reasoning_effort: "off", max_retries: 0 }, null, {}, "k");
     return await new OpenAICompatProvider(config).complete(
       [{ role: "user", content: "hi" }], undefined, () => {}, undefined, { onToolCallReady },
     );
@@ -618,9 +729,38 @@ test("openai stream rejects an in-band error envelope", async () => {
   await expect(completeOpenAIStream(typed)).rejects.toThrow("provider overloaded");
 });
 
+test("openai stream classifies a reader failure after content as checkpoint continuation", async () => {
+  const encoder = new TextEncoder();
+  let pulls = 0;
+  const response = new Response(new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (pulls++ === 0) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "partial" } }] })}\n\n`));
+      } else {
+        controller.error(new Error("socket reset"));
+      }
+    },
+  }), { status: 200, headers: { "content-type": "text/event-stream" } });
+
+  try {
+    await completeOpenAIResponse(response);
+    throw new Error("expected the stream to fail");
+  } catch (error) {
+    if (!(error instanceof ProviderAttemptError)) throw error;
+    expect(error.code).toBe("stream_interrupted");
+    expect(error.recovery).toBe("continue");
+    expect(error.semanticActivity).toBe(true);
+  }
+});
+
 test("openai stream rejects EOF before the DONE sentinel", async () => {
   const body = `data: ${JSON.stringify({ choices: [{ delta: { content: "partial" } }] })}\n\n`;
   await expect(completeOpenAIStream(body)).rejects.toThrow("ended before [DONE]");
+});
+
+test("openai stream accepts EOF after an explicit successful finish", async () => {
+  const body = `data: ${JSON.stringify({ choices: [{ delta: { content: "complete" }, finish_reason: "stop" }] })}\n\n`;
+  expect((await completeOpenAIStream(body)).content).toBe("complete");
 });
 
 test("openai stream rejects non-success finish reasons", async () => {

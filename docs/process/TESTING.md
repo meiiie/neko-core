@@ -24,6 +24,13 @@ rtk bun run eval:office                 # OPT-IN network: official support pack 
 
 ## Layer 1 — headless unit/integration (`bun test`, no network)
 
+The suite is governed by contract value, determinism, and failure signal rather than a target test count.
+Live/platform checks must declare unavailable infrastructure with `test.skipIf`; a body-level early return
+must not be counted as a pass. Custom timeouts require a real external ceiling or a deterministic fake-time
+contract, not unexplained padding. The measured audit, deletion criteria, SRT fixture finding, and staged
+mutation-testing plan are recorded in
+[`test-suite-quality-2026-08-22.md`](../research/test-suite-quality-2026-08-22.md).
+
 | Area | File | Covers |
 |---|---|---|
 | Architecture | architecture.test | core never imports adapters/ui/ink (deps point inward) |

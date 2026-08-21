@@ -1206,7 +1206,9 @@ async function cmdRun(args: Args): Promise<number> {
     // Persist toward the goal when --loop OR config auto_loop is set; --once forces a single shot.
     // Images go single-shot (Agent.run carries them; runUntilDone doesn't).
     const useLoop = !args.once && (args.loop || cfg.autoLoop) && images.length === 0;
-    const answer = useLoop ? await agent.runUntilDone(instruction) : await agent.run(instruction, undefined, images.length ? images : undefined);
+    const answer = useLoop
+      ? await agent.runUntilDone(instruction)
+      : await agent.runResilient(instruction, { images: images.length ? images : undefined });
     process.stdout.write("\n");
     if (streamed === 0 && answer.trim()) console.log(terminalSafeText(answer, { preserveLineBreaks: true })); // synthetic/non-streamed result
     console.log(`[${agent.cost.summary()}]`);

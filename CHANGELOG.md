@@ -6,6 +6,21 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.17] - 2026-08-22
+
+### Fixed
+
+- **Interrupted provider streams continue from a durable checkpoint instead of ending the task.**
+  OpenAI-compatible, OpenAI Responses, and Anthropic streams now distinguish a safe pre-output replay
+  from a post-output continuation. Partial text and tool history are preserved, retry decisions are
+  checkpointed before backoff, user cancellation still wins, and malformed or unsafe protocol data
+  continues to fail closed. A native successful terminal event is accepted even when a compatible
+  gateway closes without an optional `[DONE]` sentinel.
+- **Windows SRT validators no longer appear to hang during teardown.** Read-only scratch is nested
+  below a launch-private temporary parent, avoiding the Windows Known Folder ACL slow path while
+  preserving the exact write boundary and cleanup. The affected validator path fell from roughly
+  80-120 seconds to roughly 3-6 seconds in repeated local runs.
+
 ## [0.24.16] - 2026-08-21
 
 ### Added

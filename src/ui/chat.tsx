@@ -627,7 +627,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           adaptiveEffort: cfg.adaptiveEffort,
         });
         child.setTurnSystemContext(matchedTurnContext(prompt, subReg, cfg.resolvedHome).text);
-        return await child.run(prompt, signal);
+        return await child.runResilient(prompt, { signal });
       } finally {
         lease.close();
         subReg.setSkillPolicyForTurn(undefined);
@@ -764,7 +764,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         } else if (kind === "step") {
           setStep(data);
         } else if (kind === "recovery") {
-          addLine("info", `watchdog: provider stalled; resumed from checkpoint (${data.attempt}/${data.max})`);
+          flushStream();
+          addLine("info", `watchdog: provider stream interrupted (${data.reason}); continuing from checkpoint (${data.attempt}/${data.max})`);
           queuePersist();
         } else if (kind === "compact") {
           // In-loop safety-net compaction (a single huge turn). Show the same progress bar; the agent
@@ -2372,7 +2373,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       );
       const result = loopGoal
         ? await agentRef.current!.runUntilDone(loopGoal, { signal: controller.signal })
-        : await agentRef.current!.run(toSend, controller.signal, imgs.length ? imgs : undefined, internal);
+        : await agentRef.current!.runResilient(toSend, {
+            signal: controller.signal,
+            images: imgs.length ? imgs : undefined,
+            internal,
+          });
       const streamed = streamRef.current.trim().length > 0;
       flushStream();
       if (result === "[interrupted]") addLine("info", "(interrupted)");

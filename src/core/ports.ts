@@ -24,6 +24,59 @@ export interface ProviderResponse {
  * kind="tool" is streamed tool-call argument text (used only for a live token estimate, not shown). */
 export type DeltaHook = (text: string, kind?: "content" | "reasoning" | "tool") => void;
 
+/** Stable, payload-free lifecycle metadata for one provider request attempt. Hosts can persist and
+ * render this without retaining prompts, credentials, response bodies, or model-authored text. */
+export interface ProviderAttemptEvent {
+  type: "attempt_started" | "retry_scheduled";
+  attempt: number;
+  reason?: ProviderFailureCode;
+  delayMs?: number;
+  maxRetries?: number;
+}
+
+export type ProviderFailureCode =
+  | "transport_unavailable"
+  | "rate_limited"
+  | "server_error"
+  | "stream_interrupted"
+  | "stream_overloaded"
+  | "stream_timeout";
+
+/**
+ * A transient provider attempt failed. `recovery` is the semantic commit barrier:
+ * - `replay`: no model-authored content/tool call escaped, so the identical request may be retried.
+ * - `continue`: output crossed the boundary; never replay invisibly. Continue from the durable Agent
+ *   trajectory with a new turn, so partial text is preserved and unknown mutations are inspected.
+ * - `none`: the failure is classified but automatic recovery is unsafe.
+ */
+export class ProviderAttemptError extends Error {
+  readonly name = "ProviderAttemptError";
+  readonly retryable: boolean;
+  readonly recovery: "replay" | "continue" | "none";
+  readonly semanticActivity: boolean;
+  readonly retryAfterMs?: number;
+
+  constructor(
+    message: string,
+    readonly code: ProviderFailureCode,
+    options: {
+      retryable?: boolean;
+      recovery?: "replay" | "continue" | "none";
+      semanticActivity?: boolean;
+      retryAfterMs?: number;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.retryable = options.retryable ?? true;
+    this.recovery = options.recovery ?? "none";
+    this.semanticActivity = options.semanticActivity ?? this.recovery === "continue";
+    if (Number.isFinite(options.retryAfterMs) && Number(options.retryAfterMs) >= 0) {
+      this.retryAfterMs = Number(options.retryAfterMs);
+    }
+  }
+}
+
 /** Per-call options. `responseSchema` (a JSON Schema) asks for schema-constrained structured output
  * (native `response_format` where the endpoint supports it) so an extraction reliably fills a shape -
  * e.g. enumerating every product variant instead of collapsing to one value. */
@@ -44,6 +97,9 @@ export interface CompleteOptions {
    * turn and ask the host to execute a tool. The Agent supplies its existing safeExecute boundary,
    * so approvals and path/sandbox rules stay authoritative in Neko rather than the sidecar. */
   executeTool?: (call: ToolCall) => Promise<string | any[]>;
+  /** Attempt lifecycle only; never contains prompts, output, URLs, headers, or credentials. Awaiting
+   * this hook lets the host persist its retry state before the adapter starts cancellable backoff. */
+  onAttempt?: (event: ProviderAttemptEvent) => void | Promise<void>;
 }
 
 /** The LLM port. One method; `OpenAICompatProvider` is the adapter. */

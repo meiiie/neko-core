@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { Usage } from "../core/cost.ts";
-import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
+import { ProviderAttemptError, type CompleteOptions, type DeltaHook, type Provider, type ProviderResponse, type ToolCall } from "../core/ports.ts";
 import { VERSION } from "../shared/version.ts";
 import { isJsonObject, isObjectValue, isText, type JsonValue } from "../shared/wire.ts";
 import type { NekoConfig } from "./config.ts";
@@ -440,7 +440,6 @@ export async function parseResponsesStream(
   let reasoning = "";
   let usage: Usage | undefined;
   let completed = false;
-  let sawDone = false;
   let sawValidEvent = false;
   let outputBytes = 0;
   let reasoningBytes = 0;
@@ -449,6 +448,16 @@ export async function parseResponsesStream(
   const calls = new Map<string, { id: string; name: string; arguments: string; argumentBytes: number }>();
   const callKeysByIndex = new Map<number, string>();
   const emitted = new Set<string>();
+  const semanticActivity = () => outputBytes > 0 || reasoningBytes > 0 || calls.size > 0;
+  const interrupted = (message: string, cause?: unknown) => new ProviderAttemptError(
+    message,
+    "stream_interrupted",
+    {
+      recovery: semanticActivity() ? "continue" : "replay",
+      semanticActivity: semanticActivity(),
+      cause,
+    },
+  );
   const appendOutput = (delta: any, emit: boolean): void => {
     if (!isText(delta)) throw new Error("Responses streaming output delta was not text");
     if (!delta) return;
@@ -554,8 +563,11 @@ export async function parseResponsesStream(
     continuation.set(key, { item, bytes });
   };
 
-  for await (const event of responseEvents(response, onActivity)) {
-    if (event === RESPONSES_STREAM_DONE) { sawDone = true; break; }
+  for await (const event of responseEvents(response, onActivity, (error) => interrupted(
+    `Responses stream transport failed: ${messageOf(error)}`,
+    error,
+  ))) {
+    if (event === RESPONSES_STREAM_DONE) break;
     if (!isJsonObject(event) || !isText(event.type) || !event.type) {
       throw new Error("Responses streaming SSE data was not a valid Responses event");
     }
@@ -652,8 +664,9 @@ export async function parseResponsesStream(
     }
   }
   if (!sawValidEvent) throw new Error("Responses stream ended without a valid event");
-  if (!completed) throw new Error("Responses stream disconnected before response.completed.");
-  if (!sawDone) throw new Error("Responses stream ended before [DONE]");
+  if (!completed) throw interrupted("Responses stream disconnected before response.completed.");
+  // response.completed is the typed protocol terminal. [DONE] is an optional compatibility
+  // sentinel; EOF immediately after response.completed is complete, not truncation.
   const toolCalls = [...calls.keys()].map((key) => {
     const item = calls.get(key)!;
     const call = materializeCall(item, true);
@@ -710,7 +723,11 @@ function parseResponsesSseBlock(block: string): any | typeof RESPONSES_STREAM_DO
   catch { throw new Error("Responses streaming API sent malformed SSE data"); }
 }
 
-async function* responseEvents(response: Response, onActivity?: () => void): AsyncGenerator<any | typeof RESPONSES_STREAM_DONE> {
+async function* responseEvents(
+  response: Response,
+  onActivity?: () => void,
+  onReadError?: (error: Error) => Error,
+): AsyncGenerator<any | typeof RESPONSES_STREAM_DONE> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -718,8 +735,16 @@ async function* responseEvents(response: Response, onActivity?: () => void): Asy
   let lineBytes = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      let done: boolean;
+      let value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await reader.read());
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        throw onReadError?.(failure) ?? failure;
+      }
       if (done) break;
+      if (!value) continue;
       totalBytes += value.byteLength;
       if (totalBytes > RESPONSES_STREAM_LIMITS.maxTotalBytes) throw new Error("Responses streaming SSE aggregate exceeds safety limit");
       for (const byte of value) {

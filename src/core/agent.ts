@@ -10,7 +10,7 @@
  * Tool observations (errors + denials) are fed back so the model adapts rather than crash.
  */
 import { CostTracker, type Usage } from "./cost.ts";
-import type { DeltaHook, Provider, ToolCall } from "./ports.ts";
+import { ProviderAttemptError, type DeltaHook, type Provider, type ToolCall } from "./ports.ts";
 import { todosContextBlock, type ToolRegistry } from "./tool-runtime.ts";
 import { taskDelegatesReadOnly } from "./tools.ts";
 import { hasAuthoritativeValidatorExit, isValidationBashCommand } from "./validation-command.ts";
@@ -437,6 +437,60 @@ export class Agent {
     return false;
   }
 
+  /** Run one human goal with bounded checkpoint continuation after a committed stream interruption.
+   * The provider adapter may transparently replay only before semantic output. Once content or a tool
+   * call crossed that barrier, this method preserves the partial trajectory and opens a new internal
+   * continuation turn. User abort and exhausted/non-recoverable failures are never retried. */
+  async runResilient(
+    instruction: string,
+    opts: {
+      signal?: AbortSignal;
+      images?: ImageAttachment[];
+      internal?: boolean;
+      maxRecoveries?: number;
+    } = {},
+  ): Promise<string> {
+    const state = {
+      count: 0,
+      max: Math.max(0, Math.min(opts.maxRecoveries ?? 2, 5)),
+    };
+    return this.runWithRecovery(instruction, opts.signal, opts.images, Boolean(opts.internal), state, instruction);
+  }
+
+  private async runWithRecovery(
+    instruction: string,
+    signal: AbortSignal | undefined,
+    images: ImageAttachment[] | undefined,
+    internal: boolean,
+    state: { count: number; max: number },
+    goal: string,
+  ): Promise<string> {
+    let next = instruction;
+    let nextImages = images;
+    let nextInternal = internal;
+    while (true) {
+      try { return await this.run(next, signal, nextImages, nextInternal); }
+      catch (error) {
+        const failure = error instanceof Error ? error : null;
+        if (signal?.aborted || !failure || !isRecoverableProviderInterruption(failure) || state.count >= state.max) throw error;
+        state.count++;
+        const reason = providerRecoveryReason(failure);
+        this.emit("recovery", { attempt: state.count, max: state.max, reason });
+        // The partial assistant/tool journal and recovery decision must reach the session store before
+        // another provider request can observe or extend them.
+        await this.durableCheckpoint();
+        const delayMs = providerRecoveryDelayMs(failure, state.count);
+        if (delayMs > 0) await interruptibleDelay(delayMs, signal);
+        next = `PROVIDER RECOVERY (${state.count}/${state.max}). Goal: "${goal}". ` +
+          "The prior provider stream ended after its safe replay boundary. Its partial assistant output " +
+          "is preserved in the durable conversation. Continue from that exact checkpoint; do not repeat " +
+          "a mutation whose outcome is unknown. Inspect actual state first when needed, then finish the task.";
+        nextImages = undefined;
+        nextInternal = true;
+      }
+    }
+  }
+
   /** Closed-loop runner (agent-looping, "closed" variant): do the goal, then self-review against
    * a high bar and fix gaps, repeating until the model replies DONE or maxIters is hit. A provider
    * inactivity timeout resumes from the durable trajectory with bounded retries; this is not a total
@@ -447,24 +501,15 @@ export class Agent {
   ): Promise<string> {
     const maxIters = Math.max(1, Math.min(opts.maxIters ?? 6, 20));
     const maxStallRecoveries = Math.max(0, Math.min(opts.maxStallRecoveries ?? 2, 5));
-    let stallRecoveries = 0;
-    const runResumable = async (instruction: string, internal = false): Promise<string> => {
-      let next = instruction;
-      let nextInternal = internal;
-      while (true) {
-        try { return await this.run(next, opts.signal, undefined, nextInternal); }
-        catch (error) {
-          if (opts.signal?.aborted || !isRecoverableProviderStall(error) || stallRecoveries >= maxStallRecoveries) throw error;
-          stallRecoveries++;
-          this.emit("recovery", { attempt: stallRecoveries, max: maxStallRecoveries, reason: "provider idle timeout" });
-          next = `AUTONOMY RECOVERY (${stallRecoveries}/${maxStallRecoveries}). Goal: "${goal}". ` +
-            "The provider stopped making progress and Neko restarted its transport. Resume from the durable " +
-            "conversation/tool checkpoint. Inspect actual state before repeating any mutation, continue the " +
-            "next concrete step, and verify the final result.";
-          nextInternal = true;
-        }
-      }
-    };
+    const recoveryState = { count: 0, max: maxStallRecoveries };
+    const runResumable = (instruction: string, internal = false) => this.runWithRecovery(
+      instruction,
+      opts.signal,
+      undefined,
+      internal,
+      recoveryState,
+      goal,
+    );
     let out = await runResumable(goal);
     for (let i = 1; i < maxIters; i++) {
       if (opts.signal?.aborted || out === "[interrupted]") return out;
@@ -932,6 +977,12 @@ export class Agent {
             onToolCallReady,
             executeTool,
             onUsage: publishUsage,
+            onAttempt: async (event) => {
+              this.emit("provider_attempt", event);
+              // The host observes the retry decision before the adapter begins backoff. This barrier
+              // also makes the current user/partial-assistant trajectory crash-safe before re-entry.
+              if (event.type === "retry_scheduled") await this.durableCheckpoint();
+            },
             ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : undefined),
           },
         );
@@ -1228,13 +1279,45 @@ export class Agent {
   }
 }
 
-/** Only silence/stall failures are safe to resume automatically. Authentication, validation, policy,
- * and ordinary provider errors still surface immediately instead of being hidden behind retries. */
-function isRecoverableProviderStall(error: any): boolean {
+/** Only typed post-commit interruptions and silence/stalls continue automatically. Authentication,
+ * validation, protocol, and exhausted pre-commit replay failures still surface immediately. */
+function isRecoverableProviderInterruption(error: Error): boolean {
+  if (error instanceof ProviderAttemptError) {
+    return error.retryable && error.recovery === "continue";
+  }
   return error instanceof Error && (
     error.name === "TimeoutError"
     || /\b(?:idle timeout|produced no activity)\b/i.test(error.message)
   );
+}
+
+function providerRecoveryReason(error: Error): string {
+  return error instanceof ProviderAttemptError ? error.code : "stream_timeout";
+}
+
+function providerRecoveryDelayMs(error: Error, attempt: number): number {
+  if (error instanceof ProviderAttemptError && error.retryAfterMs !== undefined) {
+    return Math.min(30_000, error.retryAfterMs);
+  }
+  const base = Math.min(2_000, 250 * 2 ** Math.max(0, attempt - 1));
+  return Math.round(base * (0.8 + Math.random() * 0.4));
+}
+
+function interruptibleDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new DOMException("Aborted by user", "AbortError"));
+    const finish = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(new DOMException("Aborted by user", "AbortError"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
 /** Rebuild the OpenAI-format assistant turn so the next request carries the tool_calls

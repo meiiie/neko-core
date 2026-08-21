@@ -6,7 +6,7 @@
  */
 import type { Usage } from "../core/cost.ts";
 import { SESSION_CONTEXT_MARK } from "../core/agent-constants.ts";
-import type { CompleteOptions, DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/ports.ts";
+import { ProviderAttemptError, type CompleteOptions, type DeltaHook, type Provider, type ProviderResponse, type ToolCall } from "../core/ports.ts";
 import { NekoConfig } from "./config.ts";
 import { providerScope } from "./provider-scope.ts";
 import { clampEffort, effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
@@ -344,7 +344,8 @@ export function extractJsonLoose(s: string): string {
  *  sometimes goes silent on TTFT); non-user AbortErrors count too. A clean "disconnected before message_stop"
  *  does NOT (it's surfaced, not masked). The caller MUST rule out a user abort (signal.aborted) first. */
 export function isRetryableStreamStall(err: any): boolean {
-  return err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError");
+  return (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError"))
+    || (err instanceof ProviderAttemptError && err.retryable && err.recovery === "replay");
 }
 
 /** Parse a model's true output cap out of an Anthropic "max_tokens too large" 400 body, e.g.
@@ -464,6 +465,13 @@ async function parseStream(
   const toolCalls: ToolCall[] = [];
   const usage: Usage = {};
   let sawMessageStart = false, completed = false;
+  const semanticActivity = () => contentBytes > 0 || reasoningBytes > 0 || blocks.size > 0;
+  const interrupted = (message: string, cause?: unknown, code: "stream_interrupted" | "stream_overloaded" = "stream_interrupted") =>
+    new ProviderAttemptError(message, code, {
+      recovery: semanticActivity() ? "continue" : "replay",
+      semanticActivity: semanticActivity(),
+      cause,
+    });
   const addContent = (text: string): void => {
     contentBytes += Buffer.byteLength(text, "utf8");
     if (contentBytes > ANTHROPIC_STREAM_LIMITS.maxContentBytes) throw new Error("anthropic streaming content exceeds safety limit");
@@ -477,7 +485,10 @@ async function parseStream(
     if (text) onDelta(text, "reasoning");
   };
 
-  stream: for await (const ev of sseEvents(res, onActivity)) {
+  stream: for await (const ev of sseEvents(res, onActivity, (error) => interrupted(
+    `anthropic stream transport failed: ${error instanceof Error ? error.message : String(error)}`,
+    error,
+  ))) {
     if (!isJsonObject(ev) || !isText(ev.type) || !ev.type) {
       throw new Error("anthropic stream data was not a valid event");
     }
@@ -608,7 +619,13 @@ async function parseStream(
         }
         break;
       }
-      case "error": throw new Error(`anthropic stream error: ${String(JSON.stringify(ev.error)).slice(0, 200)}`);
+      case "error": {
+        const detail = String(JSON.stringify(ev.error)).slice(0, 200);
+        if (/overload|rate.?limit|temporar|unavailable|server.?error|network|timeout/i.test(detail)) {
+          throw interrupted(`anthropic stream error: ${detail}`, undefined, "stream_overloaded");
+        }
+        throw new Error(`anthropic stream error: ${detail}`);
+      }
       case "message_stop": {
         requireMessageStart(sawMessageStart);
         if ([...blocks.keys()].some((index) => !completedBlocks.has(index))) {
@@ -624,7 +641,7 @@ async function parseStream(
     }
   }
   if (!sawMessageStart) throw new Error("anthropic stream ended before message_start");
-  if (!completed) throw new Error("anthropic stream disconnected before message_stop");
+  if (!completed) throw interrupted("anthropic stream disconnected before message_stop");
   usage.total_tokens = (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0);
   const nativeBlocks = [...completedBlocks.keys()].sort((a, b) => a - b).map((index) => completedBlocks.get(index));
   return {
@@ -685,7 +702,11 @@ function usageOf(u: any): Usage {
 
 /** Yield the parsed JSON of each `data:` line in an Anthropic SSE stream (the `event:` line is redundant — the
  *  JSON carries its own `type`). */
-async function* sseEvents(res: Response, onActivity?: () => void): AsyncGenerator<any> {
+async function* sseEvents(
+  res: Response,
+  onActivity?: () => void,
+  onReadError?: (error: Error) => Error,
+): AsyncGenerator<any> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -701,8 +722,16 @@ async function* sseEvents(res: Response, onActivity?: () => void): AsyncGenerato
   };
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      let done: boolean;
+      let value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await reader.read());
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        throw onReadError?.(failure) ?? failure;
+      }
       if (done) break;
+      if (!value) continue;
       totalBytes += value.byteLength;
       if (totalBytes > ANTHROPIC_STREAM_LIMITS.maxTotalBytes) throw new Error("anthropic streaming SSE aggregate exceeds safety limit");
       for (const byte of value) {

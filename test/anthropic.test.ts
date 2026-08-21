@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { addCacheBreakpoints, ANTHROPIC_DEFAULT_MAX_TOKENS, ANTHROPIC_STREAM_LIMITS, anthropicMaxTokensLimit, anthropicThinkingPolicy, AnthropicProvider, extractJsonLoose, isRetryableStreamStall, parseMessage, stripCacheBreakpoints, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
 import { SESSION_CONTEXT_MARK } from "../src/core/agent-constants.ts";
+import { ProviderAttemptError } from "../src/core/ports.ts";
 
 test("thinkingBudget maps the effort ladder; off/unset => 0 (no extended thinking)", () => {
   expect(thinkingBudget("off")).toBe(0);
@@ -499,8 +500,14 @@ test("anthropic stream rejects a disconnected partial response", async () => {
   globalThis.fetch = (async () => new Response(body, { status: 200 })) as any;
   try {
     const cfg = new NekoConfig({ provider: "anthropic", base_url: "http://x", model: "m", reasoning_effort: "off" }, null, {}, "k");
-    await expect(new AnthropicProvider(cfg).complete([{ role: "user", content: "hi" }], undefined, () => {}))
-      .rejects.toThrow("disconnected before message_stop");
+    try {
+      await new AnthropicProvider(cfg).complete([{ role: "user", content: "hi" }], undefined, () => {});
+      throw new Error("expected the stream to fail");
+    } catch (error) {
+      if (!(error instanceof ProviderAttemptError)) throw error;
+      expect(error.message).toContain("disconnected before message_stop");
+      expect(error.recovery).toBe("continue");
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }

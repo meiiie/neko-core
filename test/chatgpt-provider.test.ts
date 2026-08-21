@@ -8,6 +8,7 @@ import { HybridChatGptProvider } from "../src/adapters/chatgpt-app-server-provid
 import { CHATGPT_CODEX_COMPAT_VERSION, ChatGptProvider, getChatGptUsage, isDirectChatGptModel, listChatGptModelCatalog, listChatGptModels, parseResponsesStream, RESPONSES_STREAM_LIMITS, resolveChatGptEffort, toResponsesInput, toResponsesTools } from "../src/adapters/chatgpt-provider.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
 import { getProvider, listModelOptions, listModels } from "../src/adapters/providers.ts";
+import { ProviderAttemptError } from "../src/core/ports.ts";
 
 const originalFetch = globalThis.fetch;
 const oldHome = process.env.HOME;
@@ -110,7 +111,14 @@ test("Responses parser preserves finalized tool arguments across sparse completi
 
 test("Responses parser rejects a disconnected stream instead of accepting a partial answer", async () => {
   const response = new Response(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: "partial" })}\n\n`);
-  await expect(parseResponsesStream(response)).rejects.toThrow("before response.completed");
+  try {
+    await parseResponsesStream(response);
+    throw new Error("expected the stream to fail");
+  } catch (error) {
+    if (!(error instanceof ProviderAttemptError)) throw error;
+    expect(error.message).toContain("before response.completed");
+    expect(error.recovery).toBe("continue");
+  }
 });
 
 test("Responses parser fails closed on malformed, empty, and unfinished SSE", async () => {
@@ -132,9 +140,8 @@ test("Responses parser fails closed on malformed, empty, and unfinished SSE", as
   await expect(parseResponsesStream(new Response(unfinished)))
     .rejects.toThrow("before response.completed");
 
-  const missingDone = `data: ${JSON.stringify({ type: "response.completed", response: { output: [], usage: {} } })}\n\n`;
-  await expect(parseResponsesStream(new Response(missingDone)))
-    .rejects.toThrow("before [DONE]");
+  const terminalAtEof = `data: ${JSON.stringify({ type: "response.completed", response: { output: [], usage: {} } })}\n\n`;
+  expect((await parseResponsesStream(new Response(terminalAtEof))).tool_calls).toEqual([]);
 
   const keepalives = [
     "data: ping\n\n",

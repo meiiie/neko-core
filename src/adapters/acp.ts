@@ -893,7 +893,10 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         startedAt: new Date().toISOString(),
         activeToolCallIds: [],
       };
-      const answerPromise = runtime.agent.run(input.text, pending.signal, input.images.length ? input.images : undefined);
+      const answerPromise = runtime.agent.runResilient(input.text, {
+        signal: pending.signal,
+        images: input.images.length ? input.images : undefined,
+      });
       const lastUser = [...runtime.agent.messages].reverse().find((message: any) => message?.role === "user" && message._neko_internal !== true);
       if (lastUser && !lastUser._neko_acp_message_id) lastUser._neko_acp_message_id = `msg_${randomUUID()}`;
       await persist(session, session.record.turnState);

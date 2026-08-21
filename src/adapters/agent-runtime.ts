@@ -91,7 +91,7 @@ export async function buildAgentRuntime(
         adaptiveEffort: cfg.adaptiveEffort,
       });
       child.setTurnSystemContext(matchedTurnContext(prompt, subReg, cfg.resolvedHome).text);
-      return await child.run(prompt, signal);
+      return await child.runResilient(prompt, { signal });
     } finally {
       lease.close();
       subReg.setSkillPolicyForTurn(undefined);

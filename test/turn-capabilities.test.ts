@@ -18,15 +18,27 @@ const tempDirs: string[] = [];
 // Windows SRT startup is serialized and can exceed a minute while the full suite exercises other
 // live sandbox paths. Keep the product command deadline unchanged; this is only the outer test gate.
 const LIVE_SRT_TEST_TIMEOUT_MS = 180_000;
+// Optional live infrastructure must be visible as skipped, not silently counted as passed.
+const LIVE_WINDOWS_SRT_BRIDGE = process.platform === "win32"
+  && detectSandbox() === "srt"
+  && sandboxActive()
+  ? resolveSrtBunBridge(process.cwd())
+  : null;
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 function fixture() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "neko-turn-root-")));
-  const home = realpathSync(mkdtempSync(join(tmpdir(), "neko-turn-home-")));
-  tempDirs.push(root, home);
+  // Keep SRT ACL targets below a private fixture container. Immediate children of the Windows
+  // %TEMP% Known Folder make grant/restore take ~30 seconds and measure OS profile ACL maintenance,
+  // not the turn-capability contract this suite owns.
+  const container = realpathSync(mkdtempSync(join(tmpdir(), "neko-turn-fixture-")));
+  const root = join(container, "root");
+  const home = join(container, "home");
+  tempDirs.push(container);
+  mkdirSync(root, { recursive: true });
+  mkdirSync(home, { recursive: true });
   mkdirSync(join(root, "src"), { recursive: true });
   writeFileSync(join(root, "src", "target.ts"), "export const answer = 41;\n", "utf8");
   return {
@@ -351,8 +363,7 @@ test("planner and active exact lease reject multiply-linked targets on the same 
   }
 });
 
-test("a live SRT exact validator cannot mutate the project directly or through temp aliases", async () => {
-  if (process.platform !== "win32" || detectSandbox() !== "srt" || !sandboxActive() || !resolveSrtBunBridge(process.cwd())) return;
+test.skipIf(!LIVE_WINDOWS_SRT_BRIDGE)("a live SRT exact validator cannot mutate the project directly or through temp aliases", async () => {
   const { root } = fixture();
   const tests = join(root, "test");
   const protectedPath = join(root, "protected.ts");
@@ -394,9 +405,8 @@ test("a live SRT exact validator cannot mutate the project directly or through t
   }
 }, LIVE_SRT_TEST_TIMEOUT_MS);
 
-test("a live SRT exact validator bridges canonical Bun into npm child scripts without changing project bytes", async () => {
-  const bridge = process.platform === "win32" ? resolveSrtBunBridge(process.cwd()) : null;
-  if (process.platform !== "win32" || detectSandbox() !== "srt" || !sandboxActive() || !bridge) return;
+test.skipIf(!LIVE_WINDOWS_SRT_BRIDGE)("a live SRT exact validator bridges canonical Bun into npm child scripts without changing project bytes", async () => {
+  const bridge = LIVE_WINDOWS_SRT_BRIDGE!;
   const { root } = fixture();
   const target = join(root, "src", "target.ts");
   const testDir = join(root, "test");

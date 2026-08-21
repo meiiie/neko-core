@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-21) — v0.24.16 release
+## Current status (2026-08-22) — v0.24.17 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,9 +38,12 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.16 (2026-08-21)** - autonomous Bash calls can
-  request exact one-call network destinations without changing standing policy; SRT enforces the
-  destination allowlist while filesystem confinement remains active. v0.24.15 added background-only approval alerts
+- **Branch:** `main`. **Current release: v0.24.17 (2026-08-22)** - interrupted provider streams
+  use a semantic commit barrier: bounded replay before visible output, durable checkpoint continuation
+  after visible output, and no automatic retry for malformed or unsafe protocol data. Windows SRT
+  read-only validators also avoid the Known Folder ACL teardown slow path. v0.24.16 added exact one-call
+  Bash network destinations without changing standing policy; SRT enforces the destination allowlist
+  while filesystem confinement remains active. v0.24.15 added background-only approval alerts
   and cursor-clean consent UI; v0.24.14 added bounded host-side DNS/TCP diagnosis
   is available without opening arbitrary Bash egress, and `/sandbox network on/off` applies to the
   current process immediately as well as persisting for the next launch.

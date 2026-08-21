@@ -3,6 +3,38 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-22 - Stream continuation and SRT teardown latency (v0.24.17)
+
+Provider reliability now uses one typed semantic-commit contract across OpenAI-compatible Chat
+Completions, OpenAI Responses, and Anthropic Messages. A transport or retryable in-band failure before
+model-authored activity may replay within the adapter's existing bound; after content, reasoning, or a
+tool call crosses the boundary, the Agent persists the partial trajectory and opens at most two internal
+continuation turns instead of duplicating the original request. Native successful terminal events are
+authoritative when a compatible gateway omits an optional `[DONE]` sentinel. Retry scheduling is
+payload-free, observable, checkpointed before cancellable jittered backoff, and user abort remains final.
+Malformed frames, invalid terminal states, size limits, authentication failures, and exhausted pre-commit
+replays still fail closed. The complete design and provider evidence are recorded in
+`docs/research/stream-reliability-2026-08-22.md`.
+
+The apparent Windows SRT teardown hang was isolated to ACL maintenance, not an orphaned process tree.
+Read-only validation scratch was an immediate child of the `%TEMP%` Known Folder, a path shape for which
+the current SRT Windows backend can spend roughly 30 seconds both granting and restoring ACLs. Neko now
+places the exact SRT-writable scratch below a fresh launch-private parent and removes that parent during
+cleanup. The turn-capability fixture was corrected to the same ordinary nested shape; the previous fixture
+measured the Windows Known Folder edge case rather than the capability contract. The exact validator fell
+from roughly 80-120 seconds to roughly 3-6 seconds, and five repeated pairs completed without a failure or
+a new residual SRT process.
+
+The accompanying suite audit found 1,468 declarations across 135 files, only one analogous duplicate
+title, 20 explicit skips, and 116 custom timeouts. Raw count therefore did not justify bulk deletion.
+Four live SRT checks that previously returned from the test body now use explicit `test.skipIf`, so missing
+optional infrastructure is no longer reported as a pass. A documented quality bar now gates future cleanup
+on distinct contract value, determinism, counterfactual/mutation value, and correct test size. The four
+sequential CI shards passed **1,456 tests, 12 explicit skips, 0 failures, and 8,131 assertions**. Lint, both
+TypeScript compilers, doctor, policy, diff hygiene, the production build, UI probe, real-PTY input probe, and
+ACP smoke passed. The build retained Bun's known non-fatal Windows `tsconfig.build.json` directory-mismatch
+diagnostic and exited zero.
+
 ## 2026-08-21 - One-call Bash network capabilities (v0.24.16)
 
 Field feedback showed that the persistent `/sandbox network` command was technically safe but the

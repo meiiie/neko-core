@@ -957,7 +957,7 @@ export function wrapBash(command: string, root: string, opts: { enabled: boolean
   let script: ReturnType<typeof writeSrtScript> = null;
   let settings: ReturnType<typeof writeEphemeralSrtSettings> | null = null;
   try {
-    if (opts.readOnlyWorkspace) validationTemp = createValidationTemp(root);
+    if (opts.readOnlyWorkspace) validationTemp = createValidationTemp(root, kind === "srt");
     let sandboxCommand = command;
     if (opts.stdinSource !== undefined) {
       if (kind !== "srt" || !validationTemp) {
@@ -1055,9 +1055,16 @@ export function wrapBash(command: string, root: string, opts: { enabled: boolean
 }
 
 /** Create an unpredictable writable scratch directory that is provably outside the project. */
-function createValidationTemp(root: string) {
-  const created = mkdtempSync(join(tmpdir(), "neko-validator-"));
+function createValidationTemp(root: string, nestBelowPrivateParent = false) {
+  // SRT grants and later revokes an ACL on this exact directory. Windows Known Folders such as
+  // %TEMP% can take ~30 seconds when that target is their immediate child. A fresh intermediate
+  // parent preserves the same authority boundary while keeping the ACL operation on the fast path.
+  const owner = nestBelowPrivateParent
+    ? mkdtempSync(join(tmpdir(), "neko-validator-parent-"))
+    : null;
+  let created = "";
   try {
+    created = mkdtempSync(join(owner ?? tmpdir(), "neko-validator-"));
     const rootReal = realpathSync(resolve(root));
     const tempReal = realpathSync(created);
     const rel = relative(rootReal, tempReal);
@@ -1070,11 +1077,12 @@ function createValidationTemp(root: string) {
       cleanup: () => {
         if (removed) return;
         removed = true;
-        try { rmSync(tempReal, { recursive: true, force: true }); } catch { /* cleanup must not mask tool output */ }
+        try { rmSync(owner ?? tempReal, { recursive: true, force: true }); } catch { /* cleanup must not mask tool output */ }
       },
     };
   } catch (error) {
-    try { rmSync(created, { recursive: true, force: true }); } catch { /* best effort */ }
+    const cleanupRoot = owner ?? created;
+    if (cleanupRoot) try { rmSync(cleanupRoot, { recursive: true, force: true }); } catch { /* best effort */ }
     throw error;
   }
 }
