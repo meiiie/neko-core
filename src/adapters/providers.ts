@@ -32,6 +32,13 @@ export type { DeltaHook, Provider, ProviderResponse, ToolCall } from "../core/po
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic-style overloaded_error (Z.ai sends it too)
 
+class RetryableStreamError extends Error {
+  constructor(message: string, readonly semanticActivity: boolean) {
+    super(message);
+    this.name = "RetryableStreamError";
+  }
+}
+
 export { clampEffort } from "./effort.ts";
 
 /** NVIDIA NIM vision endpoints take the image embedded as an <img> tag inside the message content
@@ -535,12 +542,21 @@ export class OpenAICompatProvider implements Provider {
         continue;
       }
       if (res.ok) {
-        // Committed (no mid-stream retry). Keep the idle timer live through the body read — bumpIdle on
-        // each chunk resets it — and clear it once the stream is fully consumed.
+        // Keep the idle timer live through the body read - bumpIdle on each chunk resets it. A
+        // server-declared network_error is replayed only before semantic output was surfaced.
         try {
           return stream
             ? await parseStream(res, onDelta!, bumpIdle, opts?.onToolCallReady, continuationScope)
             : parseOpenAIMessage(await res.json(), continuationScope);
+        } catch (error) {
+          if (error instanceof RetryableStreamError && !error.semanticActivity && httpAttempt < this.cfg.maxRetries) {
+            httpAttempt++;
+            const waitMs = this.retryDelayMs(httpAttempt - 1);
+            onDelta?.(`(network interrupted - retrying in ${Math.round(waitMs / 1000)}s, attempt ${httpAttempt}/${this.cfg.maxRetries})`, "reasoning");
+            await sleep(waitMs, signal);
+            continue;
+          }
+          throw error;
         } finally {
           if (idleTimer) clearTimeout(idleTimer);
         }
@@ -849,6 +865,19 @@ async function parseStream(
     sawValidChoice = true;
     const finishReason = choice.finish_reason;
     if (finishReason !== undefined && finishReason !== null && !["stop", "tool_calls", "function_call"].includes(String(finishReason))) {
+      if (finishReason === "network_error") {
+        const delta = isJsonObject(choice.delta) ? choice.delta : undefined;
+        const sameChunkActivity = Boolean(delta && (
+          (isText(delta.content) && delta.content.length > 0)
+          || (isText(delta.reasoning_content) && delta.reasoning_content.length > 0)
+          || (isText(delta.reasoning) && delta.reasoning.length > 0)
+          || (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0)
+        ));
+        throw new RetryableStreamError(
+          "streaming API returned non-success finish_reason: network_error",
+          contentBytes > 0 || reasoningBytes > 0 || acc.length > 0 || sameChunkActivity,
+        );
+      }
       throw new Error(`streaming API returned non-success finish_reason: ${String(finishReason).slice(0, 100)}`);
     }
     if (finishReason !== undefined && finishReason !== null) sawFinish = true;

@@ -6,6 +6,18 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.13] — 2026-08-21
+
+### Fixed
+
+- **Transient OpenAI-compatible stream failures recover automatically.** A provider that ends an otherwise
+  empty SSE response with `finish_reason: network_error` is now retried within the existing `max_retries`
+  budget. Neko does not replay a stream after text, reasoning, or tool data was surfaced, preventing duplicate
+  output and tool execution.
+- **Accidentally reading a directory no longer wastes a model round-trip.** `read_file` now returns the same
+  bounded, one-level entry view as `ls` when its target is a real directory, while symlinks and other special
+  paths retain the strict regular-file checks.
+
 ## [0.24.12] — 2026-08-21
 
 ### Fixed
