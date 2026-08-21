@@ -3,6 +3,25 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-21 - OpenRouter becomes a first-class provider route
+
+The old `openrouter` preset was only a bare base URL with an empty model. It could speak the generic
+Chat Completions wire, but it had no provider identity in the picker, no named CLI login route, no
+model capability metadata, and no OpenRouter app attribution. `neko login openrouter <key>` now
+activates a profile-scoped credential without echoing it; `/provider` names OpenRouter and its billing
+boundary; `/model` reads OpenRouter's live catalog filtered to models that support tools, preserving
+the server's agentic ordering plus each selected model's context window and image modality.
+
+The transport remains the existing `openai_compat` adapter - no duplicate provider loop. Requests to
+the exact `openrouter.ai` hostname carry OpenRouter's documented `HTTP-Referer` and
+`X-OpenRouter-Title` attribution headers; lookalike hosts do not. A live, keyless catalog probe returned
+334 tool-capable entries and parsed `z-ai/glm-5.3` as a 1,048,576-token reasoning/tool model. No model
+completion or paid request was made. Regression coverage locks profile UX, rich catalog parsing,
+non-tool filtering, exact-host headers, and isolated CLI login/logout key scoping. Verification: lint,
+TS 7 and TS 5.9, focused 101/101, full 1,415 pass / 12 platform-or-sandbox skips / 0 fail, production
+build, UI probe, real-PTY input probe, and ACP smoke all passed. Bun again printed its known non-fatal
+Windows `tsconfig.build.json` directory-mismatch diagnostic after the successful build.
+
 ## 2026-08-17 - v0.24.10: auto-default made true + coalesced-Enter fix
 
 Two defects caught by live multi-purpose probing (Excel create/analyze + web search against the

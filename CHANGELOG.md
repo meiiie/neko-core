@@ -6,6 +6,13 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **OpenRouter is now a first-class provider route.** `neko login openrouter <key>` activates a
+  profile backed by OpenRouter's OpenAI-compatible API. `/model` loads the live tool-capable catalog,
+  carries each model's context-window and vision metadata into the runtime, and attributes requests
+  to Neko Core without sending those headers to lookalike third-party hosts.
+
 ## [0.24.10] — 2026-08-17
 
 ### Fixed

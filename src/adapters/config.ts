@@ -309,7 +309,18 @@ export const DEFAULTS: any = {
       key_env: "KIMI_API_KEY",
       key_env_fallbacks: ["MOONSHOT_API_KEY"],
     },
-    openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "", key_env: "OPENROUTER_API_KEY" },
+    // OpenRouter exposes an OpenAI-compatible transport plus a live, heterogeneous model catalog.
+    // Leave model empty on purpose: /model discovers the current tool-capable catalog instead of
+    // pinning a vendor/model choice that can age or disappear behind the router.
+    openrouter: {
+      provider: "openai_compat",
+      family: "openrouter",
+      label: "OpenRouter API key",
+      auth: "api_key",
+      base_url: "https://openrouter.ai/api/v1",
+      model: "",
+      key_env: "OPENROUTER_API_KEY",
+    },
     // Mixture-of-Agents: diverse advisors analyze, a strong aggregator synthesizes + acts. `neko
     // --profile moa`. Opt-in quality mode (N+1 model calls/turn) — best where one model is weak.
     moa: {

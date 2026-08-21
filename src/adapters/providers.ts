@@ -170,6 +170,41 @@ export interface ModelOption {
   available?: boolean;
 }
 
+const OPENROUTER_APP_HEADERS = {
+  "HTTP-Referer": "https://github.com/meiiie/neko-core",
+  "X-OpenRouter-Title": "Neko Core",
+} as const;
+
+export function isOfficialOpenRouter(baseUrl: string): boolean {
+  try { return new URL(baseUrl).hostname.toLowerCase() === "openrouter.ai"; }
+  catch { return false; }
+}
+
+function openRouterModelOption(model: any, config: NekoConfig): ModelOption[] {
+  const id = isText(model?.id) ? model.id : "";
+  const parameters = Array.isArray(model?.supported_parameters)
+    ? model.supported_parameters.filter((value: any): value is string => isText(value))
+    : [];
+  // Neko is an acting agent. A model that cannot accept tool definitions is selectable in a chat
+  // client, but cannot satisfy Neko's core complete -> tool -> observe contract.
+  if (!id || !parameters.includes("tools")) return [];
+  const modalities = Array.isArray(model?.architecture?.input_modalities)
+    ? model.architecture.input_modalities.filter((value: any): value is string => isText(value))
+    : [];
+  const contextWindow = Number(model?.context_length ?? 0);
+  const reasoning = parameters.includes("reasoning") || parameters.includes("reasoning_effort");
+  const vision = modalities.includes("image");
+  const features = [reasoning ? "reasoning" : "", vision ? "vision" : "", "tool use"].filter(Boolean).join(", ");
+  const name = isText(model?.name) ? model.name : id;
+  return [{
+    id,
+    label: name === id ? id : `${name} (${id})`,
+    description: features,
+    contextWindow: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : config.contextWindow,
+    vision,
+  }];
+}
+
 async function listKimiModelOptions(config: NekoConfig): Promise<ModelOption[]> {
   const profile = config.profile ? config.profiles[config.profile] : undefined;
   const fallback = [...new Set([config.model, ...(profile?.models ?? [])].filter(Boolean))].map((id) => ({
@@ -293,22 +328,30 @@ export async function listModelOptions(config: NekoConfig, codexSupport?: CodexS
     vision: profile?.vision ?? config.vision,
   }));
   if (!config.apiKey && configured.length) return configured;
-  const url = `${config.baseUrl}${anthropic ? "/v1/models" : "/models"}`;
-    const headers: Record<string, string> = {};
-    if (config.apiKey) {
-      if (anthropic) {
-        headers["x-api-key"] = config.apiKey;
-        if (!isOfficialAnthropic(config.baseUrl)) headers.authorization = `Bearer ${config.apiKey}`;
-        headers["anthropic-version"] = "2023-06-01";
-      }
-      else headers.Authorization = `Bearer ${config.apiKey}`;
+  const openRouter = isOfficialOpenRouter(config.baseUrl);
+  const url = openRouter
+    ? `${config.baseUrl}/models?supported_parameters=tools&sort=agentic-high-to-low`
+    : `${config.baseUrl}${anthropic ? "/v1/models" : "/models"}`;
+  const headers: Record<string, string> = {};
+  if (openRouter) Object.assign(headers, OPENROUTER_APP_HEADERS);
+  if (config.apiKey) {
+    if (anthropic) {
+      headers["x-api-key"] = config.apiKey;
+      if (!isOfficialAnthropic(config.baseUrl)) headers.authorization = `Bearer ${config.apiKey}`;
+      headers["anthropic-version"] = "2023-06-01";
+    }
+    else headers.Authorization = `Bearer ${config.apiKey}`;
   }
   try {
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    // SAFETY: provider list entries are untyped JSON; each id is coerced to a display string here.
-    const live = ((data?.data ?? []) as any[]).map((m) => String(m?.id ?? "")).filter(Boolean).sort().map((id) => ({ id, label: id }));
+    // SAFETY: provider list entries are untyped JSON; every OpenRouter field is validated by
+    // openRouterModelOption, while generic compatible endpoints expose only an id.
+    const rows = (Array.isArray(data?.data) ? data.data : []) as any[];
+    const live = openRouter
+      ? rows.flatMap((model) => openRouterModelOption(model, config))
+      : rows.map((m) => String(m?.id ?? "")).filter(Boolean).sort().map((id) => ({ id, label: id }));
     if (!live.length) return configured;
     // Compatible model-list endpoints can lag a documented rollout (Z.AI listed only through
     // GLM-5.2 while its Coding Plan already accepted GLM-5.3). Keep live discovery, but do not let
@@ -447,6 +490,7 @@ export class OpenAICompatProvider implements Provider {
 
     const url = `${this.cfg.baseUrl}/chat/completions`;
     const headers: any = { ...(await this.resolveHeaders()), "Content-Type": "application/json" };
+    if (isOfficialOpenRouter(this.cfg.baseUrl)) Object.assign(headers, OPENROUTER_APP_HEADERS);
     if (key) headers.Authorization = `Bearer ${key}`; // local servers need no auth
 
     // HTTP errors (429/5xx) retry a bounded number of times. A LOST CONNECTION (fetch throws -

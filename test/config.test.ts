@@ -319,6 +319,15 @@ test("modelShadow: null when no profile, when models agree, and when the preset 
   expect(loadConfig({ path: tmpConfig({ model: "m" }) }).modelShadow).toBeNull(); // no profile selected
   expect(loadConfig({ path: tmpConfig({ model: "gpt-4o-mini" }), profile: "openai" }).modelShadow).toBeNull(); // same model
   expect(loadConfig({ path: tmpConfig({ model: "m" }), profile: "openrouter" }).modelShadow).toBeNull(); // empty preset - the file IS the model source, not a shadow
+  const openrouter = loadConfig({ path: tmpConfig({}), profile: "openrouter" });
+  expect(openrouter.baseUrl).toBe("https://openrouter.ai/api/v1");
+  expect(openrouter.profiles.openrouter).toMatchObject({
+    family: "openrouter",
+    label: "OpenRouter API key",
+    auth: "api_key",
+    key_env: "OPENROUTER_API_KEY",
+    model: "",
+  });
 });
 
 test("modelShadow: NEKO_MODEL is named as the source (env wins over files)", () => {

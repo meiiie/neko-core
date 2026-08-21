@@ -200,6 +200,80 @@ test("official Anthropic model discovery never sends the API key as a Bearer tok
   }
 });
 
+test("OpenRouter discovery keeps only agent-capable models and carries live context and vision metadata", async () => {
+  const originalFetch = globalThis.fetch;
+  let sentUrl = "";
+  let sentHeaders: Headers | undefined;
+  // SAFETY: test-owned fetch fixture returns a real Response for every accepted Fetch input.
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    sentUrl = String(url);
+    sentHeaders = new Headers(init?.headers);
+    return Response.json({ data: [
+      {
+        id: "vendor/reasoning-vision",
+        name: "Vendor: Reasoning Vision",
+        context_length: 262_144,
+        architecture: { input_modalities: ["text", "image"] },
+        supported_parameters: ["reasoning", "reasoning_effort", "tools", "tool_choice"],
+      },
+      {
+        id: "vendor/chat-only",
+        name: "Chat only",
+        context_length: 128_000,
+        architecture: { input_modalities: ["text"] },
+        supported_parameters: ["temperature"],
+      },
+      { name: "missing id", supported_parameters: ["tools"] },
+    ] });
+  }) as typeof fetch;
+  try {
+    const config = new NekoConfig({
+      provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "",
+    }, "openrouter", { openrouter: { key_env: "OPENROUTER_API_KEY" } }, "router-key");
+    expect(await listModelOptions(config)).toEqual([{
+      id: "vendor/reasoning-vision",
+      label: "Vendor: Reasoning Vision (vendor/reasoning-vision)",
+      description: "reasoning, vision, tool use",
+      contextWindow: 262_144,
+      vision: true,
+    }]);
+    expect(sentUrl).toBe("https://openrouter.ai/api/v1/models?supported_parameters=tools&sort=agentic-high-to-low");
+    expect(sentHeaders?.get("authorization")).toBe("Bearer router-key");
+    expect(sentHeaders?.get("http-referer")).toBe("https://github.com/meiiie/neko-core");
+    expect(sentHeaders?.get("x-openrouter-title")).toBe("Neko Core");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("OpenRouter completion attribution is exact-host only", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; headers: Headers }> = [];
+  // SAFETY: test-owned fetch fixture returns a real Response for every accepted Fetch input.
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    requests.push({ url: String(url), headers: new Headers(init?.headers) });
+    return Response.json({ choices: [{ message: { content: "ok" } }] });
+  }) as typeof fetch;
+  try {
+    const official = new OpenAICompatProvider(new NekoConfig({
+      provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "z-ai/glm-5.3",
+    }, "openrouter", {}, "router-key"));
+    const lookalike = new OpenAICompatProvider(new NekoConfig({
+      provider: "openai_compat", base_url: "https://openrouter.ai.example/v1", model: "m",
+    }, null, {}, "other-key"));
+    await official.complete([{ role: "user", content: "hello" }]);
+    await lookalike.complete([{ role: "user", content: "hello" }]);
+    expect(requests[0].url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(requests[0].headers.get("authorization")).toBe("Bearer router-key");
+    expect(requests[0].headers.get("http-referer")).toBe("https://github.com/meiiie/neko-core");
+    expect(requests[0].headers.get("x-openrouter-title")).toBe("Neko Core");
+    expect(requests[1].headers.has("http-referer")).toBe(false);
+    expect(requests[1].headers.has("x-openrouter-title")).toBe(false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function netCfg(offlineSeconds: number) {
   // localhost -> no api key required; tiny delays so the test is fast.
   return new NekoConfig(

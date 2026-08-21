@@ -202,6 +202,7 @@ neko login google api <key>
 neko login kimi
 neko login kimi api <key>
 neko login deepseek <key>
+neko login openrouter <key>
 
 # Headless/SSH alternative: prints a URL and one-time device code
 neko login openai chatgpt --device
@@ -209,7 +210,10 @@ neko login openai chatgpt --device
 neko doctor
 ```
 
-Anthropic and xAI are direct, official API-key routes (not subscription/OAuth proxies). For a non-TUI
+OpenRouter uses its [official OpenAI-compatible API](https://openrouter.ai/docs/quickstart) and
+`OPENROUTER_API_KEY`; `/model` loads the live tool-capable catalog and preserves each selected model's
+context-window and vision metadata. Anthropic
+and xAI are direct, official API-key routes (not subscription/OAuth proxies). For a non-TUI
 session, set `ANTHROPIC_API_KEY` and run `neko --profile claude`, or set `XAI_API_KEY` and run
 `neko --profile xai` (current Grok 4.5) / `neko --profile grok-build` (the dedicated coding model).
 `/model` can switch among the models exposed by the selected route.

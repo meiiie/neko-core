@@ -75,6 +75,23 @@ test("Z.AI groups Coding Plan and paid API routes while naming their billing bou
   expect(profileDisplayName(cfg("zai"))).toContain("GLM Coding Plan");
 });
 
+test("OpenRouter is a first-class API route with an explicit billing boundary", () => {
+  const grouped = providerChoices(cfg("openrouter"));
+  expect(grouped.find((choice) => choice.id === "openrouter")).toMatchObject({
+    label: "OpenRouter",
+    detail: expect.stringContaining("live tool-capable model catalog"),
+  });
+  const routes = authChoices(cfg("openrouter"), "openrouter", {
+    chatgpt: false, gemini: false, kimi: false, apiProfiles: new Set(["openrouter"]),
+  });
+  expect(routes).toEqual([expect.objectContaining({
+    id: "openrouter",
+    label: "OpenRouter API key",
+    detail: expect.stringContaining("OpenRouter pay-as-you-go billing"),
+  })]);
+  expect(profileDisplayName(cfg("openrouter"))).toBe("OpenRouter · OpenRouter API key");
+});
+
 test("profile display and model context name the active OpenAI auth route", () => {
   expect(profileDisplayName(cfg("chatgpt"))).toBe("OpenAI · ChatGPT Plus/Pro");
   expect(profileDisplayName(cfg("openai"))).toBe("OpenAI · API key (pay-as-you-go)");
