@@ -18,6 +18,7 @@ export class ResponsesProvider implements Provider {
   constructor(
     private readonly cfg: NekoConfig,
     private readonly resolveApiKey: () => string | Promise<string> = () => cfg.apiKey,
+    private readonly resolveHeaders: () => Record<string, string> | Promise<Record<string, string>> = () => ({}),
   ) {}
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
@@ -52,6 +53,7 @@ export class ResponsesProvider implements Provider {
     }
 
     const headers: any = {
+      ...(await this.resolveHeaders()),
       Accept: "text/event-stream",
       "Content-Type": "application/json",
       "User-Agent": `neko-core/${VERSION}`,

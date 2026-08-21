@@ -153,22 +153,30 @@ test("OpenCode Console OAuth loads the account catalog and sends its token only 
     const url = String(input);
     calls.push({ url, headers: new Headers(init?.headers), body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url.endsWith("/console/api/config")) return Response.json({ config: { provider: {
-      console: {
+      opencode: {
         name: "OpenCode account",
-        npm: "@ai-sdk/openai",
-        api: "https://api.opencode.ai/v1",
-        models: { gpt: { id: "gpt-internal", name: "GPT Account", tool_call: true, attachment: true, limit: { context: 272_000, output: 32_000 } } },
+        npm: "@ai-sdk/openai-compatible",
+        api: "https://opencode.ai/inference/openai/v1",
+        options: {
+          apiKey: "catalog-secret-must-not-be-sent",
+          headers: {
+            "x-opencode-org-id": "org-1",
+            authorization: "catalog-must-not-overwrite-auth",
+            "x-untrusted": "catalog-must-not-create-generic-headers",
+          },
+        },
+        models: { "x-preview-f-free": { name: "Ox Alpha Free", tool_call: true, attachment: true, limit: { context: 1_000_000, output: 32_000 } } },
       },
     } } });
     return Response.json({ error: { message: "probe stop" } }, { status: 401 });
   }) as typeof fetch;
 
-  const cfg = accountConfig();
+  const cfg = accountConfig("opencode/x-preview-f-free");
   expect(getProvider(cfg)).toBeInstanceOf(OpenCodeAccountProvider);
   expect(await listModelOptions(cfg)).toEqual([expect.objectContaining({
-    id: "console/gpt",
-    label: "GPT Account",
-    contextWindow: 272_000,
+    id: "opencode/x-preview-f-free",
+    label: "Ox Alpha Free",
+    contextWindow: 1_000_000,
     vision: true,
   })]);
   const provider = new OpenCodeAccountProvider(cfg);
@@ -177,10 +185,13 @@ test("OpenCode Console OAuth loads the account catalog and sends its token only 
   expect(calls.map((call) => call.url)).toEqual([
     "https://opencode.ai/console/api/config",
     "https://opencode.ai/console/api/config",
-    "https://api.opencode.ai/v1/responses",
+    "https://opencode.ai/inference/openai/v1/chat/completions",
   ]);
   for (const call of calls) expect(call.headers.get("authorization")).toBe("Bearer account-access");
-  expect(calls.at(-1)?.body.model).toBe("gpt-internal");
+  expect(calls.at(-1)?.headers.get("x-opencode-org-id")).toBe("org-1");
+  expect(calls.at(-1)?.headers.get("x-untrusted")).toBeNull();
+  expect(JSON.stringify(calls.at(-1))).not.toContain("catalog-secret-must-not-be-sent");
+  expect(calls.at(-1)?.body.model).toBe("x-preview-f-free");
 });
 
 test("OpenCode Console refuses a catalog endpoint outside opencode.ai before leaking OAuth", async () => {
