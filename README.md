@@ -167,6 +167,8 @@ neko
 #        -> xAI       -> Grok 4.5 / Grok Build API key
 #        -> Kimi      -> Kimi Code account (OAuth) / Kimi Platform API key
 #        -> DeepSeek  -> DeepSeek V4 API key
+#        -> OpenRouter -> one key, live tool-capable catalog
+#        -> OpenCode   -> OpenCode Zen API key (verified model catalog)
 ```
 
 ### Use Neko in an ACP editor
@@ -203,6 +205,7 @@ neko login kimi
 neko login kimi api <key>
 neko login deepseek <key>
 neko login openrouter <key>
+neko login opencode <key>
 
 # Headless/SSH alternative: prints a URL and one-time device code
 neko login openai chatgpt --device
@@ -212,7 +215,12 @@ neko doctor
 
 OpenRouter uses its [official OpenAI-compatible API](https://openrouter.ai/docs/quickstart) and
 `OPENROUTER_API_KEY`; `/model` loads the live tool-capable catalog and preserves each selected model's
-context-window and vision metadata. Anthropic
+context-window and vision metadata. OpenCode uses the public [OpenCode Zen](https://opencode.ai/docs/zen)
+API with `OPENCODE_API_KEY`; `/login` opens Zen's account/key page, and `/model` loads its live catalog.
+Neko routes GPT/Grok/Muse over Responses, Claude/Qwen over Messages, and DeepSeek/GLM/Kimi/MiniMax/free
+models over Chat Completions. Gemini entries are intentionally hidden until Neko has a verified Google-native
+Zen wire. This is Zen pay-as-you-go API billing, not OpenCode Console OAuth; Neko never reads another CLI's
+credential store or reuses OpenCode CLI's client identity. Anthropic
 and xAI are direct, official API-key routes (not subscription/OAuth proxies). For a non-TUI
 session, set `ANTHROPIC_API_KEY` and run `neko --profile claude`, or set `XAI_API_KEY` and run
 `neko --profile xai` (current Grok 4.5) / `neko --profile grok-build` (the dedicated coding model).

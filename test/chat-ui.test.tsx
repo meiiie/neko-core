@@ -691,6 +691,30 @@ test("/login groups Z.AI and distinguishes Coding Plan from paid API billing", a
   unmount();
 }, 15000);
 
+test("/login opens the official OpenCode Zen key page and captures the key through the hidden input", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-opencode-login-"));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  let opened = "";
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, lastFrame, unmount } = render(
+      <ChatApp fullscreen={false} yolo provider={provider} openUrl={(url) => { opened = url; }} />,
+    );
+    stdin.write("/login"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Sign in - choose a provider"))).toBe(true);
+    stdin.write("opencode"); await tick(40); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("paste the API key"))).toBe(true);
+    expect(opened).toBe("https://opencode.ai/zen");
+    expect(lastFrame() ?? "").toContain("pay-as-you-go");
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
 test("/model on signed-out Gemini remains useful without starting the CLI", async () => {
   const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldGeminiHome = process.env.NEKO_GEMINI_HOME;
   const home = mkdtempSync(join(tmpdir(), "neko-gemini-model-"));

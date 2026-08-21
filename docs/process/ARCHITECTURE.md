@@ -358,6 +358,19 @@ turns that call tools, and is replayed only to the same protocol, endpoint, and 
 DeepSeek's multi-step tool contract without exposing chain-of-thought to core or leaking it after a provider
 switch.
 
+## OpenCode Zen provider boundary
+
+`adapters/opencode.ts` implements one OpenCode Zen profile over the public API-key contract documented by
+OpenCode. Zen exposes a shared key and catalog but heterogeneous model wires, so this edge adapter delegates
+GPT/Grok/Muse to Responses, Claude/Qwen to Anthropic Messages, and documented compatible families to Chat
+Completions. Unknown families fail closed. Gemini catalog entries are omitted until a Google-native Zen
+adapter is implemented and verified; they are never guessed onto another protocol.
+
+The key remains profile-scoped in Neko config or `OPENCODE_API_KEY`, and catalog discovery is credential-free.
+Neko does not import OpenCode files, browser cookies, or Console sessions. OpenCode's development branch has
+a Console device flow for its own `opencode-cli` public client, but no public third-party client authorization
+contract is documented, so Neko does not reuse that client id or claim Console OAuth support.
+
 ## ChatGPT realtime voice boundary
 
 `adapters/browser-voice.ts` is the default provider-agnostic conversational preview. A fragment capability

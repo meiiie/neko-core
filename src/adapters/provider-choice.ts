@@ -27,6 +27,7 @@ function familyLabel(family: string): string {
   if (family === "deepseek") return "DeepSeek";
   if (family === "zai") return "Z.AI";
   if (family === "openrouter") return "OpenRouter";
+  if (family === "opencode") return "OpenCode";
   return family;
 }
 
@@ -60,6 +61,8 @@ export function providerChoices(cfg: NekoConfig, authOnly = false): Choice[] {
                     ? `Coding Plan (GLM-5.3) or pay-as-you-go API${current}`
                     : family === "openrouter"
                       ? `one API key for the live tool-capable model catalog${current}`
+                      : family === "opencode"
+                        ? `Zen API key for OpenCode's verified model catalog${current}`
                       : `${profile.provider ?? "?"} · ${profile.model ?? "?"}${current}`,
     });
   }
@@ -85,6 +88,7 @@ export function authChoices(cfg: NekoConfig, family: string, availability: AuthA
             : family === "google" ? "official API; free tier available"
               : family === "zai" ? (name === "zai" ? "Coding Plan subscription quota; GLM-5.3 available" : "pay-as-you-go API billing")
                 : family === "openrouter" ? "OpenRouter pay-as-you-go billing"
+                  : family === "opencode" ? "OpenCode Zen pay-as-you-go billing"
                   : "pay-as-you-go API";
       return {
         id: name,

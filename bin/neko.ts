@@ -231,7 +231,7 @@ Commands:
   skills        list available skills (~/.neko-core/skills)
   procurement   deterministic sourcing helpers; 'source-plan <identifier>' expands exact-source queries
   recipes       list runnable recipes (~/.neko-core/recipes)
-  login         sign in; OpenAI, Google, Kimi, DeepSeek, OpenRouter, or another API-key provider
+  login         sign in; OpenAI, Google, Kimi, DeepSeek, OpenRouter, OpenCode Zen, or another API-key provider
   logout        sign out the active route (other provider sessions/keys stay intact)
   support       inspect, install, update, or remove optional ChatGPT/Gemini/Office/Meeting components
   update [ver]  self-update to the latest release (resumes auto-updates); 'update 0.7.7' pins/rolls
@@ -560,12 +560,12 @@ async function cmdLogin(args: Args): Promise<number> {
   }
   let key = provider === "openai" || provider === "google" || provider === "kimi"
     ? (args.positionals[2] ?? "")
-    : provider === "deepseek" || provider === "openrouter"
+    : provider === "deepseek" || provider === "openrouter" || provider === "opencode"
       ? (["api", "api-key", "apikey"].includes(method) ? (args.positionals[2] ?? "") : (args.positionals[1] ?? ""))
       : (args.positionals[0] ?? "");
   if (!key && !process.stdin.isTTY) key = (await Bun.stdin.text()).trim(); // piped
   if (!key) {
-    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login kimi   OR   neko login deepseek <key>   OR   neko login openrouter <key>");
+    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login kimi   OR   neko login deepseek <key>   OR   neko login openrouter <key>   OR   neko login opencode <key>");
     return 2;
   }
   if (provider === "openai") setActiveProfile("openai");
@@ -573,6 +573,7 @@ async function cmdLogin(args: Args): Promise<number> {
   if (provider === "kimi") setActiveProfile("moonshot");
   if (provider === "deepseek") setActiveProfile("deepseek");
   if (provider === "openrouter") setActiveProfile("openrouter");
+  if (provider === "opencode") setActiveProfile("opencode");
   console.log(setApiKey(key));
   return 0;
 }
@@ -603,14 +604,15 @@ function cmdLogout(args: Args): number {
     console.log(clearKimiCredentials());
     return 0;
   }
-  if (provider && !["openai", "google", "kimi", "deepseek", "openrouter"].includes(provider)) {
-    console.error("usage: neko logout [openai api|openai chatgpt|google api|google gemini|kimi|kimi api|deepseek|openrouter]");
+  if (provider && !["openai", "google", "kimi", "deepseek", "openrouter", "opencode"].includes(provider)) {
+    console.error("usage: neko logout [openai api|openai chatgpt|google api|google gemini|kimi|kimi api|deepseek|openrouter|opencode]");
     return 2;
   }
   const targetProfile = explicitGeminiApi ? "gemini-api"
     : explicitKimiApi ? "moonshot"
       : provider === "deepseek" ? "deepseek"
         : provider === "openrouter" ? "openrouter"
+          : provider === "opencode" ? "opencode"
           : explicitApi || provider === "openai" ? "openai"
             : current.profile ?? undefined;
   console.log(clearApiKey(targetProfile));

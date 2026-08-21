@@ -2083,6 +2083,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             }
             return;
           }
+          if (route.id === "opencode") {
+            const url = "https://opencode.ai/zen";
+            addLine("info", `Opening OpenCode Zen to sign in, add pay-as-you-go billing, and copy an API key: ${url}`);
+            (openUrl ?? openBrowser)(url);
+          }
           activate(route.id);
           setAwaitingKey(true);
           addLine("info", `${profile?.label || route.id}: paste the API key, then Enter (input hidden). Empty Enter cancels without removing the old key.`);

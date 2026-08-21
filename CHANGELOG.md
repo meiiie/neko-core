@@ -8,6 +8,11 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Added
 
+- **OpenCode Zen login is now first-class.** `/login -> OpenCode` opens the official Zen account/key
+  page and captures one profile-scoped key; `neko login opencode <key>` provides the non-TUI path.
+  `/model` reads Zen's live public catalog, and the adapter selects the documented Responses, Messages,
+  or Chat Completions wire per supported model family without importing OpenCode CLI credentials or
+  impersonating its undocumented-for-third-parties Console OAuth client.
 - **OpenRouter is now a first-class provider route.** `neko login openrouter <key>` activates a
   profile backed by OpenRouter's OpenAI-compatible API. `/model` loads the live tool-capable catalog,
   carries each model's context-window and vision metadata into the runtime, and attributes requests

@@ -92,6 +92,23 @@ test("OpenRouter is a first-class API route with an explicit billing boundary", 
   expect(profileDisplayName(cfg("openrouter"))).toBe("OpenRouter · OpenRouter API key");
 });
 
+test("OpenCode is a first-class Zen API-key route without claiming Console OAuth", () => {
+  const grouped = providerChoices(cfg("opencode"));
+  expect(grouped.find((choice) => choice.id === "opencode")).toMatchObject({
+    label: "OpenCode",
+    detail: expect.stringContaining("Zen API key"),
+  });
+  const routes = authChoices(cfg("opencode"), "opencode", {
+    chatgpt: false, gemini: false, kimi: false, apiProfiles: new Set(["opencode"]),
+  });
+  expect(routes).toEqual([expect.objectContaining({
+    id: "opencode",
+    label: "OpenCode Zen API key",
+    detail: expect.stringContaining("OpenCode Zen pay-as-you-go billing"),
+  })]);
+  expect(profileDisplayName(cfg("opencode"))).toBe("OpenCode · OpenCode Zen API key");
+});
+
 test("profile display and model context name the active OpenAI auth route", () => {
   expect(profileDisplayName(cfg("chatgpt"))).toBe("OpenAI · ChatGPT Plus/Pro");
   expect(profileDisplayName(cfg("openai"))).toBe("OpenAI · API key (pay-as-you-go)");

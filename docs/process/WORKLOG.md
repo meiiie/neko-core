@@ -3,6 +3,25 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-21 - OpenCode Zen login and heterogeneous model routing
+
+OpenCode's published integration contract is OpenCode Zen: sign in at the official account page, add
+billing, copy an API key, and call its public endpoints. Its current development source also contains a
+Console device flow using the `opencode-cli` client id, but OpenCode does not document that identity as a
+third-party authorization grant. Neko therefore integrates the stable, explicitly reusable Zen API rather
+than importing CLI state or pretending to be OpenCode CLI.
+
+One `opencode` profile now owns one profile-scoped key (`OPENCODE_API_KEY`) and one live catalog. A small
+edge adapter routes GPT/Grok/Muse to `/zen/v1/responses`, Claude/Qwen to `/zen/v1/messages`, and the
+documented DeepSeek/GLM/Kimi/MiniMax/free families to `/zen/v1/chat/completions`. Unknown wires fail closed;
+Gemini is omitted until its Google-native Zen protocol has a verified Neko adapter. `/login` opens the
+official key page, while CLI login/logout remain secret-safe and profile-scoped. Research pinned OpenCode
+`dev` at `35fe5b7212d6cd69308d4006048740a351d27a52` and made no model or paid request.
+The public live catalog returned 58 safely routable non-Gemini models through the new adapter. Verification:
+lint, TS 7 and TS 5.9, focused 196/196, full 1,422 pass / 12 platform-or-sandbox skips / 0 fail, production
+build, UI probe, real-PTY input probe, ACP smoke, doctor, and policy. The production build again emitted Bun's
+known non-fatal Windows `tsconfig.build.json` directory-mismatch diagnostic after all probes succeeded.
+
 ## 2026-08-21 - OpenRouter becomes a first-class provider route
 
 The old `openrouter` preset was only a bare base URL with an empty model. It could speak the generic

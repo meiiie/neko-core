@@ -328,6 +328,12 @@ test("modelShadow: null when no profile, when models agree, and when the preset 
     key_env: "OPENROUTER_API_KEY",
     model: "",
   });
+  const opencode = loadConfig({ path: tmpConfig({}), profile: "opencode" });
+  expect(opencode.provider).toBe("opencode");
+  expect(opencode.baseUrl).toBe("https://opencode.ai/zen/v1");
+  expect(opencode.model).toBe("gpt-5.6-terra");
+  expect(opencode.profileKeyEnvs).toEqual(["OPENCODE_API_KEY"]);
+  expect(opencode.childSecretEnvNames).toContain("OPENCODE_API_KEY");
 });
 
 test("modelShadow: NEKO_MODEL is named as the source (env wins over files)", () => {

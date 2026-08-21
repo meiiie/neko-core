@@ -321,6 +321,20 @@ export const DEFAULTS: any = {
       model: "",
       key_env: "OPENROUTER_API_KEY",
     },
+    // OpenCode Zen is one account/key with a heterogeneous public catalog. The edge adapter selects
+    // Responses, Anthropic Messages, or Chat Completions per model; core remains provider-neutral.
+    opencode: {
+      provider: "opencode",
+      family: "opencode",
+      label: "OpenCode Zen API key",
+      auth: "api_key",
+      base_url: "https://opencode.ai/zen/v1",
+      model: "gpt-5.6-terra",
+      models: ["gpt-5.6-terra", "claude-sonnet-5", "deepseek-v4-pro", "kimi-k3", "glm-5.2"],
+      model_context: { "gpt-5.6-terra": 272_000 },
+      context_window: 131_072,
+      key_env: "OPENCODE_API_KEY",
+    },
     // Mixture-of-Agents: diverse advisors analyze, a strong aggregator synthesizes + acts. `neko
     // --profile moa`. Opt-in quality mode (N+1 model calls/turn) — best where one model is weak.
     moa: {
