@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const entry = join(import.meta.dir, "..", "bin", "neko.ts");
 
-function runDiagnostic(command: "doctor" | "policy") {
+function runDiagnostic(command: "doctor" | "policy", readOutsideRoot = "false") {
   const home = mkdtempSync(join(tmpdir(), "neko-yolo-diag-"));
   try {
     const result = Bun.spawnSync([process.execPath, entry, "--yolo", command], {
@@ -15,7 +15,7 @@ function runDiagnostic(command: "doctor" | "policy") {
         HOME: home,
         USERPROFILE: home,
         NEKO_SANDBOX: "0",
-        NEKO_READ_OUTSIDE_ROOT: "false",
+        NEKO_READ_OUTSIDE_ROOT: readOutsideRoot,
         NEKO_AUTO_UPDATE: "0",
       },
       stdout: "pipe",
@@ -44,6 +44,15 @@ test("--yolo doctor reports effective auto mode and missing confinement", () => 
   expect(result.status).toBe(0);
   expect(result.output).toContain("mode: auto - UNCONFINED AUTO");
   expect(result.output).toContain("bash_sandbox: UNCONFINED AUTO");
+});
+
+test("policy reports exact-consent host writes without implying Bash authority", () => {
+  const result = runDiagnostic("policy", "true");
+  expect(result.status).toBe(0);
+  expect(result.output).toContain("requires one human confirmation for that exact change");
+  expect(result.output).toContain("never reaches sandboxed Bash");
+  expect(result.output).toContain("System and credential paths");
+  expect(result.output).not.toContain("the one consent-gated exception");
 });
 
 test("a non-interactive agent process cannot grant project trust", () => {

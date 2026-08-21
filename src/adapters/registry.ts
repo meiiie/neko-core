@@ -286,15 +286,15 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
     });
   }
 
-  // Reads reaching outside the project is a deliberate default, not a leak: writes stay path-scoped and
-  // credential paths are refused either way. It is reported so the boundary stays something you can
-  // read off a command rather than something you have to trust.
+  // Reads reaching outside the project is a deliberate default, not a leak. Exact structured host
+  // writes are consent-gated; Bash remains path-scoped and credential/system paths remain refused.
+  // Report the complete boundary so it can be audited rather than trusted implicitly.
   if (config.readOutsideRoot) {
     findings.push({
       severity: "info",
       code: "reads_outside_root",
       subject: "read_outside_root",
-      message: "Reads may resolve outside the project directory. Structured writes and sandboxed bash stay confined to the project plus explicit additional_write_roots (including the built-in ~/.neko-core/research ledger); the one consent-gated exception is ~/.neko-core/config.json itself, which is approval-prompted in EVERY mode (never auto-approved) and JSON-validated on write. Credential paths (SSH, .env, key material, browser stores) stay refused. Set read_outside_root:false for a hard read wall.",
+      message: "Reads may resolve outside the project directory. Structured writes are automatic only in the project and exact additional_write_roots; an ordinary target elsewhere requires one human confirmation for that exact change. This transient authority never reaches sandboxed Bash. System and credential paths (SSH, .env, key material, browser stores), symlink/junction escapes, and hardlink aliases stay refused. ~/.neko-core/config.json is additionally JSON-validated after consent. Set read_outside_root:false for a hard read wall.",
     });
   }
 
@@ -304,7 +304,7 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
     subject: "filesystem",
     message: `Additional write capabilities: ${config.additionalWriteRoots
       .map((path) => path === config.researchWriteRoot ? "~/.neko-core/research" : path)
-      .join(", ")}. Auto mode skips prompts inside these exact roots; it does not grant machine-wide writes.`,
+      .join(", ")}. Auto mode skips prompts inside these exact roots; an ordinary target elsewhere still needs exact human consent.`,
   });
 
   const verdict = findings.some((f) => f.severity === "fail")

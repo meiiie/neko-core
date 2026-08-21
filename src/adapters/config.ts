@@ -97,14 +97,13 @@ export const DEFAULTS: any = {
   auto_update_check: true, // check for a newer release at startup (daily-cached; set false to silence)
   auto_update: true, // AUTO-INSTALL that newer release in the background (claude-code style); false = notify only
   completion_sound: true, // branded native sound (terminal-bell fallback) after a durable turn
-  // READS may leave the project directory; writes and edits never may. The root confinement exists to
-  // bound what a mistake can DAMAGE, and reading a doc, a skill, or a sibling repo damages nothing -
-  // while refusing it made ordinary work impossible. Credential paths stay refused either way
-  // (core/tool-runtime.ts OUTSIDE_DENIED). Set false for a hard wall around the project.
+  // READS may leave the project directory. A structured write elsewhere needs exact human consent;
+  // Bash never inherits that exception. Reading a doc, skill, or sibling repo damages nothing, while
+  // refusing it made ordinary work impossible. Credential paths stay refused either way. Set false
+  // for a hard wall around the project.
   read_outside_root: true,
-  // Structured writes and sandboxed bash may also modify these explicit directory capabilities.
-  // Neko's own research ledger is a built-in user-global writable surface; broader paths remain
-  // opt-in through additional_write_roots (or NEKO_ADDITIONAL_WRITE_ROOTS, PATH-delimited).
+  // Structured writes and sandboxed bash may also modify these durable directory capabilities without
+  // another prompt. Neko's research ledger is built in; broader roots remain explicit policy.
   additional_write_roots: [],
   mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
   // The oracle: a second opinion from a STRONGER model, consulted with a curated bundle of files and
