@@ -249,7 +249,8 @@ test("Esc and Ctrl+C both abort a busy turn at the UI boundary", async () => {
 
   for (const key of ["\x1b", "\x03"]) {
     const provider = new AbortableProvider();
-    const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+    let alerts = 0;
+    const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} completionAlert={() => { alerts++; }} />);
     stdin.write("start a long task");
     await tick(20);
     stdin.write("\r");
@@ -257,6 +258,7 @@ test("Esc and Ctrl+C both abort a busy turn at the UI boundary", async () => {
     stdin.write(key);
     expect(await until(() => provider.aborts === 1)).toBe(true);
     expect(await until(() => frames.join("\n").toLowerCase().includes("interrupted"))).toBe(true);
+    expect(alerts).toBe(0);
     unmount();
   }
 }, 30_000);
@@ -568,7 +570,8 @@ test("auto mode: a safe tool call + markdown answer render end-to-end", async ()
     { content: null, tool_calls: [{ id: "c1", name: "ls", arguments: {} }] },
     { content: "Done **listing**.", tool_calls: [] },
   ]);
-  const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+  let alerts = 0;
+  const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} completionAlert={() => { alerts++; }} />);
   stdin.write("look around");
   await tick(20);
   stdin.write("\r"); // Enter
@@ -579,6 +582,20 @@ test("auto mode: a safe tool call + markdown answer render end-to-end", async ()
   expect(all).toContain("> look around"); // user line
   expect(all).toContain("List"); // tool-call line (Claude-style label for ls)
   expect(all).toContain("Done listing"); // markdown-rendered assistant answer
+  expect(await until(() => alerts === 1)).toBe(true); // rings only after the durable checkpoint settles
+  unmount();
+});
+
+test("a failed turn stays silent", async () => {
+  let alerts = 0;
+  const provider: Provider = { complete: async () => { throw new Error("provider unavailable"); } };
+  const { stdin, frames, unmount } = render(
+    <ChatApp fullscreen={false} yolo provider={provider} completionAlert={() => { alerts++; }} />,
+  );
+  stdin.write("try once"); await tick(20); stdin.write("\r");
+  expect(await until(() => frames.join("\n").includes("provider unavailable"))).toBe(true);
+  await tick(50); // allow the failure checkpoint/finally path to settle
+  expect(alerts).toBe(0);
   unmount();
 });
 
@@ -704,11 +721,61 @@ test("/login opens the official OpenCode Zen key page and captures the key throu
     stdin.write("/login"); await tick(30); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Sign in - choose a provider"))).toBe(true);
     stdin.write("opencode"); await tick(40); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("choose how to sign in"))).toBe(true);
+    stdin.write("zen"); await tick(40); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("paste the API key"))).toBe(true);
     expect(opened).toBe("https://opencode.ai/zen");
     expect(lastFrame() ?? "").toContain("pay-as-you-go");
     unmount();
   } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("/login connects an OpenCode Console account through official device OAuth", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldFetch = globalThis.fetch;
+  const home = mkdtempSync(join(tmpdir(), "neko-opencode-oauth-ui-"));
+  // Keep Neko's credential file isolated without teaching Windows networking that the disposable
+  // directory is a real user profile. Undici can otherwise materialize protected INetCache
+  // junctions there, which makes the test-only teardown fail with EPERM on Windows.
+  process.env.HOME = home; delete process.env.USERPROFILE;
+  let opened = "";
+  // SAFETY: test-built fetch fixture implements the fetch arguments and returns a Response for every path.
+  globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/device/code")) return Response.json({
+      device_code: "device-secret",
+      user_code: "ABCD-EFGH",
+      verification_uri_complete: "/device?user_code=ABCD-EFGH&client_id=opencode-cli",
+      expires_in: 900,
+      interval: 1,
+    });
+    if (url.endsWith("/auth/device/token")) return Response.json({
+      access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600,
+    });
+    if (url.endsWith("/api/user")) return Response.json({ id: "account-1", email: "user@example.com" });
+    if (url.endsWith("/api/orgs")) return Response.json([{ id: "org-1", name: "Team" }]);
+    return Response.json({});
+  }) as typeof fetch;
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, frames, lastFrame, unmount } = render(
+      <ChatApp fullscreen={false} yolo provider={provider} openUrl={(url) => { opened = url; }} />,
+    );
+    stdin.write("/login"); await tick(30); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Sign in - choose a provider"))).toBe(true);
+    stdin.write("opencode"); await tick(40); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("OpenCode - choose how to sign in"))).toBe(true);
+    stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("OpenCode Console connected as user@example.com"))).toBe(true);
+    expect(opened).toBe("https://opencode.ai/console/device?user_code=ABCD-EFGH&client_id=opencode-cli");
+    expect(readFileSync(join(home, ".neko-core", "opencode-auth.json"), "utf8")).toContain("refresh-secret");
+    expect(frames.join("\n")).not.toContain("device-secret");
+    unmount();
+  } finally {
+    globalThis.fetch = oldFetch;
     if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
     if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
     rmSync(home, { recursive: true, force: true });

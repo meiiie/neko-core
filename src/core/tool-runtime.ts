@@ -601,7 +601,7 @@ export class ToolRegistry {
   private detachCurrent: (() => void) | null = null;
   /** Pre-images plus Neko's last known write. Rewind uses the latter as an optimistic-concurrency
    * token: a newer user/editor change is preserved rather than overwritten. */
-  private fileSnapshots = new Map<string, { before: string | null; lastWritten?: string; tainted?: boolean }>();
+  private fileSnapshots = new Map<string, { before: string | null; lastWritten?: string; tainted?: boolean; hostWrite?: boolean }>();
   /** Remote V1 mutations are deliberately not placed in the host filesystem checkpoint. Rewind
    * reports each one as an explicit conflict instead of claiming it was restored. */
   private remoteMutationPaths = new Set<string>();
@@ -660,10 +660,10 @@ export class ToolRegistry {
   }
 
   /** Record a file's current content (once) immediately before its first mutation this turn. */
-  private snapshotFile(absPath: string): void {
+  private snapshotFile(absPath: string, hostWrite = false): void {
     if (this.fileSnapshots.has(absPath)) return;
     try {
-      this.fileSnapshots.set(absPath, { before: existsSync(absPath) ? readFileSync(absPath, "utf-8") : null });
+      this.fileSnapshots.set(absPath, { before: existsSync(absPath) ? readFileSync(absPath, "utf-8") : null, hostWrite });
     } catch (e) {
       debug("checkpoint", () => `snapshotFile unreadable ${absPath}: ${messageOf(e)}`);
     }
@@ -738,7 +738,7 @@ export class ToolRegistry {
       try {
         // Re-resolve immediately before rewind. A path that became a symlink/junction/hardlink
         // after Neko's write must not turn checkpoint restore into an escape from the granted root.
-        const resolved = resolveForWrite(this.root, path, this.additionalWriteRoots);
+        const resolved = resolveForWrite(this.root, path, this.additionalWriteRoots, snapshot.hostWrite === true);
         if (resolved !== path) throw new Error("checkpoint path identity changed");
         assertSingleLinkStructuredTarget(path, path);
         const current = existsSync(path) ? readFileSync(path, "utf-8") : null;
@@ -1295,13 +1295,23 @@ export class ToolRegistry {
     }
 
     let structuredPath: string | undefined;
+    let hostWrite = false;
     let spec;
     try {
       spec = resolveTool(name);
       const structuredMutation = name === "write_file" || name === "edit" || name === "multi_edit";
-      structuredPath = !nativeBackend && structuredMutation && args.path
-        ? resolveForWrite(this.root, String(args.path), this.additionalWriteRoots)
-        : undefined;
+      if (!nativeBackend && structuredMutation && args.path) {
+        try {
+          structuredPath = resolveForWrite(this.root, String(args.path), this.additionalWriteRoots);
+        } catch (error) {
+          // A target outside every configured capability is eligible for one explicit, per-call
+          // host-write approval. Resolve through the protected-host filter now; execution receives
+          // this authority only after the prompt below succeeds.
+          if (!outsideWriteCapabilities(this.root, String(args.path), this.additionalWriteRoots)) throw error;
+          structuredPath = resolveForWrite(this.root, String(args.path), this.additionalWriteRoots, true);
+          hostWrite = true;
+        }
+      }
     } catch (error) {
       // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
       return `Error: ${(error as Error).message}`;
@@ -1332,6 +1342,12 @@ export class ToolRegistry {
     if (policyWrite && decision === "allow") {
       decision = "prompt";
       this.denialNote = this.denialNote ?? "~/.neko-core/config.json is Neko's policy file: this exact change needs your confirmation and a Neko restart to take effect.";
+    }
+    // Auto is bounded workspace autonomy, not ambient host mutation authority. An explicit target
+    // outside the project/additional roots always asks once; plan remains a hard deny.
+    if (hostWrite) {
+      if (decision === "allow") decision = "prompt";
+      this.denialNote = this.denialNote ?? "This target is outside the workspace and configured write roots; only this exact structured change is being requested.";
     }
     if (decision === "deny") {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
@@ -1371,7 +1387,7 @@ export class ToolRegistry {
       if (structuredPath) {
         const refusal = this.structuredMutationRefusal(structuredPath, String(args.path));
         if (refusal) return refusal;
-        this.snapshotFile(structuredPath);
+        this.snapshotFile(structuredPath, hostWrite);
       }
       // SAFETY: membership in the built-in tool-name set is checked just above.
       const out = nativeBackend ? await this.runNativeBackend(nativeBackend, name as NativeToolName, args, signal)
@@ -1385,6 +1401,7 @@ export class ToolRegistry {
         : await DISPATCH[name](this.root, args, {
           readOutsideRoot: this.readOutsideRoot,
           additionalWriteRoots: this.additionalWriteRoots,
+          allowHostWrites: hostWrite,
           childSecretEnvNames: this.childSecretEnvNames,
           strictEditMatch: name === "edit" && Boolean(this.turnToolPolicy?.editTarget),
           exactEditTarget: name === "edit" ? this.turnToolPolicy?.editTarget?.absolute : undefined,
@@ -2050,7 +2067,7 @@ function toolWriteFile(root: string, args: any, opts: ToolOpts): string {
   const raw = requireArg(args, "path");
   const content = args.content;
   if (content === undefined || content === null) throw new Error("missing required argument: content");
-  const path = resolveForWrite(root, raw, opts.additionalWriteRoots);
+  const path = resolveForWrite(root, raw, opts.additionalWriteRoots, opts.allowHostWrites === true);
   const existed = existsSync(path);
   mkdirSync(dirname(path), { recursive: true });
   assertSingleLinkStructuredTarget(path, raw);
@@ -2087,7 +2104,7 @@ function toolEdit(root: string, args: any, opts: ToolOpts): string {
   const newStr = args.new_string;
   if (oldStr === undefined || oldStr === null) throw new Error("missing required argument: old_string");
   if (newStr === undefined || newStr === null) throw new Error("missing required argument: new_string");
-  const path = resolveForWrite(root, raw, opts.additionalWriteRoots);
+  const path = resolveForWrite(root, raw, opts.additionalWriteRoots, opts.allowHostWrites === true);
   if (!existsSync(path)) return `Error: no such file: ${raw}`;
   assertSingleLinkStructuredTarget(path, raw);
   if (opts.exactEditTarget && canonicalRegularFileForWrite(root, raw, opts.additionalWriteRoots) !== opts.exactEditTarget) {
@@ -2140,7 +2157,7 @@ function toolMultiEdit(root: string, args: any, opts: ToolOpts): string {
   const edits = args.edits;
   if (!Array.isArray(edits) || edits.length === 0) return "Error: multi_edit needs a non-empty 'edits' array";
   if (edits.length > 100) return "Error: multi_edit accepts at most 100 edits (no change written)";
-  const path = resolveForWrite(root, raw, opts.additionalWriteRoots);
+  const path = resolveForWrite(root, raw, opts.additionalWriteRoots, opts.allowHostWrites === true);
   if (!existsSync(path)) return `Error: no such file: ${raw}`;
   assertSingleLinkStructuredTarget(path, raw);
   let text = readFileSync(path, "utf-8");
@@ -2263,7 +2280,7 @@ function resolveInRoot(root: string, p: string): string {
 /** Resolve a structured mutation against the project plus explicit additional directory capabilities.
  * An allowed root is still canonicalized, so a symlink/junction inside it cannot escape to another
  * directory. Credential/device paths remain immutable outside the project even when their parent was
- * granted broadly. */
+ * granted broadly. An exact ordinary host target can be admitted separately after human consent. */
 /** The canonical user policy file (~/.neko-core/config.json). Core computes it from the shared
  * home helper so the admission below never imports adapter config code (dependency rule).
  * Canonicalized through the same realpath-nearest pass as the requested target: macOS tempdirs
@@ -2278,16 +2295,40 @@ function isPolicyConfigTarget(absPath: string | undefined): boolean {
   return absPath !== undefined && absPath.toLowerCase() === nekoUserConfigPath().toLowerCase();
 }
 
-function resolveForWrite(root: string, p: string, additionalRoots: readonly string[]): string {
+/** System locations a host-wide write must never touch (the "important files" tier of the
+ * owner's policy). Credential/browser-store paths come from the read policy's credential matcher. */
+function protectedHostWriteRefusal(absPath: string): string | null {
+  if (process.platform === "win32") {
+    const guarded = [
+      process.env.SystemRoot || "C:\\Windows",
+      process.env.ProgramFiles || "C:\\Program Files",
+      process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
+      process.env.ProgramData || "C:\\ProgramData",
+    ];
+    for (const root of guarded) if (pathWithin(resolve(root), resolve(absPath))) return "a system directory";
+    return null;
+  }
+  for (const root of ["/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64", "/etc", "/boot", "/System", "/Library/System"]) {
+    if (pathWithin(resolve(root), resolve(absPath))) return "a system directory";
+  }
+  return null;
+}
+
+/** True only when the requested spelling begins outside every existing write capability. A path
+ * that starts inside a capability and escapes through a symlink must retain the stronger refusal. */
+function outsideWriteCapabilities(root: string, p: string, additionalRoots: readonly string[]): boolean {
+  const resolved = resolve(resolve(root), p);
+  if (pathWithin(resolve(root), resolved)) return false;
+  return !additionalRoots.some((allowed) => pathWithin(resolve(allowed), resolved));
+}
+
+function resolveForWrite(root: string, p: string, additionalRoots: readonly string[], allowHost = false): string {
   const primary = resolve(root);
   const resolved = resolve(primary, p);
   if (pathWithin(primary, resolved)) return resolveInRoot(root, p);
   const targetReal = realpathNearest(resolved);
-  // The user-owned policy file is the ONE outside-workspace structured-write target admitted
-  // through the approval gate: when the user asks the agent to fix settings, it may propose the
-  // exact edit, the user confirms it in the normal gate, and execute() additionally (a) forces a
-  // prompt even in auto mode - policy is never silently self-approved - and (b) rejects a result
-  // that is not valid JSON so a consented edit cannot brick the config.
+  // The user-owned policy file has a stricter outside-workspace path: execute() forces a prompt even
+  // in auto mode and rejects an invalid JSON result so a consented edit cannot brick the config.
   if (targetReal.toLowerCase() === nekoUserConfigPath().toLowerCase()) return targetReal;
   for (const rawRoot of additionalRoots) {
     const allowed = resolve(rawRoot);
@@ -2303,6 +2344,14 @@ function resolveForWrite(root: string, p: string, additionalRoots: readonly stri
     if (denied) throw new Error(`refused: ${denied} may not be modified outside the project: ${p}`);
     // Never continue mutation through the alias spelling after admission: use the already-resolved
     // canonical parent plus the not-yet-existing tail.
+    return targetReal;
+  }
+  if (allowHost) {
+    // Host-wide write policy: admit any remaining host target that is not protected. Credential
+    // and system paths refuse; the policy file was already admitted (with its own consent gate)
+    // before the additional-root loop.
+    const denied = deniedCredentialPath(targetReal) ?? deniedCredentialPath(resolved) ?? protectedHostWriteRefusal(targetReal);
+    if (denied) throw new Error(`refused: ${denied} is protected from host writes: ${p}`);
     return targetReal;
   }
   return resolveInRoot(root, p);
@@ -2390,6 +2439,10 @@ function describe(name: string, args: any): string {
 export interface ToolOpts {
   readOutsideRoot: boolean;
   additionalWriteRoots: readonly string[];
+  /** This structured mutation targets an ordinary path outside the workspace and was admitted
+   * through exact human consent. Credential and system roots remain immutable; the Neko policy
+   * file uses its separate consent-plus-JSON-validation path. */
+  allowHostWrites?: boolean;
   childSecretEnvNames?: Iterable<string>;
   /** Exact-file leases refuse the legacy whitespace-tolerant edit fallback. */
   strictEditMatch?: boolean;

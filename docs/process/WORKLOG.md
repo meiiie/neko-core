@@ -3,13 +3,58 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-21 - Exact-consent host writes without weakening the sandbox
+
+The structured file tools can now complete an explicitly requested edit to an ordinary host file
+outside the workspace without asking the user to reconfigure and restart Neko first. Auto/yolo never
+silently grants that reach: each exact outside target is forced through the human gate, `plan` denies,
+and the capability is not inherited by another path or by Bash. Credential/browser stores, operating
+system locations, symlink/junction escapes, and multiply-linked aliases refuse before prompting.
+Configured `additional_write_roots` remain the durable prompt-free mechanism. Checkpoints retain the
+transient capability only long enough to safely restore the same target after a failed turn. Focused
+tool, permission, read-boundary, and policy regressions pass 98 tests / 598 assertions.
+
+## 2026-08-21 - Branded durable completion sound
+
+Successful interactive turns now play the selected 230 ms Neko Bubble v6 only after the response and session
+checkpoint have both settled. The score is clean-room and synthesized deterministically into the binary; on
+Windows, winmm plays the WAV straight from memory, so the path stays synchronous/non-blocking and never opens
+a player, writes an audio cache, or spawns a helper. Linux/macOS retain terminal BEL until an equally small
+native backend exists. Provider errors, Esc/Ctrl+C interruptions, history replay, slash commands, and voice
+turns stay silent. It is on by default and has both a durable `completion_sound:false` config opt-out and a
+`NEKO_COMPLETION_SOUND=0` environment override. Tests hash-lock the score, exercise native preparation/fallback,
+and prove one alert on success plus zero on provider failure and both interrupt keys.
+
+## 2026-08-21 - OpenCode Console device OAuth corrected and integrated
+
+The earlier Zen-only conclusion below was too conservative. Re-reading OpenCode's current MIT source at
+`a9cac91d60660abac2cfe29afbdd466f60e765be` confirmed a registered OAuth method named `OpenCode Console
+account`, public client id `opencode-cli`, RFC 8628-style device polling, refresh-token rotation, user/org
+discovery, and an account-managed `/api/config`; the same integration explicitly labels API keys as
+`API key (service account)`. A live, no-consent/no-token probe also confirmed that the official device-code
+endpoint accepts that public client id. No model or paid request was made.
+
+Neko now implements that contract independently in `opencode-auth.ts`, owns its token file, and never reads
+OpenCode CLI state. `neko login opencode` and `/login -> OpenCode -> OpenCode Console account` use device
+OAuth; `neko login opencode zen <key>` preserves the existing Zen key route and profile id. The account model
+picker loads `/api/config`, uses provider/model ids, preserves catalog context/image metadata, supports only
+the three Neko-native wires currently verified, and refuses any endpoint outside HTTPS `opencode.ai` before
+the bearer can leave the process. Mock regressions cover device pending/success, deterministic org selection,
+refresh rotation, secret-safe persistence, org-scoped catalog fetch, dynamic Responses routing, and malicious
+verification/catalog URLs. Combined OpenCode/config/UI verification: 121 tests / 594 assertions, lint plus current/stable
+TypeScript green. The production build, UI probe, real-PTY input probe, ACP smoke, doctor, and policy also
+passed. The full suite reached 1,427 pass / 12 platform-or-sandbox skips; two pre-existing Windows WPF/UIA
+fixtures failed because the host rejected canonical PowerShell process creation with `uv_spawn EPERM` even
+after their bounded retries. A focused rerun reproduced only those two environment failures (7 adjacent UIA
+tests passed); no OpenCode test failed. Bun also repeated its known non-fatal Windows
+`tsconfig.build.json` directory-mismatch diagnostic after the successful build.
+
 ## 2026-08-21 - OpenCode Zen login and heterogeneous model routing
 
 OpenCode's published integration contract is OpenCode Zen: sign in at the official account page, add
 billing, copy an API key, and call its public endpoints. Its current development source also contains a
-Console device flow using the `opencode-cli` client id, but OpenCode does not document that identity as a
-third-party authorization grant. Neko therefore integrates the stable, explicitly reusable Zen API rather
-than importing CLI state or pretending to be OpenCode CLI.
+Console device flow using the `opencode-cli` client id. This entry records the initial conservative decision;
+the source-level public-client contract was subsequently verified and integrated in the newer entry above.
 
 One `opencode` profile now owns one profile-scoped key (`OPENCODE_API_KEY`) and one live catalog. A small
 edge adapter routes GPT/Grok/Muse to `/zen/v1/responses`, Claude/Qwen to `/zen/v1/messages`, and the

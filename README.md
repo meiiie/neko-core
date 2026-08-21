@@ -168,8 +168,12 @@ neko
 #        -> Kimi      -> Kimi Code account (OAuth) / Kimi Platform API key
 #        -> DeepSeek  -> DeepSeek V4 API key
 #        -> OpenRouter -> one key, live tool-capable catalog
-#        -> OpenCode   -> OpenCode Zen API key (verified model catalog)
+#        -> OpenCode   -> Console account OAuth / Zen service-account API key
 ```
+
+After a successful turn Neko plays its short Bubble completion sound on Windows (with a terminal-bell
+fallback elsewhere) so long autonomous work can finish in the background without being missed. Set
+`completion_sound:false` in `~/.neko-core/config.json` (or `NEKO_COMPLETION_SOUND=0`) for silent operation.
 
 ### Use Neko in an ACP editor
 
@@ -205,7 +209,8 @@ neko login kimi
 neko login kimi api <key>
 neko login deepseek <key>
 neko login openrouter <key>
-neko login opencode <key>
+neko login opencode
+neko login opencode zen <key>
 
 # Headless/SSH alternative: prints a URL and one-time device code
 neko login openai chatgpt --device
@@ -215,12 +220,13 @@ neko doctor
 
 OpenRouter uses its [official OpenAI-compatible API](https://openrouter.ai/docs/quickstart) and
 `OPENROUTER_API_KEY`; `/model` loads the live tool-capable catalog and preserves each selected model's
-context-window and vision metadata. OpenCode uses the public [OpenCode Zen](https://opencode.ai/docs/zen)
-API with `OPENCODE_API_KEY`; `/login` opens Zen's account/key page, and `/model` loads its live catalog.
-Neko routes GPT/Grok/Muse over Responses, Claude/Qwen over Messages, and DeepSeek/GLM/Kimi/MiniMax/free
-models over Chat Completions. Gemini entries are intentionally hidden until Neko has a verified Google-native
-Zen wire. This is Zen pay-as-you-go API billing, not OpenCode Console OAuth; Neko never reads another CLI's
-credential store or reuses OpenCode CLI's client identity. Anthropic
+context-window and vision metadata. OpenCode has two deliberately separate routes. `neko login opencode`
+uses the official Console device flow ([public-client source pinned here](https://github.com/anomalyco/opencode/blob/a9cac91d60660abac2cfe29afbdd466f60e765be/packages/core/src/plugin/provider/opencode.ts))
+and `/model` loads the account-managed provider catalog. `neko login opencode zen <key>` uses the public
+[OpenCode Zen](https://opencode.ai/docs/zen) service-account API with `OPENCODE_API_KEY`; Neko routes
+GPT/Grok/Muse over Responses, Claude/Qwen over Messages, and documented compatible families over Chat
+Completions. Neko stores its own refresh token and never reads OpenCode CLI's credential store. Account
+tokens are accepted only for HTTPS endpoints under `opencode.ai`; unknown wires fail closed. Anthropic
 and xAI are direct, official API-key routes (not subscription/OAuth proxies). For a non-TUI
 session, set `ANTHROPIC_API_KEY` and run `neko --profile claude`, or set `XAI_API_KEY` and run
 `neko --profile xai` (current Grok 4.5) / `neko --profile grok-build` (the dedicated coding model).
@@ -450,8 +456,10 @@ Bare `neko` (or `neko core`; legacy `neko code`) starts the interactive session.
 `--profile <name>` selects a runtime profile · `--yolo` auto-approves gated tools ·
 `neko --resume` continues the latest session.
 
-`--yolo` automates approvals; it does not silently grant machine-wide writes. Ordinary host reads are
-available by default, while writes stay inside the project plus canonical `additional_write_roots`.
+`--yolo` automates routine in-scope approvals; it does not silently grant machine-wide writes.
+Ordinary host reads are available by default. Writes inside the project and canonical
+`additional_write_roots` are automatic; an ordinary target elsewhere can proceed only after one
+explicit confirmation for that exact structured change. Credential and system paths remain refused.
 The global `~/.neko-core/research` ledger is included automatically; see
 [`docs/process/SANDBOX.md`](docs/process/SANDBOX.md#outside-workspace-autonomy-is-path-scoped).
 

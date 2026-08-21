@@ -44,6 +44,7 @@ import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts
 import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt, openBrowser } from "../adapters/chatgpt-auth.ts";
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginGemini } from "../adapters/gemini-cli.ts";
 import { clearKimiCredentials, hasKimiCredentials, loginKimi } from "../adapters/kimi-auth.ts";
+import { clearOpenCodeCredentials, hasOpenCodeCredentials, loginOpenCode } from "../adapters/opencode-auth.ts";
 import { installGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
 import { compareCodexVersions, discoverCodexSupport } from "../adapters/codex-app-server.ts";
 import { installCodexSupportPack } from "../adapters/codex-support-pack.ts";
@@ -69,6 +70,7 @@ import { qrMatrix, qrToText } from "../shared/qr.ts";
 import { VERSION } from "../shared/version.ts";
 import { debug } from "../shared/debug.ts";
 import { expandPlaceholders } from "../shared/paste-collapse.ts";
+import { prepareCompletionAlert } from "../adapters/completion-sound.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
@@ -130,6 +132,8 @@ interface ChatProps {
   setupBrowser?: () => Promise<string>;
   officeSupportStatus?: () => OfficeSupportStatus;
   installOfficeSupport?: (options: { force?: boolean; notify: (message: string) => void }) => Promise<OfficeSupportPackInfo | void>;
+  /** Tests inject an observer; production uses the prepared native sound and returns false to request BEL fallback. */
+  completionAlert?: () => boolean | void;
   /** Mutable bridge holder so the side panel can mirror Neko's transcript and drive turns. */
   bridgeHolder?: {
     current: BrowserBridge | null;
@@ -154,7 +158,7 @@ export const STREAM_PUMP_SCROLLED_MS = 300;
 export const shouldStreamPump = (now: number, lastPump: number, scrolledAway: boolean): boolean =>
   now - lastPump >= (scrolledAway ? STREAM_PUMP_SCROLLED_MS : STREAM_PUMP_MS);
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, bridgeHolder }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, completionAlert, bridgeHolder }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -162,6 +166,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // TUI on real terminals (Windows Terminal / PowerShell were dead after /resume). `app.clear()` clears
   // through Ink's own log-update so the frame stays consistent. Falls back to a no-op in tests.
   const clearTerm = () => { try { clearScreen?.(); } catch { /* headless */ } };
+  const ringCompletion = () => {
+    try { if (completionAlert && completionAlert() !== false) return; }
+    catch { /* fall through to BEL */ }
+    try { if (stdout?.isTTY) stdout.write("\x07"); }
+    catch { /* A terminal notification must never change turn outcome. */ }
+  };
   const [cols, setCols] = useState(stdout?.columns ?? 80);
   const [rows, setRows] = useState(stdout?.rows ?? 24);
   const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
@@ -2012,11 +2022,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       };
       const apiProfiles = new Set<string>();
       for (const [name, profile] of Object.entries(cfg.profiles)) {
-        if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "kimi_oauth" || profile.auth === "none") continue;
+        if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "kimi_oauth" || profile.auth === "opencode_oauth" || profile.auth === "none") continue;
         try { if (loadConfig({ profile: name }).apiKey) apiProfiles.add(name); } catch { /* status only */ }
       }
       const openAuthRoutes = (family: string) => {
-        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), kimi: hasKimiCredentials(), apiProfiles });
+        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), kimi: hasKimiCredentials(), opencode: hasOpenCodeCredentials(), apiProfiles });
         const selectRoute = async (route: { id: string }) => {
           setOverlay(null);
           const profile = cfg.profiles[route.id];
@@ -2083,6 +2093,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             }
             return;
           }
+          if (profile?.auth === "opencode_oauth") {
+            setBusy(true);
+            addLine("info", "Opening official OpenCode Console device sign-in in your browser...");
+            try {
+              const credentials = await loginOpenCode({
+                notify: (message) => addLine("info", message),
+                openUrl: openUrl ?? openBrowser,
+              });
+              activate(route.id);
+              addLine("info", `OpenCode Console connected as ${credentials.email}${credentials.orgName ? ` (${credentials.orgName})` : ""}. Neko owns and refreshes this session; type /model to load the account catalog.`);
+            } catch (error) {
+              addLine("error", `OpenCode sign-in failed: ${error instanceof Error ? error.message : error}`);
+            } finally {
+              setBusy(false);
+            }
+            return;
+          }
           if (route.id === "opencode") {
             const url = "https://opencode.ai/zen";
             addLine("info", `Opening OpenCode Zen to sign in, add pay-as-you-go billing, and copy an API key: ${url}`);
@@ -2097,7 +2124,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
         setOverlay({
-          title: family === "openai" ? "OpenAI - choose how to sign in" : family === "google" ? "Google - choose how to sign in" : family === "zai" ? "Z.AI - choose API route" : `Sign in to ${family}`,
+          title: family === "openai" ? "OpenAI - choose how to sign in" : family === "google" ? "Google - choose how to sign in" : family === "zai" ? "Z.AI - choose API route" : family === "opencode" ? "OpenCode - choose how to sign in" : `Sign in to ${family}`,
           items: routes,
           onSelect: (route) => { void selectRoute(route); },
         });
@@ -2128,6 +2155,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       if (cfg.usesKimiAuth) {
         addLine("info", `${clearKimiCredentials()} Kimi API keys and other provider sessions were left untouched.`);
+        agentRef.current?.setProvider(getProvider(cfg));
+        return;
+      }
+      if (cfg.usesOpenCodeAuth) {
+        addLine("info", `${clearOpenCodeCredentials()} OpenCode Zen service-account keys and other provider sessions were left untouched.`);
         agentRef.current?.setProvider(getProvider(cfg));
         return;
       }
@@ -2244,6 +2276,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       reason: plan.reason,
     });
     const turnStart = Date.now();
+    let turnCompleted = false;
     try {
       // Lock synchronously before the first asynchronous @file/vision preparation. Input arriving from
       // the terminal, phone, or side panel now joins the FIFO and is classified only after cleanup.
@@ -2344,6 +2377,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (result !== "[interrupted]" && agentRef.current!.cost.lastPrompt > COMPACT_AT * cfg.contextWindow) {
         await runCompaction("auto");
       }
+      turnCompleted = result !== "[interrupted]";
     } catch (error) {
       flushStream();
       const msg = error instanceof Error ? error.message : String(error);
@@ -2364,15 +2398,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       tabTitle(titleTaskRef.current || "Neko Core", false); // the cat returns, the dot stops
       if (inflightRef.current.length) { inflightRef.current = []; syncInflight(); } // drop any un-resulted (aborted) blinking lines
       controllerRef.current = null;
+      let persisted = true;
       try {
         await persist();
         persistErrorShownRef.current = false;
       } catch (error) {
+        persisted = false;
         if (!persistErrorShownRef.current) {
           persistErrorShownRef.current = true;
           addLine("error", `session checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
+      if (turnCompleted && persisted && cfg.completionSound && !voiceTurnRef.current) ringCompletion();
       const next = queueRef.current.shift();
       setQueued(queueRef.current.length);
       if (next !== undefined) void handle(next).catch((e) => addLine("error", e instanceof Error ? e.message : String(e))); // drain queued input
@@ -3374,6 +3411,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   if (opts.resumeId && !resumed) console.error(`neko: no session '${opts.resumeId}' - starting fresh.`);
   const id = resumed?.id ?? newSessionId();
   const cfg = loadConfig({ profile: opts.profile });
+  const completionAlert = cfg.completionSound ? await prepareCompletionAlert() : undefined;
   const hub = await buildMcpHub(cfg.mcpServers, { allow: cfg.mcpAllow, deny: cfg.mcpDeny }, cfg.mcpLazy, cfg.childSecretEnvNames);
   const showBrowserHint = !readBrowserCapability() && !loadPrefs().browserHintSeen;
   if (showBrowserHint) savePrefs({ browserHintSeen: true });
@@ -3450,7 +3488,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const startFullscreen = cfg.fullscreen && canFullscreen(process.stdout);
   const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
   const app = render(
-    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} bridgeHolder={bridgeHolder} />,
+    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} completionAlert={completionAlert} bridgeHolder={bridgeHolder} />,
     // Bracket each (already-minimized) write in BSU/ESU on terminals that support DEC 2026
     // (synchronized output) so redraws are atomic - no flicker, no Windows scrollback yank.
     {

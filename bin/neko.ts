@@ -20,6 +20,7 @@ import { getProvider } from "../src/adapters/providers.ts";
 import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt } from "../src/adapters/chatgpt-auth.ts";
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginGemini } from "../src/adapters/gemini-cli.ts";
 import { clearKimiCredentials, loginKimi } from "../src/adapters/kimi-auth.ts";
+import { clearOpenCodeCredentials, loginOpenCode } from "../src/adapters/opencode-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../src/adapters/gemini-support-pack.ts";
 import { discoverOfficeCli, installOfficeSupportPack, readOfficeSupportPack, removeOfficeSupportPack } from "../src/adapters/office-support-pack.ts";
 import { activeBrowserMeeting, startBrowserMeeting, stopBrowserMeeting } from "../src/adapters/browser-meeting.ts";
@@ -231,7 +232,7 @@ Commands:
   skills        list available skills (~/.neko-core/skills)
   procurement   deterministic sourcing helpers; 'source-plan <identifier>' expands exact-source queries
   recipes       list runnable recipes (~/.neko-core/recipes)
-  login         sign in; OpenAI, Google, Kimi, DeepSeek, OpenRouter, OpenCode Zen, or another API-key provider
+  login         sign in; OpenAI, Google, Kimi, OpenCode Console/Zen, or another API-key provider
   logout        sign out the active route (other provider sessions/keys stay intact)
   support       inspect, install, update, or remove optional ChatGPT/Gemini/Office/Meeting components
   update [ver]  self-update to the latest release (resumes auto-updates); 'update 0.7.7' pins/rolls
@@ -546,6 +547,13 @@ async function cmdLogin(args: Args): Promise<number> {
     console.log("Kimi Code sign-in complete. Active profile: kimi (official device OAuth; no proxy or API key).");
     return 0;
   }
+  const openCodeOAuth = provider === "opencode" && (!method || ["oauth", "account", "console"].includes(method));
+  if (openCodeOAuth) {
+    const credentials = await loginOpenCode({ notify: console.log });
+    setActiveProfile("opencode-account");
+    console.log(`OpenCode Console sign-in complete for ${credentials.email}. Active profile: opencode-account (device OAuth; no Zen API key).`);
+    return 0;
+  }
   if (provider === "google" && !["api", "api-key", "apikey"].includes(method)) {
     console.error("usage: neko login google gemini   OR   neko login google api <key>");
     return 2;
@@ -561,11 +569,11 @@ async function cmdLogin(args: Args): Promise<number> {
   let key = provider === "openai" || provider === "google" || provider === "kimi"
     ? (args.positionals[2] ?? "")
     : provider === "deepseek" || provider === "openrouter" || provider === "opencode"
-      ? (["api", "api-key", "apikey"].includes(method) ? (args.positionals[2] ?? "") : (args.positionals[1] ?? ""))
+      ? (["api", "api-key", "apikey", "zen", "service", "service-account"].includes(method) ? (args.positionals[2] ?? "") : (args.positionals[1] ?? ""))
       : (args.positionals[0] ?? "");
   if (!key && !process.stdin.isTTY) key = (await Bun.stdin.text()).trim(); // piped
   if (!key) {
-    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login kimi   OR   neko login deepseek <key>   OR   neko login openrouter <key>   OR   neko login opencode <key>");
+    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login kimi   OR   neko login opencode   OR   neko login opencode zen <key>   OR   neko login openrouter <key>");
     return 2;
   }
   if (provider === "openai") setActiveProfile("openai");
@@ -588,6 +596,12 @@ function cmdLogout(args: Args): number {
   const explicitGeminiApi = provider === "google" && ["api", "api-key", "apikey"].includes(method);
   const explicitKimi = provider === "kimi" && (!method || ["oauth", "account", "subscription", "code"].includes(method));
   const explicitKimiApi = provider === "kimi" && ["api", "api-key", "apikey"].includes(method);
+  const explicitOpenCodeAccount = provider === "opencode" && (
+    ["oauth", "account", "console"].includes(method) || (!method && current.profile !== "opencode")
+  );
+  const explicitOpenCodeZen = provider === "opencode" && (
+    ["api", "api-key", "apikey", "zen", "service", "service-account"].includes(method) || (!method && current.profile === "opencode")
+  );
   if (explicitGemini || (!provider && current.usesGeminiAuth)) {
     console.log(clearGeminiCredentials());
     return 0;
@@ -604,15 +618,19 @@ function cmdLogout(args: Args): number {
     console.log(clearKimiCredentials());
     return 0;
   }
+  if (explicitOpenCodeAccount || (!provider && current.usesOpenCodeAuth)) {
+    console.log(clearOpenCodeCredentials());
+    return 0;
+  }
   if (provider && !["openai", "google", "kimi", "deepseek", "openrouter", "opencode"].includes(provider)) {
-    console.error("usage: neko logout [openai api|openai chatgpt|google api|google gemini|kimi|kimi api|deepseek|openrouter|opencode]");
+    console.error("usage: neko logout [openai api|openai chatgpt|google api|google gemini|kimi|kimi api|deepseek|openrouter|opencode account|opencode zen]");
     return 2;
   }
   const targetProfile = explicitGeminiApi ? "gemini-api"
     : explicitKimiApi ? "moonshot"
       : provider === "deepseek" ? "deepseek"
         : provider === "openrouter" ? "openrouter"
-          : provider === "opencode" ? "opencode"
+          : explicitOpenCodeZen ? "opencode"
           : explicitApi || provider === "openai" ? "openai"
             : current.profile ?? undefined;
   console.log(clearApiKey(targetProfile));

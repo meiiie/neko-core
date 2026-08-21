@@ -334,6 +334,11 @@ test("modelShadow: null when no profile, when models agree, and when the preset 
   expect(opencode.model).toBe("gpt-5.6-terra");
   expect(opencode.profileKeyEnvs).toEqual(["OPENCODE_API_KEY"]);
   expect(opencode.childSecretEnvNames).toContain("OPENCODE_API_KEY");
+  const opencodeAccount = loadConfig({ path: tmpConfig({}), profile: "opencode-account" });
+  expect(opencodeAccount.provider).toBe("opencode_account");
+  expect(opencodeAccount.model).toBe("");
+  expect(opencodeAccount.usesOpenCodeAuth).toBe(true);
+  expect(opencodeAccount.profileKeyEnvs).toEqual([]);
 });
 
 test("modelShadow: NEKO_MODEL is named as the source (env wins over files)", () => {
@@ -349,13 +354,20 @@ test("boolean NEKO_* overrides parse false/true instead of using string truthine
   process.env.NEKO_MCP_LAZY = "off";
   process.env.NEKO_VISION = "yes";
   process.env.NEKO_ADAPTIVE_EFFORT = "on";
+  process.env.NEKO_COMPLETION_SOUND = "0";
   const cfg = loadConfig({ path: tmpConfig({ sandbox: true, verify_before_exit: true, mcp_lazy: true }) });
   expect(cfg.sandbox).toBe(false);
   expect(cfg.verifyBeforeExit).toBe(false);
   expect(cfg.mcpLazy).toBe(false);
   expect(cfg.vision).toBe(true);
   expect(cfg.adaptiveEffort).toBe(true);
+  expect(cfg.completionSound).toBe(false);
   expect(cfg.data.sandbox).toBe(false);
+});
+
+test("completion sound is on by default and has a permanent config opt-out", () => {
+  expect(loadConfig({ path: tmpConfig({}) }).completionSound).toBe(true);
+  expect(loadConfig({ path: tmpConfig({ completion_sound: false }) }).completionSound).toBe(false);
 });
 
 test("bash sandbox is ON by default, network off, with config/env rollback switches", () => {

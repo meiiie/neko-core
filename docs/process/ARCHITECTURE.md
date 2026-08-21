@@ -99,14 +99,13 @@ host daemon outside that OS sandbox; auto mode refuses those direct commands unl
 `allow_dangerous_bash` is explicitly enabled.
 
 Outside-workspace authority is split deliberately. Safe file readers may traverse ordinary host paths
-when `read_outside_root` is enabled, while structured mutations and ordinary sandboxed Bash share the
-project plus canonical `additional_write_roots`. The sole built-in global write capability is
-`~/.neko-core/research`; the user policy file `~/.neko-core/config.json` itself is the one
-consent-gated outside-root structured target (prompted in every mode, never auto-approved, and
-JSON-validated on write so a consented edit cannot brick the config); broader roots are user
-policy, not a side effect of `auto`/`--yolo`. Filesystem
-roots, home-wide grants, credential/agent-control capability roots, outside credential targets,
-symlink/junction escapes, and hardlink aliases are refused at the structured boundary. A timed-out SRT health probe may retry one real launch
+when `read_outside_root` is enabled. Structured mutations are automatic only in the project, canonical
+`additional_write_roots`, and the built-in `~/.neko-core/research` capability. An exact ordinary host
+target outside those roots can be admitted by one human confirmation; that transient authority is not
+reused or shared with Bash. The user policy file `~/.neko-core/config.json` keeps its stricter prompt in
+every mode plus post-write JSON validation. Filesystem-wide grants, credential/agent-control targets,
+system locations, symlink/junction escapes, and hardlink aliases are refused at the structured boundary.
+Ordinary sandboxed Bash remains confined to the project and canonical additional roots. A timed-out SRT health probe may retry one real launch
 through the same exact SRT settings, but never authorizes an unconfined fallback.
 
 The `task` tool is gated by default. Built-in reviewer/explorer roles receive explicit read-only
@@ -358,18 +357,18 @@ turns that call tools, and is replayed only to the same protocol, endpoint, and 
 DeepSeek's multi-step tool contract without exposing chain-of-thought to core or leaking it after a provider
 switch.
 
-## OpenCode Zen provider boundary
+## OpenCode account and Zen provider boundary
 
-`adapters/opencode.ts` implements one OpenCode Zen profile over the public API-key contract documented by
-OpenCode. Zen exposes a shared key and catalog but heterogeneous model wires, so this edge adapter delegates
-GPT/Grok/Muse to Responses, Claude/Qwen to Anthropic Messages, and documented compatible families to Chat
-Completions. Unknown families fail closed. Gemini catalog entries are omitted until a Google-native Zen
-adapter is implemented and verified; they are never guessed onto another protocol.
+`adapters/opencode-auth.ts` implements OpenCode's official device OAuth public-client contract with client id
+`opencode-cli`: device code, refresh-token rotation, user/org metadata, and account-managed `/api/config`.
+The session is written to Neko's own restricted file; another CLI's auth store is never read. Remote catalog
+data is untrusted: only HTTPS endpoints on `opencode.ai` (or its subdomains) may receive the account bearer,
+and unsupported packages/protocols are omitted or rejected before inference.
 
-The key remains profile-scoped in Neko config or `OPENCODE_API_KEY`, and catalog discovery is credential-free.
-Neko does not import OpenCode files, browser cookies, or Console sessions. OpenCode's development branch has
-a Console device flow for its own `opencode-cli` public client, but no public third-party client authorization
-contract is documented, so Neko does not reuse that client id or claim Console OAuth support.
+`adapters/opencode.ts` keeps that account route separate from the backwards-compatible OpenCode Zen
+service-account route. Zen's key remains profile-scoped in Neko config or `OPENCODE_API_KEY`; its public
+catalog is credential-free and its heterogeneous models delegate to Responses, Anthropic Messages, or Chat
+Completions. Unknown families fail closed, and Gemini remains omitted until a Google-native route is verified.
 
 ## ChatGPT realtime voice boundary
 

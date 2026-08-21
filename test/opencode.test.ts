@@ -4,13 +4,20 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
 import { DEFAULTS, NekoConfig } from "../src/adapters/config.ts";
-import { OpenCodeZenProvider, openCodeZenTransport } from "../src/adapters/opencode.ts";
+import { OpenCodeAccountProvider, OpenCodeZenProvider, openCodeZenTransport } from "../src/adapters/opencode.ts";
+import { saveOpenCodeCredentials } from "../src/adapters/opencode-auth.ts";
 import { getProvider, listModelOptions } from "../src/adapters/providers.ts";
 
 const originalFetch = globalThis.fetch;
+const originalHome = process.env.HOME;
+const originalProfile = process.env.USERPROFILE;
 const roots: string[] = [];
 
-afterEach(() => { globalThis.fetch = originalFetch; });
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+  if (originalProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = originalProfile;
+});
 afterAll(() => {
   const temp = resolve(tmpdir());
   for (const root of roots) {
@@ -28,6 +35,34 @@ function config(model = "gpt-5.6-terra", key = "zen-key"): NekoConfig {
     max_retries: 0,
     offline_retry_seconds: 0,
   }, "opencode", profiles, key);
+}
+
+function accountConfig(model = "console/gpt"): NekoConfig {
+  const profiles = structuredClone(DEFAULTS.profiles);
+  return new NekoConfig({
+    ...DEFAULTS,
+    ...profiles["opencode-account"],
+    model,
+    max_retries: 0,
+    offline_retry_seconds: 0,
+  }, "opencode-account", profiles, "");
+}
+
+function accountHome(): string {
+  const home = mkdtempSync(join(tmpdir(), "neko-opencode-account-"));
+  roots.push(home);
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  saveOpenCodeCredentials({
+    accessToken: "account-access",
+    refreshToken: "account-refresh",
+    expiresAt: Date.now() + 3600_000,
+    server: "https://opencode.ai/console",
+    accountId: "account-1",
+    email: "user@example.com",
+    orgId: "org-1",
+  });
+  return home;
 }
 
 test("OpenCode Zen routes documented model families without guessing unknown or Google-native wires", () => {
@@ -110,6 +145,60 @@ test("OpenCode model discovery is public, keeps supported wires, and omits Gemin
   expect(requestHeaders.has("authorization")).toBe(false);
 });
 
+test("OpenCode Console OAuth loads the account catalog and sends its token only to trusted OpenCode endpoints", async () => {
+  accountHome();
+  const calls: Array<{ url: string; headers: Headers; body?: any }> = [];
+  // SAFETY: test-built fetch fixture implements the fetch arguments and returns a Response for every path.
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({ url, headers: new Headers(init?.headers), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (url.endsWith("/console/api/config")) return Response.json({ config: { provider: {
+      console: {
+        name: "OpenCode account",
+        npm: "@ai-sdk/openai",
+        api: "https://api.opencode.ai/v1",
+        models: { gpt: { id: "gpt-internal", name: "GPT Account", tool_call: true, attachment: true, limit: { context: 272_000, output: 32_000 } } },
+      },
+    } } });
+    return Response.json({ error: { message: "probe stop" } }, { status: 401 });
+  }) as typeof fetch;
+
+  const cfg = accountConfig();
+  expect(getProvider(cfg)).toBeInstanceOf(OpenCodeAccountProvider);
+  expect(await listModelOptions(cfg)).toEqual([expect.objectContaining({
+    id: "console/gpt",
+    label: "GPT Account",
+    contextWindow: 272_000,
+    vision: true,
+  })]);
+  const provider = new OpenCodeAccountProvider(cfg);
+  await expect(provider.complete([{ role: "user", content: "probe" }])).rejects.toThrow();
+  await provider.dispose();
+  expect(calls.map((call) => call.url)).toEqual([
+    "https://opencode.ai/console/api/config",
+    "https://opencode.ai/console/api/config",
+    "https://api.opencode.ai/v1/responses",
+  ]);
+  for (const call of calls) expect(call.headers.get("authorization")).toBe("Bearer account-access");
+  expect(calls.at(-1)?.body.model).toBe("gpt-internal");
+});
+
+test("OpenCode Console refuses a catalog endpoint outside opencode.ai before leaking OAuth", async () => {
+  accountHome();
+  let evilCalled = false;
+  // SAFETY: test-built fetch fixture implements the fetch arguments and returns a Response for every path.
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("https://evil.example")) evilCalled = true;
+    return Response.json(url.endsWith("/console/api/config") ? { config: { provider: {
+      console: { npm: "@ai-sdk/openai", api: "https://evil.example/v1", models: { gpt: { tool_call: true } } },
+    } } } : { error: "unexpected" }, { status: url.endsWith("/console/api/config") ? 200 : 500 });
+  }) as typeof fetch;
+  const provider = new OpenCodeAccountProvider(accountConfig());
+  await expect(provider.complete([{ role: "user", content: "probe" }])).rejects.toThrow(/untrusted or invalid endpoint/i);
+  expect(evilCalled).toBe(false);
+});
+
 async function cli(home: string, ...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   const env = {
     HOME: home,
@@ -140,7 +229,7 @@ test("CLI OpenCode login and logout keep the Zen key profile-scoped and never ec
   roots.push(home);
   const sentinel = "opencode-integration-sentinel";
 
-  const login = await cli(home, "login", "opencode", sentinel);
+  const login = await cli(home, "login", "opencode", "zen", sentinel);
   expect(login.code).toBe(0);
   expect(login.stdout + login.stderr).not.toContain(sentinel);
   const configPath = join(home, ".neko-core", "config.json");

@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-17) — v0.24.10 release
+## Current status (2026-08-21) — v0.24.11 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,10 +38,13 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.10 (2026-08-17)** - Auto-default truly applies on fresh
-  installs (the baked legacy `approval` default no longer masks it) and the coalesced-Enter input
-  bug is fixed: a text+Enter chunk delivered as one stdin burst now inserts and submits instead of
-  being swallowed as a paste (turns no longer silently fail to start under terminal load).
+- **Branch:** `main`. **Current release: v0.24.11 (2026-08-21)** - OpenRouter and OpenCode Console
+  OAuth are first-class provider routes; successful durable turns play the built-in Neko Bubble v6;
+  and exact ordinary host-file changes can proceed through transient human consent without weakening
+  credential, system, alias, checkpoint, or Bash boundaries. The public site now matches the AGPL core
+  and dual-license policy.
+  Previous (v0.24.10, 2026-08-17) - Auto-default truly applies on fresh installs (the baked legacy
+  `approval` default no longer masks it), and coalesced text+Enter input now submits reliably.
   Previous (v0.24.9, 2026-08-17) - Auto is the default permission
   mode (bounded autonomy out of the box; only computer control, the policy file, catastrophic
   shell, credentials, and outside-workspace targets still ask), the policy file itself became the

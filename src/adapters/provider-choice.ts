@@ -11,6 +11,7 @@ export interface AuthAvailability {
   chatgpt: boolean;
   gemini: boolean;
   kimi: boolean;
+  opencode: boolean;
   apiProfiles: Set<string>;
 }
 
@@ -62,7 +63,7 @@ export function providerChoices(cfg: NekoConfig, authOnly = false): Choice[] {
                     : family === "openrouter"
                       ? `one API key for the live tool-capable model catalog${current}`
                       : family === "opencode"
-                        ? `Zen API key for OpenCode's verified model catalog${current}`
+                        ? `Console account OAuth or Zen service-account key${current}`
                       : `${profile.provider ?? "?"} · ${profile.model ?? "?"}${current}`,
     });
   }
@@ -80,15 +81,17 @@ export function authChoices(cfg: NekoConfig, family: string, availability: AuthA
         || (profile.auth === "chatgpt_oauth" ? availability.chatgpt
           : profile.auth === "gemini_oauth" ? availability.gemini
           : profile.auth === "kimi_oauth" ? availability.kimi
+            : profile.auth === "opencode_oauth" ? availability.opencode
             : availability.apiProfiles.has(name));
       const billing = profile.auth === "none" ? "no sign-in required"
         : profile.auth === "chatgpt_oauth" ? "subscription, no API billing"
           : profile.auth === "gemini_oauth" ? "Standard/Enterprise only; consumer plans moved to Antigravity"
             : profile.auth === "kimi_oauth" ? "Kimi Code account; no API key"
+              : profile.auth === "opencode_oauth" ? "OpenCode Console account; device OAuth"
             : family === "google" ? "official API; free tier available"
               : family === "zai" ? (name === "zai" ? "Coding Plan subscription quota; GLM-5.3 available" : "pay-as-you-go API billing")
                 : family === "openrouter" ? "OpenRouter pay-as-you-go billing"
-                  : family === "opencode" ? "OpenCode Zen pay-as-you-go billing"
+                  : family === "opencode" ? "OpenCode Zen service-account billing"
                   : "pay-as-you-go API";
       return {
         id: name,

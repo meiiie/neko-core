@@ -22,7 +22,7 @@
     "copy": "Chép",
     "hero.download": "Tải cho",
     "hero.other": "Nền tảng khác",
-    "hero.trust": "Miễn phí vĩnh viễn · giấy phép MIT · Windows, macOS và Linux · không cần tài khoản",
+    "hero.trust": "AGPL core · Apache SDK · giấy phép thương mại kép · Windows, macOS và Linux",
 
     "p.label": "Xem tận mắt",
     "p.title": "Một câu tiếng Việt vào, một bảng tính hoàn chỉnh ra.",
@@ -99,7 +99,7 @@
     "dl.foot": "Mọi bản dựng đều công bố trên GitHub kèm mã SHA-256, ra thẳng từ quy trình dựng công khai.",
     "dl.foot.link": "Tất cả bản phát hành <span class=\"arrow\">&rarr;</span>",
 
-    "foot.by": "Do The Wiii Lab xây dựng. Miễn phí, giấy phép MIT.",
+    "foot.by": "Do The Wiii Lab xây dựng. AGPL core với giấy phép thương mại kép.",
     "foot.releases": "Bản phát hành",
     "foot.changelog": "Nhật ký thay đổi",
     "foot.security": "Bảo mật",

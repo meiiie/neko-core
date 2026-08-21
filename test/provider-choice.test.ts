@@ -18,7 +18,7 @@ test("provider picker groups ChatGPT subscription and OpenAI API under one OpenA
 });
 
 test("OpenAI auth picker keeps subscription and API billing visibly separate", () => {
-  const choices = authChoices(cfg("chatgpt"), "openai", { chatgpt: true, gemini: false, kimi: false, apiProfiles: new Set() });
+  const choices = authChoices(cfg("chatgpt"), "openai", { chatgpt: true, gemini: false, kimi: false, opencode: false, apiProfiles: new Set() });
   expect(choices.map((choice) => choice.id)).toEqual(["chatgpt", "openai"]);
   expect(choices[0].detail).toContain("subscription, no API billing");
   expect(choices[0].detail).toContain("connected");
@@ -30,7 +30,7 @@ test("Google auth picker recommends the official API free tier and keeps enterpr
   const grouped = providerChoices(cfg("gemini"));
   expect(grouped.filter((choice) => choice.id === "google")).toHaveLength(1);
   expect(grouped.find((choice) => choice.id === "google")?.detail).toContain("Gemini API key or Code Assist Enterprise");
-  const choices = authChoices(cfg("gemini"), "google", { chatgpt: false, gemini: true, kimi: false, apiProfiles: new Set() });
+  const choices = authChoices(cfg("gemini"), "google", { chatgpt: false, gemini: true, kimi: false, opencode: false, apiProfiles: new Set() });
   expect(choices.map((choice) => choice.id)).toEqual(["gemini-api", "gemini"]);
   expect(choices[0].detail).toContain("official API; free tier available");
   expect(choices[1].detail).toContain("Standard/Enterprise only");
@@ -41,15 +41,15 @@ test("Anthropic and xAI group their official API routes without exposing proxy O
   const choices = providerChoices(cfg("claude"));
   expect(choices.find((choice) => choice.id === "anthropic")).toMatchObject({ label: "Anthropic", detail: expect.stringContaining("Claude API key") });
   expect(choices.find((choice) => choice.id === "xai")).toMatchObject({ label: "xAI", detail: expect.stringContaining("Grok or Grok Build API key") });
-  expect(authChoices(cfg("claude"), "anthropic", { chatgpt: false, gemini: false, kimi: false, apiProfiles: new Set(["claude"]) }).map((choice) => choice.id)).toEqual(["claude", "fable"]);
-  expect(authChoices(cfg("xai"), "xai", { chatgpt: false, gemini: false, kimi: false, apiProfiles: new Set(["xai"]) }).map((choice) => choice.id)).toEqual(["xai", "grok-build"]);
+  expect(authChoices(cfg("claude"), "anthropic", { chatgpt: false, gemini: false, kimi: false, opencode: false, apiProfiles: new Set(["claude"]) }).map((choice) => choice.id)).toEqual(["claude", "fable"]);
+  expect(authChoices(cfg("xai"), "xai", { chatgpt: false, gemini: false, kimi: false, opencode: false, apiProfiles: new Set(["xai"]) }).map((choice) => choice.id)).toEqual(["xai", "grok-build"]);
 });
 
 test("Kimi groups official account OAuth and API billing while DeepSeek stays API-key only", () => {
   const grouped = providerChoices(cfg("kimi"));
   expect(grouped.filter((choice) => choice.id === "kimi")).toHaveLength(1);
   expect(grouped.find((choice) => choice.id === "kimi")?.detail).toContain("Kimi Code account or API key");
-  const kimi = authChoices(cfg("kimi"), "kimi", { chatgpt: false, gemini: false, kimi: true, apiProfiles: new Set() });
+  const kimi = authChoices(cfg("kimi"), "kimi", { chatgpt: false, gemini: false, kimi: true, opencode: false, apiProfiles: new Set() });
   expect(kimi.map((choice) => choice.id)).toEqual(["kimi", "moonshot"]);
   expect(kimi[0].detail).toContain("connected");
   expect(kimi[0].detail).toContain("no API key");
@@ -64,7 +64,7 @@ test("Z.AI groups Coding Plan and paid API routes while naming their billing bou
     detail: expect.stringContaining("Coding Plan (GLM-5.3) or pay-as-you-go API"),
   });
   const routes = authChoices(cfg("zai"), "zai", {
-    chatgpt: false, gemini: false, kimi: false, apiProfiles: new Set(["zai"]),
+    chatgpt: false, gemini: false, kimi: false, opencode: false, apiProfiles: new Set(["zai"]),
   });
   expect(routes.map((choice) => choice.id)).toEqual(["zai", "zai-openai"]);
   expect(routes[0]).toMatchObject({
@@ -82,7 +82,7 @@ test("OpenRouter is a first-class API route with an explicit billing boundary", 
     detail: expect.stringContaining("live tool-capable model catalog"),
   });
   const routes = authChoices(cfg("openrouter"), "openrouter", {
-    chatgpt: false, gemini: false, kimi: false, apiProfiles: new Set(["openrouter"]),
+    chatgpt: false, gemini: false, kimi: false, opencode: false, apiProfiles: new Set(["openrouter"]),
   });
   expect(routes).toEqual([expect.objectContaining({
     id: "openrouter",
@@ -92,20 +92,24 @@ test("OpenRouter is a first-class API route with an explicit billing boundary", 
   expect(profileDisplayName(cfg("openrouter"))).toBe("OpenRouter · OpenRouter API key");
 });
 
-test("OpenCode is a first-class Zen API-key route without claiming Console OAuth", () => {
+test("OpenCode keeps Console OAuth and Zen service-account billing visibly separate", () => {
   const grouped = providerChoices(cfg("opencode"));
   expect(grouped.find((choice) => choice.id === "opencode")).toMatchObject({
     label: "OpenCode",
-    detail: expect.stringContaining("Zen API key"),
+    detail: expect.stringContaining("Console account OAuth or Zen service-account key"),
   });
   const routes = authChoices(cfg("opencode"), "opencode", {
-    chatgpt: false, gemini: false, kimi: false, apiProfiles: new Set(["opencode"]),
+    chatgpt: false, gemini: false, kimi: false, opencode: true, apiProfiles: new Set(["opencode"]),
   });
-  expect(routes).toEqual([expect.objectContaining({
-    id: "opencode",
+  expect(routes.map((route) => route.id)).toEqual(["opencode-account", "opencode"]);
+  expect(routes[0]).toMatchObject({
+    label: "OpenCode Console account",
+    detail: expect.stringContaining("device OAuth"),
+  });
+  expect(routes[1]).toMatchObject({
     label: "OpenCode Zen API key",
-    detail: expect.stringContaining("OpenCode Zen pay-as-you-go billing"),
-  })]);
+    detail: expect.stringContaining("service-account billing"),
+  });
   expect(profileDisplayName(cfg("opencode"))).toBe("OpenCode · OpenCode Zen API key");
 });
 

@@ -15,12 +15,15 @@ const RETRYABLE = new Set([429, 500, 502, 503, 504, 529]);
 export class ResponsesProvider implements Provider {
   private readonly sessionId = randomUUID();
 
-  constructor(private readonly cfg: NekoConfig) {}
+  constructor(
+    private readonly cfg: NekoConfig,
+    private readonly resolveApiKey: () => string | Promise<string> = () => cfg.apiKey,
+  ) {}
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
     if (!this.cfg.baseUrl) throw new Error("responses provider needs a base_url.");
     if (!this.cfg.model) throw new Error("responses provider needs a model.");
-    const key = this.cfg.apiKey;
+    const key = await this.resolveApiKey();
     if (!key && !this.cfg.isLocalEndpoint) throw new Error("No API key for the responses provider. Set the profile key environment variable or NEKO_API_KEY.");
 
     const url = `${this.cfg.baseUrl.replace(/\/+$/, "")}/responses`;

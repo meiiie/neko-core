@@ -1,5 +1,5 @@
-/** Consent-gated policy-file writes: the ONE outside-workspace structured target, never
- * auto-approved, JSON-guarded, and nothing else outside the root gets through. */
+/** Consent-gated host writes: the policy file is never auto-approved and is JSON-guarded;
+ * ordinary outside-root targets likewise require exact consent. */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,11 +64,10 @@ test("an APPROVED policy write lands and must be valid JSON (invalid is refused 
   expect(JSON.parse(readFileSync(cfgPath, "utf-8")).model).toBe("keep-me"); // rolled back to the turn's first pre-image
 });
 
-test("any OTHER outside-root file stays refused even with approval", async () => {
-  const secret = join(home, "secret.txt");
-  const fs = await import("node:fs");
-  writeFileSync(secret, "secret", "utf-8");
-  const out = String(await registry("default", true).execute("write_file", { path: secret, content: "exfil" }));
-  expect(out).toMatch(/Error:|refused|escapes/i);
-  expect(readFileSync(secret, "utf-8")).toBe("secret");
+test("any OTHER outside-root file also needs exact consent", async () => {
+  const ordinary = join(home, "notes.txt");
+  writeFileSync(ordinary, "keep", "utf-8");
+  const out = String(await registry("auto", false).execute("write_file", { path: ordinary, content: "change" }));
+  expect(out).toContain("Denied by user");
+  expect(readFileSync(ordinary, "utf-8")).toBe("keep");
 });

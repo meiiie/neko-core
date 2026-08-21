@@ -39,9 +39,9 @@ approval or hooks rather than widening to ordinary/full-turn bash.
 ### Outside-workspace autonomy is path-scoped
 
 Neko reads ordinary host files outside the project by default (`read_outside_root: true`), while its
-credential/device deny policy remains active. `auto`/`--yolo` removes approval prompts; it does not
-silently turn that read reach into a machine-wide write grant. Structured file tools and all three
-ordinary Bash sandbox backends share an explicit write-capability list:
+credential/device deny policy remains active. `auto`/`--yolo` removes routine in-scope approval prompts;
+it does not silently turn that read reach into a machine-wide write grant. Structured file tools and
+all three ordinary Bash sandbox backends share an explicit write-capability list:
 
 ```json
 {
@@ -57,6 +57,13 @@ credential control directories such as `.ssh`, `.codex`, `.agents`, and non-rese
 state are refused. Neko always provisions one narrow built-in capability:
 `~/.neko-core/research`. A cross-project research ledger can therefore continue without granting
 write access to the rest of the user profile.
+
+When the user explicitly asks for an ordinary file elsewhere on the host, `write_file`, `edit`, and
+`multi_edit` may request one confirmation for that exact target and operation. This is a transient
+capability: it is not inherited by another path or later turn. `plan` still denies it. System locations,
+credential/browser stores, symlink or junction escapes, and multiply-linked files refuse before the
+prompt. A durable directory workflow should use `additional_write_roots` instead. Bash remains confined
+to its sandbox write roots and never inherits this structured-file exception.
 
 This mirrors the current Claude Code posture rather than an unrestricted shell: its official
 [permissions](https://code.claude.com/docs/en/permissions) and

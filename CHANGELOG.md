@@ -6,17 +6,36 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.11] — 2026-08-21
+
 ### Added
 
-- **OpenCode Zen login is now first-class.** `/login -> OpenCode` opens the official Zen account/key
-  page and captures one profile-scoped key; `neko login opencode <key>` provides the non-TUI path.
-  `/model` reads Zen's live public catalog, and the adapter selects the documented Responses, Messages,
-  or Chat Completions wire per supported model family without importing OpenCode CLI credentials or
-  impersonating its undocumented-for-third-parties Console OAuth client.
+- **Successful turns now play Neko Bubble v6.** The original 230 ms clean-room sound is synthesized into
+  the binary and played directly from memory through Windows' native audio API; no media player, helper
+  process, or copied third-party asset is involved. Other platforms retain the terminal-bell fallback. The
+  notification fires only after the response and durable session checkpoint finish; errors, Esc/Ctrl+C
+  interruptions, transcript replay, slash commands, and voice conversations stay silent. Set
+  `completion_sound:false` or `NEKO_COMPLETION_SOUND=0` to opt out.
+- **OpenCode Console OAuth and Zen service accounts are now first-class, separate routes.**
+  `neko login opencode` uses OpenCode's official `opencode-cli` public-client device flow, stores a
+  Neko-owned refreshable session, and loads the account-managed provider/model catalog. `/login ->
+  OpenCode -> OpenCode Zen API key` and `neko login opencode zen <key>` retain the pay-as-you-go
+  service-account path. Neko never imports another CLI's credential file, and an account token is sent
+  only to HTTPS endpoints under `opencode.ai`; unknown protocols and untrusted catalog URLs fail closed.
 - **OpenRouter is now a first-class provider route.** `neko login openrouter <key>` activates a
   profile backed by OpenRouter's OpenAI-compatible API. `/model` loads the live tool-capable catalog,
   carries each model's context-window and vision metadata into the runtime, and attributes requests
   to Neko Core without sending those headers to lookalike third-party hosts.
+- **Explicit host-file work no longer requires a config restart.** `write_file`, `edit`, and
+  `multi_edit` can request one human confirmation for an exact ordinary target outside the workspace.
+  The permission is transient and never reaches Bash; system locations, credential stores,
+  symlink/junction escapes, and hardlink aliases remain refused. Persistent prompt-free workflows still
+  use canonical `additional_write_roots`, and approved changes remain checkpoint-reversible.
+
+### Fixed
+
+- **The public site now states Neko Core's actual license.** Stale MIT copy is replaced with the
+  AGPL core, Apache SDK boundary, commercial dual-license, and proprietary-brand policy.
 
 ## [0.24.10] — 2026-08-17
 

@@ -11,6 +11,7 @@ import { hasChatGptCredentials } from "./chatgpt-auth.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 import { discoverGeminiCli, hasGeminiCredentials, type GeminiCliStatus } from "./gemini-cli.ts";
 import { hasKimiCredentials } from "./kimi-auth.ts";
+import { hasOpenCodeCredentials } from "./opencode-auth.ts";
 import { browserBridgeStage, readBrowserCapability, readBrowserBridgeStatus } from "./browser-bridge.ts";
 import type { SandboxRuntimeStatus } from "./registry.ts";
 
@@ -258,6 +259,14 @@ export function collectChecks(
             detail: hasKimiCredentials()
               ? "credentials present; Kimi Code access is checked on the first request (official device OAuth; no proxy or API key)"
               : "missing - run `neko login kimi` or use /login",
+          }
+      : config.usesOpenCodeAuth
+        ? {
+            status: hasOpenCodeCredentials() ? "ok" : "warn",
+            name: "opencode_auth",
+            detail: hasOpenCodeCredentials()
+              ? "signed in to OpenCode Console (device OAuth; account catalog is checked by /model)"
+              : "missing - run `neko login opencode` or use /login",
           }
       : {
           status: config.apiKey || (config.isLocalEndpoint && !profileNeedsApiKey) ? "ok" : "warn",

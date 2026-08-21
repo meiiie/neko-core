@@ -42,10 +42,11 @@ test("the same read is refused when the host closes the wall", async () => {
   }
 });
 
-test("writing outside the root stays refused, allowed reads or not", async () => {
+test("writing outside the root asks once and respects refusal, allowed reads or not", async () => {
   const { root, outside, clean } = workspace();
   try {
-    const registry = new ToolRegistry(root, "auto", autoApprove);
+    let prompts = 0;
+    const registry = new ToolRegistry(root, "auto", () => { prompts++; return false; });
     expect(registry.readOutsideRoot).toBe(true); // reads are open...
     for (const call of [
       ["write_file", { path: join(outside, "new.txt"), content: "no" }],
@@ -53,8 +54,10 @@ test("writing outside the root stays refused, allowed reads or not", async () =>
     ] as const) {
       // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
       const result = await registry.execute(call[0], call[1] as any);
-      expect(String(result)).toContain("escapes project root"); // ...and writes are not
+      expect(String(result)).toContain("Denied by user"); // ...and writes need exact consent
     }
+    expect(prompts).toBe(2);
+    expect(readFileSync(join(outside, "SKILL.md"), "utf8")).toContain("a skill living somewhere else");
   } finally {
     clean();
   }
@@ -65,7 +68,8 @@ test("an explicit additional root allows structured writes without granting its 
   const sibling = join(dirname(outside), "not-granted");
   try {
     mkdirSync(sibling, { recursive: true });
-    const registry = new ToolRegistry(root, "auto", autoApprove);
+    let prompts = 0;
+    const registry = new ToolRegistry(root, "auto", () => { prompts++; return false; });
     registry.additionalWriteRoots = [outside];
 
     expect(await registry.execute("write_file", { path: join(outside, "notes.md"), content: "one\n" }))
@@ -80,7 +84,8 @@ test("an explicit additional root allows structured writes without granting its 
 
     expect(String(await registry.execute("write_file", {
       path: join(sibling, "blocked.txt"), content: "no",
-    }))).toContain("escapes project root");
+    }))).toContain("Denied by user");
+    expect(prompts).toBe(1);
     expect(String(await registry.execute("write_file", {
       path: join(outside, ".env"), content: "SECRET=no",
     }))).toContain("refused");

@@ -31,7 +31,7 @@ export interface Profile {
   /** UI grouping: several auth routes can belong to one provider brand (OpenAI API + ChatGPT OAuth). */
   family?: string;
   label?: string;
-  auth?: "api_key" | "chatgpt_oauth" | "gemini_oauth" | "kimi_oauth" | "none";
+  auth?: "api_key" | "chatgpt_oauth" | "gemini_oauth" | "kimi_oauth" | "opencode_oauth" | "none";
   /** Models known to the auth route when it has no model-list endpoint. `/model <id>` still accepts newer ids. */
   models?: string[];
   model_context?: Record<string, number>;
@@ -96,6 +96,7 @@ export const DEFAULTS: any = {
   image_max_bytes: 450_000, // protects strict OpenAI-compatible endpoints from oversized inline data URLs
   auto_update_check: true, // check for a newer release at startup (daily-cached; set false to silence)
   auto_update: true, // AUTO-INSTALL that newer release in the background (claude-code style); false = notify only
+  completion_sound: true, // branded native sound (terminal-bell fallback) after a durable turn
   // READS may leave the project directory; writes and edits never may. The root confinement exists to
   // bound what a mistake can DAMAGE, and reading a doc, a skill, or a sibling repo damages nothing -
   // while refusing it made ordinary work impossible. Credential paths stay refused either way
@@ -321,8 +322,19 @@ export const DEFAULTS: any = {
       model: "",
       key_env: "OPENROUTER_API_KEY",
     },
-    // OpenCode Zen is one account/key with a heterogeneous public catalog. The edge adapter selects
-    // Responses, Anthropic Messages, or Chat Completions per model; core remains provider-neutral.
+    // OpenCode Console account via the official opencode-cli public-client device OAuth flow. The
+    // account-managed /api/config catalog decides the endpoint and protocol for each provider/model.
+    "opencode-account": {
+      provider: "opencode_account",
+      family: "opencode",
+      label: "OpenCode Console account",
+      auth: "opencode_oauth",
+      base_url: "https://opencode.ai/console",
+      model: "",
+      effort_ceiling: "max",
+    },
+    // OpenCode Zen service-account/API key remains a separate, backwards-compatible billing route.
+    // The edge adapter selects Responses, Anthropic Messages, or Chat Completions per model.
     opencode: {
       provider: "opencode",
       family: "opencode",
@@ -358,6 +370,7 @@ const BOOLEAN_ENV_KEYS = new Set([
   "auto_update_check",
   "computer_use_overlay",
   "computer_use_resident",
+  "completion_sound",
   "fullscreen",
   "mcp_lazy",
   "prompt_cache",
@@ -438,6 +451,7 @@ export class NekoConfig {
   get usesGeminiCli(): boolean { return this.provider === "gemini_cli"; }
   get usesGeminiAuth(): boolean { return this.usesGeminiCli && this.profile != null && this.profiles[this.profile]?.auth === "gemini_oauth"; }
   get usesKimiAuth(): boolean { return this.provider === "kimi" && this.profile != null && this.profiles[this.profile]?.auth === "kimi_oauth"; }
+  get usesOpenCodeAuth(): boolean { return this.provider === "opencode_account" && this.profile != null && this.profiles[this.profile]?.auth === "opencode_oauth"; }
   get model(): string { return String(this.data.model ?? "").trim(); }
   /** Model for a VISION pre-pass (reading an image into text the main agent can use): `vision_model`
    * config, else a verified-good default on an NVIDIA endpoint, else "" (no auto vision). */
@@ -494,6 +508,8 @@ export class NekoConfig {
   }
   /** Check for a newer release at startup (daily-cached, non-blocking). */
   get autoUpdateCheck(): boolean { return this.data.auto_update_check !== false; }
+  /** Audible completion alert after a successful durable turn. Disable with config or NEKO_COMPLETION_SOUND=0. */
+  get completionSound(): boolean { return this.data.completion_sound !== false; }
   /** Auto-INSTALL a newer release found by the startup check (claude-code style: on by default; the
    * update stages in the background and takes effect on the next launch). Opt out with config
    * `auto_update: false` or NEKO_AUTO_UPDATE=0 - then the check only notifies. */

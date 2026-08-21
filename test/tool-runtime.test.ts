@@ -26,6 +26,46 @@ test("write then read", async () => {
   expect(await reg.execute("read_file", { path: "a.txt" })).toContain("hi");
 });
 
+test("an exact outside-workspace structured write always prompts and remains checkpoint-reversible", async () => {
+  let prompts = 0;
+  const { root, reg } = makeReg("auto", () => { prompts++; return true; });
+  const outside = mkdtempSync(join(tmpdir(), "neko-host-write-"));
+  const target = join(outside, "note.txt");
+  writeFileSync(target, "before");
+  try {
+    expect(await reg.execute("write_file", { path: target, content: "after" })).toContain("Wrote");
+    expect(prompts).toBe(1);
+    expect(readFileSync(target, "utf8")).toBe("after");
+    expect(reg.restoreCheckpoint()).toBe(1);
+    expect(readFileSync(target, "utf8")).toBe("before");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("outside-workspace structured writes are denied without consent and system roots never reach the prompt", async () => {
+  let prompts = 0;
+  const { root, reg } = makeReg("auto", () => { prompts++; return false; });
+  const outside = mkdtempSync(join(tmpdir(), "neko-host-deny-"));
+  const target = join(outside, "denied.txt");
+  try {
+    expect(await reg.execute("write_file", { path: target, content: "no" })).toContain("Denied by user");
+    expect(prompts).toBe(1);
+    expect(existsSync(target)).toBe(false);
+
+    prompts = 0;
+    const protectedTarget = process.platform === "win32"
+      ? join(process.env.SystemRoot || "C:\\Windows", "neko-host-write-refusal.txt")
+      : "/etc/neko-host-write-refusal.txt";
+    expect(await reg.execute("write_file", { path: protectedTarget, content: "no" })).toContain("protected from host writes");
+    expect(prompts).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test("edit falls back to a whitespace-tolerant line match", async () => {
   const { root, reg } = makeReg();
   writeFileSync(join(root, "code.ts"), "function f() {\nconst x = 1;\n}\n"); // file line: no indent
@@ -118,15 +158,16 @@ test("edit unique / not found / ambiguous", async () => {
   expect(await reg.execute("edit", { path: "a.ts", old_string: "const ", new_string: "let " })).toContain("times");
 });
 
-test("path escape refused for writes; reads are the host's call", async () => {
-  const { reg } = makeReg();
-  // Writes never leave the project, whatever the read setting is.
-  expect(await reg.execute("write_file", { path: "../x", content: "no" })).toContain("escapes project root");
+test("outside writes need consent while reads remain the host's call", async () => {
+  let prompts = 0;
+  const { reg } = makeReg("auto", () => { prompts++; return false; });
+  expect(await reg.execute("write_file", { path: "../neko-no-consent-outside", content: "no" })).toContain("Denied by user");
+  expect(prompts).toBe(1);
   // Reads do by default — the wall around them stopped ordinary work (a skill file one directory over)
   // without bounding any damage. Full coverage in test/read-outside-root.test.ts.
-  expect(await reg.execute("read_file", { path: "../x" })).toContain("no such file");
+  expect(await reg.execute("read_file", { path: "../neko-no-consent-outside" })).toContain("no such file");
   reg.readOutsideRoot = false;
-  expect(await reg.execute("read_file", { path: "../x" })).toContain("escapes project root");
+  expect(await reg.execute("read_file", { path: "../neko-no-consent-outside" })).toContain("escapes project root");
 });
 
 test("hard project read wall hides and refuses the host disk cleanup scan", async () => {

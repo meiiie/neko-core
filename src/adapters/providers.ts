@@ -15,7 +15,7 @@ import { HybridChatGptProvider } from "./chatgpt-app-server-provider.ts";
 import { GeminiCliProvider } from "./gemini-provider.ts";
 import { providerScope } from "./provider-scope.ts";
 import { ResponsesProvider } from "./responses-provider.ts";
-import { listOpenCodeZenModelOptions, OpenCodeZenProvider } from "./opencode.ts";
+import { listOpenCodeAccountModelOptions, listOpenCodeZenModelOptions, OpenCodeAccountProvider, OpenCodeZenProvider } from "./opencode.ts";
 import { hasGeminiCredentials, listGeminiModels } from "./gemini-cli.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 import { hasChatGptCredentials } from "./chatgpt-auth.ts";
@@ -151,11 +151,12 @@ export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "gemini_cli") return new GeminiCliProvider(config);
   if (config.provider === "responses") return new ResponsesProvider(config);
   if (config.provider === "kimi") return new KimiProvider(config);
+  if (config.provider === "opencode_account") return new OpenCodeAccountProvider(config);
   if (config.provider === "opencode") return new OpenCodeZenProvider(config);
   if (config.provider === "openai_compat") return new OpenAICompatProvider(config);
   throw new Error(
     `Unknown provider '${config.provider}'. Use openai_compat (any OpenAI /chat/completions endpoint or a ` +
-      "local server), responses (standard Responses API), chatgpt (Plus/Pro OAuth), gemini_cli (Code Assist Enterprise), kimi (Kimi OAuth/API), opencode (OpenCode Zen), anthropic (Claude Messages API), or moa (mixture-of-agents).",
+      "local server), responses (standard Responses API), chatgpt (Plus/Pro OAuth), gemini_cli (Code Assist Enterprise), kimi (Kimi OAuth/API), opencode_account (OpenCode Console OAuth), opencode (OpenCode Zen), anthropic (Claude Messages API), or moa (mixture-of-agents).",
   );
 }
 
@@ -321,6 +322,7 @@ export async function listModelOptions(config: NekoConfig, codexSupport?: CodexS
     return fallback;
   }
   if (config.provider === "kimi") return listKimiModelOptions(config);
+  if (config.provider === "opencode_account") return listOpenCodeAccountModelOptions(config);
   if (config.provider === "opencode") return listOpenCodeZenModelOptions(config);
   const anthropic = config.provider === "anthropic";
   const profile = config.profile ? config.profiles[config.profile] : undefined;
