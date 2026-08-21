@@ -47,6 +47,7 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
   const turnPolicy = registry.turnPolicyDescriptor();
   const bashCallable = !registry.noTools && registry.isToolAvailable("bash");
   const skillCallable = !registry.noTools && registry.isToolAvailable("skill") && Boolean(registry.loadSkill);
+  const networkProbeCallable = !registry.noTools && registry.isToolAvailable("network_probe");
   const detected = bashCallable && registry.sandboxBash
     ? (sandboxRuntime?.kind ?? detectSandbox())
     : "none";
@@ -114,6 +115,9 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
       : "Neko bash dynamic tool: unavailable in this request.",
     bashCallable
       ? `Sandbox toolchain: ${toolchain}. Treat this as authoritative - do not probe for bun/network inside the sandbox; if a required capability is absent, state the boundary and continue with what is available.`
+      : "",
+    networkProbeCallable
+      ? "Host network diagnostics: network_probe can resolve one host and test bounded TCP ports outside the Bash sandbox; web_search/web_fetch handle web traffic. Prefer these structured tools when Bash egress is blocked."
       : "",
     failClosedBash
       ? "Do not create a shell script whose only purpose is to wait for unavailable bash. Prefer an independent safe native tool that directly covers the task; otherwise state the boundary or request explicit computer consent before changing files."

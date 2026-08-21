@@ -36,6 +36,19 @@ approval or hooks rather than widening to ordinary/full-turn bash.
 
 (Env rollback: `NEKO_SANDBOX=0`.)
 
+`auto` and `--yolo` automate permission decisions; they do not disable this containment or silently
+turn deny-by-default Bash egress into unrestricted host networking. Use `/sandbox network on <domain
+...>` to change the Bash allowlist for the current process and persist it for later processes. The
+change applies immediately. On Windows, SRT still requires explicit domains and has no released
+allow-all setting.
+
+Network diagnosis is not forced through Bash. The gated `network_probe` tool resolves one hostname or
+IP and tests at most 16 TCP ports directly from the host with a bounded timeout. It runs outside the
+Bash sandbox, does not execute a shell, send application payloads, scan CIDRs, or fetch page content.
+In `auto`/`--yolo` it can run without a routine prompt; `default` still asks and `plan` refuses it.
+Use `web_search`/`web_fetch` for Internet content. This separation lets an agent inspect the network
+surface the user actually named without giving arbitrary host commands unrestricted egress.
+
 ### Outside-workspace autonomy is path-scoped
 
 Neko reads ordinary host files outside the project by default (`read_outside_root: true`), while its
@@ -127,7 +140,7 @@ Alternatives remain: run Neko inside WSL (bwrap) or a container/dev-container.
 
 Mechanics worth knowing (verified on Windows 11 Home, srt 1.0.0):
 
-- **Network is always an allowlist.** srt has no allow-all egress (its proxy denies unmatched
+- **Bash network is always an allowlist.** srt has no released allow-all egress (its proxy denies unmatched
   hosts), so `"sandbox_network": true` exposes only `"sandbox_domains": ["github.com",
   "*.npmjs.org", ...]`. False = hard deny-all (`deniedDomains: ["*"]`).
 - **Command bytes never ride a shell command line.** srt's CLI re-parses its command through the

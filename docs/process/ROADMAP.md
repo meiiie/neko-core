@@ -4,7 +4,7 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-21) — v0.24.13 release
+## Current status (2026-08-21) — v0.24.14 release
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
@@ -38,7 +38,10 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.13 (2026-08-21)** - transient provider-declared
+- **Branch:** `main`. **Current release: v0.24.14 (2026-08-21)** - bounded host-side DNS/TCP diagnosis
+  is available without opening arbitrary Bash egress, and `/sandbox network on/off` applies to the
+  current process immediately as well as persisting for the next launch.
+  Previous (v0.24.13, 2026-08-21) - transient provider-declared
   `network_error` stream endings recover within the configured retry budget before semantic output, and
   an accidental `read_file` call on a real directory returns a bounded one-level listing instead of a
   dead-end tool error.

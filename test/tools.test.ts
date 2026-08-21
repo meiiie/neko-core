@@ -120,6 +120,7 @@ test("describeToolCall uses Claude-style labels + primary arg", () => {
   expect(describeToolCall("todo_write", { todos: [] })).toBe("Update Todos");
   expect(describeToolCall("web_search", { query: "x" })).toBe("WebSearch(x)");
   expect(describeToolCall("web_fetch", { url: "http://x.io" })).toBe("Fetch(http://x.io)");
+  expect(describeToolCall("network_probe", { target: "example.com", ports: [443] })).toBe("NetworkProbe(example.com)");
 });
 
 test("schema shape", () => {
@@ -136,7 +137,7 @@ test("schema shape", () => {
 
 test("tool order", () => {
   const expected = [
-    "read_file", "search", "glob", "ls", "disk_cleanup_scan", "write_file", "edit", "multi_edit", "bash", "computer", "todo_write",
+    "read_file", "search", "glob", "ls", "disk_cleanup_scan", "network_probe", "write_file", "edit", "multi_edit", "bash", "computer", "todo_write",
     "web_search", "web_fetch", "exit_plan_mode", "task", "memory", "skill", "workflow", "playbook",
   ];
   if (process.platform !== "win32") {

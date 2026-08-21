@@ -96,6 +96,17 @@ export const TOOL_SPECS: ToolSpec[] = [
     required: [],
   },
   {
+    name: "network_probe",
+    permission: GATED,
+    summary: "Resolve one hostname/IP and test up to 16 TCP ports from the host network, outside the Bash sandbox. Bounded connect-only diagnostics: no shell, payload, subnet/CIDR scan, or HTTP content. Use this when sandboxed Bash has network blocked; use web_fetch for web pages.",
+    parameters: {
+      target: { type: "string", description: "One hostname or IP address, without a URL scheme, path, wildcard, or credentials." },
+      ports: { type: "array", maxItems: 16, description: "TCP ports to test (1-65535, at most 16).", items: { type: "integer", minimum: 1, maximum: 65535 } },
+      timeout_ms: { type: "integer", description: "Per DNS/connect timeout in milliseconds (100-5000, default 1500).", minimum: 100, maximum: 5000 },
+    },
+    required: ["target", "ports"],
+  },
+  {
     name: "write_file",
     permission: GATED,
     summary: "Create or overwrite a file (approval-gated). For a LARGE file, write a skeleton first, then extend it with `edit` — one very large write can be truncated or stall the model stream on some providers.",
@@ -310,6 +321,7 @@ const TOOL_LABELS: any = {
   glob: "Glob",
   ls: "List",
   disk_cleanup_scan: "DiskScan",
+  network_probe: "NetworkProbe",
   bash: "Bash",
   computer: "Computer",
   todo_write: "Update Todos",
@@ -333,7 +345,7 @@ export function describeToolCall(name: string, args: any): string {
     ? [a.action, a.name ?? a.window ?? (a.x !== undefined ? `${a.x},${a.y}` : "")].filter(Boolean).join(" ")
     : name === "skill"
     ? (a.name ?? "")
-    : (a.path ?? a.command ?? a.query ?? a.url ?? a.pattern ?? a.description ?? "");
+    : (a.path ?? a.command ?? a.query ?? a.url ?? a.target ?? a.pattern ?? a.description ?? "");
   const s = String(primary).replace(/\s+/g, " ").trim();
   const shown = s.length > 80 ? s.slice(0, 80) + "…" : s;
   return shown ? `${label}(${shown})` : label;

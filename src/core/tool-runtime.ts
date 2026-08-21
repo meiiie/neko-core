@@ -46,6 +46,7 @@ import { MAX_OBS_PAGE_CHARS } from "./agent-constants.ts";
 import { deniedCredentialPath } from "./read-policy.ts";
 import { isForegroundValidatorOnlyCommand } from "./validation-command.ts";
 import { runDiskCleanupScan } from "./disk-cleanup.ts";
+import { runNetworkProbe } from "./network-probe.ts";
 
 import { isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
 
@@ -1396,6 +1397,7 @@ export class ToolRegistry {
         : name === "disk_cleanup_scan" ? (this.readOutsideRoot
           ? await runDiskCleanupScan(signal)
           : "Error: disk_cleanup_scan is disabled because read_outside_root=false sets a hard project read wall.")
+        : name === "network_probe" ? await runNetworkProbe(args, signal)
         : name === "skill" ? this.runSkill(args)
         : name === "computer" ? await this.runComputer(args, signal)
         : await DISPATCH[name](this.root, args, {

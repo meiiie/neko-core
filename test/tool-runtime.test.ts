@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { existsSync, linkSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createServer } from "node:net";
+import type { AddressInfo } from "node:net";
 
 import { __formatBashExitForTest, __taskkillResultSucceededForTest, __windowsDescendantSnapshotForTest, type ApprovalGate, ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
 import type { PermissionMode } from "../src/core/permissions.ts";
@@ -175,6 +177,47 @@ test("hard project read wall hides and refuses the host disk cleanup scan", asyn
   reg.readOutsideRoot = false;
   expect(reg.schemas().map((schema: any) => schema.function.name)).not.toContain("disk_cleanup_scan");
   expect(await reg.execute("disk_cleanup_scan", {})).toContain("read_outside_root=false");
+});
+
+test("network_probe reaches the host network without a shell and stays bounded", async () => {
+  const server = createServer((socket) => socket.end());
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    // SAFETY: this fixture listens on a TCP host/port, never a Unix-domain socket.
+    const address = server.address() as AddressInfo | null;
+    if (!address) throw new Error("test server has no TCP port");
+    const { reg } = makeReg("auto");
+    const out = String(await reg.execute("network_probe", {
+      target: "127.0.0.1",
+      ports: [address.port],
+      timeout_ms: 1_000,
+    }));
+    expect(out).toContain("Network probe target=127.0.0.1");
+    expect(out).toContain(`127.0.0.1:${address.port} open`);
+    expect(out).not.toContain("Bash");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("network_probe validates scope, honors mode, and stops before an aborted call", async () => {
+  const { reg } = makeReg("auto");
+  expect(await reg.execute("network_probe", { target: "https://example.com/x", ports: [443] }))
+    .toContain("without a URL scheme");
+  expect(await reg.execute("network_probe", { target: "example.com", ports: Array.from({ length: 17 }, (_, i) => i + 1) }))
+    .toContain("at most 16 ports");
+
+  const denied = makeReg("default", () => false).reg;
+  expect(await denied.execute("network_probe", { target: "127.0.0.1", ports: [1] }))
+    .toContain("Denied by user");
+
+  const aborted = new AbortController();
+  aborted.abort();
+  expect(await reg.execute("network_probe", { target: "127.0.0.1", ports: [1] }, aborted.signal))
+    .toBe("(interrupted)");
 });
 
 test("missing required arg", async () => {

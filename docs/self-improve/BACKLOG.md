@@ -6,6 +6,11 @@ metric, typecheck). Mark `[x]` when committed (with the commit hash). Keep items
 one never blocks another.
 
 ## Now (high value, low risk)
+- [ ] **Optional stateful microVM sandbox backend.** Evaluate CubeSandbox/E2B-compatible execution for
+  long-running and untrusted workloads without weakening the local Bash boundary. Require durable
+  checkpoint identity, explicit mounts/egress, ephemeral credentials, bounded quiescence, cleanup,
+  and Linux/KVM conformance before exposing it. Keep host-only diagnostics as narrow native tools.
+  Design record: `docs/research/sandbox-backends-2026-08-21.md`.
 - [ ] **Trusted-project + child-secret boundary (P0 before `--yolo` claims).** Fingerprint project
   config/hooks/MCP before allowing execution or security/provider overrides; scrub provider/harness secrets
   from bash, hook, and MCP child environments unless explicitly allowlisted. The exact-snapshot gate and
