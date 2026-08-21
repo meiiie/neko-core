@@ -1054,7 +1054,8 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       const [, sub, flag, ...rest] = input.split(/\s+/);
       if (sub === "network" && flag === "off") {
         patchUserConfig({ sandbox_network: false });
-        return addLine("info", "sandbox_network=false saved to ~/.neko-core/config.json. Restart Neko to apply.");
+        ctx.registry.sandboxAllowNetwork = false;
+        return addLine("info", "sandbox_network=false applied now and saved to ~/.neko-core/config.json.");
       }
       if (sub === "network" && flag === "on") {
         const domains = rest.join(" ").split(/[\s,]+/).map((d) => d.trim().replace(/\/$/, "")).filter(Boolean);
@@ -1062,17 +1063,18 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
           return addLine("info", "usage: /sandbox network on <domain ...>  (SRT has no allow-all; list egress domains, e.g. /sandbox network on pypi.org files.pythonhosted.org)");
         }
         patchUserConfig({ sandbox_network: true, sandbox_domains: domains });
-        return addLine("info", `sandbox_network=true with domains [${domains.join(", ")}] saved to ~/.neko-core/config.json. Restart Neko to apply.`);
+        ctx.registry.sandboxAllowNetwork = true;
+        ctx.registry.sandboxDomains = [...domains];
+        return addLine("info", `sandbox_network=true with domains [${domains.join(", ")}] applied now and saved to ~/.neko-core/config.json.`);
       }
-      const cfgNow = loadConfig({ profile: ctx.cfg.profile ?? undefined });
-      const network = !cfgNow.data.sandbox_network
+      const network = !ctx.registry.sandboxAllowNetwork
         ? "blocked (default-deny)"
-        : cfgNow.data.sandbox_domains?.length
-          ? `allowlisted [${cfgNow.data.sandbox_domains.join(", ")}]`
+        : ctx.registry.sandboxDomains.length
+          ? `allowlisted [${ctx.registry.sandboxDomains.join(", ")}]`
           : "BLOCKED (SRT needs explicit sandbox_domains)";
       return addLine(
         "info",
-        `sandbox: ${cfgNow.data.sandbox ? "on" : "off"}\nnetwork: ${network}\nusage: /sandbox network on <domain ...> | /sandbox network off  (restart applies)`,
+        `sandbox: ${ctx.registry.sandboxBash ? "on" : "off"}\nnetwork: ${network}\nusage: /sandbox network on <domain ...> | /sandbox network off  (applies now)`,
       );
     }
     case "/bashes": {

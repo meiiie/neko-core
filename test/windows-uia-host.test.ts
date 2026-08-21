@@ -25,8 +25,8 @@ async function spawnWpfFixture(source: string) {
       // A heavily loaded Windows desktop may transiently refuse process creation even for the
       // canonical System32 binary. Bound the fixture retry; every other error still fails at once.
       // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
-      if ((error as NodeJS.ErrnoException).code !== "EPERM" || attempt >= 6) throw error;
-      await Bun.sleep(attempt * 500);
+      if ((error as NodeJS.ErrnoException).code !== "EPERM" || attempt >= 31) throw error;
+      await Bun.sleep(1_000);
     }
   }
 }
@@ -192,7 +192,7 @@ $w.Content=$p
     await host.dispose();
     await stopWpfFixture(form);
   }
-}, 45_000);
+}, 90_000);
 
 test("resident UIA watch returns only after readable state changes and settles", async () => {
   if (process.platform !== "win32") return;
@@ -241,7 +241,7 @@ $w.Content=$script:panel
     await host.dispose();
     await stopWpfFixture(form);
   }
-}, 45_000);
+}, 90_000);
 
 test("computer tool dispatches UIA reads through the resident host", async () => {
   if (process.platform !== "win32") return;
@@ -266,4 +266,4 @@ $w.Content=$b
   } finally {
     await stopWpfFixture(form);
   }
-}, 45_000);
+}, 90_000);

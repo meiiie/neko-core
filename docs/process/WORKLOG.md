@@ -3,6 +3,28 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-21 - Host network diagnostics without unconfined Bash (v0.24.14)
+
+Field feedback exposed a capability/wording mismatch: `--yolo` correctly automated permission
+decisions but did not and should not disable the Bash OS sandbox, while the model concluded that a
+deny-by-default Bash network meant it could not inspect the user-named host network at all. Neko now
+offers a gated native `network_probe` for bounded DNS and connect-only TCP checks of one host and at
+most 16 ports. It runs from the host without a shell or application payload, so local/LAN reach is
+truthful without granting arbitrary Bash egress. `/sandbox network on/off` now updates the live SRT
+allowlist and persists it; the model-facing runtime block distinguishes this tool from web content
+tools and sandboxed Bash.
+
+The accompanying architecture record compares Claude's self-hosted/session-checkpoint model with
+CubeSandbox's E2B-compatible KVM microVM design. Cube remains an optional future stateful backend with
+explicit admission gates; a guest microVM is not mislabeled as the Windows host network. Focused
+network/tool/command/context tests passed 94 tests / 382 assertions. The final full suite passed 1,442
+tests / 8,059 assertions with 12 intentional skips and zero failures after a bounded test-only retry
+was extended for measured Windows `uv_spawn EPERM` throttling of disposable WPF fixtures. Lint,
+current/stable TypeScript, and diff hygiene passed.
+The release diff matched neither generic credential patterns nor any of 14 current credential values.
+Doctor/policy, the production build, UI probe, real-PTY input probe, and ACP smoke passed; the real
+ConPTY ghost/typing gate passed 3/3.
+
 ## 2026-08-21 - Stream network recovery and directory-read ergonomics
 
 A field run against the OpenCode Console free model exposed two independent red paths. First, the model

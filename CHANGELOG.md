@@ -6,6 +6,24 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.14] - 2026-08-21
+
+### Added
+
+- **Network diagnosis no longer depends on sandboxed Bash egress.** The governed `network_probe`
+  tool resolves one host and tests up to 16 TCP ports directly from the host with strict target,
+  timeout, address, and output bounds. It cannot execute a shell, send application payloads, scan a
+  CIDR, or fetch content; `default` still asks, `plan` refuses it, and `auto`/`--yolo` can use it
+  without turning Bash into an unconfined host shell.
+
+### Fixed
+
+- **Bash network allowlist changes apply immediately.** `/sandbox network on <domains...>` and
+  `/sandbox network off` now update the live runtime as well as the durable user configuration, so a
+  restart is no longer required. The runtime prompt also directs DNS/port checks to `network_probe`
+  and web content to `web_search`/`web_fetch` instead of incorrectly declaring all network work
+  impossible when Bash egress is blocked.
+
 ## [0.24.13] — 2026-08-21
 
 ### Fixed
