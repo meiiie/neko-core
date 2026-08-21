@@ -2298,6 +2298,7 @@ function isPolicyConfigTarget(absPath: string | undefined): boolean {
 /** System locations a host-wide write must never touch (the "important files" tier of the
  * owner's policy). Credential/browser-store paths come from the read policy's credential matcher. */
 function protectedHostWriteRefusal(absPath: string): string | null {
+  const target = realpathNearest(resolve(absPath));
   if (process.platform === "win32") {
     const guarded = [
       process.env.SystemRoot || "C:\\Windows",
@@ -2305,11 +2306,11 @@ function protectedHostWriteRefusal(absPath: string): string | null {
       process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
       process.env.ProgramData || "C:\\ProgramData",
     ];
-    for (const root of guarded) if (pathWithin(resolve(root), resolve(absPath))) return "a system directory";
+    for (const root of guarded) if (pathWithin(realpathNearest(resolve(root)), target)) return "a system directory";
     return null;
   }
   for (const root of ["/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64", "/etc", "/boot", "/System", "/Library/System"]) {
-    if (pathWithin(resolve(root), resolve(absPath))) return "a system directory";
+    if (pathWithin(realpathNearest(resolve(root)), target)) return "a system directory";
   }
   return null;
 }
