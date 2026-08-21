@@ -36,7 +36,7 @@ import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
 import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
-import { destructiveInWorkspace, detectSandbox, executableOnPath, isDockerCommand, sandboxActiveAsync, srtHealthAsync, srtLaunchRefusal, withSrtStateVolumeGuidance, wrapBash } from "./sandbox.ts";
+import { destructiveInWorkspace, detectSandbox, executableOnPath, isDockerCommand, normalizeSandboxDomains, sandboxActiveAsync, srtHealthAsync, srtLaunchRefusal, withSrtStateVolumeGuidance, wrapBash } from "./sandbox.ts";
 import { effectivePermission, GATED, resolveTool, taskDelegatesReadOnly, toolSchemas } from "./tools.ts";
 import { residentUiaHost } from "./windows-uia-host.ts";
 import { debug, messageOf } from "../shared/debug.ts";
@@ -855,6 +855,17 @@ export class ToolRegistry {
     );
   }
 
+  /** Resolve one call's network authority without mutating the session policy. Standing domains
+   * apply only when sandbox_network is enabled; model-requested domains are ephemeral. */
+  private bashNetworkPolicy(args: any) {
+    const requested = normalizeSandboxDomains(args?.network_domains);
+    const standing = this.sandboxAllowNetwork
+      ? normalizeSandboxDomains(this.sandboxDomains, 128)
+      : [];
+    const domains = [...new Set([...standing, ...requested])];
+    return { allowNetwork: this.sandboxAllowNetwork || requested.length > 0, domains, requested };
+  }
+
   /** Run a shell command. Resolves on exit/timeout, OR early (kept running) if Ctrl+B detaches it. */
   private async exactValidatorSandboxRefusal(backend?: NativeToolBackend, signal?: AbortSignal): Promise<string | null> {
     if (!this.sandboxBash) {
@@ -893,6 +904,9 @@ export class ToolRegistry {
     // Per-call timeout (default 60s, clamped to [1s, 10min]) so slow builds/tests aren't cut off.
     const timeoutMs = this.bashTimeoutMs(args);
     const exactValidator = this.turnToolPolicy?.bashPolicy === "foreground-validator-only";
+    const network = exactValidator
+      ? { allowNetwork: false, domains: [] }
+      : this.bashNetworkPolicy(args);
     const exactRefusal = exactValidator ? await this.exactValidatorSandboxRefusal(undefined, signal) : null;
     if (exactRefusal) return exactRefusal;
     if (signal?.aborted) return "(interrupted)";
@@ -904,8 +918,8 @@ export class ToolRegistry {
     if (signal?.aborted) return "(interrupted)";
     const sb = wrapBash(command, this.root, {
       enabled: this.sandboxBash,
-      allowNetwork: this.sandboxAllowNetwork,
-      domains: this.sandboxDomains,
+      allowNetwork: network.allowNetwork,
+      domains: network.domains,
       allowHostDaemon: exactValidator ? false : this.allowDangerousBash,
       readOnlyWorkspace: exactValidator,
       denyReadFiles: this.sandboxDenyReadFiles,
@@ -1031,6 +1045,9 @@ export class ToolRegistry {
       return "Error: the remote native backend does not attest the configured bash sandbox; bash was not executed.";
     }
     const exactValidator = name === "bash" && this.turnToolPolicy?.bashPolicy === "foreground-validator-only";
+    const network = name === "bash"
+      ? (exactValidator ? { allowNetwork: false, domains: [] } : this.bashNetworkPolicy(args))
+      : { allowNetwork: this.sandboxAllowNetwork, domains: [...this.sandboxDomains] };
     const context: NativeToolCallContext = {
       ...(signal ? { signal } : undefined),
       ...(name === "bash" ? { deadlineAt: Date.now() + this.bashTimeoutMs(args) } : undefined),
@@ -1044,8 +1061,8 @@ export class ToolRegistry {
       }),
       sandbox: Object.freeze({
         enabled: this.sandboxBash,
-        allowNetwork: this.sandboxAllowNetwork,
-        domains: Object.freeze([...this.sandboxDomains]),
+        allowNetwork: network.allowNetwork,
+        domains: Object.freeze(network.domains),
         denyReadFiles: Object.freeze([...this.sandboxDenyReadFiles]),
         readOnlyWorkspace: exactValidator,
       }),
@@ -1118,7 +1135,7 @@ export class ToolRegistry {
       };
     }
     if (name === "bash" && this.turnToolPolicy?.bashPolicy === "foreground-validator-only" && properties) {
-      const { run_in_background: _background, ...validatorProperties } = properties;
+      const { run_in_background: _background, network_domains: _network, ...validatorProperties } = properties;
       return {
         ...schema,
         function: {
@@ -1158,6 +1175,14 @@ export class ToolRegistry {
     if (name === "bash" && args.run_in_background === true && this.turnToolPolicy?.allowBackgroundBash === false) {
       return `Error: background bash is unavailable for this turn (${this.turnToolPolicy.name}).`;
     }
+    let requestedBashNetworkDomains: string[] = [];
+    if (name === "bash") {
+      try {
+        requestedBashNetworkDomains = normalizeSandboxDomains(args.network_domains);
+      } catch (error) {
+        return `Error: ${messageOf(error)}`;
+      }
+    }
     if (name === "edit" && this.turnToolPolicy?.editTarget) {
       if (nativeBackend) {
         if (this.nativeBackendAttestation?.exactEditTarget !== "backend-enforced") {
@@ -1176,7 +1201,8 @@ export class ToolRegistry {
       }
     }
     if (name === "bash" && this.turnToolPolicy?.bashPolicy === "foreground-validator-only"
-      && !isForegroundValidatorOnlyCommand(String(args.command ?? ""), args)) {
+      && (!isForegroundValidatorOnlyCommand(String(args.command ?? ""), args)
+        || requestedBashNetworkDomains.length > 0)) {
       return `Tool 'bash' is restricted to a foreground validator in an isolated read-only project workspace for this turn (${this.turnToolPolicy.name}). ` +
         "Run one or more recognized test/typecheck/lint/check/verify commands joined only by &&; build targets, source-fixing flags, shell substitution, redirection, masking, and background execution are unavailable.";
     }
@@ -1297,9 +1323,11 @@ export class ToolRegistry {
 
     let structuredPath: string | undefined;
     let hostWrite = false;
+    let bashNetworkRequested = false;
     let spec;
     try {
       spec = resolveTool(name);
+      if (name === "bash") bashNetworkRequested = requestedBashNetworkDomains.length > 0;
       const structuredMutation = name === "write_file" || name === "edit" || name === "multi_edit";
       if (!nativeBackend && structuredMutation && args.path) {
         try {
@@ -1335,6 +1363,7 @@ export class ToolRegistry {
     if (signal?.aborted) return "(interrupted)";
     const sandboxedBash = spec.name === "bash" && this.sandboxBash && this.sandboxAutoApprove
       && liveBashSandbox && !destructiveInWorkspace(String(args.command ?? ""))
+      && !bashNetworkRequested // egress is a separate consequence; only auto/yolo self-approves it
       && !isDockerCommand(String(args.command ?? "")); // docker runs unsandboxed -> don't sandbox-auto-approve it
     const policyWrite = isPolicyConfigTarget(structuredPath);
     let decision = decide(this.mode, spec, args, { sandboxedBash });

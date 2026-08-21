@@ -153,9 +153,15 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "bash",
     permission: GATED,
-    summary: "Run a shell command in the project root (approval-gated). The <env> block states which shell executes it - match its syntax and never wrap commands in another shell yourself. For multi-line or quote-heavy commands, write_file a script first and run that (no nested-escaping spiral). Set a longer timeout for slow builds/tests, or run_in_background for long-lived processes (servers, watchers).",
+    summary: "Run a shell command in the project root (approval-gated). The <env> block states which shell executes it - match its syntax and never wrap commands in another shell yourself. For networked commands, declare the exact destination hosts in network_domains; auto/yolo grants them for this call without changing standing policy. For multi-line or quote-heavy commands, write_file a script first and run that (no nested-escaping spiral). Set a longer timeout for slow builds/tests, or run_in_background for long-lived processes (servers, watchers).",
     parameters: {
       command: { type: "string", description: "The shell command to run." },
+      network_domains: {
+        type: "array",
+        maxItems: 16,
+        description: "Exact destination hosts this one command needs (optional :port; *.example.com allowed). No URL schemes or paths. In auto/yolo Neko grants this egress for only this call; other modes ask for approval. Include redirect/download hosts used by package managers.",
+        items: { type: "string" },
+      },
       timeout: { type: "number", description: "Timeout in milliseconds (default 60000, max 600000)." },
       run_in_background: { type: "boolean", description: "Start it in the background and return immediately; read its output later with /bashes. Use for servers/watchers or anything long-running." },
     },

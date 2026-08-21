@@ -71,7 +71,7 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     ? (findWindowsBash() ? "GIT BASH (POSIX)" : "cmd.exe")
     : (liveSandbox ? "bash (POSIX)" : "/bin/sh (POSIX)");
   const network = !registry.sandboxAllowNetwork
-    ? "blocked (default-deny; the user can enable it by running /sandbox network on <domains...> in Neko - or the user can approve a consented structured edit of ~/.neko-core/config.json; a restart applies it)"
+    ? "blocked by standing policy (a bash call may request one-shot egress with network_domains; no config change is needed)"
     : detected === "srt"
       ? (registry.sandboxDomains.length ? "allowlisted by sandbox_domains" : "blocked (SRT needs explicit sandbox_domains)")
       : detected === "bwrap" || detected === "sandbox-exec"
@@ -83,6 +83,11 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
       ? `bun available in sandbox (bridged from ${bunBridge.source} with an exact-file read grant); node/python resolve from host`
       : "bun NOT available in sandbox (no bun.exe bridge on this machine) - use node or python for scripts/tests and say so; do not retry bun or try installing it (network in the sandbox is policy-bound)"
     : "host toolchain";
+  const oneShotNetwork = detected === "srt"
+    ? "SRT enforces each network_domains entry as an exact per-call destination allowlist."
+    : detected === "bwrap" || detected === "sandbox-exec"
+      ? "This primitive cannot filter domains; a non-empty network_domains request is a one-call full-network grant."
+      : "Without a live sandbox, network_domains does not add containment beyond the ordinary permission gate.";
   const sandbox = exactReadOnlyValidator && !liveSandbox
     ? "required read-only isolation unavailable (exact-turn bash FAILS CLOSED; no host fallback)"
     : exactReadOnlyValidator
@@ -115,6 +120,9 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
       : "Neko bash dynamic tool: unavailable in this request.",
     bashCallable
       ? `Sandbox toolchain: ${toolchain}. Treat this as authoritative - do not probe for bun/network inside the sandbox; if a required capability is absent, state the boundary and continue with what is available.`
+      : "",
+    bashCallable
+      ? `Bash egress capability: declare the exact destination hosts in the bash call's network_domains field. ${oneShotNetwork} Auto/yolo approves that bounded one-call request; other modes ask the user. Prefer this over asking the user to run /sandbox; /sandbox is only for a persistent standing policy.`
       : "",
     networkProbeCallable
       ? "Host network diagnostics: network_probe can resolve one host and test bounded TCP ports outside the Bash sandbox; web_search/web_fetch handle web traffic. Prefer these structured tools when Bash egress is blocked."

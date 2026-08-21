@@ -3,6 +3,31 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-21 - One-call Bash network capabilities (v0.24.16)
+
+Field feedback showed that the persistent `/sandbox network` command was technically safe but the
+wrong autonomy seam: a model that needed one package registry or Git host stopped and asked the user
+to edit standing policy. Neko now exposes `bash.network_domains`, a bounded list of at most 16 exact
+destinations. In auto/yolo the capability is self-approved for that call only; default and
+accept-edits still ask because egress is a separate consequence. SRT enforces the domain/port list.
+Bubblewrap and Seatbelt truthfully disclose their coarser one-process full-network fallback. Exact
+read-only validator turns remain offline even when a session has a persistent allowlist.
+
+The architecture review compared DeepSeek Harness, Anthropic sandbox-runtime, and Tencent
+CubeSandbox. All retain confinement; DeepSeek's local shell sandbox deliberately governs file
+effects while leaving network outside its vocabulary. Neko keeps the stronger independent egress
+boundary and adopts the useful idea of per-capability policy rather than turning `--yolo` into an
+unconfined host shell. Invalid URLs, credentials, match-all patterns, broad single-label wildcard suffixes, and ports fail
+before approval or launch. A live Windows SRT canary reached only `example.com:443` and returned exit
+0 without modifying config. Focused verification passed 143 tests / 624 assertions; lint, both
+TypeScript compilers, doctor, policy, the production build, UI probe, real-PTY input probe, and ACP
+smoke passed. The first full suite recorded 1,446 passes / 8,092 assertions and two unrelated Windows
+WPF fixture `uv_spawn EPERM` failures. One exact WPF case passed when isolated; the other remained
+blocked at process creation on this loaded desktop, so clean-host CI remains the release arbiter for
+that platform-only fixture. The v0.24.16 binary passed the real ConPTY ghost/typing gate 3/3 and the
+scroll benchmark (7 ms first response / 106 ms settle). The release diff matched neither generic
+credential patterns nor any of 25 current sensitive values.
+
 ## 2026-08-21 - Attention-aware approval feedback (v0.24.15)
 
 Field UI feedback exposed two sides of the same ownership bug: approval replaced the composer but

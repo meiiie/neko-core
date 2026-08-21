@@ -17,9 +17,11 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { minimalWindowsSystemEnv, resolveWindowsSystemExecutable } from "../shared/windows-system.ts";
+import { isJsonArray, isText, type WireValue } from "../shared/wire.ts";
 
 export type SandboxKind = "bwrap" | "sandbox-exec" | "srt" | "none";
 export interface SpawnTarget {
@@ -32,6 +34,71 @@ export interface SpawnTarget {
   cleanup?: () => void;
   /** The primitive itself guarantees that a normal launcher close cannot leave descendants alive. */
   treeContainedOnClose?: boolean;
+}
+
+const MAX_SANDBOX_DOMAINS_PER_CALL = 16;
+
+/** Validate and canonicalize an SRT-compatible destination allowlist. This is deliberately
+ * narrower than URL parsing: a grant names only a host pattern and optional destination port,
+ * never a scheme, path, credential, query, or the match-all wildcard. */
+export function normalizeSandboxDomains(value: WireValue, maxItems = MAX_SANDBOX_DOMAINS_PER_CALL): string[] {
+  if (value === undefined || value === null) return [];
+  if (!isJsonArray(value)) throw new Error("network_domains must be an array of host names");
+  if (value.length > maxItems) throw new Error(`network_domains accepts at most ${maxItems} hosts per call`);
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (!isText(raw)) throw new Error("network_domains entries must be strings");
+    const entry = raw.trim().toLowerCase();
+    if (!entry || entry.length > 260 || /[^\x20-\x7e]/.test(entry)
+      || entry.includes("://") || /[\/@?#\\]/.test(entry)) {
+      throw new Error(`invalid network domain: ${JSON.stringify(raw)}`);
+    }
+
+    let host = entry;
+    let port = "";
+    let ipv6 = false;
+    if (entry.startsWith("[")) {
+      const close = entry.indexOf("]");
+      if (close < 0) throw new Error(`invalid network domain: ${JSON.stringify(raw)}`);
+      host = entry.slice(1, close);
+      ipv6 = isIP(host) === 6;
+      const suffix = entry.slice(close + 1);
+      if (!ipv6 || (suffix && !/^:\d+$/.test(suffix))) {
+        throw new Error(`invalid network domain: ${JSON.stringify(raw)}`);
+      }
+      port = suffix ? suffix.slice(1) : "";
+    } else {
+      const colon = entry.lastIndexOf(":");
+      if (colon >= 0) {
+        if (entry.indexOf(":") !== colon) {
+          throw new Error(`IPv6 network domains must use brackets: ${JSON.stringify(raw)}`);
+        }
+        host = entry.slice(0, colon);
+        port = entry.slice(colon + 1);
+      }
+    }
+    if (port && (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65_535)) {
+      throw new Error(`invalid network domain port: ${JSON.stringify(raw)}`);
+    }
+
+    const wildcard = host.startsWith("*.");
+    const dnsHost = wildcard ? host.slice(2) : host;
+    const ip = isIP(dnsHost);
+    const validDns = dnsHost.length <= 253
+      && dnsHost.split(".").every((label) => label.length > 0 && label.length <= 63
+        && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label));
+    if ((!ip && !validDns) || (wildcard && (ip !== 0 || dnsHost.split(".").length < 2))) {
+      throw new Error(`invalid network domain: ${JSON.stringify(raw)}`);
+    }
+    const canonicalHost = ipv6 ? `[${host}]` : `${wildcard ? "*." : ""}${dnsHost}`;
+    const canonical = `${canonicalHost}${port ? `:${Number(port)}` : ""}`;
+    if (!seen.has(canonical)) {
+      seen.add(canonical);
+      normalized.push(canonical);
+    }
+  }
+  return normalized;
 }
 
 let cached: SandboxKind | undefined;
@@ -526,9 +593,10 @@ export function srtSettings(
   denyWrite: readonly string[] = [],
   denyRead: readonly string[] = [],
 ): string {
+  const allowedDomains = allowNetwork ? normalizeSandboxDomains(domains, 128) : [];
   return JSON.stringify({
     network: allowNetwork
-      ? { allowedDomains: domains, deniedDomains: [], strictAllowlist: true }
+      ? { allowedDomains, deniedDomains: [], strictAllowlist: true }
       : { allowedDomains: [], deniedDomains: ["*"] },
     filesystem: { denyRead: [...denyRead], allowRead: [...allowRead], allowWrite: [...allowWrite], denyWrite: [...denyWrite] },
   });

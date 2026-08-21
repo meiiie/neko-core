@@ -3,12 +3,15 @@
 ## Decision
 
 Keep Neko's local Bash sandbox enabled by default. Do not make `auto` or `--yolo` mean an
-unconfined host shell. Add narrow host-owned capabilities for host-specific work, and evaluate a
-stateful microVM backend separately for long-running or untrusted workloads.
+unconfined host shell. Add narrow host-owned capabilities for host-specific work, add per-call
+network authority for shell work, and evaluate a stateful microVM backend separately for long-running
+or untrusted workloads.
 
-The immediate host-network gap is closed by `network_probe`: bounded DNS plus connect-only TCP
-checks for one target and at most 16 ports. It is a governed native tool, not a shell escape. Bash
-egress remains deny-by-default and domain-allowlisted.
+The host-network diagnostic gap is closed by `network_probe`: bounded DNS plus connect-only TCP
+checks for one target and at most 16 ports. Shell workflows use a different seam: `bash.network_domains`
+declares at most 16 exact destinations and grants egress for that call only. Auto/yolo may exercise
+that bounded capability without asking the user to mutate standing policy. SRT enforces the list;
+weaker local primitives disclose that they can provide only a one-call all-network grant.
 
 ## What the upstream systems imply
 
@@ -23,6 +26,14 @@ network policy, and credential injection. It requires Linux/KVM (or the document
 network viewpoint is the guest. It therefore cannot replace a bounded host probe when the user asks
 about the Windows host or its LAN.
 
+DeepSeek Harness provides a useful counterpoint rather than a reason to remove containment. Its
+current source keeps bwrap/Landlock/Seatbelt/Windows restricted-token runners, fails closed when a
+confined mode cannot be enforced, resolves sandbox policy per capability call, and exposes an explicit
+`danger-full-access` + `never` preset. Its local sandbox vocabulary deliberately governs file effects
+only and leaves network unrestricted. Neko adopts the valuable per-call policy split while retaining
+SRT's independent egress boundary: autonomy comes from one-shot authority, not from silently disabling
+the network fence for every later command.
+
 Primary sources:
 
 - [Claude Managed Agents: self-hosted sandboxes](https://platform.claude.com/docs/en/managed-agents/self-hosted-sandboxes)
@@ -30,6 +41,8 @@ Primary sources:
 - [Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing)
 - [Tencent Cloud CubeSandbox](https://github.com/TencentCloud/CubeSandbox)
 - [Anthropic sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime)
+- [DeepSeek Harness sandbox subsystem](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/sandbox.md)
+- [DeepSeek Harness bash sandbox](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/shell/bash-sandbox/README.md)
 
 ## Optional backend contract
 

@@ -5,7 +5,17 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
-import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtHealthAsync, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, windowsSearchDirs, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
+import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, normalizeSandboxDomains, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtHealthAsync, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, windowsSearchDirs, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
+
+test("one-call network domains are canonical, bounded, and never accept URLs or match-all", () => {
+  expect(normalizeSandboxDomains([
+    " Example.COM ", "example.com", "*.NPMJS.org:443", "registry:8443", "127.0.0.1:8080", "[::1]:443",
+  ])).toEqual(["example.com", "*.npmjs.org:443", "registry:8443", "127.0.0.1:8080", "[::1]:443"]);
+  for (const invalid of ["*", "https://example.com/x", "user@example.com", "example.com/path", "*.com", "2001:db8::1"]) {
+    expect(() => normalizeSandboxDomains([invalid])).toThrow();
+  }
+  expect(() => normalizeSandboxDomains(Array.from({ length: 17 }, (_, i) => `h${i}.example.com`))).toThrow("at most 16");
+});
 
 test("security executables are resolved from PATH without trusting the workspace", () => {
   const root = mkdtempSync(join(tmpdir(), "neko-path-primitive-"));
