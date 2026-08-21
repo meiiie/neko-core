@@ -3,6 +3,21 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-21 - Stream network recovery and directory-read ergonomics
+
+A field run against the OpenCode Console free model exposed two independent red paths. First, the model
+passed a real skill directory to `read_file`; the strict regular-file boundary rejected it and forced a
+second navigation call. Real directories now return the existing bounded one-level listing, while symlink
+and special-file behavior remains strict. Second, the upstream returned HTTP 200 SSE followed by
+`finish_reason: network_error`. OpenCode's current source classifies this as a retryable response-stream
+failure; Neko now does the same within its existing `max_retries` budget only when no semantic stream data
+has been surfaced. Once text, reasoning, or tool data exists, the request fails rather than replaying output
+or work. Focused provider/tool verification passed 129 tests / 456 assertions; the full suite passed 1,439
+tests / 8,037 assertions with 12 intentional platform/sandbox skips and zero failures. Both current and stable
+TypeScript compilers, lint, and diff hygiene passed. Doctor and policy reported the expected local configuration,
+the production binary passed UI, real-PTY input, and ACP smokes, ConPTY ghost/typing passed 3/3, and the focused
+secret scan found no generic credential pattern or any of 13 current credential values in the release diff.
+
 ## 2026-08-21 - Exact-consent host writes without weakening the sandbox
 
 The structured file tools can now complete an explicitly requested edit to an ordinary host file

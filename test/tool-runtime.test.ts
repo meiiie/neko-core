@@ -921,9 +921,13 @@ test("safe PDF reads never execute a workspace-local pdftotext", async () => {
   }
 });
 
-test("read_file refuses non-regular paths and bounds media before reading bytes", async () => {
+test("read_file turns an accidental directory read into a bounded one-level listing and bounds media", async () => {
   const { root, reg } = makeReg();
-  expect(String(await reg.execute("read_file", { path: "." }))).toContain("not a regular file");
+  writeFileSync(join(root, "visible.txt"), "visible\n");
+  const directory = String(await reg.execute("read_file", { path: "." }));
+  expect(directory).toContain("[directory .; showing entries]");
+  expect(directory).toContain("visible.txt");
+  expect(directory).not.toContain("Error:");
 
   const oversized = join(root, "oversized.png");
   writeFileSync(oversized, "x");

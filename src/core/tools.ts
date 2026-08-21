@@ -47,7 +47,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "read_file",
     permission: SAFE,
-    summary: "Read a UTF-8 text file from the project. Use offset+limit to read a slice of a large file.",
+    summary: "Read a UTF-8 text file from the project. A directory path returns a bounded one-level listing. Use offset+limit to read a slice of a large file.",
     parameters: {
       path: { type: "string", description: "File path, relative to the project root." },
       offset: { type: "number", description: "1-based line number to start from (for paging large files)." },

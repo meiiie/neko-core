@@ -1445,6 +1445,17 @@ export class ToolRegistry {
     const raw = requireArg(args, "path");
     const path = resolveForRead(this.root, raw, this.readOutsideRoot);
     if (!existsSync(path)) return `Error: no such file: ${raw}`;
+    // Models occasionally pass a directory to read_file while navigating an unfamiliar tree. A
+    // bounded one-level listing is the useful, read-only interpretation and avoids burning another
+    // provider round-trip merely to recover with ls. Keep symlinks and every other special file on
+    // the strict regular-file path below.
+    if (lstatSync(path).isDirectory()) {
+      return `[directory ${raw}; showing entries]\n${await toolLs(this.root, { path: raw }, {
+        readOutsideRoot: this.readOutsideRoot,
+        additionalWriteRoots: this.additionalWriteRoots,
+        signal,
+      })}`;
+    }
     const ext = (raw.split(".").pop() ?? "").toLowerCase();
     if (IMAGE_EXTS.has(ext) || ext === "pdf") {
       const opened = openRegularFile(path, raw);

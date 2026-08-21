@@ -315,6 +315,73 @@ test("network-resilient: gives up once the offline budget is exhausted", async (
   }
 });
 
+test("network-resilient: retries a server-declared network_error before semantic stream output", async () => {
+  const orig = globalThis.fetch;
+  let calls = 0;
+  const deltas: string[] = [];
+  // SAFETY: test-built fetch fixture; every returned stream frame is constructed below.
+  globalThis.fetch = (async () => {
+    calls++;
+    const chunk = calls === 1
+      ? { choices: [{ delta: {}, finish_reason: "network_error" }] }
+      : { choices: [{ delta: { content: "recovered" }, finish_reason: "stop" }] };
+    return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  }) as any;
+  try {
+    const config = new NekoConfig({
+      provider: "openai_compat",
+      base_url: "http://localhost:9/v1",
+      model: "m",
+      max_retries: 1,
+      retry_base_delay_seconds: 0.001,
+      retry_max_delay_seconds: 0.001,
+    }, null, {}, "");
+    const result = await new OpenAICompatProvider(config).complete(
+      [{ role: "user", content: "hi" }],
+      undefined,
+      (text) => deltas.push(text),
+    );
+    expect(result.content).toBe("recovered");
+    expect(calls).toBe(2);
+    expect(deltas.some((text) => text.includes("network interrupted") && text.includes("attempt 1/1"))).toBe(true);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("network-resilient: does not replay network_error after semantic stream output", async () => {
+  const orig = globalThis.fetch;
+  let calls = 0;
+  // SAFETY: test-built fetch fixture; every returned stream frame is constructed below.
+  globalThis.fetch = (async () => {
+    calls++;
+    const body = [
+      { choices: [{ delta: { content: "partial" } }] },
+      { choices: [{ delta: {}, finish_reason: "network_error" }] },
+    ].map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n";
+    return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+  }) as any;
+  try {
+    const config = new NekoConfig({
+      provider: "openai_compat",
+      base_url: "http://localhost:9/v1",
+      model: "m",
+      max_retries: 1,
+    }, null, {}, "");
+    await expect(new OpenAICompatProvider(config).complete(
+      [{ role: "user", content: "hi" }],
+      undefined,
+      () => {},
+    )).rejects.toThrow("finish_reason: network_error");
+    expect(calls).toBe(1);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 test("self-heals when an endpoint rejects reasoning_effort: drops the field, retries, remembers", async () => {
   const orig = globalThis.fetch;
   const sentEffort: (string | undefined)[] = [];
