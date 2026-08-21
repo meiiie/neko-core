@@ -108,16 +108,26 @@ test("read, edit, and bash route remotely with POSIX policy context and explicit
     return "(exit 0)\nremote validator passed";
   });
   const reg = registry(backend);
+  reg.sandboxBash = true;
+  reg.sandboxAllowNetwork = true;
+  reg.sandboxDomains = ["standing.example.com"];
   reg.clearCheckpoint();
   const lease = reg.enterTurn({
     name: "exact",
     allowedTools: ["read_file", "edit", "bash"],
     editTarget: "src/only.ts",
+    bashPolicy: "foreground-validator-only",
   });
   try {
+    const bashSchema = reg.schemas().find((schema) => schema.function.name === "bash");
+    expect(bashSchema?.function.parameters.properties.network_domains).toBeUndefined();
     expect(await reg.execute("read_file", { path: "src/only.ts" })).toBe("REMOTE READ");
     expect(await reg.execute("edit", { path: "src/only.ts", old_string: "a", new_string: "b" }))
       .toStartWith("Edited src/only.ts");
+    expect(await reg.execute("bash", {
+      command: "bun test",
+      network_domains: ["example.com"],
+    })).toContain("restricted to a foreground validator");
     expect(await reg.execute("bash", { command: "bun test", timeout: 2500 })).toStartWith("(exit 0)");
   } finally {
     lease.close();
@@ -129,6 +139,11 @@ test("read, edit, and bash route remotely with POSIX policy context and explicit
     canonicalPosixRoot: "/workspace",
     strictEditMatch: true,
     exactEditTarget: "src/only.ts",
+  });
+  expect(backend.calls[2].context.sandbox).toMatchObject({
+    allowNetwork: false,
+    domains: [],
+    readOnlyWorkspace: true,
   });
   expect(reg.restoreCheckpoint()).toBe(0);
   expect(reg.consumeRestoreConflicts()).toEqual([
@@ -153,6 +168,44 @@ test("safe and gated decisions plus adversarial review happen before remote disp
   expect(await reg.execute("edit", { path: "x.ts", old_string: "a", new_string: "b" }))
     .toBe("Blocked by adversarial check: review refused it");
   expect(backend.calls.map((call) => call.name)).toEqual(["read_file"]);
+});
+
+test("bash network egress is one-call, exact, and self-approved only in auto mode", async () => {
+  let prompts = 0;
+  const backend = new FakeNativeBackend(["bash"], () => "(exit 0)\nnetwork ok");
+  const reg = registry(backend, "default", () => { prompts++; return true; });
+  reg.sandboxBash = true;
+  reg.sandboxAutoApprove = true;
+  reg.sandboxAllowNetwork = false;
+  reg.sandboxDomains = ["stale.example.com"];
+
+  expect(await reg.execute("bash", { command: "echo local" })).toStartWith("(exit 0)");
+  expect(prompts).toBe(0); // live confined bash still avoids redundant approval
+  expect(backend.calls[0].context.sandbox).toMatchObject({ allowNetwork: false, domains: [] });
+
+  expect(await reg.execute("bash", {
+    command: "curl https://api.example.com",
+    network_domains: ["API.Example.com:443", "api.example.com:443"],
+  })).toStartWith("(exit 0)");
+  expect(prompts).toBe(1); // egress is a distinct consequence outside auto/yolo
+  expect(backend.calls[1].context.sandbox).toMatchObject({
+    allowNetwork: true,
+    domains: ["api.example.com:443"],
+  });
+
+  reg.mode = "auto";
+  expect(await reg.execute("bash", {
+    command: "curl https://files.example.com",
+    network_domains: ["files.example.com"],
+  })).toStartWith("(exit 0)");
+  expect(prompts).toBe(1);
+  expect(backend.calls[2].context.sandbox.domains).toEqual(["files.example.com"]);
+
+  expect(await reg.execute("bash", {
+    command: "curl https://example.com",
+    network_domains: ["https://example.com"],
+  })).toContain("invalid network domain");
+  expect(backend.calls).toHaveLength(3);
 });
 
 test("a refusing pre-tool hook blocks a backend-owned native call before dispatch", async () => {

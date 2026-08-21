@@ -40,6 +40,8 @@ import { activeBrowserMeeting, startBrowserMeeting, stopBrowserMeeting } from ".
 import { discoverMeetingSupport, installMeetingSupportPack, readMeetingSupportPack, removeMeetingSupportPack } from "../adapters/meeting-support-pack.ts";
 import { deleteMeeting, formatMeetingTime, latestMeeting, listMeetings, readMeeting, readMeetingTranscript, type MeetingManifest } from "../adapters/meeting.ts";
 import { transcribeMeeting } from "../adapters/meeting-transcription.ts";
+import { normalizeSandboxDomains } from "../core/sandbox.ts";
+import { messageOf } from "../shared/debug.ts";
 
 import { isBool, isText } from "../shared/wire.ts";
 
@@ -1058,7 +1060,13 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         return addLine("info", "sandbox_network=false applied now and saved to ~/.neko-core/config.json.");
       }
       if (sub === "network" && flag === "on") {
-        const domains = rest.join(" ").split(/[\s,]+/).map((d) => d.trim().replace(/\/$/, "")).filter(Boolean);
+        const rawDomains = rest.join(" ").split(/[\s,]+/).map((d) => d.trim()).filter(Boolean);
+        let domains: string[];
+        try {
+          domains = normalizeSandboxDomains(rawDomains, 128);
+        } catch (error) {
+          return addLine("info", `invalid sandbox network policy: ${messageOf(error)}`);
+        }
         if (!domains.length) {
           return addLine("info", "usage: /sandbox network on <domain ...>  (SRT has no allow-all; list egress domains, e.g. /sandbox network on pypi.org files.pythonhosted.org)");
         }

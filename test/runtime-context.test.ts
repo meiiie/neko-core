@@ -21,6 +21,9 @@ test("runtime block makes Neko mode and provider-native separation authoritative
   expect(block).toContain("Provider-native shell, apply_patch/edit, approvals, sandbox, and skills are a separate transport runtime");
   expect(block).toContain("Neko bash dynamic tool: callable");
   expect(block).toContain("network_probe can resolve one host and test bounded TCP ports outside the Bash sandbox");
+  expect(block).toContain("declare the exact destination hosts in the bash call's network_domains field");
+  expect(block).toContain("Auto/yolo approves that bounded one-call request");
+  expect(block).toContain("/sandbox is only for a persistent standing policy");
   expect(block).toContain("sandbox=off (host/unconfined)");
   expect(block).toMatch(/shell=(?:GIT BASH \(POSIX\)|cmd\.exe|\/bin\/sh \(POSIX\))/);
   expect(block).not.toMatch(/[^\x00-\x7f]/);
@@ -78,6 +81,7 @@ test("runtime block says unhealthy SRT fails closed without a host fallback", ()
   expect(block).toContain("Do not create a shell script");
   expect(block).not.toContain("host/unconfined");
   expect(block).not.toContain("UNCONFINED AUTO");
+  expect(block).toContain("SRT enforces each network_domains entry as an exact per-call destination allowlist");
 });
 
 test("runtime block distinguishes a transient SRT probe timeout from unconfined fallback", () => {

@@ -129,6 +129,14 @@ test("schema shape", () => {
   expect(s.function.name).toBe("read_file");
   expect(s.function.parameters.required).toEqual(["path"]);
 
+  const bash = toOpenAISchema(resolveTool("bash"));
+  expect(bash.function.parameters.properties.network_domains).toMatchObject({
+    type: "array",
+    maxItems: 16,
+    items: { type: "string" },
+  });
+  expect(bash.function.description).toContain("network_domains");
+
   const computer = toOpenAISchema(resolveTool("computer"));
   expect(computer.function.parameters.properties.action.enum).toContain("watch");
   expect(computer.function.parameters.properties.mark.type).toBe("integer");

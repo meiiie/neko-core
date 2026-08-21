@@ -6,6 +6,16 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.16] - 2026-08-21
+
+### Added
+
+- **Auto/yolo Bash can request network access without making the user edit sandbox policy.** A Bash
+  call may declare up to 16 exact destination hosts in `network_domains`. The grant exists only for
+  that call; SRT enforces the domain/port allowlist, invalid or match-all entries fail before launch,
+  and default/accept-edits still ask because egress is a separate consequence. `/sandbox network`
+  remains available only for users who intentionally want a persistent standing allowlist.
+
 ## [0.24.15] - 2026-08-21
 
 ### Added

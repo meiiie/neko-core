@@ -39,6 +39,10 @@ test("/sandbox network changes the live registry and persists the next-session p
   expect(saved.sandbox_network).toBe(true);
   expect(saved.sandbox_domains).toEqual(["example.com", "api.github.com"]);
 
+  await runSlashCommand("/sandbox network on https://not-a-domain.example/path", ctx);
+  expect(lines.at(-1)).toContain("invalid sandbox network policy");
+  expect(registry.sandboxDomains).toEqual(["example.com", "api.github.com"]);
+
   await runSlashCommand("/sandbox", ctx);
   expect(lines.at(-1)).toContain("allowlisted [example.com, api.github.com]");
   expect(lines.at(-1)).toContain("applies now");

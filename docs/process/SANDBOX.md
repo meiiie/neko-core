@@ -37,10 +37,17 @@ approval or hooks rather than widening to ordinary/full-turn bash.
 (Env rollback: `NEKO_SANDBOX=0`.)
 
 `auto` and `--yolo` automate permission decisions; they do not disable this containment or silently
-turn deny-by-default Bash egress into unrestricted host networking. Use `/sandbox network on <domain
-...>` to change the Bash allowlist for the current process and persist it for later processes. The
-change applies immediately. On Windows, SRT still requires explicit domains and has no released
-allow-all setting.
+turn deny-by-default Bash egress into unrestricted standing host networking. A Bash call can instead
+declare up to 16 exact destinations in `network_domains`; this creates a capability for that call
+only, without editing user config. `auto`/`--yolo` self-approves the one-call grant. Other modes show
+the ordinary approval surface because egress is a separate consequence from filesystem confinement.
+On Windows, SRT enforces the exact destination/optional-port allowlist. Bubblewrap and Seatbelt have
+no domain proxy, so the same field truthfully means full network for that one process only.
+
+Use `/sandbox network on <domain ...>` only when a durable standing allowlist is wanted. It changes
+the current process and persists the policy for later processes; `/sandbox network off` removes it.
+SRT still has no released allow-all setting. Domain entries reject URL schemes, paths, credentials,
+the bare `*` wildcard, invalid ports, and over-broad suffixes before a command or config mutation runs.
 
 Network diagnosis is not forced through Bash. The gated `network_probe` tool resolves one hostname or
 IP and tests at most 16 TCP ports directly from the host with a bounded timeout. It runs outside the
@@ -48,6 +55,11 @@ Bash sandbox, does not execute a shell, send application payloads, scan CIDRs, o
 In `auto`/`--yolo` it can run without a routine prompt; `default` still asks and `plan` refuses it.
 Use `web_search`/`web_fetch` for Internet content. This separation lets an agent inspect the network
 surface the user actually named without giving arbitrary host commands unrestricted egress.
+
+The model-facing Bash schema owns the autonomous path: package installs, Git HTTPS operations, and
+similar shell workflows should declare their actual registry/download hosts in `network_domains`
+instead of telling the user to run `/sandbox`. Redirect targets must be declared too; a proxy refusal
+can be retried with the additional exact host, never by widening to `*`.
 
 ### Outside-workspace autonomy is path-scoped
 
