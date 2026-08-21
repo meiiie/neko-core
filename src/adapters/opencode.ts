@@ -23,6 +23,7 @@ interface AccountTarget {
   baseUrl: string;
   transport: Exclude<OpenCodeZenTransport, "unsupported">;
   token: string;
+  headers: Record<string, string>;
   providerName: string;
   model: RemoteModel;
 }
@@ -119,6 +120,22 @@ function providerEntries(account: OpenCodeAccountConfig): Array<[string, RemoteP
   );
 }
 
+/** The Console catalog currently selects the billing workspace with x-opencode-org-id. Keep that
+ * server-owned capability, but never let catalog data replace auth/content headers or mint a generic
+ * header channel to future endpoints. */
+function accountHeaders(...sources: JsonValue[]) {
+  const headers: Record<string, string> = {};
+  for (const source of sources) {
+    if (!isJsonObject(source)) continue;
+    for (const [rawName, value] of Object.entries(source)) {
+      const name = rawName.toLowerCase();
+      if (!/^x-opencode-[a-z0-9-]+$/.test(name) || !isText(value) || value.length > 4096 || /[\r\n]/.test(value)) continue;
+      headers[name] = value;
+    }
+  }
+  return headers;
+}
+
 function accountTarget(account: OpenCodeAccountConfig, id: string): AccountTarget {
   const slash = id.indexOf("/");
   if (slash <= 0 || slash === id.length - 1) {
@@ -148,6 +165,7 @@ function accountTarget(account: OpenCodeAccountConfig, id: string): AccountTarge
     baseUrl,
     transport,
     token: account.token,
+    headers: accountHeaders(options.headers, model.headers),
     providerName: isText(provider.name) ? provider.name : providerId,
     model,
   };
@@ -181,7 +199,8 @@ export class OpenCodeAccountProvider implements Provider {
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
     if (!this.config.model) throw new Error("OpenCode Console needs a model. Use /model to choose one.");
     const target = accountTarget(await this.account(), this.config.model);
-    const key = `${target.transport}:${target.baseUrl}:${target.apiModelId}`;
+    const headerIdentity = JSON.stringify(Object.entries(target.headers).sort(([a], [b]) => a.localeCompare(b)));
+    const key = `${target.transport}:${target.baseUrl}:${target.apiModelId}:${headerIdentity}`;
     let current = this.delegates.get(key);
     if (current && current.token !== target.token) {
       await current.provider.dispose?.();
@@ -191,11 +210,12 @@ export class OpenCodeAccountProvider implements Provider {
     if (!current) {
       const delegated = accountDelegateConfig(this.config, target);
       const resolveToken = () => target.token;
+      const resolveHeaders = () => ({ ...target.headers });
       const provider = target.transport === "responses"
-        ? new ResponsesProvider(delegated, resolveToken)
+        ? new ResponsesProvider(delegated, resolveToken, resolveHeaders)
         : target.transport === "anthropic"
-          ? new AnthropicProvider(delegated, resolveToken)
-          : new OpenAICompatProvider(delegated, resolveToken);
+          ? new AnthropicProvider(delegated, resolveToken, resolveHeaders)
+          : new OpenAICompatProvider(delegated, resolveToken, resolveHeaders);
       current = { token: target.token, provider };
       this.delegates.set(key, current);
     }

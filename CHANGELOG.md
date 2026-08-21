@@ -6,6 +6,16 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.12] — 2026-08-21
+
+### Fixed
+
+- **OpenCode Console models now retain their selected workspace.** The live account catalog supplies a
+  scoped `x-opencode-*` header for inference; v0.24.11 loaded the catalog but dropped that header, so
+  Ox Alpha Free and other account models failed with HTTP 403 `Workspace selection is required` after
+  a successful OAuth login. Neko now carries only OpenCode-scoped catalog headers across each supported
+  wire while still preventing catalog data from replacing authorization, API-key, or content headers.
+
 ## [0.24.11] — 2026-08-21
 
 ### Added

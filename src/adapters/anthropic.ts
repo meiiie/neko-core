@@ -26,6 +26,7 @@ export class AnthropicProvider implements Provider {
   constructor(
     private readonly cfg: NekoConfig,
     private readonly resolveApiKey: () => string | Promise<string> = () => cfg.apiKey,
+    private readonly resolveHeaders: () => Record<string, string> | Promise<Record<string, string>> = () => ({}),
   ) {}
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
@@ -91,7 +92,11 @@ export class AnthropicProvider implements Provider {
     let cacheOn = this.cfg.promptCache;
     if (cacheOn) addCacheBreakpoints(payload);
 
-    const headers: any = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
+    const headers: any = {
+      ...(await this.resolveHeaders()),
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    };
     if (key) {
       headers["x-api-key"] = key;
       if (!officialAnthropic) headers.authorization = `Bearer ${key}`; // Z.ai-compatible endpoints use Bearer
