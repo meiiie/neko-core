@@ -17,6 +17,13 @@ accelerating auto-scroll clock, so long selections keep moving without artificia
 extraction now also covers the live streaming tail. Research and claim boundaries are recorded in
 `docs/research/transcript-input-sota-2026-07-30.md`.
 
+The release gate exposed a test-fixture race rather than a product failure: WPF could publish a textbox
+to one UIA snapshot just before its ValuePattern accepted the first request. The integration test now
+retries only the exact idempotent set-value until it receives the existing `set+VERIFIED` proof; toggle
+and invoke remain one-shot, and no production timeout or assertion was relaxed. Windows release testing
+continues to use the four sequential clean-process shards defined by CI because a monolithic Bun process
+eventually makes this loaded desktop refuse unrelated PowerShell creation with `uv_spawn EPERM`.
+
 ## 2026-08-23 - Explicit yolo authority and turn-scope continuity (v0.24.18)
 
 A field transcript exposed two independent harness failures. After completing a new FPT/market request,

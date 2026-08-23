@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { ResidentUiaHost, residentUiaHost } from "../src/core/windows-uia-host.ts";
+import { ResidentUiaHost, residentUiaHost, type UiaRequest } from "../src/core/windows-uia-host.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import { resolveWindowsSystemExecutable } from "../src/shared/windows-system.ts";
 
@@ -71,6 +71,25 @@ async function waitForUiaText(read: () => Promise<string>, needle: string, timeo
     await Bun.sleep(100);
   }
   throw new Error(`UIA did not expose ${JSON.stringify(needle)} within ${timeoutMs}ms${lastError ? `; last error: ${lastError}` : last ? `; last output: ${last}` : ""}`);
+}
+
+/** A WPF control can appear in one UIA snapshot before its ValuePattern is ready. Repeating an exact
+ * set-value is idempotent, so wait for the verified bridge response without weakening the assertion. */
+async function waitForVerifiedSetValue(host: ResidentUiaHost, request: UiaRequest, timeoutMs = 15_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let last = "";
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    try {
+      const response = await host.request(request, Math.max(1_000, Math.min(5_000, remaining)));
+      last = response.error ?? response.output ?? "empty UIA response";
+      if (response.ok && response.output?.includes("set+VERIFIED")) return response.output;
+    } catch (error) {
+      last = error instanceof Error ? error.message : String(error);
+    }
+    await Bun.sleep(100);
+  }
+  throw new Error(`UIA setvalue was not verified within ${timeoutMs}ms; last response: ${last}`);
 }
 
 test("resident UIA host reuses one PowerShell process and restarts after disposal", async () => {
@@ -183,7 +202,8 @@ $w.Content=$p
       return response.output ?? "";
     }, "Resident probe input");
     expect(output).toContain("Resident probe input");
-    expect((await host.request({ action: "setvalue", window: title, name: "Resident probe input", value: "Resident" })).output).toContain("set+VERIFIED");
+    const setOutput = await waitForVerifiedSetValue(host, { action: "setvalue", window: title, name: "Resident probe input", value: "Resident" });
+    expect(setOutput).toContain("set+VERIFIED");
     expect((await host.request({ action: "get", window: title, name: "Resident probe input" })).output).toContain("Resident");
     expect((await host.request({ action: "toggle", window: title, name: "Resident probe toggle" })).output).toContain("toggled+VERIFIED");
     expect((await host.request({ action: "invoke", window: title, name: "Resident probe button" })).output).toContain("invoked");
