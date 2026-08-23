@@ -24,6 +24,12 @@ and invoke remain one-shot, and no production timeout or assertion was relaxed. 
 continues to use the four sequential clean-process shards defined by CI because a monolithic Bun process
 eventually makes this loaded desktop refuse unrelated PowerShell creation with `uv_spawn EPERM`.
 
+The ConPTY scroll gate also exposed two stale harness assumptions. It used fixed sleeps to queue three
+identical `/help` commands, which a loaded TUI correctly classified as one multiline paste, and its
+replacement status seed revealed that bare `/memory` parsed an empty action instead of the intended
+`status` default. The command parser now has a regression test; the benchmark serializes distinct local
+commands through rendered acknowledgements before measuring the same wheel burst.
+
 ## 2026-08-23 - Explicit yolo authority and turn-scope continuity (v0.24.18)
 
 A field transcript exposed two independent harness failures. After completing a new FPT/market request,

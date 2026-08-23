@@ -36,10 +36,38 @@ const until = async (pred: () => boolean, ms: number) => {
   return pred();
 };
 
+// Seed a long transcript through acknowledged commands, not fixed sleeps. On a loaded Windows host,
+// three queued `/help\r` writes can reach Ink as one multiline paste and benchmark the paste guard
+// instead of scrolling. Distinct markers prove each command completed before the next one is sent.
+const submitSeed = async (command: string, marker: string): Promise<boolean> => {
+  // One terminal chunk exercises the supported coalesced-text+Enter path and cannot lose Enter
+  // between two Ink renders. The marker below still serializes the separate commands.
+  term.write(`${command}\r`);
+  const completed = await until(() => vt.text().includes(marker), 5_000);
+  if (!completed) {
+    console.log(`[${label}] seed ${command} did not render ${JSON.stringify(marker)}`);
+    console.log(vt.lines().map((line, i) => `${String(i).padStart(2)}|${line}`).join("\n"));
+  }
+  const ready = completed && await until(
+    () => vt.lines().some((line) => /^\s*>\s*(?:Try:.*)?$/.test(line)),
+    3_000,
+  );
+  if (completed && !ready) {
+    console.log(`[${label}] seed ${command} rendered but the composer did not clear`);
+    console.log(vt.lines().map((line, i) => `${String(i).padStart(2)}|${line}`).join("\n"));
+  }
+  return ready;
+};
+
 const startupOk = await until(() => vt.text().includes("shift+tab to cycle"), 8000);
-term.write("/help"); await sleep(400); term.write("\r"); await sleep(700);
-term.write("/help"); await sleep(400); term.write("\r"); await sleep(700);
-term.write("/help"); await sleep(400); term.write("\r"); await sleep(900);
+const seedOk = startupOk
+  && await submitSeed("/help", "Commands:")
+  && await submitSeed("/tools", "tools:")
+  && await submitSeed("/skills", "skills:")
+  && await submitSeed("/memory", "save an explicit preference:")
+  && await submitSeed("/context", "context window capacity:");
+if (!seedOk) console.log(`[${label}] transcript seed failed before the scroll measurement`);
+await sleep(300);
 
 // Baseline settled. Burst 15 wheel-ups over ~150ms (a real flick).
 const preBytes = bytes;
@@ -85,4 +113,4 @@ term.write("\x03"); await sleep(200); term.write("\x03");
 await Promise.race([proc.exited, sleep(2500)]);
 try { proc.kill(); } catch {}
 term.close();
-process.exit(startupOk && resizeOk && menuOk && keyboardOk && viewportMoved ? 0 : 1);
+process.exit(startupOk && seedOk && resizeOk && menuOk && keyboardOk && viewportMoved ? 0 : 1);

@@ -13,6 +13,7 @@ import {
   memoryTool,
   setMemoryEnabled,
 } from "../src/core/memory.ts";
+import { runSlashCommand } from "../src/ui/commands.ts";
 
 // memory.ts resolves ~/.neko-core/memory via homedir(); point HOME at a temp dir per test.
 const ORIG = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
@@ -135,4 +136,15 @@ test("empty index block when there are no memories", () => {
   freshHome();
   expect(memoryIndexBlock()).toBe("");
   expect(memoryTool({ action: "list" })).toBe("(no memories yet)");
+});
+
+test("/memory with no argument shows status instead of usage", async () => {
+  freshHome();
+  const lines: string[] = [];
+  // SAFETY: /memory status uses only addLine from this focused command fixture.
+  const ctx = { addLine: (_kind: string, text: string) => lines.push(text) } as any;
+  await runSlashCommand("/memory", ctx);
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain("Neko memory:");
+  expect(lines[0]).not.toContain("usage: /memory");
 });

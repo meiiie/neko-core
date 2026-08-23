@@ -19,6 +19,10 @@ All notable changes to Neko Core are documented here. The format follows
   display frame, and keeps scrolling with gentle acceleration while the pointer is held at an edge.
   Copied ranges can include the live streaming tail as well as committed history.
 
+### Fixed
+
+- **`/memory` without an argument shows memory status again** instead of falling through to usage.
+
 ## [0.24.18] - 2026-08-23
 
 ### Added

@@ -1340,7 +1340,8 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     }
     case "/memory": {
       const rest = input.slice("/memory".length).trim();
-      const [action = "status", ...parts] = rest.split(/\s+/);
+      const [rawAction = "", ...parts] = rest.split(/\s+/);
+      const action = rawAction || "status";
       const name = parts.join(" ").trim();
       if (action === "on") return addLine("info", setMemoryEnabled(true));
       if (action === "off") return addLine("info", setMemoryEnabled(false));
