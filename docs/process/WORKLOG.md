@@ -13,8 +13,9 @@ it. The fast path now applies only when no run is selected.
 
 The fullscreen terminal simulation now enters the exact two-row prompt path, drags bottom-to-top and
 top-to-bottom, and decodes the OSC 52 payload to prove the complete draft is copied both ways. Its colored
-variant also asserts that a fully covered row emits inverse highlighting. The 16 ms coalescing path and
-mouse coordinate geometry are unchanged.
+variant also asserts that a fully covered row emits inverse highlighting. CI runs that visual assertion
+under explicit `FORCE_COLOR=3`, because a non-color TTY may omit ANSI even when `NO_COLOR` is absent. The
+16 ms coalescing path and mouse coordinate geometry are unchanged.
 
 ## 2026-08-23 - Clipboard and mouse-selection latency (v0.24.19)
 

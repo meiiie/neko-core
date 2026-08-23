@@ -55,6 +55,11 @@ jobs:
             bun test
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+      - name: require colored soft-wrap selection rendering
+        shell: pwsh
+        env:
+          FORCE_COLOR: "3"
+        run: bun test test/fullscreen-sim.test.ts --test-name-pattern "fullscreen prompt drag-select copies every soft-wrapped row in both directions"
       - name: require a live benchmark-oracle sandbox
         if: runner.os != 'Windows'
         shell: bash

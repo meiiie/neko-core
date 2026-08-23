@@ -319,10 +319,10 @@ test("fullscreen prompt drag-select copies every soft-wrapped row in both direct
     stdin.push(`\x1b[<0;${lastX};${lastY}M`); await tick(25);
     stdin.push(`\x1b[<32;${firstX};${firstY}M`); await tick(25);
     stdin.push(`\x1b[<0;${firstX};${firstY}m`); await tick(80);
-    // NO_COLOR is deliberately set in some non-interactive test hosts. In a color-capable run, this
-    // proves a fully covered visual row still emits the inverse highlight instead of taking the plain
-    // one-run fast path. The clipboard assertion below is color-independent.
-    if (!process.env.NO_COLOR || process.env.FORCE_COLOR) expect(out.all).toContain("\x1b[7m");
+    // The full suite can run on a non-color TTY even when NO_COLOR is absent. CI repeats this exact
+    // test with FORCE_COLOR=3; only that explicit color-capable run asserts the inverse sequence.
+    // The clipboard assertion below remains color-independent in every environment.
+    if (process.env.FORCE_COLOR) expect(out.all).toContain("\x1b[7m");
     expect(copied()).toBe(draft);
 
     out.all = "";
