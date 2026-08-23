@@ -6,6 +6,8 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.22] - 2026-08-24
+
 ### Fixed
 
 - **Mouse-wheel gestures move picker selections again.** Picker input now handles vertical wheel

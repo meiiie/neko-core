@@ -3,7 +3,7 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
-## 2026-08-24 - Adaptive mouse-motion audit and picker wheel repair
+## 2026-08-24 - Adaptive mouse-motion audit and picker wheel repair (v0.24.22)
 
 The pointer stack remains deliberately layered instead of choosing between all-motion and no motion:
 fullscreen keeps DEC 1000 for buttons/wheel, DEC 1002 for left-button drag selection, and SGR 1006 for
