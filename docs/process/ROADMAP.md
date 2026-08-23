@@ -4,11 +4,17 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-23) — v0.24.20
+## Current status (2026-08-23) — v0.24.21
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
+
+- **Cancellable login + cooperative updates (v0.24.21, 2026-08-23):** provider sign-in now obeys
+  Esc/Ctrl+C through browser, polling, and child-process boundaries; OpenCode resolves its device URL
+  correctly; hover is restored only on interactive surfaces. Self-update lock heartbeats preserve slow
+  active downloads, while a manual update waits for startup auto-update instead of racing it. The
+  development gate now runs stable native TypeScript 7.0.2.
 
 - **Soft-wrapped prompt selection (v0.24.20, 2026-08-23):** dragging across visual rows now keeps
   a fully covered row visibly selected and copies the complete codepoint range in either direction.
@@ -58,9 +64,11 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.20 (2026-08-23)** - prompt selection across soft-wrapped
-  rows preserves both the visible highlight and complete copied range in either drag direction.
-  Previous (v0.24.19, 2026-08-23) - clipboard image conversion is asynchronous and warm, while
+- **Branch:** `main`. **Current release: v0.24.21 (2026-08-23)** - provider login is cancellable,
+  contextual hover is restored, and manual/automatic updates coordinate through a progress-heartbeating
+  lock. Previous (v0.24.20, 2026-08-23) - prompt selection across soft-wrapped rows preserves both the
+  visible highlight and complete copied range in either drag direction. Previous (v0.24.19, 2026-08-23) -
+  clipboard image conversion is asynchronous and warm, while
   prompt/transcript selection avoids idle mouse floods and supports held-edge scrolling across long
   history. Previous (v0.24.18, 2026-08-23) - official xAI device OAuth
   connects Grok subscription quota without mixing it with API-key billing; explicit CLI/TUI `--yolo`

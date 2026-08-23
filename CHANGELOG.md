@@ -6,6 +6,8 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.21] - 2026-08-23
+
 ### Changed
 
 - **The development and release typecheck gate now uses stable native TypeScript 7.0.2.** The temporary

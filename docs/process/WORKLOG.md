@@ -3,7 +3,7 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
-## 2026-08-23 - Stable native TypeScript 7.0.2
+## 2026-08-23 - Stable native TypeScript 7.0.2 (v0.24.21)
 
 The primary typecheck gate moved from the native `7.0.1-rc` to production `7.0.2`. The stable package
 checked the complete repository cleanly before adoption and measured 1.681 seconds median on this
@@ -14,7 +14,7 @@ and does not enter the standalone binary.
 The 5.9 alias, duplicate CI step, and old `verify` path were removed as planned at TypeScript 7 GA.
 `bun run typecheck` is now the single production compiler verdict on every supported CI OS.
 
-## 2026-08-23 - Cooperative self-update lock
+## 2026-08-23 - Cooperative self-update lock (v0.24.21)
 
 The updater's idle-progress watchdog allowed a healthy release download to run for as long as bytes
 kept arriving, but its machine-wide lock only carried the acquisition time. A download lasting more
@@ -29,7 +29,7 @@ reports that the live updater is still active. When the peer already installed t
 version, the CLI probes and reuses that result rather than downloading the same binary again. Focused
 coverage passed 15/15 with 59 assertions; TypeScript 7 RC, stable 5.9, and anti-slop lint were clean.
 
-## 2026-08-23 - Cancellable provider login and contextual mouse hover
+## 2026-08-23 - Cancellable provider login and contextual mouse hover (v0.24.21)
 
 The OpenCode Console began returning `/console/device?...` as its complete verification path. Neko
 previously concatenated that path with a base URL already ending in `/console`, producing
