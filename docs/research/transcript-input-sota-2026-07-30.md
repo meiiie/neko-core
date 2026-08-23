@@ -6,6 +6,21 @@ Scope: Neko Core `/transcript` under Windows Terminal/ConPTY. The failure under 
 mouse movement or wheel report becoming visible search text. This ledger distinguishes terminal input
 classification from transcript storage, rendering, and search.
 
+## Checkpoint 2026-08-24 - adaptive hover without an idle motion flood
+
+Removing DEC 1003 globally fixed idle composer traffic but also removed the immediate hover feedback
+that makes pickers and clickable controls feel direct. Restoring it globally would repeat the original
+latency failure. Neko therefore treats mouse reporting as a capability stack: 1000/1002/1006 stay active
+in fullscreen for click, wheel, drag selection, and coordinates; 1003 is enabled only for the lifetime
+of a painted hoverable surface and is disabled as soon as that surface closes. Pointer bursts keep only
+their latest hover coordinate, React state bails on an unchanged semantic target, and selection updates
+remain display-frame-coalesced. This preserves direct manipulation without making ordinary pointer
+movement part of the composer hot path.
+
+The same audit corrected picker dispatch precedence: a wheel report is also a pointer report, so net
+wheel gestures must be handled before the generic pointer branch. Functional index updates preserve
+every separately delivered tick in a fast burst.
+
 ## Checkpoint 2026-08-23 - prompt selection, edge scrolling, and image paste
 
 Field testing exposed three separate latency mechanisms, not one renderer defect:

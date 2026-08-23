@@ -3,6 +3,21 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-24 - Adaptive mouse-motion audit and picker wheel repair
+
+The pointer stack remains deliberately layered instead of choosing between all-motion and no motion:
+fullscreen keeps DEC 1000 for buttons/wheel, DEC 1002 for left-button drag selection, and SGR 1006 for
+coordinates; DEC 1003 is added only while a painted picker, approval, history navigation, or voice
+control can provide real hover feedback. Closing that surface removes only 1003, so wheel, click,
+drag-select, edge auto-scroll, and release-copy remain live without idle pointer traffic in the composer.
+
+The audit found one ordering defect inside `SelectList`: `parseLastPointer()` correctly classifies wheel
+reports as pointer events, but the generic branch then consumed them before `parseWheelAll()` could move
+the picker. Net wheel gestures now run first. Their state update is functional, so separately delivered
+reports in one fast burst accumulate instead of sharing a stale selected index. A focused component
+regression failed on both behaviors before the repair, then passed alongside the mouse parser,
+fullscreen virtual-terminal, two-way prompt selection, edge auto-scroll, text-input, and scroll suites.
+
 ## 2026-08-24 - Concurrent trust-store reader repair (v0.24.21)
 
 The pre-tag Windows CI gate caught a real directory-snapshot race: one process enumerated a trusted

@@ -72,6 +72,16 @@ export function SelectList(props: {
   const start = Math.max(0, Math.min(idx - 3, Math.max(0, filtered.length - N)));
 
   useInput((input, key) => {
+    // Wheel reports are pointer reports too. Handle their net gesture before the generic pointer
+    // branch, otherwise parseLastPointer() consumes them as a no-op and a picker cannot scroll.
+    const wheel = parseWheelAll(input);
+    if (wheel) {
+      if (renaming === null) {
+        const delta = (wheel.dir === "up" ? -1 : 1) * wheel.count;
+        setIndex((current) => Math.max(0, Math.min(filtered.length - 1, current + delta)));
+      }
+      return;
+    }
     // Mouse: each visible item row is a hit zone (HIT_SENTINEL anchor recorded by the differ from
     // the LAST PAINTED frame). Hover follows the pointer, a left click selects + confirms, and the
     // wheel moves the cursor. Zones are indexed in visible order, so item = filtered[start + zone].
@@ -89,11 +99,6 @@ export function SelectList(props: {
         if (it) { setIndex(start + zone); onSelect(it); }
       }
       return; // release / other buttons: consumed, never type-to-filter residue
-    }
-    const wheel = parseWheelAll(input);
-    if (wheel) {
-      if (renaming === null) setIndex(Math.max(0, Math.min(filtered.length - 1, idx + (wheel.dir === "up" ? -1 : 1) * wheel.count)));
-      return;
     }
     // Rename mode owns the keyboard until Enter/Esc.
     if (renaming !== null) {

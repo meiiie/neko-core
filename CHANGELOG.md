@@ -6,6 +6,12 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Mouse-wheel gestures move picker selections again.** Picker input now handles vertical wheel
+  reports before the generic pointer path and accumulates rapid reports with a functional state update,
+  while contextual any-motion hover and low-volume drag selection keep their existing behavior.
+
 ## [0.24.21] - 2026-08-23
 
 ### Changed
