@@ -17,6 +17,10 @@ variant also asserts that a fully covered row emits inverse highlighting. CI run
 under explicit `FORCE_COLOR=3`, because a non-color TTY may omit ANSI even when `NO_COLOR` is absent. The
 16 ms coalescing path and mouse coordinate geometry are unchanged.
 
+The release run also exposed fixed-sleep races in the older Alt+V component tests on a loaded Windows
+runner. Those fixtures now wait for the exact input, paste-start, and final-value states with a bounded
+deadline; production timing and assertions are unchanged.
+
 ## 2026-08-23 - Clipboard and mouse-selection latency (v0.24.19)
 
 Windows Alt+V no longer starts a synchronous PowerShell/.NET image pipeline on Ink's input thread. A

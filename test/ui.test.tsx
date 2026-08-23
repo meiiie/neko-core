@@ -12,6 +12,11 @@ const pasteProps = () => {
 };
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+const waitFor = async (check: () => boolean, timeoutMs = 2000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (!check() && Date.now() < deadline) await tick(20);
+  expect(check()).toBe(true);
+};
 
 test("TextInput appends a multibyte Vietnamese char as one codepoint (the old bug split it)", async () => {
   let val = "";
@@ -56,33 +61,35 @@ test("Alt+V inserts the [Image #N] token AT THE CARET (inline, Claude-Code style
   }
   const { stdin, unmount } = render(<Wrap />);
   stdin.write("look  now"); // caret sits at the end; move it between the two spaces
-  await tick();
+  await waitFor(() => val === "look  now");
   stdin.write("\x1b[D\x1b[D\x1b[D\x1b[D"); // four lefts -> after "look "
   await tick();
   stdin.write("\x1bv"); // Alt+V
-  await tick();
+  await waitFor(() => val === "look [Image #1]  now");
   expect(val).toBe("look [Image #1]  now"); // token landed inline at the caret, not appended
   unmount();
 });
 
 test("Alt+V with no clipboard image (hook returns null) leaves the input untouched", async () => {
   let val = "";
+  let pasteCalls = 0;
   function Wrap() {
     const [v, setV] = useState("");
     val = v;
-    return <TextInput value={v} onChange={setV} onSubmit={() => {}} onPasteImage={() => null} {...pasteProps()} />;
+    return <TextInput value={v} onChange={setV} onSubmit={() => {}} onPasteImage={() => { pasteCalls++; return null; }} {...pasteProps()} />;
   }
   const { stdin, unmount } = render(<Wrap />);
   stdin.write("hi");
-  await tick();
+  await waitFor(() => val === "hi");
   stdin.write("\x1bv");
-  await tick();
+  await waitFor(() => pasteCalls === 1);
   expect(val).toBe("hi");
   unmount();
 });
 
 test("Alt+V reads asynchronously without freezing typing and inserts at the captured caret", async () => {
   let val = "";
+  let pasteStarted = false;
   let finish: (value: string | null) => void = () => {};
   function Wrap() {
     const [v, setV] = useState("");
@@ -92,22 +99,22 @@ test("Alt+V reads asynchronously without freezing typing and inserts at the capt
         value={v}
         onChange={setV}
         onSubmit={() => {}}
-        onPasteImage={() => new Promise((resolve) => { finish = resolve; })}
+        onPasteImage={() => new Promise((resolve) => { pasteStarted = true; finish = resolve; })}
         {...pasteProps()}
       />
     );
   }
   const { stdin, unmount } = render(<Wrap />);
   stdin.write("look  now");
-  await tick();
+  await waitFor(() => val === "look  now");
   stdin.write("\x1b[D\x1b[D\x1b[D\x1b[D"); // caret after the first space
   await tick();
   stdin.write("\x1bv");
   stdin.write("X"); // remains responsive while clipboard decoding is pending
-  await tick();
+  await waitFor(() => pasteStarted && val === "look X now");
   expect(val).toBe("look X now");
   finish("[Image #1]");
-  await tick();
+  await waitFor(() => val === "look [Image #1] X now");
   expect(val).toBe("look [Image #1] X now");
   unmount();
 });
