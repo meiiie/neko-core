@@ -3,7 +3,7 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
-## 2026-08-23 - Clipboard and mouse-selection latency
+## 2026-08-23 - Clipboard and mouse-selection latency (v0.24.19)
 
 Windows Alt+V no longer starts a synchronous PowerShell/.NET image pipeline on Ink's input thread. A
 session-owned STA worker warms after the first frame and serves asynchronous resize/encode requests;

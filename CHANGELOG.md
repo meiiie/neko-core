@@ -6,6 +6,19 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.19] - 2026-08-23
+
+### Changed
+
+- **Pasting a clipboard image no longer freezes the composer.** On Windows, Neko warms one
+  session-owned clipboard worker and performs image conversion asynchronously. The same local test
+  image fell from 773-848 ms per paste to 21-29 ms on the warmed path, while typing remains live and
+  the image placeholder returns to the caret position captured by Alt+V.
+- **Mouse selection stays responsive across long prompts and transcript pages.** Fullscreen mode now
+  requests drag motion instead of every idle pointer movement, coalesces prompt highlights to the
+  display frame, and keeps scrolling with gentle acceleration while the pointer is held at an edge.
+  Copied ranges can include the live streaming tail as well as committed history.
+
 ## [0.24.18] - 2026-08-23
 
 ### Added
