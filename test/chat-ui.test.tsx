@@ -803,7 +803,7 @@ test("/login connects an OpenCode Console account through official device OAuth"
     if (url.endsWith("/auth/device/code")) return Response.json({
       device_code: "device-secret",
       user_code: "ABCD-EFGH",
-      verification_uri_complete: "/device?user_code=ABCD-EFGH&client_id=opencode-cli",
+      verification_uri_complete: "/console/device?user_code=ABCD-EFGH&client_id=opencode-cli",
       expires_in: 900,
       interval: 1,
     });
@@ -829,6 +829,48 @@ test("/login connects an OpenCode Console account through official device OAuth"
     expect(readFileSync(join(home, ".neko-core", "opencode-auth.json"), "utf8")).toContain("refresh-secret");
     expect(frames.join("\n")).not.toContain("device-secret");
     unmount();
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("Esc and Ctrl+C cancel a pending OpenCode login without closing the terminal", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldFetch = globalThis.fetch;
+  const home = mkdtempSync(join(tmpdir(), "neko-opencode-oauth-cancel-ui-"));
+  process.env.HOME = home; delete process.env.USERPROFILE;
+  // SAFETY: test-built fetch fixture implements the fetch arguments and returns a Response for every path.
+  globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/device/code")) return Response.json({
+      device_code: "pending-device",
+      user_code: "WAIT-CODE",
+      verification_uri_complete: "/console/device?user_code=WAIT-CODE&client_id=opencode-cli",
+      expires_in: 900,
+      interval: 5,
+    });
+    return Response.json({ error: "authorization_pending", error_description: "pending" }, { status: 400 });
+  }) as typeof fetch;
+  try {
+    for (const cancel of ["\x1b", "\x03"]) {
+      const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+      const { stdin, frames, lastFrame, unmount } = render(
+        <ChatApp fullscreen={false} yolo provider={provider} openUrl={() => {}} />,
+      );
+      stdin.write("/login"); await tick(30); stdin.write("\r");
+      expect(await until(() => (lastFrame() ?? "").includes("Sign in - choose a provider"))).toBe(true);
+      stdin.write("opencode"); await tick(40); stdin.write("\r");
+      expect(await until(() => (lastFrame() ?? "").includes("OpenCode - choose how to sign in"))).toBe(true);
+      stdin.write("\r");
+      expect(await until(() => frames.join("\n").includes("WAIT-CODE"))).toBe(true);
+      stdin.write(cancel);
+      expect(await until(() => frames.join("\n").includes("(login cancelled)"), 1000)).toBe(true);
+      expect(lastFrame() ?? "").toContain("> ");
+      expect(existsSync(join(home, ".neko-core", "opencode-auth.json"))).toBe(false);
+      unmount();
+    }
   } finally {
     globalThis.fetch = oldFetch;
     if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;

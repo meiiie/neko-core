@@ -3,6 +3,32 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-23 - Cancellable provider login and contextual mouse hover
+
+The OpenCode Console began returning `/console/device?...` as its complete verification path. Neko
+previously concatenated that path with a base URL already ending in `/console`, producing
+`/console/console/device` and sending an authenticated user to the Overview screen. The adapter now
+uses URL resolution, preserves the same-origin HTTPS check, and has a regression fixture matching the
+current official client contract.
+
+Provider login was also marked busy without installing an abort controller. Esc and Ctrl+C therefore
+had nothing to signal while device OAuth was polling. One UI-owned controller now spans ChatGPT,
+Gemini, Kimi, Grok, and OpenCode login work; adapters carry it through network requests, polling delays,
+callback servers, and child-process authentication. Esc and the first Ctrl+C cancel cleanly, while a
+second Ctrl+C can still terminate an uncooperative operation.
+
+The v0.24.19 move from DEC 1003 any-motion reporting to DEC 1002 drag reporting removed pointer floods
+and fixed composer latency, but also starved existing picker and button hover states. Neko now opts into
+1003 only while a real hoverable surface is painted and disables it as soon as that surface closes. A
+virtual-terminal regression proves `/login` rows follow bare pointer motion and that teardown restores
+the low-volume mode.
+
+Verification closed with lint, TypeScript 7 and stable 5.9, doctor, policy, the production build, UI
+probe, real-PTY input probe, and ACP smoke all passing. The official four-process Windows gate passed
+**1,477 tests, 12 intentional skips, 0 failures, and 8,247 assertions**. A preceding monolithic run
+reproduced the documented loaded-desktop `uv_spawn EPERM` on its final WPF fixture; the same fixture and
+all UIA tests passed in the clean shard without changing a timeout or assertion.
+
 ## 2026-08-23 - Soft-wrapped prompt selection correctness (v0.24.20)
 
 A field screenshot exposed a renderer-only ambiguity that unit geometry and transcript selection tests

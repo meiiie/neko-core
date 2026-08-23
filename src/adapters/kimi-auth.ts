@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { homeDir } from "../shared/home.ts";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
+import { abortableDelay, requestSignal, throwIfAborted } from "../shared/abort.ts";
 import { VERSION } from "../shared/version.ts";
 import { openBrowser } from "./chatgpt-auth.ts";
 import { isJsonObject, isObjectValue } from "../shared/wire.ts";
@@ -40,6 +41,7 @@ export interface KimiLoginOptions {
   openUrl?: (url: string) => void;
   oauthHost?: string;
   baseUrl?: string;
+  signal?: AbortSignal;
 }
 
 function authPath(): string {
@@ -152,7 +154,7 @@ function credentialsFromToken(payload: TokenResponse, previousRefreshToken = "")
   };
 }
 
-async function postForm(fetchImpl: typeof fetch, url: string, fields: Record<string, string>): Promise<{ response: Response; data: TokenResponse }> {
+async function postForm(fetchImpl: typeof fetch, url: string, fields: Record<string, string>, signal?: AbortSignal): Promise<{ response: Response; data: TokenResponse }> {
   const response = await fetchImpl(url, {
     method: "POST",
     headers: {
@@ -161,7 +163,7 @@ async function postForm(fetchImpl: typeof fetch, url: string, fields: Record<str
       Accept: "application/json",
     },
     body: new URLSearchParams(fields),
-    signal: AbortSignal.timeout(30_000),
+    signal: requestSignal(signal),
   });
   let data: TokenResponse = {};
   // SAFETY: token endpoint JSON; the field checks that follow establish the contract.
@@ -201,14 +203,14 @@ export function explainKimiAccessError(error: any): Error {
   return match ? accessError(Number(match[1])) : (error instanceof Error ? error : new Error(message));
 }
 
-async function verifyKimiCodeAccess(fetchImpl: typeof fetch, accessToken: string, baseUrl: string): Promise<void> {
+async function verifyKimiCodeAccess(fetchImpl: typeof fetch, accessToken: string, baseUrl: string, signal?: AbortSignal): Promise<void> {
   const response = await fetchImpl(`${baseUrl.replace(/\/+$/, "")}/models`, {
     headers: {
       ...kimiIdentityHeaders(),
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/json",
     },
-    signal: AbortSignal.timeout(30_000),
+    signal: requestSignal(signal),
   });
   if (response.ok) return;
   const detail = apiErrorDetail(await response.text());
@@ -254,10 +256,10 @@ export async function loginKimi(options: KimiLoginOptions = {}): Promise<KimiCre
   const fetchImpl = options.fetchImpl ?? fetch;
   const oauthHost = (options.oauthHost ?? KIMI_OAUTH_HOST).replace(/\/+$/, "");
   const baseUrl = options.baseUrl ?? KIMI_CODE_BASE_URL;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  throwIfAborted(options.signal);
   const { response, data } = await postForm(fetchImpl, `${oauthHost}/api/oauth/device_authorization`, {
     client_id: KIMI_CLIENT_ID,
-  });
+  }, options.signal);
   if (!response.ok) throw oauthError("Kimi device authorization failed", response, data);
 
   // SAFETY: token endpoint JSON validated by TokenResponse checks before use.
@@ -291,12 +293,12 @@ export async function loginKimi(options: KimiLoginOptions = {}): Promise<KimiCre
       client_id: KIMI_CLIENT_ID,
       device_code: deviceCode,
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-    });
+    }, options.signal);
     if (polled.response.ok) {
       const credentials = credentialsFromToken(polled.data);
       // Do not report a browser login as usable until the account and stable device identity are
       // accepted by the coding endpoint. This catches expired/ineligible memberships up front.
-      await verifyKimiCodeAccess(fetchImpl, credentials.accessToken, baseUrl);
+      await verifyKimiCodeAccess(fetchImpl, credentials.accessToken, baseUrl, options.signal);
       saveKimiCredentials(credentials);
       return credentials;
     }
@@ -305,7 +307,13 @@ export async function loginKimi(options: KimiLoginOptions = {}): Promise<KimiCre
     else if (error === "access_denied") throw oauthError("Kimi sign-in was denied", polled.response, polled.data);
     else if (error === "expired_token") break;
     else if (error !== "authorization_pending") throw oauthError("Kimi sign-in failed", polled.response, polled.data);
-    await sleep(intervalSeconds * 1000);
+    if (options.sleep) {
+      throwIfAborted(options.signal);
+      await options.sleep(intervalSeconds * 1000);
+      throwIfAborted(options.signal);
+    } else {
+      await abortableDelay(intervalSeconds * 1000, options.signal);
+    }
   }
   throw new Error("Kimi sign-in timed out. Run /login and try again.");
 }

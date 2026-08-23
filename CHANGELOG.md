@@ -6,6 +6,21 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Mouse hover is responsive again without slowing the composer.** Neko enables terminal any-motion
+  reports only while a picker or another hoverable control is visible; ordinary typing and long mouse
+  selections retain the lower-volume drag-only mode introduced in v0.24.19.
+
+### Fixed
+
+- **Browser sign-in can always be cancelled from the TUI.** Esc interrupts a pending login, the first
+  Ctrl+C cancels it, and a second Ctrl+C remains an emergency exit. The same abort signal now reaches
+  browser callbacks, device polling, request timeouts, and provider-owned login processes.
+- **OpenCode device sign-in opens the actual connection page again.** Relative verification URLs are
+  resolved against the Console origin, preventing the invalid `/console/console/device` route that
+  redirected signed-in users to the Overview page.
+
 ## [0.24.20] - 2026-08-23
 
 ### Fixed

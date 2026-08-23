@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 
 import { atomicWriteFileSync } from "../shared/atomic.ts";
+import { abortableDelay, requestSignal, throwIfAborted, userAbortError } from "../shared/abort.ts";
 import { homeDir } from "../shared/home.ts";
 import { VERSION } from "../shared/version.ts";
 
@@ -44,6 +45,7 @@ interface LoginOptions {
   openUrl?: (url: string) => void;
   notify?: (message: string) => void;
   sleep?: (ms: number) => Promise<void>;
+  signal?: AbortSignal;
 }
 
 function authPath(): string {
@@ -163,11 +165,12 @@ export function buildChatGptAuthorizeUrl(redirectUri: string, challenge: string,
   return `${issuer}/oauth/authorize?${query}`;
 }
 
-async function exchangeCode(code: string, verifier: string, redirectUri: string, fetchImpl: typeof fetch, issuer: string): Promise<ChatGptCredentials> {
+async function exchangeCode(code: string, verifier: string, redirectUri: string, fetchImpl: typeof fetch, issuer: string, signal?: AbortSignal): Promise<ChatGptCredentials> {
   const response = await fetchImpl(`${issuer}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: CLIENT_ID, code_verifier: verifier }),
+    signal: requestSignal(signal),
   });
   if (!response.ok) throw new Error(`ChatGPT token exchange failed (HTTP ${response.status}).`);
   // SAFETY: token endpoint JSON; the field checks that follow establish the contract.
@@ -189,6 +192,7 @@ async function browserLogin(options: LoginOptions): Promise<ChatGptCredentials> 
   const codes = pkce();
   const state = randomBytes(32).toString("base64url");
   const authorizeUrl = buildChatGptAuthorizeUrl(redirectUri, codes.challenge, state, issuer);
+  throwIfAborted(options.signal);
 
   let resolveLogin!: (credentials: ChatGptCredentials) => void;
   let rejectLogin!: (error: Error) => void;
@@ -206,7 +210,7 @@ async function browserLogin(options: LoginOptions): Promise<ChatGptCredentials> 
       return;
     }
     try {
-      const credentials = await exchangeCode(code, codes.verifier, redirectUri, fetchImpl, issuer);
+      const credentials = await exchangeCode(code, codes.verifier, redirectUri, fetchImpl, issuer, options.signal);
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end("<h1>Neko is signed in</h1><p>You can close this tab and return to the terminal.</p>");
       resolveLogin(credentials);
     } catch (e) {
@@ -214,6 +218,7 @@ async function browserLogin(options: LoginOptions): Promise<ChatGptCredentials> 
       rejectLogin(e instanceof Error ? e : new Error(String(e)));
     }
   });
+  const abort = () => rejectLogin(userAbortError());
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -222,21 +227,30 @@ async function browserLogin(options: LoginOptions): Promise<ChatGptCredentials> 
     throw new Error(`Could not start the ChatGPT callback on port ${CALLBACK_PORT}. Try \`neko login chatgpt --device\`. (${error instanceof Error ? error.message : error})`);
   });
   const timeout = setTimeout(() => rejectLogin(new Error("ChatGPT sign-in timed out after 5 minutes.")), 5 * 60_000);
-  options.notify?.(`Open this URL to sign in:\n${authorizeUrl}`);
-  try { (options.openUrl ?? openBrowser)(authorizeUrl); }
-  catch { options.notify?.("Could not open a browser automatically. Copy the URL above into your browser."); }
-  try { return await result; }
-  finally { clearTimeout(timeout); await new Promise<void>((resolve) => server.close(() => resolve())); }
+  try {
+    options.signal?.addEventListener("abort", abort, { once: true });
+    throwIfAborted(options.signal);
+    options.notify?.(`Open this URL to sign in:\n${authorizeUrl}`);
+    try { (options.openUrl ?? openBrowser)(authorizeUrl); }
+    catch { options.notify?.("Could not open a browser automatically. Copy the URL above into your browser."); }
+    return await result;
+  }
+  finally {
+    options.signal?.removeEventListener("abort", abort);
+    clearTimeout(timeout);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 }
 
 async function deviceLogin(options: LoginOptions): Promise<ChatGptCredentials> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const issuer = options.issuer ?? CHATGPT_ISSUER;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  throwIfAborted(options.signal);
   const start = await fetchImpl(`${issuer}/api/accounts/deviceauth/usercode`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "User-Agent": `neko-core/${VERSION}` },
     body: JSON.stringify({ client_id: CLIENT_ID }),
+    signal: requestSignal(options.signal),
   });
   if (!start.ok) throw new Error(`Could not start ChatGPT device sign-in (HTTP ${start.status}).`);
   // SAFETY: device-auth JSON from OpenAI; required fields are validated immediately below.
@@ -252,15 +266,22 @@ async function deviceLogin(options: LoginOptions): Promise<ChatGptCredentials> {
       method: "POST",
       headers: { "Content-Type": "application/json", "User-Agent": `neko-core/${VERSION}` },
       body: JSON.stringify({ device_auth_id: data.device_auth_id, user_code: data.user_code }),
+      signal: requestSignal(options.signal),
     });
     if (poll.ok) {
       // SAFETY: device-auth poll JSON; required fields are validated immediately below.
       const code = await poll.json() as { authorization_code?: string; code_verifier?: string };
       if (!code.authorization_code || !code.code_verifier) throw new Error("ChatGPT device authorization returned an invalid response.");
-      return exchangeCode(code.authorization_code, code.code_verifier, `${issuer}/deviceauth/callback`, fetchImpl, issuer);
+      return exchangeCode(code.authorization_code, code.code_verifier, `${issuer}/deviceauth/callback`, fetchImpl, issuer, options.signal);
     }
     if (poll.status !== 403 && poll.status !== 404) throw new Error(`ChatGPT device sign-in failed (HTTP ${poll.status}).`);
-    await sleep(interval);
+    if (options.sleep) {
+      throwIfAborted(options.signal);
+      await options.sleep(interval);
+      throwIfAborted(options.signal);
+    } else {
+      await abortableDelay(interval, options.signal);
+    }
   }
 }
 

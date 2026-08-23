@@ -29,7 +29,7 @@ import { setApprovalCursorHidden, setFocusReporting, terminalFocusFromInput } fr
 import { flattenLines, projectLineRows, ScrollRegion, stickyPromptAnchor, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, primeAnsiCache, renderNodeRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
-import { DISABLE_MOUSE, isMouseEnabled, parseLastPointer, parseWheelAll } from "./mouse.ts";
+import { DISABLE_MOUSE, isMouseEnabled, parseLastPointer, parseWheelAll, setMouseHover } from "./mouse.ts";
 import { brandTitle, saveTitle, setTabTitle, setTerminalTitle, stopTitleDriver } from "./title.ts";
 import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { toolResultDisplayLines, TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
@@ -1317,7 +1317,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (key.ctrl && char === "c") {
       if (selectedText.current) { copySelection(); clearSelection(); return; } // select-then-Ctrl+C copies the selection
       if (approvalFlashRef.current || approvalFlash) return; // committed approval is visual-only for ~140ms; do not abort after accepting
-      if (busy) return controllerRef.current?.abort();
+      if (busy) {
+        const controller = controllerRef.current;
+        if (controller && !controller.signal.aborted) {
+          controller.abort();
+          ctrlC.current = true;
+          flashCopyNote("cancelling... press ctrl+c again to exit");
+          setTimeout(() => { ctrlC.current = false; }, 2000);
+          return;
+        }
+        if (ctrlC.current) return exit();
+        return;
+      }
       if (input) { setInput(""); ctrlC.current = false; return; }
       if (ctrlC.current) return exit();
       ctrlC.current = true;
@@ -2089,6 +2100,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         cfg.adopt(loadConfig({ profile }));
         agentRef.current?.setProvider(getProvider(cfg));
       };
+      async function withLogin<T>(label: string, task: (signal: AbortSignal) => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+        const controller = new AbortController();
+        controllerRef.current = controller;
+        busyRef.current = true;
+        setBusy(true);
+        try {
+          return { ok: true, value: await task(controller.signal) };
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") addLine("info", "(login cancelled)");
+          else addLine("error", `${label} failed: ${error instanceof Error ? error.message : error}`);
+          return { ok: false };
+        } finally {
+          if (controllerRef.current === controller) controllerRef.current = null;
+          busyRef.current = false;
+          setBusy(false);
+        }
+      }
       const apiProfiles = new Set<string>();
       for (const [name, profile] of Object.entries(cfg.profiles)) {
         if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "grok_oauth" || profile.auth === "kimi_oauth" || profile.auth === "opencode_oauth" || profile.auth === "none") continue;
@@ -2122,77 +2150,65 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             return;
           }
           if (profile?.auth === "chatgpt_oauth") {
-            setBusy(true);
             addLine("info", "Opening ChatGPT Plus/Pro sign-in in your browser...");
-            try {
-              await loginChatGpt({ notify: (message) => addLine("info", message) });
+            const result = await withLogin("ChatGPT sign-in", (signal) => loginChatGpt({
+              notify: (message) => addLine("info", message),
+              signal,
+            }));
+            if (result.ok) {
               activate(route.id);
               addLine("info", "OpenAI connected with ChatGPT Plus/Pro. Subscription quota is active; API billing is not used. Type /model to choose a model.");
-            } catch (error) {
-              addLine("error", `ChatGPT sign-in failed: ${error instanceof Error ? error.message : error}`);
-            } finally {
-              setBusy(false);
             }
             return;
           }
           if (profile?.auth === "gemini_oauth") {
-            setBusy(true);
-            try {
-              await loginGemini((message) => addLine("info", message));
+            const result = await withLogin("Gemini sign-in", async (signal) => {
+              await loginGemini((message) => addLine("info", message), signal);
+              return true;
+            });
+            if (result.ok) {
               activate(route.id);
               addLine("info", "Google connected through Gemini Code Assist Standard/Enterprise. Type /model to choose an available model.");
-            } catch (error) {
-              addLine("error", `Gemini sign-in failed: ${error instanceof Error ? error.message : error}`);
-            } finally {
-              setBusy(false);
             }
             return;
           }
           if (profile?.auth === "kimi_oauth") {
-            setBusy(true);
             addLine("info", "Opening official Kimi Code device sign-in in your browser...");
-            try {
-              await loginKimi({ notify: (message) => addLine("info", message) });
+            const result = await withLogin("Kimi sign-in", (signal) => loginKimi({
+              notify: (message) => addLine("info", message),
+              signal,
+            }));
+            if (result.ok) {
               activate(route.id);
               addLine("info", "Kimi Code connected. Neko owns and refreshes this session; no API key or proxy is used. Type /model to load your account catalog.");
-            } catch (error) {
-              addLine("error", `Kimi sign-in failed: ${error instanceof Error ? error.message : error}`);
-            } finally {
-              setBusy(false);
             }
             return;
           }
           if (profile?.auth === "grok_oauth") {
-            setBusy(true);
             addLine("info", "Opening official xAI device sign-in for Grok in your browser...");
-            try {
-              const credentials = await loginGrok({
-                notify: (message) => addLine("info", message),
-                openUrl: openUrl ?? openBrowser,
-              });
+            const result = await withLogin("Grok sign-in", (signal) => loginGrok({
+              notify: (message) => addLine("info", message),
+              openUrl: openUrl ?? openBrowser,
+              signal,
+            }));
+            if (result.ok) {
+              const credentials = result.value;
               activate(route.id);
               addLine("info", `Grok connected${credentials.email ? ` as ${credentials.email}` : ""}. Neko owns and refreshes this subscription session; XAI_API_KEY billing remains separate. Type /model to load the account catalog.`);
-            } catch (error) {
-              addLine("error", `Grok sign-in failed: ${error instanceof Error ? error.message : error}`);
-            } finally {
-              setBusy(false);
             }
             return;
           }
           if (profile?.auth === "opencode_oauth") {
-            setBusy(true);
             addLine("info", "Opening official OpenCode Console device sign-in in your browser...");
-            try {
-              const credentials = await loginOpenCode({
-                notify: (message) => addLine("info", message),
-                openUrl: openUrl ?? openBrowser,
-              });
+            const result = await withLogin("OpenCode sign-in", (signal) => loginOpenCode({
+              notify: (message) => addLine("info", message),
+              openUrl: openUrl ?? openBrowser,
+              signal,
+            }));
+            if (result.ok) {
+              const credentials = result.value;
               activate(route.id);
               addLine("info", `OpenCode Console connected as ${credentials.email}${credentials.orgName ? ` (${credentials.orgName})` : ""}. Neko owns and refreshes this session; type /model to load the account catalog.`);
-            } catch (error) {
-              addLine("error", `OpenCode sign-in failed: ${error instanceof Error ? error.message : error}`);
-            } finally {
-              setBusy(false);
             }
             return;
           }
@@ -2937,6 +2953,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const inputPrompt = awaitingKey ? "key> " : pendingMulti ? "... " : "> ";
   const inputCols = Math.max(1, contentCols - inputPrompt.length);
   useEffect(() => { if (!pillShown) setPillHover(false); }, [pillShown]);
+  const hoverableSurface = Boolean(
+    overlay
+    || approval
+    || pillShown
+    || promptAnchor
+    || (voiceSnapshot && voiceSnapshot.state !== "stopped" && voiceSnapshot.state !== "error" && !viewer && !search),
+  );
+  useEffect(() => {
+    if (!fullscreen || !isMouseEnabled() || !stdout) return;
+    setMouseHover(stdout, hoverableSurface);
+    return () => { if (hoverableSurface) setMouseHover(stdout, false); };
+  }, [fullscreen, hoverableSurface, stdout]);
   // Compute the matching row indices for a query over the flattened rows (case-insensitive).
   const findMatches = (q: string): number[] => {
     if (!q.trim()) return [];

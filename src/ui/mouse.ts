@@ -14,6 +14,10 @@ import type { Writable } from "node:stream";
 // 1000 = button events, 1002 = drag motion only, 1006 = SGR coordinates. Avoid 1003 (every bare
 // pointer move): it can deliver hundreds of useless chunks per second and make prompt editing lag.
 export const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+// Any-motion mode is deliberately separate: selectors and buttons need bare hover, the composer does
+// not. ChatApp enables it only while a hoverable surface is visible, avoiding the old idle motion flood.
+export const ENABLE_MOUSE_HOVER = "\x1b[?1003h";
+export const DISABLE_MOUSE_HOVER = "\x1b[?1003l";
 // DISABLE resets EVERY standard mouse mode, not just the three we enable: a terminal (or a stale
 // session, or WT itself) can be left in a different encoding (1015 urxvt / 1016 SGR-pixels produce the
 // large-decimal "[555;62;22M" reports seen after exit), and turning off a mode that is already off is a
@@ -32,6 +36,9 @@ export function isMouseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
 
 export function enableMouse(out: Writable = process.stdout): void { out.write(ENABLE_MOUSE); }
 export function disableMouse(out: Writable = process.stdout): void { out.write(DISABLE_MOUSE); }
+export function setMouseHover(out: Writable = process.stdout, enabled: boolean): void {
+  out.write(enabled ? ENABLE_MOUSE_HOVER : DISABLE_MOUSE_HOVER);
+}
 
 /**
  * Parse ALL wheel events in an input chunk (a fast spin can batch several SGR reports into one chunk -

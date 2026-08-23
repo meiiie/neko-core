@@ -43,7 +43,7 @@ test("OpenCode device OAuth polls, selects a deterministic org, and never prints
     if (url.endsWith("/auth/device/code")) return Response.json({
       device_code: "device-secret-never-print",
       user_code: "ABCD-EFGH",
-      verification_uri_complete: "/device?user_code=ABCD-EFGH&client_id=opencode-cli",
+      verification_uri_complete: "/console/device?user_code=ABCD-EFGH&client_id=opencode-cli",
       expires_in: 900,
       interval: 1,
     });
@@ -82,6 +82,33 @@ test("OpenCode device OAuth polls, selects a deterministic org, and never prints
   const path = join(home, ".neko-core", "opencode-auth.json");
   if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
   expect(readFileSync(path, "utf8")).not.toContain("device-secret-never-print");
+});
+
+test("OpenCode device OAuth aborts a pending browser login immediately", async () => {
+  isolatedHome();
+  const controller = new AbortController();
+  // SAFETY: test-built fetch fixture implements the fetch arguments and returns a Response for every path.
+  const mockFetch = (async (input: string | URL | Request, _init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/device/code")) return Response.json({
+      device_code: "pending-device",
+      user_code: "WAIT-CODE",
+      verification_uri_complete: "/console/device?user_code=WAIT-CODE&client_id=opencode-cli",
+      expires_in: 900,
+      interval: 5,
+    });
+    return Response.json({ error: "access_denied", error_description: "cancelled" }, { status: 400 });
+  }) as typeof fetch;
+
+  const startedAt = Date.now();
+  const running = loginOpenCode({
+    fetchImpl: mockFetch,
+    signal: controller.signal,
+    openUrl: () => controller.abort(),
+  });
+  await expect(running).rejects.toMatchObject({ name: "AbortError" });
+  expect(Date.now() - startedAt).toBeLessThan(500);
+  expect(loadOpenCodeCredentials()).toBeNull();
 });
 
 test("OpenCode token refresh rotates both tokens and keeps OAuth JSON off stdout-facing config", async () => {

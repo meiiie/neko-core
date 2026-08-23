@@ -467,6 +467,44 @@ test("approval decision keys never leak into the prompt", async () => {
   }
 }, 30000);
 
+test("fullscreen picker enables hover motion only while the interactive overlay is visible", async () => {
+  const vt = new VirtualTerminal(100, 30);
+  const out = new FakeTtyOut(100, 30, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+    React.createElement(ChatApp as any, {
+      yolo: true,
+      provider: { complete: async () => ({ content: "", tool_calls: [] }) },
+      sessionId: "picker-hover",
+      frameDiffer: differ,
+      preAltDispose,
+    }),
+    // SAFETY: fake stdin/stdout implement the exact TTY methods used by the renderer wrapper.
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  await tick(300);
+  out.all = "";
+  stdin.push("/login"); await tick(30); stdin.push("\r");
+  for (let waited = 0; waited < 2000 && !vt.text().includes("Sign in - choose a provider"); waited += 25) await tick(25);
+  expect(vt.text()).toContain("Sign in - choose a provider");
+  expect(out.all).toContain("\x1b[?1003h");
+
+  const googleRow = vt.lines().findIndex((line) => line.includes("Google")) + 1;
+  expect(googleRow).toBeGreaterThan(0);
+  stdin.push(`\x1b[<35;5;${googleRow}M`); await tick(100);
+  expect(vt.text()).toMatch(/>\s+Google/);
+
+  out.all = "";
+  stdin.push("\x1b"); await tick(100);
+  expect(out.all).toContain("\x1b[?1003l");
+  app.unmount();
+  await tick(50);
+}, 30000);
+
 test("voice panel mouse controls mute and stop the active session", async () => {
   const vt = new VirtualTerminal(100, 30);
   const out = new FakeTtyOut(100, 30, vt);

@@ -10,6 +10,7 @@ import { scrubChildEnv } from "../shared/child-env.ts";
 import { homeDir } from "../shared/home.ts";
 import { isJsonNumber, isJsonObject, isObjectValue, isText, type JsonValue } from "../shared/wire.ts";
 import { VERSION } from "../shared/version.ts";
+import { throwIfAborted, userAbortError } from "../shared/abort.ts";
 
 export const GEMINI_CLI_MIN_VERSION = "0.38.0";
 const RPC_TIMEOUT_MS = 20_000;
@@ -631,13 +632,17 @@ function requireGeminiExecutable(): GeminiExecutable {
 }
 
 /** Enterprise/Google Cloud OAuth owned by Gemini CLI. Consumer OAuth ended on 2026-06-18. */
-export async function loginGemini(notify: (message: string) => void = () => {}): Promise<void> {
+export async function loginGemini(notify: (message: string) => void = () => {}, signal?: AbortSignal): Promise<void> {
   const client = startGeminiAcp(requireGeminiExecutable());
+  const abort = () => client.close(userAbortError());
   try {
+    signal?.addEventListener("abort", abort, { once: true });
+    throwIfAborted(signal);
     await client.initialize();
     notify("Opening Google sign-in in your browser...");
     await client.authenticate();
   } finally {
+    signal?.removeEventListener("abort", abort);
     client.close();
   }
 }

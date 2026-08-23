@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path";
 
 import { atomicWriteFileSync } from "../shared/atomic.ts";
+import { abortableDelay, requestSignal, throwIfAborted } from "../shared/abort.ts";
 import { homeDir } from "../shared/home.ts";
 import { VERSION } from "../shared/version.ts";
 import { isJsonNumber, isJsonObject, isText, type JsonObject, type JsonValue } from "../shared/wire.ts";
@@ -42,6 +43,7 @@ export interface GrokLoginOptions {
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   openUrl?: (url: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface GrokCatalogModel {
@@ -96,12 +98,12 @@ function oauthHeaders() {
   };
 }
 
-async function postForm(fetchImpl: typeof fetch, url: string, fields: Record<string, string>): Promise<{ response: Response; data: JsonObject }> {
+async function postForm(fetchImpl: typeof fetch, url: string, fields: Record<string, string>, signal?: AbortSignal): Promise<{ response: Response; data: JsonObject }> {
   const response = await fetchImpl(url, {
     method: "POST",
     headers: oauthHeaders(),
     body: new URLSearchParams(fields),
-    signal: AbortSignal.timeout(30_000),
+    signal: requestSignal(signal),
   });
   const parsed = await boundedJson(response, "Grok OAuth response");
   if (!isJsonObject(parsed)) throw new Error("Grok OAuth response was not a JSON object.");
@@ -268,12 +270,12 @@ function trustedVerificationUrl(value: string): URL {
 /** RFC 8628 device login using xAI's published public-client contract. */
 export async function loginGrok(options: GrokLoginOptions = {}): Promise<GrokCredentials> {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  throwIfAborted(options.signal);
   const started = await postForm(fetchImpl, `${GROK_OAUTH_ISSUER}/oauth2/device/code`, {
     client_id: GROK_CLIENT_ID,
     scope: GROK_OAUTH_SCOPES.join(" "),
     referrer: "neko-core",
-  });
+  }, options.signal);
   if (!started.response.ok) throw oauthError("Grok device authorization failed", started.response, started.data);
   const deviceCode = requiredText(started.data.device_code, "device code");
   const userCode = requiredText(started.data.user_code, "user code");
@@ -294,12 +296,18 @@ export async function loginGrok(options: GrokLoginOptions = {}): Promise<GrokCre
   const deadline = Date.now() + expiresIn * 1000;
   while (Date.now() < deadline) {
     // RFC 8628 requires sleeping before the first poll.
-    await sleep(intervalSeconds * 1000);
+    if (options.sleep) {
+      throwIfAborted(options.signal);
+      await options.sleep(intervalSeconds * 1000);
+      throwIfAborted(options.signal);
+    } else {
+      await abortableDelay(intervalSeconds * 1000, options.signal);
+    }
     const polled = await postForm(fetchImpl, `${GROK_OAUTH_ISSUER}/oauth2/token`, {
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       device_code: deviceCode,
       client_id: GROK_CLIENT_ID,
-    });
+    }, options.signal);
     if (polled.response.ok && isText(polled.data.access_token)) {
       const credentials = credentialsFromToken(polled.data);
       saveGrokCredentials(credentials);

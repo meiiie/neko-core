@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path";
 
 import { atomicWriteFileSync } from "../shared/atomic.ts";
+import { abortableDelay, requestSignal, throwIfAborted } from "../shared/abort.ts";
 import { homeDir } from "../shared/home.ts";
 import { isJsonNumber, isJsonObject, isText, type JsonObject, type JsonValue } from "../shared/wire.ts";
 import { openBrowser } from "./chatgpt-auth.ts";
@@ -29,6 +30,7 @@ export interface OpenCodeLoginOptions {
   sleep?: (ms: number) => Promise<void>;
   openUrl?: (url: string) => void;
   server?: string;
+  signal?: AbortSignal;
 }
 
 export interface OpenCodeAccountConfig {
@@ -67,12 +69,12 @@ async function boundedJson(response: Response, label: string): Promise<JsonValue
   }
 }
 
-async function postJson(fetchImpl: typeof fetch, url: string, body: Record<string, string>): Promise<{ response: Response; data: JsonObject }> {
+async function postJson(fetchImpl: typeof fetch, url: string, body: Record<string, string>, signal?: AbortSignal): Promise<{ response: Response; data: JsonObject }> {
   const response = await fetchImpl(url, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30_000),
+    signal: requestSignal(signal),
   });
   const data = await boundedJson(response, "OpenCode OAuth response");
   if (!isJsonObject(data)) throw new Error("OpenCode OAuth response was not a JSON object.");
@@ -166,12 +168,12 @@ export async function validOpenCodeAccessToken(options: { fetchImpl?: typeof fet
   finally { refreshFlight = null; }
 }
 
-async function getJson(fetchImpl: typeof fetch, url: string, token: string, orgId?: string): Promise<JsonValue> {
+async function getJson(fetchImpl: typeof fetch, url: string, token: string, orgId?: string, signal?: AbortSignal): Promise<JsonValue> {
   const headers = new Headers({ Accept: "application/json", Authorization: `Bearer ${token}` });
   if (orgId) headers.set("x-org-id", orgId);
   const response = await fetchImpl(url, {
     headers,
-    signal: AbortSignal.timeout(30_000),
+    signal: requestSignal(signal),
   });
   const data = await boundedJson(response, "OpenCode Console response");
   if (!response.ok) throw oauthError("OpenCode Console request failed", response, isJsonObject(data) ? data : {});
@@ -193,9 +195,9 @@ export async function loadOpenCodeAccountConfig(fetchImpl: typeof fetch = fetch)
 /** Official RFC 8628-style device login used by OpenCode's public `opencode-cli` client. */
 export async function loginOpenCode(options: OpenCodeLoginOptions = {}): Promise<OpenCodeCredentials> {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const server = fixedServer(options.server);
-  const started = await postJson(fetchImpl, `${server}/auth/device/code`, { client_id: OPENCODE_CLIENT_ID });
+  throwIfAborted(options.signal);
+  const started = await postJson(fetchImpl, `${server}/auth/device/code`, { client_id: OPENCODE_CLIENT_ID }, options.signal);
   if (!started.response.ok) throw oauthError("OpenCode device authorization failed", started.response, started.data);
   const deviceCode = requiredText(started.data.device_code, "device code");
   const userCode = requiredText(started.data.user_code, "user code");
@@ -204,7 +206,9 @@ export async function loginOpenCode(options: OpenCodeLoginOptions = {}): Promise
   let intervalSeconds = isJsonNumber(interval) ? Math.max(1, interval) : 5;
   if (!isJsonNumber(expiresIn) || expiresIn <= 0) throw new Error("OpenCode device authorization returned an invalid expiry.");
   const verificationPath = requiredText(started.data.verification_uri_complete, "verification URL");
-  const verification = new URL(verificationPath.startsWith("/") ? `${server}${verificationPath}` : verificationPath, `${server}/`);
+  // The official service currently returns `/console/device?...`. Resolve it as a URL, rather than
+  // concatenating it with a server that already ends in `/console` (which produced `/console/console`).
+  const verification = new URL(verificationPath, `${server}/`);
   const expected = new URL(server);
   if (verification.protocol !== "https:" || verification.origin !== expected.origin) {
     throw new Error("OpenCode device authorization returned an untrusted verification URL.");
@@ -215,20 +219,26 @@ export async function loginOpenCode(options: OpenCodeLoginOptions = {}): Promise
 
   const deadline = Date.now() + expiresIn * 1000;
   while (Date.now() < deadline) {
-    await sleep(intervalSeconds * 1000);
+    if (options.sleep) {
+      throwIfAborted(options.signal);
+      await options.sleep(intervalSeconds * 1000);
+      throwIfAborted(options.signal);
+    } else {
+      await abortableDelay(intervalSeconds * 1000, options.signal);
+    }
     const polled = await postJson(fetchImpl, `${server}/auth/device/token`, {
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       device_code: deviceCode,
       client_id: OPENCODE_CLIENT_ID,
-    });
+    }, options.signal);
     if (polled.response.ok && isText(polled.data.access_token)) {
       const accessToken = requiredText(polled.data.access_token, "access token");
       const refreshToken = requiredText(polled.data.refresh_token, "refresh token");
       const tokenExpiresIn = polled.data.expires_in;
       if (!isJsonNumber(tokenExpiresIn) || tokenExpiresIn <= 0) throw new Error("OpenCode OAuth returned an invalid expiry.");
       const [user, orgBody] = await Promise.all([
-        getJson(fetchImpl, `${server}/api/user`, accessToken),
-        getJson(fetchImpl, `${server}/api/orgs`, accessToken),
+        getJson(fetchImpl, `${server}/api/user`, accessToken, undefined, options.signal),
+        getJson(fetchImpl, `${server}/api/orgs`, accessToken, undefined, options.signal),
       ]);
       if (!isJsonObject(user)) throw new Error("OpenCode Console returned an invalid user record.");
       const accountId = requiredText(user.id, "account id");
