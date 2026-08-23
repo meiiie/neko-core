@@ -6,6 +6,16 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.23] - 2026-08-24
+
+### Fixed
+
+- **Fullscreen wheel and hover now activate reliably on Windows Terminal.** Neko reasserts a complete
+  SGR mouse state after Ink mounts and on every base/hover transition, so an early terminal-mode write
+  cannot leave physical mouse input silent and closing a picker cannot disable later scrolling.
+- **Windows UIA tests no longer depend on encoded PowerShell being allowed.** Disposable WPF fixtures
+  use a direct, test-owned command argument, avoiding false `EPERM` failures under Defender/ASR policy.
+
 ## [0.24.22] - 2026-08-24
 
 ### Fixed

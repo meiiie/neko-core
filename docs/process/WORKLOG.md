@@ -3,13 +3,37 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-24 - Post-mount mouse-mode recovery (v0.24.23)
+
+Field testing of v0.24.22 exposed the layer its component regression could not exercise: injecting an
+SGR report directly proved the picker parser, but did not prove that Windows Terminal had been asked to
+emit SGR reports. Base modes 1000/1002/1006 were written before Ink mounted. Windows can establish VT
+processing after that write, while the later overlay effect emitted only 1003. The resulting legacy
+mouse encoding matched none of Neko's deliberately SGR-only parsers, making physical wheel and hover
+look completely dead even though synthetic input passed.
+
+Mouse transitions are now complete, ordered terminal states. The post-mount base effect ends on 1002
+and reasserts 1006; an interactive surface ends on 1003 and reasserts 1006; closing it restores the full
+base state instead of merely clearing 1003. This also covers terminals where 1000/1002/1003 are mutually
+exclusive. A fullscreen regression verifies mount/open/close mode bytes, and a compiled-binary ConPTY
+gate proves `/login` moves OpenAI to Anthropic by wheel and then Google by hover. Transcript wheel
+latency measured 12 ms to first response and 109 ms to settle in the verification run.
+
+The full Windows suite additionally exposed a test-infrastructure false failure: Defender/ASR rejected
+test-owned WPF fixtures launched through `-EncodedCommand` with `EPERM`. Passing the same controlled
+script as a direct argv `-Command` removed that policy-sensitive encoding without changing production;
+the isolated UIA file then passed 9/9. The ConPTY ghost probe had a second false signal: it wrote an
+entire phrase in one PTY chunk, intentionally activating Neko's paste-collapsing path, then required the
+literal draft to be visible. It now emits physical key cadence before asserting input echo.
+
 ## 2026-08-24 - Adaptive mouse-motion audit and picker wheel repair (v0.24.22)
 
 The pointer stack remains deliberately layered instead of choosing between all-motion and no motion:
 fullscreen keeps DEC 1000 for buttons/wheel, DEC 1002 for left-button drag selection, and SGR 1006 for
 coordinates; DEC 1003 is added only while a painted picker, approval, history navigation, or voice
-control can provide real hover feedback. Closing that surface removes only 1003, so wheel, click,
-drag-select, edge auto-scroll, and release-copy remain live without idle pointer traffic in the composer.
+control can provide real hover feedback. Closing that surface restores the complete 1002 + 1006 base
+state, so wheel, click, drag-select, edge auto-scroll, and release-copy remain live without idle pointer
+traffic in the composer.
 
 The audit found one ordering defect inside `SelectList`: `parseLastPointer()` correctly classifies wheel
 reports as pointer events, but the generic branch then consumed them before `parseWheelAll()` could move

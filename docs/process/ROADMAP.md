@@ -4,11 +4,16 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-24) — v0.24.22
+## Current status (2026-08-24) — v0.24.23
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
+
+- **Physical mouse-mode recovery (v0.24.23, 2026-08-24):** fullscreen reasserts complete SGR mouse
+  states after Ink mounts and on every base/hover transition. Windows Terminal therefore emits the
+  wheel, drag, click, and hover reports Neko parses even when its earliest VT write was dropped, and
+  closing an interactive surface restores scrolling instead of leaving tracking disabled.
 
 - **Adaptive mouse interactions (v0.24.22, 2026-08-24):** terminal hover remains contextual so idle
   pointer motion cannot flood the composer, while click, drag selection, edge auto-scroll, and wheel
@@ -69,8 +74,10 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.22 (2026-08-24)** - contextual hover remains responsive
-  without idle pointer floods, and picker wheels correctly accumulate rapid reports. Previous
+- **Branch:** `main`. **Current release: v0.24.23 (2026-08-24)** - physical wheel and hover survive
+  Windows startup and picker lifecycle transitions through complete SGR mode reassertion. Previous
+  (v0.24.22, 2026-08-24) - contextual hover remains responsive without idle pointer floods, and picker
+  wheels correctly accumulate rapid reports. Previous
   (v0.24.21, 2026-08-23) - provider login is cancellable, contextual hover is restored, and
   manual/automatic updates coordinate through a progress-heartbeating lock. Previous
   (v0.24.20, 2026-08-23) - prompt selection across soft-wrapped rows preserves both the
