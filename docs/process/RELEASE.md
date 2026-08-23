@@ -9,7 +9,7 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
 
 | Gate | Command | What it catches |
 |---|---|---|
-| Types (both compilers) | `bun run typecheck` + `bun run typecheck:stable` | tsgo/tsc divergence |
+| Types | `bun run typecheck` | native TypeScript 7 diagnostics |
 | Full suite, ship runtime | `bun test` under the pinned runtime | logic + sims (incl. the differ-less fallback sim) |
 | Policy audit | `node bin/neko-source.cjs policy` | safe source bootstrap + boundary drift |
 | Build + render smoke | `bun run build` (compiles, then `__uiprobe`) | artifact-only breakage (the jsxDEV class) |

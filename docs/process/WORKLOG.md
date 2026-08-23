@@ -3,6 +3,17 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-23 - Stable native TypeScript 7.0.2
+
+The primary typecheck gate moved from the native `7.0.1-rc` to production `7.0.2`. The stable package
+checked the complete repository cleanly before adoption and measured 1.681 seconds median on this
+Windows checkout versus 12.169 seconds for the temporary TypeScript 5.9 JavaScript cross-check, a
+7.2x speedup. Neko does not import the compiler API; TypeScript remains a development-only dependency
+and does not enter the standalone binary.
+
+The 5.9 alias, duplicate CI step, and old `verify` path were removed as planned at TypeScript 7 GA.
+`bun run typecheck` is now the single production compiler verdict on every supported CI OS.
+
 ## 2026-08-23 - Cooperative self-update lock
 
 The updater's idle-progress watchdog allowed a healthy release download to run for as long as bytes

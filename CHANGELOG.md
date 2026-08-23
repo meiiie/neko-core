@@ -8,6 +8,8 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **The development and release typecheck gate now uses stable native TypeScript 7.0.2.** The temporary
+  5.9 compatibility cross-check has been retired now that the native compiler is production-ready.
 - **Mouse hover is responsive again without slowing the composer.** Neko enables terminal any-motion
   reports only while a picker or another hoverable control is visible; ordinary typing and long mouse
   selections retain the lower-volume drag-only mode introduced in v0.24.19.
