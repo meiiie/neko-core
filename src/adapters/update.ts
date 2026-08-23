@@ -3,7 +3,7 @@
  * place, plus a daily-cached startup check that notifies when a newer release exists (Claude-Code style).
  * Releases are published by the `v*` tag CI (.github/workflows/release.yml); assets are per-platform.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -181,6 +181,7 @@ export function cleanupStaleUpdate(exe = process.execPath, now = Date.now()): vo
  * immediately; age is only the fallback for a live/reused/uninspectable pid. The owner token prevents
  * an old updater from deleting a successor's lock during its `finally`. */
 const LOCK_STALE_MS = 10 * 60_000;
+const LOCK_HEARTBEAT_MS = 30_000;
 const lockPath = () => join(homeDir(), ".neko-core", ".update.lock");
 let ownedUpdateLock: { path: string; token: string } | null = null;
 
@@ -214,7 +215,8 @@ export function acquireUpdateLock(now = Date.now(), isAlive: (pid: number) => bo
 
   try {
     const held = JSON.parse(readFileSync(path, "utf-8"));
-    const fresh = isJsonNumber(held.at) && now - held.at < LOCK_STALE_MS;
+    const heartbeatAt = Math.max(isJsonNumber(held.at) ? held.at : 0, statSync(path).mtimeMs);
+    const fresh = now - heartbeatAt < LOCK_STALE_MS;
     const live = isAlive(held.pid);
     if (fresh && live) return false;
   } catch {
@@ -223,6 +225,35 @@ export function acquireUpdateLock(now = Date.now(), isAlive: (pid: number) => bo
   try { rmSync(path, { force: true }); } catch { return false; }
   // Re-create exclusively: if another updater won the takeover race, it remains the sole owner.
   return createOwnedUpdateLock(path, now);
+}
+
+/** Keep a long, progressing download from looking abandoned to another updater. The file timestamp is
+ * refreshed without rewriting/truncating the token-bearing lock file. */
+export function refreshUpdateLock(now = Date.now()): boolean {
+  const owned = ownedUpdateLock;
+  if (!owned) return false;
+  try {
+    const current = JSON.parse(readFileSync(owned.path, "utf-8"));
+    if (current.token !== owned.token) return false;
+    const stamp = new Date(now);
+    utimesSync(owned.path, stamp, stamp);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Wait for a peer updater while it is making progress. Manual `neko update` uses this path so a
+ * startup auto-update does not turn a healthy install into an immediate command failure. */
+export async function acquireUpdateLockWithin(waitMs: number, pollMs = 250): Promise<boolean> {
+  const deadline = Date.now() + Math.max(0, waitMs);
+  const interval = Math.max(1, pollMs);
+  for (;;) {
+    if (acquireUpdateLock()) return true;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(interval, remaining)));
+  }
 }
 
 export function releaseUpdateLock(): void {
@@ -294,7 +325,13 @@ export function selfUpdateSucceeded(result: SelfUpdateResult): boolean {
   return result !== "failed";
 }
 
-export async function selfUpdate(log: (s: string) => void, target?: string, opts: { progressTty?: boolean } = {}): Promise<SelfUpdateResult> {
+function probeBinaryVersion(exe: string): string | null {
+  const probe = spawnSync(exe, ["version"], { encoding: "utf8", timeout: 15000, windowsHide: true });
+  if (probe.status !== 0) return null;
+  return /^neko-core\s+([0-9]+\.[0-9]+\.[0-9]+)/m.exec(probe.stdout ?? "")?.[1] ?? null;
+}
+
+export async function selfUpdate(log: (s: string) => void, target?: string, opts: { progressTty?: boolean; waitForLockMs?: number } = {}): Promise<SelfUpdateResult> {
   const exe = process.execPath;
   if (basename(exe).replace(/\.exe$/i, "").toLowerCase() === "bun") {
     log("Running from source (bun). Update with:  git pull && bun run build");
@@ -320,13 +357,28 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
     tag = latest;
     log(`Updating v${VERSION} -> ${tag} ...`);
   }
-  // One installer at a time, machine-wide (see acquireUpdateLock). A second caller says so and
-  // leaves, instead of silently double-downloading and racing the swap.
-  if (!acquireUpdateLock()) {
-    log("Another neko is already installing an update. Let it finish, then check with `neko --version`.");
+  // One installer at a time, machine-wide (see acquireUpdateLock). Background callers leave rather
+  // than racing the swap; the explicit CLI waits briefly for that background work to settle.
+  const waitForLockMs = opts.waitForLockMs ?? 0;
+  let waitedForPeer = false;
+  let acquired = acquireUpdateLock();
+  if (!acquired && waitForLockMs > 0) {
+    waitedForPeer = true;
+    log("Another neko is already installing an update; waiting for it to finish ...");
+    acquired = await acquireUpdateLockWithin(waitForLockMs);
+  }
+  if (!acquired) {
+    log("Another neko is still installing an update. Try again later, then check with `neko --version`.");
     return "failed";
   }
   try {
+    if (waitedForPeer && !target) {
+      const installed = probeBinaryVersion(exe);
+      if (installed && !isNewer(tag, installed)) {
+        log(`Another neko finished installing v${installed}. Restart neko to use it.`);
+        return "up-to-date";
+      }
+    }
     const url = `https://github.com/${REPO}/releases/download/${tag}/${assetName()}`;
     let expectedSha: string | null = null;
     try {
@@ -345,9 +397,15 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
     try {
       const mb = (n: number) => (n / 1048576).toFixed(1);
       let lastShown = 0;
+      let lastHeartbeat = Date.now();
       let got = 0;
       bytes = await downloadReleaseBytes(url, (received, total) => {
         got = received;
+        const now = Date.now();
+        if (now - lastHeartbeat >= LOCK_HEARTBEAT_MS) {
+          if (!refreshUpdateLock(now)) throw new Error("update lock ownership was lost");
+          lastHeartbeat = now;
+        }
         if (!showProgress || Date.now() - lastShown <= 250) return;
         lastShown = Date.now();
         const line = total > 0
@@ -360,6 +418,10 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
       if (showProgress) process.stdout.write("\n");
       // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
       log(`Download failed: ${(e as Error).message}`);
+      return "failed";
+    }
+    if (!refreshUpdateLock()) {
+      log("Install stopped because update lock ownership was lost.");
       return "failed";
     }
     if (expectedSha) {
@@ -376,9 +438,8 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
     const tmp = process.platform === "win32" ? `${exe}.new-${process.pid}.exe` : `${exe}.new-${process.pid}`;
     try {
       writeFileSync(tmp, bytes, { mode: 0o755 });
-      const probe = spawnSync(tmp, ["version"], { encoding: "utf8", timeout: 15000, windowsHide: true });
-      const probed = /^neko-core\s+([0-9]+\.[0-9]+\.[0-9]+)/m.exec(probe.stdout ?? "")?.[1];
-      if (probe.status !== 0 || !probed || `v${probed}` !== tag) {
+      const probed = probeBinaryVersion(tmp);
+      if (!probed || `v${probed}` !== tag) {
         rmSync(tmp, { force: true });
         log(`Downloaded binary failed its version probe (expected ${tag}).`);
         return "failed";

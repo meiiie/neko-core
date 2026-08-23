@@ -14,6 +14,10 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Fixed
 
+- **Manual and automatic updates no longer fight over a healthy slow download.** The machine-wide
+  update lock now receives progress heartbeats, and `neko update` waits for an active startup updater
+  instead of failing immediately. If that updater finishes first, the CLI reuses its installed result
+  rather than downloading the same release again.
 - **Browser sign-in can always be cancelled from the TUI.** Esc interrupts a pending login, the first
   Ctrl+C cancels it, and a second Ctrl+C remains an emergency exit. The same abort signal now reaches
   browser callbacks, device polling, request timeouts, and provider-owned login processes.

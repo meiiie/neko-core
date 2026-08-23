@@ -3,6 +3,21 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-23 - Cooperative self-update lock
+
+The updater's idle-progress watchdog allowed a healthy release download to run for as long as bytes
+kept arriving, but its machine-wide lock only carried the acquisition time. A download lasting more
+than ten minutes could therefore still be mistaken for an abandoned owner and raced by a second
+updater. The owner now refreshes the lock file timestamp every 30 seconds of download progress without
+rewriting its token-bearing contents; dead owners remain immediately reclaimable and the ten-minute
+fallback remains bounded.
+
+An explicit `neko update` also no longer fails immediately when startup auto-update holds the lock. It
+waits for at most 120 seconds, remains interruptible by the terminal, then either acquires the lock or
+reports that the live updater is still active. When the peer already installed the requested latest
+version, the CLI probes and reuses that result rather than downloading the same binary again. Focused
+coverage passed 15/15 with 59 assertions; TypeScript 7 RC, stable 5.9, and anti-slop lint were clean.
+
 ## 2026-08-23 - Cancellable provider login and contextual mouse hover
 
 The OpenCode Console began returning `/console/device?...` as its complete verification path. Neko

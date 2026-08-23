@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { activateStagedBinary, assetName, cleanupStaleUpdate, isNewer, latestVersion, parseSha256Sidecar, selfUpdateSucceeded } from "../src/adapters/update.ts";
+import { acquireUpdateLockWithin, activateStagedBinary, assetName, cleanupStaleUpdate, isNewer, latestVersion, parseSha256Sidecar, refreshUpdateLock, selfUpdateSucceeded } from "../src/adapters/update.ts";
 
 test("cleanupStaleUpdate removes the leftover <exe>.old; no-op when absent", () => {
   const dir = mkdtempSync(join(tmpdir(), "neko-upd-"));
@@ -218,6 +218,8 @@ test("the machine-wide update lock reclaims dead owners without deleting success
     const t0 = Date.now();
     expect(acquireUpdateLock(t0)).toBe(true);      // first caller holds it
     expect(acquireUpdateLock(t0 + 60_000)).toBe(false); // a live lock is respected
+    expect(refreshUpdateLock(t0 + 9 * 60_000)).toBe(true);
+    expect(acquireUpdateLock(t0 + 11 * 60_000, () => true)).toBe(false); // heartbeat keeps a slow live download owned
     releaseUpdateLock();
     expect(acquireUpdateLock(t0 + 61_000)).toBe(true);  // released -> free again
     releaseUpdateLock();
@@ -235,6 +237,23 @@ test("the machine-wide update lock reclaims dead owners without deleting success
     // Age remains a bounded fallback when a pid is live, reused, or cannot be inspected.
     writeFileSync(lock, JSON.stringify({ pid: 42, at: t0 }));
     expect(acquireUpdateLock(t0 + 11 * 60_000, () => true)).toBe(true);
+    releaseUpdateLock();
+  } finally {
+    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a manual updater waits for an active auto-updater instead of failing immediately", async () => {
+  const saved = { up: process.env.USERPROFILE, home: process.env.HOME };
+  const home = mkdtempSync(join(tmpdir(), "neko-update-wait-"));
+  process.env.USERPROFILE = home; process.env.HOME = home;
+  try {
+    const { acquireUpdateLock, releaseUpdateLock } = require("../src/adapters/update.ts");
+    expect(acquireUpdateLock()).toBe(true);
+    expect(await acquireUpdateLockWithin(20, 5)).toBe(false);
+    setTimeout(releaseUpdateLock, 25);
+    expect(await acquireUpdateLockWithin(250, 5)).toBe(true);
     releaseUpdateLock();
   } finally {
     process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
