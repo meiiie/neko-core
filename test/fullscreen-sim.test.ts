@@ -487,11 +487,14 @@ test("fullscreen picker enables hover motion only while the interactive overlay 
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   await tick(300);
+  // Production enters the alt screen before Ink mounts. Windows can drop that early DECSET while VT
+  // processing comes online, so the first post-mount effect must independently reassert base tracking.
+  expect(out.all).toContain("\x1b[?1003l\x1b[?1002h\x1b[?1006h");
   out.all = "";
   stdin.push("/login"); await tick(30); stdin.push("\r");
   for (let waited = 0; waited < 2000 && !vt.text().includes("Sign in - choose a provider"); waited += 25) await tick(25);
   expect(vt.text()).toContain("Sign in - choose a provider");
-  expect(out.all).toContain("\x1b[?1003h");
+  expect(out.all).toContain("\x1b[?1002l\x1b[?1003h\x1b[?1006h");
 
   const googleRow = vt.lines().findIndex((line) => line.includes("Google")) + 1;
   expect(googleRow).toBeGreaterThan(0);
@@ -500,7 +503,7 @@ test("fullscreen picker enables hover motion only while the interactive overlay 
 
   out.all = "";
   stdin.push("\x1b"); await tick(100);
-  expect(out.all).toContain("\x1b[?1003l");
+  expect(out.all).toContain("\x1b[?1003l\x1b[?1002h\x1b[?1006h");
   app.unmount();
   await tick(50);
 }, 30000);

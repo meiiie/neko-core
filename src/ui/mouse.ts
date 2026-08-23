@@ -11,13 +11,21 @@
  */
 import type { Writable } from "node:stream";
 
-// 1000 = button events, 1002 = drag motion only, 1006 = SGR coordinates. Avoid 1003 (every bare
-// pointer move): it can deliver hundreds of useless chunks per second and make prompt editing lag.
-export const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
-// Any-motion mode is deliberately separate: selectors and buttons need bare hover, the composer does
-// not. ChatApp enables it only while a hoverable surface is visible, avoiding the old idle motion flood.
-export const ENABLE_MOUSE_HOVER = "\x1b[?1003h";
-export const DISABLE_MOUSE_HOVER = "\x1b[?1003l";
+// 1000 = button events, 1002 = drag motion, 1003 = all motion, 1006 = SGR coordinates. The tracking
+// modes are mutually exclusive in terminal implementations, so each transition writes a COMPLETE,
+// ordered state rather than assuming an earlier DECSET survived startup. This matters on Windows:
+// pre-Ink writes can land before VT processing is ready, leaving a later bare `1003h` in legacy X10
+// encoding while Neko correctly waits for SGR reports. Reasserting 1006 after the selected tracking
+// mode makes mount, picker-open, and picker-close independently self-healing.
+//
+// Base mode deliberately ends on 1002: it includes press/release, wheel, and button-drag motion while
+// avoiding the idle no-button motion flood that made prompt editing lag.
+export const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1003l\x1b[?1002h\x1b[?1006h";
+// Any-motion mode ends on 1003. Selectors and buttons need bare hover; the composer does not.
+export const ENABLE_MOUSE_HOVER = "\x1b[?1000h\x1b[?1002l\x1b[?1003h\x1b[?1006h";
+// Leaving hover is a full transition back to base, not merely `1003l`: clearing the active exclusive
+// mode can otherwise leave NO tracking mode live, so wheel/drag silently die after the first picker.
+export const DISABLE_MOUSE_HOVER = ENABLE_MOUSE;
 // DISABLE resets EVERY standard mouse mode, not just the three we enable: a terminal (or a stale
 // session, or WT itself) can be left in a different encoding (1015 urxvt / 1016 SGR-pixels produce the
 // large-decimal "[555;62;22M" reports seen after exit), and turning off a mode that is already off is a

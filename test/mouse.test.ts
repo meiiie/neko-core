@@ -129,8 +129,11 @@ test("base mouse tracking keeps drag motion cheap and hover tracking is opt-in",
   for (const mode of [1000, 1002, 1003, 1005, 1006, 1015, 1016, 9001]) {
     expect(DISABLE_MOUSE).toContain(`\x1b[?${mode}l`); // every mode gets an explicit reset
   }
-  // We only ENABLE the three we actually use.
-  expect(ENABLE_MOUSE).toBe("\x1b[?1000h\x1b[?1002h\x1b[?1006h");
-  expect(ENABLE_MOUSE_HOVER).toBe("\x1b[?1003h");
-  expect(DISABLE_MOUSE_HOVER).toBe("\x1b[?1003l");
+  // Tracking modes are mutually exclusive on real terminals. Every state transition must be
+  // complete: SGR 1006 is reasserted after the selected base/hover mode, and leaving hover restores
+  // 1002 rather than merely clearing 1003 (which would leave mouse tracking off).
+  expect(ENABLE_MOUSE).toBe("\x1b[?1000h\x1b[?1003l\x1b[?1002h\x1b[?1006h");
+  expect(ENABLE_MOUSE_HOVER).toContain("\x1b[?1002l");
+  expect(ENABLE_MOUSE_HOVER.endsWith("\x1b[?1003h\x1b[?1006h")).toBe(true);
+  expect(DISABLE_MOUSE_HOVER).toBe(ENABLE_MOUSE);
 });

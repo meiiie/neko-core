@@ -2962,8 +2962,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   );
   useEffect(() => {
     if (!fullscreen || !isMouseEnabled() || !stdout) return;
+    // This post-mount write is intentional even when hoverableSurface is false. The pre-render
+    // alt-screen guard enables base tracking for terminals that are already VT-ready; Windows can
+    // drop that early DECSET while its console mode is still being established. setMouseHover(false)
+    // reasserts the COMPLETE base state (1002 + SGR 1006) after Ink is alive, so wheel/drag work on the
+    // first frame. Both branches are complete states, making overlay open/close self-healing too.
     setMouseHover(stdout, hoverableSurface);
-    return () => { if (hoverableSurface) setMouseHover(stdout, false); };
+    // When dependencies change, the live alt-screen guard proves it is safe to restore base mode. On
+    // unmount, cleanup ordering may already have disabled mouse + left the alt screen; never re-enable
+    // tracking behind that teardown.
+    return () => { if (hoverableSurface && altDisposeRef.current) setMouseHover(stdout, false); };
   }, [fullscreen, hoverableSurface, stdout]);
   // Compute the matching row indices for a query over the flattened rows (case-insensitive).
   const findMatches = (q: string): number[] => {

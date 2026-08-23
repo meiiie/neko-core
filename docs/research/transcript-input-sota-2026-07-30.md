@@ -6,16 +6,29 @@ Scope: Neko Core `/transcript` under Windows Terminal/ConPTY. The failure under 
 mouse movement or wheel report becoming visible search text. This ledger distinguishes terminal input
 classification from transcript storage, rendering, and search.
 
+## Checkpoint 2026-08-24 - terminal-mode lifecycle correction
+
+The v0.24.22 picker regression injected SGR input directly and therefore proved dispatch, not terminal
+negotiation. Field testing showed physical mouse input could remain silent: base 1000/1002/1006 was
+written before Ink mounted, and a later bare 1003 transition did not repair a dropped 1006 mode. Some
+terminal implementations also treat 1000/1002/1003 as mutually exclusive, so clearing 1003 alone can
+leave no active tracking mode.
+
+Each state is now complete and ordered. Post-mount base mode selects 1002 then SGR 1006; hover mode
+selects 1003 then SGR 1006; leaving hover re-emits the full base state. The compiled ConPTY probe covers
+wheel and hover dispatch, while the fullscreen simulation asserts the DECSET lifecycle bytes that
+ConPTY consumes internally rather than echoing to its output stream.
+
 ## Checkpoint 2026-08-24 - adaptive hover without an idle motion flood
 
 Removing DEC 1003 globally fixed idle composer traffic but also removed the immediate hover feedback
 that makes pickers and clickable controls feel direct. Restoring it globally would repeat the original
-latency failure. Neko therefore treats mouse reporting as a capability stack: 1000/1002/1006 stay active
-in fullscreen for click, wheel, drag selection, and coordinates; 1003 is enabled only for the lifetime
-of a painted hoverable surface and is disabled as soon as that surface closes. Pointer bursts keep only
-their latest hover coordinate, React state bails on an unchanged semantic target, and selection updates
-remain display-frame-coalesced. This preserves direct manipulation without making ordinary pointer
-movement part of the composer hot path.
+latency failure. Neko therefore treats mouse reporting as explicit states: base 1002 + 1006 handles
+click, wheel, drag selection, and coordinates; 1003 + 1006 is active only for the lifetime of a painted
+hoverable surface; closing it restores the complete base state. Pointer bursts keep only their latest
+hover coordinate, React state bails on an unchanged semantic target, and selection updates remain
+display-frame-coalesced. This preserves direct manipulation without making ordinary pointer movement
+part of the composer hot path.
 
 The same audit corrected picker dispatch precedence: a wheel report is also a pointer report, so net
 wheel gestures must be handled before the generic pointer branch. Functional index updates preserve
