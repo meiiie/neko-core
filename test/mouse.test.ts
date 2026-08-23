@@ -130,5 +130,5 @@ test("DISABLE_MOUSE resets EVERY standard mouse mode (not just the 3 we enable) 
     expect(DISABLE_MOUSE).toContain(`\x1b[?${mode}l`); // every mode gets an explicit reset
   }
   // We only ENABLE the three we actually use.
-  expect(ENABLE_MOUSE).toBe("\x1b[?1000h\x1b[?1003h\x1b[?1006h");
+  expect(ENABLE_MOUSE).toBe("\x1b[?1000h\x1b[?1002h\x1b[?1006h");
 });

@@ -6,6 +6,37 @@ Scope: Neko Core `/transcript` under Windows Terminal/ConPTY. The failure under 
 mouse movement or wheel report becoming visible search text. This ledger distinguishes terminal input
 classification from transcript storage, rendering, and search.
 
+## Checkpoint 2026-08-23 - prompt selection, edge scrolling, and image paste
+
+Field testing exposed three separate latency mechanisms, not one renderer defect:
+
+1. Neko enabled DEC 1003, so Windows Terminal reported every bare pointer movement even though only
+   clicks, wheels, and left-button drags affect state. XTerm's contract already provides 1002 for button
+   motion without the 1003 all-motion flood. Neko now enables 1000/1002/1006.
+   <https://invisible-island.net/xterm/ctlseqs/ctlseqs.html>
+2. Prompt drag samples each called React state directly. Mouse-capable Ink runtimes independently use
+   frame-rate sampling for this reason; Neko now keeps the latest range and commits at most once per
+   16 ms frame. Release remains immediate, so copied text is exact.
+   <https://www.npmjs.com/package/ink-native>
+3. Transcript edge selection was event-driven and read React's last committed scroll distance. A held
+   pointer emits no new motion, while FrameDiffer intentionally scrolls without React renders. Neko now
+   runs a 40 ms edge clock with gentle acceleration and reads the hook's live distance. This matches the
+   state/viewport separation used by mature terminal text widgets rather than coupling selection length
+   to mouse-report frequency.
+   <https://github.com/ratatui/ratatui-textarea>
+
+Alt+V had an independent 0.77-0.85 second synchronous Windows path: every paste started PowerShell,
+loaded WinForms/System.Drawing, resized, encoded, and wrote a temp file on Ink's input thread. Current
+open-source coding agents either use a native clipboard module asynchronously (for example Qwen Code) or
+run platform helpers outside the UI loop. Neko keeps its zero-native-dependency/single-binary boundary:
+one session-owned STA PowerShell worker is warmed after the first frame, while TextInput preserves the
+captured caret and remains editable until the image arrives.
+<https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/ui/utils/clipboardUtils.ts>
+
+Local Windows measurement with the same clipboard screenshot: old path 773-848 ms per paste; warmed
+worker 21-29 ms after its first request (18-40x lower hot-path latency). These are local engineering
+measurements, not an independent product benchmark.
+
 ## Checkpoint 2026-07-30
 
 Current best model:

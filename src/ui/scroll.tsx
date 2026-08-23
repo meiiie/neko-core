@@ -140,6 +140,8 @@ export function useScroll(total: number, viewH: number): ScrollApi {
 export interface RowScrollApi {
   /** Rows between the viewport bottom and the live tail. 0 = pinned to the tail. */
   dist: number;
+  /** Live distance during direct FrameDiffer hops, which intentionally do not render React per row. */
+  current: () => number;
   scrolled: boolean;
   /** Accumulate a scroll of `n` rows (negative = up/older). Coalesced: any burst inside one frame
    * interval flushes as ONE state update, so a fast wheel spin moves far in a single render instead of
@@ -220,6 +222,7 @@ export function useRowScroll(totalRows: number, viewH: number, onHop?: (dist: nu
   };
   return {
     dist: Math.min(st.current.shown, maxRef.current),
+    current: () => Math.min(st.current.shown, maxRef.current),
     scrolled: st.current.shown > 0 || st.current.target > 0,
     by: (n) => { // n>0 = toward the tail (dist shrinks); n<0 = up into history (dist grows)
       st.current.target = Math.max(0, Math.min(maxRef.current, st.current.target - n));

@@ -81,6 +81,37 @@ test("Alt+V with no clipboard image (hook returns null) leaves the input untouch
   unmount();
 });
 
+test("Alt+V reads asynchronously without freezing typing and inserts at the captured caret", async () => {
+  let val = "";
+  let finish: (value: string | null) => void = () => {};
+  function Wrap() {
+    const [v, setV] = useState("");
+    val = v;
+    return (
+      <TextInput
+        value={v}
+        onChange={setV}
+        onSubmit={() => {}}
+        onPasteImage={() => new Promise((resolve) => { finish = resolve; })}
+        {...pasteProps()}
+      />
+    );
+  }
+  const { stdin, unmount } = render(<Wrap />);
+  stdin.write("look  now");
+  await tick();
+  stdin.write("\x1b[D\x1b[D\x1b[D\x1b[D"); // caret after the first space
+  await tick();
+  stdin.write("\x1bv");
+  stdin.write("X"); // remains responsive while clipboard decoding is pending
+  await tick();
+  expect(val).toBe("look X now");
+  finish("[Image #1]");
+  await tick();
+  expect(val).toBe("look [Image #1] X now");
+  unmount();
+});
+
 test("Markdown renders headings, bold, inline code, bullets, fences", () => {
   const { lastFrame } = render(<Markdown text={"# Title\n- **bold** and `code`\n\n```\nblock\n```"} />);
   const out = lastFrame() ?? "";

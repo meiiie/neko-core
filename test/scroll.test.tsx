@@ -68,6 +68,16 @@ test("useRowScroll glides toward the target (ease-out) instead of jumping", asyn
   c.unmount();
 });
 
+test("useRowScroll exposes the live distance while direct hops bypass React", async () => {
+  let api: RowScrollApi | null = null;
+  const c = render(<RowProbe total={200} viewH={20} grab={(a) => (api = a)} onHop={() => {}} />);
+  await tick();
+  expect(api!.dist).toBe(0);
+  api!.by(-40); // first direct hop runs synchronously, without a React render
+  expect(api!.current()).toBeGreaterThan(0);
+  c.unmount();
+});
+
 test("useRowScroll jumps an exact content row to the viewport top", async () => {
   let api: RowScrollApi | null = null;
   const c = render(<RowProbe total={100} viewH={10} grab={(a) => (api = a)} />);

@@ -230,7 +230,7 @@ export function TextInput(props: {
     /** Alt+V hook: ChatApp reads the clipboard image and returns its `[Image #N]` placeholder (or
      * null). TextInput only does the caret mechanics - the token is inserted AT the caret, inline,
      * so an image reads as part of the sentence being typed (the Claude Code affordance). */
-    onPasteImage?: () => string | null;
+    onPasteImage?: () => string | null | Promise<string | null>;
     /** Legacy caret glyph override. Kept for config/API compatibility; overlay caret ignores it. */
     caretGlyph?: CaretStyle;
     /** Click-to-caret hook: ChatApp registers the handler it calls with the click's (dRow, dCol)
@@ -322,14 +322,27 @@ export function TextInput(props: {
         }
     const chars = [...ref.current];
     if (key.meta && input === "v" && onPasteImage) { // Alt+V: clipboard image -> [Image #N] at the caret
-      const ph = onPasteImage();
-      if (ph) {
-        const ins = [...(cur.current > 0 && chars[cur.current - 1] !== " " ? " " : "") + ph + " "];
-        chars.splice(cur.current, 0, ...ins);
-        cur.current += ins.length;
-        ref.current = chars.join("");
+      // Clipboard decoding is asynchronous on Windows. Capture the semantic insertion point, then let
+      // typing continue while the warm worker reads/resizes the image. When it finishes, preserve any
+      // caret movement that happened after Alt+V instead of jumping the user back in time.
+      const at = cur.current;
+      const apply = (ph: string | null) => {
+        if (!ph) return;
+        const live = [...ref.current];
+        const pos = Math.min(at, live.length);
+        const prefix = pos > 0 && live[pos - 1] !== " " ? " " : "";
+        const suffix = " "; // preserve the established token boundary, including an intentional next space
+        const ins = [...prefix + ph + suffix];
+        live.splice(pos, 0, ...ins);
+        if (cur.current >= pos) cur.current += ins.length;
+        ref.current = live.join("");
         onChange(ref.current);
-      }
+      };
+      try {
+        const result = onPasteImage();
+        if (result instanceof Promise) void result.then(apply, () => {});
+        else apply(result);
+      } catch { /* the adapter reports a user-facing paste error */ }
       return;
     }
     if ((key.upArrow || key.downArrow) && !key.ctrl && !key.meta && props.verticalNavigation !== false) {

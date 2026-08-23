@@ -3,6 +3,20 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-23 - Clipboard and mouse-selection latency
+
+Windows Alt+V no longer starts a synchronous PowerShell/.NET image pipeline on Ink's input thread. A
+session-owned STA worker warms after the first frame and serves asynchronous resize/encode requests;
+TextInput captures the insertion point while leaving typing responsive. The same clipboard screenshot
+measured 773-848 ms on the former path and 21-29 ms once the worker was warm.
+
+Fullscreen mouse reporting now uses DEC 1002 drag motion instead of DEC 1003 all-motion, eliminating
+idle pointer floods. Prompt selections coalesce to one state commit per 16 ms visual frame. Transcript
+selection reads the live direct-scroll position and a held edge pointer drives a 40 ms, gently
+accelerating auto-scroll clock, so long selections keep moving without artificial mouse motion. Copy
+extraction now also covers the live streaming tail. Research and claim boundaries are recorded in
+`docs/research/transcript-input-sota-2026-07-30.md`.
+
 ## 2026-08-23 - Explicit yolo authority and turn-scope continuity (v0.24.18)
 
 A field transcript exposed two independent harness failures. After completing a new FPT/market request,

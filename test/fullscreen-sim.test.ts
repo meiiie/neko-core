@@ -280,6 +280,49 @@ test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for
   await tick(50);
 }, 30000);
 
+test("fullscreen drag-select keeps auto-scrolling while the pointer is held still at the edge", async () => {
+  const vt = new VirtualTerminal(100, 30);
+  const out = new FakeTtyOut(100, 30, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  const messages = Array.from({ length: 80 }, (_, i) => ({ role: "user", content: `EDGE-ROW-${String(i).padStart(2, "0")}` }));
+  // SAFETY: test-built session fixture; ChatApp only reads the declared session/message fields.
+  const session: any = {
+    id: "edge-select", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages,
+  };
+  // SAFETY: FakeTtyOut implements the writable TTY surface exercised by the alt-screen guard.
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+    React.createElement(ChatApp as any, {
+      yolo: true,
+      provider: { complete: async () => ({ content: "", tool_calls: [] }) },
+      resumedSession: session,
+      sessionId: "edge-select",
+      frameDiffer: differ,
+      preAltDispose,
+    }),
+    // SAFETY: fake stdin/stdout implement the exact TTY methods used by the renderer wrapper.
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  for (let waited = 0; waited < 2500 && !vt.text().includes("EDGE-ROW-79"); waited += 25) await tick(25);
+  const rows = vt.lines();
+  const y = rows.findIndex((line) => line.includes("EDGE-ROW-79")) + 1;
+  const x = rows[y - 1].indexOf("EDGE-ROW-79") + 1;
+  expect(y).toBeGreaterThan(2);
+  stdin.push(`\x1b[<0;${x};${y}M`); await tick(20);  // press on the newest visible row
+  stdin.push(`\x1b[<32;${x};1M`);                  // drag to the top edge once, then hold still
+  await tick(20);
+  out.all = "";                                    // ignore the motion event's immediate highlight
+  await tick(420);                                 // the selection clock must keep moving without input
+  expect((out.all.match(/\x1b\[\d+;1H/g) ?? []).length).toBeGreaterThan(3); // repeated timer-driven row paints
+  out.all = "";
+  stdin.push(`\x1b[<0;${x};1m`); await tick(100);  // release copies the full off-screen range
+  expect(out.all).toContain("\x1b]52;");
+  app.unmount();
+  await tick(50);
+}, 30000);
+
 test("todo flow shows the current plan once while the next step is running", async () => {
   const vt = new VirtualTerminal(96, 28);
   const out = new FakeTtyOut(96, 28, vt);

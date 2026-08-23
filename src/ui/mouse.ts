@@ -1,20 +1,19 @@
 /**
- * Mouse wheel scrolling for fullscreen mode (SGR mouse reporting, DEC 1000 + 1006).
+ * Mouse wheel scrolling for fullscreen mode (SGR mouse reporting, DEC 1000 + 1002 + 1006).
  *
  * Enabling mouse tracking lets us receive wheel events, but it also takes over the terminal's native
  * click-drag select-to-copy. So it's on by default ONLY in fullscreen (already opt-in) and can be turned
  * off with NEKO_DISABLE_MOUSE=1; most terminals also let you hold Shift to bypass capture for a native
- * selection. We enable button + SGR-coordinate reporting (1000/1006) but NOT motion (1002/1003), so only
- * clicks/wheel are reported - less interference with the terminal than full motion tracking.
+ * selection. We enable button-drag + SGR-coordinate reporting (1000/1002/1006), but NOT all-motion
+ * 1003. This keeps app-owned selection while bare pointer movement produces no input flood.
  *
  * SGR mouse report: `CSI < Cb ; Cx ; Cy (M|m)`. Wheel up = Cb 64, wheel down = Cb 65.
  */
 import type { Writable } from "node:stream";
 
-// 1000 = button events, 1003 = ANY-motion events (needed for hover affordances like the jump pill),
-// 1006 = SGR coordinates. Motion reports are cheap for us (parsed + dropped by the shared guards) and
-// only enabled in fullscreen.
-export const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1003h\x1b[?1006h";
+// 1000 = button events, 1002 = drag motion only, 1006 = SGR coordinates. Avoid 1003 (every bare
+// pointer move): it can deliver hundreds of useless chunks per second and make prompt editing lag.
+export const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 // DISABLE resets EVERY standard mouse mode, not just the three we enable: a terminal (or a stale
 // session, or WT itself) can be left in a different encoding (1015 urxvt / 1016 SGR-pixels produce the
 // large-decimal "[555;62;22M" reports seen after exit), and turning off a mode that is already off is a

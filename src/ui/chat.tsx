@@ -39,7 +39,7 @@ import type { Usage } from "../core/cost.ts";
 import { loadConfig } from "../adapters/config.ts";
 import { loadAgent } from "../adapters/agents.ts";
 import { ensureNekoHome, rememberNote } from "../adapters/context.ts";
-import { readClipboardImage, writeClipboardText } from "../adapters/clipboard.ts";
+import { disposeClipboardImageReader, readClipboardImage, warmClipboardImageReader, writeClipboardText } from "../adapters/clipboard.ts";
 import { describeImage } from "../adapters/vision.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
 import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt, openBrowser } from "../adapters/chatgpt-auth.ts";
@@ -291,6 +291,29 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const inputSelAnchor = useRef<{ index: number; x: number; y: number } | null>(null);
     const indexAtRef = useRef<((dRow: number, dCol: number, fromIndex?: number) => number) | null>(null);
     const [inputSel, setInputSel] = useState<{ from: number; to: number } | null>(null);
+    // Windows Terminal can emit hundreds of drag samples per second. Ink is capped to the display
+    // rate, so rendering every intermediate prompt range only builds a stale React backlog. Keep the
+    // newest range and commit at most once per visual frame; release still flushes synchronously.
+    const pendingInputSel = useRef<{ from: number; to: number } | null | undefined>(undefined);
+    const inputSelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const sameInputSel = (a: { from: number; to: number } | null, b: { from: number; to: number } | null) =>
+      a === b || Boolean(a && b && a.from === b.from && a.to === b.to);
+    const flushInputSelection = (next: { from: number; to: number } | null) => {
+      pendingInputSel.current = undefined;
+      if (inputSelTimer.current) { clearTimeout(inputSelTimer.current); inputSelTimer.current = null; }
+      setInputSel((old) => sameInputSel(old, next) ? old : next);
+    };
+    const scheduleInputSelection = (next: { from: number; to: number } | null) => {
+      pendingInputSel.current = next;
+      if (inputSelTimer.current) return;
+      inputSelTimer.current = setTimeout(() => {
+        inputSelTimer.current = null;
+        const latest = pendingInputSel.current;
+        pendingInputSel.current = undefined;
+        if (latest !== undefined) setInputSel((old) => sameInputSel(old, latest) ? old : latest);
+      }, 16);
+    };
+    useEffect(() => () => { if (inputSelTimer.current) clearTimeout(inputSelTimer.current); }, []);
     const pastedImagesRef = useRef(new Map<number, string>()); // [Image #N] id -> data: URL (shares the paste id counter)
     const nextPasteIdRef = useRef(1);
     // Reset the shared id counter only when NOTHING is staged - a still-staged image (its turn is
@@ -940,6 +963,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // TextInput itself. Both end in the same place - the text is copied on release and remembered for
   // Ctrl+C - so from the user's side there is one gesture, not two. ---
   const selAnchor = useRef<{ x: number; row: number } | null>(null); // where a left-drag began: 1-based screen col + CONTENT row index
+  const edgeDrag = useRef<{ dir: -1 | 1; x: number; startedAt: number } | null>(null);
+  const edgeScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const edgeScrollTick = useRef<() => void>(() => {});
+  const stopSelectionAutoScroll = () => {
+    edgeDrag.current = null;
+    if (edgeScrollTimer.current) { clearTimeout(edgeScrollTimer.current); edgeScrollTimer.current = null; }
+  };
   const selectedText = useRef("");                                 // the current persisted selection's text (for Ctrl+C)
   const [copyNote, setCopyNote] = useState<string | null>(null);   // transient copy confirmation, auto-clears
   const copyNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -948,8 +978,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current);
     copyNoteTimer.current = setTimeout(() => setCopyNote(null), 2500);
   };
-  useEffect(() => () => { if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current); }, []);
-  const clearSelection = () => { if (selectedText.current || selAnchor.current) { selectedText.current = ""; selAnchor.current = null; frameDiffer?.setSelection(null); } };
+  useEffect(() => () => {
+    if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current);
+    stopSelectionAutoScroll();
+  }, []);
+  const clearSelection = () => {
+    stopSelectionAutoScroll();
+    if (selectedText.current || selAnchor.current) { selectedText.current = ""; selAnchor.current = null; frameDiffer?.setSelection(null); }
+  };
   const copySelection = () => { if (selectedText.current) { copyBoth(selectedText.current); flashCopyNote(`copied ${selectedText.current.length} chars to clipboard`); } };
   const settleApproval = (kind: ApprovalFlash["kind"], expectedId?: string): boolean => {
     const waiting = remoteApprovalRef.current;
@@ -978,7 +1014,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // The total band content + the top CONTENT row currently visible (matches FrameDiffer.windowRows).
   // bandViewH is one row shorter only while the sticky prompt owns screen row 1.
   const bandTotal = () => paddedRowsRef.current.length + streamRowsRef.current.length;
-  const bandStart = () => Math.max(0, bandTotal() - rowScroll.dist - bandViewH);
+  // `rowScroll.dist` is React's last committed snapshot. During direct differ hops React is purposely
+  // bypassed, so drag selection must read the live ref or its content row freezes at the old viewport.
+  const bandStart = () => Math.max(0, bandTotal() - rowScroll.current() - bandViewH);
   const contentRowAt = (screenY: number) => {
     const total = bandTotal();
     if (total === 0) return 0;
@@ -993,10 +1031,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Extract the selected text from the CONTENT rows (paddedRows - what the band shows, incl. rows scrolled
   // off), so a selection that spans past the fold copies in full. Honor columns on the first/last row.
   const selectionText = (sel: { r0: number; c0: number; r1: number; c1: number }): string => {
-    const rows = paddedRowsRef.current;
+    const committed = paddedRowsRef.current;
+    const live = streamRowsRef.current;
+    const total = committed.length + live.length;
     const out: string[] = [];
-    for (let r = sel.r0; r <= sel.r1 && r < rows.length; r++) {
-      const plain = (rows[r] ?? "").replace(/\x1b\[[0-9;]*m/g, ""); // strip SGR -> real text (gutter incl.)
+    for (let r = sel.r0; r <= sel.r1 && r < total; r++) {
+      const row = r < committed.length ? committed[r] : live[r - committed.length];
+      const plain = (row ?? "").replace(/\x1b\[[0-9;]*m/g, ""); // strip SGR -> real text (gutter incl.)
       const from = r === sel.r0 ? sel.c0 - 1 : 0;
       const to = r === sel.r1 ? sel.c1 : plain.length;
       out.push(plain.slice(Math.max(0, from), to).replace(/\s+$/, ""));
@@ -1005,7 +1046,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   };
   // Editing the prompt invalidates any highlight over it: the indices no longer point at the same
   // characters. Typing, history navigation, /clear and a submit all land here.
-  useEffect(() => { setInputSel(null); }, [input]);
+  useEffect(() => { flushInputSelection(null); }, [input]);
 
   // New transcript content shifts the band, so a screen-anchored highlight would land on the wrong rows -
   // drop the selection whenever the line count changes (a new turn, a committed reply, etc.).
@@ -1203,8 +1244,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     /** Read the clipboard image and stage it behind an inline `[Image #N]` token (Claude-Code style):
      * the token travels IN the sentence, deleting it detaches the image, and the id shares the text
      * paste counter so numbering is uniform. Returns the token to insert, or null. */
-    const pasteImage = (): string | null => {
-      const path = readClipboardImage(cfg.imageLongEdge);
+    const pasteImage = async (): Promise<string | null> => {
+      const path = await readClipboardImage(cfg.imageLongEdge);
       if (!path) { addLine("info", "no image in the clipboard"); return null; }
       try {
         const b64 = readFileSync(path).toString("base64");
@@ -1852,7 +1893,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     if (text === "/paste") {
-      const ph = pasteImage();
+      const ph = await pasteImage();
       if (ph) setInput((v) => (v ? v.trimEnd() + " " : "") + ph + " "); // token lands in the (empty) input, ready to compose around
       return;
     }
@@ -2910,7 +2951,24 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // PgUp/PgDn / Ctrl+arrows / Home scroll the rich view by LINES, and (ctrl+)End or clicking the pill
   // jumps back to the live tail.
   const ROWS_PER_NOTCH = 3; // one wheel notch = 3 rows: the terminal-native scroll grain
-  const EDGE_SCROLL = 2;    // rows to auto-scroll per drag-move while the pointer is held at a band edge
+  // A held pointer at either edge must continue selecting even when the OS emits no more motion. The
+  // speed ramps gently like a document editor instead of tying scroll distance to mouse-report rate.
+  edgeScrollTick.current = () => {
+    edgeScrollTimer.current = null;
+    const drag = edgeDrag.current;
+    const anchor = selAnchor.current;
+    if (!drag || !anchor) return;
+    const step = Math.min(6, 1 + Math.floor((Date.now() - drag.startedAt) / 700));
+    scrollRows(drag.dir * step);
+    const focus = { x: drag.x, row: contentRowAt(drag.dir < 0 ? bandTopRow : bandBottomRow) };
+    frameDiffer?.setSelection(selFrom(anchor, focus), gutter + contentCols);
+    edgeScrollTimer.current = setTimeout(() => edgeScrollTick.current(), 40);
+  };
+  const startSelectionAutoScroll = (dir: -1 | 1, x: number) => {
+    const old = edgeDrag.current;
+    edgeDrag.current = old?.dir === dir ? { ...old, x } : { dir, x, startedAt: Date.now() };
+    if (!edgeScrollTimer.current) edgeScrollTimer.current = setTimeout(() => edgeScrollTick.current(), 40);
+  };
   useInput(
     (input, key) => {
       if (!fullscreen || overlay || viewer || approval) return;
@@ -2923,7 +2981,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setPromptAnchorHover(anchorHit);
         if (anchorHit && ptr.kind === "press" && ptr.left && promptAnchor) {
           clearSelection();
-          setInputSel(null);
+          flushInputSelection(null);
           jumpToPrompt(promptAnchor);
           return;
         }
@@ -2956,8 +3014,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (ptr.kind === "move") setVoiceControlHover(null);
         setPillHover(pillHit(ptr.x, ptr.y));
         if (!search && ptr.kind === "press" && ptr.left) {
+          stopSelectionAutoScroll();
           clearSelection();                                                       // a fresh drag drops any old selection
-          setInputSel(null);                                                      // ...including one over the prompt
+          flushInputSelection(null);                                              // ...including one over the prompt
           if (pillHit(ptr.x, ptr.y)) return scrollBottom();                       // the pill is a click target
           if (ptr.y > bandBottomRow) {
             // Click in the input area: move the caret to the clicked cell (Claude Code parity).
@@ -2973,7 +3032,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             } else {
               inputSelAnchor.current = null;
             }
-            setInputSel(null);
+            flushInputSelection(null);
             selAnchor.current = null; // a press in the input never starts a TRANSCRIPT selection
             return;
           }
@@ -2983,25 +3042,28 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (ptr.kind === "move") {
           const dragging = inputSelAnchor.current;
           if (dragging && ptr.left) {
+            stopSelectionAutoScroll();
             if (indexAtRef.current) {
               const focus = indexAtRef.current(ptr.y - dragging.y, ptr.x - dragging.x, dragging.index);
               const from = Math.min(dragging.index, focus);
               const to = Math.max(dragging.index, focus);
-              setInputSel(to > from ? { from, to } : null);
+              scheduleInputSelection(to > from ? { from, to } : null);
             }
             return;
           }
           if (selAnchor.current && ptr.left) {
-            // Auto-scroll when the drag reaches an edge, so a selection can run PAST the fold: dragging
-            // at/above the top row scrolls up (revealing earlier text); at/below the bottom scrolls down.
-            if (ptr.y <= bandTopRow) scrollRows(-EDGE_SCROLL);
-            else if (ptr.y >= bandBottomRow) scrollRows(EDGE_SCROLL);
+            // Start a clock at the edge. Mouse drivers stop sending motion when the pointer is held
+            // still, so event-driven scrolling alone can never cross a long document smoothly.
+            if (ptr.y <= bandTopRow) startSelectionAutoScroll(-1, ptr.x);
+            else if (ptr.y >= bandBottomRow) startSelectionAutoScroll(1, ptr.x);
+            else stopSelectionAutoScroll();
             const focus = { x: ptr.x, row: contentRowAt(ptr.y) };
             frameDiffer?.setSelection(selFrom(selAnchor.current, focus), gutter + contentCols); // extend the drag
           }
           return; // a drag OR a bare hover - moves never fall through
         }
         if (ptr.kind === "release") {
+          stopSelectionAutoScroll();
           if (inputSelAnchor.current) {
             const anchor = inputSelAnchor.current;
             inputSelAnchor.current = null;
@@ -3011,11 +3073,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             const from = Math.min(anchor.index, focus), to = Math.max(anchor.index, focus);
             const text = [...promptRef.current].slice(from, to).join("");
             if (text) {
-              setInputSel({ from, to });
+              flushInputSelection({ from, to });
               selectedText.current = text;   // so Ctrl+C copies exactly this, like a transcript selection
               copyBoth(text);
               flashCopyNote(`copied ${text.length} chars to clipboard`);
-            } else setInputSel(null);
+            } else flushInputSelection(null);
             return;
           }
           const a = selAnchor.current;
@@ -3504,7 +3566,10 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // throw in teardown); this handler cannot. It only does synchronous writes (allowed in 'exit') and is
   // idempotent, so it's safe on top of the other cleanups. This is what finally stops mouse-tracking
   // leaking into the user's shell after neko is gone (image #34).
-  process.on("exit", () => { try { emergencyRestore(); } catch { /* nothing left to protect */ } });
+  process.on("exit", () => {
+    disposeClipboardImageReader();
+    try { emergencyRestore(); } catch { /* nothing left to protect */ }
+  });
   // Tab title: save the user's title (stack push), brand the tab for the session; per-turn updates
   // show the current task + busy state (see handle()); restored on exit.
   saveTitle();
@@ -3558,6 +3623,9 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
       maxFps: resolveUiFps(cfg.uiFpsConfig).fps,
     },
   );
+  // Pay PowerShell/.NET startup in the background while the first screen is idle. Alt+V then needs
+  // only the clipboard read + resize, and never blocks Ink even when the worker is still warming.
+  warmClipboardImageReader();
   clearHolder.fn = () => app.clear();
   try {
     await app.waitUntilExit();
@@ -3567,6 +3635,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     // transcript echo - a raw-text dump interleaved with the shell prompt was the junk of image #66; the
     // conversation lives in the session file, one `neko --resume` away.
     differ?.dispose(); // stop the self-heal timer before the terminal is restored
+    disposeClipboardImageReader();
     emergencyRestore(); // full terminal restore (cursor, mouse, main screen, title) - idempotent on clean exits
     browserBridge?.close();
     await hub.close();
