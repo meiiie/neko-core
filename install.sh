@@ -1,8 +1,8 @@
 #!/bin/sh
 # Neko Core installer (macOS / Linux) — downloads a standalone binary; no Bun required.
 #   Latest:  curl -fsSL https://neko.holilihu.online/install.sh | sh
-#   Pinned:  curl -fsSL https://neko.holilihu.online/install.sh | sh -s -- --version 0.9.0
-#            (or set NEKO_VERSION=v0.9.0 before the one-liner)
+#   Pinned:  curl -fsSL https://neko.holilihu.online/install.sh | sh -s -- --version 1.0.0
+#            (or set NEKO_VERSION=v1.0.0 before the one-liner)
 set -e
 
 REPO="meiiie/neko-core"

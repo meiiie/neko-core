@@ -1,31 +1,26 @@
-# Neko self-improvement brain
+# Human-gated self-improvement
 
-This folder is Neko's **self-knowledge**: what it is, what it's doing, where it's going, what the harness is,
-and what to try next. The continuous loop (`scripts/self-improve.ts`) and any agent working on Neko should
-**read this folder first** to orient, and **update it** as work happens — so progress is never lost and the
-loop never works blind.
+This directory is an optional experiment surface for improving Neko's harness. It is not a daemon, release
+authority, or source of product truth. The owner starts a bounded run deliberately, reviews its diff, and
+ships it only through the same tests and release gates as any human-authored change.
 
-It complements (does not replace) `docs/process/` (ROADMAP/WORKLOG/RULES/ARCHITECTURE) — that's the human
-project log; this is the *self-improvement* brain.
+| File | Purpose |
+|---|---|
+| [STATE.md](STATE.md) | Current baseline, measurement focus, and most recent accepted move |
+| [BACKLOG.md](BACKLOG.md) | Candidate improvements; an idea is not a commitment |
+| [RESEARCH.md](RESEARCH.md) | Dated evidence and possible mappings to Neko |
+| [HARNESS.md](HARNESS.md) | Small-change protocol for an experimental pass |
 
-| File | Purpose | Who updates it |
-|---|---|---|
-| [STATE.md](STATE.md) | Current focus + what's done + how to measure (the "where am I now"). | the loop, after each cycle |
-| [BACKLOG.md](BACKLOG.md) | Concrete, verifiable improvement ideas — the loop's GOAL QUEUE. | the loop (adds) + research passes |
-| [RESEARCH.md](RESEARCH.md) | SOTA techniques + papers + how each applies to Neko. The grounding. | research passes (when stuck) |
-| [HARNESS.md](HARNESS.md) | How Neko's harness works + the levers to improve it. | when the harness changes |
+The canonical product architecture is [../HARNESS-ARCHITECTURE.md](../HARNESS-ARCHITECTURE.md). The canonical
+history is [../process/WORKLOG.md](../process/WORKLOG.md). If these files disagree, code, tests, current process
+docs, and owner direction win.
 
-## The loop, in one picture
-```
-read STATE + BACKLOG  ->  pick a goal  ->  Neko works (verified)  ->  commit if green, else revert
-        ^                                                                      |
-        |                                  if stuck (no improvement for a few rounds):
-        +----  update STATE/BACKLOG  <---  RESEARCH pass: web_search SOTA + new papers -> new ideas
-```
+## Admission loop
 
-## North star (the standard to beat)
-- **Darwin Gödel Machine** (ICLR 2026): an agent that edits its own code and validates each change against a
-  benchmark, growing an archive of improved versions. SWE-bench 20%→50%. That's the bar for *open-ended*
-  self-improvement; our loop is the verified, single-branch, human-gated version of it.
-- Improve along EVERY axis, measured: **token efficiency · speed · accuracy/pass-rate · robustness · security ·
-  harness capability**. The bench dev-log (`~/.neko-core/bench-log.jsonl`) makes each one a number to move.
+    read current state -> choose one measurable lever -> make one bounded change
+           -> run targeted evidence -> run full gate -> human review
+           -> accept and record, or revert completely
+
+Research-only passes may update RESEARCH.md and BACKLOG.md but must not present an unimplemented idea as a
+current capability. The loop never deletes safety checks, weakens permissions, publishes releases, or runs
+forever without explicit owner authority.

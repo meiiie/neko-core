@@ -1177,7 +1177,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
       altDisposeRef.current = installAltScreenGuard((stdout as any) ?? process.stdout, { mouse: isMouseEnabled() });
     }
-    return () => { if (altDisposeRef.current) { altDisposeRef.current(); altDisposeRef.current = null; } };
+    return () => {
+      const dispose = altDisposeRef.current;
+      altDisposeRef.current = null;
+      // Ink can emit its final frame erases just after React unmount begins. Leave the alternate screen
+      // on the next task so those bytes still land in the buffer Ink owns, never on the restored shell.
+      if (dispose) setTimeout(dispose, 0);
+    };
   }, []);
   // Measure the OUTER transcript region (sticky anchor + scroll band), whose height does not change when
   // the anchor mounts. Measuring the inner band made viewH shrink by one row, which changed the chosen
@@ -3602,10 +3608,11 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // throw in teardown); this handler cannot. It only does synchronous writes (allowed in 'exit') and is
   // idempotent, so it's safe on top of the other cleanups. This is what finally stops mouse-tracking
   // leaking into the user's shell after neko is gone (image #34).
-  process.on("exit", () => {
+  const onProcessExit = () => {
     disposeClipboardImageReader();
     try { emergencyRestore(); } catch { /* nothing left to protect */ }
-  });
+  };
+  process.once("exit", onProcessExit);
   // Tab title: save the user's title (stack push), brand the tab for the session; per-turn updates
   // show the current task + busy state (see handle()); restored on exit.
   saveTitle();
@@ -3641,6 +3648,20 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   // first, then render - the first frame paints INTO the alt screen. ChatApp adopts the disposer (prop)
   // so unmount tears it down exactly as if the mount effect had installed it.
   const startFullscreen = cfg.fullscreen && canFullscreen(process.stdout);
+  if (startFullscreen) {
+    // The fullscreen transcript normally warms rich rows after mount. The welcome line has no plain
+    // fallback text, so that ordering painted the composer immediately and left the whole header blank
+    // until the warmer ran. Prime this one tiny, fixed line before Ink's first frame; history remains
+    // lazy/windowed, and the first visible frame is complete instead of assembling in two stages.
+    const welcome: Line = { id: 0, kind: "welcome", text: "" };
+    const contentCols = Math.max(20, (process.stdout.columns ?? 80) - 4);
+    primeAnsiCache(welcome, contentCols, cfg);
+    if (differ) {
+      const rows = getCachedRows(welcome, contentCols) ?? fallbackRows(welcome);
+      differ.setBand({ top: 1, height: Math.max(3, (process.stdout.rows ?? 24) - 8) });
+      differ.setBandContent(rows.map((row) => row.length ? `  ${row}` : row), 0);
+    }
+  }
   const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
   const app = render(
     <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} completionAlert={completionAlert} bridgeHolder={bridgeHolder} />,
@@ -3666,6 +3687,9 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   try {
     await app.waitUntilExit();
   } finally {
+    // Let the deferred React unmount disposer run after Ink's final erase writes. Without this one
+    // turn, the primary shell can be restored first and then overwritten by Ink's trailing cleanup.
+    await new Promise<void>((resolveDone) => setTimeout(resolveDone, 0));
     // Claude-code-clean teardown (image #65): restore the terminal (leave alt -> the primary comes back
     // EXACTLY as it was before neko ran), then print ONLY the resume hint at the shell's own cursor. No
     // transcript echo - a raw-text dump interleaved with the shell prompt was the junk of image #66; the
@@ -3675,6 +3699,14 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     emergencyRestore(); // full terminal restore (cursor, mouse, main screen, title) - idempotent on clean exits
     browserBridge?.close();
     await hub.close();
-    console.log(`\nResume this session with:\n  neko --resume ${id}\n`);
+    // The last-resort hook must not run AFTER this handoff text: another LEAVE_ALT can restore the
+    // primary cursor over text we just printed. CRLF also anchors output at column zero on Windows.
+    process.off("exit", onProcessExit);
+    // bin/neko.ts intentionally owns the final process exit code. Wait until the handoff bytes have
+    // reached the terminal before returning to it; an immediate process.exit can otherwise discard a
+    // queued TTY write on the fallback renderer even though the alternate screen was restored correctly.
+    await new Promise<void>((resolveWrite) => {
+      process.stdout.write(`\r\n\r\nResume this session with:\r\n  neko --resume ${id}\r\n`, "utf8", () => resolveWrite());
+    });
   }
 }

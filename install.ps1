@@ -1,7 +1,7 @@
 # Neko Core installer (Windows) — downloads a standalone binary; no Bun required.
 #   Latest:  irm https://neko.holilihu.online/install.ps1 | iex
-#   Pinned:  & ([scriptblock]::Create((irm https://neko.holilihu.online/install.ps1))) -Version 0.9.0
-#            (or set $env:NEKO_VERSION='v0.9.0' before the one-liner)
+#   Pinned:  & ([scriptblock]::Create((irm https://neko.holilihu.online/install.ps1))) -Version 1.0.0
+#            (or set $env:NEKO_VERSION='v1.0.0' before the one-liner)
 param([string]$Version)  # MUST be the first statement - lets a scriptblock invocation pass -Version cleanly
 $ErrorActionPreference = 'Stop'
 
@@ -18,7 +18,7 @@ function Write-Note($msg) { Write-Host $msg -ForegroundColor Yellow }
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
 
 # Pinned install / ROLLBACK path: -Version (scriptblock arg) OR $env:NEKO_VERSION picks an exact
-# release (e.g. '0.9.0') - the public way back to a known-good baseline. Otherwise the latest tag.
+# release (e.g. '1.0.0') - the public way back to a known-good baseline. Otherwise the latest tag.
 $pin = if ($Version) { $Version } elseif ($env:NEKO_VERSION) { $env:NEKO_VERSION } else { $null }
 $tag = $null
 $rel = $null

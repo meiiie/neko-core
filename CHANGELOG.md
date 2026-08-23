@@ -6,6 +6,34 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-24
+
+### Added
+
+- **A long-term stable compatibility baseline.** The CLI, config/profile overlay, durable session format,
+  package-root SDK surface, ACP v1 bridge, global skills, and exact-version rollback now form the supported
+  1.x contract. Existing pre-1.0 user configuration and sessions require no migration.
+- **A compiled-binary startup/exit lifecycle gate.** A real PTY/ConPTY test requires the complete welcome
+  header in the first composer frame and proves terminal restoration finishes before the resume hint.
+
+### Changed
+
+- **Standalone builds now pin stable Bun 1.4.0 on every platform.** It contains the native Windows
+  IOCP/TTY engine that replaces the raw-input failure path which required a canary runtime in earlier releases;
+  the real input probe remains mandatory for every runnable artifact.
+- **Documentation now has one current source per subject.** The README, harness architecture, roadmap,
+  testing, release, and self-improvement contracts were consolidated; obsolete Python scaffold, porting,
+  completed parity, and pre-implementation fullscreen plans were removed while their history remains in Git.
+
+### Fixed
+
+- **The first fullscreen frame no longer shows an input box under a blank header.** Neko primes only the
+  fixed welcome row before Ink renders, preserving lazy history while painting logo, version, provider, model,
+  effort, and working directory together with the composer.
+- **Exiting no longer leaves a displaced or partially overwritten resume command.** Ink's final erases finish
+  inside the alternate buffer before Neko restores the shell; the fallback exit hook is disarmed before a
+  CRLF-anchored handoff is printed.
+
 ## [0.24.23] - 2026-08-24
 
 ### Fixed

@@ -49,7 +49,9 @@ const submitSeed = async (command: string, marker: string): Promise<boolean> => 
     console.log(vt.lines().map((line, i) => `${String(i).padStart(2)}|${line}`).join("\n"));
   }
   const ready = completed && await until(
-    () => vt.lines().some((line) => /^\s*>\s*(?:Try:.*)?$/.test(line)),
+    // The hardware-caret sentinel is intentionally zero-width on screen but remains present in the
+    // virtual terminal's text model. Treat it like whitespace when deciding that the composer cleared.
+    () => vt.lines().some((line) => /^[\s\u2060]*>[\s\u2060]*(?:Try:.*)?$/.test(line)),
     3_000,
   );
   if (completed && !ready) {

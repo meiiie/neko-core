@@ -46,32 +46,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Four targets build NATIVELY (bun embeds ITSELF - required on canary, which publishes no
-          # cross-target downloads: "Target platform ...-v1.4.0 is not available" killed the two
-          # cross-compiled jobs at v0.7.5). Native also means the artifact gets BOTH smokes:
+          # Four targets build NATIVELY. Native also means the artifact gets BOTH smokes:
           # __uiprobe (render) and input-probe (a real PTY hears keys - the Bun-1.3.14 class).
           - { os: ubuntu-latest,    target: bun-linux-x64,    asset: neko-linux-x64,       smoke: true }
           - { os: ubuntu-24.04-arm, target: bun-linux-arm64,  asset: neko-linux-arm64,     smoke: true }
           - { os: macos-latest,     target: bun-darwin-arm64, asset: neko-macos-arm64,     smoke: true }
-          # Intel macOS: no Intel runners left, and the x64 bun HANGS under Rosetta on the arm64
-          # runner (first re-tag of v0.7.5 sat 45min in that step). So this one target cross-compiles
-          # from STABLE bun (versioned cross-target runtimes exist only for releases) and is not
-          # smoked (x64 artifacts can't run here either). The canary-fixed stdin regression is
-          # Windows-only, so a stable runtime is correct for Intel macs. Unify at the next stable.
-          - { os: macos-latest,     target: bun-darwin-x64,   asset: neko-macos-x64,       smoke: false, bun: latest }
+          # Intel macOS: no Intel runners left, and the x64 binary cannot be smoked on the arm64 runner,
+          # so this one target cross-compiles from the same stable release runtime.
+          - { os: macos-latest,     target: bun-darwin-x64,   asset: neko-macos-x64,       smoke: false }
           - { os: windows-latest,   target: bun-windows-x64,  asset: neko-windows-x64.exe, smoke: true }
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
-          # PINNED TO CANARY (temporarily - revert to `latest` at the first stable AFTER 1.3.14):
-          # stable Bun 1.3.14 has a Windows raw-stdin regression on some machines (a minimal
-          # `stdin.setRawMode(true)` probe receives ZERO key bytes while Node in the same terminal
-          # receives them; bun is mid-rework of its Windows I/O - "Remove libuv on Windows" #33160).
-          # A 1.3.14-compiled neko renders but cannot be typed into on such machines; the canary
-          # (1.4.0) runtime is field-verified to fix exactly that. A matrix entry can override
-          # (darwin-x64 cross-compiles from stable - see the matrix comment).
-          bun-version: ${{ matrix.bun || 'canary' }}
+          # Exact stable runtime for every artifact. Bun 1.4.0 includes the native Windows IOCP/TTY
+          # engine that fixed the 1.3.14 raw-stdin path; the input and lifecycle probes still prove it.
+          bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - name: compile
         # scripts/build.ts is the ONE source of truth for compile flags (NODE_ENV define, tsconfig
@@ -79,8 +69,7 @@ jobs:
         # cat icon, publisher/version/copyright). bun REJECTS --windows-* off Windows, so the script
         # gates them by host; args are passed as argv (no shell quoting fragility across runners).
         shell: bash
-        # `bun --revision` first: canary is a rolling tag, so the embedded runtime's exact
-        # version+commit must be ON RECORD for every release (forensics when a field report lands).
+        # `bun --revision` first: record the exact embedded runtime version+commit for field forensics.
         run: |
           bun --revision
           bun scripts/build.ts --target=${{ matrix.target }} --outfile=${{ matrix.asset }}
@@ -99,6 +88,10 @@ jobs:
         if: ${{ matrix.smoke }}
         shell: bash
         run: bun scripts/acp-smoke.ts ./${{ matrix.asset }}
+      - name: startup/exit lifecycle - first frame complete, shell restored before handoff
+        if: ${{ matrix.smoke }}
+        shell: bash
+        run: bun scripts/e2e-startup-lifecycle.ts --exe ./${{ matrix.asset }}
       - name: publish SHA-256 beside the binary
         shell: bash
         run: |

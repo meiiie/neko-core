@@ -3,6 +3,43 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-24 - Stable 1.0 baseline: complete first frame, clean shell handoff, current docs
+
+The 1.0 pass began from two physical Windows Terminal observations, deliberately without broad performance
+refactoring. On startup, the composer appeared before the header. The fullscreen transcript's rich-row cache
+was warmed in a post-mount effect, but the welcome line intentionally has no plain fallback text; the first Ink
+frame therefore had chrome and input but a blank transcript band. `runChat` now primes exactly that one fixed
+welcome row and seeds the frame differ before render. Session history remains windowed and lazy.
+
+On exit, the alternate buffer could be restored while Ink still had a final erase write queued. That trailing
+write then landed on the primary shell, displaced the cursor, and made the resume command appear clipped or at
+the wrong column. React teardown now defers the alt-screen disposer by one task; `runChat` waits that turn,
+restores terminal modes, removes the last-resort process-exit hook, and prints one CRLF-anchored handoff. The new
+real ConPTY regression records raw bytes and requires the header at first composer visibility, the last
+alternate-screen restore before the hint, and no restore sequence after it. It runs against source, the local
+binary, both renderers, and release artifacts through `--exe`.
+
+The runtime gate that previously blocked a 1.0 designation is closed without weakening it. Bun's official
+stable 1.4.0 release (revision `34cbb9a40`, published 2026-08-20) contains the native Windows IOCP/TTY engine
+that replaced the 1.3.14 stdin failure path. CI and all five release builds now pin 1.4.0 exactly, while the
+compiled PTY input probe remains the deciding evidence rather than trusting a version string.
+
+Documentation was treated as part of the harness. README was reduced to the current product and usage
+contract; a docs index now separates normative guides from dated research/marketing evidence; the harness,
+testing, roadmap, release, and human-gated self-improvement docs were rewritten around the shipped TypeScript
+system. Obsolete Python-scaffold architecture, porting/vision guides, completed parity checklist, and the
+pre-implementation fullscreen plan were removed. Git remains the archive, so no engineering history was lost.
+
+The local stable-runtime gate on the release candidate completed with TypeScript and lint clean, 1,479 tests
+passing (12 intentional infrastructure skips, zero failures), policy/doctor successful, and the compiled binary
+passing render, keyboard, ACP, startup/exit, and three consecutive ghost-frame ConPTY probes. Scroll interaction
+measured 6 ms to first response and 80 ms to settle on the incremental renderer; the fallback measured 63 ms
+and 139 ms. The fallback run also found a probe-only blind spot: its virtual terminal retained the zero-width
+hardware-caret sentinel, so the benchmark now treats that sentinel as non-visible composer spacing.
+
+Cross-platform CI, artifact workflow, checksum inventory, latest-release routing, and public download-page
+verification are recorded by the immutable GitHub commit/tag and release run rather than claimed in advance.
+
 ## 2026-08-24 - Post-mount mouse-mode recovery (v0.24.23)
 
 Field testing of v0.24.22 exposed the layer its component regression could not exercise: injecting an

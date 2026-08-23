@@ -10,13 +10,15 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
 | Gate | Command | What it catches |
 |---|---|---|
 | Types | `bun run typecheck` | native TypeScript 7 diagnostics |
+| Lint | `bun run lint` | anti-slop and trust-boundary mistakes |
 | Full suite, ship runtime | `bun test` under the pinned runtime | logic + sims (incl. the differ-less fallback sim) |
 | Policy audit | `node bin/neko-source.cjs policy` | safe source bootstrap + boundary drift |
 | Build + render smoke | `bun run build` (compiles, then `__uiprobe`) | artifact-only breakage (the jsxDEV class) |
 | Input smoke | part of `bun run build` (`scripts/input-probe.ts`) | a runtime that renders but drops stdin (the Bun-1.3.14 class) |
+| Startup + exit e2e | `bun scripts/e2e-startup-lifecycle.ts` | incomplete first frame and terminal-restore byte races |
 | Ghost + typing e2e | `bun scripts/e2e-conpty-ghost.ts dist/neko.exe` ×3 | ConPTY displacement AND dead input, on a REAL terminal (typed-echo asserted — "clean" without input is hollow) |
 | Scroll bench (render changes only) | `bun scripts/bench-scroll-conpty.ts` | feel regressions; compare the baselines in the script header |
-| Secret scan | `/secret-scan` | leaked keys before a public push |
+| Secret scan | `gitleaks dir . --config .gitleaks.toml --redact` | leaked keys before a public push |
 
 ## 2. Docs — part of the release, not an afterthought
 
@@ -34,9 +36,10 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
 
 ## 3. Tag → watch → verify (never tag-and-walk-away)
 
-1. Commit, push `self-improve`, fast-forward `main`, push, tag `vX.Y.Z`, push the tag.
-2. WATCH the release workflow to completion (a monitor, not hope).
-3. Verify, every time: **5/5 binaries + 5/5 SHA-256 sidecars** attached · the browser-extension ZIP when
+1. Commit the exact candidate and push/fast-forward `main`.
+2. WATCH the cross-platform `ci` workflow to completion. Only then create and push `vX.Y.Z`.
+3. WATCH the release workflow to completion (a monitor, not hope).
+4. Verify, every time: **5/5 binaries + 5/5 SHA-256 sidecars** attached · the browser-extension ZIP when
    that workflow step exists · `releases/latest` resolves to the new tag · `isDraft: false` · install
    one-liner fetches the new version end-to-end when the change warrants it.
 
@@ -48,8 +51,10 @@ and a link to the CHANGELOG section for detail.
 
 ## 5. Runtime discipline
 
-- The embedded runtime is pinned in `ci.yml`/`release.yml` (currently bun **canary** — stable 1.3.14
-  drops Windows stdin; `bun-stable-watch` files the revert issue the day a newer stable ships).
+- The embedded runtime is pinned exactly in `ci.yml`/`release.yml` (currently stable Bun **1.4.0**).
+  Bun 1.4.0 includes the native Windows IOCP/TTY engine that replaced the 1.3.14 raw-stdin failure path;
+  Neko's real PTY input and lifecycle probes remain mandatory so a future runtime regression cannot pass on
+  version identity alone.
 - `bun --revision` is logged at every release compile: the exact embedded runtime commit is always
   on record for forensics.
 
@@ -65,23 +70,27 @@ and a link to the CHANGELOG section for detail.
 
 ## 7. Stable baseline + rollback
 
-- One release at a time is the **known-good baseline** (currently **v0.9.0**). New features target
+- One release at a time is the **known-good baseline** (currently **v1.0.0**). New features target
   the next minor; only field-driven fixes may move the baseline pointer.
 - **Rollback is first-class and it STICKS.** Two public paths, both pin so auto-update can't undo them:
-  - In-app: `neko update 0.9.0` — downloads that exact version (up OR down) and pauses auto-update
+  - In-app: `neko update 1.0.0` — downloads that exact version (up OR down) and pauses auto-update
     (`neko update` with no version returns to latest and resumes it).
   - Installer (version as an ARGUMENT — the rustup/uv-style form, cleaner than an env line):
-    - Windows: `& ([scriptblock]::Create((irm https://neko.holilihu.online/install.ps1))) -Version 0.9.0`
-    - Unix: `curl -fsSL https://neko.holilihu.online/install.sh | sh -s -- --version 0.9.0`
-    - `NEKO_VERSION=v0.9.0` before the one-liner still works as a fallback. Either way the installer
+    - Windows: `& ([scriptblock]::Create((irm https://neko.holilihu.online/install.ps1))) -Version 1.0.0`
+    - Unix: `curl -fsSL https://neko.holilihu.online/install.sh | sh -s -- --version 1.0.0`
+    - `NEKO_VERSION=v1.0.0` before the one-liner still works as a fallback. Either way the installer
       installs + pins.
   - The pin is `auto_update: false` in `~/.neko-core/config.json`, NOT a new field: it must be
-    honored by the version being rolled back TO. Every release ≥ 0.7.4 honors it, so a rollback to
-    0.9.0 holds; a new pin field would be ignored by the old binary and the user would be dragged
+  honored by the version being rolled back TO. Every release ≥ 0.7.4 honors it, so a rollback to
+  1.0.0 holds; a new pin field would be ignored by the old binary and the user would be dragged
     forward on the next launch. A baseline nobody can *stay* on is a label, not a guarantee.
 
 ## 8. LTS / 1.0 bar
 
-The 1.0 (long-term stable) designation waits for BOTH: the runtime pin retired onto a stable bun,
-AND a field soak with no new incident class. Until then "stable" means: the recommended,
-evidence-backed, returnable baseline — exactly what §1–§7 produce.
+The 1.0 designation requires BOTH a stable embedded Bun and owner-accepted field soak with no open incident
+class. The v1.0.0 baseline satisfied this on 2026-08-24: Bun 1.4.0 carried the native Windows stdin fix, the
+owner confirmed the current interactive build stable after the storage reboot, and the startup/exit lifecycle
+regression joined the existing input, fullscreen, sandbox, updater, provider-stream, and crash-recovery gates.
+
+This is a compatibility and rollback promise, not a claim that bugs are impossible. A new incident class ships
+as a new patch version after the same gates; a public tag is never rewritten.

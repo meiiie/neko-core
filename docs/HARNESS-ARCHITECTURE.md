@@ -1,290 +1,178 @@
-# Neko Core Harness Architecture
+# Neko Core harness architecture
 
-Status: Historical (Python contest harness; not the shipped TypeScript runtime)
-Last updated: 2026-06-08
+The harness is everything that turns a model completion into dependable work: context construction, the agent
+loop, tool contracts, permissions, persistence, recovery, provider transport, and the user-facing terminal or
+ACP adapter. Model quality matters, but the harness decides what the model can observe, do, remember, verify,
+and recover.
 
-Current architecture: [`process/ARCHITECTURE.md`](process/ARCHITECTURE.md).
+This document is the canonical map. Trust-boundary details live in
+[process/ARCHITECTURE.md](process/ARCHITECTURE.md); runnable evidence lives in
+[process/TESTING.md](process/TESTING.md).
 
-## Operating Thesis
-
-This project is not a prompt collection. It is a small inference harness with
-contracts, configuration, profiling, model invocation, validation, and traceable
-development artifacts.
-
-The design follows lessons from:
-
-- Wiii's self-harness and mode/workflow direction;
-- Codex-style task harnesses and typed protocol boundaries;
-- Odysseus/Goose-style provider inventory and workflow-pack thinking;
-- Anthropic's Claude Code large-codebase guidance on working through explicit
-  entry points, subproblems, and reusable project context.
-
-Reference:
-
-- https://claude.com/blog/how-claude-code-works-in-large-codebases-best-practices-and-where-to-start
-
-## Architecture
+## End-to-end turn
 
 ```text
-configs/default.json
-  -> loader
-  -> schema
-  -> configurable profiler
-  -> prompt strategy
-  -> provider-neutral chat client
-  -> answer normalizer
-  -> optional verifier/tournament
-  -> validation summary
-  -> pred.csv
-  -> dev trace/session artifacts
+user / ACP client
+      |
+      v
+session + project trust + skills + memory + runtime policy
+      |
+      v
+Agent.run / runUntilDone
+      |
+      +--> Provider.complete(messages, tool schemas, effort, abort signal)
+      |           |
+      |           +--> streamed text / reasoning metadata / tool calls / usage
+      |
+      +--> ToolRegistry preflight
+                  |
+                  +--> turn capability lease
+                  +--> permission + seatbelt + adversarial hook
+                  +--> durable pre-effect checkpoint
+                  +--> local, sandboxed, MCP, browser, Office, or computer executor
+                  +--> durable result/error checkpoint
+      |
+      v
+completion verification + session checkpoint + terminal/ACP update
 ```
 
-Runtime modules:
+Every effect returns through the same `ToolRegistry` boundary. Provider-managed tools, ACP clients, MCP
+servers, subagents, browser control, and optional support packs do not receive a second path around it.
 
-- `agents.py`: documents named harness roles, tool boundaries, artifact reads,
-  artifact writes, and handoff contracts for runtime and development roles.
-- `branding.py`: owns Neko Core identity, version string, and ASCII banner.
-- `capabilities.py`: lists runtime and development-only capabilities in one
-  registry.
-- `command_registry.py`: documents CLI/script command surfaces, examples, and
-  guardrails.
-- `doctor.py`: runs lightweight diagnostics similar to CLI doctor/status
-  workflows.
-- `project.py`: initializes project-local configuration under `.neko-core/`
-  so teams can tune workflows and markers without editing source files.
-- `workflows.py`: resolves named workflow profiles from config.
-- `scripts/verify.ps1`: dev-only verification runner that emits
-  command/output/result evidence and a final verdict.
-- `scripts/evaluate.ps1`: dev-only workflow comparison runner for stability,
-  trace review, trace comparison, harness-score review, and eval summary
-  artifacts.
-- `checkpoint.py`: writes qid-level checkpoints plus metadata so large runs can
-  resume without trusting stale input or config state.
-- `compare.py`: compares two trace-enabled runs using manifests and prediction
-  trace rows.
-- `config.py`: loads schema-versioned harness config, project-local config,
-  named runtime profiles, and CLI/env profile overrides.
-- `loader.py`: reads CSV/JSON input and maps it to `Problem`.
-- `manifest.py`: writes reproducible run metadata for trace-enabled runs.
-- `model_inventory.py`: probes provider model inventory and filters Bang C
-  eligible LLM plus embedding/rerank models from config.
-- `schema.py`: owns shared dataclasses.
-- `classifier.py`: profiles item shape using config markers and thresholds.
-- `prompting.py`: builds prompt variants from the profile.
-- `model_client.py`: provider factory and shared chat-client protocol.
-- `local_client.py`: local `llama.cpp`/GGUF provider for the self-contained
-  Gemma contest image.
-- `nvidia_client.py`: optional NVIDIA/OpenAI-compatible API provider for
-  development and future extension.
-- `policy.py`: audits runtime/development boundaries across command, tool, and
-  agent registries.
-- `solver.py`: strategy orchestration.
-- `tool_registry.py`: documents named tool contracts, permission class,
-  inputs, outputs, and safety guardrails.
-- `normalize.py`: strict answer-letter extraction.
-- `evaluation.py`: validates predictions and computes harness score.
-- `exporter.py`: writes contest output and dev traces.
-- `review.py`: reads dev traces after a run and reports reviewer findings
-  without invoking a model.
-- `risk.py`: collects deterministic prediction-risk signals from trace rows,
-  including tournament ties, agent disagreement, broad-marker guards, compound
-  profiles, and review-target confidence gaps.
+## Layers
 
-Dev traces are structured as agent steps on each prediction. Current roles are
-`classifier`, `solver`, `repair`, `synthesizer`, `tie-breaker`, `verifier`,
-and deterministic adjudicators. This gives the team a Claude Code-like review
-timeline without changing the contest artifact: `pred.csv` remains only
-`qid,answer`.
+| Layer | Responsibility | Key modules |
+|---|---|---|
+| Core domain | provider/tool ports, agent loop, cost, permissions, tool contracts | `src/core/` |
+| Adapters | provider transports, config, sessions, MCP, skills, sandbox, browser, Office | `src/adapters/` |
+| UI and protocols | Ink TUI, CLI commands, transcript renderer, ACP server | `src/ui/`, `src/adapters/acp.ts` |
+| Distribution | safe source bootstrap, compiler, installers, update and release workflows | `bin/`, `scripts/`, `.github/` |
 
-Trace review is intentionally separate from solving. `--review-trace` can be
-run after any trace-enabled workflow to catch low confidence, fallback paths,
-trace warnings, missing roles, blocked steps, and deterministic risk signals.
-This mirrors the execute-then-verify split from coding agents while keeping the
-contest runtime simple.
+Dependencies point inward. Core imports neither adapters nor Ink; `test/architecture.test.ts` enforces the
+rule. The public package root exposes the embeddable core without starting the CLI.
 
-Run manifests are written as `run-manifest.json` only for trace-enabled
-development runs. They capture config/input hashes and selected runtime options,
-so experiments can be compared without relying on memory or hidden local state.
-`--compare-traces` uses those manifests plus prediction trace rows to flag
-changed answers, input/config drift, confidence drift, and fallback drift.
+## Context contract
 
-`--run-dir <path>` creates a development run session. The CLI writes
-`output/pred.csv`, `traces/`, `run-report.md`, `review-tasks.md`, and
-`review-tasks.json` under that directory, then runs the trace reviewer against
-the session trace. It also writes `events.jsonl`, a structured timeline of run
-lifecycle events that future UI, task watchers, or subagents can consume without
-parsing prose reports. This gives the team one portable folder per experiment
-while keeping the final `/data` to `/output` contest contract unchanged.
-`--list-runs` and `--session <run-dir>` are read-only resume surfaces inspired
-by Claude Code's `/resume` and `/session`: they rediscover run folders from
-disk, summarize workflow/model/contract/review state, and print the next
-review or resolve command without relying on hidden process state. `--events`
-renders the run's event log as a compact timeline.
+Neko builds one bounded, cache-stable model request from:
 
-For larger public/private files, trace-enabled runs checkpoint each newly
-solved qid to `traces/predictions.checkpoint.jsonl`. `--resume` verifies the
-checkpoint metadata against the current input/config/workflow before reusing
-saved qids. The final `pred.csv` remains a validated full-run artifact, not a
-partial checkpoint.
+1. the base system prompt and current runtime policy;
+2. the exact trusted project snapshot (`AGENTS.md`, `NEKO.md`, and supported imports);
+3. global identity plus bounded memory/workflow/playbook indexes;
+4. the durable canonical message trajectory;
+5. turn-local capability and environment context;
+6. only the tool schemas available to this turn.
 
-`--review-tasks <trace-dir>` turns trace-review findings into an action queue.
-It is intentionally deterministic and model-free: subagents or teammates can
-pick up those tasks later, while the submission artifact stays unchanged.
-`scripts/resolve-tasks.ps1` is the first deterministic task runner: it reads
-that queue, reruns the qid-scoped tasks with a stronger workflow, records a
-task-resolution report plus JSON lifecycle artifact, and compares only the
-queued qids against the source run when baseline traces are available.
+Large observations are paged or clipped, old tool images are masked, and compaction preserves the original
+task, recent turns, open todos, and a structured summary. Controller messages persist locally but are removed
+from provider-visible conversation history. Credentials, raw chain-of-thought, UI state, and unrelated host
+files are never context just because they exist.
 
-`--agents` and `--agent <name>` expose a read-only role registry inspired by
-Claude Code-style agent surfaces. The registry names the current runner,
-classifier, solver, verifier, trace reviewer, task resolver, session inspector,
-and model inventory roles, but it does not spawn processes or mutate outputs.
-Its purpose is to make handoff boundaries explicit before adding heavier
-subagent workflows.
+## Agent loop and completion
 
-`--tools` and `--tool <name>` expose a read-only tool contract registry inspired
-by Claude Code's explicit tool registry. Runtime tools such as loader,
-classifier, solver, verifier, and exporter are separated from development tools
-such as trace review, model inventory, web research, and subagent review. The
-web and subagent entries are intentionally marked external and quarantined:
-they may inform tests or config, but they cannot directly write the contest
-artifact or perform privileged actions.
-
-`--commands` and `--command <name>` expose a read-only command registry inspired
-by Claude Code's slash-command surface. This registry is the map of how humans
-operate the harness: identity checks, local config, diagnostics, registries,
-runtime solving, run sessions, trace review, task resolution, verification, and
-evals. It gives contributors a stable command vocabulary before the project
-adds heavier interactive or subagent orchestration.
-
-`--policy` audits the registry boundary itself. It verifies that runtime tools
-are not external or quarantined, development-only outputs do not leak into
-runtime tools, web research and subagent review remain quarantined, and the run
-command/exporter preserve the contest artifact contract. The command is
-read-only, and the solve path enforces the same policy before loading input or
-model state. This is the first Claude Code-style permission layer for richer
-workflows.
-
-`--yolo` is the first bounded autonomous mode. It adapts the same lesson from
-Codex/Claude-style agents: autonomy is a named permission/workflow state, not
-an invisible prompt behavior. The preset selects `contest-strict` when no
-workflow is provided, enables compatible auto-resume, keeps checkpointing on,
-and writes review/session artifacts. It still runs the same policy gate, model
-eligibility check, prediction validator, and exporter contract. It does not
-submit leaderboard files, push git changes, delete files, or allow development
-tools such as web research/subagent review to write `pred.csv`.
-
-`scripts/evaluate.ps1` composes those run sessions into a higher-level eval
-session. Each workflow repeat gets its own run folder, then the eval report
-records trace review, trace comparison, and a selected candidate. This mirrors
-the agent pattern of separating execution, verification, and synthesis.
-
-## Why Config First
-
-Public test data is not the real problem. Private test can vary by language,
-wording, option count, context shape, or question style. Rules that assume one
-public-test format are fragile.
-
-The config layer stores:
-
-- input filename candidates;
-- output contract;
-- provider registry, runtime profiles, local Gemma model path, and optional API
-  model defaults;
-- allowed LLM and embedding/rerank families;
-- retry/timeout policy;
-- multilingual profiling markers;
-- classifier thresholds;
-- harness scoring weights.
-
-`neko --init` copies the canonical config to `.neko-core/config.json`.
-When no `--config` path is provided, the loader checks this project-local
-config before `configs/default.json`. This mirrors agent CLI practice: runtime
-source stays stable while a team can tune local harness profiles.
-
-Runtime profiles are also config-owned. The current config exposes
-`gemma26b-q4-local` for the self-contained contest image and
-`nvidia-gemma31b-api` for explicit API-based development. Select them through
-`--profile <name>` or `HACKC_PROFILE=<name>`, and inspect them through
-`--profiles`. This follows the same direction seen in Codex/Claude-style
-systems: base config, named profiles, local project config, environment/CLI
-overrides, and read-only doctor/status commands to show the effective runtime.
-
-When a new language or question marker appears, update config first. Only change
-code when the runtime contract itself needs a new capability.
-
-## Runtime Boundary
-
-Final submission runtime must remain narrow:
+`src/core/agent.ts` owns the loop:
 
 ```text
-read /data
-write /output/pred.csv
+complete -> validate tool calls -> execute -> observe -> complete
 ```
 
-It must not depend on:
+The loop includes:
 
-- web browsing;
-- Wiii backend services;
-- database/vector sidecars;
-- browser automation;
-- subagents;
-- local notebooks;
-- hidden trace state;
-- API keys committed to source.
+- preflight validation for tool names and required arguments;
+- eager execution only for safe calls whose order is already valid;
+- concurrent fan-out for independent read-only calls;
+- repetition, failure-streak, and unproductive-result guards;
+- explicit abort propagation through provider, hooks, tools, and sidecars;
+- token/context accounting across every provider call in the turn;
+- validation debt after mutations and a fresh-evidence completion gate;
+- bounded checkpoint continuation for committed partial streams;
+- closed-loop self-review through `runUntilDone`, with a hard step ceiling.
 
-For the current Bang C direction, the final scoring image should prefer
-`provider=local_llamacpp` with `Gemma 4 26B A4B QAT Q4_0 GGUF` already present
-under `/models`. The NVIDIA provider remains an explicit development/API
-extension, not a hidden scoring dependency.
+A provider error is not success, an interrupted mutation is not automatically replayable, and a confident
+final sentence cannot clear missing verification evidence.
 
-Development may use those tools to improve the harness, but the final container
-must be able to reproduce from source plus the allowed runtime environment.
+## Tool and authority contract
 
-## Extension Rules
+Tools declare schemas and permission classes in the core. The runtime then intersects four sources of
+authority:
 
-Add a new technique only through one of these extension points:
+1. base tool availability;
+2. the active mode (`default`, `accept-edits`, `plan`, or `auto`);
+3. a turn-scoped capability lease, such as reviewer-only or exact-file work;
+4. explicit launch authority such as `--yolo`.
 
-1. Config marker/threshold/model/rubric update.
-2. New runtime profile or provider-registry entry in config.
-3. New prompt variant in `prompting.py`.
-4. New profile rule in `classifier.py` backed by config.
-5. New strategy in `solver.py`.
-6. New validation or scoring check in `evaluation.py`.
+The intersection can narrow authority but cannot expand beyond the host policy. Project trust, credential
+denials, system paths, catastrophic shell refusal, exact outside-root consent, and sandbox health remain
+independent checks. Hooks run after deterministic preflight and before the effect; they cannot make a denied
+tool available.
 
-Avoid adding cross-cutting branches inside unrelated modules.
+Read-only Bash is still treated as a command execution surface. When sandboxed, it receives only the exact
+filesystem roots and one-call network domains granted by policy. An unhealthy configured sandbox fails closed.
 
-## Claude Code Patterns Adapted
+## Provider and protocol integrity
 
-Useful patterns from the local Claude Code snapshot:
+Providers implement the `Provider` port. They translate canonical messages and tools to a vendor protocol,
+stream deltas back, preserve opaque continuation data only for the exact endpoint/model that created it, and
+report usage. Retry decisions use a semantic commit barrier:
 
-- Keep the bootstrap/entrypoint thin and fast.
-- Put commands such as version, doctor, and status before the expensive solve
-  path.
-- Treat tool/workflow registries as explicit capability lists, not scattered
-  conditionals.
-- Separate diagnostics, runtime execution, and UI rendering.
-- Use feature/config gates for optional capabilities instead of hard-coding
-  private-test assumptions.
+- before visible output or a ready tool call, a bounded transport retry is safe;
+- after a committed semantic event, recovery continues from the durable checkpoint rather than replaying the
+  request blindly;
+- malformed protocol data, user aborts, and unknown mutation outcomes are never converted into success.
 
-For Neko Core, the first adapted slices are `--doctor`, `--capabilities`,
-`--agents`, `--agent`, `--tools`, `--tool`, `--commands`, `--command`,
-`--policy`, `--list-workflows`, `--yolo`, `scripts/verify.ps1`, and
-`scripts/evaluate.ps1`.
-They prove config, contract, model, key presence, input discovery, the
-runtime/development boundary, role handoffs, tool guardrails, command
-guardrails, policy boundaries, verification evidence, and workflow stability
-without running inference unless explicitly requested. Future work should add
-subagent-style evaluation reviewers in the same style, while keeping the final
-Docker contract narrow.
+Subscription OAuth and API-key billing are separate profiles. Sidecar agents are isolated behind a Neko-owned
+tool proxy, so their native tool surfaces cannot bypass the registry.
 
-## Wiii Reuse Path
+## Durable sessions and crash recovery
 
-If this harness proves useful, Wiii should import the pattern, not the contest
-logic:
+`src/adapters/session.ts` stores versioned sessions with atomic primary/backup publication and one active
+writer lease. Checkpoints occur when a user prompt is accepted, around tool effects, on provider checkpoints,
+and at turn termination.
 
-- schema-versioned workflow config;
-- domain-independent profiling contracts;
-- strict output validators;
-- dev-only trace summaries;
-- runtime boundaries that keep UI, tools, memory, and model calls explicit.
+The canonical trajectory includes user and assistant messages, stable tool-call IDs, tool results/errors,
+compaction capsules, provider continuation state, model/profile/mode, and turn state. A call that was durable
+before a crash but has no durable result is sealed as `unknown_outcome`; Neko inspects real state before any
+possible retry.
+
+ACP uses the same store. `session/load` replays history to a client; `session/resume` rebuilds model context
+without replay when the client already has the transcript.
+
+## Terminal lifecycle
+
+The fullscreen TUI owns an alternate-screen buffer. Startup enters it before Ink's first render and primes the
+small welcome row so header and composer appear in one frame. The frame differ owns the scrollable transcript
+band; Ink owns the stable chrome and input.
+
+On exit, React/Ink completes its final erase writes while the alternate buffer is still active. Neko then
+disables mouse/focus/keyboard modes, restores the primary buffer and title, removes its emergency exit hook,
+and prints one CRLF-anchored resume hint. The ConPTY lifecycle regression asserts this byte ordering on both
+the incremental and fallback renderers.
+
+## Extension seams
+
+- **Model or compatible endpoint:** add or override a config profile first.
+- **New provider protocol:** implement `Provider`; keep vendor types in an adapter.
+- **Native tool:** add the schema and permission class, then its bounded runtime implementation and tests.
+- **MCP surface:** compose it through `mcp-compose.ts`; duplicate names fail closed.
+- **Skill:** ship Markdown plus bounded assets/scripts; the binary embeds built-ins and user-global overrides
+  live in `~/.neko-core/skills`.
+- **Client UI:** use ACP instead of importing terminal components.
+
+No extension may create a second credentials store in the transcript, a second approval model, or a direct
+effect path from a provider to the host.
+
+## Evidence and release bar
+
+Harness changes require targeted regression tests plus the full gate:
+
+```bash
+bun run typecheck
+bun run lint
+bun test
+node bin/neko-source.cjs doctor
+node bin/neko-source.cjs policy
+bun run build
+```
+
+Terminal/render changes additionally run the real ConPTY lifecycle and ghost/typing probes. Security and
+benchmark claims must use the frozen public evaluation contract rather than self-reported success. The exact
+release procedure is [process/RELEASE.md](process/RELEASE.md).
