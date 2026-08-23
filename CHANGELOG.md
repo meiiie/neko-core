@@ -6,6 +6,12 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Selecting a soft-wrapped prompt no longer loses fully covered rows.** Dragging from the second
+  visual row to the first, or in the opposite direction, keeps every covered row highlighted and copies
+  the complete codepoint range. The frame-coalesced selection path remains unchanged.
+
 ## [0.24.19] - 2026-08-23
 
 ### Changed

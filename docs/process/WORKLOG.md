@@ -3,6 +3,19 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-23 - Soft-wrapped prompt selection correctness
+
+A field screenshot exposed a renderer-only ambiguity that unit geometry and transcript selection tests
+did not cover. `selectionRuns()` correctly represents a fully selected visual row as one selected run,
+but TextInput's one-run fast path treated it as plain text. A drag across two rows therefore appeared to
+drop whichever row was covered end to end, even though the underlying clipboard range could still contain
+it. The fast path now applies only when no run is selected.
+
+The fullscreen terminal simulation now enters the exact two-row prompt path, drags bottom-to-top and
+top-to-bottom, and decodes the OSC 52 payload to prove the complete draft is copied both ways. Its colored
+variant also asserts that a fully covered row emits inverse highlighting. The 16 ms coalescing path and
+mouse coordinate geometry are unchanged.
+
 ## 2026-08-23 - Clipboard and mouse-selection latency (v0.24.19)
 
 Windows Alt+V no longer starts a synchronous PowerShell/.NET image pipeline on Ink's input thread. A

@@ -280,6 +280,62 @@ test("fullscreen drag-select: uniform highlight, copies on release, PERSISTS for
   await tick(50);
 }, 30000);
 
+test("fullscreen prompt drag-select copies every soft-wrapped row in both directions", async () => {
+  const vt = new VirtualTerminal(190, 30);
+  const out = new FakeTtyOut(190, 30, vt);
+  const stdin = new FakeStdin();
+  const differ = new FrameDiffer();
+  // SAFETY: FakeTtyOut implements the writable TTY surface exercised by the alt-screen guard.
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  const app = renderFS(
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+    React.createElement(ChatApp as any, {
+      yolo: true,
+      provider: { complete: async () => ({ content: "", tool_calls: [] }) },
+      sessionId: "prompt-soft-wrap-select",
+      frameDiffer: differ,
+      preAltDispose,
+    }),
+    // SAFETY: fake stdin/stdout implement the exact TTY methods used by the renderer wrapper.
+    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+  );
+  const draft = "ban nghi sao hehehe " + Array.from({ length: 7 }, (_, i) => `[Pasted text #${i + 1} +2 lines]`).join("");
+  const copied = () => {
+    const matches = [...out.all.matchAll(/\x1b\]52;c;([A-Za-z0-9+/=]*)\x07/g)];
+    return matches.length ? Buffer.from(matches.at(-1)![1], "base64").toString("utf8") : "";
+  };
+  try {
+    await tick(350);
+    stdin.push(draft);
+    for (let waited = 0; waited < 2000 && !vt.text().includes("#7 +2 lines]"); waited += 25) await tick(25);
+    const rows = vt.lines();
+    const firstY = rows.findIndex((line) => line.includes("ban nghi")) + 1;
+    const lastY = rows.findIndex((line) => line.includes("#7 +2 lines]")) + 1;
+    expect(lastY).toBeGreaterThan(firstY);
+    const firstX = rows[firstY - 1].indexOf("ban nghi") + 1;
+    const lastX = rows[lastY - 1].indexOf("#7 +2 lines]") + "#7 +2 lines]".length + 1;
+
+    out.all = "";
+    stdin.push(`\x1b[<0;${lastX};${lastY}M`); await tick(25);
+    stdin.push(`\x1b[<32;${firstX};${firstY}M`); await tick(25);
+    stdin.push(`\x1b[<0;${firstX};${firstY}m`); await tick(80);
+    // NO_COLOR is deliberately set in some non-interactive test hosts. In a color-capable run, this
+    // proves a fully covered visual row still emits the inverse highlight instead of taking the plain
+    // one-run fast path. The clipboard assertion below is color-independent.
+    if (!process.env.NO_COLOR || process.env.FORCE_COLOR) expect(out.all).toContain("\x1b[7m");
+    expect(copied()).toBe(draft);
+
+    out.all = "";
+    stdin.push(`\x1b[<0;${firstX};${firstY}M`); await tick(25);
+    stdin.push(`\x1b[<32;${lastX};${lastY}M`); await tick(25);
+    stdin.push(`\x1b[<0;${lastX};${lastY}m`); await tick(80);
+    expect(copied()).toBe(draft);
+  } finally {
+    app.unmount();
+    await tick(50);
+  }
+}, 30000);
+
 test("fullscreen drag-select keeps auto-scrolling while the pointer is held still at the edge", async () => {
   const vt = new VirtualTerminal(100, 30);
   const out = new FakeTtyOut(100, 30, vt);

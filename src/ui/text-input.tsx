@@ -432,7 +432,9 @@ export function TextInput(props: {
       const sel = props.selection ?? null;
       const seg = (start: number, end: number, key: string) => {
         const runs = selectionRuns(start, end, sel);
-        if (runs.length <= 1) return plain(start, end);
+        // One run can mean either "nothing selected" OR "this whole visual row is selected".
+        // Only the former may take the plain fast path.
+        if (!runs.some((run) => run.on)) return plain(start, end);
         return (
           <Text key={key}>
             {runs.map((r, ri) => (r.on
