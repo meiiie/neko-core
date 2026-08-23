@@ -3,7 +3,7 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
-## 2026-08-23 - Soft-wrapped prompt selection correctness
+## 2026-08-23 - Soft-wrapped prompt selection correctness (v0.24.20)
 
 A field screenshot exposed a renderer-only ambiguity that unit geometry and transcript selection tests
 did not cover. `selectionRuns()` correctly represents a fully selected visual row as one selected run,

@@ -6,6 +6,8 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.20] - 2026-08-23
+
 ### Fixed
 
 - **Selecting a soft-wrapped prompt no longer loses fully covered rows.** Dragging from the second
