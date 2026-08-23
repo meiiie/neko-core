@@ -94,6 +94,8 @@ test("system prompt requires observable acceptance criteria before implementatio
   expect(DEFAULT_SYSTEM_PROMPT).toContain("don't inventory it with both ls and glob");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("run the full suite once after the last edit");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("focused-first only for diagnosis or an expensive suite");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("Never resurrect an unrelated older task");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("foreground sleep/poll loop");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("Verify from a CLEAN state");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("not disposable validation artifacts");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("a clean run recreates an output");

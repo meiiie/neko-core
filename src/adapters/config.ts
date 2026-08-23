@@ -31,7 +31,7 @@ export interface Profile {
   /** UI grouping: several auth routes can belong to one provider brand (OpenAI API + ChatGPT OAuth). */
   family?: string;
   label?: string;
-  auth?: "api_key" | "chatgpt_oauth" | "gemini_oauth" | "kimi_oauth" | "opencode_oauth" | "none";
+  auth?: "api_key" | "chatgpt_oauth" | "gemini_oauth" | "grok_oauth" | "kimi_oauth" | "opencode_oauth" | "none";
   /** Models known to the auth route when it has no model-list endpoint. `/model <id>` still accepts newer ids. */
   models?: string[];
   model_context?: Record<string, number>;
@@ -246,6 +246,22 @@ export const DEFAULTS: any = {
     mistral: { provider: "openai_compat", base_url: "https://api.mistral.ai/v1", model: "mistral-large-latest", key_env: "MISTRAL_API_KEY" },
     together: { provider: "openai_compat", base_url: "https://api.together.xyz/v1", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo", key_env: "TOGETHER_API_KEY" },
     fireworks: { provider: "openai_compat", base_url: "https://api.fireworks.ai/inference/v1", model: "accounts/fireworks/models/llama-v3p3-70b-instruct", key_env: "FIREWORKS_API_KEY" },
+    // xAI exposes two intentionally separate billing routes. `grok` uses the user's Grok
+    // subscription through xAI's published device-OAuth + cli-chat-proxy contract; `xai` and
+    // `grok-build` remain pay-as-you-go API-key profiles and never consume subscription tokens.
+    grok: {
+      provider: "responses",
+      family: "xai",
+      label: "Grok subscription",
+      auth: "grok_oauth",
+      base_url: "https://cli-chat-proxy.grok.com/v1",
+      model: "grok-4.6",
+      models: ["grok-4.6", "grok-4.5"],
+      model_context: { "grok-4.6": 500_000, "grok-4.5": 500_000 },
+      context_window: 500_000,
+      effort_ceiling: "xhigh",
+      vision: false,
+    },
     xai: {
       provider: "responses",
       family: "xai",
@@ -450,6 +466,7 @@ export class NekoConfig {
   get usesGeminiCli(): boolean { return this.provider === "gemini_cli"; }
   get usesGeminiAuth(): boolean { return this.usesGeminiCli && this.profile != null && this.profiles[this.profile]?.auth === "gemini_oauth"; }
   get usesKimiAuth(): boolean { return this.provider === "kimi" && this.profile != null && this.profiles[this.profile]?.auth === "kimi_oauth"; }
+  get usesGrokAuth(): boolean { return this.provider === "responses" && this.profile != null && this.profiles[this.profile]?.auth === "grok_oauth"; }
   get usesOpenCodeAuth(): boolean { return this.provider === "opencode_account" && this.profile != null && this.profiles[this.profile]?.auth === "opencode_oauth"; }
   get model(): string { return String(this.data.model ?? "").trim(); }
   /** Model for a VISION pre-pass (reading an image into text the main agent can use): `vision_model`

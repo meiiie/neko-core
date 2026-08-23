@@ -44,6 +44,7 @@ import { describeImage } from "../adapters/vision.ts";
 import { clearApiKey, setActiveProfile, setApiKey } from "../adapters/project.ts";
 import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt, openBrowser } from "../adapters/chatgpt-auth.ts";
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginGemini } from "../adapters/gemini-cli.ts";
+import { clearGrokCredentials, hasGrokCredentials, loginGrok } from "../adapters/grok-auth.ts";
 import { clearKimiCredentials, hasKimiCredentials, loginKimi } from "../adapters/kimi-auth.ts";
 import { clearOpenCodeCredentials, hasOpenCodeCredentials, loginOpenCode } from "../adapters/opencode-auth.ts";
 import { installGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
@@ -255,7 +256,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       out.push({ id: idRef.current++, kind: "info", text: "Google is not configured - type /login for a Gemini API key or Code Assist Enterprise." });
     } else if (cfg.usesKimiAuth && !hasKimiCredentials()) {
       out.push({ id: idRef.current++, kind: "info", text: "Kimi Code is not signed in - type /login to connect your account (no API key)." });
-    } else if (!cfg.apiKey && !cfg.isLocalEndpoint && !cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.usesKimiAuth) {
+    } else if (cfg.usesGrokAuth && !hasGrokCredentials()) {
+      out.push({ id: idRef.current++, kind: "info", text: "Grok is not signed in - type /login to connect your subscription (no XAI_API_KEY billing)." });
+    } else if (!cfg.apiKey && !cfg.isLocalEndpoint && !cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.usesKimiAuth && !cfg.usesGrokAuth && !cfg.usesOpenCodeAuth) {
       out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
     }
     if (browserHint) {
@@ -579,8 +582,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   const registryRef = useRef<ToolRegistry | null>(null);
   if (!registryRef.current) {
+    const baseRegistry = new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub);
+    baseRegistry.explicitYolo = yolo;
     registryRef.current = configureToolRegistry(
-      new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub),
+      baseRegistry,
       cfg,
     );
     if (resumedRef.current) registryRef.current.todos = recoverTodos(resumedRef.current.messages); // keep the tracker + registry in sync on startup resume
@@ -2045,11 +2050,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       };
       const apiProfiles = new Set<string>();
       for (const [name, profile] of Object.entries(cfg.profiles)) {
-        if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "kimi_oauth" || profile.auth === "opencode_oauth" || profile.auth === "none") continue;
+        if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "grok_oauth" || profile.auth === "kimi_oauth" || profile.auth === "opencode_oauth" || profile.auth === "none") continue;
         try { if (loadConfig({ profile: name }).apiKey) apiProfiles.add(name); } catch { /* status only */ }
       }
       const openAuthRoutes = (family: string) => {
-        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), kimi: hasKimiCredentials(), opencode: hasOpenCodeCredentials(), apiProfiles });
+        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), grok: hasGrokCredentials(), kimi: hasKimiCredentials(), opencode: hasOpenCodeCredentials(), apiProfiles });
         const selectRoute = async (route: { id: string }) => {
           setOverlay(null);
           const profile = cfg.profiles[route.id];
@@ -2116,6 +2121,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             }
             return;
           }
+          if (profile?.auth === "grok_oauth") {
+            setBusy(true);
+            addLine("info", "Opening official xAI device sign-in for Grok in your browser...");
+            try {
+              const credentials = await loginGrok({
+                notify: (message) => addLine("info", message),
+                openUrl: openUrl ?? openBrowser,
+              });
+              activate(route.id);
+              addLine("info", `Grok connected${credentials.email ? ` as ${credentials.email}` : ""}. Neko owns and refreshes this subscription session; XAI_API_KEY billing remains separate. Type /model to load the account catalog.`);
+            } catch (error) {
+              addLine("error", `Grok sign-in failed: ${error instanceof Error ? error.message : error}`);
+            } finally {
+              setBusy(false);
+            }
+            return;
+          }
           if (profile?.auth === "opencode_oauth") {
             setBusy(true);
             addLine("info", "Opening official OpenCode Console device sign-in in your browser...");
@@ -2147,7 +2169,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
         setOverlay({
-          title: family === "openai" ? "OpenAI - choose how to sign in" : family === "google" ? "Google - choose how to sign in" : family === "zai" ? "Z.AI - choose API route" : family === "opencode" ? "OpenCode - choose how to sign in" : `Sign in to ${family}`,
+          title: family === "openai" ? "OpenAI - choose how to sign in" : family === "google" ? "Google - choose how to sign in" : family === "xai" ? "xAI - choose subscription or API" : family === "zai" ? "Z.AI - choose API route" : family === "opencode" ? "OpenCode - choose how to sign in" : `Sign in to ${family}`,
           items: routes,
           onSelect: (route) => { void selectRoute(route); },
         });
@@ -2178,6 +2200,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       if (cfg.usesKimiAuth) {
         addLine("info", `${clearKimiCredentials()} Kimi API keys and other provider sessions were left untouched.`);
+        agentRef.current?.setProvider(getProvider(cfg));
+        return;
+      }
+      if (cfg.usesGrokAuth) {
+        addLine("info", `${clearGrokCredentials()} XAI_API_KEY and other provider sessions were left untouched.`);
         agentRef.current?.setProvider(getProvider(cfg));
         return;
       }

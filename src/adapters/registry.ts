@@ -143,7 +143,7 @@ export interface Capability {
   detail: string;
 }
 
-export function collectCapabilities(config: NekoConfig): Capability[] {
+export function collectCapabilities(config: NekoConfig, explicitYolo = false): Capability[] {
   const auto = config.mode === "auto";
   return [
     { name: "agent_loop", klass: "agent", status: "enabled", detail: `complete -> tool-calls -> observe, capped at max_steps=${config.maxSteps}` },
@@ -157,13 +157,24 @@ export function collectCapabilities(config: NekoConfig): Capability[] {
       status: "enabled",
       // "Gated-but-sandboxed" is a NAMED state like mode=auto: the gate stays in the contract,
       // the prompt is skipped only while confinement is LIVE (primitive + provisioning).
-      detail: config.sandbox && config.sandboxAutoApprove && sandboxActive()
-        ? `bash (gated; explicitly auto-approved while OS-sandboxed: writes confined to workspace/temp plus explicit additional_write_roots, host reads remain available; sandbox_auto_approve=false to prompt)`
-        : "bash (gated: needs approval)",
+      detail: explicitYolo
+        ? config.sandbox && sandboxActive()
+          ? "bash (approval-free under explicit --yolo; OS-sandboxed; hard seatbelts remain)"
+          : "bash (approval-free under explicit --yolo when runnable; doctor reports confinement; hard seatbelts remain)"
+        : config.sandbox && config.sandboxAutoApprove && sandboxActive()
+          ? `bash (gated; explicitly auto-approved while OS-sandboxed: writes confined to workspace/temp plus explicit additional_write_roots, host reads remain available; sandbox_auto_approve=false to prompt)`
+          : "bash (gated: needs approval)",
     },
     { name: "permission_modes", klass: "agent", status: "enabled", detail: "default / accept-edits / plan / auto (Shift+Tab to cycle in chat)" },
-    { name: "approval_gate", klass: "agent", status: "enabled", detail: `mode=${config.mode}` },
-    { name: "bounded_autopilot", klass: "agent", status: auto ? "enabled" : "disabled", detail: "mode=auto (--yolo): bounded gated tools run without prompting; host computer control still requires explicit consent" },
+    { name: "approval_gate", klass: "agent", status: "enabled", detail: explicitYolo ? "yolo (explicit --yolo; mode=auto)" : `mode=${config.mode}` },
+    {
+      name: "bounded_autopilot",
+      klass: "agent",
+      status: auto ? "enabled" : "disabled",
+      detail: explicitYolo
+        ? "explicit --yolo: approval prompts are disabled; hard credential/system/catastrophic seatbelts remain"
+        : "mode=auto: bounded gated tools run without prompting; host computer control still requires explicit consent",
+    },
     { name: "introspection", klass: "cli", status: "enabled", detail: "tools/agents/commands/capabilities/policy registries" },
     { name: "meeting_companion", klass: "tool", status: "enabled", detail: "explicit-consent local capture; optional local transcription; timestamped evidence" },
   ];
@@ -202,7 +213,7 @@ const MUST_GATE_ACTIONS = {
   playbook: ["add", "revise", "remove"],
 };
 
-export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRuntimeStatus): PolicyReport {
+export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRuntimeStatus, explicitYolo = false): PolicyReport {
   const tools = listTools();
   const agents = listAgents();
   const commands = listCommands();
@@ -252,7 +263,14 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
   }
 
   if (config.mode === "auto") {
-    findings.push({ severity: "warn", code: "bounded_autonomy_on", subject: "mode", message: "mode=auto (--yolo): gated tools run without prompting. Named state, not hidden." });
+    findings.push({
+      severity: "warn",
+      code: "bounded_autonomy_on",
+      subject: "mode",
+      message: explicitYolo
+        ? "explicit --yolo: approval prompts are disabled. Hard credential/system/catastrophic seatbelts remain."
+        : "mode=auto: bounded gated tools run without prompting, while host-boundary prompts remain. Named state, not hidden.",
+    });
     if (!config.sandbox || sandboxKind === "none") {
       findings.push({
         severity: "warn",
@@ -294,7 +312,9 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
       severity: "info",
       code: "reads_outside_root",
       subject: "read_outside_root",
-      message: "Reads may resolve outside the project directory. Structured writes are automatic only in the project and exact additional_write_roots; an ordinary target elsewhere requires one human confirmation for that exact change. This transient authority never reaches sandboxed Bash. System and credential paths (SSH, .env, key material, browser stores), symlink/junction escapes, and hardlink aliases stay refused. ~/.neko-core/config.json is additionally JSON-validated after consent. Set read_outside_root:false for a hard read wall.",
+      message: explicitYolo
+        ? "Reads may resolve outside the project directory. Exact ordinary structured writes are pre-authorized by explicit --yolo for this launch; this authority never reaches sandboxed Bash. System and credential paths (SSH, .env, key material, browser stores), symlink/junction escapes, and hardlink aliases stay refused. ~/.neko-core/config.json is additionally JSON-validated after every write. Set read_outside_root:false for a hard read wall."
+        : "Reads may resolve outside the project directory. Structured writes are automatic only in the project and exact additional_write_roots; an ordinary target elsewhere requires one human confirmation for that exact change. This transient authority never reaches sandboxed Bash. System and credential paths (SSH, .env, key material, browser stores), symlink/junction escapes, and hardlink aliases stay refused. ~/.neko-core/config.json is additionally JSON-validated after consent. Set read_outside_root:false for a hard read wall.",
     });
   }
 
@@ -304,7 +324,9 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
     subject: "filesystem",
     message: `Additional write capabilities: ${config.additionalWriteRoots
       .map((path) => path === config.researchWriteRoot ? "~/.neko-core/research" : path)
-      .join(", ")}. Auto mode skips prompts inside these exact roots; an ordinary target elsewhere still needs exact human consent.`,
+      .join(", ")}. Auto mode skips prompts inside these exact roots; ${explicitYolo
+        ? "explicit --yolo pre-authorizes an exact ordinary target elsewhere for this launch"
+        : "an ordinary target elsewhere still needs exact human consent"}.`,
   });
 
   const verdict = findings.some((f) => f.severity === "fail")

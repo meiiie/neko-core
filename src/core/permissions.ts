@@ -4,7 +4,8 @@
  *   default       prompt before write/edit/bash
  *   accept-edits  auto-approve file edits; still prompt for bash
  *   plan          read-only: block all writes/commands (propose a plan)
- *   auto (yolo)   auto-approve bounded tools; host desktop control still requires consent
+ *   auto          auto-approve bounded tools; host desktop control still requires consent
+ *   --yolo        explicit startup authority: no approval prompts while mode remains auto
  *
  * Safe tools (read_file/search/glob/ls) are always allowed in every mode.
  */
@@ -17,7 +18,7 @@ export const MODES: { mode: PermissionMode; label: string; detail: string }[] = 
   { mode: "default", label: "default", detail: "prompt before write/edit/bash" },
   { mode: "accept-edits", label: "accept-edits", detail: "auto-approve file edits; prompt for bash" },
   { mode: "plan", label: "plan", detail: "read-only; block all writes/commands" },
-  { mode: "auto", label: "auto (yolo)", detail: "auto-approve bounded tools; prompt for host computer control" },
+  { mode: "auto", label: "auto", detail: "auto-approve bounded tools; prompt for host computer control" },
 ];
 
 const MODE_ORDER: PermissionMode[] = ["default", "accept-edits", "plan", "auto"];
@@ -32,13 +33,12 @@ export function decide(
   mode: PermissionMode,
   spec: ToolSpec,
   args: any = {},
-  opts: { sandboxedBash?: boolean } = {},
+  opts: { sandboxedBash?: boolean; yolo?: boolean } = {},
 ): Decision {
-  // Desktop control crosses out of the workspace/sandbox and acts as the logged-in user. `auto`
-  // grants bounded coding autonomy, not ambient authority over the host GUI. A real approval gate
-  // (including an explicit per-session "always allow computer" choice) is required every time the
-  // host has not already recorded that consent; plan mode remains a hard deny.
-  if (spec.name === "computer") return mode === "plan" ? "deny" : "prompt";
+  // Desktop control crosses out of the workspace/sandbox and acts as the logged-in user. Ordinary
+  // `auto` grants bounded coding autonomy, not ambient host-GUI authority. Explicit `--yolo` is the
+  // up-front session consent; plan mode remains a hard deny after the user cycles away from auto.
+  if (spec.name === "computer") return mode === "plan" ? "deny" : mode === "auto" && opts.yolo ? "allow" : "prompt";
   if (effectivePermission(spec, args) !== GATED) return "allow";
   switch (mode) {
     case "auto":

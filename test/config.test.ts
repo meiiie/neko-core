@@ -121,6 +121,13 @@ test("Claude and xAI use current official native API profiles", () => {
   expect(grok.model).toBe("grok-4.5");
   expect(grok.contextWindow).toBe(1_000_000);
 
+  const subscription = loadConfig({ path: tmpConfig({}), profile: "grok" });
+  expect(subscription.provider).toBe("responses");
+  expect(subscription.usesGrokAuth).toBe(true);
+  expect(subscription.baseUrl).toBe("https://cli-chat-proxy.grok.com/v1");
+  expect(subscription.model).toBe("grok-4.6");
+  expect(subscription.contextWindow).toBe(500_000);
+
   const build = loadConfig({ path: tmpConfig({}), profile: "grok-build" });
   expect(build.provider).toBe("responses");
   expect(build.model).toBe("grok-build-0.1");

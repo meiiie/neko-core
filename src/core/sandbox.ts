@@ -566,7 +566,7 @@ export function withSrtStateVolumeGuidance(raw: string): string {
  * Deliberately does NOT fire on a plain single-file delete (`rm file.txt`) - that keeps ordinary
  * cleanup convenient; it fires on the mass/irreversible forms (recursive/force/glob rm, git history
  * or worktree wipers, find -delete, script-driven deletion, shred/truncate). Users who want zero
- * prompts still have "always allow bash" and mode=auto (yolo). */
+ * prompts still have "always allow bash" and mode=auto. Explicit --yolo is tracked separately. */
 export function destructiveInWorkspace(command: string): string | null {
   const c = String(command).replace(/\s+/g, " ").trim();
   if (/\brm\b/.test(c) && (/\s-[a-z]*r/i.test(c) || /\s-[a-z]*f/i.test(c) || /[*?]/.test(c))) return "recursive/force/wildcard delete (rm)";

@@ -3,6 +3,49 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-23 - Explicit yolo authority and turn-scope continuity (v0.24.18)
+
+A field transcript exposed two independent harness failures. After completing a new FPT/market request,
+the model resurrected an unrelated dev-server task from older history, then held a single buffered Bash
+poll for 160 seconds. Separately, CLI `--yolo` had been flattened into ordinary `mode=auto`, so host
+computer, exact outside-root writes, the Neko policy file, and plan exit could still wait for approval.
+
+Neko now carries an explicit-yolo bit through CLI/TUI runtime composition and child registries. While its
+live mode remains auto, those approval surfaces execute without calling the gate; Shift+Tab away from auto
+revokes the authority. Credential/system targets, project trust, sandbox confinement, policy JSON
+validation, and catastrophic-command refusals are unchanged. Diagnostics and the model-facing runtime
+block distinguish ordinary auto from explicit yolo. The stable prompt treats a clear later replacement as
+the current scope, and ToolRegistry deterministically blocks foreground sleep/poll loops with a declared
+budget above 30 seconds in favor of background jobs plus bounded probes.
+
+Verification: focused permission/runtime/diagnostic/UI regressions passed; lint, both TypeScript compilers,
+diff hygiene, doctor/policy/capability truth checks, the production compile, UI probe, real-PTY input probe,
+and ACP smoke passed. The full suite reached 1,467 passes and 12 intentional skips; its only failure was a
+host `uv_spawn EPERM` while starting the last disposable WPF PowerShell fixture after earlier WPF cases had
+passed. The exact failed test then passed 1/1 in isolation. Bun canary repeated its known non-fatal
+`tsconfig.build.json` directory-mismatch diagnostic while producing the binary successfully.
+
+## 2026-08-23 - Official Grok subscription OAuth (v0.24.18)
+
+The earlier API-key-only xAI boundary became stale when SpaceXAI published Grok Build and documented its
+public device-OAuth plus `cli-chat-proxy` contract. Neko now has a separate `grok` profile for subscription
+quota while preserving `xai` and `grok-build` as pay-as-you-go API-key profiles. `neko login xai` and the
+guided `/login` picker request a Neko-owned RFC 8628 session, store it atomically in
+`~/.neko-core/grok-auth.json`, refresh it before expiry, and retry exactly once after a 401. Neko sends its
+own version instead of claiming to be Grok Build. `/model` reads the account-visible catalog and accepts
+only Responses-compatible entries. The agent read/context denylist now covers both the new Grok file and
+the previously omitted OpenCode credential file. Research and clean-room boundaries are recorded in
+`docs/research/grok-subscription-2026-08-23.md`.
+
+Verification: `oxlint`, both TypeScript compilers, the 77-test Grok/config/security slice, doctor/config for
+the signed-out `grok` profile, policy, focused secret scan, diff check, production compile, UI probe, real-PTY
+input probe, and ACP smoke pass. The first full run passed 1,461/1,461 runnable tests. After the lint-only
+header construction cleanup, the second full run passed 1,459 tests and reached two unrelated WPF fixtures;
+Windows then refused their repeated PowerShell spawn with host `EPERM`. Both fixtures had passed in the first
+run, and the same isolated rerun passed its seven non-WPF cases before the host repeated that `EPERM`. Bun
+canary also repeated its known non-fatal `tsconfig.build.json` directory-mismatch diagnostic while still
+producing the binary and passing every artifact smoke.
+
 ## 2026-08-22 - Stream continuation and SRT teardown latency (v0.24.17)
 
 Provider reliability now uses one typed semantic-commit contract across OpenAI-compatible Chat

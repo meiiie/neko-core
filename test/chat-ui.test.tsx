@@ -637,6 +637,25 @@ test("default mode: gated bash shows the approval box, 'y' approves", async () =
   }
 }, 40000);
 
+test("explicit yolo executes gated bash without rendering an approval box", async () => {
+  const oldSandbox = process.env.NEKO_SANDBOX;
+  process.env.NEKO_SANDBOX = "0";
+  try {
+    const provider = new MockProvider([
+      { content: null, tool_calls: [{ id: "c1", name: "bash", arguments: { command: "echo yolo-ok" } }] },
+      { content: "Yolo finished.", tool_calls: [] },
+    ]);
+    const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
+    stdin.write("run without approval"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("Yolo finished"))).toBe(true);
+    expect(frames.join("\n")).not.toContain("Approve bash?");
+    unmount();
+  } finally {
+    if (oldSandbox === undefined) delete process.env.NEKO_SANDBOX;
+    else process.env.NEKO_SANDBOX = oldSandbox;
+  }
+}, 40000);
+
 test("a pending approval plays one Neko alert only after the terminal reports focus-out", async () => {
   const oldSandbox = process.env.NEKO_SANDBOX;
   const oldMode = process.env.NEKO_MODE;

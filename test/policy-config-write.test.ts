@@ -71,3 +71,21 @@ test("any OTHER outside-root file also needs exact consent", async () => {
   expect(out).toContain("Denied by user");
   expect(readFileSync(ordinary, "utf-8")).toBe("keep");
 });
+
+test("explicit yolo skips policy and outside-write prompts while retaining validation", async () => {
+  const cfgPath = join(home, ".neko-core", "config.json");
+  const fs = await import("node:fs");
+  fs.mkdirSync(join(home, ".neko-core"), { recursive: true });
+  writeFileSync(cfgPath, JSON.stringify({ model: "before" }), "utf-8");
+  const ordinary = join(home, "notes.txt");
+  writeFileSync(ordinary, "before", "utf-8");
+  let asked = 0;
+  const reg = new ToolRegistry(root, "auto", () => { asked++; return false; });
+  reg.explicitYolo = true;
+
+  expect(String(await reg.execute("write_file", { path: cfgPath, content: JSON.stringify({ model: "after" }) }))).toContain("Wrote ");
+  expect(String(await reg.execute("write_file", { path: ordinary, content: "after" }))).toContain("Wrote ");
+  expect(asked).toBe(0);
+  expect(JSON.parse(readFileSync(cfgPath, "utf-8")).model).toBe("after");
+  expect(readFileSync(ordinary, "utf-8")).toBe("after");
+});

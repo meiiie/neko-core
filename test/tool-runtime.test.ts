@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
 
-import { __formatBashExitForTest, __taskkillResultSucceededForTest, __windowsDescendantSnapshotForTest, type ApprovalGate, ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
+import { __formatBashExitForTest, __taskkillResultSucceededForTest, __windowsDescendantSnapshotForTest, type ApprovalGate, foregroundPollingReason, ToolRegistry, todosContextBlock } from "../src/core/tool-runtime.ts";
 import type { PermissionMode } from "../src/core/permissions.ts";
 import { isText } from "../src/shared/wire.ts";
 
@@ -281,6 +281,25 @@ test("auto mode cannot silently cross the computer host boundary", async () => {
   expect(await reg.execute("computer", { action: "read" })).toBe("host action ran");
   expect(prompts).toBe(2);
   expect(executions).toBe(1);
+});
+
+test("explicit yolo crosses the computer boundary without calling the approval gate", async () => {
+  let prompts = 0;
+  let executions = 0;
+  const { reg } = makeReg("auto", () => { prompts++; return false; });
+  reg.explicitYolo = true;
+  reg.computerHandler = () => { executions++; return "host action ran"; };
+
+  expect(await reg.execute("computer", { action: "read" })).toBe("host action ran");
+  expect({ prompts, executions }).toEqual({ prompts: 0, executions: 1 });
+});
+
+test("explicit yolo accepts plan exit without calling the approval gate", async () => {
+  let prompts = 0;
+  const { reg } = makeReg("auto", () => { prompts++; return false; });
+  reg.explicitYolo = true;
+  expect(await reg.execute("exit_plan_mode", { plan: "Implement the checked plan" })).toContain("explicit --yolo authority");
+  expect(prompts).toBe(0);
 });
 
 test("disabled tool is hidden from schemas and blocked on execute", async () => {
@@ -710,8 +729,9 @@ test("read_file streams a bounded, resumable page of a huge file (no whole-file 
   expect(second).toContain("STREAM_NEEDLE");
 });
 
-test("catastrophic bash is refused even in auto mode (seatbelt)", async () => {
+test("catastrophic bash is refused even in explicit yolo (seatbelt)", async () => {
   const { reg } = makeReg("auto", () => true); // auto would otherwise auto-approve bash
+  reg.explicitYolo = true;
   expect(await reg.execute("bash", { command: "rm -rf /" })).toContain("Refused"); // never runs
   expect(await reg.execute("bash", { command: "rm -rf ~" })).toContain("Refused");
   expect(await reg.execute("bash", { command: "echo hello" })).not.toContain("Refused"); // safe runs
@@ -719,6 +739,7 @@ test("catastrophic bash is refused even in auto mode (seatbelt)", async () => {
 
 test("seatbelt is not bypassed by QUOTING the target (rm -rf \"$HOME\"/\"/\"/'~')", async () => {
   const { reg } = makeReg("auto", () => true);
+  reg.explicitYolo = true;
   // A quote char between the flag and the dangerous token must not defeat the guard.
   for (const cmd of ['rm -rf "$HOME"', 'rm -rf "/"', "rm -rf '/'", "rm -rf '~'"]) {
     expect(await reg.execute("bash", { command: cmd })).toContain("Refused");
@@ -909,6 +930,19 @@ test("bash run_in_background returns at once and records the job", async () => {
   const out = await reg.execute("bash", { command: "sleep 0.4", run_in_background: true });
   expect(out).toContain("Running in background");
   expect(reg.backgrounds.length).toBe(1);
+});
+
+test("long foreground polling is redirected to background jobs instead of looking frozen", async () => {
+  const { reg } = makeReg("auto", () => true);
+  const out = await reg.execute("bash", {
+    command: "for i in $(seq 1 50); do curl -m 2 http://127.0.0.1:4317; sleep 30; done",
+  });
+  expect(out).toContain("Blocked foreground polling");
+  expect(out).toContain("about 1500s");
+  expect(out).toContain("run_in_background=true");
+
+  expect(foregroundPollingReason("for i in $(seq 1 3); do echo ok; sleep 1; done")).toBeNull();
+  expect(foregroundPollingReason("bun test --timeout 120000")).toBeNull();
 });
 
 test("a pre-aborted background bash call spawns no job", async () => {

@@ -4,11 +4,22 @@
 > class of Claude Code / Codex CLI. This file is the target the work loops over; tick
 > milestones as they land (each must be verified + committed).
 
-## Current status (2026-08-22) — v0.24.17 release
+## Current status (2026-08-23) — v0.24.18
 Neko Core is a **working terminal coding agent** — Phases A→G below are done (agentic core, project
 intelligence, MCP, single-binary, SOTA refinement, robustness + skill extensibility + Claude-Code tool
 parity) — and, as of v0.7.0, a **fullscreen-first terminal UI** in the Claude-Code class.
 Runtime remains config-first and provider-agnostic; no model or endpoint is hard-coded as the product path.
+
+- **Explicit yolo + turn-scope continuity (v0.24.18, 2026-08-23):** CLI/TUI `--yolo` is now a
+  first-class runtime authority rather than an alias flattened into ordinary auto mode. It removes all
+  approval waits while preserving hard credential/system/catastrophic refusals and is revoked when the
+  user cycles away from auto. The harness also refuses foreground polling loops over 30 seconds and tells
+  the model not to resurrect an unrelated older task after a later user request replaces it.
+
+- **Grok subscription route (v0.24.18, 2026-08-23):** after SpaceXAI published Grok Build's public
+  device-OAuth and proxy contract, Neko added a Neko-owned refreshable session, live Responses model
+  catalog, one-shot 401 recovery, and separate subscription/API billing choices. API keys are never used as
+  a silent fallback, and Neko neither reads another CLI's token file nor impersonates its client identity.
 
 - **Realtime V3 integration (2026-07-22):** the optional ChatGPT subscription bridge now requires official
   Codex App Server 0.145.0, requests Frameless Bidi V3 explicitly, verifies the negotiated version before
@@ -38,10 +49,13 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
   `hackathon-engine` (11 references, design-engine Law 0), `web-app`, `docker`, `sql`, `research-method`,
   `clean-writing`.
 
-- **Branch:** `main`. **Current release: v0.24.17 (2026-08-22)** - interrupted provider streams
-  use a semantic commit barrier: bounded replay before visible output, durable checkpoint continuation
-  after visible output, and no automatic retry for malformed or unsafe protocol data. Windows SRT
-  read-only validators also avoid the Known Folder ACL teardown slow path. v0.24.16 added exact one-call
+- **Branch:** `main`. **Current release: v0.24.18 (2026-08-23)** - official xAI device OAuth now
+  connects Grok subscription quota without mixing it with API-key billing; explicit CLI/TUI `--yolo`
+  removes approval waits while preserving hard refusals, and long foreground polling is redirected to
+  background jobs. Previous (v0.24.17, 2026-08-22) - interrupted provider streams use a semantic commit
+  barrier: bounded replay before visible output, durable checkpoint continuation after visible output,
+  and no automatic retry for malformed or unsafe protocol data. Windows SRT read-only validators also
+  avoid the Known Folder ACL teardown slow path. v0.24.16 added exact one-call
   Bash network destinations without changing standing policy; SRT enforces the destination allowlist
   while filesystem confinement remains active. v0.24.15 added background-only approval alerts
   and cursor-clean consent UI; v0.24.14 added bounded host-side DNS/TCP diagnosis
@@ -206,7 +220,8 @@ Runtime remains config-first and provider-agnostic; no model or endpoint is hard
 - **Claude/xAI routes (released in v0.12.0):** Claude uses the official Messages API with adaptive thinking,
   native structured output, and signed/redacted thinking continuation. xAI uses the official Responses API
   for Grok 4.5 and Grok Build, with local encrypted continuation, cache affinity, streaming tools, vision,
-  retry, cancellation, and scoped API-key handling. Neither route impersonates a subscription client.
+  retry, cancellation, and scoped API-key handling. Those API profiles remain isolated from the newer
+  official `grok` subscription profile; no route impersonates another client.
 - **Outcome-verified computer use (released in v0.11.0, 2026-07-12):** Neko now treats tool success as process
   evidence, not task completion. After real state changes, CLI/TUI/subagents reject a finish claim until a
   fresh successful inspection tool call exists. `computer display` establishes one Per-Monitor-v2 physical

@@ -27,6 +27,7 @@ import { getChatGptUsage, type ChatGptUsageReport, type ChatGptUsageWindow } fro
 import { discoverCodexSupport } from "../adapters/codex-app-server.ts";
 import { installCodexSupportPack, readCodexSupportPack, removeCodexSupportPack } from "../adapters/codex-support-pack.ts";
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials } from "../adapters/gemini-cli.ts";
+import { hasGrokCredentials } from "../adapters/grok-auth.ts";
 import { hasKimiCredentials } from "../adapters/kimi-auth.ts";
 import { hasOpenCodeCredentials } from "../adapters/opencode-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
@@ -251,11 +252,15 @@ function switchProfile(ctx: CommandCtx, name: string): boolean {
     addLine("info", `note: provider "${name}" needs Kimi Code sign-in - type /login.`);
     return false;
   }
+  if (cfg.usesGrokAuth && !hasGrokCredentials()) {
+    addLine("info", `note: provider "${name}" needs Grok subscription sign-in - type /login.`);
+    return false;
+  }
   if (cfg.usesOpenCodeAuth && !hasOpenCodeCredentials()) {
     addLine("info", `note: provider "${name}" needs OpenCode Console sign-in - type /login.`);
     return false;
   }
-  if (!cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.usesKimiAuth && !cfg.usesOpenCodeAuth && !cfg.apiKey && !cfg.isLocalEndpoint) {
+  if (!cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.usesGrokAuth && !cfg.usesKimiAuth && !cfg.usesOpenCodeAuth && !cfg.apiKey && !cfg.isLocalEndpoint) {
     addLine("info", `note: provider "${name}" has no API key yet - type /login to add it (it saves to this provider).`);
     return false;
   }
@@ -702,10 +707,10 @@ function openProviderPicker(ctx: CommandCtx, initialFamily?: string): void {
   const chooseFamily = (family: string) => {
     const apiProfiles = new Set<string>();
     for (const [name, profile] of Object.entries(cfg.profiles)) {
-      if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "kimi_oauth" || profile.auth === "opencode_oauth" || profile.auth === "none") continue;
+      if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "grok_oauth" || profile.auth === "kimi_oauth" || profile.auth === "opencode_oauth" || profile.auth === "none") continue;
       try { if (loadConfig({ profile: name }).apiKey) apiProfiles.add(name); } catch { /* status only */ }
     }
-    const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), kimi: hasKimiCredentials(), opencode: hasOpenCodeCredentials(), apiProfiles });
+    const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), grok: hasGrokCredentials(), kimi: hasKimiCredentials(), opencode: hasOpenCodeCredentials(), apiProfiles });
     if (routes.length === 1) {
       if (switchProfile(ctx, routes[0].id)) void openModelPicker(ctx);
       return;

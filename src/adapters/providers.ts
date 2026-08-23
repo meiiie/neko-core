@@ -19,6 +19,7 @@ import { listOpenCodeAccountModelOptions, listOpenCodeZenModelOptions, OpenCodeA
 import { hasGeminiCredentials, listGeminiModels } from "./gemini-cli.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 import { hasChatGptCredentials } from "./chatgpt-auth.ts";
+import { grokProxyHeaders, hasGrokCredentials, listGrokCatalog, validGrokAccessToken } from "./grok-auth.ts";
 import { explainKimiAccessError, hasKimiCredentials, kimiIdentityHeaders, validKimiAccessToken } from "./kimi-auth.ts";
 import { clampEffort, effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
 import { SESSION_CONTEXT_MARK } from "../core/agent-constants.ts";
@@ -157,7 +158,17 @@ export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "anthropic") return new AnthropicProvider(config);
   if (config.provider === "chatgpt") return new HybridChatGptProvider(config, new ChatGptProvider(config));
   if (config.provider === "gemini_cli") return new GeminiCliProvider(config);
-  if (config.provider === "responses") return new ResponsesProvider(config);
+  if (config.provider === "responses") {
+    if (config.usesGrokAuth) {
+      return new ResponsesProvider(
+        config,
+        () => validGrokAccessToken(),
+        () => grokProxyHeaders(config.model),
+        async (rejectedToken) => { await validGrokAccessToken({ force: true, rejectedToken }); },
+      );
+    }
+    return new ResponsesProvider(config);
+  }
   if (config.provider === "kimi") return new KimiProvider(config);
   if (config.provider === "opencode_account") return new OpenCodeAccountProvider(config);
   if (config.provider === "opencode") return new OpenCodeZenProvider(config);
@@ -332,6 +343,24 @@ export async function listModelOptions(config: NekoConfig, codexSupport?: CodexS
   if (config.provider === "kimi") return listKimiModelOptions(config);
   if (config.provider === "opencode_account") return listOpenCodeAccountModelOptions(config);
   if (config.provider === "opencode") return listOpenCodeZenModelOptions(config);
+  if (config.usesGrokAuth) {
+    const profile = config.profile ? config.profiles[config.profile] : undefined;
+    const fallback = [...new Set([config.model, ...(profile?.models ?? [])].filter(Boolean))].map((id) => ({
+      id,
+      label: id,
+      contextWindow: profile?.model_context?.[id] ?? profile?.context_window ?? config.contextWindow,
+      vision: profile?.vision ?? config.vision,
+    }));
+    if (!hasGrokCredentials()) return fallback;
+    try {
+      const live = await listGrokCatalog(config.model);
+      return live.length ? live : fallback;
+    } catch {
+      // A transient catalog failure must not disable the picker. Completion still reports auth or
+      // entitlement failures, while profile-confirmed models remain available as a degraded mode.
+      return fallback;
+    }
+  }
   const anthropic = config.provider === "anthropic";
   const profile = config.profile ? config.profiles[config.profile] : undefined;
   const configured = [...new Set([config.model, ...(profile?.models ?? [])].filter(Boolean))].map((id) => ({

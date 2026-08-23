@@ -23,6 +23,7 @@ export interface AgentRuntime {
 export interface BuildAgentRuntimeOptions {
   root: string;
   mode?: ToolRegistry["mode"];
+  yolo?: boolean;
   approval: ApprovalGate;
   noTools?: boolean;
   onDelta?: DeltaHook;
@@ -45,8 +46,10 @@ export async function buildAgentRuntime(
     cfg.childSecretEnvNames,
   );
   const browserBridge = startManagedBrowserBridge({ extensionIds: cfg.browserExtensionIds });
+  const baseRegistry = new ToolRegistry(options.root, options.mode ?? cfg.mode, options.approval, hub);
+  baseRegistry.explicitYolo = Boolean(options.yolo);
   const registry = configureToolRegistry(
-    new ToolRegistry(options.root, options.mode ?? cfg.mode, options.approval, hub),
+    baseRegistry,
     cfg,
     { noTools: options.noTools },
   );

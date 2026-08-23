@@ -10,6 +10,7 @@ export interface Choice {
 export interface AuthAvailability {
   chatgpt: boolean;
   gemini: boolean;
+  grok: boolean;
   kimi: boolean;
   opencode: boolean;
   apiProfiles: Set<string>;
@@ -53,7 +54,7 @@ export function providerChoices(cfg: NekoConfig, authOnly = false): Choice[] {
           : family === "anthropic"
             ? `Claude API key${current}`
             : family === "xai"
-              ? `Grok or Grok Build API key${current}`
+              ? `Grok subscription or xAI API key${current}`
               : family === "kimi"
                 ? `Kimi Code account or API key${current}`
                 : family === "deepseek"
@@ -80,14 +81,16 @@ export function authChoices(cfg: NekoConfig, family: string, availability: AuthA
       const ready = profile.auth === "none"
         || (profile.auth === "chatgpt_oauth" ? availability.chatgpt
           : profile.auth === "gemini_oauth" ? availability.gemini
-          : profile.auth === "kimi_oauth" ? availability.kimi
-            : profile.auth === "opencode_oauth" ? availability.opencode
+          : profile.auth === "grok_oauth" ? availability.grok
+            : profile.auth === "kimi_oauth" ? availability.kimi
+              : profile.auth === "opencode_oauth" ? availability.opencode
             : availability.apiProfiles.has(name));
       const billing = profile.auth === "none" ? "no sign-in required"
         : profile.auth === "chatgpt_oauth" ? "subscription, no API billing"
           : profile.auth === "gemini_oauth" ? "Standard/Enterprise only; consumer plans moved to Antigravity"
-            : profile.auth === "kimi_oauth" ? "Kimi Code account; no API key"
-              : profile.auth === "opencode_oauth" ? "OpenCode Console account; device OAuth"
+            : profile.auth === "grok_oauth" ? "Grok subscription; official xAI device OAuth"
+              : profile.auth === "kimi_oauth" ? "Kimi Code account; no API key"
+                : profile.auth === "opencode_oauth" ? "OpenCode Console account; device OAuth"
             : family === "google" ? "official API; free tier available"
               : family === "zai" ? (name === "zai" ? "Coding Plan subscription quota; GLM-5.3 available" : "pay-as-you-go API billing")
                 : family === "openrouter" ? "OpenRouter pay-as-you-go billing"

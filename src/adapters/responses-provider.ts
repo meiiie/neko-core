@@ -19,14 +19,12 @@ export class ResponsesProvider implements Provider {
     private readonly cfg: NekoConfig,
     private readonly resolveApiKey: () => string | Promise<string> = () => cfg.apiKey,
     private readonly resolveHeaders: () => Record<string, string> | Promise<Record<string, string>> = () => ({}),
+    private readonly recoverUnauthorized?: (rejectedToken: string) => void | Promise<void>,
   ) {}
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
     if (!this.cfg.baseUrl) throw new Error("responses provider needs a base_url.");
     if (!this.cfg.model) throw new Error("responses provider needs a model.");
-    const key = await this.resolveApiKey();
-    if (!key && !this.cfg.isLocalEndpoint) throw new Error("No API key for the responses provider. Set the profile key environment variable or NEKO_API_KEY.");
-
     const url = `${this.cfg.baseUrl.replace(/\/+$/, "")}/responses`;
     const scope = providerScope("responses", url, this.cfg.model);
     const { instructions, input } = toResponsesInput(messages, scope);
@@ -52,19 +50,28 @@ export class ResponsesProvider implements Provider {
       payload.text = { format: { type: "json_schema", name: "extraction", schema: opts.responseSchema, strict: true } };
     }
 
-    const headers: any = {
-      ...(await this.resolveHeaders()),
-      Accept: "text/event-stream",
-      "Content-Type": "application/json",
-      "User-Agent": `neko-core/${VERSION}`,
+    let activeKey = "";
+    const requestHeaders = async () => {
+      const key = await this.resolveApiKey();
+      if (!key && !this.cfg.isLocalEndpoint) {
+        throw new Error("No API key for the responses provider. Set the profile key environment variable or NEKO_API_KEY.");
+      }
+      const headers = new Headers(await this.resolveHeaders());
+      headers.set("Accept", "text/event-stream");
+      headers.set("Content-Type", "application/json");
+      headers.set("User-Agent", `neko-core/${VERSION}`);
+      if (key) headers.set("Authorization", `Bearer ${key}`);
+      activeKey = key;
+      return headers;
     };
-    if (key) headers.Authorization = `Bearer ${key}`;
+    let headers = await requestHeaders();
 
     const offlineDeadline = Date.now() + this.cfg.offlineRetrySeconds * 1000;
     let httpAttempt = 0;
     let netAttempt = 0;
     let healedReasoning = false;
     let healedCacheKey = false;
+    let recoveredAuth = false;
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
       const idle = new AbortController();
@@ -118,6 +125,12 @@ export class ResponsesProvider implements Provider {
 
       if (idleTimer) clearTimeout(idleTimer);
       const body = await response.text().catch(() => "");
+      if (response.status === 401 && this.recoverUnauthorized && !recoveredAuth) {
+        recoveredAuth = true;
+        await this.recoverUnauthorized(activeKey);
+        headers = await requestHeaders();
+        continue;
+      }
       if (payload.reasoning?.effort && response.status >= 400 && response.status < 500 && /reasoning|effort/i.test(body)) {
         if (!healedReasoning) {
           healedReasoning = true;

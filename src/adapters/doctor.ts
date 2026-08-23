@@ -8,6 +8,7 @@ import { cachedRefreshRate, resolveUiFps } from "./display.ts";
 import { SearxngSidecar } from "./sidecar.ts";
 import { VERSION } from "../shared/version.ts";
 import { hasChatGptCredentials } from "./chatgpt-auth.ts";
+import { hasGrokCredentials } from "./grok-auth.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 import { discoverGeminiCli, hasGeminiCredentials, type GeminiCliStatus } from "./gemini-cli.ts";
 import { hasKimiCredentials } from "./kimi-auth.ts";
@@ -105,6 +106,7 @@ export function collectChecks(
   codexSupport?: CodexSupportStatus,
   geminiSupport?: GeminiCliStatus,
   sandboxRuntime?: SandboxRuntimeStatus,
+  explicitYolo = false,
 ): Check[] {
   const sandboxKind = sandboxRuntime?.kind ?? detectSandbox();
   const sandboxLive = config.sandbox && sandboxKind !== "none" &&
@@ -182,11 +184,11 @@ export function collectChecks(
       status: config.mode === "auto" ? "warn" : "ok",
       name: "mode",
       detail: unconfinedAuto
-        ? "auto - UNCONFINED AUTO: gated tools run without approval and bash has no live OS sandbox"
+        ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - UNCONFINED AUTO: gated tools run without approval and bash has no live OS sandbox`
         : failClosedAuto
-          ? `auto - other gated tools run without approval; bash FAILS CLOSED because the configured ${sandboxKind} sandbox is unusable`
+          ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - other gated tools run without approval; bash FAILS CLOSED because the configured ${sandboxKind} sandbox is unusable`
         : config.mode === "auto"
-          ? "auto - gated tools run without approval"
+          ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - gated tools run without approval`
           : config.mode,
     },
     {
@@ -210,7 +212,9 @@ export function collectChecks(
               ? `on (srt) but unusable - bash FAILS CLOSED with no host fallback; ${sandboxHealthDetail}`
             : !sandboxLive
               ? `on (${sandboxKind}) but unusable - bash FAILS CLOSED with no host fallback`
-            : `on (${sandboxKind})${config.sandboxAutoApprove ? " - bash auto-approved by explicit sandbox_auto_approve=true; host reads remain available; workspace-destructive commands still confirm" : " - bash still requires approval by default"}`
+            : explicitYolo
+              ? `on (${sandboxKind}) - approval prompts disabled by explicit --yolo; hard seatbelts remain`
+              : `on (${sandboxKind})${config.sandboxAutoApprove ? " - bash auto-approved by explicit sandbox_auto_approve=true; host reads remain available; workspace-destructive commands still confirm" : " - bash still requires approval by default"}`
         : `off (available: ${sandboxKind}${
             sandboxKind === "none" && process.platform === "win32"
               ? "; for Windows: bun add -g @anthropic-ai/sandbox-runtime, then: srt windows-install"
@@ -259,6 +263,14 @@ export function collectChecks(
             detail: hasKimiCredentials()
               ? "credentials present; Kimi Code access is checked on the first request (official device OAuth; no proxy or API key)"
               : "missing - run `neko login kimi` or use /login",
+          }
+      : config.usesGrokAuth
+        ? {
+            status: hasGrokCredentials() ? "ok" : "warn",
+            name: "grok_auth",
+            detail: hasGrokCredentials()
+              ? "signed in to Grok (official xAI device OAuth; subscription route, no XAI_API_KEY billing)"
+              : "missing - run `neko login xai` or use /login",
           }
       : config.usesOpenCodeAuth
         ? {

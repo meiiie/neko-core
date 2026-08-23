@@ -164,7 +164,7 @@ neko
 #        -> Google -> Gemini API key    (official free tier / optional paid; recommended)
 #                  -> Code Assist Standard/Enterprise (OAuth)
 #        -> Anthropic -> Claude Sonnet 5 / Fable 5 API key
-#        -> xAI       -> Grok 4.5 / Grok Build API key
+#        -> xAI       -> Grok subscription (OAuth) / xAI API key
 #        -> Kimi      -> Kimi Code account (OAuth) / Kimi Platform API key
 #        -> DeepSeek  -> DeepSeek V4 API key
 #        -> OpenRouter -> one key, live tool-capable catalog
@@ -205,6 +205,8 @@ neko login openai chatgpt
 neko login openai api <key>
 neko login google gemini
 neko login google api <key>
+neko login xai
+neko login xai api <key>
 neko login kimi
 neko login kimi api <key>
 neko login deepseek <key>
@@ -227,10 +229,13 @@ and `/model` loads the account-managed provider catalog. `neko login opencode ze
 GPT/Grok/Muse over Responses, Claude/Qwen over Messages, and documented compatible families over Chat
 Completions. Neko stores its own refresh token and never reads OpenCode CLI's credential store. Account
 tokens are accepted only for HTTPS endpoints under `opencode.ai`; unknown wires fail closed. Anthropic
-and xAI are direct, official API-key routes (not subscription/OAuth proxies). For a non-TUI
-session, set `ANTHROPIC_API_KEY` and run `neko --profile claude`, or set `XAI_API_KEY` and run
-`neko --profile xai` (current Grok 4.5) / `neko --profile grok-build` (the dedicated coding model).
-`/model` can switch among the models exposed by the selected route.
+remains a direct API-key route. xAI has two separate official routes: `neko login xai` uses the public
+[Grok Build device-OAuth contract](https://github.com/xai-org/grok-build/blob/07b2f7144fd5c5c9d3dd1966937a87852d2dbdb8/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md)
+and Grok subscription quota through `cli-chat-proxy.grok.com`; `neko login xai api <key>` uses the
+pay-as-you-go xAI API. Neko stores its own refreshable session in `~/.neko-core/grok-auth.json`, never
+imports another CLI's credentials, identifies itself as Neko, and retries one rejected bearer only after
+refresh. `/model` loads the account-visible Responses catalog for the subscription route. For a non-TUI
+API session, set `XAI_API_KEY` and run `neko --profile xai` or `neko --profile grok-build`.
 
 Kimi is also first-class and connects directly to Moonshot AI. `neko login kimi` uses Moonshot AI's public
 RFC 8628 device flow and stores Neko's own refreshable session in `~/.neko-core/kimi-auth.json`; it never
@@ -453,14 +458,15 @@ export function createAgent(provider: Provider, root: string, approve: ApprovalG
 `agents` · `commands` · `capabilities` · `policy` · `context` · `sessions` · `procurement` · `mcp` · `login` · `logout` · `update`.
 
 Bare `neko` (or `neko core`; legacy `neko code`) starts the interactive session.
-`--profile <name>` selects a runtime profile · `--yolo` auto-approves gated tools ·
+`--profile <name>` selects a runtime profile · `--yolo` disables approval prompts for that launch ·
 `neko --resume` continues the latest session.
 
-`--yolo` automates routine in-scope approvals; it does not silently grant machine-wide writes.
-Ordinary host reads are available by default. Writes inside the project and canonical
-`additional_write_roots` are automatic; an ordinary target elsewhere can proceed only after one
-explicit confirmation for that exact structured change. Credential and system paths remain refused.
-The global `~/.neko-core/research` ledger is included automatically; see
+Ordinary `auto` remains bounded: host computer control, the policy file, and an exact structured write
+outside configured roots still ask. Explicit `--yolo` is up-front authority for those prompts while the
+mode remains `auto`; cycling modes with Shift+Tab revokes it immediately. It never changes project trust,
+and credential/system targets plus catastrophic shell commands remain hard refusals instead of prompts.
+Long-lived servers and polling loops run as background jobs so one buffered Bash call cannot make the UI
+look frozen. The global `~/.neko-core/research` ledger is included automatically; see
 [`docs/process/SANDBOX.md`](docs/process/SANDBOX.md#outside-workspace-autonomy-is-path-scoped).
 
 ## Contributing

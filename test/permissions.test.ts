@@ -32,6 +32,12 @@ test("host computer control requires explicit consent even in auto mode", () => 
   expect(decide("plan", computer)).toBe("deny");
 });
 
+test("explicit yolo allows host computer control without changing ordinary auto", () => {
+  expect(decide("auto", computer, {}, { yolo: true })).toBe("allow");
+  expect(decide("default", computer, {}, { yolo: true })).toBe("prompt");
+  expect(decide("plan", computer, {}, { yolo: true })).toBe("deny");
+});
+
 test("plan denies gated", () => {
   expect(decide("plan", write)).toBe("deny");
   expect(decide("plan", bash)).toBe("deny");

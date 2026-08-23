@@ -5,10 +5,10 @@ import { join } from "node:path";
 
 const entry = join(import.meta.dir, "..", "bin", "neko.ts");
 
-function runDiagnostic(command: "doctor" | "policy", readOutsideRoot = "false") {
+function runDiagnostic(command: "doctor" | "policy", readOutsideRoot = "false", yolo = true) {
   const home = mkdtempSync(join(tmpdir(), "neko-yolo-diag-"));
   try {
-    const result = Bun.spawnSync([process.execPath, entry, "--yolo", command], {
+    const result = Bun.spawnSync([process.execPath, entry, ...(yolo ? ["--yolo"] : []), command], {
       cwd: home,
       env: {
         ...process.env,
@@ -31,10 +31,12 @@ function runDiagnostic(command: "doctor" | "policy", readOutsideRoot = "false") 
 }
 
 test("--yolo policy reports effective auto mode and missing confinement", () => {
-  const result = runDiagnostic("policy");
+  const result = runDiagnostic("policy", "true");
   expect(result.status).toBe(0);
   expect(result.output).toContain("Verdict: WARN");
   expect(result.output).toContain("bounded_autonomy_on");
+  expect(result.output).toContain("explicit --yolo: approval prompts are disabled");
+  expect(result.output).toContain("pre-authorized by explicit --yolo");
   expect(result.output).toContain("auto_without_live_sandbox");
   expect(result.output).toContain("UNCONFINED AUTO");
 });
@@ -42,12 +44,12 @@ test("--yolo policy reports effective auto mode and missing confinement", () => 
 test("--yolo doctor reports effective auto mode and missing confinement", () => {
   const result = runDiagnostic("doctor");
   expect(result.status).toBe(0);
-  expect(result.output).toContain("mode: auto - UNCONFINED AUTO");
+  expect(result.output).toContain("mode: yolo (explicit --yolo) - UNCONFINED AUTO");
   expect(result.output).toContain("bash_sandbox: UNCONFINED AUTO");
 });
 
 test("policy reports exact-consent host writes without implying Bash authority", () => {
-  const result = runDiagnostic("policy", "true");
+  const result = runDiagnostic("policy", "true", false);
   expect(result.status).toBe(0);
   expect(result.output).toContain("requires one human confirmation for that exact change");
   expect(result.output).toContain("never reaches sandboxed Bash");

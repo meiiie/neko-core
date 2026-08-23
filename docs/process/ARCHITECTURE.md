@@ -102,11 +102,17 @@ Outside-workspace authority is split deliberately. Safe file readers may travers
 when `read_outside_root` is enabled. Structured mutations are automatic only in the project, canonical
 `additional_write_roots`, and the built-in `~/.neko-core/research` capability. An exact ordinary host
 target outside those roots can be admitted by one human confirmation; that transient authority is not
-reused or shared with Bash. The user policy file `~/.neko-core/config.json` keeps its stricter prompt in
-every mode plus post-write JSON validation. Filesystem-wide grants, credential/agent-control targets,
+reused or shared with Bash. The user policy file `~/.neko-core/config.json` keeps its stricter prompt plus
+post-write JSON validation. Explicit CLI/TUI `--yolo` is tracked separately from ordinary `mode=auto`: it
+pre-authorizes computer, exact host-write, policy-write, and plan-exit prompts only while the live mode
+remains auto. Shift+Tab revokes that authority immediately. Filesystem-wide grants, credential/agent-control targets,
 system locations, symlink/junction escapes, and hardlink aliases are refused at the structured boundary.
 Ordinary sandboxed Bash remains confined to the project and canonical additional roots. A timed-out SRT health probe may retry one real launch
 through the same exact SRT settings, but never authorizes an unconfined fallback.
+
+Buffered foreground Bash rejects explicit sleep/poll loops whose declared wait budget exceeds 30 seconds.
+Servers and watchers use the existing background-job lifecycle followed by short bounded probes; long
+builds/tests without polling sleeps remain valid foreground work.
 
 The `task` tool is gated by default. Built-in reviewer/explorer roles receive explicit read-only
 allowlists and may run concurrently; generic/custom tasks retain only inherited authority and are
@@ -335,12 +341,19 @@ tool-use blocks are persisted as opaque continuation data and replayed byte-for-
 secret-free endpoint, and model all match. Official Anthropic structured output uses
 `output_config.format`; compatible endpoints retain the forced-tool fallback.
 
-`adapters/responses-provider.ts` is the small API-key adapter for the standard Responses API. The xAI
-profiles use it with `store: false`, locally retained encrypted reasoning, a stable per-session
-`prompt_cache_key`, native tools/vision/structured output, idle-aware streaming, and bounded retry. It does
-not import CLIProxyAPI, reuse subscription OAuth, impersonate an official CLI, or call a private inference
-endpoint. `provider-scope.ts` gives all opaque provider continuations the same endpoint-and-model isolation
-rule, including OpenAI-compatible thought-signature metadata.
+`adapters/responses-provider.ts` is the small credential-injected adapter for the standard Responses API.
+Both xAI API-key profiles and the separate Grok subscription profile use it with `store: false`, locally
+retained encrypted reasoning, a stable per-session `prompt_cache_key`, native tools/vision/structured output,
+idle-aware streaming, and bounded retry. `provider-scope.ts` gives opaque continuations the same
+endpoint-and-model isolation rule, including OpenAI-compatible thought-signature metadata.
+
+`adapters/grok-auth.ts` implements xAI's published RFC 8628 public-client flow directly: Neko requests its
+own device token from `auth.x.ai`, stores it atomically in restricted `~/.neko-core/grok-auth.json`, refreshes
+before expiry or once after HTTP 401, and sends the documented subscription headers only to
+`cli-chat-proxy.grok.com`. Account identity comes from the directly returned token solely for the proxy
+contract and display. Neko identifies itself with its own name/version; it neither imports `~/.grok`, copies
+Clay/OpenCode credentials, impersonates Grok Build, nor silently falls back to `XAI_API_KEY`. The `grok`
+profile consumes subscription quota; `xai` and `grok-build` remain separate pay-as-you-go profiles.
 
 ## Kimi and DeepSeek provider boundaries
 

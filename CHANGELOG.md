@@ -6,6 +6,26 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.18] - 2026-08-23
+
+### Added
+
+- **Grok subscriptions can sign in directly through Neko.** `neko login xai` and the guided `/login`
+  flow use xAI's official device OAuth, keep a Neko-owned refreshable session, load the account-visible
+  Responses model catalog, and recover once from an expired bearer. This subscription route stays
+  separate from `neko login xai api <key>` and pay-as-you-go API billing.
+
+### Fixed
+
+- **Explicit `--yolo` no longer pauses for approval.** Host computer control, exact structured writes
+  outside configured roots, valid policy-file changes, Bash, and plan exit use the launch-time authority
+  without rendering an approval box. Credential/system targets, project trust, sandbox confinement,
+  policy JSON validation, and catastrophic-command refusals remain enforced. Cycling away from `auto`
+  with Shift+Tab revokes the authority immediately.
+- **A completed request no longer revives unrelated old work or appears frozen in a long poll.** The
+  harness treats a clear later request as the current scope, and foreground sleep/poll loops with a
+  declared budget above 30 seconds are redirected to background jobs plus short bounded probes.
+
 ## [0.24.17] - 2026-08-22
 
 ### Fixed

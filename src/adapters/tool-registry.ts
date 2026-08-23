@@ -23,6 +23,13 @@ function modeRuntimeDetail(
 ): string {
   switch (registry.mode) {
     case "auto":
+      if (registry.isExplicitYolo()) {
+        return failClosedBash
+          ? "explicit --yolo removes approval prompts; bash still FAILS CLOSED until its configured OS sandbox is healthy; hard seatbelts still apply"
+          : unconfinedAuto
+            ? "EXPLICIT --YOLO / UNCONFINED: approval prompts are disabled and bash runs on the host; hard seatbelts still apply"
+            : "explicit --yolo removes approval prompts; hard seatbelts still apply";
+      }
       return failClosedBash
         ? "non-bash gated tools run without an approval prompt; bash FAILS CLOSED until its configured OS sandbox is healthy; host computer control still requires explicit consent"
         : unconfinedAuto
@@ -108,7 +115,7 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     "# NEKO DYNAMIC-TOOL RUNTIME",
     "This block is authoritative for Neko dynamic tools in this session.",
     "Provider-native shell, apply_patch/edit, approvals, sandbox, and skills are a separate transport runtime. They do not grant or describe Neko permissions. Do not use provider-native action tools for Neko work; use only the dynamic tool schemas attached to this request.",
-    `Effective Neko permission mode: ${registry.mode}${registry.mode === "auto" ? " (yolo)" : ""} - ${modeRuntimeDetail(registry, sandboxedBash, failClosedBash, unconfinedAuto)}.`,
+    `Effective Neko permission mode: ${registry.isExplicitYolo() ? "yolo (explicit --yolo; mode=auto)" : registry.mode} - ${modeRuntimeDetail(registry, sandboxedBash, failClosedBash, unconfinedAuto)}.`,
     turnPolicy?.editTarget
       ? `Active exact-file turn: edit target=${JSON.stringify(turnPolicy.editTarget)}; edit requires exactly one byte-for-byte old_string match. ` +
         (turnPolicy.bashPolicy === "foreground-validator-only"
@@ -209,6 +216,7 @@ export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRe
   target.denialNote = source.denialNote;
   target.loadSkill = source.loadSkill;
   target.allowDangerousBash = source.allowDangerousBash;
+  target.explicitYolo = source.explicitYolo;
   target.readOutsideRoot = source.readOutsideRoot;
   target.additionalWriteRoots = [...source.additionalWriteRoots];
   target.bashTimeoutCapMs = source.bashTimeoutCapMs;

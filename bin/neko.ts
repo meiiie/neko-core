@@ -19,6 +19,7 @@ import { buildMcpHub, renderMcp } from "../src/adapters/mcp.ts";
 import { getProvider } from "../src/adapters/providers.ts";
 import { clearChatGptCredentials, hasChatGptCredentials, loginChatGpt } from "../src/adapters/chatgpt-auth.ts";
 import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginGemini } from "../src/adapters/gemini-cli.ts";
+import { clearGrokCredentials, hasGrokCredentials, loginGrok } from "../src/adapters/grok-auth.ts";
 import { clearKimiCredentials, loginKimi } from "../src/adapters/kimi-auth.ts";
 import { clearOpenCodeCredentials, loginOpenCode } from "../src/adapters/opencode-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../src/adapters/gemini-support-pack.ts";
@@ -161,8 +162,8 @@ async function promptApprove(toolName: string, args: any): Promise<boolean> {
     args.command ? `run: ${args.command}` : args.path ? `${toolName} ${args.path}` : toolName,
   );
   // Non-interactive (pipe / CI / no TTY): fail closed at once instead of hanging on a prompt that
-  // can never be answered. Some host-boundary actions still prompt in --yolo, so never promise that
-  // changing modes would authorize the call.
+  // can never be answered. Explicit --yolo bypasses this gate before promptApprove is reached;
+  // ordinary modes must not imply that a human approved anything.
   if (!process.stdin.isTTY) {
     console.log(`\n[approval] ${action} -> DENIED (non-interactive; explicit approval is unavailable)`);
     return false;
@@ -200,6 +201,7 @@ async function buildAgent(
   return buildAgentRuntime(cfg, {
     root: process.cwd(),
     mode: yolo ? "auto" : cfg.mode,
+    yolo,
     approval: promptApprove,
     noTools,
     onEvent: printEvent,
@@ -232,7 +234,7 @@ Commands:
   skills        list available skills (~/.neko-core/skills)
   procurement   deterministic sourcing helpers; 'source-plan <identifier>' expands exact-source queries
   recipes       list runnable recipes (~/.neko-core/recipes)
-  login         sign in; OpenAI, Google, Kimi, OpenCode Console/Zen, or another API-key provider
+  login         sign in; OpenAI, Google, Grok/xAI, Kimi, OpenCode, or an API-key provider
   logout        sign out the active route (other provider sessions/keys stay intact)
   support       inspect, install, update, or remove optional ChatGPT/Gemini/Office/Meeting components
   update [ver]  self-update to the latest release (resumes auto-updates); 'update 0.7.7' pins/rolls
@@ -258,7 +260,7 @@ Commands:
 
 Options:
   --profile <name>   named runtime profile (see 'neko profiles')
-  --yolo             auto-approve gated tools (bounded autonomy)
+  --yolo             disable approval prompts; hard credential/system/catastrophic seatbelts remain
   --loop             run "run" as a closed loop: work + self-review until done
   --once             force a single-shot run (overrides config "auto_loop": true)
   --no-tools         (run) expose no tools; a pure text completion (e.g. a judgment/review pass)
@@ -287,13 +289,14 @@ function cmdConfig(args: Args): number {
   }
   // The API key is a secret - only ever report presence, never the value.
   if (cfg.usesChatGptAuth) console.log(`  chatgpt_auth = ${hasChatGptCredentials() ? "signed in" : "missing"} (API billing disabled)`);
+  else if (cfg.usesGrokAuth) console.log(`  grok_auth = ${hasGrokCredentials() ? "signed in" : "missing"} (subscription route; XAI_API_KEY billing disabled)`);
   else if (cfg.usesGeminiAuth) console.log(`  gemini_auth = ${hasGeminiCredentials() ? "signed in" : "missing"} (Code Assist Standard/Enterprise)`);
   else console.log(`  api_key = ${cfg.apiKey ? "set" : "missing"}`);
   return 0;
 }
 
 function cmdDoctor(args: Args): number {
-  console.log(render([...collectChecks(load(args)), ...collectTerminalChecks()]));
+  console.log(render([...collectChecks(load(args), undefined, undefined, undefined, args.yolo), ...collectTerminalChecks()]));
   return 0;
 }
 
@@ -364,12 +367,12 @@ function cmdCommands(): number {
 }
 
 function cmdCapabilities(args: Args): number {
-  console.log(renderCapabilities(collectCapabilities(load(args))));
+  console.log(renderCapabilities(collectCapabilities(load(args), args.yolo)));
   return 0;
 }
 
 function cmdPolicy(args: Args): number {
-  const report = evaluatePolicy(load(args));
+  const report = evaluatePolicy(load(args), undefined, args.yolo);
   console.log(renderPolicyReport(report));
   return report.verdict === "fail" ? 1 : 0;
 }
@@ -547,6 +550,13 @@ async function cmdLogin(args: Args): Promise<number> {
     console.log("Kimi Code sign-in complete. Active profile: kimi (official device OAuth; no proxy or API key).");
     return 0;
   }
+  const grokOAuth = (provider === "xai" || provider === "grok") && (!method || ["oauth", "account", "subscription", "device", "code"].includes(method));
+  if (grokOAuth) {
+    const credentials = await loginGrok({ notify: console.log });
+    setActiveProfile("grok");
+    console.log(`Grok sign-in complete${credentials.email ? ` for ${credentials.email}` : ""}. Active profile: grok (official xAI device OAuth; XAI_API_KEY billing is separate).`);
+    return 0;
+  }
   const openCodeOAuth = provider === "opencode" && (!method || ["oauth", "account", "console"].includes(method));
   if (openCodeOAuth) {
     const credentials = await loginOpenCode({ notify: console.log });
@@ -566,19 +576,24 @@ async function cmdLogin(args: Args): Promise<number> {
     console.error("usage: neko login kimi   OR   neko login kimi api <key>");
     return 2;
   }
-  let key = provider === "openai" || provider === "google" || provider === "kimi"
+  if ((provider === "xai" || provider === "grok") && !["api", "api-key", "apikey"].includes(method)) {
+    console.error("usage: neko login xai   OR   neko login xai api <key>");
+    return 2;
+  }
+  let key = provider === "openai" || provider === "google" || provider === "kimi" || provider === "xai" || provider === "grok"
     ? (args.positionals[2] ?? "")
     : provider === "deepseek" || provider === "openrouter" || provider === "opencode"
       ? (["api", "api-key", "apikey", "zen", "service", "service-account"].includes(method) ? (args.positionals[2] ?? "") : (args.positionals[1] ?? ""))
       : (args.positionals[0] ?? "");
   if (!key && !process.stdin.isTTY) key = (await Bun.stdin.text()).trim(); // piped
   if (!key) {
-    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login kimi   OR   neko login opencode   OR   neko login opencode zen <key>   OR   neko login openrouter <key>");
+    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login xai   OR   neko login xai api <key>   OR   neko login kimi   OR   neko login opencode   OR   neko login opencode zen <key>");
     return 2;
   }
   if (provider === "openai") setActiveProfile("openai");
   if (provider === "google") setActiveProfile("gemini-api");
   if (provider === "kimi") setActiveProfile("moonshot");
+  if (provider === "xai" || provider === "grok") setActiveProfile("xai");
   if (provider === "deepseek") setActiveProfile("deepseek");
   if (provider === "openrouter") setActiveProfile("openrouter");
   if (provider === "opencode") setActiveProfile("opencode");
@@ -596,6 +611,12 @@ function cmdLogout(args: Args): number {
   const explicitGeminiApi = provider === "google" && ["api", "api-key", "apikey"].includes(method);
   const explicitKimi = provider === "kimi" && (!method || ["oauth", "account", "subscription", "code"].includes(method));
   const explicitKimiApi = provider === "kimi" && ["api", "api-key", "apikey"].includes(method);
+  const explicitGrok = (provider === "grok" || provider === "xai") && (
+    ["oauth", "account", "subscription", "device", "code"].includes(method) || (!method && (provider === "grok" || current.profile === "grok"))
+  );
+  const explicitXaiApi = provider === "xai" && (
+    ["api", "api-key", "apikey"].includes(method) || (!method && current.profile !== "grok")
+  );
   const explicitOpenCodeAccount = provider === "opencode" && (
     ["oauth", "account", "console"].includes(method) || (!method && current.profile !== "opencode")
   );
@@ -618,16 +639,21 @@ function cmdLogout(args: Args): number {
     console.log(clearKimiCredentials());
     return 0;
   }
+  if (explicitGrok || (!provider && current.usesGrokAuth)) {
+    console.log(clearGrokCredentials());
+    return 0;
+  }
   if (explicitOpenCodeAccount || (!provider && current.usesOpenCodeAuth)) {
     console.log(clearOpenCodeCredentials());
     return 0;
   }
-  if (provider && !["openai", "google", "kimi", "deepseek", "openrouter", "opencode"].includes(provider)) {
-    console.error("usage: neko logout [openai api|openai chatgpt|google api|google gemini|kimi|kimi api|deepseek|openrouter|opencode account|opencode zen]");
+  if (provider && !["openai", "google", "xai", "grok", "kimi", "deepseek", "openrouter", "opencode"].includes(provider)) {
+    console.error("usage: neko logout [openai api|openai chatgpt|google api|google gemini|xai|xai api|kimi|kimi api|deepseek|openrouter|opencode account|opencode zen]");
     return 2;
   }
   const targetProfile = explicitGeminiApi ? "gemini-api"
     : explicitKimiApi ? "moonshot"
+      : explicitXaiApi ? (current.profile === "grok-build" ? "grok-build" : "xai")
       : provider === "deepseek" ? "deepseek"
         : provider === "openrouter" ? "openrouter"
           : explicitOpenCodeZen ? "opencode"
@@ -1181,9 +1207,9 @@ async function cmdRun(args: Args): Promise<number> {
     // without weakening the conservative full capability plan derived from the original envelope.
     registry.noTools = images.length > 0 || !!args.noTools;
     applySkillPolicyForTurn(registry, originalInstruction, registry.root, cfg.resolvedHome);
-    // Non-interactive: every approval prompt auto-denies (no human to answer). This also matters in
-    // --yolo because host computer control and plan review deliberately remain explicit boundaries.
-    const headlessApprovals = !process.stdin.isTTY && !registry.noTools;
+    // Non-interactive: every approval prompt auto-denies (no human to answer). Explicit --yolo has
+    // no approval prompts; hard refusals remain refusals rather than becoming approval requests.
+    const headlessApprovals = !process.stdin.isTTY && !registry.noTools && !args.yolo;
     let denials = 0;
     if (headlessApprovals) {
       registry.denialNote =
@@ -1199,7 +1225,7 @@ async function cmdRun(args: Args): Promise<number> {
         "# Non-interactive run\n" +
         "There is no human at this terminal. Any tool call that still needs explicit approval will be " +
         "DENIED automatically. Do NOT retry a denied call. Do what is possible with allowed tools, then " +
-        "say plainly what was blocked. Auto/yolo never bypasses host computer control or plan review.",
+        "say plainly what was blocked. Ordinary auto mode does not bypass host computer control or plan review.",
       );
     }
     agent.setTurnSystemContext(matchedTurnContext(originalInstruction, registry, cfg.resolvedHome).text);

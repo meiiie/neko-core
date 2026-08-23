@@ -2,8 +2,8 @@
  * Executable coding-agent tools + the approval gate.
  *
  * read_file / search : safe  -> run immediately.
- * write_file / bash  : gated -> require approval unless approval=auto (--yolo).
- * computer           : host boundary -> requires explicit approval even in auto mode.
+ * write_file / bash  : gated -> require approval unless mode=auto.
+ * computer           : host boundary -> prompts in ordinary auto; explicit --yolo pre-authorizes it.
  *
  * Each tool returns a STRING observation (errors + denials included) so a failed or denied
  * tool never crashes the agent loop. Mutations stay inside the project or explicit additional roots.
@@ -560,6 +560,9 @@ export class ToolRegistry {
   computerHandler?: (args: any) => string | any[];
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
+  /** True only when the host was launched with explicit --yolo authority. Ordinary/default auto mode
+   * remains consequence-gated; changing away from auto immediately restores prompts. */
+  explicitYolo = false;
   /** Maximum foreground bash timeout. Product default is 10min; bounded evals can fail fast. */
   bashTimeoutCapMs = 600_000;
   /** Opt-in OS sandbox for bash (fs read-only except cwd). Set from config by the host. */
@@ -622,6 +625,10 @@ export class ToolRegistry {
     const normalized = normalizeNativeBackend(nativeBackend);
     this.nativeBackendTools = normalized.tools;
     this.nativeBackendAttestation = normalized.attestation;
+  }
+
+  isExplicitYolo(): boolean {
+    return this.explicitYolo && this.mode === "auto";
   }
 
   /** True while a foreground bash command is running (so the REPL can show the Ctrl+B hint). */
@@ -1245,6 +1252,13 @@ export class ToolRegistry {
       const danger = dangerousCommand(String(args.command ?? ""));
       if (danger) return `Refused: '${danger}' is blocked as catastrophic. Set "allow_dangerous_bash": true in config to override.`;
     }
+    if (name === "bash" && args.run_in_background !== true) {
+      const longPoll = foregroundPollingReason(String(args.command ?? ""));
+      if (longPoll) {
+        return `Blocked foreground polling: ${longPoll}. Start long-lived servers/watchers with ` +
+          "run_in_background=true, then use short bounded status probes; one buffered shell call must not hold the turn.";
+      }
+    }
 
     // web_search: pick the best configured backend (SearXNG > Tavily > DuckDuckGo).
     if (name === "web_search") {
@@ -1261,12 +1275,14 @@ export class ToolRegistry {
       return this.web.fetch(this.root, args, this.scrapeBackend, this.summarize);
     }
 
-    // exit_plan_mode: always asks the user to approve the plan (the plan-review gate).
+    // A normal plan exit asks the user. Explicit --yolo is the user's up-front approval authority.
     if (name === "exit_plan_mode") {
-      const ok = await this.prompt(name, args);
-      if (!ok) return "The user did NOT approve the plan. Ask what to change, then call exit_plan_mode again with a revised plan.";
+      if (!this.isExplicitYolo()) {
+        const ok = await this.prompt(name, args);
+        if (!ok) return "The user did NOT approve the plan. Ask what to change, then call exit_plan_mode again with a revised plan.";
+      }
       const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
-      return "Plan approved by the user. Implement it now.";
+      return this.isExplicitYolo() ? "Plan accepted under explicit --yolo authority. Implement it now." : "Plan approved by the user. Implement it now.";
     }
 
     // todo_write: safe, no approval — record the plan for the REPL to render.
@@ -1353,8 +1369,8 @@ export class ToolRegistry {
     // Sandboxed-bash auto-approval keys off LIVE confinement (primitive present + provisioned),
     // never off config intent alone - see decide() for the policy rationale. It is WITHHELD for
     // commands that irreversibly destroy data inside the workspace: the sandbox contains the blast
-    // radius, but the user's own code + .git are writable, so those still get one confirmation.
-    // (mode=auto/yolo still allows everything - that's the point of yolo; always-allow-bash too.)
+    // radius, but the user's own code + .git are writable, so non-auto modes still get one confirmation.
+    // Ordinary auto and explicit yolo allow them; the catastrophic-command seatbelt remains separate.
     const needsLiveSandboxDecision = spec.name === "bash" && this.sandboxBash
       && this.sandboxAutoApprove && this.mode !== "auto";
     const liveBashSandbox = nativeBackend
@@ -1366,16 +1382,17 @@ export class ToolRegistry {
       && !bashNetworkRequested // egress is a separate consequence; only auto/yolo self-approves it
       && !isDockerCommand(String(args.command ?? "")); // docker runs unsandboxed -> don't sandbox-auto-approve it
     const policyWrite = isPolicyConfigTarget(structuredPath);
-    let decision = decide(this.mode, spec, args, { sandboxedBash });
+    const explicitYolo = this.isExplicitYolo();
+    let decision = decide(this.mode, spec, args, { sandboxedBash, yolo: explicitYolo });
     // The user policy file is the one target auto mode may never self-approve: flipping Neko's own
     // permission/network settings must pass the human gate in EVERY mode (plan still denies above).
-    if (policyWrite && decision === "allow") {
+    if (policyWrite && decision === "allow" && !explicitYolo) {
       decision = "prompt";
       this.denialNote = this.denialNote ?? "~/.neko-core/config.json is Neko's policy file: this exact change needs your confirmation and a Neko restart to take effect.";
     }
     // Auto is bounded workspace autonomy, not ambient host mutation authority. An explicit target
     // outside the project/additional roots always asks once; plan remains a hard deny.
-    if (hostWrite) {
+    if (hostWrite && !explicitYolo) {
       if (decision === "allow") decision = "prompt";
       this.denialNote = this.denialNote ?? "This target is outside the workspace and configured write roots; only this exact structured change is being requested.";
     }
@@ -2458,6 +2475,55 @@ export function dangerousCommand(command: string): string | null {
   if (/\b(rd|rmdir|del)\b\s+\/s\b.*\b[a-z]:\\?($|\s)/i.test(c)) return "recursive delete of a Windows drive";
   if (/>\s*\/dev\/(sd|nvme|disk)/i.test(c)) return "overwrite a disk device";
   return null;
+}
+
+const FOREGROUND_POLL_BUDGET_SECONDS = 30;
+
+/** Detect explicit shell wait loops that would make a buffered foreground tool look frozen. This is
+ * deliberately narrow: builds/tests may legitimately run for minutes, while only commands containing
+ * literal sleep/timeout polling are redirected to the existing background-job path. */
+export function foregroundPollingReason(command: string): string | null {
+  const source = String(command);
+  const waits: number[] = [];
+  const collect = (pattern: RegExp, unitIndex?: number) => {
+    for (const match of source.matchAll(pattern)) {
+      let seconds = Number(match[1]);
+      if (!Number.isFinite(seconds) || seconds < 0) continue;
+      const unit = unitIndex === undefined ? "s" : String(match[unitIndex] ?? "s").toLowerCase();
+      if (unit === "m") seconds *= 60;
+      else if (unit === "h") seconds *= 3600;
+      waits.push(seconds);
+    }
+  };
+  collect(/\bsleep\s+(\d+(?:\.\d+)?)\s*([smh]?)\b/gi, 2);
+  collect(/\bstart-sleep(?:\s+-seconds)?\s+(\d+(?:\.\d+)?)\b/gi);
+  collect(/\btimeout(?:\.exe)?\s+\/t\s+(\d+(?:\.\d+)?)\b/gi);
+  if (!waits.length) return null;
+
+  const longestWait = Math.max(...waits);
+  if (longestWait > FOREGROUND_POLL_BUDGET_SECONDS) {
+    return `an explicit wait lasts ${longestWait}s (limit ${FOREGROUND_POLL_BUDGET_SECONDS}s)`;
+  }
+
+  const lower = source.toLowerCase();
+  if (/\b(while|until)\b/.test(lower)) {
+    return `an open-ended wait loop can exceed ${FOREGROUND_POLL_BUDGET_SECONDS}s`;
+  }
+
+  let repetitions = 1;
+  const seqRange = /\bseq\s+(-?\d+)\s+(-?\d+)\b/i.exec(source);
+  const seqCount = /\bseq\s+(\d+)\b/i.exec(source);
+  const rangeCount = /(?:\{|\b)(\d+)\.\.(\d+)(?:\}|\b)/.exec(source);
+  const lessThanCount = /\b-lt\s+(\d+)\b/i.exec(source);
+  if (seqRange) repetitions = Math.abs(Number(seqRange[2]) - Number(seqRange[1])) + 1;
+  else if (seqCount) repetitions = Number(seqCount[1]);
+  else if (rangeCount) repetitions = Math.abs(Number(rangeCount[2]) - Number(rangeCount[1])) + 1;
+  else if (lessThanCount) repetitions = Number(lessThanCount[1]);
+
+  const explicitWaitBudget = repetitions * waits.reduce((sum, seconds) => sum + seconds, 0);
+  return explicitWaitBudget > FOREGROUND_POLL_BUDGET_SECONDS
+    ? `the explicit wait loop budgets about ${explicitWaitBudget}s (limit ${FOREGROUND_POLL_BUDGET_SECONDS}s)`
+    : null;
 }
 
 function renderTodos(todos: { content: string; status: string }[]): string {
