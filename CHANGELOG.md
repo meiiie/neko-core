@@ -18,6 +18,9 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Fixed
 
+- **Concurrent project trust changes no longer produce a false corrupt-store error.** A reader now
+  tolerates a record that a verified revoke removes between directory enumeration and file inspection,
+  while malformed, linked, oversized, and genuinely unreadable records still fail closed.
 - **Manual and automatic updates no longer fight over a healthy slow download.** The machine-wide
   update lock now receives progress heartbeats, and `neko update` waits for an active startup updater
   instead of failing immediately. If that updater finishes first, the CLI reuses its installed result

@@ -3,6 +3,15 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-24 - Concurrent trust-store reader repair (v0.24.21)
+
+The pre-tag Windows CI gate caught a real directory-snapshot race: one process enumerated a trusted
+project record just before a concurrent verified revoke removed it, then treated the resulting `ENOENT`
+from `lstat` as store corruption. `readStore()` now skips only `ENOENT` at the `lstat` and `readFile`
+boundaries. Every other filesystem failure, unexpected entry, link, size violation, and malformed JSON
+continues to fail closed. The existing three-process add/add/revoke regression is the acceptance test;
+the release tag remained uncreated while the repair was made.
+
 ## 2026-08-23 - Stable native TypeScript 7.0.2 (v0.24.21)
 
 The primary typecheck gate moved from the native `7.0.1-rc` to production `7.0.2`. The stable package

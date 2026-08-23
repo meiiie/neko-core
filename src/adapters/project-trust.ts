@@ -273,12 +273,25 @@ function readStore(home: string): TrustStore {
     if (!match) throw new Error("Project trust store contains an unexpected entry");
     if (Object.keys(projects).length >= hardRecordLimit) throw new Error("Project trust store contains too many records");
     const path = join(dir, name);
-    const stat = lstatSync(path);
+    let stat: Stats;
+    try { stat = lstatSync(path); }
+    catch (error) {
+      // SAFETY: Node filesystem errors carry the stable errno code used to distinguish a concurrent revoke.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
     if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_TRUST_RECORD_BYTES) {
       throw new Error("Project trust store contains an invalid record");
     }
+    let text: string;
+    try { text = readFileSync(path, "utf-8"); }
+    catch (error) {
+      // SAFETY: Node filesystem errors carry the stable errno code used to distinguish a concurrent revoke.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
     let raw: unknown;
-    try { raw = JSON.parse(readFileSync(path, "utf-8")); }
+    try { raw = JSON.parse(text); }
     catch { throw new Error("Project trust store is invalid JSON"); }
     projects[match[1]] = validateRecord(match[1], raw);
   }
