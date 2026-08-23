@@ -55,7 +55,10 @@ function report(label: string) {
 
 await sleep(4000);
 report("startup");
-term.write("xin chao");
+// Emulate physical typing one key at a time. Writing the whole phrase in one PTY chunk exercises
+// Neko's intentional paste-collapsing path, so looking for the literal draft falsely reports DEAD
+// input even though Enter later submits the preserved paste correctly.
+for (const key of "xin chao") { term.write(key); await sleep(15); }
 await sleep(800);
 // INPUT check - the other field class ("renders but typing does nothing"): the echo must be visible.
 const typedEcho = vt.text().includes("xin chao");

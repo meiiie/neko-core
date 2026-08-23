@@ -18,7 +18,11 @@ async function spawnWpfFixture(source: string) {
   if (!WINDOWS_POWERSHELL) throw new Error("trusted Windows PowerShell is unavailable");
   for (let attempt = 1; ; attempt++) {
     try {
-      return Bun.spawn([WINDOWS_POWERSHELL, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", Buffer.from(source, "utf16le").toString("base64")], {
+      // `source` is a test-owned argument passed directly to CreateProcess (no shell interpolation).
+      // Avoid PowerShell -EncodedCommand here: Defender/ASR can reject encoded WPF fixtures with
+      // EPERM even though the canonical System32 binary is healthy, making the UIA gate host-policy
+      // dependent. Bun owns Windows argv quoting, so the plain command remains exact and inspectable.
+      return Bun.spawn([WINDOWS_POWERSHELL, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", source], {
         cwd: dirname(WINDOWS_POWERSHELL), stdout: "ignore", stderr: "ignore",
       });
     } catch (error) {
