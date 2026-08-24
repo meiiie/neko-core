@@ -59,7 +59,7 @@ export const DEFAULT_SYSTEM_PROMPT =
   "- Never hold a foreground sleep/poll loop over 30s; use a background job and bounded heartbeats.\n" +
   "- Verify from a CLEAN state: remove stale generated outputs before a check so they cannot short-circuit it. Afterward leave the intended deliverables, not disposable validation artifacts. When the deliverable is a program and a clean run recreates an output, that runtime output is disposable even if the acceptance behavior names its path.\n\n" +
   "## Accuracy\n" +
-  "Time-sensitive or factual questions (today/current/latest/best/a price/who holds an office) -> your training has a CUTOFF; do NOT answer from memory. web_search, then VERIFY before answering: cross-check each key fact across >=2 independent sources; prefer primary/official/known-leaderboard sources over SEO/aggregator/content-farm pages; sanity-check recency (a 'latest/2026' source that lists clearly-old items is stale -- discard it, don't repeat it). If sources conflict or are thin, SAY SO and cite (URL + date) rather than presenting a guess as fact. Conclusions are provisional: keep doubting, re-verify when evidence shifts, and revise or drop stale knowledge instead of trusting a frozen snapshot. For a deeper dive or an ongoing, self-correcting research ledger, load `deep-research` / `research-method`.\n\n" +
+  "Facts that can change - including administrative boundaries/names/status, laws/regulations, office holders, prices/schedules, product/model availability, and anything asked as today/current/latest - are time-sensitive even when the user omits 'current'. Your training has a CUTOFF: do not answer these from memory. Use web_search, then web_fetch authoritative primary sources; cross-check key facts across >=2 independent sources and report the source date plus effective/operational date when relevant. Reject stale/SEO/aggregator evidence. If evidence conflicts, is thin, or web is unavailable, say the answer is unverified instead of guessing. For deeper or ongoing research, load `deep-research` / `research-method`.\n\n" +
   "## Web & HTML\n" +
   "Building an HTML page? Always ship a complete SEO `<head>` — title + meta description, canonical, Open Graph + Twitter tags, a JSON-LD block, a favicon — and commit to ONE design direction (state it). Avoid the AI-slop defaults: Inter or Space Grotesk as the face, warm-cream + serif + terracotta, purple->blue gradients, four identical rounded cards. Derive EVERY region from the design system including nav and footer (a signature oversized-wordmark footer reads elite). For the full design + SEO discipline, load the `web-app` skill (it pulls design-engine + seo).\n\n" +
   "## Output\n" +
@@ -73,6 +73,28 @@ export const DEFAULT_SYSTEM_PROMPT =
   "MathML. Simple LaTeX (`$...$`, `$$...$$`, \\frac, ^, _, greek) is converted to Unicode, but keep formulas " +
   "short and readable rather than dense multi-line LaTeX.\n\n" +
   "Be concise — no filler, no 'I will now...' preamble or 'let me know if...' postamble, and no AI-slop tics (reflexive 'not X but Y' contrasts, throat-clearing openers, faux-insight, importance-puffery, weasel citations like 'studies show', hollow stat-dropping); write plain, active, specific sentences and sound like a focused senior engineer pair-programming, not a script. When done: a short summary, then stop.";
+
+const FACT_QUERY_CUE = /(?:\?|\b(?:who|what|where|which|when|how|is|are|belongs?|part of|verify|check)\b|\b(?:ai|gì|nào|đâu|bao nhiêu|là|thuộc|kiểm tra|xác minh)\b)/iu;
+const VOLATILE_FACT_DOMAIN = /(?:\b(?:administrative|jurisdiction|province|district|county|municipality|commune|ward|special zone|law|regulation|statute|ruling|president|prime minister|minister|governor|mayor|ceo|price|schedule|weather|score|election|release|version|model availability)\b|đơn vị hành chính|địa giới|tỉnh|thành phố|huyện|quận|xã|phường|đặc khu|huyện đảo|sáp nhập|luật|nghị quyết|nghị định|thông tư|quy định|chủ tịch|thủ tướng|bộ trưởng|giá|lịch|thời tiết|tỉ số|bầu cử|phiên bản|model mới)/iu;
+const VIETNAM_ISLAND_ADMIN = /(?:hoàng sa|trường sa)/iu;
+const LOCAL_ARTIFACT_CUE = /(?:package\.json|(?:^|[\s`'"])(?:\.{0,2}[\\/]|[a-z]:[\\/]|src[\\/]|test[\\/])|\b(?:this|the|local|project|repo(?:sitory)?|workspace)\s+(?:file|code|config|version|model)\b)/iu;
+
+/** A conservative host-side backstop for mutable public facts. It encodes no factual snapshot; it
+ * only decides whether a tool-less final needs one web pass. Local/code uses of "current" do not
+ * qualify without a volatile public-fact domain. */
+export function requiresFreshFactVerification(text: string): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || !FACT_QUERY_CUE.test(raw)) return false;
+  if (LOCAL_ARTIFACT_CUE.test(raw)) return false;
+  if (VIETNAM_ISLAND_ADMIN.test(raw)) return true;
+  return VOLATILE_FACT_DOMAIN.test(raw);
+}
+
+/** Native and namespaced MCP web readers both count; availability still comes from the active
+ * turn's schema surface, so a restricted runtime is never promised a missing tool. */
+export function isFreshFactWebTool(name: string): boolean {
+  return /(?:^|__)web_(?:search|fetch)$/i.test(String(name ?? ""));
+}
 
 /** Loss-aware continuation capsule. A fixed schema makes compaction auditable across providers and keeps
  * goals, corrections, evidence, and open loops distinct instead of blending them into vague prose. */

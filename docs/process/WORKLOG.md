@@ -3,6 +3,28 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-24 - Freshness gate for mutable public facts (v1.0.1)
+
+A field answer still described Hoàng Sa and Trường Sa with the pre-July-2025 `huyện đảo` labels. Official
+sources confirmed the current administrative status: Nghị quyết 1659/NQ-UBTVQH15 reorganized huyện Hoàng Sa
+as đặc khu Hoàng Sa under Đà Nẵng, and Nghị quyết 1667/NQ-UBTVQH15 formed đặc khu Trường Sa under Khánh Hòa.
+Both resolutions were adopted and took legal effect on 16 June 2025; the new commune-level governments began
+operating on 1 July 2025. The distinction matters because saying only "effective from 1 July" conflates two
+different dates.
+
+The root cause was not missing tool access. The always-on Accuracy prompt mentioned explicit words such as
+`current` and `latest`, but a model could treat an unqualified administrative question as timeless and return
+training memory without calling a web tool. The fix keeps facts out of code: a small host-side classifier marks
+mutable public-fact questions, and the agent loop intercepts one tool-less final when the active turn exposes
+`web_search` or `web_fetch`. Productive proactive web evidence is credited, namespaced MCP web tools count, and
+a restricted runtime with no web capability is never trapped in an impossible loop. The retry asks for primary
+sources, cross-checking, and separate legal/operational dates; if evidence remains unavailable, the model must
+say the answer is unverified rather than guess.
+
+Regression tests cover both Vietnamese island-administration examples, English administrative questions,
+office-holder freshness, local-code false positives, native/namespaced web tools, memory-only rejection,
+proactive evidence, and no-web degradation. The always-on prompt stayed below its 9,000-byte budget.
+
 ## 2026-08-24 - Public 1.0 launch contract and atomic future releases
 
 The public-launch pass compared primary 1.0 releases from Bun, Deno, GitHub CLI, Terraform, and uv. The common

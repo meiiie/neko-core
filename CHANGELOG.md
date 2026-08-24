@@ -6,6 +6,8 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-24
+
 ### Changed
 
 - **The stable 1.x promise is now explicit and public.** Compatibility, support, deprecation, external-service,
@@ -14,6 +16,15 @@ All notable changes to Neko Core are documented here. The format follows
 - **Future GitHub releases publish atomically.** The workflow creates a draft, attaches and verifies the complete
   five-binary/five-checksum/browser-extension set, then publishes it. Repository release immutability protects
   tags and assets created after the policy is enabled.
+
+### Fixed
+
+- **Mutable public facts can no longer silently fall back to model memory.** Questions about administrative
+  status, laws, office holders, prices, schedules, and other changeable facts get one host-enforced web
+  verification pass when a web tool is available. The prompt now requires authoritative primary sources and
+  distinguishes a legal effective date from the date a new administration begins operating. Regression coverage
+  includes the 2025 changes from huyện đảo to đặc khu for Hoàng Sa and Trường Sa without baking either answer
+  into the classifier.
 
 ## [1.0.0] - 2026-08-24
 

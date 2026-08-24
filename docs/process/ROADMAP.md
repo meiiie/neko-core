@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-08-24) - v1.0.0
+## Current status (2026-08-24) - v1.0.1
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The 1.0 baseline includes:
@@ -14,8 +14,10 @@ The 1.0 baseline includes:
 - five standalone release targets with SHA-256 sidecars and verified exact-version rollback;
 - stable Bun 1.4.0 as the compiled runtime, including the Windows stdin engine required by the input probe.
 
-**Branch:** `main`. **Current release: v1.0.0 (2026-08-24).** This is the long-term stable baseline;
-the complete pre-1.0 history remains in [CHANGELOG.md](../../CHANGELOG.md) and
+**Branch:** `main`. **Current release: v1.0.1 (2026-08-24).** The 1.0 compatibility contract remains the
+long-term stable baseline; v1.0.1 is its current patch release. Mutable public facts now require fresh web
+evidence when that capability is available. The complete pre-1.0 history remains in
+[CHANGELOG.md](../../CHANGELOG.md) and
 [WORKLOG.md](WORKLOG.md).
 
 ## Compatibility policy

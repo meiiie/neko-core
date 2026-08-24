@@ -31,6 +31,8 @@ import {
   clampObservation,
   estimateRequestTokens,
   estimateTokens,
+  isFreshFactWebTool,
+  requiresFreshFactVerification,
   SESSION_CONTEXT_MARK,
   type EventHook,
   type AgentOptions,
@@ -47,6 +49,8 @@ export {
   clampObservation,
   estimateRequestTokens,
   estimateTokens,
+  isFreshFactWebTool,
+  requiresFreshFactVerification,
 };
 export { isValidationBashCommand } from "./validation-command.ts";
 export type { EventHook, AgentOptions };
@@ -777,6 +781,9 @@ export class Agent {
     let stateVerificationRequested = false;
     let stateVerificationEvidence = false;
     let completionVerificationEvidence = false;
+    const freshFactVerificationRequired = !internal && requiresFreshFactVerification(instruction);
+    let freshFactVerificationRequested = false;
+    let freshFactVerificationEvidence = false;
     let nextReasoningEffort: string | undefined;
     let consecutiveReadSteps = 0; // adaptive effort: only lower reasoning on a SUSTAINED all-read pattern
     let toolchainCapabilityFailures = 0;
@@ -785,6 +792,7 @@ export class Agent {
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
       const failed = observation == null || Agent.isUnproductiveResult(observation);
+      if (!failed && isFreshFactWebTool(call.name)) freshFactVerificationEvidence = true;
       const validationCommand = call.name.toLowerCase() === "bash"
         && isValidationBashCommand(String(call.arguments?.command ?? ""));
       if (validationCommand) {
@@ -1020,6 +1028,22 @@ export class Agent {
             content: `PLAN NOT COMPLETE: ${openTodos.length} todo item(s) are still open. Re-check the actual state, ` +
               "continue the work, and call todo_write with the full updated plan before finishing. Mark items " +
               "completed only when verified. If progress is genuinely blocked, state the blocker clearly instead of claiming completion.",
+          });
+          continue;
+        }
+        const hasFreshFactWebTool = toolSchemas.some((schema: any) =>
+          isFreshFactWebTool(String(schema?.function?.name ?? schema?.name ?? "")));
+        if (freshFactVerificationRequired && hasFreshFactWebTool && !freshFactVerificationEvidence
+          && !freshFactVerificationRequested && step < this.maxSteps - 1) {
+          freshFactVerificationRequested = true;
+          verifiedExit = true; // this evidence gate subsumes the generic inspection-only gate
+          this.messages.push({
+            role: "user",
+            _neko_internal: true,
+            content: "CURRENT-FACT VERIFICATION REQUIRED: this question concerns public facts that can change. " +
+              "Do not answer from training memory. Use web_search and web_fetch now, prefer authoritative primary " +
+              "sources, cross-check the key fact, and distinguish the legal effective date from an operational date " +
+              "when relevant. If current evidence is unavailable or conflicts, say so plainly instead of guessing.",
           });
           continue;
         }
