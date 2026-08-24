@@ -13,6 +13,7 @@ import { trustedGitOutput, trustedGitOutputAsync } from "./trusted-git.ts";
 import { homeDir } from "../shared/home.ts";
 import { isBool, isJsonNumber, isJsonObject, isText, type JsonObject } from "../shared/wire.ts";
 import { dirname, join, resolve } from "node:path";
+import type { StoredHostProfile } from "./host-profile.ts";
 
 export type SessionTurnStatus = "idle" | "running" | "interrupted";
 
@@ -57,6 +58,8 @@ export interface Session {
   turnState?: SessionTurnState;
   usage?: SessionUsage;
   contextFingerprint?: string;
+  /** Immutable launch-authorized ACP host authority; absent for ordinary Neko sessions. */
+  hostProfile?: StoredHostProfile;
 }
 
 /** Lightweight session metadata for the picker/list - everything EXCEPT the (large) messages array.
@@ -76,6 +79,7 @@ export interface SessionMeta {
   reasoningEffort?: string;
   revision?: number;
   turnState?: SessionTurnState;
+  hostProfile?: StoredHostProfile;
   msgCount: number;
   titleText: string; // precomputed first-user-message title (so no messages needed to show a title)
   mtime: number; // file mtimeMs at index time - freshness key (with fsize)
@@ -165,6 +169,16 @@ function validUsage(value: any): value is SessionUsage {
   return keys.every((key) => Number.isSafeInteger(usage[key]) && Number(usage[key]) >= 0);
 }
 
+function validStoredHostProfile(value: any): value is StoredHostProfile {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const profile = value;
+  return profile.schemaVersion === 1
+    && /^[a-z][a-z0-9-]{0,63}$/.test(String(profile.id ?? ""))
+    && Number.isSafeInteger(profile.version) && profile.version >= 1
+    && /^[a-z][a-z0-9-]{0,63}$/.test(String(profile.mcpServerName ?? ""))
+    && /^[a-f0-9]{64}$/.test(String(profile.toolSurfaceHash ?? ""));
+}
+
 function parseSession(value: any, expectedId: string): Session | null {
   const session = isJsonObject(value) ? value : null;
   if (session === null) return null;
@@ -186,6 +200,7 @@ function parseSession(value: any, expectedId: string): Session | null {
   if (session.turnState !== undefined && !validTurnState(session.turnState)) return null;
   if (session.usage !== undefined && !validUsage(session.usage)) return null;
   if (session.contextFingerprint !== undefined && !validMetadataText(session.contextFingerprint, MAX_SESSION_FINGERPRINT_BYTES)) return null;
+  if (session.hostProfile !== undefined && !validStoredHostProfile(session.hostProfile)) return null;
   // SAFETY: every field above is validated against the session schema before this cast.
   return value as Session;
 }
@@ -511,6 +526,7 @@ function metaOf(session: Session, mtime: number, fsize: number): SessionMeta {
     model: session.model, branch: session.branch, bytes: session.bytes, title: session.title,
     provider: session.provider, profile: session.profile, mode: session.mode,
     reasoningEffort: session.reasoningEffort, revision: session.revision, turnState: session.turnState,
+    hostProfile: session.hostProfile,
     msgCount: session.messages?.length ?? 0, titleText, mtime, fsize,
   };
 }
@@ -537,7 +553,8 @@ function validMeta(value: any, expectedId: string): value is SessionMeta {
     && (meta.mode === undefined || new Set(["default", "accept-edits", "plan", "auto"]).has(String(meta.mode)))
     && (meta.reasoningEffort === undefined || validMetadataText(meta.reasoningEffort, MAX_SESSION_EFFORT_BYTES))
     && (meta.revision === undefined || (Number.isSafeInteger(meta.revision) && Number(meta.revision) >= 0))
-    && (meta.turnState === undefined || validTurnState(meta.turnState));
+    && (meta.turnState === undefined || validTurnState(meta.turnState))
+    && (meta.hostProfile === undefined || validStoredHostProfile(meta.hostProfile));
 }
 
 /** Session metadata for the list/picker WITHOUT parsing every full transcript. Backed by a persistent

@@ -65,6 +65,7 @@ interface Args {
   command?: string;
   positionals: string[];
   profile?: string;
+  hostProfile?: string;
   procurementCategory?: string;
   procurementIdentifierKind?: string;
   procurementDomains?: string[];
@@ -97,6 +98,7 @@ function parseArgs(argv: string[]): Args {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--profile") args.profile = argv[++i];
+    else if (a === "--host-profile") args.hostProfile = argv[++i];
     else if (a === "--category") args.procurementCategory = argv[++i];
     else if (a === "--kind") args.procurementIdentifierKind = argv[++i];
     else if (a === "--domain") { const domain = argv[++i]; if (domain) (args.procurementDomains ??= []).push(domain); }
@@ -260,6 +262,7 @@ Commands:
 
 Options:
   --profile <name>   named runtime profile (see 'neko profiles')
+  --host-profile <id> (acp) exclusive embedding-host tool profile; currently: nekocut
   --yolo             disable approval prompts; hard credential/system/catastrophic seatbelts remain
   --loop             run "run" as a closed loop: work + self-review until done
   --once             force a single-shot run (overrides config "auto_loop": true)
@@ -1508,9 +1511,12 @@ async function main(): Promise<number> {
       case "browser": return await cmdBrowser(args);
       case "acp": {
         const { runAcpServer } = await import("../src/adapters/acp.ts");
+        const { resolveHostCapabilityProfile } = await import("../src/adapters/host-profile.ts");
+        const hostProfile = resolveHostCapabilityProfile(args.hostProfile);
         await runAcpServer({
-          configForRoot: (root) => {
-            const cfg = loadConfig({ profile: args.profile, cwd: root });
+          hostProfile,
+          configForRoot: (root, savedProfile) => {
+            const cfg = loadConfig({ profile: savedProfile ?? args.profile, cwd: root });
             if (args.yolo) cfg.data.mode = "auto";
             return cfg;
           },

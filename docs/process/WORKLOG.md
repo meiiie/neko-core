@@ -3,6 +3,27 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-25 - Launch-authorized ACP host capability profiles (v1.1.0)
+
+Added a generic, fail-closed host-profile composition without changing ordinary `neko`, `neko --yolo`, or
+`neko acp`. `neko acp --host-profile nekocut` accepts exactly one named MCP-over-ACP server on the existing
+connection, exposes only six declared NekoCut tools, and omits native tools, configured MCP, browser, web,
+skills, subagents, hooks, and project/global dynamic context. Stdio/HTTP/SSE descriptors and extra or missing
+servers are rejected before runtime construction.
+
+The profile is selected only by the trusted launch command. Its ID, version, server name, and SHA-256 tool
+surface are stored with durable sessions; normal and host sessions do not list or resume each other. Restore
+requires the same profile and a fresh in-band host implementation. Mode changes are intersected with the
+profile and cannot widen tools. MCP transport failures are recorded as unknown outcomes and are never retried.
+
+Evidence: TypeScript typecheck passed; the complete suite passed 1,492 tests with 12 intentional skips and zero
+failures; the final ACP/host slice passed 15 tests and 110 assertions. The compiled binary passed its build-time
+UI/input/ACP/startup probes, and a real NekoCut client completed initialize, session/new, close, and durable
+resume over MCP-over-ACP without a provider call. The negotiated profile hash was independently recomputed and
+matched on both sides. The release candidate was rebuilt and re-tested with pinned Bun 1.4.0; three consecutive
+Windows ConPTY ghost/typing probes passed. The Windows artifact grew by 15,872 bytes (about 15.5 KiB, 0.017%)
+versus v1.0.2, with no new runtime dependency.
+
 ## 2026-08-24 - Selective Vietnam sovereignty knowledge capsule (v1.0.2)
 
 The v1.0.1 freshness gate stopped stale administrative answers when web tools were available, but it did not

@@ -1,6 +1,6 @@
 /** Shared production Agent composition for non-TUI hosts (CLI run, ACP, and future clients). */
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
-import type { DeltaHook } from "../core/ports.ts";
+import type { DeltaHook, McpTools } from "../core/ports.ts";
 import { ToolRegistry, type ApprovalGate } from "../core/tool-runtime.ts";
 import { loadAgent } from "./agents.ts";
 import { startManagedBrowserBridge } from "./browser-bridge.ts";
@@ -8,6 +8,7 @@ import type { NekoConfig } from "./config.ts";
 import { ensureNekoHome } from "./context.ts";
 import { buildMcpHub, type McpServerConfig } from "./mcp.ts";
 import { getProvider } from "./providers.ts";
+import { hostToolNames, type HostCapabilityProfile } from "./host-profile.ts";
 import { planTurnCapabilities } from "./turn-capabilities.ts";
 import { configureToolRegistry, inheritToolRegistrySettings, restrictToolRegistryForSubagent } from "./tool-registry.ts";
 import { matchedTurnContext, productionTurnContext, subagentTurnContext } from "./turn-context.ts";
@@ -30,6 +31,10 @@ export interface BuildAgentRuntimeOptions {
   onEvent?: (kind: string, data: any) => void;
   onCheckpoint?: () => void | Promise<void>;
   mcpServers?: Record<string, McpServerConfig>;
+  /** Exclusive, launch-authorized authority ceiling for an embedding ACP host. */
+  hostProfile?: HostCapabilityProfile;
+  /** Per-session in-band MCP supplied by that host. Required when hostProfile is present. */
+  hostTools?: McpTools;
 }
 
 /** Compose exactly one long-lived Agent session without coupling it to a terminal UI. */
@@ -38,6 +43,42 @@ export async function buildAgentRuntime(
   options: BuildAgentRuntimeOptions,
 ): Promise<AgentRuntime> {
   ensureNekoHome();
+  if (options.hostProfile) {
+    if (!options.hostTools) throw new Error("host profile requires an in-band host MCP connection");
+    const requestedMode = options.mode ?? cfg.mode;
+    const mode = options.hostProfile.allowedModes.includes(requestedMode)
+      ? requestedMode
+      : options.hostProfile.allowedModes[0];
+    const registry = new ToolRegistry(options.root, mode, options.approval, options.hostTools);
+    registry.allowOnlyTools(hostToolNames(options.hostProfile));
+    registry.allowBackgroundBash = false;
+    registry.readOutsideRoot = false;
+    registry.explicitYolo = Boolean(options.yolo);
+    registry.noTools = Boolean(options.noTools);
+    const provider = getProvider(cfg);
+    const agent = new Agent({
+      provider,
+      tools: registry,
+      maxSteps: cfg.maxSteps,
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      dynamicContext: () => options.hostProfile!.systemContext,
+      onEvent: options.onEvent,
+      onCheckpoint: options.onCheckpoint,
+      onDelta: options.onDelta,
+      verifyBeforeExit: false,
+      verifyStateChangesBeforeExit: false,
+      adaptiveEffort: cfg.adaptiveEffort,
+    });
+    return {
+      agent,
+      registry,
+      config: cfg,
+      close: async () => {
+        try { await options.hostTools?.close?.(); } catch { /* best-effort in-band transport shutdown */ }
+        try { await agent.currentProvider().dispose?.(); } catch { /* best-effort provider shutdown */ }
+      },
+    };
+  }
   const servers = { ...cfg.mcpServers, ...(options.mcpServers ?? {}) };
   const hub = await buildMcpHub(
     servers,

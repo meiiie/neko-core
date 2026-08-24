@@ -123,6 +123,8 @@ export interface McpTools {
   /** Lazy tool loading (optional): pull tool schemas on demand instead of all upfront. */
   loadTools?(names: string[]): string;
   indexBlock?(): string;
+  /** Release transport-owned resources when the host session closes. */
+  close?(): void | Promise<void>;
 }
 
 /** Web content acquisition (implemented by an adapter, injected by the host). */

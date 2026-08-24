@@ -453,6 +453,13 @@ unknown outcome before the next provider request rather than replayed as a mutat
 `neko acp`, so provider selection, global skills, project context, MCP, ToolRegistry decisions, path
 containment, bash sandboxing, and the catastrophic-command seatbelt cannot drift between hosts.
 
+An explicit `--host-profile` selects a narrower alternate composition before ACP starts. The profile is
+immutable session authority: `adapters/acp-host-mcp.ts` accepts only an exact MCP-over-ACP descriptor,
+`adapters/agent-runtime.ts` omits every native/global tool source, and `ToolRegistry.allowOnlyTools` enforces
+the declared surface again at schema and execution time. Durable sessions store the profile version and
+surface hash, so a normal process or a changed profile cannot resume them. The first profile is `nekocut`;
+new embedding products add reviewed declarative profiles rather than host-specific conditionals in core.
+
 The ACP client's permission response is only an implementation of core's `ApprovalGate`. Core still
 decides whether a call is allowed, denied, or eligible to prompt. In particular, `plan` is a hard deny;
 `auto` does not bypass host-computer consent or seatbelts; and allow/reject-always choices are scoped to

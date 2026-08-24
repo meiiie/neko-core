@@ -111,6 +111,7 @@ neko --resume                # resume the latest session in this folder
 neko run "fix the failing tests"
 neko run --loop "finish the migration and verify it"
 neko acp                     # ACP v1 server for Zed, JetBrains, and other clients
+neko acp --host-profile nekocut # exclusive six-tool embedding profile for NekoCut
 neko update                  # install latest and resume auto-updates
 neko update <version>        # exact rollback/pin; pauses auto-updates
 ```
@@ -157,6 +158,11 @@ These surfaces are optional and progressively disclosed. Their contracts live un
 Clients can create, list, load, resume, and close sessions; replay and resume are deliberately distinct.
 Permission requests map to Neko's named modes rather than bypassing the CLI safety boundary. See
 [Neko over ACP](docs/process/ACP.md).
+
+Embedding applications can opt into a launch-authorized host profile. The first profile,
+`neko acp --host-profile nekocut`, disables native/global tools and accepts only NekoCut's exact
+MCP-over-ACP surface for that session. Ordinary ACP behavior is unchanged, and an ACP request cannot select
+or widen the profile after launch.
 
 ## Configuration
 

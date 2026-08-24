@@ -10,6 +10,8 @@ import { Agent } from "../src/core/agent.ts";
 import type { Provider } from "../src/core/ports.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import { loadSession, newSessionId, saveSession, setSessionsDir } from "../src/adapters/session.ts";
+import { hostToolNames, NEKOCUT_HOST_PROFILE } from "../src/adapters/host-profile.ts";
+import { isJsonObject } from "../src/shared/wire.ts";
 
 const roots: string[] = [];
 let sessionStore = "";
@@ -390,6 +392,132 @@ test("ACP refuses client authority expansion before building a session runtime",
     })).rejects.toThrow("additionalDirectories");
   });
   expect(builds).toBe(0);
+});
+
+test("ACP host profile exposes only its in-band MCP surface and persists its authority", async () => {
+  const root = tempRoot();
+  const home = tempRoot();
+  const cfg = loadConfig({ cwd: root, home });
+  const expected = hostToolNames(NEKOCUT_HOST_PROFILE);
+  const mcpCalls: string[] = [];
+  let advertised: string[] = [];
+  let providerCall = 0;
+
+  const agentApp = createNekoAcpAgent({
+    config: cfg,
+    hostProfile: NEKOCUT_HOST_PROFILE,
+    buildRuntime: async (runtimeConfig, options) => {
+      expect(options.hostProfile?.id).toBe("nekocut");
+      expect(options.hostTools).toBeDefined();
+      const registry = new ToolRegistry(options.root, options.mode, options.approval, options.hostTools);
+      registry.allowOnlyTools(expected);
+      const agent = new Agent({
+        provider: {
+          complete: async (_messages, schemas) => {
+            advertised = (schemas ?? []).map((schema: any) => schema.function?.name).filter(Boolean);
+            providerCall++;
+            return providerCall === 1
+              ? { content: null, tool_calls: [{ id: "snapshot-1", name: expected[0], arguments: {} }] }
+              : { content: "snapshot inspected", tool_calls: [] };
+          },
+        },
+        tools: registry,
+        onEvent: options.onEvent,
+        onCheckpoint: options.onCheckpoint,
+        onDelta: options.onDelta,
+        verifyBeforeExit: false,
+        verifyStateChangesBeforeExit: false,
+      });
+      return {
+        agent,
+        registry,
+        config: runtimeConfig,
+        close: async () => { await options.hostTools?.close?.(); },
+      };
+    },
+  });
+
+  const identity = { parse: (value: any) => {
+    if (!isJsonObject(value)) throw new Error("test MCP params must be a JSON object");
+    return value;
+  } };
+  const tools = NEKOCUT_HOST_PROFILE.tools.map((tool) => ({
+    name: tool.name,
+    description: tool.name,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  }));
+  const clientApp = acp.client({ name: "nekocut-host-test" })
+    .onRequest("mcp/connect", identity, ({ params }) => {
+      expect(params.serverId).toBe("nekocut-test-server");
+      return { connectionId: "nekocut-test-connection" };
+    })
+    .onRequest("mcp/message", identity, ({ params }) => {
+      expect(params.connectionId).toBe("nekocut-test-connection");
+      if (params.method === "initialize") return {
+        protocolVersion: "2025-11-25",
+        capabilities: { tools: {} },
+        serverInfo: { name: "nekocut", version: "1" },
+      };
+      if (params.method === "tools/list") return { tools };
+      if (params.method === "tools/call") {
+        mcpCalls.push(isJsonObject(params.params) ? String(params.params.name) : "");
+        return { content: [{ type: "text", text: "bounded project snapshot" }] };
+      }
+      throw new Error(`unexpected inner MCP method ${params.method}`);
+    })
+    .onRequest("mcp/disconnect", identity, ({ params }) => {
+      expect(params.connectionId).toBe("nekocut-test-connection");
+      return {};
+    })
+    .onNotification("mcp/message", identity, ({ params }) => {
+      expect(params.method).toBe("notifications/initialized");
+    });
+
+  let id = "";
+  await clientApp.connectWith(agentApp, async (ctx) => {
+    const initialized = await ctx.request(acp.methods.agent.initialize, {
+      protocolVersion: acp.PROTOCOL_VERSION,
+      clientCapabilities: {},
+    });
+    expect(initialized.agentCapabilities?.mcpCapabilities).toEqual({ acp: true });
+    const initializedHost = initialized._meta?.["neko.hostProfile"];
+    expect(isJsonObject(initializedHost) ? initializedHost.id : undefined).toBe("nekocut");
+
+    await expect(ctx.request(acp.methods.agent.session.new, {
+      cwd: root,
+      mcpServers: [{ name: "evil", command: process.execPath, args: [], env: [] }],
+    })).rejects.toThrow("accepts only");
+
+    const created = await ctx.request(acp.methods.agent.session.new, {
+      cwd: root,
+      mcpServers: [{ type: "acp", name: "nekocut", serverId: "nekocut-test-server" }],
+    });
+    id = created.sessionId;
+    expect(created.modes?.availableModes.map((mode) => mode.id)).toEqual(["default", "auto"]);
+    await expect(ctx.request(acp.methods.agent.session.setMode, {
+      sessionId: id,
+      modeId: "plan",
+    })).rejects.toThrow("outside host profile");
+    const result = await ctx.request(acp.methods.agent.session.prompt, {
+      sessionId: id,
+      prompt: [{ type: "text", text: "Inspect this editing project." }],
+    });
+    expect(result.stopReason).toBe("end_turn");
+    expect(advertised).toEqual(expected);
+    expect(mcpCalls).toEqual(["project_snapshot"]);
+    const listed = await ctx.request(acp.methods.agent.session.list, { cwd: root });
+    expect(listed.sessions.map((session) => session.sessionId)).toContain(id);
+    await ctx.request(acp.methods.agent.session.close, { sessionId: id });
+    const resumed = await ctx.request(acp.methods.agent.session.resume, {
+      sessionId: id,
+      cwd: root,
+      mcpServers: [{ type: "acp", name: "nekocut", serverId: "nekocut-test-server" }],
+    });
+    expect(resumed.modes?.availableModes.map((mode) => mode.id)).toEqual(["default", "auto"]);
+    await ctx.request(acp.methods.agent.session.close, { sessionId: id });
+  });
+
+  expect(loadSession(id)?.hostProfile?.id).toBe("nekocut");
 });
 
 test("ACP connection loss closes sessions even without session/close", async () => {

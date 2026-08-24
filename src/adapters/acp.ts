@@ -12,8 +12,16 @@ import type { JsonValue } from "../shared/wire.ts";
 import { describeToolCall } from "../core/tools.ts";
 import { VERSION } from "../shared/version.ts";
 import { buildAgentRuntime, type AgentRuntime } from "./agent-runtime.ts";
+import { AcpHostMcp } from "./acp-host-mcp.ts";
 import { loadConfig, type NekoConfig } from "./config.ts";
 import { getProvider } from "./providers.ts";
+import {
+  hostProfileMeta,
+  hostToolNames,
+  sameHostProfile,
+  storedHostProfile,
+  type HostCapabilityProfile,
+} from "./host-profile.ts";
 import {
   acquireSessionLease,
   AsyncSessionWriter,
@@ -49,6 +57,10 @@ const REJECT_ONCE = "reject_once";
 const REJECT_ALWAYS = "reject_always";
 const CHATGPT_TERMINAL_AUTH = "neko-chatgpt-login";
 
+function isPermissionMode(value: string): value is PermissionMode {
+  return MODE_IDS.has(value);
+}
+
 interface AcpSession {
   sessionId: string;
   root: string;
@@ -79,10 +91,15 @@ export interface AcpRuntimeFactoryOptions {
   buildRuntime?: typeof buildAgentRuntime;
   /** Internal lifecycle seam: production stdio awaits every connection-owned cleanup task. */
   trackCleanup?: (task: Promise<void>) => void;
+  /** Optional exclusive authority selected by the trusted process launcher, never by ACP input. */
+  hostProfile?: HostCapabilityProfile;
 }
 
-function modeState(mode: PermissionMode): acp.SessionModeState {
-  return { currentModeId: mode, availableModes: MODES };
+function modeState(mode: PermissionMode, profile?: HostCapabilityProfile): acp.SessionModeState {
+  return {
+    currentModeId: mode,
+    availableModes: profile ? MODES.filter((item) => profile.allowedModes.some((mode) => mode === item.id)) : MODES,
+  };
 }
 
 function toolKind(name: string): acp.ToolKind {
@@ -251,6 +268,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
   const sessions = new Map<string, AcpSession>();
   const buildRuntime = options.buildRuntime ?? buildAgentRuntime;
   const baseConfig = options.config;
+  const hostProfile = options.hostProfile;
 
   const app = acp.agent({ name: "neko-core" });
 
@@ -270,22 +288,38 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         loadSession: true,
         promptCapabilities: { embeddedContext: true },
         sessionCapabilities: { list: {}, resume: {}, close: {} },
+        ...(hostProfile ? { mcpCapabilities: { acp: true } } : undefined),
       },
       authMethods,
       agentInfo: { name: "neko-core", version: VERSION },
+      ...(hostProfile ? { _meta: { "neko.hostProfile": hostProfileMeta(hostProfile) } } : undefined),
     };
   });
 
-  const refuseAuthorityExpansion = (params: { additionalDirectories?: string[]; mcpServers?: unknown[] }) => {
+  const sessionHostServer = (params: { additionalDirectories?: string[]; mcpServers?: unknown[] }): (acp.McpServerAcp & { type: "acp" }) | undefined => {
     if (params.additionalDirectories?.length) {
       throw new acp.RequestError(-32602, "Neko ACP does not yet support additionalDirectories.");
     }
-    if (params.mcpServers?.length) {
+    if (!hostProfile) {
+      if (!params.mcpServers?.length) return undefined;
       throw new acp.RequestError(
         -32602,
         "Client-supplied ACP MCP servers are disabled; configure trusted MCP servers in Neko instead.",
       );
     }
+    if (!Array.isArray(params.mcpServers) || params.mcpServers.length !== 1) {
+      throw new acp.RequestError(-32602, `Host profile '${hostProfile.id}' requires exactly one in-band ACP MCP server.`);
+    }
+    const server = params.mcpServers[0];
+    if (!isJsonObject(server) || server.type !== "acp" || server.name !== hostProfile.mcpServerName
+      || !isText(server.serverId) || !server.serverId || server.serverId.length > 256
+      || /[\u0000-\u001f\u007f]/.test(server.serverId)) {
+      throw new acp.RequestError(
+        -32602,
+        `Host profile '${hostProfile.id}' accepts only its '${hostProfile.mcpServerName}' ACP-transport MCP server.`,
+      );
+    }
+    return { type: "acp", name: server.name, serverId: server.serverId };
   };
 
   const configForSession = (root: string, record?: Session): NekoConfig => {
@@ -364,6 +398,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           model: session.runtime.config.model,
           profile: session.runtime.config.profile,
           effort: session.runtime.config.effort,
+          hostProfile: session.record.hostProfile,
           system: session.runtime.agent.messages.filter((message: any) => message?.role === "system"),
         })).digest("hex"),
       };
@@ -386,6 +421,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     messageCount: session.record.messages.length,
     continuityLevel: session.record.turnState?.status === "interrupted" ? "recovered" : "durable",
     revision: session.record.revision ?? 0,
+    ...(session.record.hostProfile ? { hostProfile: session.record.hostProfile } : undefined),
   });
 
   const syncSessionState = async (session: AcpSession, client: acp.AgentContext): Promise<void> => {
@@ -480,6 +516,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     cfg: NekoConfig,
     client: acp.AgentContext,
     restored: boolean,
+    hostServer?: acp.McpServerAcp & { type: "acp" },
   ): Promise<AcpSession> => {
     if (sessions.has(record.id)) throw new acp.RequestError(-32000, "ACP session already has an active writer.");
     let lease: SessionLease;
@@ -520,11 +557,15 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     };
 
     let runtime: AgentRuntime | undefined;
+    let hostTools: AcpHostMcp | undefined;
     try {
+      if (hostProfile) hostTools = await AcpHostMcp.connect(hostProfile, client, hostServer!);
       runtime = await buildRuntime(cfg, {
         root,
         mode: record.mode ?? cfg.mode,
         approval,
+        hostProfile,
+        hostTools,
         onCheckpoint: async () => {
           if (session.persistenceFailed) throw session.persistenceFailure;
           await persist(session, {
@@ -671,13 +712,14 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       return session;
     } catch (error) {
       try { await runtime?.close(); } catch { /* preserve the activation failure */ }
+      if (!runtime) try { await hostTools?.close(); } catch { /* preserve the activation failure */ }
       lease.release();
       throw error;
     }
   };
 
   app.onRequest("session/new", async ({ params, client }) => {
-    refuseAuthorityExpansion(params);
+    const hostServer = sessionHostServer(params);
     const root = sessionRoot(params.cwd);
     const cfg = configForSession(root);
     const now = new Date().toISOString();
@@ -690,16 +732,17 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       provider: cfg.provider,
       model: cfg.model,
       profile: cfg.profile,
-      mode: cfg.mode,
+      mode: hostProfile?.allowedModes.includes(cfg.mode) ? cfg.mode : hostProfile?.allowedModes[0] ?? cfg.mode,
       reasoningEffort: cfg.effort,
       revision: 0,
       messages: [],
       turnState: { status: "idle", activeToolCallIds: [] },
+      ...(hostProfile ? { hostProfile: storedHostProfile(hostProfile) } : undefined),
     };
-    const session = await activate(record, root, cfg, client, false);
+    const session = await activate(record, root, cfg, client, false, hostServer);
     try {
       await syncSessionState(session, client);
-      return { sessionId: record.id, modes: modeState(session.runtime.registry.mode), configOptions: configOptions(cfg) };
+      return { sessionId: record.id, modes: modeState(session.runtime.registry.mode, hostProfile), configOptions: configOptions(cfg) };
     } catch (error) {
       sessions.delete(record.id);
       await session.close().catch(() => {});
@@ -711,7 +754,8 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     const filter = params.cwd ? sessionRoot(params.cwd) : null;
     const offset = decodeCursor(params.cursor);
     const pageSize = 50;
-    const all = listSessionMetas().filter((meta) => !filter || sameRoot(comparableRoot(meta.cwd), filter));
+    const all = listSessionMetas().filter((meta) => sameHostProfile(meta.hostProfile, hostProfile)
+      && (!filter || sameRoot(comparableRoot(meta.cwd), filter)));
     const page = all.slice(offset, offset + pageSize);
     return {
       sessions: page.map((meta) => ({
@@ -727,6 +771,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           messageCount: meta.msgCount,
           continuityLevel: meta.turnState?.status === "interrupted" ? "recovered" : "durable",
           revision: meta.revision ?? 0,
+          ...(meta.hostProfile ? { hostProfile: meta.hostProfile } : undefined),
         },
       })),
       ...(offset + pageSize < all.length ? { nextCursor: encodeCursor(offset + pageSize) } : undefined),
@@ -738,21 +783,24 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     client: acp.AgentContext,
     replay: boolean,
   ) => {
-    refuseAuthorityExpansion(params);
+    const hostServer = sessionHostServer(params);
     if (sessions.has(params.sessionId)) throw new acp.RequestError(-32000, "ACP session already has an active writer.");
     const root = sessionRoot(params.cwd);
     const record = loadSession(params.sessionId);
     if (!record) throw new acp.RequestError(-32002, "ACP session not found or its checkpoints are corrupt.");
+    if (!sameHostProfile(record.hostProfile, hostProfile)) {
+      throw new acp.RequestError(-32002, "ACP session belongs to a different host capability profile.");
+    }
     let storedRoot: string;
     try { storedRoot = sessionRoot(record.cwd); }
     catch { throw new acp.RequestError(-32002, "ACP session workspace is no longer available."); }
     if (!sameRoot(storedRoot, root)) throw new acp.RequestError(-32602, "ACP session cwd does not match the saved workspace.");
     const cfg = configForSession(root, record);
-    const session = await activate(record, root, cfg, client, true);
+    const session = await activate(record, root, cfg, client, true, hostServer);
     try {
       if (replay) await replaySession(session, client);
       await syncSessionState(session, client);
-      return { modes: modeState(session.runtime.registry.mode), configOptions: configOptions(session.runtime.config) };
+      return { modes: modeState(session.runtime.registry.mode, hostProfile), configOptions: configOptions(session.runtime.config) };
     } catch (error) {
       sessions.delete(record.id);
       await session.close().catch(() => {});
@@ -766,9 +814,11 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
   app.onRequest("session/set_mode", async ({ params, client }) => {
     const session = sessions.get(params.sessionId);
     if (!session) throw new acp.RequestError(-32002, "ACP session not found.");
-    if (!MODE_IDS.has(params.modeId)) throw new acp.RequestError(-32602, "Unknown Neko permission mode.");
-    // SAFETY: value was just membership-checked against the mode list.
-    session.runtime.registry.mode = params.modeId as PermissionMode;
+    if (!isPermissionMode(params.modeId)) throw new acp.RequestError(-32602, "Unknown Neko permission mode.");
+    if (hostProfile && !hostProfile.allowedModes.includes(params.modeId)) {
+      throw new acp.RequestError(-32602, `Mode '${params.modeId}' is outside host profile '${hostProfile.id}'.`);
+    }
+    session.runtime.registry.mode = params.modeId;
     await persist(session, session.record.turnState);
     await client.notify(acp.methods.client.session.update, {
       sessionId: params.sessionId,
@@ -857,7 +907,8 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           : command === "cost"
             ? runtime.agent.cost.summary()
             : command === "sessions"
-              ? listSessionMetas().filter((meta) => sameRoot(comparableRoot(meta.cwd), session.root)).slice(0, 20)
+              ? listSessionMetas().filter((meta) => sameHostProfile(meta.hostProfile, hostProfile)
+                && sameRoot(comparableRoot(meta.cwd), session.root)).slice(0, 20)
                 .map((meta) => `${meta.id}  ${sessionTitle(meta)}`).join("\n") || "No durable sessions in this workspace."
               : runtime.registry.schemas().map((schema: any) => schema.function?.name ?? schema.name).filter(Boolean).sort().join("\n");
         await client.notify(acp.methods.client.session.update, {
@@ -866,28 +917,37 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         });
         return { stopReason: "end_turn" };
       }
-      const plan = planTurnCapabilities({
-        rawUserText: input.text,
-        source: "user",
-        imageCount: input.images.length,
-        attachmentCount: params.prompt.filter((block) => block.type !== "text" && block.type !== "image").length,
-        root: runtime.registry.root,
-        home: runtime.config.resolvedHome,
-      });
-      lease = runtime.registry.enterTurn({
-        name: plan.profile,
-        allowedTools: plan.allowedTools,
-        allowBackgroundBash: plan.allowBackgroundBash,
-        editTarget: plan.editTarget,
-        bashPolicy: plan.bashPolicy,
-        reason: plan.reason,
-      });
-      applySkillPolicyForTurn(runtime.registry, input.text, runtime.registry.root, runtime.config.resolvedHome);
-      runtime.agent.setTurnSystemContext(matchedTurnContext(
-        input.text,
-        runtime.registry,
-        runtime.config.resolvedHome,
-      ).text);
+      if (hostProfile) {
+        lease = runtime.registry.enterTurn({
+          name: `host:${hostProfile.id}`,
+          allowedTools: hostToolNames(hostProfile),
+          allowBackgroundBash: false,
+          reason: "exclusive launch-authorized host capability surface",
+        });
+      } else {
+        const plan = planTurnCapabilities({
+          rawUserText: input.text,
+          source: "user",
+          imageCount: input.images.length,
+          attachmentCount: params.prompt.filter((block) => block.type !== "text" && block.type !== "image").length,
+          root: runtime.registry.root,
+          home: runtime.config.resolvedHome,
+        });
+        lease = runtime.registry.enterTurn({
+          name: plan.profile,
+          allowedTools: plan.allowedTools,
+          allowBackgroundBash: plan.allowBackgroundBash,
+          editTarget: plan.editTarget,
+          bashPolicy: plan.bashPolicy,
+          reason: plan.reason,
+        });
+        applySkillPolicyForTurn(runtime.registry, input.text, runtime.registry.root, runtime.config.resolvedHome);
+        runtime.agent.setTurnSystemContext(matchedTurnContext(
+          input.text,
+          runtime.registry,
+          runtime.config.resolvedHome,
+        ).text);
+      }
       session.record.turnState = {
         status: "running",
         startedAt: new Date().toISOString(),

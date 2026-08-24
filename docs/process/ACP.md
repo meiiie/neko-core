@@ -15,6 +15,7 @@ Useful launch options remain host-owned:
 ```bash
 neko acp --profile chatgpt
 neko acp --yolo
+neko acp --host-profile nekocut
 ```
 
 `--yolo` selects Neko's `auto` permission mode. It does not disable catastrophic-command checks,
@@ -60,9 +61,28 @@ In AI Chat choose **Add Custom Agent**, then add this entry to `~/.jetbrains/acp
 }
 ```
 
-Neko currently refuses client-supplied MCP during session creation, so keep both forwarding switches off
+Ordinary `neko acp` refuses client-supplied MCP during session creation, so keep both forwarding switches off
 and configure trusted MCP servers in Neko itself. Use the full path to the Neko executable if the IDE does
 not inherit your shell's `PATH`.
+
+## Embedded host profiles
+
+`--host-profile` is an authority ceiling selected by the trusted process launcher, not a preference supplied
+inside an ACP session. `--host-profile nekocut` changes composition for that process only:
+
+- native filesystem, shell, web, browser, computer, skills, subagents, hooks, memory/workflows, and globally
+  configured MCP are not built into the runtime;
+- the client must provide exactly one MCP server named `nekocut` using ACP's in-band transport; stdio, HTTP,
+  SSE, extra servers, and missing servers fail before the session runtime is created;
+- the model sees exactly six namespaced NekoCut inspect/preview/submit tools, enforced by the same
+  `ToolRegistry` allowlist at schema and execution time;
+- only `default` and `auto` modes are available, and changing mode cannot add a tool;
+- the profile ID, version, and tool-surface hash are checkpointed. List/load/resume are isolated from ordinary
+  ACP sessions and require the same profile on the next process.
+
+The in-band server is carried over the existing ACP stdio channel; Neko never executes a client-provided
+command or opens a client-provided URL. `submit_edit_plan` stages a typed proposal in NekoCut. NekoCut remains
+the sole authority for validation, Apply, persistence, and Undo.
 
 ACP clients that advertise Terminal Auth support can also launch Neko's corresponding method. It runs
 `neko login openai chatgpt` in a separate interactive terminal, so browser OAuth never shares the ACP
@@ -93,7 +113,8 @@ non-responsive client fails closed.
 - streamed agent text/thought chunks and tool lifecycle updates
 - session metadata, usage, mode, provider/profile/model/effort configuration, and implemented slash commands
 - text, resource links, and embedded text context
-- trusted MCP servers from Neko's normal user/project configuration
+- trusted MCP servers from Neko's normal user/project configuration, or an exclusive launch-authorized host
+  surface when `--host-profile` is explicitly selected
 
 ACP session IDs are the same durable IDs used by `neko sessions` and `neko resume`. `session/load` restores
 the canonical Agent messages and replays user/assistant/tool history with stable message/tool IDs before it
@@ -115,10 +136,11 @@ not persisted and therefore return to the named permission mode after a restart.
 only `/help`, `/cost`, `/sessions`, and `/tools`; each is dispatched by the ACP adapter rather than sent to the
 model as an ordinary prompt.
 
-Neko still does not advertise session delete, additional workspace roots, client-supplied MCP, image/audio
+Neko still does not advertise session delete, additional workspace roots, arbitrary client-supplied MCP, image/audio
 prompts, or draft ACP v2. Those methods fail explicitly rather than degrading to a broader local authority.
-Client-supplied MCP is deliberately held back because merely opening a session must not launch an untrusted
-stdio command or network connection before Neko's permission boundary runs.
+Ordinary client-supplied MCP is deliberately held back because merely opening a session must not launch an
+untrusted stdio command or network connection before Neko's permission boundary runs. The host-profile
+exception accepts only an exact ACP-transport descriptor whose implementation stays on the existing channel.
 
 ## Debugging
 
