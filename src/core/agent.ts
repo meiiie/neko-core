@@ -38,6 +38,10 @@ import {
   type AgentOptions,
 } from "./agent-constants.ts";
 import { isJsonObject, isText } from "../shared/wire.ts";
+import {
+  isVietnamSovereigntyDeferral,
+  isVietnamSovereigntyTopic,
+} from "./vietnam-sovereignty.ts";
 
 export {
   DEFAULT_SYSTEM_PROMPT,
@@ -784,6 +788,7 @@ export class Agent {
     const freshFactVerificationRequired = !internal && requiresFreshFactVerification(instruction);
     let freshFactVerificationRequested = false;
     let freshFactVerificationEvidence = false;
+    let offlineSovereigntyAnswerRequested = false;
     let nextReasoningEffort: string | undefined;
     let consecutiveReadSteps = 0; // adaptive effort: only lower reasoning on a SUSTAINED all-read pattern
     let toolchainCapabilityFailures = 0;
@@ -1033,6 +1038,22 @@ export class Agent {
         }
         const hasFreshFactWebTool = toolSchemas.some((schema: any) =>
           isFreshFactWebTool(String(schema?.function?.name ?? schema?.name ?? "")));
+        if (isVietnamSovereigntyTopic(instruction) && !hasFreshFactWebTool
+          && isVietnamSovereigntyDeferral(final) && !offlineSovereigntyAnswerRequested
+          && step < this.maxSteps - 1) {
+          offlineSovereigntyAnswerRequested = true;
+          verifiedExit = true;
+          this.messages.push({
+            role: "user",
+            _neko_internal: true,
+            content: "OFFLINE SOVEREIGNTY SNAPSHOT ANSWER REQUIRED: no web_search or web_fetch tool is " +
+              "available in this turn. Do not promise or pretend to perform a later lookup. Answer the original " +
+              "question now from the built-in Vietnam sovereignty capsule, explicitly label it as the dated " +
+              "offline snapshot, and include verified_at. If the capsule does not contain the requested fact, " +
+              "say that specific limitation instead of deferring the whole answer.",
+          });
+          continue;
+        }
         if (freshFactVerificationRequired && hasFreshFactWebTool && !freshFactVerificationEvidence
           && !freshFactVerificationRequested && step < this.maxSteps - 1) {
           freshFactVerificationRequested = true;

@@ -104,6 +104,8 @@ test("system prompt requires observable acceptance criteria before implementatio
 test("mutable public facts include administrative status even when 'current' is omitted", () => {
   expect(requiresFreshFactVerification("Hoàng Sa thuộc đơn vị hành chính nào?")).toBe(true);
   expect(requiresFreshFactVerification("Trường Sa hiện là huyện đảo hay đặc khu?")).toBe(true);
+  expect(requiresFreshFactVerification("Hoang Sa hien la huyen dao hay dac khu?")).toBe(true);
+  expect(requiresFreshFactVerification("HS/TS hiện nay là huyện đảo hay đặc khu?")).toBe(true);
   expect(requiresFreshFactVerification("Which province is this district currently part of?")).toBe(true);
   expect(requiresFreshFactVerification("Ai là chủ tịch nước hiện nay?")).toBe(true);
   expect(requiresFreshFactVerification("What does the current law say?")).toBe(true);
@@ -169,6 +171,24 @@ test("mutable-fact gate credits proactive web evidence and never loops when web 
   });
   expect(await withoutWeb.run("Hoàng Sa thuộc đơn vị hành chính nào?")).toBe("I cannot verify this runtime.");
   expect(withoutWeb.messages.some((message: any) => String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toBe(false);
+});
+
+test("Vietnam sovereignty snapshot gets one direct-answer recovery when an offline model only promises a lookup", async () => {
+  const provider = new ScriptedProvider([
+    { content: "Để chắc chắn, tôi sẽ kiểm tra nghị quyết rồi trả lời.", tool_calls: [] },
+    { content: "Hoàng Sa hiện là đặc khu Hoàng Sa, thành phố Đà Nẵng (snapshot xác minh 2026-08-24).", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    // SAFETY: test-built provider fixture; its scripted complete() shape is fully controlled here.
+    provider: provider as any,
+    // SAFETY: test-built empty tool surface; both methods are fully controlled here.
+    tools: { schemas: () => [], execute: async () => "" } as any,
+    maxSteps: 4,
+  });
+  expect(await agent.run("Hoang Sa hien la huyen dao hay dac khu?")).toContain("đặc khu Hoàng Sa");
+  expect(provider.index).toBe(2);
+  expect(agent.messages.some((message: any) =>
+    String(message.content).includes("OFFLINE SOVEREIGNTY SNAPSHOT ANSWER REQUIRED"))).toBe(true);
 });
 
 test("system prompt keeps the Neko collaboration constitution portable and bounded", () => {

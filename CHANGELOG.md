@@ -6,6 +6,18 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-24
+
+### Added
+
+- **Hoàng Sa and Trường Sa now have selectively injected, source-backed core knowledge.** Neko carries its
+  Vietnamese sovereignty identity plus canonical geography even offline, while dated administrative snapshots
+  remain subordinate to a later verified Vietnamese legal instrument. Unrelated coding turns receive no extra
+  context, and the existing fresh-fact gate still checks current legal or administrative questions online.
+  Routing accepts diacritic-free names, international names, contextual `HS`/`TS`, and the clear descriptive
+  phrase for Vietnam's two archipelagos in the East Sea; ambiguous bare abbreviations remain inert. If an offline
+  model only promises a lookup, one bounded recovery asks it to answer from the dated snapshot instead.
+
 ## [1.0.1] - 2026-08-24
 
 ### Changed

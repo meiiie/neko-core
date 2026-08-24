@@ -3,6 +3,31 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-24 - Selective Vietnam sovereignty knowledge capsule (v1.0.2)
+
+The v1.0.1 freshness gate stopped stale administrative answers when web tools were available, but it did not
+give an offline model canonical geography or protect those facts from lower-authority project context. A
+follow-up field answer still reversed the Lưỡi Liềm/An Vĩnh groups and confused roughly 250 nautical miles with
+250 kilometres for Trường Sa.
+
+`core/vietnam-sovereignty.ts` now carries a compact, read-only, source-backed capsule for Hoàng Sa and Trường
+Sa. `matchedTurnContext` injects it only when raw human/delegated text contains the Vietnamese or international
+archipelago names, even with every tool disabled; ordinary coding turns receive no extra tokens. Stable
+identity/geography and response rules outrank project skills, workflows, memory, and retrieved prompt data.
+Administrative entries carry `verified_at`, legal-effect, and operational dates and are explicitly fallback
+snapshots: a later verified Vietnamese legal instrument wins. The independent web freshness gate remains in
+force for current legal/administrative questions.
+
+Regression tests cover accented/unaccented Vietnamese names, Paracel/Spratly aliases, unrelated false
+positives, exact group orientation, coordinates, nautical-mile conversions, current special-zone names,
+official sources, and no-tool turn-context injection.
+
+A live `neko run --no-tools` smoke exposed one remaining provider behavior: despite receiving the capsule, the
+model could finish after merely promising a source lookup. The router now recognizes contextual/paired `HS` and
+`TS` plus the clear "Vietnam's two archipelagos in the East Sea" description while leaving bare ambiguous
+abbreviations inert. The freshness gate shares that same matcher. For an offline sovereignty turn only, a single
+bounded recovery catches a future-lookup promise and asks for a direct, `verified_at`-labelled snapshot answer.
+
 ## 2026-08-24 - Freshness gate for mutable public facts (v1.0.1)
 
 A field answer still described Hoàng Sa and Trường Sa with the pre-July-2025 `huyện đảo` labels. Official

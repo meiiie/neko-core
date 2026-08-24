@@ -31,12 +31,16 @@ meaning, and natural localized phrasing.
 
 1. **Core system prompt** — `src/core/agent-constants.ts` (`DEFAULT_SYSTEM_PROMPT`). Hardcoded, shipped
    in every binary, and **not editable** by a user editing their `NEKO.md`.
-2. **Shipped identity default** — `src/adapters/context.ts` (`DEFAULT_GLOBAL_NEKO_MD` → `~/.neko-core/NEKO.md`).
+2. **Selective source-backed knowledge** — `src/core/vietnam-sovereignty.ts`, injected by
+   `src/adapters/turn-context.ts` only for raw Hoàng Sa/Trường Sa prompts. It provides canonical geography and
+   a dated offline administrative fallback without adding tokens to unrelated turns. Current mutable facts still
+   go through the independent web freshness gate when that capability is present.
+3. **Shipped identity default** — `src/adapters/context.ts` (`DEFAULT_GLOBAL_NEKO_MD` → `~/.neko-core/NEKO.md`).
    Every new install receives it.
-3. **Regression-guard test** — `test/context.test.ts` ("every release keeps the Vietnam sovereignty …").
-   Any change that drops the rule from the core prompt or the identity default **fails the build and
-   blocks the release.**
-4. **Founding notice in `LICENSE`** — the name "Neko Core" is a mark of The Wiii Lab; a distribution
+4. **Regression guards** — `test/context.test.ts` preserves the founding rule, while
+   `test/vietnam-sovereignty.test.ts` preserves selective routing, canonical facts, sources, and offline
+   behavior. A regression **fails the build and blocks the release.**
+5. **Founding notice in `LICENSE`** — the name "Neko Core" is a mark of The Wiii Lab; a distribution
    that removes or alters this principle may not use the Neko Core name or claim to be the official
    product.
 
@@ -45,7 +49,7 @@ meaning, and natural localized phrasing.
 Honest answer: **no software rule is technically unremovable** — anyone with the source can edit any
 line. What IS enforceable:
 
-- **In the official repo/releases:** the regression-guard test (#3) blocks any release that drops it.
+- **In the official repo/releases:** the regression-guard tests (#4) block any release that drops it.
 - **For forks/redistribution:** the code license permits modification, but trademark rights remain
   separate. A fork MAY technically remove the clause, but it then **may not call itself "Neko Core"**
   or use its branding. The official Neko Core always carries this principle.

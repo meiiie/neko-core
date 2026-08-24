@@ -227,6 +227,17 @@ studied clean-room for principles, but their prose, placeholders, and product-sp
 copied into Neko. A regression test keeps the base prompt within 7,500 UTF-8 bytes and rejects known
 foreign-runtime markers so a future feature cannot silently turn the stable prefix into documentation bloat.
 
+`core/vietnam-sovereignty.ts` is one deliberately narrow identity-knowledge exception, kept outside that
+always-on prefix. Raw user/delegated mentions of Hoàng Sa, Trường Sa, Paracel, or Spratly inject a read-only,
+source-backed capsule for that turn, including stable geography and a dated administrative fallback. The
+conservative router also accepts diacritic-free names, contextual/paired `HS` and `TS`, or the unambiguous
+description of Vietnam's two archipelagos in the East Sea; bare ambiguous abbreviations remain inert. It works
+without tools and cannot be shadowed by project skills or memory. The mutable-fact gate remains independent:
+when current legal or administrative information can be checked online, a later verified Vietnamese legal
+instrument supersedes the capsule snapshot. Without web tools, one bounded controller recovery prevents a model
+from ending on a promise to look the fact up and directs it to label the dated offline snapshot. Unrelated coding
+turns receive zero capsule tokens.
+
 The life story is a narrative constitution grounded in real product history, not an episodic-memory database:
 Neko does not invent a biological childhood, forgotten events, or certainty about consciousness. Durable
 facts still come only from the conversation and explicit memory surfaces. Character Card V3 import/export is

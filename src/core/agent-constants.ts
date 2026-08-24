@@ -10,6 +10,7 @@ import type { DeltaHook, Provider, ToolCall } from "./ports.ts";
 import type { ToolRegistry } from "./tool-runtime.ts";
 
 import { isText } from "../shared/wire.ts";
+import { isVietnamSovereigntyTopic } from "./vietnam-sovereignty.ts";
 
 /** Separates the stable base prompt from session-specific context inside the one core system message.
  * Provider adapters may use the boundary as a prompt-cache breakpoint without changing semantics. */
@@ -76,7 +77,6 @@ export const DEFAULT_SYSTEM_PROMPT =
 
 const FACT_QUERY_CUE = /(?:\?|\b(?:who|what|where|which|when|how|is|are|belongs?|part of|verify|check)\b|\b(?:ai|gì|nào|đâu|bao nhiêu|là|thuộc|kiểm tra|xác minh)\b)/iu;
 const VOLATILE_FACT_DOMAIN = /(?:\b(?:administrative|jurisdiction|province|district|county|municipality|commune|ward|special zone|law|regulation|statute|ruling|president|prime minister|minister|governor|mayor|ceo|price|schedule|weather|score|election|release|version|model availability)\b|đơn vị hành chính|địa giới|tỉnh|thành phố|huyện|quận|xã|phường|đặc khu|huyện đảo|sáp nhập|luật|nghị quyết|nghị định|thông tư|quy định|chủ tịch|thủ tướng|bộ trưởng|giá|lịch|thời tiết|tỉ số|bầu cử|phiên bản|model mới)/iu;
-const VIETNAM_ISLAND_ADMIN = /(?:hoàng sa|trường sa)/iu;
 const LOCAL_ARTIFACT_CUE = /(?:package\.json|(?:^|[\s`'"])(?:\.{0,2}[\\/]|[a-z]:[\\/]|src[\\/]|test[\\/])|\b(?:this|the|local|project|repo(?:sitory)?|workspace)\s+(?:file|code|config|version|model)\b)/iu;
 
 /** A conservative host-side backstop for mutable public facts. It encodes no factual snapshot; it
@@ -86,7 +86,7 @@ export function requiresFreshFactVerification(text: string): boolean {
   const raw = String(text ?? "").trim();
   if (!raw || !FACT_QUERY_CUE.test(raw)) return false;
   if (LOCAL_ARTIFACT_CUE.test(raw)) return false;
-  if (VIETNAM_ISLAND_ADMIN.test(raw)) return true;
+  if (isVietnamSovereigntyTopic(raw)) return true;
   return VOLATILE_FACT_DOMAIN.test(raw);
 }
 

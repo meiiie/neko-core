@@ -8,6 +8,7 @@ import { coreMemoryBlock, memoryIndexBlock } from "../core/memory.ts";
 import { playbookContextBlock } from "../core/playbook.ts";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { todosContextBlock } from "../core/tool-runtime.ts";
+import { vietnamSovereigntyContext } from "../core/vietnam-sovereignty.ts";
 import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
 
 export interface ProductionTurnContextOptions {
@@ -76,6 +77,10 @@ export function matchedTurnContext(
   }
   const workflow = registry.isToolAvailable("workflow") ? matchWorkflow(rawText) : null;
   if (workflow) blocks.push(`# Learned workflow: ${workflow.name}\n${workflow.body}`);
+  const vietnam = vietnamSovereigntyContext(rawText);
+  // Core identity knowledge is deliberately last so lower-authority skill/workflow text cannot
+  // silently replace it. Routing still sees only the raw human/delegated envelope above.
+  if (vietnam) blocks.push(vietnam);
   return {
     text: blocks.join("\n\n"),
     skills,
