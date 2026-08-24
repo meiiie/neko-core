@@ -6,6 +6,23 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-25
+
+### Added
+
+- **Embedding hosts can launch Neko with an exclusive, session-scoped capability profile.**
+  `neko acp --host-profile nekocut` accepts NekoCut's in-band ACP MCP server and exposes exactly six
+  inspect/preview/submit tools. Native tools, global MCP, web, browser, computer control, skills, hooks,
+  memory, workflows, and subagents are absent from that runtime rather than hidden only in the UI.
+- **Host authority survives durable ACP sessions without becoming broader.** The profile ID, version, and
+  SHA-256 tool-surface fingerprint are checkpointed; list/load/resume require the same launch-authorized
+  profile and a fresh in-band implementation. Client requests and mode changes cannot add tools or modes.
+
+### Compatibility
+
+- Ordinary `neko`, `neko --yolo`, and `neko acp` composition is unchanged. Existing configuration and sessions
+  need no migration. Host-profile sessions are intentionally isolated from ordinary ACP sessions.
+
 ## [1.0.2] - 2026-08-24
 
 ### Added
