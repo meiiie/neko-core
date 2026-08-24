@@ -752,6 +752,20 @@ test("Ctrl+C clears a non-empty input (does not exit)", async () => {
   c.unmount();
 });
 
+test("Ctrl+C twice exits an idle chat", async () => {
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
+  await tick();
+  c.stdin.write("\x03");
+  await tick(40);
+  expect(strip(c.lastFrame())).toContain("press ctrl+c again to exit");
+  c.stdin.write("\x03");
+  await tick(100);
+  const framesAfterExit = c.frames.length;
+  c.stdin.write("must not reach an unmounted chat");
+  await tick(100);
+  expect(c.frames.length).toBe(framesAfterExit);
+});
+
 test("Alt+C copies the whole draft without changing it", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   await tick();
