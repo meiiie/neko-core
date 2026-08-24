@@ -18,16 +18,11 @@ The 1.0 baseline includes:
 the complete pre-1.0 history remains in [CHANGELOG.md](../../CHANGELOG.md) and
 [WORKLOG.md](WORKLOG.md).
 
-## Compatibility promise
+## Compatibility policy
 
-For the 1.x line:
-
-- existing `~/.neko-core/config.json` profiles, auth stores, sessions, skills, recipes, and memory remain
-  readable unless a security issue requires an explicit migration;
-- public CLI commands and the package-root core exports change only through documented deprecation;
-- ACP stays on protocol v1 until clients and Neko can migrate without losing durable continuity;
-- exact rollback remains supported and auto-update never overrides a user pin;
-- security boundaries may become stricter in a patch release, but never silently weaker.
+The 1.x CLI, configuration, durable-data, SDK, ACP, authority, and delivery commitments are defined in the
+canonical [stability and support policy](STABILITY.md). Roadmap work may extend those contracts, but it may not
+silently narrow them.
 
 ## Active priorities
 

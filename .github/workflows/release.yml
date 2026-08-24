@@ -10,28 +10,39 @@ permissions:
   contents: write
 
 jobs:
-  # The release is created ONCE, before any build. When every matrix job created it
+  # The DRAFT release is created ONCE, before any build. When every matrix job created it
   # instead (softprops/action-gh-release), two jobs racing on a fresh tag could each
   # create one; the duplicate was discarded and its asset upload 404'd -- v0.5.0
-  # shipped without neko-linux-arm64 until a manual re-run. gh is synchronous: when
-  # this job ends, the release exists and is discoverable.
+  # shipped without neko-linux-arm64 until a manual re-run. Keeping it draft also
+  # prevents users and the installer from seeing a half-populated release. The final
+  # publish job runs only after every target and checksum has uploaded successfully.
   release:
-    name: create release
+    name: create draft release
     runs-on: ubuntu-latest
+    outputs:
+      state: ${{ steps.release_state.outputs.state }}
     steps:
       - uses: actions/checkout@v7
-      - name: create the GitHub release for the tag (idempotent for re-runs)
+      - name: create the GitHub draft release for the tag (idempotent for re-runs)
+        id: release_state
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" ||
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes
+        run: |
+          if state=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq 'if .isDraft then "draft" else "published" end' 2>/dev/null); then
+            echo "release already exists in state: $state"
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --generate-notes
+            state=draft
+          fi
+          echo "state=$state" >> "$GITHUB_OUTPUT"
       - name: package the auditable unpacked browser extension
         shell: bash
         run: |
           cd browser-extension
           zip -r "../neko-browser-extension-$GITHUB_REF_NAME.zip" manifest.json service-worker.js control-indicator.js popup.html popup.css popup.js icons
       - name: attach browser extension bundle to the release
+        if: ${{ steps.release_state.outputs.state == 'draft' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" "neko-browser-extension-$GITHUB_REF_NAME.zip" --repo "$GITHUB_REPOSITORY" --clobber
@@ -101,10 +112,30 @@ jobs:
             shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           fi
       - name: attach to release
+        if: ${{ needs.release.outputs.state == 'draft' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" "${{ matrix.asset }}" "${{ matrix.asset }}.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+
+  publish:
+    name: publish complete release
+    needs: [release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: publish only after every artifact is present
+        if: ${{ needs.release.outputs.state == 'draft' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+      - name: assert the release is public and complete
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          test "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+          count=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')
+          test "$count" -eq 11 || { echo "::error::release has $count assets, expected 11"; exit 1; }
 
   # The site reads the latest release from the GitHub API and rewrites its version + download sizes on
   # the way out, so a release needs no site deploy. That is only true while it actually works, and a
@@ -123,7 +154,7 @@ jobs:
   # one colo, not a proof about all of them.
   site:
     name: site reports the new version
-    needs: build
+    needs: publish
     runs-on: ubuntu-latest
     steps:
       - name: wait for neko.holilihu.online to serve this version

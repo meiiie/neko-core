@@ -3,6 +3,28 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-24 - Public 1.0 launch contract and atomic future releases
+
+The public-launch pass compared primary 1.0 releases from Bun, Deno, GitHub CLI, Terraform, and uv. The common
+pattern was not a longer feature dump: installation and upgrade stay near the top, the stable contract is
+stated plainly, platform artifacts remain inspectable, and detail moves behind a changelog or launch post.
+Terraform's compatibility-first 1.0 was the closest fit for Neko's intent.
+
+The audit found public drift that would have weakened the announcement. `SECURITY.md` still called Neko
+pre-1.0, the contributor guide described the old approval-every-write model, the repository description said
+approval-gated by default, and the bilingual landing page promised that every mutation waits. The canonical
+policy now defines compatibility and support for CLI, configuration, durable data, SDK, ACP, authority, and
+delivery. README, roadmap, security/contribution guidance, GitHub metadata, release notes, and both website
+languages use the same actual rule: ordinary trusted-workspace work proceeds in bounded `auto`; consequential
+host boundaries remain explicit or refused.
+
+GitHub's immutable-release guidance exposed one more delivery gap: the old workflow published the release
+before its matrix attached binaries, making a partial release briefly discoverable. Future tag workflows create
+one draft, upload the browser bundle plus five binaries and five checksums, assert all 11 assets, and only then
+publish. Repository immutability can therefore lock future tags and assets without making a failed matrix
+unrecoverable. GitHub cannot retroactively make v1.0.0 immutable, so that release retains its independently
+verified sidecars, GitHub asset digests, and never-retag rule.
+
 ## 2026-08-24 - Stable 1.0 baseline: complete first frame, clean shell handoff, current docs
 
 The 1.0 pass began from two physical Windows Terminal observations, deliberately without broad performance

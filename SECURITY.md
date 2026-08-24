@@ -2,13 +2,16 @@
 
 ## Supported versions
 
-Neko Core is pre-1.0 and ships from `main`. Security fixes land on `main` and in the next tagged release;
-please run the latest version (`neko update`).
+Neko Core 1.x is the stable product line. Security fixes land on `main` and ship in a new tagged stable
+release; users should run the latest release with `neko update`. The broader compatibility commitment is in
+[docs/process/STABILITY.md](docs/process/STABILITY.md).
 
 | Version | Supported |
 | ------- | --------- |
-| latest release / `main` | ✅ |
-| older releases | ❌ |
+| latest stable 1.x release | Yes |
+| older 1.x releases | No backports; retained for rollback |
+| `main` and pre-release builds | Development only |
+| pre-1.0 releases | No |
 
 ## Reporting a vulnerability
 
@@ -36,7 +39,9 @@ privately as above.
 
 ## Scope notes
 
-- `bash` / `write_file` / `edit` are **approval-gated** by design; a way to bypass that gate (or the
-  catastrophic-command seatbelt) without user approval is in scope.
+- Neko is **consequence-gated**. Trusted workspace work can proceed in the default `auto` mode, while host
+  computer control, policy changes, credential/system paths, work outside trusted roots, and catastrophic
+  shell commands remain explicitly governed or refused. A way to exceed the active authority, bypass a hard
+  seatbelt, or turn `plan` mode into mutation is in scope.
 - `/remote-control` binds to loopback and `/relay` is end-to-end encrypted; a way to reach either without
   the per-session token, or to read relayed messages, is in scope.

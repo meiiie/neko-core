@@ -53,3 +53,14 @@ test("release workflow publishes one SHA-256 sidecar with every platform binary"
   expect(release).toContain('sha256sum "${{ matrix.asset }}"');
   expect(release).toContain('shasum -a 256 "${{ matrix.asset }}"');
 });
+
+test("release workflow keeps a tag draft until the complete asset set exists", () => {
+  const createDraft = release.indexOf("--draft --generate-notes");
+  const uploadBinary = release.indexOf('gh release upload "$GITHUB_REF_NAME" "${{ matrix.asset }}"');
+  const publish = release.indexOf('--draft=false --latest');
+  expect(createDraft).toBeGreaterThan(0);
+  expect(uploadBinary).toBeGreaterThan(createDraft);
+  expect(publish).toBeGreaterThan(uploadBinary);
+  expect(release).toContain('test "$count" -eq 11');
+  expect(release).toContain("needs: publish");
+});

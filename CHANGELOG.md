@@ -6,6 +6,15 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The stable 1.x promise is now explicit and public.** Compatibility, support, deprecation, external-service,
+  security, and rollback boundaries have one canonical policy; the README, contributor guide, security policy,
+  GitHub release announcement, repository metadata, and bilingual website use the same consequence-gated model.
+- **Future GitHub releases publish atomically.** The workflow creates a draft, attaches and verifies the complete
+  five-binary/five-checksum/browser-extension set, then publishes it. Repository release immutability protects
+  tags and assets created after the policy is enabled.
+
 ## [1.0.0] - 2026-08-24
 
 ### Added

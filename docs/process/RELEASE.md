@@ -34,12 +34,15 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
   the live path needs no deploy, this one does.
 - Version bumped in BOTH `src/shared/version.ts` and `package.json`.
 
-## 3. Tag → watch → verify (never tag-and-walk-away)
+## 3. Tag -> draft -> publish -> verify (never tag-and-walk-away)
 
 1. Commit the exact candidate and push/fast-forward `main`.
 2. WATCH the cross-platform `ci` workflow to completion. Only then create and push `vX.Y.Z`.
-3. WATCH the release workflow to completion (a monitor, not hope).
-4. Verify, every time: **5/5 binaries + 5/5 SHA-256 sidecars** attached · the browser-extension ZIP when
+3. The release workflow creates one **draft**, attaches the browser bundle, five binaries, and five SHA-256
+   sidecars, and publishes only after the complete 11-asset set exists. Users and installers never see a
+   half-built release.
+4. WATCH the release workflow to completion (a monitor, not hope).
+5. Verify, every time: **5/5 binaries + 5/5 SHA-256 sidecars** attached · the browser-extension ZIP when
    that workflow step exists · `releases/latest` resolves to the new tag · `isDraft: false` · install
    one-liner fetches the new version end-to-end when the change warrants it.
 
@@ -47,7 +50,9 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
 
 `gh release edit vX.Y.Z --notes-file ...` replaces the auto-generated commit list with: 2-4 highlight
 bullets (user language, numbers included), the install one-liner, upgrade notes (who needs to act),
-and a link to the CHANGELOG section for detail.
+the 1.x compatibility impact, supported platforms/checksums, and a link to the CHANGELOG section for detail.
+Major milestones open with what the stability designation means; they do not bury the contract below a raw
+commit list.
 
 ## 5. Runtime discipline
 
@@ -94,3 +99,11 @@ regression joined the existing input, fullscreen, sandbox, updater, provider-str
 
 This is a compatibility and rollback promise, not a claim that bugs are impossible. A new incident class ships
 as a new patch version after the same gates; a public tag is never rewritten.
+
+## 9. Release integrity
+
+Repository release immutability applies to releases published after the policy is enabled. The workflow must
+therefore keep every release in draft state until all assets are attached. Publication locks the tag and assets
+and lets GitHub issue release provenance; a failed build leaves a repairable draft rather than a public partial
+release. Older releases, including any version published before the policy was enabled, retain their explicit
+SHA-256 sidecars and the never-retag rule but cannot be made retroactively immutable by GitHub.

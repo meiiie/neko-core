@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Neko Core — a coding agent that runs on your computer</title>
-<meta name="description" content="Neko Core is a local-first terminal coding agent for any model. AGPL core, Apache SDK boundary, and commercial dual licensing.">
+<title>Neko Core — stable local-first coding agent</title>
+<meta name="description" content="Neko Core is a stable local-first terminal coding agent for any model, with durable sessions and consequence-gated autonomy.">
 <link rel="canonical" href="https://neko.holilihu.online/">
 <link rel="icon" href="/neko.ico" sizes="any">
 <link rel="icon" href="/neko-icon.png" type="image/png">
 <link rel="apple-touch-icon" href="/avatar-512.png">
-<meta property="og:title" content="Neko Core — a coding agent that runs on your computer">
-<meta property="og:description" content="It reads, edits, runs, browses and remembers on your own machine, with any model. It asks before it changes anything.">
+<meta property="og:title" content="Neko Core — stable local-first coding agent">
+<meta property="og:description" content="It reads, edits, runs, browses and remembers on your machine. Routine work moves automatically; consequential actions stay governed.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://neko.holilihu.online/">
 <meta property="og:image" content="https://neko.holilihu.online/og.jpg">
@@ -19,7 +19,7 @@
 <meta property="og:locale" content="en">
 <meta property="og:locale:alternate" content="vi">
 <meta name="twitter:card" content="summary_large_image">
-<meta property="og:image:alt" content="Neko Core - it runs on your computer, it asks before it changes anything.">
+<meta property="og:image:alt" content="Neko Core - a stable local-first coding agent with consequence-gated autonomy.">
 <meta name="theme-color" content="#faf9f6">
 <link rel="preload" as="image" href="/neko-hero.webp">
 <link rel="preload" as="image" href="/hero-bg.webp">
@@ -46,8 +46,8 @@
 <div class="announce">
   <div class="wrap">
     <span class="pip" aria-hidden="true"></span>
-    <span data-i18n="announce">Neko Core <span data-release="version">1.0.0</span> is out.</span>
-    <a href="https://github.com/meiiie/neko-core/releases/latest" data-i18n="announce.link">What changed <span class="arrow">&rarr;</span></a>
+    <span data-i18n="announce">Neko Core <span data-release="version">1.0.0</span> is stable.</span>
+    <a href="https://github.com/meiiie/neko-core/releases/latest" data-i18n="announce.link">Read the launch notes <span class="arrow">&rarr;</span></a>
   </div>
 </div>
 
@@ -74,11 +74,11 @@
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <p class="eyebrow"><span data-i18n="hero.eyebrow">Local-first coding agent</span></p>
+        <p class="eyebrow"><span data-i18n="hero.eyebrow">Stable local-first coding agent</span></p>
 
         <h1 class="wordmark">NEKO<br><span class="amber">CORE</span><span class="caret">_</span></h1>
 
-        <p class="lead" data-i18n="hero.lead">A terminal agent that works on your machine — with any model, including one running offline on your own hardware. It asks before it changes anything.</p>
+        <p class="lead" data-i18n="hero.lead">A terminal agent that works on your machine — with any model, including one running offline. Routine project work moves automatically while consequential actions stay visibly governed.</p>
 
         <div class="install install-slim">
           <div class="cmdrow" id="cmd-ps">
@@ -148,14 +148,14 @@
     <div class="wrap">
       <span class="mark mark-tr" aria-hidden="true">+</span>
       <div class="sec-head reveal">
-        <p class="eyebrow"><span class="num">02</span><span data-i18n="s1.label">Approvals</span><span class="hair"></span></p>
-        <h2 data-i18n="s1.title">It asks before it touches your machine.</h2>
-        <p class="body" data-i18n="s1.body">Neko puts the tools that only look in one category and the tools that change something in another. The first category runs straight away. The second waits for you, and the line between them is printed by a command you can run yourself.</p>
+        <p class="eyebrow"><span class="num">02</span><span data-i18n="s1.label">Boundaries</span><span class="hair"></span></p>
+        <h2 data-i18n="s1.title">Routine work moves. Consequences stay governed.</h2>
+        <p class="body" data-i18n="s1.body">Neko defaults to bounded autonomy inside a trusted workspace. Host control, policy changes, credential and system paths, work outside trusted roots, and catastrophic shell commands remain explicit or refused.</p>
       </div>
       <div class="split">
         <div class="facts reveal">
-          <div class="fact"><b data-i18n="s1.f1.t">Read now, write on approval</b><span data-i18n="s1.f1.d"><code>read_file</code>, <code>search</code>, <code>glob</code> and <code>ls</code> run immediately. <code>write_file</code>, <code>edit</code> and <code>bash</code> wait for you to say yes.</span></div>
-          <div class="fact"><b data-i18n="s1.f2.t">Autonomy has a name</b><span data-i18n="s1.f2.d">Turning approvals off is a mode you enter deliberately, and the session footer shows it for as long as it is on.</span></div>
+          <div class="fact"><b data-i18n="s1.f1.t">Auto by default</b><span data-i18n="s1.f1.d">Ordinary reads, edits and commands inside a trusted workspace can proceed without approval churn. Hard boundaries still apply.</span></div>
+          <div class="fact"><b data-i18n="s1.f2.t">Authority stays visible</b><span data-i18n="s1.f2.d"><code>default</code>, <code>accept-edits</code>, <code>plan</code> and <code>auto</code> are named states shown in the session footer. <code>--yolo</code> removes waits, not seatbelts.</span></div>
           <div class="fact"><b data-i18n="s1.f3.t">Checkable, not promised</b><span data-i18n="s1.f3.d"><code>neko policy</code> re-derives the boundary from the source and exits non-zero when anything has drifted.</span></div>
         </div>
         <div class="panel reveal">

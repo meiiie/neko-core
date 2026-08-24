@@ -17,6 +17,10 @@ on the user's machine.
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg)](LICENSING.md)
 [![Made with Bun](https://img.shields.io/badge/runtime-Bun-000?logo=bun)](https://bun.sh)
 
+**Stable 1.x line.** Public CLI, configuration, durable-session, SDK, ACP, authority, and rollback contracts
+follow the [stability and support policy](docs/process/STABILITY.md). See the
+[current release](https://github.com/meiiie/neko-core/releases/latest) for install and upgrade notes.
+
 ## Why Neko
 
 - **A real agent harness.** Streaming `complete -> tool calls -> observe` loop, concurrent safe reads,
@@ -197,7 +201,8 @@ export function createAgent(provider: Provider, root: string, approve: ApprovalG
 
 Start with the [documentation index](docs/README.md), then read the
 [harness architecture](docs/HARNESS-ARCHITECTURE.md), [working rules](docs/process/RULES.md), and
-[testing contract](docs/process/TESTING.md). Contributions are described in [CONTRIBUTING.md](CONTRIBUTING.md).
+[testing contract](docs/process/TESTING.md). The public compatibility commitment is in the
+[stability policy](docs/process/STABILITY.md). Contributions are described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Heritage and ownership
 

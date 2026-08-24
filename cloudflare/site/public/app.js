@@ -9,16 +9,16 @@
   "use strict";
 
   var VI = {
-    "announce": "Neko Core {v} đã ra.",
-    "announce.link": "Có gì mới <span class=\"arrow\">&rarr;</span>",
+    "announce": "Neko Core {v} đã ổn định.",
+    "announce.link": "Đọc bản công bố <span class=\"arrow\">&rarr;</span>",
 
     "nav.how": "Cách hoạt động",
     "nav.download": "Tải về",
     "nav.docs": "Tài liệu",
     "nav.cta": "Lấy Neko",
 
-    "hero.eyebrow": "Tác tử lập trình chạy tại máy",
-    "hero.lead": "Một tác tử trong terminal làm việc ngay trên máy bạn — với bất kỳ mô hình nào, kể cả mô hình chạy ngoại tuyến. Và nó hỏi trước khi đổi gì.",
+    "hero.eyebrow": "Tác tử lập trình local-first ổn định",
+    "hero.lead": "Một tác tử trong terminal làm việc ngay trên máy bạn — với bất kỳ mô hình nào, kể cả mô hình chạy ngoại tuyến. Công việc thường ngày tự tiến hành; hành động hệ trọng vẫn nằm trong ranh giới hiển thị rõ ràng.",
     "copy": "Chép",
     "hero.download": "Tải cho",
     "hero.other": "Nền tảng khác",
@@ -29,13 +29,13 @@
     "p.body": "Một tệp nhật ký điện 599 dòng, yêu cầu bằng tiếng Việt: làm sạch rồi dựng dashboard. Neko đọc workbook, sao lưu bản gốc, viết script, chạy, rồi kiểm lại kết quả.",
     "p.caption": "Phiên chạy thật, không cắt ghép — 30 giây trong đó. Ảnh tĩnh là dashboard lúc xong.",
 
-    "s1.label": "Phê duyệt",
-    "s1.title": "Nó hỏi trước khi chạm vào máy bạn.",
-    "s1.body": "Công cụ chỉ nhìn nằm ở một nhóm, công cụ làm thay đổi nằm ở nhóm khác. Nhóm đầu chạy ngay, nhóm sau chờ bạn — và ranh giới ấy in ra được bằng một lệnh.",
-    "s1.f1.t": "Đọc thì chạy ngay, ghi thì chờ duyệt",
-    "s1.f1.d": "<code>read_file</code>, <code>search</code>, <code>glob</code> và <code>ls</code> chạy tức thì. <code>write_file</code>, <code>edit</code> và <code>bash</code> chờ bạn đồng ý.",
-    "s1.f2.t": "Quyền tự chủ có tên gọi",
-    "s1.f2.d": "Tắt phê duyệt là một chế độ bạn chủ động bước vào, và chân phiên làm việc hiển thị nó suốt thời gian còn bật.",
+    "s1.label": "Ranh giới",
+    "s1.title": "Việc thường ngày tiến lên. Hệ quả vẫn được quản trị.",
+    "s1.body": "Neko mặc định tự hành có giới hạn trong workspace đã tin cậy. Điều khiển máy, thay đổi chính sách, đường dẫn bí mật và hệ thống, công việc ngoài vùng tin cậy, cùng lệnh shell thảm họa vẫn phải minh bạch hoặc bị từ chối.",
+    "s1.f1.t": "Mặc định tự hành",
+    "s1.f1.d": "Đọc, sửa và chạy lệnh thông thường trong workspace tin cậy có thể tiếp tục mà không bị ngắt bởi hộp duyệt. Các ranh giới cứng vẫn còn nguyên.",
+    "s1.f2.t": "Quyền hạn luôn nhìn thấy được",
+    "s1.f2.d": "<code>default</code>, <code>accept-edits</code>, <code>plan</code> và <code>auto</code> là các trạng thái có tên, luôn hiện ở chân phiên. <code>--yolo</code> bỏ chờ đợi, không bỏ dây an toàn.",
     "s1.f3.t": "Kiểm chứng được, không phải lời hứa",
     "s1.f3.d": "<code>neko policy</code> dựng lại ranh giới từ mã nguồn và thoát với mã lỗi khi có gì đó lệch đi.",
     "s1.panel": "KIỂM TOÁN QUYỀN",

@@ -12,6 +12,7 @@ the documents listed here.
 - [Extending Neko](EXTENDING.md) - providers, tools, skills, recipes, and MCP.
 - [Working rules](process/RULES.md) - repository invariants and verify loop.
 - [Testing](process/TESTING.md) - deterministic, terminal, sandbox, and live evaluation layers.
+- [Stability and support](process/STABILITY.md) - the public 1.x compatibility and support promise.
 - [Release](process/RELEASE.md) - the stable delivery contract.
 
 ## Capability guides

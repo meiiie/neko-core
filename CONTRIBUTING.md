@@ -15,7 +15,7 @@ You need [Bun](https://bun.sh) (the runtime + bundler + test runner).
 ```bash
 git clone https://github.com/meiiie/neko-core
 cd neko-core
-bun install
+bun install --frozen-lockfile
 node bin/neko-source.cjs doctor # safe no-build source launcher (requires Node.js)
 ```
 
@@ -25,7 +25,9 @@ Before you open a PR, all of these should pass:
 
 ```bash
 bun run typecheck          # tsc --noEmit
+bun run lint               # anti-slop and trust-boundary checks
 bun test                   # the test suite
+node bin/neko-source.cjs doctor # read-only resolved setup diagnostics
 node bin/neko-source.cjs policy # audits the safe/gated tool boundary
 bun run build              # bun build --compile -> dist/neko (the shipped single binary)
 ```
@@ -51,8 +53,9 @@ A **new model or endpoint is a config profile, not code** (`src/adapters/config.
 - **Secrets never get committed or printed.** API keys come from env (`NEKO_API_KEY` /
   `OPENAI_API_KEY` / `NVIDIA_API_KEY`) or a gitignored `~/.neko-core/config.json`. Scan before you push.
 - **Clean-room.** Study other agents for *ideas*, never copy proprietary code into this repo.
-- **Safe-by-default.** `write_file` / `edit` / `bash` are approval-gated; keep that boundary
-  (`node bin/neko-source.cjs policy` must stay PASS).
+- **Consequence-gated.** Default `auto` mode may edit and run ordinary commands inside a trusted workspace.
+  Host computer control, policy changes, credential/system paths, work outside trusted roots, catastrophic
+  shell, and `plan` mode keep their stricter boundaries (`node bin/neko-source.cjs policy` must stay valid).
 - **Windows-friendly output.** Printed (non-TUI) strings should be ASCII — the Windows console is cp1252,
   so an em-dash or fancy quote can mojibake.
 
