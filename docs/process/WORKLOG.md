@@ -3,6 +3,29 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-27 - Session-scoped Wiii Computer port over ACP
+
+Implemented the Wiii handoff as an optional typed ACP host capability without teaching Neko about Docker, WSL,
+noVNC, executable paths, or machine provisioning. Exact `dev.wiii.computer.v1` negotiation now installs one
+coordinate-free semantic `computer` tool for that connection and session. Missing or partial capability disables
+ACP computer use completely instead of falling back to Neko's local Windows UIA/PowerShell path; the existing CLI
+computer path and exclusive NekoCut host profile are unchanged.
+
+The adapter enforces `status -> observe -> acquire -> act -> release`, exact state-version/ref/role/name
+preconditions, stable operation IDs, one re-observation with no blind action retry on stale state, and same-ID
+recovery after an unknown action result. Project revocation, lease loss, human takeover, CAPTCHA, and protected
+inputs stop action and trigger best-effort cleanup. Model-visible results are allowlisted: native environment/lease
+IDs, attach URLs, element values, host detail, and secrets never enter the tool observation. Turn completion,
+cancel, session close, and connection cleanup all close the session port; Wiii's peer-side bridge remains the final
+native release authority after a transport has already disconnected. Provider-native children share the same
+bounded port rather than creating another owner.
+
+Evidence: lint and TypeScript typecheck passed. The focused ACP/permission/architecture slice passed 115 tests
+and 802 assertions with zero failures, including 9 new Computer contract/lifecycle tests and 49 assertions. The
+full suite passed 1,501 tests and 8,428 assertions with zero failures (12 intentional platform/hidden-oracle
+skips). Doctor and policy returned success, and the compiled binary passed UI, PTY input, ACP, and startup/exit
+lifecycle smoke probes.
+
 ## 2026-08-25 - Launch-authorized ACP host capability profiles (v1.1.0)
 
 Added a generic, fail-closed host-profile composition without changing ordinary `neko`, `neko --yolo`, or

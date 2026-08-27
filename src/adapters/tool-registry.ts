@@ -215,6 +215,9 @@ export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRe
   target.checkAction = source.checkAction;
   target.denialNote = source.denialNote;
   target.loadSkill = source.loadSkill;
+  // Provider-native children inside one AgentSession share the same bounded host lease. Never
+  // construct another owner, and never fall back to the local Windows computer implementation.
+  target.computerPort = source.computerPort;
   target.allowDangerousBash = source.allowDangerousBash;
   target.explicitYolo = source.explicitYolo;
   target.readOutsideRoot = source.readOutsideRoot;

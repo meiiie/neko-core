@@ -1,6 +1,6 @@
 /** Shared production Agent composition for non-TUI hosts (CLI run, ACP, and future clients). */
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
-import type { DeltaHook, McpTools } from "../core/ports.ts";
+import type { ComputerToolPort, DeltaHook, McpTools } from "../core/ports.ts";
 import { ToolRegistry, type ApprovalGate } from "../core/tool-runtime.ts";
 import { loadAgent } from "./agents.ts";
 import { startManagedBrowserBridge } from "./browser-bridge.ts";
@@ -35,6 +35,8 @@ export interface BuildAgentRuntimeOptions {
   hostProfile?: HostCapabilityProfile;
   /** Per-session in-band MCP supplied by that host. Required when hostProfile is present. */
   hostTools?: McpTools;
+  /** ACP embedding boundary: a semantic host port, or false to forbid the local Windows fallback. */
+  computer?: ComputerToolPort | false;
 }
 
 /** Compose exactly one long-lived Agent session without coupling it to a terminal UI. */
@@ -88,6 +90,8 @@ export async function buildAgentRuntime(
   );
   const browserBridge = startManagedBrowserBridge({ extensionIds: cfg.browserExtensionIds });
   const baseRegistry = new ToolRegistry(options.root, options.mode ?? cfg.mode, options.approval, hub);
+  if (options.computer === false) baseRegistry.disabled.add("computer");
+  else if (options.computer) baseRegistry.computerPort = options.computer;
   baseRegistry.explicitYolo = Boolean(options.yolo);
   const registry = configureToolRegistry(
     baseRegistry,
@@ -198,6 +202,7 @@ export async function buildAgentRuntime(
     registry,
     config: cfg,
     close: async () => {
+      try { await registry.computerPort?.close?.(); } catch { /* best-effort host lease cleanup */ }
       browserBridge?.close();
       await hub.close();
       try { await agent.currentProvider().dispose?.(); } catch { /* best-effort provider shutdown */ }

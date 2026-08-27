@@ -19,6 +19,7 @@ export type { Usage } from "./core/cost.ts";
 
 export type {
   CompleteOptions,
+  ComputerToolPort,
   DeltaHook,
   McpTools,
   Provider,

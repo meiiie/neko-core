@@ -460,6 +460,15 @@ the declared surface again at schema and execution time. Durable sessions store 
 surface hash, so a normal process or a changed profile cannot resume them. The first profile is `nekocut`;
 new embedding products add reviewed declarative profiles rather than host-specific conditionals in core.
 
+Optional embedding capabilities use typed core ports rather than MCP or native-tool fallbacks. Wiii's
+`dev.wiii.computer.v1` extension is implemented by `adapters/acp-computer.ts`: capability negotiation is bound
+to the ACP connection, the adapter exposes one semantic `ComputerToolPort`, and ordinary ACP explicitly disables
+the local Windows computer implementation when that port is absent. Wiii owns provisioning, Project binding,
+native identifiers, credentials, and the display lease. The adapter owns only the fail-closed
+status/observe/acquire/act/release protocol, stable operation IDs, semantic preconditions, transcript redaction,
+and best-effort lifecycle cleanup. A child agent shares the same session port object, so it cannot mint a second
+owner or widen authority.
+
 The ACP client's permission response is only an implementation of core's `ApprovalGate`. Core still
 decides whether a call is allowed, denied, or eligible to prompt. In particular, `plan` is a hard deny;
 `auto` does not bypass host-computer consent or seatbelts; and allow/reject-always choices are scoped to

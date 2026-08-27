@@ -35,11 +35,15 @@ export function decide(
   args: any = {},
   opts: { sandboxedBash?: boolean; yolo?: boolean } = {},
 ): Decision {
+  const permission = effectivePermission(spec, args);
   // Desktop control crosses out of the workspace/sandbox and acts as the logged-in user. Ordinary
   // `auto` grants bounded coding autonomy, not ambient host-GUI authority. Explicit `--yolo` is the
   // up-front session consent; plan mode remains a hard deny after the user cycles away from auto.
-  if (spec.name === "computer") return mode === "plan" ? "deny" : mode === "auto" && opts.yolo ? "allow" : "prompt";
-  if (effectivePermission(spec, args) !== GATED) return "allow";
+  // A semantic host port may mark status/observe/release safe; those calls do not control the seat.
+  if (spec.name === "computer" && permission === GATED) {
+    return mode === "plan" ? "deny" : mode === "auto" && opts.yolo ? "allow" : "prompt";
+  }
+  if (permission !== GATED) return "allow";
   switch (mode) {
     case "auto":
       return "allow";

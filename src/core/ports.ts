@@ -127,6 +127,17 @@ export interface McpTools {
   close?(): void | Promise<void>;
 }
 
+/** A host-owned semantic computer capability. The core sees one high-level tool and never
+ * learns how the host provisions a desktop, stores credentials, or owns its display lease. */
+export interface ComputerToolPort {
+  schema(): any;
+  permission(args: any): "safe" | "gated";
+  call(args: any, signal?: AbortSignal): Promise<string | any[]>;
+  /** Release turn-scoped control without destroying the reusable host connection. */
+  release?(): void | Promise<void>;
+  close?(): void | Promise<void>;
+}
+
 /** Web content acquisition (implemented by an adapter, injected by the host). */
 export interface WebPort {
   search(query: string, opts: { searxngUrl: string; backend: string; keepaliveMin?: number; tavilyKey?: string }): Promise<string>;

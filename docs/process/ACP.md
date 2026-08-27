@@ -84,6 +84,46 @@ The in-band server is carried over the existing ACP stdio channel; Neko never ex
 command or opens a client-provided URL. `submit_edit_plan` stages a typed proposal in NekoCut. NekoCut remains
 the sole authority for validation, Apply, persistence, and Undo.
 
+## Optional Wiii Computer capability
+
+An ordinary ACP client may advertise Wiii's session-scoped semantic Computer extension in `initialize`:
+
+```json
+{
+  "clientCapabilities": {
+    "_meta": {
+      "dev.wiii.computer.v1": {
+        "semanticProtocol": "neko-computer.semantic.v1",
+        "methods": [
+          "wiii/computer/v1/status",
+          "wiii/computer/v1/observe",
+          "wiii/computer/v1/lease/acquire",
+          "wiii/computer/v1/act",
+          "wiii/computer/v1/lease/release"
+        ]
+      }
+    }
+  }
+}
+```
+
+Negotiation is exact and connection-scoped. A missing, partial, renamed, or cross-connection capability
+exposes no `computer` tool in ACP and never falls back to Neko's local Windows UIA/PowerShell implementation.
+Launch-authorized host profiles remain exclusive and ignore this optional extension.
+
+When negotiated, the model sees one coordinate-free semantic tool and must follow
+`status -> observe -> acquire -> focus/invoke/set_text -> release`. Neko uses only a ref from the latest
+snapshot plus its exact state version, role, and name. A stale or mismatched target causes one fresh observation
+and no blind action retry. Mutating requests carry a stable, Neko-owned operation ID; an unknown result can be
+retried with that same ID only after a fresh observation shows the same logical preconditions.
+
+Wiii remains the sole owner of provisioning, project grants, native environment IDs, display URLs/tokens,
+credentials, and native lease IDs. Neko allowlists the model-visible status/snapshot/result fields, omits element
+values, refuses protected inputs, stops for CAPTCHA or human takeover, and best-effort releases control after each
+turn and on cancel/close/disconnect. `status`, `observe`, and `release` are read/cleanup operations; acquire and
+state-changing actions retain Neko's host-computer consent boundary. Provider-native children inside the same
+AgentSession share that one bounded port and never create another native owner.
+
 ACP clients that advertise Terminal Auth support can also launch Neko's corresponding method. It runs
 `neko login openai chatgpt` in a separate interactive terminal, so browser OAuth never shares the ACP
 protocol stream and no credential is sent in JSON-RPC. The client reconnects after a successful login;

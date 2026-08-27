@@ -31,13 +31,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { homeDir } from "../shared/home.ts";
-import type { McpTools, WebPort } from "./ports.ts";
+import type { ComputerToolPort, McpTools, WebPort } from "./ports.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
 import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
 import { destructiveInWorkspace, detectSandbox, executableOnPath, isDockerCommand, normalizeSandboxDomains, sandboxActiveAsync, srtHealthAsync, srtLaunchRefusal, withSrtStateVolumeGuidance, wrapBash } from "./sandbox.ts";
-import { effectivePermission, GATED, resolveTool, taskDelegatesReadOnly, toolSchemas } from "./tools.ts";
+import { effectivePermission, GATED, resolveTool, SAFE, taskDelegatesReadOnly, toolSchemas, type ToolSpec } from "./tools.ts";
 import { residentUiaHost } from "./windows-uia-host.ts";
 import { debug, messageOf } from "../shared/debug.ts";
 import { scrubChildEnv } from "../shared/child-env.ts";
@@ -558,6 +558,9 @@ export class ToolRegistry {
    * the long-horizon computer-use eval in-process (any OS, no desktop); a future remote/other-OS backend
    * would plug in the same way. Returns the same shape as the real path: a string, or image content parts. */
   computerHandler?: (args: any) => string | any[];
+  /** Optional embedding-host semantic computer port. It replaces the local Windows schema and
+   * implementation, so an ACP client can never fall back to coordinates or host PowerShell. */
+  computerPort?: ComputerToolPort;
   /** When false (default), catastrophic bash commands are refused even in auto mode (seatbelt). */
   allowDangerousBash = false;
   /** True only when the host was launched with explicit --yolo authority. Ordinary/default auto mode
@@ -1103,11 +1106,17 @@ export class ToolRegistry {
   /** All tool schemas shown to the model: enabled built-in + connected MCP tools. */
   schemas(): any[] {
     if (this.noTools) return []; // perception mode: a vision-only endpoint 400s if sent any tools
+    const builtIns = toolSchemas()
+      .filter((s) => !(s.function.name === "computer" && this.computerPort))
+      .filter((s) => !(s.function.name === "disk_cleanup_scan" && !this.readOutsideRoot))
+      .filter((s) => this.isToolAvailable(s.function.name))
+      .map((schema) => this.schemaForTurn(schema));
+    const hostComputer = this.computerPort && this.isToolAvailable("computer")
+      ? [this.computerPort.schema()]
+      : [];
     return [
-      ...toolSchemas()
-        .filter((s) => !(s.function.name === "disk_cleanup_scan" && !this.readOutsideRoot))
-        .filter((s) => this.isToolAvailable(s.function.name))
-        .map((schema) => this.schemaForTurn(schema)),
+      ...builtIns,
+      ...hostComputer,
       ...(this.mcp?.toolSchemas() ?? []).filter((s) => {
         const name = String(s?.function?.name ?? "");
         // SAFETY: membership in the built-in tool-name set is checked just above.
@@ -1340,9 +1349,12 @@ export class ToolRegistry {
     let structuredPath: string | undefined;
     let hostWrite = false;
     let bashNetworkRequested = false;
-    let spec;
+    let spec: ToolSpec;
     try {
       spec = resolveTool(name);
+      if (name === "computer" && this.computerPort) {
+        spec = { ...spec, permission: this.computerPort.permission(args) === "safe" ? SAFE : GATED };
+      }
       if (name === "bash") bashNetworkRequested = requestedBashNetworkDomains.length > 0;
       const structuredMutation = name === "write_file" || name === "edit" || name === "multi_edit";
       if (!nativeBackend && structuredMutation && args.path) {
@@ -1527,6 +1539,7 @@ export class ToolRegistry {
    * scripts. Reads/acts on a window BY NAME (no vision); pointer acts use touch injection (no mouse hijack).
    * Unicode element names go through a temp UTF-8 file (@file) -- the cp1252 console mangles non-ASCII args. */
   private async runComputer(args: any, signal?: AbortSignal): Promise<string | any[]> {
+    if (this.computerPort) return this.computerPort.call(args, signal);
     // An injected backend (e.g. the simulated GUI world in the long-horizon eval) takes over the whole
     // tool: it needs no real desktop, so it also bypasses the Windows-only guard below. Default unset.
     if (this.computerHandler) return this.computerHandler(args);

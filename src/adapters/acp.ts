@@ -12,6 +12,11 @@ import type { JsonValue } from "../shared/wire.ts";
 import { describeToolCall } from "../core/tools.ts";
 import { VERSION } from "../shared/version.ts";
 import { buildAgentRuntime, type AgentRuntime } from "./agent-runtime.ts";
+import {
+  parseWiiiComputerCapability,
+  WiiiComputerTool,
+  type WiiiComputerCapability,
+} from "./acp-computer.ts";
 import { AcpHostMcp } from "./acp-host-mcp.ts";
 import { loadConfig, type NekoConfig } from "./config.ts";
 import { getProvider } from "./providers.ts";
@@ -67,6 +72,7 @@ interface AcpSession {
   record: Session;
   lease: SessionLease;
   runtime: AgentRuntime;
+  computer?: WiiiComputerTool;
   pending?: AbortController;
   pendingSettled?: Promise<void>;
   settlePending?: () => void;
@@ -263,16 +269,30 @@ function supportsTerminalAuth(capabilities?: acp.ClientCapabilities): boolean {
     || (capabilities?.terminal === true && capabilities._meta?.["terminal-auth"] === true);
 }
 
+/** AgentContext is request-scoped, while its SDK connection context is stable. Keeping capability
+ * negotiation on that identity prevents one ACP client from lending authority to another. */
+function connectionKey(client: acp.AgentContext): object {
+  // SAFETY: ACP SDK 1.3 exposes this stable object through its internal connectionContext getter;
+  // the public declaration omits only the @internal member, not the runtime invariant.
+  const context = (client as acp.AgentContext & { readonly connectionContext: object }).connectionContext;
+  return context;
+}
+
 /** Create a testable ACP AgentApp. Production callers use {@link runAcpServer}. */
 export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.AgentApp {
   const sessions = new Map<string, AcpSession>();
+  const computerCapabilities = new WeakMap<object, WiiiComputerCapability>();
   const buildRuntime = options.buildRuntime ?? buildAgentRuntime;
   const baseConfig = options.config;
   const hostProfile = options.hostProfile;
 
   const app = acp.agent({ name: "neko-core" });
 
-  app.onRequest("initialize", ({ params }) => {
+  app.onRequest("initialize", ({ params, client }) => {
+    const key = connectionKey(client);
+    const computer = hostProfile ? null : parseWiiiComputerCapability(params.clientCapabilities);
+    if (computer) computerCapabilities.set(key, computer);
+    else computerCapabilities.delete(key);
     const authMethods: acp.AuthMethod[] = supportsTerminalAuth(params.clientCapabilities)
       ? [{
       id: CHATGPT_TERMINAL_AUTH,
@@ -558,6 +578,8 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
 
     let runtime: AgentRuntime | undefined;
     let hostTools: AcpHostMcp | undefined;
+    const computerCapability = hostProfile ? undefined : computerCapabilities.get(connectionKey(client));
+    const computer = computerCapability ? new WiiiComputerTool(client, computerCapability, record.id) : undefined;
     try {
       if (hostProfile) hostTools = await AcpHostMcp.connect(hostProfile, client, hostServer!);
       runtime = await buildRuntime(cfg, {
@@ -566,6 +588,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         approval,
         hostProfile,
         hostTools,
+        computer: computer ?? false,
         onCheckpoint: async () => {
           if (session.persistenceFailed) throw session.persistenceFailure;
           await persist(session, {
@@ -638,6 +661,10 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           }
         },
       });
+      const closeRuntime = runtime.close.bind(runtime);
+      runtime.close = async () => {
+        try { await computer?.close(); } finally { await closeRuntime(); }
+      };
 
       let closed = false;
       session = {
@@ -646,6 +673,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         record,
         lease,
         runtime,
+        computer,
         permissionClient: client,
         toolCalls,
         alwaysAllow,
@@ -712,6 +740,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       return session;
     } catch (error) {
       try { await runtime?.close(); } catch { /* preserve the activation failure */ }
+      if (!runtime) try { await computer?.close(); } catch { /* preserve the activation failure */ }
       if (!runtime) try { await hostTools?.close(); } catch { /* preserve the activation failure */ }
       lease.release();
       throw error;
@@ -990,6 +1019,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       signal.removeEventListener("abort", abort);
       runtime.registry.setSkillPolicyForTurn(undefined);
       lease?.close();
+      try { await session.computer?.release(); } catch { /* best-effort turn lease cleanup */ }
       try {
         runtime.agent.clearTurnSystemContext();
       } finally {
@@ -1016,7 +1046,9 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
   });
 
   app.onConnect((connection) => {
+    const key = connectionKey(connection.client);
     const cleanup = connection.closed.finally(async () => {
+      computerCapabilities.delete(key);
       const open = [...sessions.values()];
       sessions.clear();
       await Promise.allSettled(open.map((session) => session.close()));
