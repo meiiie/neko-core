@@ -94,8 +94,9 @@ try {
   }
   if (leaveAt < 0 || leaveAt > resumeAt) throw new Error("terminal restore did not finish before the resume handoff");
   // Windows ConPTY may canonicalize the CRLF handoff into cursor movement, so inspect the resulting
-  // screen there. POSIX PTYs preserve the bytes, while this intentionally small VirtualTerminal does
-  // not emulate DEC's separate primary/alternate buffers; assert the post-restore CRLF contract there.
+  // screen there. POSIX PTYs preserve line boundaries but their ONLCR discipline may expand an app's
+  // CRLF to CRCRLF; this intentionally small VirtualTerminal also does not emulate DEC's separate
+  // primary/alternate buffers. Assert the post-restore line contract while accepting that PTY encoding.
   if (process.platform === "win32") {
     const finalLines = vt.lines();
     const handoffRow = finalLines.findIndex((line) => line === "Resume this session with:");
@@ -104,7 +105,7 @@ try {
     }
   } else {
     const restoredTail = raw.slice(leaveAt + LEAVE_ALT.length);
-    if (!restoredTail.includes("\r\n\r\nResume this session with:\r\n  neko --resume ")) {
+    if (!/\r+\n\r+\nResume this session with:\r+\n  neko --resume /.test(restoredTail)) {
       throw new Error(`resume handoff did not preserve its clean-line CRLF contract: ${JSON.stringify(restoredTail.slice(-1_000))}`);
     }
   }
