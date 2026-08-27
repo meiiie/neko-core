@@ -95,11 +95,11 @@ An ordinary ACP client may advertise Wiii's session-scoped semantic Computer ext
       "dev.wiii.computer.v1": {
         "semanticProtocol": "neko-computer.semantic.v1",
         "methods": [
-          "wiii/computer/v1/status",
-          "wiii/computer/v1/observe",
-          "wiii/computer/v1/lease/acquire",
-          "wiii/computer/v1/act",
-          "wiii/computer/v1/lease/release"
+          "_wiii/computer/v1/status",
+          "_wiii/computer/v1/observe",
+          "_wiii/computer/v1/lease/acquire",
+          "_wiii/computer/v1/act",
+          "_wiii/computer/v1/lease/release"
         ]
       }
     }

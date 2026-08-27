@@ -3,6 +3,19 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-27 - ACP v1 extension namespace compatibility hotfix (v1.2.1)
+
+The independently implemented Wiii bridge and its authoritative handoff exposed one wire-level mismatch in
+the v1.2.0 Computer capability: ACP v1 reserves underscore-prefixed names for implementation-specific methods,
+while Neko's first release candidate still used the earlier unprefixed draft names. Neko now sends the exact
+five `_wiii/computer/v1/*` methods advertised and handled by Wiii. Capability parsing remains exact and
+fail-closed; a regression test pins all five strings and rejects the obsolete unprefixed list.
+
+There is deliberately no dual-name fallback. Retrying `act` or lease mutations under a second method name could
+duplicate an operation after an unknown transport outcome, violating the existing stable-operation-ID safety
+contract. The correction changes no tool authority, lifecycle behavior, ordinary ACP session, NekoCut host
+profile, dependency, or binary composition.
+
 ## 2026-08-27 - Release lifecycle probe drains final PTY output deterministically
 
 The v1.2.0 stable-runtime gate exposed a test-only race: on Windows, `Bun.Terminal` can deliver the final PTY

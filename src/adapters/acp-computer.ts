@@ -10,11 +10,11 @@ export const WIII_COMPUTER_CAPABILITY = "dev.wiii.computer.v1";
 export const WIII_COMPUTER_PROTOCOL = "neko-computer.semantic.v1";
 
 export const WIII_COMPUTER_METHODS = {
-  status: "wiii/computer/v1/status",
-  observe: "wiii/computer/v1/observe",
-  acquire: "wiii/computer/v1/lease/acquire",
-  act: "wiii/computer/v1/act",
-  release: "wiii/computer/v1/lease/release",
+  status: "_wiii/computer/v1/status",
+  observe: "_wiii/computer/v1/observe",
+  acquire: "_wiii/computer/v1/lease/acquire",
+  act: "_wiii/computer/v1/act",
+  release: "_wiii/computer/v1/lease/release",
 } as const;
 
 type WiiiComputerMethod = typeof WIII_COMPUTER_METHODS[keyof typeof WIII_COMPUTER_METHODS];

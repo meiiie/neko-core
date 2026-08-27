@@ -105,7 +105,28 @@ function computerTool(client: FakeComputerClient): WiiiComputerTool {
 }
 
 test("Wiii Computer capability negotiation is exact and fail-closed", () => {
+  expect(Object.values(WIII_COMPUTER_METHODS)).toEqual([
+    "_wiii/computer/v1/status",
+    "_wiii/computer/v1/observe",
+    "_wiii/computer/v1/lease/acquire",
+    "_wiii/computer/v1/act",
+    "_wiii/computer/v1/lease/release",
+  ]);
   expect(parseWiiiComputerCapability({})).toBeNull();
+  expect(parseWiiiComputerCapability({
+    _meta: {
+      [WIII_COMPUTER_CAPABILITY]: {
+        semanticProtocol: WIII_COMPUTER_PROTOCOL,
+        methods: [
+          "wiii/computer/v1/status",
+          "wiii/computer/v1/observe",
+          "wiii/computer/v1/lease/acquire",
+          "wiii/computer/v1/act",
+          "wiii/computer/v1/lease/release",
+        ],
+      },
+    },
+  })).toBeNull();
   expect(parseWiiiComputerCapability({
     _meta: {
       [WIII_COMPUTER_CAPABILITY]: {

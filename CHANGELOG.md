@@ -6,6 +6,20 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-27
+
+### Fixed
+
+- **Wiii Computer sessions now use ACP v1-compliant extension method names.** The five negotiated host calls
+  use the required `_wiii/computer/v1/*` namespace on both Neko Core and Wiii, so status, observation, lease,
+  action, and release requests reach the host instead of being rejected as unknown methods.
+
+### Compatibility
+
+- This patch changes only the optional `dev.wiii.computer.v1` wire surface introduced in v1.2.0. Ordinary CLI,
+  provider, session, ACP, and NekoCut behavior is unchanged; no runtime dependency or fallback mutation retry
+  was added. Wiii integrations must use the corrected underscore-prefixed method list.
+
 ## [1.2.0] - 2026-08-27
 
 ### Added
