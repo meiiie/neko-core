@@ -64,7 +64,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/cost", desc: "session cumulative tokens vs the last model request" },
   { name: "/usage", desc: "subscription/session quota and token usage for the active account" },
   { name: "/voice", desc: "terminal GPT-Live, browser compatibility, ChatGPT, or dictation" },
-  { name: "/model", desc: "show / list / switch model (/model list · /model <id>)" },
+  { name: "/model", desc: "switch model or provider (/model list · /model <id>)" },
   { name: "/provider", desc: "switch provider (account) then pick its model - picker or /provider <name>" },
   { name: "/support", desc: "manage optional model and Office components" },
   { name: "/browser", desc: "connect a signed-in Chrome tab (guided setup/status)" },
@@ -98,7 +98,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/remote-control", desc: "toggle a local HTTP control server (/rc) - drive Neko from elsewhere" },
   { name: "/relay", desc: "drive multiple Neko sessions from your phone (live + E2E; /relay new rotates)" },
   { name: "/coach", desc: "photo coach: your phone films, Neko watches and speaks posing cues (/coach status, /coach stop)" },
-  { name: "/login", desc: "connect ChatGPT or save a provider API key" },
+  { name: "/login", desc: "connect/update credentials; use /provider to switch" },
   { name: "/logout", desc: "sign out the active auth route only" },
   { name: "/rewind", desc: "undo the last turn (restore context + revert this turn's file edits)" },
   { name: "/bashes", desc: "list background bash tasks (Ctrl+B to background a running one)" },
@@ -236,39 +236,48 @@ function switchProfile(ctx: CommandCtx, name: string): boolean {
     addLine("error", `no provider "${name}". Known: ${Object.keys(cfg.profiles).sort().join(", ")}`);
     return false;
   }
-  setActiveProfile(name); // persist as default for next session too
-  cfg.adopt(loadConfig({ profile: name })); // in-session cfg now = the new provider (endpoint+model+key)
-  agent.setProvider(getProvider(cfg)); // the running agent calls the new endpoint from the next turn
-  agent.setMaxContextTokens(cfg.contextWindow);
-  addLine("info", `provider -> ${name}  (${cfg.provider} · ${cfg.model})`);
-  if (cfg.usesChatGptAuth && !hasChatGptCredentials()) {
+  let next: NekoConfig;
+  try {
+    next = loadConfig({ profile: name });
+  } catch (error) {
+    addLine("error", `loading provider "${name}": ${error instanceof Error ? error.message : error}`);
+    return false;
+  }
+  // Selection and onboarding are separate. Never replace a working provider with an unusable one;
+  // /login owns credential setup and activates the profile only after that setup succeeds.
+  if (next.usesChatGptAuth && !hasChatGptCredentials()) {
     addLine("info", `note: provider "${name}" needs ChatGPT sign-in - type /login.`);
     return false;
   }
-  if (cfg.usesGeminiAuth && !hasGeminiCredentials()) {
+  if (next.usesGeminiAuth && !hasGeminiCredentials()) {
     addLine("info", `note: provider "${name}" needs Google sign-in - type /login.`);
     return false;
   }
-  if (cfg.usesKimiAuth && !hasKimiCredentials()) {
+  if (next.usesKimiAuth && !hasKimiCredentials()) {
     addLine("info", `note: provider "${name}" needs Kimi Code sign-in - type /login.`);
     return false;
   }
-  if (cfg.usesGrokAuth && !hasGrokCredentials()) {
+  if (next.usesGrokAuth && !hasGrokCredentials()) {
     addLine("info", `note: provider "${name}" needs Grok subscription sign-in - type /login.`);
     return false;
   }
-  if (cfg.usesOpenCodeAuth && !hasOpenCodeCredentials()) {
+  if (next.usesOpenCodeAuth && !hasOpenCodeCredentials()) {
     addLine("info", `note: provider "${name}" needs OpenCode Console sign-in - type /login.`);
     return false;
   }
-  if (cfg.usesClineAuth && !hasClineCredentials()) {
+  if (next.usesClineAuth && !hasClineCredentials()) {
     addLine("info", `note: provider "${name}" needs Cline Account sign-in - type /login.`);
     return false;
   }
-  if (!cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.usesGrokAuth && !cfg.usesKimiAuth && !cfg.usesOpenCodeAuth && !cfg.usesClineAuth && !cfg.apiKey && !cfg.isLocalEndpoint) {
+  if (!next.usesChatGptAuth && !next.usesGeminiAuth && !next.usesGrokAuth && !next.usesKimiAuth && !next.usesOpenCodeAuth && !next.usesClineAuth && !next.apiKey && !next.isLocalEndpoint) {
     addLine("info", `note: provider "${name}" has no API key yet - type /login to add it (it saves to this provider).`);
     return false;
   }
+  setActiveProfile(name); // persist only a usable default for the next session
+  cfg.adopt(next); // in-session cfg now = the new provider (endpoint+model+key)
+  agent.setProvider(getProvider(cfg)); // the running agent calls the new endpoint from the next turn
+  agent.setMaxContextTokens(cfg.contextWindow);
+  addLine("info", `provider -> ${name}  (${cfg.provider} · ${cfg.model})`);
   return true;
 }
 
@@ -282,9 +291,16 @@ async function openModelPicker(ctx: CommandCtx): Promise<void> {
     if (!models.length) return addLine("info", "no models returned by this provider");
     ctx.setOverlay({
       title: `Select model  (${profileDisplayName(cfg)})`,
-      items: models.map((model) => ({ id: model.id, label: model.label, detail: modelDetail(model, cfg.model) })),
+      items: [
+        ...models.map((model) => ({ id: model.id, label: model.label, detail: modelDetail(model, cfg.model) })),
+        { id: "__neko_change_provider__", label: "Change provider/account...", detail: "use an existing login or API key; /login is only for setup" },
+      ],
       onSelect: (it) => {
         ctx.setOverlay(null);
+        if (it.id === "__neko_change_provider__") {
+          openProviderPicker(ctx);
+          return;
+        }
         const selected = models.find((model) => model.id === it.id);
         if (selected?.available === false) {
           openCodexInstallPrompt(ctx, selected);

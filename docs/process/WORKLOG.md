@@ -3,6 +3,28 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-28 - Discoverable, fail-closed provider switching (v1.2.2)
+
+A clean-room review of Codex Router confirmed that Neko already owned the important product primitive: a live
+provider swap that changes the running adapter, endpoint, credential scope, model catalog, and next-launch
+default without restarting. The field problem was discoverability. `/model` looked provider-local, so users
+naturally returned to `/login` whenever they wanted another account. Neko now places one explicit
+`Change provider/account...` action after the current catalog and chains it into the existing
+provider -> account -> model picker. `/provider` remains the direct route, while `/login` is described only as
+credential setup or renewal.
+
+The review also found an ordering bug in the existing live switch: it persisted and adopted the selected
+profile before checking whether that route had an API key or valid account session. A mistaken selection could
+therefore replace a working configuration with an unusable default. Candidate configuration and credential
+readiness are now checked first; only a usable route is committed to memory and disk. Regression coverage pins
+both the new model-picker affordance and the guarantee that an unconfigured provider cannot change
+`active_profile`.
+
+Neko deliberately did not adopt Codex Router's external proxy, merged-client configuration, LiteLLM process, or
+credential-forwarder stack. Those mechanisms solve routing for clients Neko does not control; Neko's direct
+adapters already provide the same in-session user outcome with no new daemon, dependency, protocol layer, or
+binary-size class.
+
 ## 2026-08-27 - ACP v1 extension namespace compatibility hotfix (v1.2.1)
 
 The independently implemented Wiii bridge and its authoritative handoff exposed one wire-level mismatch in

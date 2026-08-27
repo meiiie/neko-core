@@ -6,6 +6,25 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-08-28
+
+### Changed
+
+- **Provider switching is now discoverable from `/model`.** The model picker ends with a
+  `Change provider/account...` action that continues into Neko's existing provider, account, and model flow.
+  `/provider` remains the direct shortcut; `/login` is now labelled only as credential onboarding or renewal.
+
+### Fixed
+
+- **An unavailable provider can no longer replace a working active profile.** Neko resolves the candidate
+  profile and verifies its API key or account session before persisting or adopting it. Selecting a route that
+  still needs `/login` leaves both the running agent and next-launch default unchanged.
+
+### Compatibility
+
+- This patch adds no proxy, daemon, dependency, provider wire change, configuration field, or session migration.
+  Existing profiles, `/provider`, `/login`, CLI startup, ACP hosts, and the v1.0.0 rollback baseline remain compatible.
+
 ## [1.2.1] - 2026-08-27
 
 ### Fixed

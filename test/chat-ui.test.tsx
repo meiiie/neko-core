@@ -889,11 +889,39 @@ test("/model on signed-out Gemini remains useful without starting the CLI", asyn
     stdin.write("/model"); await tick(30); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Google · Gemini Code Assist Standard/Enterprise"))).toBe(true);
     expect(lastFrame() ?? "").toContain("auto");
+    expect(lastFrame() ?? "").toContain("Change provider/account...");
     unmount();
   } finally {
     if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
     if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
     if (oldGeminiHome === undefined) delete process.env.NEKO_GEMINI_HOME; else process.env.NEKO_GEMINI_HOME = oldGeminiHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("selecting an unconfigured provider keeps the working profile active", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const oldDeepSeekKey = process.env.DEEPSEEK_API_KEY, oldNekoKey = process.env.NEKO_API_KEY;
+  const home = mkdtempSync(join(tmpdir(), "neko-provider-switch-"));
+  const configDir = join(home, ".neko-core");
+  const configPath = join(configDir, "config.json");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(configPath, JSON.stringify({ active_profile: "local" }, null, 2) + "\n");
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  delete process.env.DEEPSEEK_API_KEY; delete process.env.NEKO_API_KEY;
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo profile="local" provider={provider} />);
+    stdin.write("/provider deepseek"); await tick(30); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes('provider "deepseek" has no API key yet'))).toBe(true);
+    expect(JSON.parse(readFileSync(configPath, "utf8")).active_profile).toBe("local");
+    expect(frames.join("\n")).not.toContain("provider -> deepseek");
+    unmount();
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    if (oldDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY; else process.env.DEEPSEEK_API_KEY = oldDeepSeekKey;
+    if (oldNekoKey === undefined) delete process.env.NEKO_API_KEY; else process.env.NEKO_API_KEY = oldNekoKey;
     rmSync(home, { recursive: true, force: true });
   }
 }, 15000);
