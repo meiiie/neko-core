@@ -93,13 +93,20 @@ try {
     throw new Error(`resume handoff was not printed; terminal tail=${JSON.stringify(raw.slice(-2_000))}`);
   }
   if (leaveAt < 0 || leaveAt > resumeAt) throw new Error("terminal restore did not finish before the resume handoff");
-  // Assert the physical terminal result, not a transport encoding. ConPTY may represent a CRLF cursor
-  // transition as CUP rather than replaying the original bytes; both are equivalent on screen. The
-  // handoff must start at column zero, retain one blank line above it, and place the command below it.
-  const finalLines = vt.lines();
-  const handoffRow = finalLines.findIndex((line) => line === "Resume this session with:");
-  if (handoffRow < 1 || finalLines[handoffRow - 1] !== "" || !finalLines[handoffRow + 1]?.startsWith("  neko --resume ")) {
-    throw new Error(`resume handoff was not anchored on a clean line: ${JSON.stringify(finalLines)}`);
+  // Windows ConPTY may canonicalize the CRLF handoff into cursor movement, so inspect the resulting
+  // screen there. POSIX PTYs preserve the bytes, while this intentionally small VirtualTerminal does
+  // not emulate DEC's separate primary/alternate buffers; assert the post-restore CRLF contract there.
+  if (process.platform === "win32") {
+    const finalLines = vt.lines();
+    const handoffRow = finalLines.findIndex((line) => line === "Resume this session with:");
+    if (handoffRow < 1 || finalLines[handoffRow - 1] !== "" || !finalLines[handoffRow + 1]?.startsWith("  neko --resume ")) {
+      throw new Error(`resume handoff was not anchored on a clean line: ${JSON.stringify(finalLines)}`);
+    }
+  } else {
+    const restoredTail = raw.slice(leaveAt + LEAVE_ALT.length);
+    if (!restoredTail.includes("\r\n\r\nResume this session with:\r\n  neko --resume ")) {
+      throw new Error(`resume handoff did not preserve its clean-line CRLF contract: ${JSON.stringify(restoredTail.slice(-1_000))}`);
+    }
   }
   if (raw.slice(resumeAt).includes(LEAVE_ALT)) throw new Error("a late terminal restore ran after the resume handoff");
 
