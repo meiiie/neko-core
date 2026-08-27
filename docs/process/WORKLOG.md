@@ -3,6 +3,34 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-27 - Config-first B.AI and TokenRouter API gateways
+
+Reviewed the current official API, catalog, pricing, privacy, and authentication material for B.AI,
+TokenRouter, Token Harbor, AIHubMix, Empero, Cline, and HiLinkup. B.AI and TokenRouter have the strongest
+immediate fit for the built-in picker: both publish ordinary Bearer-key OpenAI-compatible endpoints and live
+model catalogs, while currently exposing useful GLM/Qwen/DeepSeek routes. Their website login is account/key
+management, not a published third-party OAuth or device flow, so Neko deliberately labels both routes `api_key`
+and does not import browser cookies or imitate an OAuth contract.
+
+Added `bai` (`https://api.b.ai/v1`, starter `glm-5.3-flash`) and `tokenrouter`
+(`https://api.tokenrouter.com/v1`, starter `qwen/qwen3.8-max-free`) as data-only profiles over the existing
+`openai_compat` adapter. `/login` captures each key through the existing hidden profile-scoped input, `/model`
+merges the provider's authenticated live catalog with the small verified starter set, and the picker states
+that promotions/free routes are provider-controlled. There is no new protocol adapter, SDK, dependency, or
+agent-loop branch.
+
+Empero is not a default coding profile because its official page says prompts and completions are logged for
+training. Cline remains another coding client rather than a Neko subscription provider; its public programmatic
+surface uses API keys. Token Harbor is transparent but its permanent free routes can retain content after opt-in;
+AIHubMix's advertised free GLM route remains promotional/preview; and the time-limited HiLinkup claim did not
+have enough durable official contract detail to justify permanent picker surface. All remain usable through a
+user-defined OpenAI-compatible profile without Neko endorsing a volatile free offer.
+
+Evidence: both production `/v1/models` endpoints returned an authenticated JSON boundary (HTTP 401 without a
+key), TypeScript typecheck passed, focused config/provider-choice verification passed 60 tests and 262
+assertions, and the complete suite passed 1,503 tests and 8,445 assertions with zero failures (12 intentional
+platform/hidden-oracle skips). The compiled binary passed UI, PTY input, ACP, and startup/exit lifecycle probes.
+
 ## 2026-08-27 - Session-scoped Wiii Computer port over ACP
 
 Implemented the Wiii handoff as an optional typed ACP host capability without teaching Neko about Docker, WSL,

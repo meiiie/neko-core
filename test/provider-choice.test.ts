@@ -95,6 +95,33 @@ test("OpenRouter is a first-class API route with an explicit billing boundary", 
   expect(profileDisplayName(cfg("openrouter"))).toBe("OpenRouter · OpenRouter API key");
 });
 
+test("B.AI and TokenRouter stay API-key-only and expose promotion volatility", () => {
+  const grouped = providerChoices(cfg("bai"));
+  expect(grouped.find((choice) => choice.id === "bai")).toMatchObject({
+    label: "B.AI",
+    detail: expect.stringContaining("live GLM, Qwen, DeepSeek, and MiMo catalog"),
+  });
+  expect(grouped.find((choice) => choice.id === "tokenrouter")).toMatchObject({
+    label: "TokenRouter",
+    detail: expect.stringContaining("live multi-provider model catalog"),
+  });
+
+  const availability = {
+    chatgpt: false, gemini: false, grok: false, kimi: false, opencode: false,
+    apiProfiles: new Set(["bai"]),
+  };
+  expect(authChoices(cfg("bai"), "bai", availability)).toEqual([expect.objectContaining({
+    id: "bai",
+    label: "B.AI API key",
+    detail: expect.stringContaining("promotions are provider-controlled"),
+  })]);
+  expect(authChoices(cfg("tokenrouter"), "tokenrouter", availability)).toEqual([expect.objectContaining({
+    id: "tokenrouter",
+    label: "TokenRouter API key",
+    detail: expect.stringContaining("free routes may change"),
+  })]);
+});
+
 test("OpenCode keeps Console OAuth and Zen service-account billing visibly separate", () => {
   const grouped = providerChoices(cfg("opencode"));
   expect(grouped.find((choice) => choice.id === "opencode")).toMatchObject({

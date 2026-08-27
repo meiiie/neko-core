@@ -7,7 +7,7 @@ import { loadConfig, NekoConfig, redactSecrets } from "../src/adapters/config.ts
 
 beforeEach(() => {
   for (const key of Object.keys(process.env)) {
-    if (key.startsWith("NEKO_") || ["OPENAI_API_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"].includes(key)) delete process.env[key];
+    if (key.startsWith("NEKO_") || ["OPENAI_API_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY", "BAI_API_KEY", "TOKENROUTER_API_KEY"].includes(key)) delete process.env[key];
   }
 });
 
@@ -198,6 +198,25 @@ test("Gemini account and API-key routes are separate config-first profiles", () 
   expect(api.contextWindow).toBe(1_048_576);
   expect(api.vision).toBe(true);
   expect(api.effortCeiling).toBe("high");
+});
+
+test("B.AI and TokenRouter are config-first API-key gateways with live model discovery", () => {
+  const bai = loadConfig({ path: tmpConfig({}), profile: "bai" });
+  expect(bai.provider).toBe("openai_compat");
+  expect(bai.baseUrl).toBe("https://api.b.ai/v1");
+  expect(bai.model).toBe("glm-5.3-flash");
+  expect(bai.profiles.bai.models).toContain("qwen3.8-flash");
+  expect(bai.profiles.bai.auth).toBe("api_key");
+  expect(bai.profileKeyEnvs).toEqual(["BAI_API_KEY"]);
+  expect(bai.vision).toBe(false); // heterogeneous catalog: do not send images to text-only routes
+
+  const tokenrouter = loadConfig({ path: tmpConfig({}), profile: "tokenrouter" });
+  expect(tokenrouter.provider).toBe("openai_compat");
+  expect(tokenrouter.baseUrl).toBe("https://api.tokenrouter.com/v1");
+  expect(tokenrouter.model).toBe("qwen/qwen3.8-max-free");
+  expect(tokenrouter.profiles.tokenrouter.models).toContain("z-ai/glm-5.3-flash");
+  expect(tokenrouter.profiles.tokenrouter.auth).toBe("api_key");
+  expect(tokenrouter.profileKeyEnvs).toEqual(["TOKENROUTER_API_KEY"]);
 });
 
 test("withModel clones the config at a different model, same endpoint, original unchanged", () => {

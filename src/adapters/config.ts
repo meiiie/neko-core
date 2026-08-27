@@ -337,6 +337,32 @@ export const DEFAULTS: any = {
       model: "",
       key_env: "OPENROUTER_API_KEY",
     },
+    // Multi-model gateways stay ordinary OpenAI-compatible profiles. Their browser account login
+    // only manages API keys; neither service publishes a third-party OAuth/device flow for Neko.
+    // Keep a verified starter model while /model discovers the account's current catalog at runtime.
+    bai: {
+      provider: "openai_compat",
+      family: "bai",
+      label: "B.AI API key",
+      auth: "api_key",
+      base_url: "https://api.b.ai/v1",
+      model: "glm-5.3-flash",
+      models: ["glm-5.3-flash", "qwen3.8-flash", "deepseek-v4-flash", "mimo-v2.5"],
+      model_context: { "glm-5.3-flash": 1_000_000, "qwen3.8-flash": 1_000_000, "deepseek-v4-flash": 1_000_000 },
+      effort_ceiling: "max",
+      key_env: "BAI_API_KEY",
+    },
+    tokenrouter: {
+      provider: "openai_compat",
+      family: "tokenrouter",
+      label: "TokenRouter API key",
+      auth: "api_key",
+      base_url: "https://api.tokenrouter.com/v1",
+      model: "qwen/qwen3.8-max-free",
+      models: ["qwen/qwen3.8-max-free", "z-ai/glm-5.3-flash"],
+      effort_ceiling: "max",
+      key_env: "TOKENROUTER_API_KEY",
+    },
     // OpenCode Console account via the official opencode-cli public-client device OAuth flow. The
     // account-managed /api/config catalog decides the endpoint and protocol for each provider/model.
     "opencode-account": {
