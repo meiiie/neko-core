@@ -23,7 +23,7 @@ test("relay client keeps terminal semantics and accessible control names", () =>
   expect(script).toContain('t.className = "turn user"');
   expect(script).toContain('t.className = "turn neko"');
   expect(html).toContain('class="pr">&gt;</span>');
-  expect(html).toContain('id="hversion">v1.1.0</small>');
+  expect(html).toContain('id="hversion">v1.2.0</small>');
   expect(html).toContain('Try: "explain src/agent.ts"   or   /help');
   expect(html).toContain("width: 100%; max-width: none; height: 100dvh");
   expect(html).toContain("interactive-widget=resizes-content");

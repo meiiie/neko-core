@@ -276,7 +276,7 @@
   <header>
     <div class="mark">ハ・・マ</div>
     <div class="hgrid">
-      <div class="htitle"><span id="htitle">Neko Core</span> <small id="hversion">v1.1.0</small></div>
+      <div class="htitle"><span id="htitle">Neko Core</span> <small id="hversion">v1.2.0</small></div>
       <div class="hstatus" id="hstatus"><span class="dot"></span><span id="hstatustxt">not paired</span></div>
       <div class="hhost" id="hhost"></div>
     </div>
@@ -539,7 +539,7 @@
     const pct = Number.isFinite(Number(meta.contextPercent)) ? Math.max(0, Math.min(100, Math.round(Number(meta.contextPercent)))) : 0;
     $("statusr").textContent = (hostModel || "no model") + " · " + pct + "% ctx";
     $("htitle").textContent = "Neko Core";
-    $("hversion").textContent = "v" + (meta.version || "1.1.0");
+    $("hversion").textContent = "v" + (meta.version || "1.2.0");
     $("hhost").textContent = meta.cwd || location.host;
     $("hostpick").textContent = hosts.length ? `${hosts.length} session${hosts.length === 1 ? "" : "s"}` : "sessions";
     $("hostpick").title = connection + (meta.title ? " - " + meta.title : "");

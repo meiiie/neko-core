@@ -6,6 +6,33 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-27
+
+### Added
+
+- **Cline Account is now a first-class sign-in route.** `neko login cline account` and `/login` use
+  Cline's official device OAuth flow, keep Cline Account separate from `CLINE_API_KEY` billing, refresh
+  credentials without importing another client's state, and populate `/model` from Cline's public and
+  authenticated catalogs.
+- **B.AI and TokenRouter are available as config-first API providers.** Both reuse Neko's existing
+  OpenAI-compatible adapter and authenticated live model discovery. Promotional/free availability remains
+  provider-controlled and is labelled accordingly.
+- **Wiii can lend Neko a session-scoped Computer capability over ACP.** The optional host port uses semantic
+  observations, stable operation IDs, stale-state checks, bounded acquire/act/release leases, and mandatory
+  cleanup on cancellation or disconnect. It never gives ordinary CLI sessions Wiii infrastructure authority.
+
+### Security
+
+- Cline OAuth credentials are atomic/private and hidden from every safe filesystem surface. Account bearer
+  tokens are sent only to the exact official Cline API origin; lookalike endpoints fail before a request.
+- ACP Computer results redact native lease/environment identifiers, attach URLs, protected values, and host
+  detail before they become model-visible. Unknown mutation outcomes are not blindly replayed.
+
+### Compatibility
+
+- This is an additive 1.x release. Existing CLI commands, profiles, sessions, ordinary ACP clients, NekoCut
+  host profiles, and the v1.0.0 rollback baseline require no migration. No runtime dependency was added.
+
 ## [1.1.0] - 2026-08-25
 
 ### Added
