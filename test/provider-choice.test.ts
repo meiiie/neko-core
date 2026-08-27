@@ -143,6 +143,27 @@ test("OpenCode keeps Console OAuth and Zen service-account billing visibly separ
   expect(profileDisplayName(cfg("opencode"))).toBe("OpenCode · OpenCode Zen API key");
 });
 
+test("Cline keeps Account OAuth and direct API billing visibly separate", () => {
+  const grouped = providerChoices(cfg("cline-account"));
+  expect(grouped.find((choice) => choice.id === "cline")).toMatchObject({
+    label: "Cline",
+    detail: expect.stringContaining("Account OAuth or API key"),
+  });
+  const routes = authChoices(cfg("cline-account"), "cline", {
+    chatgpt: false, gemini: false, grok: false, kimi: false, opencode: false, cline: true, apiProfiles: new Set(["cline"]),
+  });
+  expect(routes.map((route) => route.id)).toEqual(["cline-account", "cline"]);
+  expect(routes[0]).toMatchObject({
+    label: "Cline Account",
+    detail: expect.stringContaining("official WorkOS device OAuth"),
+  });
+  expect(routes[1]).toMatchObject({
+    label: "Cline API key",
+    detail: expect.stringContaining("Cline API billing"),
+  });
+  expect(profileDisplayName(cfg("cline-account"))).toBe("Cline · Cline Account");
+});
+
 test("profile display and model context name the active OpenAI auth route", () => {
   expect(profileDisplayName(cfg("chatgpt"))).toBe("OpenAI · ChatGPT Plus/Pro");
   expect(profileDisplayName(cfg("openai"))).toBe("OpenAI · API key (pay-as-you-go)");

@@ -3,6 +3,32 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-27 - First-class Cline Account OAuth and separate API-key route
+
+Corrected the earlier Cline assessment after reviewing the current official Cline SDK/CLI rather than the
+older public API-key-only surface. Cline now publishes a WorkOS RFC 8628 device flow for its account provider:
+the public client obtains WorkOS tokens, exchanges them at Cline's `/api/v1/auth/register`, refreshes at
+`/api/v1/auth/refresh`, and sends the resulting access token with the required `workos:` prefix. Independent
+Apache/MIT/AGPL clients on GitHub implement the same contract, confirming it is usable outside Cline's own UI.
+
+Added two deliberately separate profiles. `cline-account` is official device OAuth owned and refreshed by
+Neko; `cline` is direct API-key access via `CLINE_API_KEY`. `/login`, `/logout`, `/model`, provider pickers, and
+`doctor` now understand both routes. Account HTTP 401 performs one forced refresh only. Transient refresh
+failure keeps a still-valid token, invalid grants require a new sign-in, auth JSON is atomic/private and hidden
+from every safe filesystem tool, and no browser cookie or Cline CLI/extension credential is imported. Public
+recommended/free/Cline Pass models seed the picker before login; the authenticated account catalog can enrich
+it after login.
+
+Primary references: Cline's official `sdk/packages/core/src/auth/cline.ts`, provider-auth registry, production
+environment configuration, authentication documentation, and live recommended-model endpoint. The adapter is
+a clean-room implementation of the wire contract and adds no runtime dependency or background process.
+
+Evidence: lint and TypeScript typecheck passed; 11 focused Cline/provider-choice/doctor tests were added and
+the complete suite reached 1,509 passes and 8,495 assertions. Four pre-existing disk/SRT/trust timing tests
+exceeded their concurrent full-suite Windows deadlines; all four passed when rerun in their owning files (72
+tests total), separating machine saturation from a Cline regression. Doctor/policy reported the intended
+signed-out account boundary, and the compiled Windows binary passed UI, PTY input, ACP, and startup/exit probes.
+
 ## 2026-08-27 - Config-first B.AI and TokenRouter API gateways
 
 Reviewed the current official API, catalog, pricing, privacy, and authentication material for B.AI,
@@ -20,8 +46,8 @@ that promotions/free routes are provider-controlled. There is no new protocol ad
 agent-loop branch.
 
 Empero is not a default coding profile because its official page says prompts and completions are logged for
-training. Cline remains another coding client rather than a Neko subscription provider; its public programmatic
-surface uses API keys. Token Harbor is transparent but its permanent free routes can retain content after opt-in;
+training. The Cline conclusion in this earlier snapshot was superseded by the newer official SDK/CLI evidence
+recorded above. Token Harbor is transparent but its permanent free routes can retain content after opt-in;
 AIHubMix's advertised free GLM route remains promotional/preview; and the time-limited HiLinkup claim did not
 have enough durable official contract detail to justify permanent picker surface. All remain usable through a
 user-defined OpenAI-compatible profile without Neko endorsing a volatile free offer.

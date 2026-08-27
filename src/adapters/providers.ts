@@ -16,6 +16,7 @@ import { GeminiCliProvider } from "./gemini-provider.ts";
 import { providerScope } from "./provider-scope.ts";
 import { ResponsesProvider } from "./responses-provider.ts";
 import { listOpenCodeAccountModelOptions, listOpenCodeZenModelOptions, OpenCodeAccountProvider, OpenCodeZenProvider } from "./opencode.ts";
+import { ClineAccountProvider, listClineModelOptions } from "./cline.ts";
 import { hasGeminiCredentials, listGeminiModels } from "./gemini-cli.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 import { hasChatGptCredentials } from "./chatgpt-auth.ts";
@@ -172,10 +173,11 @@ export function getProvider(config: NekoConfig): Provider {
   if (config.provider === "kimi") return new KimiProvider(config);
   if (config.provider === "opencode_account") return new OpenCodeAccountProvider(config);
   if (config.provider === "opencode") return new OpenCodeZenProvider(config);
+  if (config.provider === "cline_account") return new ClineAccountProvider(config);
   if (config.provider === "openai_compat") return new OpenAICompatProvider(config);
   throw new Error(
     `Unknown provider '${config.provider}'. Use openai_compat (any OpenAI /chat/completions endpoint or a ` +
-      "local server), responses (standard Responses API), chatgpt (Plus/Pro OAuth), gemini_cli (Code Assist Enterprise), kimi (Kimi OAuth/API), opencode_account (OpenCode Console OAuth), opencode (OpenCode Zen), anthropic (Claude Messages API), or moa (mixture-of-agents).",
+      "local server), responses (standard Responses API), chatgpt (Plus/Pro OAuth), gemini_cli (Code Assist Enterprise), kimi (Kimi OAuth/API), opencode_account (OpenCode Console OAuth), opencode (OpenCode Zen), cline_account (Cline Account OAuth), anthropic (Claude Messages API), or moa (mixture-of-agents).",
   );
 }
 
@@ -343,6 +345,7 @@ export async function listModelOptions(config: NekoConfig, codexSupport?: CodexS
   if (config.provider === "kimi") return listKimiModelOptions(config);
   if (config.provider === "opencode_account") return listOpenCodeAccountModelOptions(config);
   if (config.provider === "opencode") return listOpenCodeZenModelOptions(config);
+  if (config.provider === "cline_account") return listClineModelOptions(config);
   if (config.usesGrokAuth) {
     const profile = config.profile ? config.profiles[config.profile] : undefined;
     const fallback = [...new Set([config.model, ...(profile?.models ?? [])].filter(Boolean))].map((id) => ({

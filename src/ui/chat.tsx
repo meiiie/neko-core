@@ -47,6 +47,7 @@ import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginG
 import { clearGrokCredentials, hasGrokCredentials, loginGrok } from "../adapters/grok-auth.ts";
 import { clearKimiCredentials, hasKimiCredentials, loginKimi } from "../adapters/kimi-auth.ts";
 import { clearOpenCodeCredentials, hasOpenCodeCredentials, loginOpenCode } from "../adapters/opencode-auth.ts";
+import { clearClineCredentials, hasClineCredentials, loginCline } from "../adapters/cline-auth.ts";
 import { installGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
 import { compareCodexVersions, discoverCodexSupport } from "../adapters/codex-app-server.ts";
 import { installCodexSupportPack } from "../adapters/codex-support-pack.ts";
@@ -258,7 +259,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       out.push({ id: idRef.current++, kind: "info", text: "Kimi Code is not signed in - type /login to connect your account (no API key)." });
     } else if (cfg.usesGrokAuth && !hasGrokCredentials()) {
       out.push({ id: idRef.current++, kind: "info", text: "Grok is not signed in - type /login to connect your subscription (no XAI_API_KEY billing)." });
-    } else if (!cfg.apiKey && !cfg.isLocalEndpoint && !cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.usesKimiAuth && !cfg.usesGrokAuth && !cfg.usesOpenCodeAuth) {
+    } else if (cfg.usesClineAuth && !hasClineCredentials()) {
+      out.push({ id: idRef.current++, kind: "info", text: "Cline Account is not signed in - type /login to connect with device OAuth." });
+    } else if (!cfg.apiKey && !cfg.isLocalEndpoint && !cfg.usesChatGptAuth && !cfg.usesGeminiAuth && !cfg.usesKimiAuth && !cfg.usesGrokAuth && !cfg.usesOpenCodeAuth && !cfg.usesClineAuth) {
       out.push({ id: idRef.current++, kind: "info", text: "No API key found - type /login to add one (or set NEKO_API_KEY)." });
     }
     if (browserHint) {
@@ -2125,11 +2128,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       const apiProfiles = new Set<string>();
       for (const [name, profile] of Object.entries(cfg.profiles)) {
-        if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "grok_oauth" || profile.auth === "kimi_oauth" || profile.auth === "opencode_oauth" || profile.auth === "none") continue;
+        if (profile.auth === "chatgpt_oauth" || profile.auth === "gemini_oauth" || profile.auth === "grok_oauth" || profile.auth === "kimi_oauth" || profile.auth === "opencode_oauth" || profile.auth === "cline_oauth" || profile.auth === "none") continue;
         try { if (loadConfig({ profile: name }).apiKey) apiProfiles.add(name); } catch { /* status only */ }
       }
       const openAuthRoutes = (family: string) => {
-        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), grok: hasGrokCredentials(), kimi: hasKimiCredentials(), opencode: hasOpenCodeCredentials(), apiProfiles });
+        const routes = authChoices(cfg, family, { chatgpt: hasChatGptCredentials(), gemini: hasGeminiCredentials(), grok: hasGrokCredentials(), kimi: hasKimiCredentials(), opencode: hasOpenCodeCredentials(), cline: hasClineCredentials(), apiProfiles });
         const selectRoute = async (route: { id: string }) => {
           setOverlay(null);
           const profile = cfg.profiles[route.id];
@@ -2218,6 +2221,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             }
             return;
           }
+          if (profile?.auth === "cline_oauth") {
+            addLine("info", "Opening official Cline Account device sign-in in your browser...");
+            const result = await withLogin("Cline sign-in", (signal) => loginCline({
+              notify: (message) => addLine("info", message),
+              openUrl: openUrl ?? openBrowser,
+              signal,
+            }));
+            if (result.ok) {
+              const credentials = result.value;
+              activate(route.id);
+              addLine("info", `Cline Account connected${credentials.email ? ` as ${credentials.email}` : ""}. Neko owns and refreshes this session; the separate CLINE_API_KEY route remains untouched. Type /model to load the live catalog.`);
+            }
+            return;
+          }
           if (route.id === "opencode") {
             const url = "https://opencode.ai/zen";
             addLine("info", `Opening OpenCode Zen to sign in, add pay-as-you-go billing, and copy an API key: ${url}`);
@@ -2232,7 +2249,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
         setOverlay({
-          title: family === "openai" ? "OpenAI - choose how to sign in" : family === "google" ? "Google - choose how to sign in" : family === "xai" ? "xAI - choose subscription or API" : family === "zai" ? "Z.AI - choose API route" : family === "opencode" ? "OpenCode - choose how to sign in" : `Sign in to ${family}`,
+          title: family === "openai" ? "OpenAI - choose how to sign in" : family === "google" ? "Google - choose how to sign in" : family === "xai" ? "xAI - choose subscription or API" : family === "zai" ? "Z.AI - choose API route" : family === "opencode" ? "OpenCode - choose how to sign in" : family === "cline" ? "Cline - choose account or API key" : `Sign in to ${family}`,
           items: routes,
           onSelect: (route) => { void selectRoute(route); },
         });
@@ -2273,6 +2290,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       if (cfg.usesOpenCodeAuth) {
         addLine("info", `${clearOpenCodeCredentials()} OpenCode Zen service-account keys and other provider sessions were left untouched.`);
+        agentRef.current?.setProvider(getProvider(cfg));
+        return;
+      }
+      if (cfg.usesClineAuth) {
+        addLine("info", `${clearClineCredentials()} CLINE_API_KEY and other provider sessions were left untouched.`);
         agentRef.current?.setProvider(getProvider(cfg));
         return;
       }

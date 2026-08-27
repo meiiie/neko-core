@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { loadConfig, NekoConfig } from "../src/adapters/config.ts";
 import { collectChecks, collectTerminalChecks, srtToolchainCheck, terminalName } from "../src/adapters/doctor.ts";
 import { saveKimiCredentials } from "../src/adapters/kimi-auth.ts";
+import { saveClineCredentials } from "../src/adapters/cline-auth.ts";
 
 test("terminalName identifies the host from the env, most-specific first", () => {
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
@@ -75,6 +76,25 @@ test("doctor does not claim Kimi account access before the first request verifie
     expect(check.status).toBe("ok");
     expect(check.detail).toContain("access is checked on the first request");
     expect(check.detail.includes("signed in")).toBe(false);
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor reports Cline Account OAuth separately from API-key billing", () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-doctor-cline-"));
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  try {
+    const config = new NekoConfig({ provider: "cline_account" }, "cline-account", { "cline-account": { auth: "cline_oauth" } }, "");
+    expect(collectChecks(config).find((item) => item.name === "cline_auth"))
+      .toMatchObject({ status: "warn", detail: expect.stringContaining("neko login cline account") });
+    saveClineCredentials({ accessToken: "access", refreshToken: "refresh", expiresAt: Date.now() + 3_600_000, tokenType: "Bearer" });
+    expect(collectChecks(config).find((item) => item.name === "cline_auth"))
+      .toMatchObject({ status: "ok", detail: expect.stringContaining("WorkOS device OAuth") });
   } finally {
     if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
     if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;

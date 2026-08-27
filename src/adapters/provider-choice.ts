@@ -13,6 +13,7 @@ export interface AuthAvailability {
   grok: boolean;
   kimi: boolean;
   opencode: boolean;
+  cline?: boolean;
   apiProfiles: Set<string>;
 }
 
@@ -32,6 +33,7 @@ function familyLabel(family: string): string {
   if (family === "bai") return "B.AI";
   if (family === "tokenrouter") return "TokenRouter";
   if (family === "opencode") return "OpenCode";
+  if (family === "cline") return "Cline";
   return family;
 }
 
@@ -71,6 +73,8 @@ export function providerChoices(cfg: NekoConfig, authOnly = false): Choice[] {
                           ? `one API key for the live multi-provider model catalog${current}`
                       : family === "opencode"
                         ? `Console account OAuth or Zen service-account key${current}`
+                      : family === "cline"
+                        ? `Account OAuth or API key${current}`
                       : `${profile.provider ?? "?"} · ${profile.model ?? "?"}${current}`,
     });
   }
@@ -90,6 +94,7 @@ export function authChoices(cfg: NekoConfig, family: string, availability: AuthA
           : profile.auth === "grok_oauth" ? availability.grok
             : profile.auth === "kimi_oauth" ? availability.kimi
               : profile.auth === "opencode_oauth" ? availability.opencode
+                : profile.auth === "cline_oauth" ? Boolean(availability.cline)
             : availability.apiProfiles.has(name));
       const billing = profile.auth === "none" ? "no sign-in required"
         : profile.auth === "chatgpt_oauth" ? "subscription, no API billing"
@@ -97,12 +102,14 @@ export function authChoices(cfg: NekoConfig, family: string, availability: AuthA
             : profile.auth === "grok_oauth" ? "Grok subscription; official xAI device OAuth"
               : profile.auth === "kimi_oauth" ? "Kimi Code account; no API key"
                 : profile.auth === "opencode_oauth" ? "OpenCode Console account; device OAuth"
+                  : profile.auth === "cline_oauth" ? "Cline Account; official WorkOS device OAuth"
             : family === "google" ? "official API; free tier available"
               : family === "zai" ? (name === "zai" ? "Coding Plan subscription quota; GLM-5.3 available" : "pay-as-you-go API billing")
                 : family === "openrouter" ? "OpenRouter pay-as-you-go billing"
                   : family === "bai" ? "B.AI API billing; current promotions are provider-controlled"
                     : family === "tokenrouter" ? "TokenRouter API billing; free routes may change"
                   : family === "opencode" ? "OpenCode Zen service-account billing"
+                    : family === "cline" ? "Cline API billing"
                   : "pay-as-you-go API";
       return {
         id: name,

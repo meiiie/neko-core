@@ -394,6 +394,21 @@ service-account route. Zen's key remains profile-scoped in Neko config or `OPENC
 catalog is credential-free and its heterogeneous models delegate to Responses, Anthropic Messages, or Chat
 Completions. Unknown families fail closed, and Gemini remains omitted until a Google-native route is verified.
 
+## Cline Account and API-key provider boundary
+
+`adapters/cline-auth.ts` implements Cline's official WorkOS device-authorization flow: the fixed public
+client requests a device code from WorkOS, exchanges the resulting WorkOS tokens with Cline, and stores only
+the returned Cline-scoped access/refresh pair under `~/.neko-core`. Verification URLs are accepted only from
+`authkit.cline.bot`; refresh and registration use the fixed `api.cline.bot` origin. Transient refresh failures
+preserve a still-valid token, while an invalid grant requires a new login. The device credential, browser
+cookies, and another Cline client's credential store are never persisted or imported.
+
+`adapters/cline.ts` reuses the Chat Completions transport with honest Neko client headers and a refreshable
+`workos:` bearer. One early HTTP 401 permits one forced refresh, never an unbounded replay. Public recommended
+models keep `/model` useful before login and the authenticated account catalog takes precedence afterward.
+The `cline-account` OAuth profile and the direct `cline`/`CLINE_API_KEY` profile remain separate billing
+routes; neither silently falls back to the other.
+
 ## ChatGPT realtime voice boundary
 
 `adapters/browser-voice.ts` is the default provider-agnostic conversational preview. A fragment capability

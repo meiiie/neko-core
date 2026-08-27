@@ -13,6 +13,7 @@ import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-serve
 import { discoverGeminiCli, hasGeminiCredentials, type GeminiCliStatus } from "./gemini-cli.ts";
 import { hasKimiCredentials } from "./kimi-auth.ts";
 import { hasOpenCodeCredentials } from "./opencode-auth.ts";
+import { hasClineCredentials } from "./cline-auth.ts";
 import { browserBridgeStage, readBrowserCapability, readBrowserBridgeStatus } from "./browser-bridge.ts";
 import type { SandboxRuntimeStatus } from "./registry.ts";
 
@@ -279,6 +280,14 @@ export function collectChecks(
             detail: hasOpenCodeCredentials()
               ? "signed in to OpenCode Console (device OAuth; account catalog is checked by /model)"
               : "missing - run `neko login opencode` or use /login",
+          }
+      : config.usesClineAuth
+        ? {
+            status: hasClineCredentials() ? "ok" : "warn",
+            name: "cline_auth",
+            detail: hasClineCredentials()
+              ? "signed in to Cline Account (official WorkOS device OAuth; live catalog is checked by /model)"
+              : "missing - run `neko login cline account` or use /login",
           }
       : {
           status: config.apiKey || (config.isLocalEndpoint && !profileNeedsApiKey) ? "ok" : "warn",

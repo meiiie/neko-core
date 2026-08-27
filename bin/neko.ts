@@ -22,6 +22,7 @@ import { clearGeminiCredentials, discoverGeminiCli, hasGeminiCredentials, loginG
 import { clearGrokCredentials, hasGrokCredentials, loginGrok } from "../src/adapters/grok-auth.ts";
 import { clearKimiCredentials, loginKimi } from "../src/adapters/kimi-auth.ts";
 import { clearOpenCodeCredentials, loginOpenCode } from "../src/adapters/opencode-auth.ts";
+import { clearClineCredentials, hasClineCredentials, loginCline } from "../src/adapters/cline-auth.ts";
 import { installGeminiSupportPack, readGeminiSupportPack, removeGeminiSupportPack } from "../src/adapters/gemini-support-pack.ts";
 import { discoverOfficeCli, installOfficeSupportPack, readOfficeSupportPack, removeOfficeSupportPack } from "../src/adapters/office-support-pack.ts";
 import { activeBrowserMeeting, startBrowserMeeting, stopBrowserMeeting } from "../src/adapters/browser-meeting.ts";
@@ -236,7 +237,7 @@ Commands:
   skills        list available skills (~/.neko-core/skills)
   procurement   deterministic sourcing helpers; 'source-plan <identifier>' expands exact-source queries
   recipes       list runnable recipes (~/.neko-core/recipes)
-  login         sign in; OpenAI, Google, Grok/xAI, Kimi, OpenCode, or an API-key provider
+  login         sign in; OpenAI, Google, Grok/xAI, Kimi, OpenCode, Cline, or an API-key provider
   logout        sign out the active route (other provider sessions/keys stay intact)
   support       inspect, install, update, or remove optional ChatGPT/Gemini/Office/Meeting components
   update [ver]  self-update to the latest release (resumes auto-updates); 'update 0.7.7' pins/rolls
@@ -294,6 +295,7 @@ function cmdConfig(args: Args): number {
   if (cfg.usesChatGptAuth) console.log(`  chatgpt_auth = ${hasChatGptCredentials() ? "signed in" : "missing"} (API billing disabled)`);
   else if (cfg.usesGrokAuth) console.log(`  grok_auth = ${hasGrokCredentials() ? "signed in" : "missing"} (subscription route; XAI_API_KEY billing disabled)`);
   else if (cfg.usesGeminiAuth) console.log(`  gemini_auth = ${hasGeminiCredentials() ? "signed in" : "missing"} (Code Assist Standard/Enterprise)`);
+  else if (cfg.usesClineAuth) console.log(`  cline_auth = ${hasClineCredentials() ? "signed in" : "missing"} (account route; CLINE_API_KEY billing disabled)`);
   else console.log(`  api_key = ${cfg.apiKey ? "set" : "missing"}`);
   return 0;
 }
@@ -567,6 +569,13 @@ async function cmdLogin(args: Args): Promise<number> {
     console.log(`OpenCode Console sign-in complete for ${credentials.email}. Active profile: opencode-account (device OAuth; no Zen API key).`);
     return 0;
   }
+  const clineOAuth = provider === "cline" && (!method || ["oauth", "account", "subscription", "device"].includes(method));
+  if (clineOAuth) {
+    const credentials = await loginCline({ notify: console.log });
+    setActiveProfile("cline-account");
+    console.log(`Cline Account sign-in complete${credentials.email ? ` for ${credentials.email}` : ""}. Active profile: cline-account (official device OAuth; CLINE_API_KEY billing is separate).`);
+    return 0;
+  }
   if (provider === "google" && !["api", "api-key", "apikey"].includes(method)) {
     console.error("usage: neko login google gemini   OR   neko login google api <key>");
     return 2;
@@ -583,14 +592,18 @@ async function cmdLogin(args: Args): Promise<number> {
     console.error("usage: neko login xai   OR   neko login xai api <key>");
     return 2;
   }
+  if (provider === "cline" && !["api", "api-key", "apikey"].includes(method)) {
+    console.error("usage: neko login cline account   OR   neko login cline api <key>");
+    return 2;
+  }
   let key = provider === "openai" || provider === "google" || provider === "kimi" || provider === "xai" || provider === "grok"
     ? (args.positionals[2] ?? "")
-    : provider === "deepseek" || provider === "openrouter" || provider === "opencode"
+    : provider === "deepseek" || provider === "openrouter" || provider === "opencode" || provider === "cline"
       ? (["api", "api-key", "apikey", "zen", "service", "service-account"].includes(method) ? (args.positionals[2] ?? "") : (args.positionals[1] ?? ""))
       : (args.positionals[0] ?? "");
   if (!key && !process.stdin.isTTY) key = (await Bun.stdin.text()).trim(); // piped
   if (!key) {
-    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login xai   OR   neko login xai api <key>   OR   neko login kimi   OR   neko login opencode   OR   neko login opencode zen <key>");
+    console.error("usage: neko login <key>   OR   neko login openai api <key>   OR   neko login xai   OR   neko login xai api <key>   OR   neko login kimi   OR   neko login opencode   OR   neko login opencode zen <key>   OR   neko login cline account   OR   neko login cline api <key>");
     return 2;
   }
   if (provider === "openai") setActiveProfile("openai");
@@ -600,6 +613,7 @@ async function cmdLogin(args: Args): Promise<number> {
   if (provider === "deepseek") setActiveProfile("deepseek");
   if (provider === "openrouter") setActiveProfile("openrouter");
   if (provider === "opencode") setActiveProfile("opencode");
+  if (provider === "cline") setActiveProfile("cline");
   console.log(setApiKey(key));
   return 0;
 }
@@ -626,6 +640,12 @@ function cmdLogout(args: Args): number {
   const explicitOpenCodeZen = provider === "opencode" && (
     ["api", "api-key", "apikey", "zen", "service", "service-account"].includes(method) || (!method && current.profile === "opencode")
   );
+  const explicitClineAccount = provider === "cline" && (
+    ["oauth", "account", "subscription", "device"].includes(method) || (!method && current.profile !== "cline")
+  );
+  const explicitClineApi = provider === "cline" && (
+    ["api", "api-key", "apikey"].includes(method) || (!method && current.profile === "cline")
+  );
   if (explicitGemini || (!provider && current.usesGeminiAuth)) {
     console.log(clearGeminiCredentials());
     return 0;
@@ -650,8 +670,12 @@ function cmdLogout(args: Args): number {
     console.log(clearOpenCodeCredentials());
     return 0;
   }
-  if (provider && !["openai", "google", "xai", "grok", "kimi", "deepseek", "openrouter", "opencode"].includes(provider)) {
-    console.error("usage: neko logout [openai api|openai chatgpt|google api|google gemini|xai|xai api|kimi|kimi api|deepseek|openrouter|opencode account|opencode zen]");
+  if (explicitClineAccount || (!provider && current.usesClineAuth)) {
+    console.log(clearClineCredentials());
+    return 0;
+  }
+  if (provider && !["openai", "google", "xai", "grok", "kimi", "deepseek", "openrouter", "opencode", "cline"].includes(provider)) {
+    console.error("usage: neko logout [openai api|openai chatgpt|google api|google gemini|xai|xai api|kimi|kimi api|deepseek|openrouter|opencode account|opencode zen|cline account|cline api]");
     return 2;
   }
   const targetProfile = explicitGeminiApi ? "gemini-api"
@@ -660,6 +684,7 @@ function cmdLogout(args: Args): number {
       : provider === "deepseek" ? "deepseek"
         : provider === "openrouter" ? "openrouter"
           : explicitOpenCodeZen ? "opencode"
+          : explicitClineApi ? "cline"
           : explicitApi || provider === "openai" ? "openai"
             : current.profile ?? undefined;
   console.log(clearApiKey(targetProfile));

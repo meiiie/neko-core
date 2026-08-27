@@ -31,7 +31,7 @@ export interface Profile {
   /** UI grouping: several auth routes can belong to one provider brand (OpenAI API + ChatGPT OAuth). */
   family?: string;
   label?: string;
-  auth?: "api_key" | "chatgpt_oauth" | "gemini_oauth" | "grok_oauth" | "kimi_oauth" | "opencode_oauth" | "none";
+  auth?: "api_key" | "chatgpt_oauth" | "gemini_oauth" | "grok_oauth" | "kimi_oauth" | "opencode_oauth" | "cline_oauth" | "none";
   /** Models known to the auth route when it has no model-list endpoint. `/model <id>` still accepts newer ids. */
   models?: string[];
   model_context?: Record<string, number>;
@@ -388,6 +388,30 @@ export const DEFAULTS: any = {
       context_window: 131_072,
       key_env: "OPENCODE_API_KEY",
     },
+    // Cline Account uses Cline's official WorkOS device flow. Neko stores and refreshes its own
+    // Cline-scoped token; it never imports credentials from the Cline extension or CLI.
+    "cline-account": {
+      provider: "cline_account",
+      family: "cline",
+      label: "Cline Account",
+      auth: "cline_oauth",
+      base_url: "https://api.cline.bot/api/v1",
+      model: "z-ai/glm-5.3-flash",
+      models: ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4-flash", "poolside/laguna-s-2.1:free"],
+      effort_ceiling: "max",
+    },
+    // Direct Cline API access is deliberately separate from the account/subscription route.
+    cline: {
+      provider: "openai_compat",
+      family: "cline",
+      label: "Cline API key",
+      auth: "api_key",
+      base_url: "https://api.cline.bot/api/v1",
+      model: "z-ai/glm-5.3-flash",
+      models: ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4-flash", "poolside/laguna-s-2.1:free"],
+      effort_ceiling: "max",
+      key_env: "CLINE_API_KEY",
+    },
     // Mixture-of-Agents: diverse advisors analyze, a strong aggregator synthesizes + acts. `neko
     // --profile moa`. Opt-in quality mode (N+1 model calls/turn) — best where one model is weak.
     moa: {
@@ -494,6 +518,7 @@ export class NekoConfig {
   get usesKimiAuth(): boolean { return this.provider === "kimi" && this.profile != null && this.profiles[this.profile]?.auth === "kimi_oauth"; }
   get usesGrokAuth(): boolean { return this.provider === "responses" && this.profile != null && this.profiles[this.profile]?.auth === "grok_oauth"; }
   get usesOpenCodeAuth(): boolean { return this.provider === "opencode_account" && this.profile != null && this.profiles[this.profile]?.auth === "opencode_oauth"; }
+  get usesClineAuth(): boolean { return this.provider === "cline_account" && this.profile != null && this.profiles[this.profile]?.auth === "cline_oauth"; }
   get model(): string { return String(this.data.model ?? "").trim(); }
   /** Model for a VISION pre-pass (reading an image into text the main agent can use): `vision_model`
    * config, else a verified-good default on an NVIDIA endpoint, else "" (no auto vision). */

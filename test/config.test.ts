@@ -365,6 +365,15 @@ test("modelShadow: null when no profile, when models agree, and when the preset 
   expect(opencodeAccount.model).toBe("");
   expect(opencodeAccount.usesOpenCodeAuth).toBe(true);
   expect(opencodeAccount.profileKeyEnvs).toEqual([]);
+  const clineAccount = loadConfig({ path: tmpConfig({}), profile: "cline-account" });
+  expect(clineAccount.provider).toBe("cline_account");
+  expect(clineAccount.baseUrl).toBe("https://api.cline.bot/api/v1");
+  expect(clineAccount.model).toBe("z-ai/glm-5.3-flash");
+  expect(clineAccount.usesClineAuth).toBe(true);
+  expect(clineAccount.profileKeyEnvs).toEqual([]);
+  const clineApi = loadConfig({ path: tmpConfig({}), profile: "cline" });
+  expect(clineApi.provider).toBe("openai_compat");
+  expect(clineApi.profileKeyEnvs).toEqual(["CLINE_API_KEY"]);
 });
 
 test("modelShadow: NEKO_MODEL is named as the source (env wins over files)", () => {

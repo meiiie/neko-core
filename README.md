@@ -81,6 +81,7 @@ Neko keeps account subscriptions and pay-as-you-go API billing visibly separate.
 | Z.AI | GLM Coding Plan or paid General API |
 | OpenRouter | API key with live tool-capable model discovery |
 | OpenCode | Console account OAuth or Zen service-account API key |
+| Cline | Cline Account device OAuth or Cline API key |
 | Local/custom | Any configured OpenAI-compatible endpoint, including llama.cpp or Ollama |
 
 Neko owns and refreshes its own OAuth state. It does not import another CLI's credential store, mix an
@@ -100,6 +101,8 @@ neko login deepseek <key>
 neko login openrouter <key>
 neko login opencode
 neko login opencode zen <key>
+neko login cline account
+neko login cline api <key>
 ```
 
 ## Everyday use
