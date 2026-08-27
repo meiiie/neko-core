@@ -3,6 +3,16 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-27 - Release lifecycle probe drains final PTY output deterministically
+
+The v1.2.0 stable-runtime gate exposed a test-only race: on Windows, `Bun.Terminal` can deliver the final PTY
+data callback just after `proc.exited` settles. The first lifecycle run therefore saw the completed alternate-
+screen restore but inspected its buffer before the already-written resume handoff arrived; two immediate
+reruns passed. A second stress pass exposed that ConPTY may also represent the leading CRLF transition as a
+cursor-position update rather than replaying the original bytes. The probe now waits at most one second for the
+exact marker and checks the resulting terminal grid: column-zero title, blank row above, resume command below.
+Restore ordering remains byte-checked. A missing/displaced handoff or a late restore still fails.
+
 ## 2026-08-27 - First-class Cline Account OAuth and separate API-key route
 
 Corrected the earlier Cline assessment after reviewing the current official Cline SDK/CLI rather than the

@@ -82,19 +82,24 @@ try {
   const exitCode = await Promise.race([proc.exited, sleep(5_000).then(() => null)]);
   if (exitCode === null) throw new Error("neko did not exit after /exit");
 
+  // Bun.Terminal may deliver the final PTY data callback just after proc.exited settles. Bound the
+  // drain wait to the exact handoff marker; this preserves the missing/late-restore assertions below
+  // without turning a transport scheduling race into a false product failure.
+  await waitFor(() => raw.includes("Resume this session with:"), 1_000);
+
   const resumeAt = raw.lastIndexOf("Resume this session with:");
   const leaveAt = raw.lastIndexOf(LEAVE_ALT);
   if (resumeAt < 0) {
     throw new Error(`resume handoff was not printed; terminal tail=${JSON.stringify(raw.slice(-2_000))}`);
   }
   if (leaveAt < 0 || leaveAt > resumeAt) throw new Error("terminal restore did not finish before the resume handoff");
-  const afterRestore = raw.slice(leaveAt + LEAVE_ALT.length, resumeAt);
-  const visiblePrefix = afterRestore.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
-  // POSIX PTYs may apply ONLCR to an already CRLF-anchored write, producing CR-CR-LF. It is still the
-  // same clean-line boundary on screen; require two line feeds while accepting one or more carriage
-  // returns before each. Windows ConPTY emits the ordinary CR-LF form.
-  if (!/(?:\r*\n){2}$/.test(visiblePrefix)) {
-    throw new Error(`resume handoff was not anchored on a clean line: ${JSON.stringify(afterRestore)}`);
+  // Assert the physical terminal result, not a transport encoding. ConPTY may represent a CRLF cursor
+  // transition as CUP rather than replaying the original bytes; both are equivalent on screen. The
+  // handoff must start at column zero, retain one blank line above it, and place the command below it.
+  const finalLines = vt.lines();
+  const handoffRow = finalLines.findIndex((line) => line === "Resume this session with:");
+  if (handoffRow < 1 || finalLines[handoffRow - 1] !== "" || !finalLines[handoffRow + 1]?.startsWith("  neko --resume ")) {
+    throw new Error(`resume handoff was not anchored on a clean line: ${JSON.stringify(finalLines)}`);
   }
   if (raw.slice(resumeAt).includes(LEAVE_ALT)) throw new Error("a late terminal restore ran after the resume handoff");
 
