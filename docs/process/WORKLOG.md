@@ -3,6 +3,32 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-28 - Executable comment hygiene and Bun 1.4 build cleanup (v1.4.0)
+
+Neko now bundles a globally discoverable `no-comments` skill adapted from pstack's MIT-licensed policy. The
+skill treats deletion as the default only for narration, decorative banners, dead prose, and unsupported
+workaround alibis. It keeps comments that carry evidenced legal, public-contract, external-runtime, security,
+permission, credential, crash-recovery, idempotency, trust-boundary, or intentionally malformed-fixture facts.
+A regression test proves the skill loads from the binary's built-in catalog in an arbitrary workspace.
+
+Applying that policy to production source and maintenance scripts removed redundant explanations without
+changing Neko's runtime boundaries. The audit also exposed one real root cause hidden behind a historical
+comment: Bun 1.4.0 on Windows emitted an internal `directory mismatch` diagnostic whenever the build used the
+old Bun 1.3 JSX `--tsconfig-override`. CI and releases are pinned to Bun 1.4.0, whose production transform works
+without that override, so the obsolete file and flag were removed instead of shortening their explanatory
+comment. The release workflow now describes only the compile invariants it still enforces.
+
+Release-candidate evidence: TypeScript, lint, and diff checks passed; the full suite reached 1,522 passes,
+12 intentional skips, 8,556 assertions, and zero failures across 142 files. The Bun 1.4.0 binary compiled
+without the internal diagnostic and passed production UI rendering, real-PTY input, ACP handshake, and
+startup/exit lifecycle probes. No dependency, provider wire, permission, durable-session, ACP, or host-profile
+contract changed.
+
+The first exact-candidate suite also caught a live-SRT test timeout rather than accepting a lucky rerun. The
+sandbox completed correctly in 24.95 seconds, but the test killed it at 20 seconds and observed `status=null`.
+Its bounded launch allowance is now 45 seconds, still below the release job's fail-fast budget, and it asserts
+the spawn error separately before status/output and launch-material cleanup. Repeated live runs remain the gate.
+
 ## 2026-08-28 - Wiii Workstation Awareness v1 (v1.3.0)
 
 The v1.2 Computer port already enforced the difficult authority boundary: exact ACP capability negotiation,

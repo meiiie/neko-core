@@ -6,6 +6,34 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-28
+
+### Added
+
+- **`no-comments` is now a bundled, globally discoverable code-hygiene skill.** It removes narration,
+  decorative sections, dead prose, and unsupported workaround alibis while preserving evidenced security,
+  protocol, operating-system, public-contract, and intentionally malformed-fixture comments. The skill is
+  available from every workspace without a project-local installation.
+
+### Changed
+
+- Production source and maintenance scripts were audited under the new policy. Redundant comment prose was
+  removed without changing the agent loop, providers, permissions, ACP, durable sessions, or terminal behavior.
+
+### Fixed
+
+- **Windows release builds no longer emit Bun's internal `directory mismatch` diagnostic.** The obsolete
+  Bun 1.3 JSX tsconfig override was removed now that CI and release artifacts use Bun 1.4.0. The production JSX
+  render, real-PTY input, ACP handshake, and startup/exit probes remain part of every build.
+- The live Windows SRT release test now allows a bounded 45-second cold launch and reports spawn errors
+  separately, avoiding false failures when a healthy sandbox starts just beyond the previous 20-second cap.
+
+### Compatibility
+
+- This release adds one embedded Markdown skill and no runtime dependency, configuration field, session
+  migration, provider wire change, or expanded tool authority. Existing 1.x CLI, SDK, ACP, NekoCut, and Wiii
+  integrations remain compatible.
+
 ## [1.3.0] - 2026-08-28
 
 ### Added

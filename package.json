@@ -1,6 +1,6 @@
 {
   "name": "neko-core",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Mot chu meo trong terminal, chi muon meo meo - va lam viec. Local-first, config-first, offline-capable.",
   "type": "module",
   "license": "AGPL-3.0-only",

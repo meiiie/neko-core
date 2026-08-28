@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-08-28) - v1.3.0
+## Current status (2026-08-28) - v1.4.0
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The 1.0 baseline includes:
@@ -20,10 +20,10 @@ The 1.0 baseline includes:
   coordinate-blind host control;
 - separate Cline Account OAuth and API-key routes, plus config-first B.AI and TokenRouter gateways.
 
-**Branch:** `main`. **Current release: v1.3.0 (2026-08-28).** The 1.0 compatibility contract remains the
-long-term stable baseline; v1.3.0 lets a capable Wiii host describe Neko's persistent work computer so browser,
-terminal, files, and desktop intent can use the semantic Computer port proactively. Ordinary CLI composition,
-exclusive host profiles, and older Wiii clients remain compatible. The complete pre-1.0 history remains in
+**Branch:** `main`. **Current release: v1.4.0 (2026-08-28).** The 1.0 compatibility contract remains the
+long-term stable baseline; v1.4.0 adds the globally bundled `no-comments` hygiene skill and removes an obsolete
+Bun 1.3 build override that produced an internal Bun 1.4.0 Windows diagnostic. Ordinary CLI composition,
+providers, ACP hosts, and durable sessions remain compatible. The complete pre-1.0 history remains in
 [CHANGELOG.md](../../CHANGELOG.md) and
 [WORKLOG.md](WORKLOG.md).
 
