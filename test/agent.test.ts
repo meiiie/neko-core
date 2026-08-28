@@ -111,6 +111,12 @@ test("mutable public facts include administrative status even when 'current' is 
   expect(requiresFreshFactVerification("What does the current law say?")).toBe(true);
   expect(requiresFreshFactVerification("When does the new regulation take effect?")).toBe(true);
   expect(requiresFreshFactVerification("What is the latest TypeScript version?")).toBe(true);
+  expect(requiresFreshFactVerification("Is there a new release of Neko?")).toBe(true);
+  expect(requiresFreshFactVerification("latest release")).toBe(true);
+  expect(requiresFreshFactVerification("release mới")).toBe(true);
+  expect(requiresFreshFactVerification("Phiên bản hiện tại của TypeScript là gì?")).toBe(true);
+  expect(requiresFreshFactVerification("kiểm tra máy tính: status -> observe -> acquire -> release")).toBe(false);
+  expect(requiresFreshFactVerification("Mở trình duyệt rồi status, observe và release")).toBe(false);
   expect(requiresFreshFactVerification("fix the current value in src/config.ts")).toBe(false);
   expect(requiresFreshFactVerification("rename current-price.ts")).toBe(false);
   expect(requiresFreshFactVerification("What version does package.json declare?")).toBe(false);
@@ -1817,6 +1823,58 @@ test("read-only computer observation does not add the state-change completion ro
   });
   expect(await agent.run("what is open?")).toBe("Here is what is on screen.");
   expect(agent.messages.some((m: any) => String(m.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(false);
+});
+
+test("Wiii status and observe verify state while acquire and release preserve that evidence", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "invoke", name: "computer", arguments: { action: "invoke" } }] },
+    { content: null, tool_calls: [{ id: "observe", name: "computer", arguments: { action: "observe", max_nodes: 4 } }] },
+    { content: null, tool_calls: [{ id: "release", name: "computer", arguments: { action: "release" } }] },
+    { content: null, tool_calls: [{ id: "status", name: "computer", arguments: { action: "status" } }] },
+    { content: "Browser opened and ownership was released.", tool_calls: [] },
+  ]);
+  const observationFor = (action: string): string => {
+    if (action === "invoke") return JSON.stringify({ outcome: "completed", verified: true });
+    if (action === "observe") return JSON.stringify({ outcome: "observed", snapshot: { stateVersion: "state-2" } });
+    if (action === "release") return JSON.stringify({ outcome: "released" });
+    return JSON.stringify({ outcome: "ready", seat_state: "available", agent_has_control: false });
+  };
+  const agent = new Agent({
+    // SAFETY: test-built provider fixture; ScriptedProvider implements the Provider surface exercised here.
+    provider: provider as any,
+    // SAFETY: test-built tool fixture; the asserted action strings and observations are fully controlled here.
+    tools: {
+      schemas: () => [],
+      execute: async (_name: string, args: any) => observationFor(String(args.action)),
+    } as any,
+    maxSteps: 7,
+    verifyStateChangesBeforeExit: true,
+  });
+  expect(await agent.run("Open the work browser and release control.")).toBe("Browser opened and ownership was released.");
+  expect(provider.index).toBe(5);
+  expect(agent.messages.some((message: any) => String(message.content).includes("NO VERIFICATION EVIDENCE YET"))).toBe(false);
+  expect(agent.messages.some((message: any) => String(message.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(false);
+});
+
+test("Wiii control-plane-only lifecycle does not manufacture a state-change verification loop", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "status", name: "computer", arguments: { action: "status" } }] },
+    { content: null, tool_calls: [{ id: "observe", name: "computer", arguments: { action: "observe" } }] },
+    { content: null, tool_calls: [{ id: "acquire", name: "computer", arguments: { action: "acquire" } }] },
+    { content: null, tool_calls: [{ id: "release", name: "computer", arguments: { action: "release" } }] },
+    { content: "Computer is ready and control is released.", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    // SAFETY: test-built provider fixture; ScriptedProvider implements the Provider surface exercised here.
+    provider: provider as any,
+    // SAFETY: test-built tool fixture; it returns a fixed productive lifecycle observation.
+    tools: { schemas: () => [], execute: async () => JSON.stringify({ outcome: "ready" }) } as any,
+    maxSteps: 7,
+    verifyStateChangesBeforeExit: true,
+  });
+  expect(await agent.run("status -> observe -> acquire -> release")).toBe("Computer is ready and control is released.");
+  expect(provider.index).toBe(5);
+  expect(agent.messages.some((message: any) => String(message.content).includes("VERIFICATION REQUIRED"))).toBe(false);
 });
 
 test("clearly read-only bash avoids a redundant completion-verification round", async () => {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  parseWiiiWorkstationManifest,
   parseWiiiComputerCapability,
   WIII_COMPUTER_CAPABILITY,
   WIII_COMPUTER_METHODS,
@@ -14,11 +15,12 @@ import {
 import { createNekoAcpAgent } from "../src/adapters/acp.ts";
 import { loadConfig } from "../src/adapters/config.ts";
 import { inheritToolRegistrySettings } from "../src/adapters/tool-registry.ts";
+import { productionTurnContext } from "../src/adapters/turn-context.ts";
 import { Agent } from "../src/core/agent.ts";
 import type { ComputerToolPort, Provider } from "../src/core/ports.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import { setSessionsDir } from "../src/adapters/session.ts";
-import { isText } from "../src/shared/wire.ts";
+import { isText, type JsonObject } from "../src/shared/wire.ts";
 
 const roots: string[] = [];
 
@@ -44,7 +46,31 @@ function advertisedCapability(): acp.ClientCapabilities {
   };
 }
 
-function readyStatus(controlled = false, seatState: "available" | "agent_controlled" | "user_controlled" = controlled ? "agent_controlled" : "available") {
+function workstationManifest(overrides: JsonObject = {}) {
+  return {
+    schemaVersion: "wiii-workstation.manifest.v1",
+    contextVersion: "ctx-1234abcd",
+    label: "May tinh cong viec cua Neko",
+    coworkerName: "Neko",
+    persistence: "durable",
+    operatingSystem: "Linux - Debian 12",
+    interactionMode: "semantic",
+    activeProjectLabel: "Wiii",
+    surfaces: ["computer", "browser", "terminal", "files"],
+    apps: [
+      { appId: "browser", displayName: "Trinh duyet", state: "available", actions: ["invoke"] },
+      { appId: "terminal", displayName: "Terminal", state: "available", actions: ["invoke"] },
+      { appId: "files", displayName: "Tep du an", state: "available", actions: ["invoke"] },
+    ],
+    ...overrides,
+  };
+}
+
+function readyStatus(
+  controlled = false,
+  seatState: "available" | "agent_controlled" | "user_controlled" = controlled ? "agent_controlled" : "available",
+  workstation?: any,
+) {
   return {
     protocolVersion: "wiii-computer.agent.v1",
     available: true,
@@ -59,6 +85,7 @@ function readyStatus(controlled = false, seatState: "available" | "agent_control
       attachUrl: "http://127.0.0.1/?token=must-not-leak",
     },
     agentHasControl: controlled,
+    ...(workstation === undefined ? undefined : { workstation }),
   };
 }
 
@@ -137,6 +164,76 @@ test("Wiii Computer capability negotiation is exact and fail-closed", () => {
   })).toBeNull();
   expect(parseWiiiComputerCapability(advertisedCapability())?.methods)
     .toEqual(new Set(Object.values(WIII_COMPUTER_METHODS)));
+});
+
+test("workstation manifest is bounded, allowlisted, and projected as turn context", async () => {
+  const client = new FakeComputerClient((method) => {
+    if (method === WIII_COMPUTER_METHODS.status) return readyStatus(false, "available", workstationManifest());
+    throw new Error("unexpected method");
+  });
+  const tool = computerTool(client);
+  expect(tool.contextBlock()).toBe("");
+  await tool.prepareTurn();
+  const context = tool.contextBlock();
+  expect(context).toContain("## Your work computer");
+  expect(context).toContain("persistent durable Wiii work computer");
+  expect(context).toContain('"Linux - Debian 12"');
+  expect(context).toContain('"browser": "Trinh duyet"');
+  expect(context).toContain("observe max_nodes=4");
+  expect(context).not.toContain("private-environment-id");
+  expect(context).not.toContain("attachUrl");
+  expect(tool.schema().function.description).toContain("your persistent Wiii work computer");
+});
+
+test("malformed, oversized, and secret-bearing workstation manifests are ignored without breaking old hosts", async () => {
+  expect(parseWiiiWorkstationManifest(workstationManifest())).not.toBeNull();
+  expect(parseWiiiWorkstationManifest(workstationManifest({ surfaces: ["computer", "unknown"] }))).toBeNull();
+  expect(parseWiiiWorkstationManifest(workstationManifest({ label: "x".repeat(9_000) }))).toBeNull();
+  expect(parseWiiiWorkstationManifest(workstationManifest({ activeProjectLabel: "token=must-not-leak" }))).toBeNull();
+  expect(parseWiiiWorkstationManifest({ ...workstationManifest(), environmentId: "private" })).toBeNull();
+
+  let statusIndex = 0;
+  const candidates = [
+    readyStatus(false),
+    readyStatus(false, "available", workstationManifest({ schemaVersion: "future-schema" })),
+    readyStatus(false, "available", workstationManifest({ label: "https://secret.invalid/?token=bad" })),
+  ];
+  const client = new FakeComputerClient((method) => {
+    if (method === WIII_COMPUTER_METHODS.status) return candidates[statusIndex++];
+    throw new Error("unexpected method");
+  });
+  const tool = computerTool(client);
+  for (const _candidate of candidates) {
+    expect(JSON.parse(await tool.call({ action: "status" })).outcome).toBe("ready");
+    expect(tool.contextBlock()).toBe("");
+  }
+});
+
+test("fast workstation observation forwards maxNodes 4 and preserves the four stable refs", async () => {
+  const refs = ["workstation:main", "app:browser", "app:terminal", "app:files"];
+  const client = new FakeComputerClient((method, params) => {
+    if (method === WIII_COMPUTER_METHODS.status) return readyStatus();
+    if (method === WIII_COMPUTER_METHODS.observe) {
+      expect(params).toEqual({ maxNodes: 4 });
+      const snapshot: any = semanticSnapshot();
+      snapshot.nodes = refs.map((ref, index) => ({
+        ref,
+        parentRef: index === 0 ? null : "workstation:main",
+        appId: null,
+        role: index === 0 ? "desktop" : "launcher",
+        name: index === 0 ? "Workstation" : ref.slice(4),
+        description: null,
+        value: null,
+        states: ["enabled"],
+        actions: index === 0 ? ["focus"] : ["invoke"],
+        bounds: null,
+      }));
+      return snapshot;
+    }
+    throw new Error("unexpected method");
+  });
+  const result = JSON.parse(await computerTool(client).call({ action: "observe", max_nodes: 4 }));
+  expect(result.snapshot.nodes.map((node: any) => node.ref)).toEqual(refs);
 });
 
 test("semantic lifecycle hides host secrets and sends stable operation ids", async () => {
@@ -448,6 +545,7 @@ test("ACP Computer capability is connection-scoped and absent means no local fal
       const registry = new ToolRegistry(options.root, options.mode, options.approval);
       if (options.computer === false) registry.disabled.add("computer");
       else if (options.computer) registry.computerPort = options.computer;
+      if (options.computer === false) expect(registry.schemas().some((schema: any) => schema.function.name === "computer")).toBe(false);
       return {
         agent: new Agent({ provider, tools: registry, maxSteps: 1 }),
         registry,
@@ -482,6 +580,122 @@ test("ACP Computer capability is connection-scoped and absent means no local fal
     await capableContext.request(acp.methods.agent.session.close, { sessionId: first.sessionId });
     await capableContext.request(acp.methods.agent.session.close, { sessionId: second.sessionId });
   });
+});
+
+test("plain browser intent receives workstation context and proactively uses the Wiii Computer port", async () => {
+  const root = tempRoot();
+  const home = tempRoot();
+  setSessionsDir(tempRoot());
+  const cfg = loadConfig({ cwd: root, home });
+  let providerStep = 0;
+  let controlled = false;
+  let systemContext = "";
+  let releases = 0;
+  const provider: Provider = {
+    async complete(messages, tools) {
+      if (providerStep === 0) {
+        systemContext = String(messages.find((message: any) => message.role === "system")?.content ?? "");
+        expect(tools?.some((schema: any) => schema.function?.name === "computer")).toBe(true);
+      }
+      const scripted = [
+        { content: null, tool_calls: [{ id: "status", name: "computer", arguments: { action: "status" } }] },
+        { content: null, tool_calls: [{ id: "discover", name: "computer", arguments: { action: "observe", max_nodes: 4 } }] },
+        { content: null, tool_calls: [{ id: "acquire", name: "computer", arguments: { action: "acquire" } }] },
+        { content: null, tool_calls: [{ id: "open", name: "computer", arguments: {
+          action: "invoke", target_ref: "app:browser", expected_role: "launcher", expected_name: "browser",
+        } }] },
+        { content: null, tool_calls: [{ id: "verify", name: "computer", arguments: { action: "observe", max_nodes: 400 } }] },
+        { content: null, tool_calls: [{ id: "release", name: "computer", arguments: { action: "release" } }] },
+        { content: "Trang hien tai da duoc quan sat trong trinh duyet cong viec.", tool_calls: [] },
+      ];
+      return scripted[providerStep++];
+    },
+  };
+  const agentApp = createNekoAcpAgent({
+    config: cfg,
+    buildRuntime: async (runtimeConfig, options) => {
+      const registry = new ToolRegistry(options.root, options.mode, options.approval);
+      if (options.computer === false) registry.disabled.add("computer");
+      else if (options.computer) registry.computerPort = options.computer;
+      return {
+        agent: new Agent({
+          provider,
+          tools: registry,
+          maxSteps: 9,
+          dynamicContext: () => productionTurnContext(registry, {
+            model: runtimeConfig.model,
+            provider: runtimeConfig.provider,
+            home: runtimeConfig.resolvedHome,
+          }),
+          onDelta: options.onDelta,
+          onEvent: options.onEvent,
+          verifyStateChangesBeforeExit: true,
+        }),
+        registry,
+        config: runtimeConfig,
+        close: async () => {},
+      };
+    },
+  });
+  const passthrough = (params: any) => params;
+  const launcherSnapshot = () => ({
+    ...semanticSnapshot("state-launcher", "browser"),
+    nodes: [{
+      ref: "app:browser",
+      parentRef: "workstation:main",
+      appId: null,
+      role: "launcher",
+      name: "browser",
+      description: null,
+      value: null,
+      states: ["enabled"],
+      actions: ["invoke"],
+      bounds: null,
+    }],
+  });
+  const clientApp = acp.client({ name: "wiii-awareness" })
+    .onRequest(acp.methods.client.session.requestPermission, () => ({
+      outcome: { outcome: "selected", optionId: "allow_once" },
+    }))
+    .onRequest(WIII_COMPUTER_METHODS.status, passthrough, () =>
+      readyStatus(controlled, controlled ? "agent_controlled" : "available", workstationManifest()))
+    .onRequest(WIII_COMPUTER_METHODS.observe, passthrough, ({ params }) =>
+      params.maxNodes === 4 ? launcherSnapshot() : semanticSnapshot("state-browser", "Current page"))
+    .onRequest(WIII_COMPUTER_METHODS.acquire, passthrough, () => {
+      controlled = true;
+      return { acquired: true, seatState: "agent_controlled" };
+    })
+    .onRequest(WIII_COMPUTER_METHODS.act, passthrough, ({ params }) => ({
+      outcome: "completed",
+      action: params.action,
+      targetRef: params.targetRef,
+      beforeStateVersion: params.stateVersion,
+      afterStateVersion: "state-browser",
+      verified: true,
+    }))
+    .onRequest(WIII_COMPUTER_METHODS.release, passthrough, () => {
+      controlled = false;
+      releases++;
+      return { released: true };
+    });
+
+  await clientApp.connectWith(agentApp, async (context) => {
+    await context.request(acp.methods.agent.initialize, {
+      protocolVersion: acp.PROTOCOL_VERSION,
+      clientCapabilities: advertisedCapability(),
+    });
+    const session = await context.request(acp.methods.agent.session.new, { cwd: root, mcpServers: [] });
+    const result = await context.request(acp.methods.agent.session.prompt, {
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "Mo trinh duyet cong viec va cho toi biet trang hien tai." }],
+    });
+    expect(result.stopReason).toBe("end_turn");
+    await context.request(acp.methods.agent.session.close, { sessionId: session.sessionId });
+  });
+  expect(systemContext).toContain("## Your work computer");
+  expect(systemContext).toContain("observe max_nodes=4");
+  expect(providerStep).toBe(7);
+  expect(releases).toBe(1);
 });
 
 test("ACP cancel, session close, and disconnect release the Wiii lease", async () => {

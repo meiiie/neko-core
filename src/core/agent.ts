@@ -661,7 +661,10 @@ export class Agent {
       // state: reducing access must never be approval-blocked.
       if (/^mcp__neko_meeting__(?:start|stop|transcribe|delete)$/.test(name)) return true;
       if (name === "computer") {
-        return !new Set(["list", "read", "get", "watch", "wait", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
+        return !new Set([
+          "list", "read", "get", "watch", "wait", "screenshot", "display",
+          "status", "observe", "acquire", "release",
+        ]).has(String(call.arguments?.action ?? "").toLowerCase());
       }
       // MCP browser adapters are outside core's static registry. Their read-only snapshot/content
       // tools deliberately do not match these common state-changing suffixes.
@@ -693,7 +696,8 @@ export class Agent {
       if (name === "bash") return Agent.isClearlyReadOnlyBash(call.arguments);
       if (new Set(["read_file", "search", "glob", "ls", "disk_cleanup_scan", "web_search", "web_fetch", "mcp_load"]).has(name)) return true;
       if (name === "computer") {
-        return new Set(["list", "read", "get", "display", "watch", "wait", "screenshot"]).has(String(call.arguments?.action ?? "").toLowerCase());
+        return new Set(["list", "read", "get", "display", "watch", "wait", "screenshot", "status", "observe"])
+          .has(String(call.arguments?.action ?? "").toLowerCase());
       }
       return this.tools.mcp?.permission?.(name) === "safe";
     }
@@ -712,7 +716,8 @@ export class Agent {
       if ((isText(observation) && Agent.isUnproductiveResult(observation)) || observation == null) return false;
       const name = call.name.toLowerCase();
       if (name === "computer") {
-        return new Set(["list", "read", "get", "watch", "screenshot", "display"]).has(String(call.arguments?.action ?? "").toLowerCase());
+        return new Set(["list", "read", "get", "watch", "screenshot", "display", "status", "observe"])
+          .has(String(call.arguments?.action ?? "").toLowerCase());
       }
       if (EDIT_TOOLS.has(name) || Agent.isStateChangingCall(call)) return name === "bash";
       return !new Set(["todo_write", "skill", "memory", "workflow", "playbook"]).has(name);

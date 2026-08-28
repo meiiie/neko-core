@@ -6,6 +6,40 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-28
+
+### Added
+
+- **Wiii Workstation Awareness v1 makes the optional ACP Computer a first-class work environment.** Before
+  each ACP model turn, Neko reads Wiii's bounded `wiii-workstation.manifest.v1` projection and injects the
+  validated OS, active Project, surfaces, and app catalog into dynamic context. A browser/app/desktop task can
+  therefore select Computer without the user naming a tool or protocol.
+- **Fast semantic app discovery uses Wiii's four stable launcher refs.** The Computer schema now directs the
+  model to observe with `maxNodes: 4` for `workstation:main`, `app:browser`, `app:terminal`, and `app:files`,
+  then use a larger observation only for dynamic controls.
+
+### Fixed
+
+- **Computer ownership cleanup no longer erases valid app-state evidence.** `status` and `observe` count as
+  read-only verification; `acquire` and `release` are control-plane lifecycle; only `focus`, `invoke`, and
+  `set_text` count as semantic state changes. The previous status/observe/acquire/release completion loop is
+  covered by a regression test.
+- **Computer lifecycle words no longer look like a software-release question.** Bare `status`, `observe`, or
+  `release` in a machine-control prompt does not trigger public web verification. Explicit requests such as
+  `latest release`, `new release`, and `current version` still do.
+
+### Security
+
+- Workstation manifests are schema-, enum-, count-, string-, and total-size-bounded. Unknown secret/native
+  fields, credentials, URLs, host paths, executables, and Docker/container details are rejected before the
+  projection reaches model context. Older Wiii hosts without a manifest continue without workstation context.
+
+### Compatibility
+
+- This is an additive optional ACP extension. Ordinary `neko`, `neko --yolo`, plan mode, NekoCut host profiles,
+  existing Wiii Computer clients, configuration, and durable sessions require no migration. Neko Core still
+  does not provision Docker, WSL, VMs, displays, browser profiles, or projects, and adds no runtime dependency.
+
 ## [1.2.2] - 2026-08-28
 
 ### Changed

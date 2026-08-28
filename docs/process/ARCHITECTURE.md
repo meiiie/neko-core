@@ -48,6 +48,11 @@ or a UI framework (Ink/React). Adapters import `core/` (ports) + `shared/`, neve
 - `McpTools` — external tool source (`toolSchemas`/`has`/`call`); `adapters/mcp.ts` `McpHub`
   satisfies it. The `ToolRegistry` holds one optionally.
 
+`ComputerToolPort` is the optional host-owned semantic computer port. Its
+`prepareTurn`/`contextBlock` hooks expose only a bounded model-safe workstation projection;
+`schema`/`permission`/`call`/`release` keep execution and lease cleanup behind the same
+ToolRegistry authority.
+
 Also: `ToolRegistry` (`core/tool-runtime.ts`) — the agent calls `schemas()`/`execute()`, never
 knowing what a tool does; `ApprovalGate` (`core/tool-runtime.ts`) — the gated-tool consent
 callback the UI supplies.
@@ -483,6 +488,13 @@ native identifiers, credentials, and the display lease. The adapter owns only th
 status/observe/acquire/act/release protocol, stable operation IDs, semantic preconditions, transcript redaction,
 and best-effort lifecycle cleanup. A child agent shares the same session port object, so it cannot mint a second
 owner or widen authority.
+
+Wiii status may also carry `wiii-workstation.manifest.v1`. `acp-computer.ts` bounds and allowlists that projection,
+then `ComputerToolPort.prepareTurn` refreshes it before a model turn and `contextBlock` feeds it through the
+ordinary dynamic-context seam. Core never learns Docker/container/provider internals or native identifiers.
+Invalid or absent projections inject nothing, while capability absence still removes the tool and forbids local
+fallback. The projection advertises the four stable launcher refs and fast four-node observation; it grants no
+new action, lease, permission mode, or child authority.
 
 The ACP client's permission response is only an implementation of core's `ApprovalGate`. Core still
 decides whether a call is allowed, denied, or eligible to prompt. In particular, `plan` is a hard deny;

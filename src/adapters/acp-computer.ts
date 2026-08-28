@@ -20,6 +20,10 @@ export const WIII_COMPUTER_METHODS = {
 type WiiiComputerMethod = typeof WIII_COMPUTER_METHODS[keyof typeof WIII_COMPUTER_METHODS];
 type SemanticAction = "focus" | "invoke" | "set_text";
 type SeatState = "available" | "agent_controlled" | "user_controlled";
+type WorkstationSurface = "computer" | "browser" | "terminal" | "files";
+type WorkstationAppId = "browser" | "terminal" | "files";
+type WorkstationAppState = "available" | "running" | "unavailable";
+type WorkstationAppAction = "invoke" | "focus";
 
 const REQUIRED_METHODS = Object.freeze(Object.values(WIII_COMPUTER_METHODS));
 const SAFE_ACTIONS = new Set(["status", "observe", "release"]);
@@ -27,10 +31,32 @@ const SEMANTIC_ACTIONS = new Set<SemanticAction>(["focus", "invoke", "set_text"]
 const HUMAN_CHECK = /\b(?:captcha|hcaptcha|recaptcha|turnstile|human verification|verify (?:you are|that you are) human|not a robot)\b/i;
 const PROTECTED_TARGET = /\b(?:password|passcode|one[- ]time|otp|verification code|secret|credential|api key|access token|refresh token|cookie)\b/i;
 const DISPLAY_SECRET = /(?:\b(?:token|key|secret|password|cookie|code)=|\bbearer\s+[a-z0-9._~-]+|\beyJ[a-z0-9_-]{20,}\.)/i;
+const WORKSTATION_SCHEMA = "wiii-workstation.manifest.v1";
+const WORKSTATION_MAX_CHARS = 8_192;
+const FORBIDDEN_MANIFEST_KEY = /^(?:environmentId|leaseId|attachUrl|displayUrl|vncUrl|executable|command|hostPath|cookie|password|otp|apiKey|token|provider|container|docker)$/i;
+const FORBIDDEN_MANIFEST_TEXT = /(?:\b(?:bearer|cookie|password|passcode|otp|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|docker|container|lease[ _-]?id)\b|(?:https?|wss?|vnc):\/\/|(?:^|\s)(?:[a-z]:\\|\\\\|\/(?:home|users|mnt|var|tmp|etc)\/)|\b(?:sk-[a-z0-9_-]{12,}|ghp_[a-z0-9]{12,}|xox[baprs]-[a-z0-9-]{12,}|akia[a-z0-9]{12,})\b|\.(?:exe|cmd|bat|ps1|sh)\b)/i;
 
 export interface WiiiComputerCapability {
   semanticProtocol: typeof WIII_COMPUTER_PROTOCOL;
   methods: ReadonlySet<WiiiComputerMethod>;
+}
+
+export interface WiiiWorkstationManifest {
+  schemaVersion: typeof WORKSTATION_SCHEMA;
+  contextVersion: string;
+  label: string;
+  coworkerName: string;
+  persistence: "durable" | "ephemeral";
+  operatingSystem: string;
+  interactionMode: "semantic";
+  activeProjectLabel: string;
+  surfaces: WorkstationSurface[];
+  apps: Array<{
+    appId: WorkstationAppId;
+    displayName: string;
+    state: WorkstationAppState;
+    actions: WorkstationAppAction[];
+  }>;
 }
 
 interface ComputerClient {
@@ -47,6 +73,7 @@ interface SafeStatus {
   state: "preparing" | "ready" | "suspended" | "error" | "unknown_outcome" | null;
   seatState: SeatState | null;
   agentHasControl: boolean;
+  workstation: WiiiWorkstationManifest | null;
 }
 
 interface SafeNode {
@@ -91,6 +118,88 @@ function safeDisplayText(value: any, max: number): string {
 function boundedOpaque(value: any, max: number): string | null {
   const text = boundedText(value, max);
   return text && !DISPLAY_SECRET.test(text) ? text : null;
+}
+
+function manifestText(value: any, max: number): string | null {
+  const text = boundedText(value, max)?.trim() ?? "";
+  if (!text || /[\r\n\t]/.test(text) || DISPLAY_SECRET.test(text) || FORBIDDEN_MANIFEST_TEXT.test(text)) return null;
+  return text;
+}
+
+function manifestContainsForbiddenData(value: JsonValue): boolean {
+  if (isText(value)) return DISPLAY_SECRET.test(value) || FORBIDDEN_MANIFEST_TEXT.test(value);
+  if (isJsonArray(value)) return value.some(manifestContainsForbiddenData);
+  if (!isJsonObject(value)) return false;
+  return Object.entries(value).some(([key, child]) =>
+    FORBIDDEN_MANIFEST_KEY.test(key) || manifestContainsForbiddenData(child));
+}
+
+function isWorkstationSurface(value: any): value is WorkstationSurface {
+  return value === "computer" || value === "browser" || value === "terminal" || value === "files";
+}
+
+function isWorkstationAppId(value: any): value is WorkstationAppId {
+  return value === "browser" || value === "terminal" || value === "files";
+}
+
+function isWorkstationAppState(value: any): value is WorkstationAppState {
+  return value === "available" || value === "running" || value === "unavailable";
+}
+
+function isWorkstationAppAction(value: any): value is WorkstationAppAction {
+  return value === "invoke" || value === "focus";
+}
+
+/** Parse only the bounded model-visible projection. Malformed, oversized, or secret-bearing
+ * manifests grant no context but never invalidate the older Computer status contract. */
+export function parseWiiiWorkstationManifest(value: JsonValue | undefined): WiiiWorkstationManifest | null {
+  if (!isJsonObject(value)) return null;
+  let encoded = "";
+  try { encoded = JSON.stringify(value); } catch { return null; }
+  if (encoded.length > WORKSTATION_MAX_CHARS || manifestContainsForbiddenData(value)) return null;
+
+  const contextVersion = manifestText(value.contextVersion, 100);
+  const label = manifestText(value.label, 160);
+  const coworkerName = manifestText(value.coworkerName, 80);
+  const operatingSystem = manifestText(value.operatingSystem, 160);
+  const activeProjectLabel = manifestText(value.activeProjectLabel, 240);
+  if (value.schemaVersion !== WORKSTATION_SCHEMA || !contextVersion || !/^ctx-[a-z0-9._:-]{1,96}$/i.test(contextVersion)
+    || !label || !coworkerName || !operatingSystem || !activeProjectLabel
+    || (value.persistence !== "durable" && value.persistence !== "ephemeral")
+    || value.interactionMode !== "semantic" || !isJsonArray(value.surfaces) || !isJsonArray(value.apps)
+    || value.surfaces.length < 1 || value.surfaces.length > 4 || value.apps.length > 3) {
+    return null;
+  }
+
+  const surfaces = value.surfaces.filter(isWorkstationSurface);
+  if (surfaces.length !== value.surfaces.length || new Set(surfaces).size !== surfaces.length) return null;
+
+  const apps: WiiiWorkstationManifest["apps"] = [];
+  for (const raw of value.apps) {
+    if (!isJsonObject(raw) || !isWorkstationAppId(raw.appId)
+      || !isWorkstationAppState(raw.state)
+      || !isJsonArray(raw.actions) || raw.actions.length > 2) return null;
+    const appId = raw.appId;
+    const displayName = manifestText(raw.displayName, 120);
+    const actions = raw.actions.filter(isWorkstationAppAction);
+    if (!displayName || actions.length !== raw.actions.length || new Set(actions).size !== actions.length
+      || !surfaces.includes(appId)) return null;
+    apps.push({ appId, displayName, state: raw.state, actions });
+  }
+  if (new Set(apps.map((app) => app.appId)).size !== apps.length) return null;
+
+  return {
+    schemaVersion: WORKSTATION_SCHEMA,
+    contextVersion,
+    label,
+    coworkerName,
+    persistence: value.persistence,
+    operatingSystem,
+    interactionMode: "semantic",
+    activeProjectLabel,
+    surfaces,
+    apps,
+  };
 }
 
 function numberInRange(value: any, min: number, max: number): number | null {
@@ -169,6 +278,7 @@ function parseStatus(value: JsonValue): SafeStatus {
     state: safeState,
     seatState: safeSeat,
     agentHasControl: outer.agentHasControl,
+    workstation: outer.available ? parseWiiiWorkstationManifest(outer.workstation) : null,
   };
 }
 
@@ -252,6 +362,7 @@ export class WiiiComputerTool implements ComputerToolPort {
   private releaseOperationId = "";
   private pendingAcquireOperationId = "";
   private unknownAct: { fingerprint: string; operationId: string } | null = null;
+  private workstation: WiiiWorkstationManifest | null = null;
   private closed = false;
 
   constructor(
@@ -269,7 +380,7 @@ export class WiiiComputerTool implements ComputerToolPort {
       type: "function",
       function: {
         name: "computer",
-        description: "Use the Wiii-owned semantic Computer. Follow status -> observe -> acquire -> focus/invoke/set_text -> release. Act only on a ref from the latest observation with the exact role and name. Never guess coordinates, handle CAPTCHA, or enter secrets; stop for human takeover.",
+        description: "Use your persistent Wiii work computer when a task needs its browser, terminal, files, or desktop. Follow status -> observe -> acquire -> focus/invoke/set_text -> observe -> release. Use observe max_nodes=4 to discover workstation:main and the app:browser/app:terminal/app:files launchers, then a larger observation for dynamic controls. Act only on the latest exact ref, role, and name. Never guess coordinates, handle CAPTCHA, or enter secrets; stop for human takeover.",
         parameters: {
           type: "object",
           properties: {
@@ -277,7 +388,7 @@ export class WiiiComputerTool implements ComputerToolPort {
               type: "string",
               enum: ["status", "observe", "acquire", "focus", "invoke", "set_text", "release"],
             },
-            max_nodes: { type: "integer", minimum: 1, maximum: 400, description: "Observation cap (default 400)." },
+            max_nodes: { type: "integer", minimum: 1, maximum: 400, description: "Observation cap. Use 4 for fast app discovery; use a larger budget for dynamic controls (default 400)." },
             target_ref: { type: "string", description: "Exact semantic ref from the latest observe result." },
             expected_role: { type: "string", description: "Exact role from that same observed node." },
             expected_name: { type: "string", description: "Exact name from that same observed node." },
@@ -287,6 +398,35 @@ export class WiiiComputerTool implements ComputerToolPort {
         },
       },
     };
+  }
+
+  /** Refresh context without acquiring the seat or writing a hidden tool result to the transcript. */
+  async prepareTurn(signal?: AbortSignal): Promise<void> {
+    if (this.closed) return;
+    try { await this.readStatus(signal); }
+    catch { this.workstation = null; }
+  }
+
+  contextBlock(): string {
+    const workstation = this.workstation;
+    if (!workstation) return "";
+    const apps = workstation.apps.length
+      ? workstation.apps.map((app) =>
+        `- ${JSON.stringify(app.appId)}: ${JSON.stringify(app.displayName)}; state=${app.state}; actions=${app.actions.join(", ") || "none"}`).join("\n")
+      : "- none";
+    return `## Your work computer
+
+- This is ${JSON.stringify(workstation.label)}, your persistent ${workstation.persistence} Wiii work computer. It is not a disposable tool or throwaway sandbox.
+- Coworker: ${JSON.stringify(workstation.coworkerName)}
+- Operating system: ${JSON.stringify(workstation.operatingSystem)}
+- Active project: ${JSON.stringify(workstation.activeProjectLabel)}
+- Available surfaces: ${workstation.surfaces.map((surface) => JSON.stringify(surface)).join(", ")}
+- Apps:\n${apps}
+- App state, browser profiles, and sign-ins may persist across turns.
+- Proactively use Computer when the task needs an available browser, app, or desktop; do not wait for the user to name the tool.
+- Do not infer an app or capability absent from this manifest.
+- For Browser, Terminal, or Files, start with status then observe max_nodes=4 and select the exact stable ref, role, and name. Never guess coordinates. Re-observe with a larger budget before acting on dynamic controls.
+- Hand passwords, OTPs, CAPTCHA, and human verification to the user. Consequential actions still follow the current permission and policy mode.`;
   }
 
   permission(args: any): "safe" | "gated" {
@@ -331,6 +471,7 @@ export class WiiiComputerTool implements ComputerToolPort {
 
   private async readStatus(signal?: AbortSignal): Promise<SafeStatus> {
     const current = parseStatus(await this.request(WIII_COMPUTER_METHODS.status, {}, signal));
+    this.workstation = current.workstation;
     if (current.agentHasControl) {
       this.leaseHeld = true;
       this.releasePending = true;

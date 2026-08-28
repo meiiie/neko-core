@@ -30,6 +30,7 @@ function hasAvailableExternalTool(registry: ToolRegistry): boolean {
 export function productionTurnContext(registry: ToolRegistry, options: ProductionTurnContextOptions): string {
   const blocks = [
     dynamicToolRuntimeBlock(registry),
+    registry.isToolAvailable("computer") ? registry.computerPort?.contextBlock?.() ?? "" : "",
     environmentBlock({ model: options.model, provider: options.provider }, registry.root),
     projectContextBlock(registry.root, options.home),
     coreMemoryBlock(options.home),

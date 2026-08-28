@@ -971,6 +971,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           reason: plan.reason,
         });
         applySkillPolicyForTurn(runtime.registry, input.text, runtime.registry.root, runtime.config.resolvedHome);
+        await session.computer?.prepareTurn(pending.signal);
         runtime.agent.setTurnSystemContext(matchedTurnContext(
           input.text,
           runtime.registry,

@@ -76,7 +76,8 @@ export const DEFAULT_SYSTEM_PROMPT =
   "Be concise — no filler, no 'I will now...' preamble or 'let me know if...' postamble, and no AI-slop tics (reflexive 'not X but Y' contrasts, throat-clearing openers, faux-insight, importance-puffery, weasel citations like 'studies show', hollow stat-dropping); write plain, active, specific sentences and sound like a focused senior engineer pair-programming, not a script. When done: a short summary, then stop.";
 
 const FACT_QUERY_CUE = /(?:\?|\b(?:who|what|where|which|when|how|is|are|belongs?|part of|verify|check)\b|\b(?:ai|gì|nào|đâu|bao nhiêu|là|thuộc|kiểm tra|xác minh)\b)/iu;
-const VOLATILE_FACT_DOMAIN = /(?:\b(?:administrative|jurisdiction|province|district|county|municipality|commune|ward|special zone|law|regulation|statute|ruling|president|prime minister|minister|governor|mayor|ceo|price|schedule|weather|score|election|release|version|model availability)\b|đơn vị hành chính|địa giới|tỉnh|thành phố|huyện|quận|xã|phường|đặc khu|huyện đảo|sáp nhập|luật|nghị quyết|nghị định|thông tư|quy định|chủ tịch|thủ tướng|bộ trưởng|giá|lịch|thời tiết|tỉ số|bầu cử|phiên bản|model mới)/iu;
+const VOLATILE_FACT_DOMAIN = /(?:\b(?:administrative|jurisdiction|province|district|county|municipality|commune|ward|special zone|law|regulation|statute|ruling|president|prime minister|minister|governor|mayor|ceo|price|schedule|weather|score|election|model availability)\b|đơn vị hành chính|địa giới|tỉnh|thành phố|huyện|quận|xã|phường|đặc khu|huyện đảo|sáp nhập|luật|nghị quyết|nghị định|thông tư|quy định|chủ tịch|thủ tướng|bộ trưởng|giá|lịch|thời tiết|tỉ số|bầu cử|model mới)/iu;
+const SOFTWARE_RELEASE_QUERY = /(?:\b(?:latest|current|new|newest|recent|stable)\s+(?:(?:software|package|app|model|typescript|neko)\s+)?(?:release|version)\b|\b(?:release|version)\s+(?:available|current|latest|new|newest|now)\b|bản phát hành mới nhất|bản phát hành mới|phiên bản hiện tại|phiên bản mới nhất|phiên bản mới|release mới)/iu;
 const LOCAL_ARTIFACT_CUE = /(?:package\.json|(?:^|[\s`'"])(?:\.{0,2}[\\/]|[a-z]:[\\/]|src[\\/]|test[\\/])|\b(?:this|the|local|project|repo(?:sitory)?|workspace)\s+(?:file|code|config|version|model)\b)/iu;
 
 /** A conservative host-side backstop for mutable public facts. It encodes no factual snapshot; it
@@ -84,8 +85,10 @@ const LOCAL_ARTIFACT_CUE = /(?:package\.json|(?:^|[\s`'"])(?:\.{0,2}[\\/]|[a-z]:
  * qualify without a volatile public-fact domain. */
 export function requiresFreshFactVerification(text: string): boolean {
   const raw = String(text ?? "").trim();
-  if (!raw || !FACT_QUERY_CUE.test(raw)) return false;
+  if (!raw) return false;
   if (LOCAL_ARTIFACT_CUE.test(raw)) return false;
+  if (SOFTWARE_RELEASE_QUERY.test(raw)) return true;
+  if (!FACT_QUERY_CUE.test(raw)) return false;
   if (isVietnamSovereigntyTopic(raw)) return true;
   return VOLATILE_FACT_DOMAIN.test(raw);
 }

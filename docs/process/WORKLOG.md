@@ -3,6 +3,39 @@
 Running journal of what was done and the decisions behind it. Newest entry first.
 Rules that govern this work live in `RULES.md`.
 
+## 2026-08-28 - Wiii Workstation Awareness v1 (v1.3.0)
+
+The v1.2 Computer port already enforced the difficult authority boundary: exact ACP capability negotiation,
+semantic refs instead of coordinates, state-version preconditions, stable operation IDs, one stale re-observe,
+human/CAPTCHA stop conditions, and lease cleanup. What it lacked was a bounded description of the persistent
+machine before the first model decision. Neko therefore treated Computer like an optional low-level tool and
+could wait for the user to name it explicitly.
+
+The ACP adapter now performs one read-only status preflight before each model turn. It accepts only Wiii's
+`wiii-workstation.manifest.v1` projection, validates its full encoded size and every schema/enum/string/count,
+and rejects secret-bearing/native/provider details. The validated projection enters the existing volatile
+dynamic-context seam through two small `ComputerToolPort` hooks; it does not create a new store, transcript
+type, authority, or provisioning abstraction. Missing/old/malformed manifests simply produce no workstation
+context while the v1 Computer tool remains compatible.
+
+The model-facing contract now describes Computer as Neko's Wiii work computer and names the fast launcher
+workflow: `status`, `observe maxNodes: 4`, exact stable launcher ref/role/name, acquire, invoke, a larger
+post-action observe, then release. Core completion classification was corrected at the same seam: status and
+observe are evidence, acquire/release are lifecycle, and only focus/invoke/set_text change app state. Public
+fact routing now requires an explicit software-release phrase instead of matching the bare word `release` in
+a Computer protocol trace.
+
+Regression coverage includes capability absence, valid/old/malformed/oversized/secret-bearing manifests, the
+four stable refs under the four-node budget, stale/CAPTCHA/authority cleanup, verification-loop prevention, and
+an ACP end-to-end prompt that says only “open the work browser” yet receives workstation context and executes
+the semantic Computer workflow. Wiii retains Docker/VM/container/project/display lifecycle; Neko Core gained no
+daemon, SDK, provider-specific owner, or runtime dependency.
+
+Release evidence: TypeScript and lint passed; the complete suite reached 1,521 passes, 12 intentional skips,
+8,548 assertions, and zero failures across 142 files. Doctor/policy preserved their expected local auto-mode and
+untrusted-checkout warnings. The Bun 1.4.0 compiled artifact passed UI, real-PTY input, ACP, startup/exit, and three
+ConPTY ghost-plus-typing probes; Gitleaks scanned the release tree with no finding.
+
 ## 2026-08-28 - Discoverable, fail-closed provider switching (v1.2.2)
 
 A clean-room review of Codex Router confirmed that Neko already owned the important product primitive: a live

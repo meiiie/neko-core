@@ -112,16 +112,31 @@ exposes no `computer` tool in ACP and never falls back to Neko's local Windows U
 Launch-authorized host profiles remain exclusive and ignore this optional extension.
 
 When negotiated, the model sees one coordinate-free semantic tool and must follow
-`status -> observe -> acquire -> focus/invoke/set_text -> release`. Neko uses only a ref from the latest
+`status -> observe -> acquire -> focus/invoke/set_text -> observe -> release`. Neko uses only a ref from the latest
 snapshot plus its exact state version, role, and name. A stale or mismatched target causes one fresh observation
 and no blind action retry. Mutating requests carry a stable, Neko-owned operation ID; an unknown result can be
 retried with that same ID only after a fresh observation shows the same logical preconditions.
 
+Status may include a `wiii-workstation.manifest.v1` projection with a bounded label, context version,
+persistence mode, OS, active Project label, surfaces, and allowlisted Browser/Terminal/Files apps. Before each
+model turn, Neko performs a read-only status preflight and injects `## Your work computer` only when that
+manifest validates. The projection tells Neko this is its normal persistent Wiii work environment and permits
+proactive Computer use for browser/app/desktop intent. Missing, malformed, oversized, or secret-bearing
+manifests are ignored without invalidating the older status contract.
+
+The workstation projection never accepts native environment/lease IDs, attach/display/VNC URLs, host paths,
+commands/executables, Docker/container/provider details, or credentials. For launcher discovery, the model uses
+`observe { maxNodes: 4 }`, which Wiii reserves for `workstation:main`, `app:browser`, `app:terminal`, and
+`app:files`. Dynamic controls require a later larger observation; every action still uses the latest exact
+state version/ref/role/name.
+
 Wiii remains the sole owner of provisioning, project grants, native environment IDs, display URLs/tokens,
 credentials, and native lease IDs. Neko allowlists the model-visible status/snapshot/result fields, omits element
 values, refuses protected inputs, stops for CAPTCHA or human takeover, and best-effort releases control after each
-turn and on cancel/close/disconnect. `status`, `observe`, and `release` are read/cleanup operations; acquire and
-state-changing actions retain Neko's host-computer consent boundary. Provider-native children inside the same
+turn and on cancel/close/disconnect. `status` and `observe` are read-only verification evidence;
+`acquire`/`release` are control-plane lifecycle and do not invalidate a fresh app-state observation; only
+`focus`, `invoke`, and `set_text` change semantic app state. Acquire and state-changing actions retain Neko's
+host-computer consent boundary. Provider-native children inside the same
 AgentSession share that one bounded port and never create another native owner.
 
 ACP clients that advertise Terminal Auth support can also launch Neko's corresponding method. It runs

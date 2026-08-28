@@ -133,6 +133,11 @@ export interface ComputerToolPort {
   schema(): any;
   permission(args: any): "safe" | "gated";
   call(args: any, signal?: AbortSignal): Promise<string | any[]>;
+  /** Refresh host-owned, model-safe context before a turn. This is capability discovery only;
+   * it must not acquire control or expose native host identifiers. */
+  prepareTurn?(signal?: AbortSignal): void | Promise<void>;
+  /** Bounded dynamic-context projection for the current host computer, if one was validated. */
+  contextBlock?(): string;
   /** Release turn-scoped control without destroying the reusable host connection. */
   release?(): void | Promise<void>;
   close?(): void | Promise<void>;
