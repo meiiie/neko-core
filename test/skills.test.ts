@@ -120,6 +120,17 @@ test("skills context distinguishes Neko skills from provider-located skills", ()
   expect(context).toContain("not callable through this tool");
 });
 
+test("the bundled no-comments skill is globally discoverable and preserves proof comments", () => {
+  const skill = loadSkill("no-comments");
+  expect(skill?.source).toBe("builtin");
+  expect(skill?.description).toContain("workaround alibis");
+  expect(skill?.body).toContain("Security, permission, credential, crash-recovery, idempotency, or trust-boundary invariants");
+  expect(skill?.body).toContain("safety-comment requirement");
+  expect(skill?.body).toContain("https://github.com/cursor/plugins/tree/main/pstack");
+  expect(matchesSkill("no-comments", "Ra soat va don comments trong src/core")).toBe(true);
+  expect(matchesSkill("no-comments", "Explain src/core/agent.ts")).toBe(false);
+});
+
 test("an exact single-file microtask skips generic process skills through Agent and ToolRegistry", async () => {
   const root = mkdtempSync(join(tmpdir(), "nk-skill-turn-"));
   const home = mkdtempSync(join(tmpdir(), "nk-skill-home-"));

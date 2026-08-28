@@ -186,8 +186,7 @@ function estimateContentTokens(content: any): number {
   return tokens;
 }
 
-// Rough multimodal token estimate over the conversation, used for the pre-request overflow guard and
-// for UI only until the provider reports actual usage. It intentionally distinguishes text from images.
+/** Multimodal estimate used until authoritative provider usage arrives. */
 export function estimateTokens(messages: any[]): number {
   let tokens = 0;
   for (const m of messages) {
@@ -207,7 +206,6 @@ export function estimateRequestTokens(messages: any[], schemas: any[] = []): num
   return estimateTokens(messages) + (schemas.length ? estimateTextTokens(schemas) : 0);
 }
 
-// onEvent(kind, data): tool lifecycle + final/max_steps + throttled crash-journal checkpoint events.
 export type EventHook = (kind: string, data: any) => void;
 
 export interface AgentOptions {

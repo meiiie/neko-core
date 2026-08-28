@@ -173,7 +173,6 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
         </Box>
       );
     case "tool_result": {
-      // Read-type tools collapse to a 1-line summary; full output is under Ctrl+O.
       if (line.summary) {
         const more = line.text.split("\n").length > 1;
         return <Text dimColor>{`  └ ${line.summary}${more ? " (ctrl+o to expand)" : ""}`}</Text>;

@@ -516,8 +516,6 @@ export class OpenAICompatProvider implements Provider {
     if (this.cfg.maxTokens > 0) payload[this.cfg.completionTokensField] = this.cfg.maxTokens; // 0 -> omit (model's full budget)
     if (stream) payload.stream_options = { include_usage: true };
     if (tools && tools.length) payload.tools = tools;
-    // Proactively map a configured effort down to the endpoint's declared ceiling (e.g. 'max' -> 'high'
-    // for an endpoint that caps at high), so the intent is honored without a wasted 400 round-trip.
     const requestedEffort = requestEffort(this.cfg.effort, opts?.reasoningEffort);
     const effort = clampEffort(requestedEffort, this.effortOverride.get(this.cfg.model) ?? this.cfg.effortCeiling);
     if (effort && !this.effortUnsupported.has(this.cfg.model)) {

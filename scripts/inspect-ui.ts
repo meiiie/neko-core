@@ -136,7 +136,6 @@ const streamMs = performance.now() - t0;
 dump("AFTER COMMIT", vt);
 console.log(`\nstream wall time: ${streamMs.toFixed(0)}ms for ${MD.length} chars, ${out.bytes} total bytes written`);
 
-// --- drag-select the "Nga - Ukraine" line and copy it (mouse: press left, drag, release) ---
 {
   const ls = vt.lines();
   const row = ls.findIndex((l) => l.includes("Nga - Ukraine"));
@@ -171,7 +170,6 @@ dump("AFTER End (back to tail)", vt);
 app.unmount();
 await tick(50);
 
-// Todo lifecycle: capture the live plan, a constrained-terminal reflow, an update, then the idle state.
 const todoProvider = new TodoFlow();
 const { vt: todoVt, out: todoOut, stdin: todoIn, app: todoApp } = mountFlow(todoProvider, "inspect-todos", 96, 28, true);
 await tick(300);

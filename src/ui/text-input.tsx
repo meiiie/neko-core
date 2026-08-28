@@ -92,14 +92,9 @@ export function wrapInput(cps: string[], cur: number, width: number): WrapResult
       line.push({ ch: cp, index: idx, w: 0 });
       continue;
     }
-      // Soft-wrap when the next cell would exceed the line width. But if the line is EMPTY and the
-      // cell is wider than the whole width (e.g. a 2-cell CJK char on a 1-col box), don't flush —
-      // that would emit a spurious empty line. Let the wide char occupy the (too-narrow) line.
+      // Never emit an empty row when one wide cell exceeds the entire width.
       if (lineCols > 0 && lineCols + w > cols) {
-        // WORD wrap (image #79): break at the line's last space so words stay whole - "đã đấ|m"
-        // read broken mid-word while Claude Code carries the word down. The partial word after the
-        // space moves to the new line (and the caret moves with it when it rides a carried cell).
-        // A single word wider than the whole box still hard-breaks; an overflowing space flushes.
+        // Prefer the last space; a word wider than the viewport still hard-wraps.
         let br = -1;
         if (cp !== " ") for (let k = line.length - 1; k >= 0; k--) if (line[k].ch === " ") { br = k; break; }
         if (br >= 0) {
@@ -254,24 +249,16 @@ export function TextInput(props: {
     const { value, onChange, onSubmit, placeholder, mask, width = 9999, pastedContents, nextPasteId, onCommitPastes, onPasteImage, caretGlyph = "thin-block" } = props;
   const ref = useRef(value);
   const cur = useRef([...value].length);
-  // External change (history nav, clear): adopt it and put the cursor at the end.
   if (value !== ref.current) {
     ref.current = value;
     cur.current = [...value].length;
   }
     const [, setTick] = useState(0);
     const rerender = () => setTick((t) => t + 1);
-    // Paste-collapse state is OWNED by ChatApp (pastedContents + nextPasteId are props) so submit
-    // AND the external editor (Ctrl+G) can expand placeholders. This layer only INSERTS them.
+    // ChatApp owns collapsed paste contents; this component inserts only their placeholders.
     const gcPastes = (text: string) => gcPastesImpl(text, pastedContents);
 
-  // Caret: the REAL terminal hardware cursor (a thin bar between cells, like Claude Code's "khả|o") -
-  // no glyph is drawn in the text at all. TextInput marks the caret position with a zero-width SENTINEL
-  // (CARET_SENTINEL); the FrameDiffer finds it, strips it, and positions the terminal cursor there
-  // (DECSCUSR bar + show). This is the only way to sit BETWEEN two cells with zero width - any drawn
-  // glyph occupies a full cell and reads as a gap ("chà▏o"). The terminal blinks the cursor natively,
-  // so there is no glyph-toggle (which used to add/remove a visible space on each blink).
-  // Insert text at the caret (shared by typing, newline keys, and Alt+V).
+  // A zero-width sentinel positions the native terminal caret without occupying a text cell.
   const insertAtCaret = (text: string) => {
     const chars = [...ref.current];
     const ins = [...text];

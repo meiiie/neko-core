@@ -42,7 +42,7 @@ const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
 const SCOPE = [
   "src", "test", "skills", "docs", "bin", "scripts", "assets", ".github",
   "package.json", "bun.lock", "CHANGELOG.md", "README.md", "CLAUDE.md",
-  "tsconfig.json", "tsconfig.build.json", "bunfig.toml", "install.ps1", "install.sh",
+  "tsconfig.json", "bunfig.toml", "install.ps1", "install.sh",
 ];
 const gitDirty = () => sh("git", ["status", "--porcelain", "--", ...SCOPE]).out.trim().length > 0;
 function ensureBranch() {

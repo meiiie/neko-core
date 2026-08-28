@@ -74,10 +74,7 @@ function sentinelCol(row: string): number {
   return idx < 0 ? 0 : colAt(row, idx); // the cursor sits just before the char that follows the sentinel
 }
 
-// Diagnostic tap (NEKO_TRACE_FRAMES=<file>): NDJSON of every differ decision - what the model believed
-// and what rows were emitted. This is `doctor keys` for the RENDER side: model-vs-screen divergence
-// bugs (ghost rows) are invisible in unit sims and only reproducible under a real ConPTY; the tap turns
-// a field screenshot into a byte-level timeline. Zero cost when the env is unset.
+// Optional NDJSON trace for diagnosing model-to-screen divergence under a real PTY.
 const TRACE = process.env.NEKO_TRACE_FRAMES;
 function trace(ev: any): void {
   if (!TRACE) return;
@@ -98,12 +95,7 @@ export function parseInkPayload(p: string): { eraseCount: number; frame: string 
   const eraseCount = m[1] ? (m[1].match(/\x1b\[2K/g) ?? []).length : 0;
   const frame = p.slice(m[1]?.length ?? 0);
   if (frame.length === 0) return null;
-  // A frame is text + SGR color codes + newlines. Any cursor-movement/erase/scroll CSI - OR a non-link
-  // OSC introducer - means this is NOT a plain frame (alt-screen switches, wipes, Ink's clear, or a
-  // /copy OSC 52 clipboard write that goes through the wrapper): refuse to optimize and pass it through
-  // untouched rather than splice the band into it and eat it. OSC 8 hyperlinks are the one exception:
-  // they are zero-width TEXT ATTRIBUTES (like SGR) that legitimately live inside chrome rows - rejecting
-  // them would silently drop the differ into passthrough-reset (full repaints) on every linked frame.
+  // Only text, SGR and OSC 8 links are safe to diff; other terminal controls pass through intact.
   if (/\x1b\[[0-9;]*[ABCDEFGHJKSTr]/.test(frame) || /\x1b\](?!8;;)/.test(frame)) return null;
   return { eraseCount, frame };
 }
@@ -118,20 +110,10 @@ export class FrameDiffer {
 
   private lastRaw: string[] | null = null; // the last RAW Ink frame (pre-compose), for geometry refresh
 
-  // The band geometry under which `prev` (the screen model) was LAST painted. A hardware scroll
-  // (DECSTBM+SU/SD) moves REAL screen rows; it is only safe while model and screen agree on which
-  // rows are band. Right after setBand changes the geometry, screen rows just beyond the OLD band
-  // still hold CHROME - a scroll region sized to the NEW band would physically drag those chrome
-  // rows along while the model updates only band rows, and the divergence is permanent (the
-  // duplicated-footer ghost, images #77/#78: SD1 over rows 1..24 while screen rows 23-24 were the
-  // rule + input line). So: scroll ONLY when paintedBand === band; otherwise plain absolute rows.
+  // Hardware scroll is safe only when the painted and current band geometry agree.
   private paintedBand: ScrollBand | null = null;
   private markPainted(): void { this.paintedBand = this.band ? { ...this.band } : null; }
-  // Hardware scroll (DECSTBM+SU/SD) switch. OFF BY DEFAULT ON WINDOWS: at real write cadence,
-  // ConPTY displaces content OUTSIDE the DECSTBM region (the e2e divergence probe caught the chrome
-  // one row off right after a region scroll; paced probes pass - it takes live timing). Plain
-  // absolute row repaints cannot be displaced. Unix PTYs keep the optimization; NEKO_HWSCROLL=1/0
-  // forces either way.
+  // Windows defaults to absolute repaint because ConPTY can displace rows outside DECSTBM.
   private hwScrollEnabled(): boolean {
     const v = process.env.NEKO_HWSCROLL;
     if (v === "1") return true;
@@ -139,13 +121,7 @@ export class FrameDiffer {
     return process.platform !== "win32";
   }
 
-  // SELF-HEALING RESYNC - the answer to conhost's residual displacement (the one-row ghost that
-  // survived every targeted fix; its mechanism lives inside ConPTY's buffer/viewport handling, not
-  // in our bytes). We cannot stop the displacement from ever happening, but we CAN bound its
-  // lifetime: a full ABSOLUTE repaint of the model (CUP per row + EL - cannot be displaced, erases
-  // anything stale) runs (a) ~400ms after each burst of writes goes quiet (trailing debounce - the
-  // screen the user actually looks at is always freshly healed) and (b) at least every ~2s during
-  // sustained activity (streaming). Cost: one plain frame per pause. A curses-style ^L, automated.
+  // Periodic absolute repaint bounds residual ConPTY displacement during bursts and streaming.
   private lastResyncAt = 0;
   private resyncTimer: ReturnType<typeof setTimeout> | null = null;
   /** Absolute repaint of the whole model. Empty rows still get EL: after a resize/reflow the reserved
@@ -154,9 +130,7 @@ export class FrameDiffer {
     const lines = this.prev!;
     let out = "";
     for (let i = 0; i < lines.length; i++) out += `${ESC}${i + 1};1H` + lines[i] + EL;
-    // Fullscreen intentionally renders rows-1 so writing the bottom-right cell can never make Windows
-    // scroll. The unowned physical spare row still reflows OLD text during a resize; clear it explicitly
-    // or a fragment can survive beneath the footer even though every modeled row is correct.
+    // Clear the unowned spare row after resize so reflowed text cannot survive below the footer.
     out += `${ESC}${lines.length + 1};1H${EL}`;
     this.lastResyncAt = Date.now();
     return out + `${ESC}${lines.length};1H`;
@@ -214,10 +188,7 @@ export class FrameDiffer {
   }
   reset(): void { this.prev = null; }
 
-  // --- Hardware caret: the terminal's own cursor at the input, positioned from the CARET_SENTINEL that
-  // TextInput plants. The sentinel is stripped from the model (so it never displays or offsets a diff);
-  // its row/col drives a real cursor (DECSCUSR bar + show). The terminal blinks it natively - no glyph,
-  // no gap, no blink-toggle. When no sentinel is present (a menu/overlay owns the screen) the cursor hides.
+  // The stripped caret sentinel drives the terminal's native cursor; overlays omit it to hide the caret.
   private cursorPos: { row: number; col: number } | null = null;
   private caretActive = false;
   /** Find the caret sentinel in the composed lines, record its (row, col), and STRIP every sentinel so
@@ -276,12 +247,7 @@ export class FrameDiffer {
     this.markPainted(); // model is now consistent with the CURRENT geometry
   }
 
-  // Text selection (mouse drag-to-copy): a highlighted region over the band, anchored to CONTENT rows
-  // (indices into bandRows), NOT screen rows - so a drag can extend past the top/bottom edge and the
-  // view can scroll under it while the highlight stays on the same text (the "drag up to select above
-  // the fold" case). windowRows maps content rows -> screen rows from the CURRENT scroll distance, so
-  // every repaint (scroll hop included) re-lands the highlight correctly with no per-scroll bookkeeping.
-  // Columns include the 2-space gutter (bandRows are full screen rows), so screen col X = string index X-1.
+  // Selection anchors to content rows so it remains stable while the viewport scrolls beneath it.
   private selection: { r0: number; c0: number; r1: number; c1: number } | null = null; // r0/r1 = CONTENT row indices
   private selWidth = 0; // pad spanned rows out to this screen column so the block is a solid rectangle
   /** Highlight a selection over the band (r0/r1 are CONTENT row indices into bandRows); null clears it.
@@ -326,8 +292,7 @@ export class FrameDiffer {
   private windowRows(): string[] | null {
     if (!this.band || !this.bandRows) return null;
     const H = this.band.height;
-    // Committed rows + the live tail form one logical scrollback; the window slices across the seam
-    // WITHOUT materializing the concat (the tail changes on every stream delta - O(H) here, not O(all)).
+    // Slice across committed rows and the live tail without materializing their concatenation.
     const total = this.bandRows.length + this.bandTail.length;
     const end = Math.max(0, total - this.bandDist);
     const start = Math.max(0, end - H);
@@ -336,10 +301,7 @@ export class FrameDiffer {
       slice.push(i < this.bandRows.length ? this.bandRows[i] : this.bandTail[i - this.bandRows.length]);
     }
     while (slice.length < H) slice.push("");
-    // Selection highlight: r0/r1 are CONTENT row indices. The slice index i shows content row `start+i`,
-    // so a row is selected when start+i is within [r0, r1]. Column bounds apply on the first/last CONTENT
-    // rows; middle rows fill to the right edge. Because start comes from the CURRENT scroll distance, the
-    // highlight follows the text as the view scrolls - no screen-coordinate bookkeeping on scroll.
+    // First and last selected content rows use column bounds; middle rows fill the viewport.
     if (this.selection) {
       const s = this.selection;
       for (let i = 0; i < slice.length; i++) {
@@ -394,8 +356,7 @@ export class FrameDiffer {
     if (!anyChange) return;
     const top = this.band.top;
     let out = "";
-    // Geometry changed since the model was last painted -> a detected "shift" is a re-anchoring
-    // artifact of the new slice, not a real scroll. Plain absolute rows only (they self-heal).
+    // A shift after geometry changes is re-anchoring, not a hardware-scroll candidate.
     const shift = this.hwScrollEnabled() && this.sameGeometry() ? detectShift(prevBand, win, H) : null;
     trace({ ev: "repaintBand", top, H, prevLen: this.prev.length, shift: shift ? `${shift.dir}${shift.k}` : null, geomOk: this.sameGeometry() });
     if (shift) {
@@ -409,8 +370,7 @@ export class FrameDiffer {
       for (let i = 0; i < H; i++) if (win[i] !== prevBand[i]) out += `${ESC}${top + i};1H` + win[i] + EL;
     }
     for (let i = 0; i < H; i++) this.prev[base + i] = win[i];
-    // Sustained activity (a long scroll, streaming) never goes quiet enough for the trailing heal -
-    // fold a full repaint in at least every ~2s so displacement can't accumulate mid-gesture.
+    // Sustained activity receives periodic full repaint even without an idle window.
     if (this.healEnabled() && Date.now() - this.lastResyncAt > 2000) out = this.paintAll();
     else out += `${ESC}${this.prev.length};1H`; // restore the cursor row Ink assumes (its frame's last line)
     this.writer(out + this.cursorSuffix()); // re-place the hardware caret after a scroll/repaint
@@ -438,10 +398,7 @@ export class FrameDiffer {
     return out + this.cursorSuffix();
   }
   private processInner(payload: string): string | null {
-    // NEUTRAL control writes: Ink 7 brackets every frame with its own BSU/ESU as SEPARATE writes
-    // (write-synchronized.js), and hides/shows the cursor the same way. These carry no screen content -
-    // pass them through but DO NOT reset the baseline, or the differ is blinded on every single frame
-    // (exactly the bug the TTY bench caught: differ ON produced identical bytes to differ OFF).
+    // Ink emits BSU/ESU and cursor controls separately; they must not reset the frame baseline.
     if (/^(?:\x1b\[\?[0-9;]+[hl])+$/.test(payload)) return null;
     // Ink sometimes handles a resize as an explicit wipe immediately followed by its new full frame.
     // Passing that through would paint the frame's intentionally BLANK transcript band and reset our
@@ -481,12 +438,7 @@ export class FrameDiffer {
     for (let i = 0; i < lines.length; i++) if (lines[i] !== prev[i]) changed.push(i);
     if (changed.length === 0) return "";             // identical frame -> skip the write entirely
 
-    // --- fullscreen scroll detection over the band ---
-    // ONLY when the chrome BELOW the band is untouched: a real scroll moves band rows and nothing else.
-    // When the chrome changes shape in the same frame (an overlay/picker opens, the input grows), a
-    // near-uniform shift can still be detected across the frame - but emitScroll would hardware-shift
-    // REAL screen rows beyond its model, desyncing the baseline from the screen and leaving residue the
-    // next diffs never repair (the mangled /resume picker, image #60). Chrome changed -> plain line-diff.
+    // Chrome changes invalidate band-only hardware-scroll detection.
     const band = this.band;
     if (band && geomOk && this.hwScrollEnabled() && band.height >= 8 && changed.length > band.height / 2) {
       const base = bandBase(band);
@@ -501,21 +453,14 @@ export class FrameDiffer {
       }
     }
 
-    // --- plain line-diff ---
     let out = "";
     trace({ ev: "diff", changed: changed.map((i) => i + 1), n: lines.length, bandH: band?.height });
-    // Heal scheduling is SELECTIVE: only structurally-risky writes arm it (many rows changing =
-    // layout churn, the displacement's habitat). Small diffs - the caret blink, the spinner, the
-    // ctx% tick - must NOT arm, or an idle session heals every second forever (blink 530ms beats a
-    // 400ms trailing timer). Idle stays byte-silent; risky moments still get the belt.
+    // Only structural writes arm healing; caret and status ticks must leave an idle screen silent.
     const risky = band && this.healEnabled() && changed.length >= 8;
     if (risky && Date.now() - this.lastResyncAt > 2000) { this.armTrailingResync(); return this.paintAll(); }
     if (risky) this.armTrailingResync();
     if (band) {
-      // ABSOLUTE addressing in fullscreen (the frame is pinned at screen row 1 by alt+clear+home). This
-      // is immune to cursor drift: any real-terminal quirk that leaves the cursor somewhere unexpected
-      // (async BSU/ESU flush, a preceding hardware-scroll repaint) would derail RELATIVE moves and paint
-      // a changed line one row off - the ghosted second input box seen on startup. Absolute can't drift.
+      // Fullscreen frames are pinned to row one, so changed rows use absolute addressing.
       for (const i of changed) out += `${ESC}${i + 1};1H` + lines[i] + EL;
       out += `${ESC}${lines.length};1H`; // end on the last line - the row Ink assumes next render
     } else {
@@ -551,18 +496,15 @@ function overlaySelection(row: string, from: number, to: number): string {
   if (from >= to) return row;
   const cap = to === Number.MAX_SAFE_INTEGER ? Infinity : to;
   const isSgr = (): RegExpExecArray | null => (row[i] === "\x1b" && row[i + 1] === "[" ? /^\x1b\[[0-9;]*[A-Za-z]/.exec(row.slice(i)) : null);
-  // OSC 8 hyperlinks are zero-width like SGR: emitted verbatim before the block, dropped inside it
-  // (the highlight closes any open link first, so a link cut in half never bleeds into the selection).
+  // Close OSC 8 links before the selection block so a clipped link cannot bleed into it.
   const isOsc = (): RegExpExecArray | null => (row[i] === "\x1b" && row[i + 1] === "]" ? /^\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/.exec(row.slice(i)) : null);
   let out = "", col = 0, i = 0, sgr = "";
-  // 1. content BEFORE the block: emit verbatim, tracking colour state.
   for (let m; col < from && i < row.length; ) {
     if ((m = isSgr())) { if (m[0].endsWith("m")) sgr += m[0]; out += m[0]; i += m[0].length; continue; }
     if ((m = isOsc())) { out += m[0]; i += m[0].length; continue; }
     out += row[i]; col++; i++;
   }
   while (col < from) { out += " "; col++; } // pad if the row ended before the block starts (trailing space)
-  // 2. INSIDE the block: one flat colour - drop the row's own SGR (keep tracking state), fill to the edge.
   out += "\x1b]8;;\x07" + SEL_ON; // close any open hyperlink (a stray close is a no-op), then highlight
   for (let m; col < cap && i < row.length; ) {
     if ((m = isSgr())) { if (m[0].endsWith("m")) sgr += m[0]; i += m[0].length; continue; }
@@ -570,7 +512,7 @@ function overlaySelection(row: string, from: number, to: number): string {
     out += row[i]; col++; i++;
   }
   if (cap !== Infinity) while (col < cap) { out += " "; col++; } // pad the block out to a solid rectangle
-  out += `${ESC}0m${sgr}`; // 3. close: reset the block, replay the row's colour state...
+  out += `${ESC}0m${sgr}`;
   while (i < row.length) { out += row[i]; i++; } // ...then emit any content AFTER the block (last-row suffix)
   return out;
 }
@@ -613,7 +555,6 @@ function emitScroll(prev: string[], next: string[], band: ScrollBand, s: { dir: 
   for (let i = 0; i < band.height; i++) {
     if (shifted[i] !== next[base + i]) out += `${ESC}${top + i};1H` + next[base + i] + EL;
   }
-  // Chrome above and below the band: plain per-line diff, absolute rows.
   for (let i = 0; i < next.length; i++) {
     if ((i < base || i >= base + band.height) && next[i] !== prev[i]) out += `${ESC}${i + 1};1H` + next[i] + EL;
   }

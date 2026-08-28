@@ -195,11 +195,7 @@ export class Agent {
   /** The single system message is `<base prompt>` + SESSION_CONTEXT_MARK + `<live session context>`.
    * One system message only: some chat templates (Llama/Mistral on vLLM) suppress tool-calling
    * when a SECOND system message is present, so session context is merged in, never split out. */
-    // BROAD doom-loop state (distinct from the per-step exact-repeat `lastSig`/`repeats` guard):
-    // (a) edits-per-path: the agent often loops editing ONE file with DIFFERENT args chasing a build
-    //     error -- the exact-repeat guard never trips because every sig differs. Track per-path count
-    //     and nudge once the cap is hit. (b) consecutive failing bash runs: re-running a failing
-    //     command 3x with tiny tweaks is the other classic budget sink.
+    // Tracks repeated edits with distinct arguments and consecutive unproductive tool calls.
     private readonly editsPerPath = new Map<string, number>();
   private consecutiveUnproductive = 0;
   /** Validation debt belongs to one OUTER user goal. `runUntilDone` controller reviews use
@@ -290,8 +286,7 @@ export class Agent {
     const sys = this.messages.filter((m) => m.role === "system"); // keep system + dynamic context
     const convo = this.messages.filter((m) => m.role !== "system");
 
-    // Keep the most recent turns verbatim; only summarize what's older. Snap the boundary back to
-    // a user message so we never orphan a tool result from its assistant tool_call.
+    // Snap the retained tail to a user turn so tool results never lose their initiating call.
     const KEEP_TAIL = 8;
     let cut = Math.max(0, convo.length - KEEP_TAIL);
     while (cut > 0 && convo[cut].role !== "user") cut--;
@@ -300,9 +295,7 @@ export class Agent {
     if (!head.length) return ""; // nothing old enough to compact
 
     const text = compactionSource(head);
-    // Compaction MUST always free context. If the summarizer call fails (a transient model error),
-    // fall back to a crude marker rather than leaving the oversized context in place -- otherwise the
-    // next call just overflows again and the turn is stuck. The recent tail is kept verbatim regardless.
+    // Compaction must still free context when the summarizer fails.
     let summary: string;
     try {
       const res = await this.provider.complete(cleanProviderMessages([
@@ -314,11 +307,7 @@ export class Agent {
     } catch {
       summary = "(earlier conversation elided to fit the context window; the summary call failed, but the recent turns below are intact)";
     }
-      // Low-hanging context win (Anthropic): big tool outputs kept in the tail are rarely re-read in
-      // full — clip them to the head, so post-compaction context stays lean. Clip by LINE count for
-      // normal structured output, AND by total CHAR count for dense few-line output (minified JSON,
-      // base64, packed log lines) which is long in chars yet short in lines and would otherwise slip
-      // through unclipped, freeing no context.
+      // Bound retained tool output by lines and characters, including dense minified payloads.
       const leanTail = tail.map((m) => {
         if (m.role !== "tool" || !isText(m.content)) return m;
         const lines = m.content.split("\n");
@@ -329,10 +318,7 @@ export class Agent {
         }
         return m;
       });
-    // The ORIGINAL instruction must survive every prune VERBATIM - summarizers compress away the one
-    // thing the whole run is anchored to (instruction fade-out / Governance Decay, arXiv 2606.22528,
-    // 2603.05344). Deterministic code, not a summarizer promise: when the first user turn is in the
-    // summarized head, carry its text (clipped) ahead of the model summary.
+    // Preserve the original user instruction verbatim when it moves into the summarized head.
     const firstUser = head.find((m) => m.role === "user");
     const task = isText(firstUser?.content) ? firstUser.content.slice(0, 600) : "";
     const plan = todosContextBlock(this.tools.todos);
@@ -351,10 +337,7 @@ export class Agent {
    * it freed anything (so the caller only falls back to a summary when there's nothing left to clip). */
   private shrinkOldObservations(keepRecent = 3, minSavingsChars = 0): boolean {
     const CLIP = 1200, MARK = "chars elided to fit context";
-    // A GUI loop can produce several base64 screenshots inside one user turn. Summarizing cannot help
-    // that shape (there is no older user-turn boundary), so keep the two most recent visual states and
-    // mask older tool images before clipping text. Two supports before/after comparison while bounding
-    // both request size and local session growth.
+    // Keep the two newest visual states and mask older tool images in a single long turn.
     const imageIdx = this.messages
       .map((m, i) => (m.role === "tool" && Array.isArray(m.content) && m.content.some((p: any) => p?.type === "image_url") ? i : -1))
       .filter((i) => i >= 0);
@@ -383,10 +366,7 @@ export class Agent {
         : p);
       shrank = true;
     }
-    // USER-attached images from EARLIER turns are maskable too. They used to be untouchable, which
-    // created a death spiral: one oversized pasted image overflowed the window, the 400'd request left
-    // the image in history, and every later turn re-sent it and 400'd forever - nothing could free it.
-    // The CURRENT user turn's attachment is preserved (the model must get one full look at it).
+    // Earlier user images may be masked; preserve attachments from the current user turn.
     for (const i of oldUserImageIdx) {
       const m = this.messages[i];
       m.content = m.content.map((p: any) => p?.type === "image_url"
@@ -580,11 +560,7 @@ export class Agent {
      * for every tool, not just the ones already wrapped inside execute(). */
     private async safeExecute(call: { name: string; arguments: any }, signal?: AbortSignal): Promise<string | any[]> {
       const args = unwrapToolArgs(call.arguments); // tolerate _raw / JSON-string arg wrappers from some models
-      // Pre-flight argument validation (Gecko, arXiv 2602.19218): a call missing a REQUIRED key
-      // would execute, throw, and burn the round-trip on a vague error - catch it BEFORE execution
-      // and feed back the schema hint so the model self-repairs in one step. Presence-only (null/
-      // undefined), never type pedantry: nothing that executes today is rejected, and an unknown
-      // schema (e.g. an unloaded MCP tool) fails open to the executor's own checks.
+      // Reject missing required keys before execution; unknown schemas remain executor-owned.
       const spec = this.tools.schemas().find((s: any) => s.function?.name === call.name)?.function?.parameters;
       const missing = (spec?.required ?? []).filter((k: string) => args?.[k] == null);
       if (missing.length) {
@@ -841,36 +817,23 @@ export class Agent {
       this.emit("step", step + 1);
       await this.durableCheckpoint(); // user prompt / prior tool result is durable before provider work
       if (signal?.aborted) return "[interrupted]";
-      // In-loop overflow guard: within ONE turn (e.g. many huge browser snapshots) context can grow
-      // past the window with no chance for the between-turn UI compaction to run. Compact here BEFORE a
-      // request would overflow -- otherwise the server computes a negative max_tokens and 400s the turn.
+      // Compact before a long single turn can overflow the next provider request.
       const toolSchemas = this.tools.schemas();
       let estimatedTokens = estimateRequestTokens(this.providerHistory(), toolSchemas);
-      // Cost guard, before the hard overflow guard: once a tool-heavy turn is substantial, clear old
-      // results only when doing so saves >=8k estimated tokens. Keep five recent observations. This
-      // mirrors provider context-editing guidance without churning the prompt cache for tiny wins.
+      // Avoid invalidating prompt caches unless clipping saves a meaningful amount of context.
       const editAt = Math.min(50_000, 0.5 * this.maxContextTokens);
       if (step > 0 && estimatedTokens > editAt && this.shrinkOldObservations(5, 32_000)) {
         estimatedTokens = estimateRequestTokens(this.providerHistory(), toolSchemas);
       }
       if (estimatedTokens > COMPACT_SAFETY_AT * this.maxContextTokens) {
-        // One long turn has a single user message, so compact()'s snap-to-user boundary frees nothing;
-        // clip the oldest observations in place first (cheap, synchronous), and only pay for a summarizer
-        // call if that found nothing to clip. The compact/compact_done events bracket ONLY that slow path,
-        // so the UI's compacting indicator shows for the model call, not the instant in-place clip.
+        // Clip old observations before paying for a summarizer call in a single long turn.
         if (!this.shrinkOldObservations()) {
           this.emit("compact", "auto");
           await this.compact();
           this.emit("compact_done", "auto");
         }
       }
-      // Stream-eager execution ("Executing as You Generate", arXiv 2604.00491; AsyncFC 2605.15077):
-      // a streamed tool call is fully parsed long before the whole response finishes, so READ-ONLY
-      // calls start executing DURING generation - a turn's floor drops from generation+execution
-      // toward max(generation, execution). Strictly order-safe: eager-starting STOPS at the first
-      // non-read call in emission order (a read after a write must observe the write), gated tools
-      // are never eager (approval semantics untouched), everything runs under the same abort signal,
-      // and results are consumed by key below - never re-executed.
+      // Eager execution is limited to the read-only prefix and shares the turn's abort signal.
       const eager = new Map<string, Promise<string | any[]>>();
       const eagerKey = (c: { id?: string; name: string; arguments?: any }) =>
         c.id || `${c.name}:${JSON.stringify(c.arguments ?? {})}`;
@@ -881,11 +844,7 @@ export class Agent {
         if (!eagerOk || signal?.aborted || eager.has(eagerKey(call))) return;
         eager.set(eagerKey(call), this.safeExecute(call, signal));
       };
-      // Crash journal for provider-managed loops (Codex App Server, Gemini CLI) and ordinary streaming.
-      // Their deltas/tool calls arrive while complete() is still pending; without mirroring them into the
-      // canonical message list, every mid-turn save snapshots only the user prompt. Keep one in-flight
-      // assistant message per streamed segment, commit it beside each completed dynamic tool result, and
-      // emit bounded checkpoints so a network loss + killed terminal loses at most a short delta tail.
+      // Journal streamed deltas and tool results so mid-turn checkpoints contain the canonical trajectory.
       let inflightAssistant: any | null = null;
       let streamedContent = "";
       let managedTrace = false;
@@ -919,9 +878,7 @@ export class Agent {
         const text = content ?? "";
         const hadInflight = inflightAssistant !== null;
         const message = inflightAssistant ?? ensureInflight();
-        // Most streaming adapters return exactly the deltas already journaled. If a provider delivers
-        // an unstreamed suffix, append only that suffix; never duplicate the whole streamed answer. A
-        // brand-new segment after a tool has no in-flight deltas of its own, so its returned text wins.
+        // Append only a returned suffix that was not already journaled from deltas.
         if (!hadInflight || !managedTrace) message.content = text;
         else if (!streamedContent) message.content = text;
         else if (text.startsWith(streamedContent)) message.content += text.slice(streamedContent.length);
@@ -934,14 +891,9 @@ export class Agent {
       let managedToolChain: Promise<void> = Promise.resolve();
       const executeTool = (call: { id: string; name: string; arguments: any }): Promise<string | any[]> => {
         managedTrace = true;
-        // Provider callbacks can arrive concurrently. Serialize the canonical trajectory so each
-        // assistant(function_call) is followed by its own tool(function_call_output) before the next
-        // call begins; otherwise completion order can create invalid role ordering on resume.
+        // Serialize callbacks to preserve assistant-call/tool-result ordering on resume.
         const task = managedToolChain.then(async () => {
-          // Provider-managed calls do not come back in response.tool_calls. Materialize and persist the
-          // assistant function_call BEFORE execution: a mutating tool can finish its external side effect
-          // and then lose the network/terminal before returning. Resume must know that call was attempted;
-          // sealDanglingToolCalls() marks its outcome unknown when no result was journaled.
+          // Persist provider-managed calls before execution so crash recovery records unknown outcomes.
           finalizeInflight(null, [call]);
           checkpoint(true, false);
           this.emit("tool_call", call);
@@ -958,14 +910,11 @@ export class Agent {
       };
       let response;
       let latestUsage: Usage | undefined;
-      // Before every provider call, publish the already-booked input plus this pending request's
-      // context estimate. Providers without live usage still get a monotonic whole-turn meter; when
-      // authoritative usage arrives below, it replaces this visibly approximate snapshot.
+      // Publish a monotonic estimate until authoritative provider usage arrives.
       this.emit("usage_estimate", {
         prompt_tokens: this.cost.promptTokens + estimateRequestTokens(this.providerHistory(), toolSchemas),
       });
-      // Provider live-usage callbacks describe THIS complete() call. Rebase them onto the Agent's
-      // already-booked totals so the UI sees one monotonic absolute counter across a multi-step turn.
+      // Rebase call-local live usage onto the accumulated turn total.
       const usageBase = {
         prompt: this.cost.promptTokens,
         completion: this.cost.completionTokens,
@@ -1089,11 +1038,7 @@ export class Agent {
           });
           continue;
         }
-        // An action's return value is process evidence, not proof of the user-visible outcome. A
-        // DPI-virtualized script can report success while placing an icon at the wrong physical pixel.
-        // Production agents therefore require one fresh, successful inspection after the latest mutation.
-        // A well-behaved agent that already inspected pays no extra model round; only unverified finishes
-        // are intercepted.
+        // A state-changing action requires fresh inspection evidence of its user-visible outcome.
         if (this.verifyStateChangesBeforeExit && changedRealState && step < this.maxSteps - 1) {
           if (!stateVerificationEvidence && !stateVerificationRequested) {
             stateVerificationRequested = true;
@@ -1120,11 +1065,7 @@ export class Agent {
             continue;
           }
         }
-        // Pre-completion gate (opt-in): intercept the FIRST unsupported tool-less final and force a
-        // re-inspection of the ACTUAL state - the "declared done without re-running the check"
-        // failure mode (LangChain PreCompletionChecklist; ACE reflection-before-exit). Productive
-        // inspection/test evidence already gathered in this run satisfies it; a later mutation clears
-        // that evidence. Fires at most once, and never on the last step so wrap-up can finish.
+        // Intercept at most one unsupported final so the model can gather fresh verification evidence.
         if (this.verifyBeforeExit && !verifiedExit && !completionVerificationEvidence && step < this.maxSteps - 1) {
           verifiedExit = true;
           this.messages.push({
@@ -1169,16 +1110,12 @@ export class Agent {
         for (const call of toolCalls) {
           if (signal?.aborted) return "[interrupted]"; // stop promptly between tools on Esc
             this.emit("tool_call", call);
-            // Loop guard: if the model makes the SAME call 3x in a row, it's stuck — nudge instead of
-            // re-running it, so it changes approach or finishes (prevents lag/chaos/spinning).
+            // Refuse the third identical call and request a different approach.
             const sig = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
             const repeatableWait = this.isRepeatableWaitCall(call);
             repeats = !repeatableWait && sig === lastSig ? repeats + 1 : 0;
             lastSig = repeatableWait ? "" : sig;
-            // BROAD doom-loop guard: counts repeated edits to ONE path with DIFFERENT args (which the
-            // exact-repeat guard above structurally cannot — every sig differs). It only WARNS (appended
-            // below after the edit runs), so a legitimate multi-edit is never blocked; only an EXACT
-            // 3x-identical repeat is blocked here (that one is unambiguously stuck).
+            // Distinct edits to one path are counted separately from exact repeats.
             const broad = this.broadLoopNudge(call);
             const circuitBlocked = toolchainCircuitOpen && Agent.isToolchainCommand(call);
             let observation = circuitBlocked
@@ -1202,19 +1139,12 @@ export class Agent {
               }
             }
             if (Agent.isUnproductiveResult(observation)) stepHadUnproductiveResult = true;
-            // Track consecutive UNPRODUCTIVE results (failed OR empty) from ANY tool; a productive result
-            // resets the streak. Catches the doom-loop the exact-repeat + edit guards structurally miss:
-            // probing a heavy/obfuscated page with a DIFFERENT selector each time, every one returning []
-            // (the classic Facebook-feed time sink). The result is still fed back; the loop also signals.
+            // A productive result resets the consecutive empty-or-failed streak.
             this.consecutiveUnproductive = Agent.isUnproductiveResult(observation) ? this.consecutiveUnproductive + 1 : 0;
             this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
             this.emit("tool_result", { call, observation });
             await this.durableCheckpoint();
-            // Tool-error recovery (Self-Harness pattern, arXiv 2606.09498 - the paper's single biggest win
-            // was a recovery directive injected AT the point of a tool error): on the FIRST failure of a
-            // MUTATING tool, tell the model HOW to recover - models otherwise flail (blind re-runs, deleting
-            // the partial artifact they still need). Edge-triggered so it never nags: a mutating success
-            // re-arms it, and PERSISTENT failure is the unproductive-streak guard's job below (fires at N).
+            // Give recovery guidance on the first mutating failure; success re-arms the edge trigger.
             const mutFailed = MUTATING_TOOLS.has(call.name) && isText(observation) &&
               (observation.startsWith(`Error running ${call.name}`) || Agent.isFailedRunResult(observation));
             if (mutFailed && !mutErrored && repeats < 2) {
@@ -1226,12 +1156,9 @@ export class Agent {
                 "and confirm it passes; then continue the task." });
             }
             if (MUTATING_TOOLS.has(call.name)) mutErrored = mutFailed;
-            // BROAD edit-loop guard (warn, don't block): the edit RAN above; append a one-time nudge so the
-            // model steps back instead of micro-editing one file forever. Skipped when the exact-repeat guard
-            // already blocked this step (repeats >= 2) to avoid double-nudging.
+            // Warn once after repeated distinct edits; exact repeats are handled above.
             if (broad !== null && repeats < 2) this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: broad });
-            // After enough consecutive empty/failed results, append one nudge so the model changes APPROACH
-            // (usually the strategy is wrong, not the arguments) instead of trying a 7th selector variant.
+            // Nudge once after enough consecutive empty or failed results.
             if (this.consecutiveUnproductive >= UNPRODUCTIVE_CAP) {
               const nudge = "[loop guard] The last " + this.consecutiveUnproductive + " tool results in a row " +
                 "were empty or failed. That usually means the APPROACH is wrong, not the arguments - stop " +
@@ -1243,20 +1170,13 @@ export class Agent {
             }
           }
       }
-      // Adaptive effort, conservative variant: lower reasoning only on a SUSTAINED all-read pattern
-      // (2+ consecutive steps), never after a single read whose result the next step must still
-      // synthesize. That "lagged proxy" risk is exactly why this stays off by default pending an eval;
-      // this gate makes a future enablement strictly safer — it can only fire less, in narrower cases.
+      // Lower effort only after a sustained read-only pattern; the feature remains opt-in.
       const allReads = toolCalls.length > 0 && !stepHadUnproductiveResult
         && toolCalls.every((call) => this.isMechanicalReadCall(call));
       consecutiveReadSteps = allReads ? consecutiveReadSteps + 1 : 0;
       nextReasoningEffort = this.adaptiveEffort && consecutiveReadSteps >= 2 ? "low" : undefined;
 
-      // Budget-aware COMPLETION nudge (2026 SOTA: agents fail not from inability but because "nobody told
-      // it when the work is over" - a completion signal near the budget edge is what changes behavior).
-      // On a long task, glm/GLM-class models over-research and get cut off at max_steps with the artifact
-      // never written. This fires at ~2/3 then ~6/7 of the budget, once each: it does NOT stifle earlier
-      // exploration (that stays free) - it just stops the model running out with nothing produced.
+      // Issue one completion nudge near each configured step-budget threshold.
       if (this.maxSteps >= 10) {
         const frac = (step + 1) / this.maxSteps;
         const threshold = budgetNudges === 0 ? 0.66 : budgetNudges === 1 ? 0.85 : 2;
@@ -1272,8 +1192,7 @@ export class Agent {
       }
     }
 
-    // Step limit reached: instead of an abrupt stop, ask for one tool-less wrap-up so the user gets
-    // a useful summary of what was done and what remains (don't leave the task half-narrated).
+    // Request one tool-less wrap-up after the step limit.
     this.emit("max_steps", this.maxSteps);
     let final: string;
     try {

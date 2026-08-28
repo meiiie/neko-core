@@ -17,8 +17,6 @@
 
 import { isText } from "../shared/wire.ts";
 
-// ---- Inputs (what the harness captures per trial) -------------------------------------------
-
 export type ToolName = string;
 
 /** One captured tool call. `path`/`pattern`/`cmd` are normalized so the redundancy detector can group. */
@@ -67,8 +65,6 @@ export interface TaskSpec {
   optimalSteps?: number; // for step-efficiency; omit to skip the per-task step-efficiency score
   records: TrialRecord[];
 }
-
-// ---- RedundancyBench-style execution-efficiency detector ------------------------------------
 
 const READ_TOOLS = new Set(["read_file", "ls", "glob", "search"]);
 const MUTATING_TOOLS = new Set(["edit", "write_file", "multi_edit"]);
@@ -154,8 +150,6 @@ export function redundantCalls(trace: TraceEntry[]): number {
   return redundantCallMask(trace).filter(Boolean).length;
 }
 
-// ---- Statistics helpers ---------------------------------------------------------------------
-
 export function quantile(sortedAsc: number[], q: number): number {
   if (!sortedAsc.length) return 0;
   const pos = (sortedAsc.length - 1) * q;
@@ -164,8 +158,6 @@ export function quantile(sortedAsc: number[], q: number): number {
   if (lo === hi) return sortedAsc[lo];
   return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (pos - lo);
 }
-
-// ---- Per-task analysis ----------------------------------------------------------------------
 
 export interface TaskMetric {
   id: string;
@@ -256,8 +248,6 @@ export function analyzeTask(spec: TaskSpec, slaMs = DEFAULT_SLA_MS): TaskMetric 
   };
 }
 
-// ---- Aggregate CLEAR + reliability report ---------------------------------------------------
-
 export interface DimReport {
   tasks: TaskMetric[];
   trials: number;
@@ -333,8 +323,6 @@ export function aggregate(tasks: TaskMetric[], slaMs = DEFAULT_SLA_MS): DimRepor
     slaMs,
   };
 }
-
-// ---- Scorecard renderer ---------------------------------------------------------------------
 
 function pct(x: number): string {
   return `${Math.round(x * 100)}%`;

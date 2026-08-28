@@ -36,10 +36,7 @@ export function titleSeq(title: string): string {
 // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
 const out = (): Writable & { isTTY?: boolean } => process.stdout as any;
 
-// The xterm title STACK (push on start, pop on exit) restores the user's shell title when neko quits.
-// But on Windows Terminal (ConPTY) it BACKFIRES: WT restores the pushed title mid-session, so the tab
-// brands for a blink then snaps back to the shell's "Windows PowerShell 5.1" (image #56 - the revert value
-// is exactly what we pushed). So skip the stack on Windows; PowerShell resets its own title on exit anyway.
+// Windows Terminal restores the xterm title stack mid-session, so only non-Windows hosts use it.
 const useTitleStack = process.platform !== "win32";
 
 /** Save the user's current title (stack push) - call once at startup, pair with restoreTitle on exit. */

@@ -90,10 +90,7 @@ export class ChatGptAppServerProvider implements Provider {
     if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
     if (!this.cfg.model.startsWith("gpt-5.6-")) throw new Error(`Codex App Server route is not required for ${this.cfg.model}`);
     if (tools.length && !opts.executeTool) throw new Error("Codex App Server tools need Neko's safe execution callback");
-    // Disarm the idle stop the moment a turn begins. It is armed at the END of a turn, so a LONG
-    // next turn (a deep-research run streaming past codex_keepalive minutes) used to have the timer
-    // fire mid-flight: dispose() rejected the live turn with "Codex App Server stopped" - the field
-    // failure. Idle means idle: the countdown runs only between turns.
+    // The keepalive timer runs only between turns.
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
 
     let startupCleanup: Promise<void> | null = null;

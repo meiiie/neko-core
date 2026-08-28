@@ -62,7 +62,6 @@ async function probe(label: string, out: FakeTtyOut, t0: number, t1: number): Pr
 async function main() {
   console.log("=== NEKO PERF HARNESS: scroll + long-input lag ===\n");
 
-  // ---- SCROLL lag: long transcript, burst of wheel-up then wheel-down ----
   {
     const vt = new VirtualTerminal(100, 30);
     const out = new FakeTtyOut(100, 30, vt);
@@ -100,7 +99,6 @@ async function main() {
     console.log("baseline: differ on = each hop should be sub-ms band repaint, NOT full frame\n");
   }
 
-  // ---- LONG-INPUT lag: type into a huge input buffer ----
   {
     const vt = new VirtualTerminal(100, 30);
     const out = new FakeTtyOut(100, 30, vt);

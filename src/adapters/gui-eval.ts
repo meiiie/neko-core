@@ -28,8 +28,6 @@ import { getProvider } from "./providers.ts";
 // Increment whenever task semantics or verifiers change so bench-log comparisons stay honest.
 export const GUI_HARNESS_VERSION = 3;
 
-// ---- The simulated GUI world -------------------------------------------------------------------
-
 type Role = "button" | "edit" | "text" | "checkbox";
 
 interface El {
@@ -179,8 +177,6 @@ export class GuiWorld {
   }
 }
 
-// ---- Tasks: one per axis -----------------------------------------------------------------------
-
 export interface GuiTask {
   id: string;
   axis: string;         // the capability this task isolates
@@ -288,9 +284,8 @@ export const GUI_TASKS: GuiTask[] = [
   },
 ];
 
-// ---- HARD tier (`neko bench gui hard`): the base tier saturated live at first calibration
-// (gpt-oss-120b 4/4), so it is a smoke/regression tier - blind to harness lift. These tasks add the
-// pressures real desktops apply that the base tier lacks: CROSS-SCREEN MEMORY (the needed value is only
+// The base GUI tier saturated its first live calibration (gpt-oss-120b 4/4), so it is only a
+// smoke/regression tier. The hard tier adds pressures real desktops apply: CROSS-SCREEN MEMORY (the needed value is only
 // visible on an earlier screen), PARTIAL OBSERVABILITY (paged lists), DECOYS (near-identical names, the
 // wrong one found first), a one-shot INTERRUPT dialog hijacking navigation, and GUARDED actions that
 // refuse with a validation error until preconditions hold (error-message-driven progress + a final
@@ -514,8 +509,6 @@ export const GUI_SYSTEM_PROMPT =
   "- Obey every stated constraint exactly; never activate a control the task forbids.\n" +
   "- Work step by step to the goal, then STOP - do not keep acting once the goal is verified.";
 
-// ---- Runner ------------------------------------------------------------------------------------
-
 export interface GuiRun { id: string; axis: string; pass: boolean; steps: number; actions: number; misses: number; violation: boolean; tokens: number; outTok: number; err?: string; }
 export interface GuiTaskResult extends GuiRun { trials: number; passes: number; violations: number; ms: number; }
 export interface GuiReport { model: string; effort: string; trials: number; results: GuiTaskResult[]; passed: number; total: number; violations: number; misses: number; actions: number; tokens: number; outTok: number; seconds: number; }
@@ -539,8 +532,7 @@ export async function runGuiTrial(task: GuiTask, provider: Provider, maxSteps?: 
     try { await agent.run(task.prompt); } catch (e) { err = e instanceof Error ? e.message : String(e); }
     return {
       id: task.id, axis: task.axis, pass: !err && task.verify(world),
-      // A model turn may emit several tool calls. Keep both numbers so batching cannot look faster
-      // merely because the harness used to hide the actual amount of GUI work.
+      // Model turns and GUI actions remain separate metrics because one turn may batch actions.
       steps: modelTurns, actions: world.steps, misses: world.misses, violation: !!world.violation,
       tokens: agent.cost.totalTokens, outTok: agent.cost.completionTokens, err: err || undefined,
     };

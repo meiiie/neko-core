@@ -232,7 +232,6 @@ export async function startRemoteRelay(
     draining = false;
   };
 
-  // ---- v1 transport: long-poll pull -> run -> reply (also the WSS-blocked fallback) ----
   const startPoll = () => {
     mode = "poll";
     send = (f) => {
@@ -269,9 +268,8 @@ export async function startRemoteRelay(
     void loop();
   };
 
-  // ---- v2 transport: hibernation-friendly WebSocket with reconnect ----
-  const outbox: any[] = []; // frames to deliver once the socket is back
-  let failures = 0; // consecutive connects that never opened
+  const outbox: any[] = [];
+  let failures = 0;
   const wsSend = (f: any) => {
     if (ws && ws.readyState === 1) {
       try { ws.send(JSON.stringify(f)); return; } catch { /* fall through to outbox */ }

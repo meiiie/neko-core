@@ -41,7 +41,6 @@ const pct = (a: number[], p: number) => { const s = [...a].sort((x, y) => x - y)
 async function main() {
   console.log("# THROUGHPUT UNDER LOAD (does background work degrade UI latency?)\n");
 
-  // Read the resolved FPS cap
   const { resolveUiFps } = await import("../src/adapters/display.ts");
   let fpsCap = "?";
   try { fpsCap = String(resolveUiFps(null).fps); } catch {} // null = no explicit config; env/pref/display layering applies

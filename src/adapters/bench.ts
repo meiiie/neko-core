@@ -926,7 +926,6 @@ const TASKS: BenchTask[] = [
     verify: async (d) => { const g = await runJs(d, "gen.mjs"); const want = (g.out ?? "").trim(); const got = (read(d, "answer.txt") ?? "").trim(); return g.ok && want.length > 0 && got === want; },
     constraints: keepFiles("gen.mjs"),
   },
-  // ---- harder tier (cross-file, state, algorithms, careful reading) ----
   {
     id: "two-file-bug",
     files: {
@@ -976,7 +975,6 @@ const TASKS: BenchTask[] = [
     prompt: "Create out.txt whose content is the word 'banana' REVERSED and then UPPERCASED (the letters of 'banana' in reverse order, all capitals).",
     verify: (d) => (read(d, "out.txt") ?? "").trim() === "ANANAB",
   },
-  // ---- tricky tier (subtle bugs + careful multi-step; richer signal even when the easy tier saturates) ----
   {
     id: "off-by-one",
     files: {
@@ -1020,8 +1018,7 @@ const TASKS: BenchTask[] = [
   },
 ];
 
-// ---- HARD tier (`neko bench hard`): multi-file, real algorithms, verification-biting. This is a
-// higher-bar regression/cost tier than `easy`, but it is not a frontier discriminator: the recorded
+// The hard benchmark tier is multi-file and verification-heavy, but not a frontier discriminator: the recorded
 // glm-5.2 calibration saturated at 12/12. Deterministic verifiers only; do not describe this score as
 // evidence that a harness change improved top-end capability.
 export const HARD_TASKS: BenchTask[] = [
@@ -1371,8 +1368,7 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number; tasks?:
           else if (outcome === "model_failure") modelFailures++;
           else infraErrors++;
           tokens += agent.cost.totalTokens; inTok += agent.cost.promptTokens; cachedTok += agent.cost.cachedTokens; outTok += agent.cost.completionTokens; calls += agent.cost.calls;
-          // Surface a thrown error (e.g. HTTP 401/timeout) — a swallowed exception used to read as a plain
-          // "0/1 fail", which hid real problems (a bad key looked like the model failing).
+          // Infrastructure errors must remain distinct from model failures.
           if (err) onProgress?.(`    ! ${task.id} ERRORED: ${err.replace(/\s+/g, " ").slice(0, 140)}`);
         } finally {
           try { trial?.close(); } finally { await provider.dispose?.(); }
@@ -2103,8 +2099,6 @@ function appendBenchLog(r: BenchReport, suite = "easy"): void {
   } catch { /* a logging failure must never break the bench */ }
 }
 
-// ---- Harness-lift: the SAME tasks run RAW (model only, no tools/loop) vs +NEKO (tools + agentic loop).
-// The thesis made measurable: Neko's edge is the HARNESS turning a given model into a capable agent. ----
 export interface LiftRow { id: string; raw: boolean; harness: boolean; }
 export interface LiftReport { model: string; fingerprint: string; maxSteps: number; rows: LiftRow[]; rawPass: number; harnessPass: number; total: number; seconds: number; }
 

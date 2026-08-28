@@ -9,7 +9,7 @@
  * Longer payloads return null (the caller falls back to printing the URL). Spec: ISO/IEC 18004.
  */
 
-// ---- GF(256) arithmetic (primitive polynomial 0x11d) ----
+// QR Reed-Solomon uses GF(256) with primitive polynomial 0x11d.
 const EXP = new Uint8Array(512);
 const LOG = new Uint8Array(256);
 (() => {
@@ -47,7 +47,6 @@ export function ecCodewords(data: number[], deg: number): number[] {
   return rem;
 }
 
-// ---- version table (EC-L, single block): size, data codewords, EC codewords, alignment center ----
 interface Ver { size: number; data: number; ec: number; align: number }
 const VERSIONS: Ver[] = [
   { size: 21, data: 19, ec: 7, align: 0 },

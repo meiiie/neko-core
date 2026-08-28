@@ -52,7 +52,6 @@ function report(t: "THESIS" | "HELD" | "RISK" | "N/A", title: string, detail: st
   if (t === "THESIS") thesis++; else if (t === "HELD") held++; else if (t === "RISK") risk++; else na++;
 }
 
-// ---- 1. The article's thesis: the textual seatbelt misses obvious bypasses of "rm -rf /". ----
 console.log(`${B}1. Is the textual seatbelt bypassable? (the article's central claim)${X}`);
 const bypasses: [string, string][] = [
   ["base64 pipe", "echo cm0gLXJmIH4K | base64 -d | bash"],       // decodes to: rm -rf ~
@@ -67,7 +66,6 @@ for (const [name, cmd] of bypasses) {
 }
 console.log(`        ${D}(sanity: naive "rm -rf /" is caught -> ${dangerousCommand("rm -rf /") ?? "null"})${X}\n`);
 
-// ---- 2. neko's real answer: even when a bypass slips the seatbelt, the OS sandbox contains it. ----
 // Uses ONLY git-bash builtins (echo + redirection) so a missing python can't fake a "HELD".
 console.log(`${B}2. Does the OS sandbox contain the consequence the seatbelt missed?${X}`);
 if (live) {
@@ -87,7 +85,6 @@ if (live) {
 }
 console.log("");
 
-// ---- 3. In-workspace destruction: the sandbox allows it BY DESIGN, so the approval layer guards it. ----
 // Two layers to check separately: the sandbox contains the blast radius but keeps the workspace
 // WRITABLE (so in-workspace deletion runs there - expected); the auto-approve guard then withholds
 // the no-prompt fast path for exactly these commands, so the user gets one confirmation.
@@ -107,7 +104,6 @@ if (live) {
   console.log(`        ${D}(sandbox-layer check: a sandboxed "rm -rf victim" ${gone ? "DID delete in-workspace - expected; the guard above is what asks first" : "did not delete - unexpected"})${X}`);
 }
 
-// ---- Verdict ----
 console.log(`\n${B}Verdict${X}`);
 console.log(`  ${Y}THESIS${X} confirmed (seatbelt bypassable): ${thesis}`);
 console.log(`  ${G}HELD${X}   by the OS sandbox / seatbelt:      ${held}`);

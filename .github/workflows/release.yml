@@ -75,10 +75,7 @@ jobs:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - name: compile
-        # scripts/build.ts is the ONE source of truth for compile flags (NODE_ENV define, tsconfig
-        # override, and - on the Windows runner only - the PE branding: Task Manager "Neko Core", the
-        # cat icon, publisher/version/copyright). bun REJECTS --windows-* off Windows, so the script
-        # gates them by host; args are passed as argv (no shell quoting fragility across runners).
+        # scripts/build.ts owns compile flags and host-gated Windows PE metadata.
         shell: bash
         # `bun --revision` first: record the exact embedded runtime version+commit for field forensics.
         run: |

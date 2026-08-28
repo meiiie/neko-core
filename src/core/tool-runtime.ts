@@ -909,9 +909,8 @@ export class ToolRegistry {
     if (args.run_in_background === true && !this.allowBackgroundBash) {
       return "Error: background bash is unavailable in a sub-agent; run it in the parent session so /bashes can inspect and stop it.";
     }
-    // A pre-cancelled turn must never launch a process, especially a persistent background job.
+    // Never launch a process after cancellation.
     if (signal?.aborted) return "(interrupted)";
-    // Per-call timeout (default 60s, clamped to [1s, 10min]) so slow builds/tests aren't cut off.
     const timeoutMs = this.bashTimeoutMs(args);
     const exactValidator = this.turnToolPolicy?.bashPolicy === "foreground-validator-only";
     const network = exactValidator
@@ -935,8 +934,6 @@ export class ToolRegistry {
       denyReadFiles: this.sandboxDenyReadFiles,
       additionalWriteRoots: this.additionalWriteRoots,
     });
-    // Agent-presence opt-in: desktop helpers read NEKO_PRESENCE to show the independent cursor + honour takeover.
-    // Desktop input backend opt-in: NEKO_INPUT picks the non-hijacking (inject) vs legacy (sendinput) path.
     const env: NodeJS.ProcessEnv = scrubChildEnv(process.env, this.childSecretEnvNames);
     Object.assign(env, sb.env);
     if (this.presence) env.NEKO_PRESENCE = "1";
@@ -954,16 +951,12 @@ export class ToolRegistry {
       sb.cleanup?.();
       throw error;
     }
-    // A script can contain credentials. Keep it only while the process may still read it; cleanup
-    // covers foreground, background, detach, timeout, abort and spawn errors.
+    // Temporary scripts may contain credentials and exist only for the child lifetime.
     child.once("close", () => sb.cleanup?.());
     child.once("error", () => sb.cleanup?.());
-    // Cap LIVE accumulation so a runaway command (`yes`, an infinite echo loop) can't grow the buffer
-    // to gigabytes and OOM the process before the timeout fires.
+    // Bound live output before a runaway child can exhaust memory.
     const MAX_BASH_OUTPUT = 200_000;
 
-    // Model-initiated background (run_in_background): start it, return immediately, and keep
-    // accumulating output into a record the user reads with /bashes. For servers/watchers/long jobs.
     if (args.run_in_background === true) {
       const id = `bg${++this.bgCounter}`;
       // SAFETY: optional numeric field; null/undefined keep the omitted behavior.
@@ -1005,7 +998,7 @@ export class ToolRegistry {
     signal?.removeEventListener("abort", onAbort);
     this.detachCurrent = null;
 
-    // Esc / Ctrl+C while a command runs: terminate the entire shell tree, not just its leader.
+    // Cancellation must settle the whole process tree.
     if (outcome.kind === "abort") {
       const stopped = await terminateProcessTree(child);
       sb.cleanup?.();
@@ -1027,7 +1020,6 @@ export class ToolRegistry {
       const id = `bg${++this.bgCounter}`;
       // SAFETY: optional numeric field; null/undefined keep the omitted behavior.
       const bg = { id, command, output, done: false, code: undefined as number | null | undefined };
-      // Keep accumulating into the background record (the same `output` string is snapshotted; rebind).
       child.stdout?.removeListener("data", onData);
       child.stderr?.removeListener("data", onData);
       child.stdout?.on("data", (d: any) => { bg.output += d.toString().slice(0, Math.max(0, MAX_BASH_OUTPUT - bg.output.length)); });
@@ -1231,9 +1223,7 @@ export class ToolRegistry {
     }
     if (name === "task" && signal?.aborted) return "(interrupted)";
 
-    // A trusted hook is executable policy. Run it only after the native/MCP permission decision,
-    // so a denied action cannot mutate through its hook. Read-only reviewer/explorer tasks skip
-    // parent hooks entirely; their SAFE/parallel contract must remain side-effect free.
+    // Hooks run only after permission; read-only delegated tasks never inherit executable hooks.
     const preHookApplies = Boolean(this.hooks?.preToolUse)
       && !(name === "task" && taskDelegatesReadOnly(args));
     const runPreHook = async (): Promise<string | null> => {
@@ -1252,8 +1242,7 @@ export class ToolRegistry {
       return null;
     };
 
-    // Seatbelt: refuse clearly catastrophic bash even in auto mode (not a full sandbox - a
-    // last-resort guard against accidents / prompt injection). Override: allow_dangerous_bash.
+    // The catastrophic-command seatbelt is independent from sandbox and approval mode.
     if (name === "bash" && !this.allowDangerousBash) {
       if (this.mode === "auto" && isDockerCommand(String(args.command ?? ""))) {
         return "Refused: Docker/podman uses the host daemon outside Neko's OS sandbox. In auto mode this requires the explicit allow_dangerous_bash override.";
@@ -1269,15 +1258,12 @@ export class ToolRegistry {
       }
     }
 
-    // web_search: pick the best configured backend (SearXNG > Tavily > DuckDuckGo).
     if (name === "web_search") {
       const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       if (!this.web) return "Error: web adapter is not configured";
       return this.web.search(String(args.query ?? ""), { searxngUrl: this.searxngUrl, backend: this.searchBackend, keepaliveMin: this.searxngKeepalive, tavilyKey: this.tavilyKey });
     }
 
-    // web_fetch: fetch the page, then (if a prompt + summarizer are available) extract just what
-    // was asked via a single model pass — instead of dumping the whole page into context.
     if (name === "web_fetch") {
       const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       if (!this.web) return "Error: web adapter is not configured";
@@ -1294,7 +1280,6 @@ export class ToolRegistry {
       return this.isExplicitYolo() ? "Plan accepted under explicit --yolo authority. Implement it now." : "Plan approved by the user. Implement it now.";
     }
 
-    // todo_write: safe, no approval — record the plan for the REPL to render.
     if (name === "todo_write") {
       const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       if (!Array.isArray(args.todos)) return "Error: todo_write needs a 'todos' array.";
@@ -1317,7 +1302,6 @@ export class ToolRegistry {
       return renderTodos(this.todos);
     }
 
-    // mcp_load: a SAFE meta-tool that pulls MCP tool schemas on demand (lazy mode). No side effects.
     if (name === "mcp_load" && this.mcp?.loadTools) {
       const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       const names = Array.isArray(args.names) ? args.names.map(String) : [String(args.name ?? "")].filter(Boolean);
@@ -1332,7 +1316,6 @@ export class ToolRegistry {
       if (decision === "prompt" && !(await this.prompt(name, args))) {
         return `Denied by user: ${name}${this.denialNote ? `\n${this.denialNote}` : ""}`;
       }
-      // Auto-approved + adversarial review on: vet the call (MCP tools are a prime injection vector).
       if (!declaredSafe && decision === "allow" && this.checkAction) {
         const v = await this.checkAction(name, args);
         if (!v.ok) return `Blocked by adversarial check: ${v.reason || "looks unsafe"}`;
@@ -1361,9 +1344,7 @@ export class ToolRegistry {
         try {
           structuredPath = resolveForWrite(this.root, String(args.path), this.additionalWriteRoots);
         } catch (error) {
-          // A target outside every configured capability is eligible for one explicit, per-call
-          // host-write approval. Resolve through the protected-host filter now; execution receives
-          // this authority only after the prompt below succeeds.
+          // Resolve host writes through the protected-target filter before asking for authority.
           if (!outsideWriteCapabilities(this.root, String(args.path), this.additionalWriteRoots)) throw error;
           structuredPath = resolveForWrite(this.root, String(args.path), this.additionalWriteRoots, true);
           hostWrite = true;
@@ -1378,11 +1359,7 @@ export class ToolRegistry {
       if (refusal) return refusal;
     }
 
-    // Sandboxed-bash auto-approval keys off LIVE confinement (primitive present + provisioned),
-    // never off config intent alone - see decide() for the policy rationale. It is WITHHELD for
-    // commands that irreversibly destroy data inside the workspace: the sandbox contains the blast
-    // radius, but the user's own code + .git are writable, so non-auto modes still get one confirmation.
-    // Ordinary auto and explicit yolo allow them; the catastrophic-command seatbelt remains separate.
+    // Sandbox auto-approval requires live confinement and excludes destructive workspace commands.
     const needsLiveSandboxDecision = spec.name === "bash" && this.sandboxBash
       && this.sandboxAutoApprove && this.mode !== "auto";
     const liveBashSandbox = nativeBackend
@@ -1396,14 +1373,12 @@ export class ToolRegistry {
     const policyWrite = isPolicyConfigTarget(structuredPath);
     const explicitYolo = this.isExplicitYolo();
     let decision = decide(this.mode, spec, args, { sandboxedBash, yolo: explicitYolo });
-    // The user policy file is the one target auto mode may never self-approve: flipping Neko's own
-    // permission/network settings must pass the human gate in EVERY mode (plan still denies above).
+    // Policy mutations require explicit yolo authority or a human gate.
     if (policyWrite && decision === "allow" && !explicitYolo) {
       decision = "prompt";
       this.denialNote = this.denialNote ?? "~/.neko-core/config.json is Neko's policy file: this exact change needs your confirmation and a Neko restart to take effect.";
     }
-    // Auto is bounded workspace autonomy, not ambient host mutation authority. An explicit target
-    // outside the project/additional roots always asks once; plan remains a hard deny.
+    // Auto mode does not grant ambient host-write authority.
     if (hostWrite && !explicitYolo) {
       if (decision === "allow") decision = "prompt";
       this.denialNote = this.denialNote ?? "This target is outside the workspace and configured write roots; only this exact structured change is being requested.";
@@ -1414,8 +1389,7 @@ export class ToolRegistry {
     if (decision === "prompt" && !(await this.prompt(name, args))) {
       return `Denied by user: ${name} (${describe(name, args)})${this.denialNote ? `\n${this.denialNote}` : ""}`;
     }
-    // Adversarial review: when a mutating tool is auto-approved (no human in the loop), a model
-    // pass vets it for prompt injection / destructive intent before it runs.
+    // Review auto-approved mutations when an adversarial checker is configured.
     if (decision === "allow" && effectivePermission(spec, args) === GATED && this.checkAction) {
       const v = await this.checkAction(name, args);
       if (!v.ok) return `Blocked by adversarial check: ${v.reason || "looks unsafe"}`;
@@ -1426,9 +1400,7 @@ export class ToolRegistry {
     }
     const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
 
-    // A generic/custom child inherits mutating authority, so task reaches this point only after the
-    // ordinary gated decision. reviewer/explorer are dynamically safe and capability-restricted by
-    // the host builder. The parent signal is the child's cancellation authority.
+    // Generic children inherit the gated decision; read-only roles are host-restricted.
     if (name === "task") {
       if (signal?.aborted) return "(interrupted)"; // approval/review may have waited after the early check
       if (!this.subagent) return "Sub-agents are not available in this context.";
@@ -1471,9 +1443,7 @@ export class ToolRegistry {
         const succeeded = isText(out) && (name === "write_file" ? out.startsWith("Wrote ") : out.startsWith("Edited "));
         this.finishStructuredMutation(structuredPath, succeeded);
       }
-      // A consented policy-file write must still leave a LOADABLE config: validate the result and
-      // roll back to the pre-image snapshot if the model produced invalid JSON (config-first
-      // hygiene - a broken policy file would brick the next Neko start).
+      // Roll back a policy mutation that leaves invalid JSON.
       if (policyWrite && isText(out) && (out.startsWith("Wrote ") || out.startsWith("Edited "))) {
         try {
           JSON.parse(readFileSync(structuredPath!, "utf-8"));
@@ -1505,10 +1475,7 @@ export class ToolRegistry {
     const raw = requireArg(args, "path");
     const path = resolveForRead(this.root, raw, this.readOutsideRoot);
     if (!existsSync(path)) return `Error: no such file: ${raw}`;
-    // Models occasionally pass a directory to read_file while navigating an unfamiliar tree. A
-    // bounded one-level listing is the useful, read-only interpretation and avoids burning another
-    // provider round-trip merely to recover with ls. Keep symlinks and every other special file on
-    // the strict regular-file path below.
+    // Interpret a directory as one bounded listing; special files retain strict handling.
     if (lstatSync(path).isDirectory()) {
       return `[directory ${raw}; showing entries]\n${await toolLs(this.root, { path: raw }, {
         readOutsideRoot: this.readOutsideRoot,
@@ -1540,11 +1507,8 @@ export class ToolRegistry {
    * Unicode element names go through a temp UTF-8 file (@file) -- the cp1252 console mangles non-ASCII args. */
   private async runComputer(args: any, signal?: AbortSignal): Promise<string | any[]> {
     if (this.computerPort) return this.computerPort.call(args, signal);
-    // An injected backend (e.g. the simulated GUI world in the long-horizon eval) takes over the whole
-    // tool: it needs no real desktop, so it also bypasses the Windows-only guard below. Default unset.
+    // An injected backend owns the complete computer-tool contract.
     if (this.computerHandler) return this.computerHandler(args);
-    // The computer tool drives Windows UI Automation via PowerShell scripts - Windows-only by design.
-    // Fail honestly and immediately on other platforms instead of a confusing spawn error 90s later.
     if (process.platform !== "win32") {
       return "Error: the computer tool is Windows-only (it drives Windows UI Automation via PowerShell). It is not available on this platform.";
     }
@@ -1572,12 +1536,10 @@ export class ToolRegistry {
         script = "uia.ps1"; sa = ["setvalue", atFile(nm), atFile(String(args.value ?? ""))]; break;
       }
       case "click": {
-        // Set-of-Marks: a `mark` (an [N] from the last ocr) is the preferred, grounding-free target -
-        // it resolves to coords in the resident host, so a text model never emits pixels. x,y still work.
+        // Resident OCR marks avoid model-generated pixel coordinates.
         const hasMark = args.mark !== undefined && Number.isInteger(Number(args.mark));
         const x = Number(args.x), y = Number(args.y);
         if (!hasMark && (!Number.isFinite(x) || !Number.isFinite(y))) return "Error: computer click needs a 'mark' number from a prior ocr, or numeric 'x' and 'y'.";
-        // One-shot fallback path only (resident is default): mark can't resolve without the warm host.
         script = "inject.ps1"; sa = hasMark ? ["tap", "0", "0"] : ["tap", String(Math.round(x)), String(Math.round(y))]; break;
       }
       case "stroke": {
@@ -1615,8 +1577,6 @@ export class ToolRegistry {
         const settle = args.settle_ms === undefined ? 500 : Number(args.settle_ms);
         if (!Number.isInteger(duration) || duration < 250 || duration > 30_000) return "Error: computer watch 'duration_ms' must be an integer from 250 to 30000.";
         if (!Number.isInteger(settle) || settle < 100 || settle > 2_000 || settle >= duration) return "Error: computer watch 'settle_ms' must be an integer from 100 to 2000 and less than duration_ms.";
-        // watch is a resident-only event primitive. The assignments satisfy the shared fallback shape;
-        // an unavailable/disabled host returns an explicit wait+read alternative below.
         script = "uia.ps1"; sa = ["read"]; break;
       }
       case "open": {
@@ -1627,8 +1587,7 @@ export class ToolRegistry {
       }
       case "screenshot": {
         capturePath = join(tmpdir(), `neko_shot_${Date.now()}.gif`);
-        // A vision-capable main model gets embedded bytes, so its temp capture can be removed. Keep
-        // the legacy file for a text-only driver: it may hand that path to the separate vision helper.
+        // Text-only drivers retain the capture path for a separate vision helper.
         if (this.vision) tmp.push(capturePath);
         script = "screenshot.ps1";
         sa = [capturePath];
@@ -1668,7 +1627,6 @@ export class ToolRegistry {
           else return response.output?.trim() || "(no output)";
         } catch (error) {
           if (signal?.aborted) return "(interrupted)";
-          // Transport/startup failure only: preserve the proven one-shot adapter as the rollback path.
           debug("computer", () => `resident Windows host unavailable, using one-shot fallback: ${messageOf(error)}`);
         }
       }
@@ -1681,8 +1639,6 @@ export class ToolRegistry {
           ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa],
           { cwd: this.root, env, timeoutMs: 90_000, maxOutputBytes: 8 * 1024 * 1024, signal },
         );
-        // Surface failures instead of swallowing them into "(no output)" — the agent can only adapt to a
-        // failure it can SEE (same contract as the rest of the loop). Timeout/spawn error -> r.error.
         if (r.aborted) return `(interrupted)${r.cleanupConfirmed ? "" : "\n(process-tree cleanup could not be confirmed)"}`;
         if (r.error) return `Error: computer ${action} could not run PowerShell: ${r.error.message}`;
         if (r.timedOut) {
@@ -1694,11 +1650,7 @@ export class ToolRegistry {
       }
       if (capturePath) {
         if (!existsSync(capturePath)) return `Error: computer screenshot did not create an image. ${err || out || ""}`.trim();
-        // Return the observation itself, not a dead temp-file path. This closes the GUI loop in one
-        // tool round-trip: with vision on, the next model call sees the screen; without it, the legacy
-        // saved path remains available to the separate vision helper. Keep scale/view dimensions because
-        // grounded coordinates must map back to physical pixels. The temp image is removed in finally
-        // after its bytes have been embedded in the result.
+        // Preserve view dimensions because grounded coordinates map back to physical pixels.
         const observation = renderImageFile(readFileSync(capturePath), "desktop screenshot", "gif", this.vision);
         if (isText(observation)) return [out, observation].filter(Boolean).join("\n");
         const info = out.replace(/^saved\s+.*?\s+(?=view=)/i, "captured ");
@@ -2145,8 +2097,6 @@ function toolWriteFile(root: string, args: any, opts: ToolOpts): string {
   assertSingleLinkStructuredTarget(path, raw);
   writeFileSync(path, String(content), "utf-8");
   const lines = String(content).split("\n");
-  // Claude-style row: line number (1-based, right-aligned), then the "+" marker, then the content -
-  // same format editDiff uses, so a written file's preview shows line numbers like an edit's does.
   const num = (i: number) => String(i + 1).padStart(4);
   return [
     `Wrote ${raw}  (${existed ? "overwrote, " : ""}+${lines.length})`,
@@ -2154,11 +2104,10 @@ function toolWriteFile(root: string, args: any, opts: ToolOpts): string {
   ].join("\n");
 }
 
-/** A Claude-style unified diff: context lines (plain), removed (-), added (+) with a header. */
+/** A compact unified diff with context, removed and added rows. */
 function editDiff(path: string, origLines: string[], startLine: number, removed: string[], added: string[]): string {
   const ctx = 2;
   const num = (i: number) => String(i + 1).padStart(4); // 1-based line number, right-aligned
-  // Claude-style row: line number FIRST, then the +/-/space marker, then the content.
   const row = (i: number, sign: string, l: string) => `${num(i)} ${sign} ${l}`;
   const out = [`Edited ${path}  (+${added.length} -${removed.length})`];
   const beforeStart = Math.max(0, startLine - ctx);

@@ -189,8 +189,7 @@ function inline(raw: string): ReactNode[] {
     else if (m[3] !== undefined) out.push(<Text key={key++} color="yellow">{m[3]}</Text>);
     else if (m[4] !== undefined) out.push(<Text key={key++} italic>{m[4]}</Text>);
     else if (m[5] !== undefined) {
-      // [text](url): render the label AND carry the url as a real hyperlink (it used to be dropped -
-      // fatal when the answer IS the link, e.g. a sourced product). Non-web targets keep label-only.
+      // Only web and file targets become terminal hyperlinks.
       const url = (m[6] ?? "").trim();
       const linkable = /^https?:\/\/./i.test(url) || /^file:\/\//i.test(url);
       out.push(<Text key={key++} color="cyan" underline>{linkable ? osc8(url, m[5]) : m[5]}</Text>);

@@ -23,7 +23,6 @@ console.log(`session ${id}: ${s.messages.length} messages, ${JSON.stringify(s.me
 const ms = (t0: number) => (performance.now() - t0).toFixed(1) + "ms";
 const tick = (n = 40) => new Promise((r) => setTimeout(r, n));
 
-// --- micro pieces ---
 let t0 = performance.now();
 const tok = estimateTokens(s.messages);
 console.log(`estimateTokens: ${ms(t0)} (=${tok} tok)  <- runs EVERY render until the first API call`);
@@ -41,7 +40,6 @@ t0 = performance.now();
 const flat = flattenLines(fullLines, 100);
 console.log(`flattenLines: ${ms(t0)} (${flat.length} rows)`);
 
-// --- ANSI cache: viewport-scale warm cost + RichView paste cost (per frame) ---
 const CFG = new NekoConfig({}, null, {}, "");
 const { warmAnsiCache, getCachedRows, fallbackRows, clearAnsiCache, WARM_WINDOW } = await import("../src/ui/ansi-cache.ts");
 clearAnsiCache();
@@ -69,7 +67,6 @@ for (let i = 1; i <= 10; i++) {
 console.log(`RichView 10 scroll re-renders: ${ms(t0)} (avg ${((performance.now() - t0) / 10).toFixed(1)}ms/frame)`);
 rv.unmount();
 
-// --- full ChatApp in fullscreen with the real session ---
 process.env.NEKO_FULLSCREEN = "1";
 const provider: any = { complete: async () => ({ content: "ok", tool_calls: [] }) };
 t0 = performance.now();

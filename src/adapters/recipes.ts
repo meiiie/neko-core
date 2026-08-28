@@ -108,8 +108,6 @@ function parse(file: string, suppliedText?: string): Recipe | null {
 }
 
 export function listRecipes(cwd = process.cwd(), home = homeDir()): Recipe[] {
-  // Load filesystem recipes in dir order ([home, cwd]); mergeRecipes keeps the first occurrence
-  // of a name (home overrides cwd) and layers the bundled defaults underneath.
   const filesystem: Recipe[] = [];
   const userDir = join(home, ".neko-core", "recipes");
   if (existsSync(userDir)) {

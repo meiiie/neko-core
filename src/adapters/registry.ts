@@ -9,7 +9,6 @@ import { GATED, listTools, SAFE } from "../core/tools.ts";
 export const READ_ONLY = "read-only";
 export const READ_WRITE = "read-write";
 
-// ---------------------------------------------------------------- agents
 export interface AgentSpec {
   name: string;
   access: typeof READ_ONLY | typeof READ_WRITE;
@@ -78,7 +77,6 @@ export function renderAgentDetail(a: AgentSpec): string {
   return lines.join("\n");
 }
 
-// -------------------------------------------------------------- commands
 export interface CommandSpec {
   name: string;
   group: string;
@@ -135,7 +133,6 @@ export function renderCommands(commands: CommandSpec[]): string {
   return lines.join("\n");
 }
 
-// ----------------------------------------------------------- capabilities
 export interface Capability {
   name: string;
   klass: "agent" | "tool" | "cli";
@@ -184,7 +181,6 @@ export function renderCapabilities(caps: Capability[]): string {
   return ["Neko Core capabilities", ...caps.map((c) => `[${c.klass}] ${c.name}: ${c.status} - ${c.detail}`)].join("\n");
 }
 
-// --------------------------------------------------------------- policy
 export interface PolicyFinding {
   /** `info` states a deliberate posture rather than a problem; it never moves the verdict. */
   severity: "fail" | "warn" | "info";

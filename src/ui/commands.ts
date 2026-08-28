@@ -1255,9 +1255,6 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return addLine("info", "usage: /handoff [send <target-session-id> <summary>|inbox]");
     }
     case "/continue": {
-      // Pick up an interrupted/incomplete task. The trajectory (sealed) + the todo list are already in
-      // context - so tell the agent to resume the first unfinished todo and keep going, not restart.
-      // A single run() naturally loops through steps until the work is done (or it needs you again).
       ctx.runText(
         "Continue the task from where it was interrupted. Review your current todo list and the recent " +
         "tool results above, then resume the FIRST incomplete todo and keep working until every todo is " +

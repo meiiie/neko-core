@@ -1,17 +1,4 @@
-/**
- * Config-first runtime for Neko Core (TypeScript).
- *
- * Behaviour is data, not code. Config resolves by overlaying, lowest precedence first:
- *   1. built-in defaults (DEFAULTS, below)
- *   2. the active profile preset        (pick with --profile / NEKO_PROFILE)
- *   3. ~/.neko-core/config.json        (user-global, claude.json-style home file)
- *   4. ./.neko-core/config.json        (project-local, wins over user/profile)
- *   5. NEKO_* environment variables     (win last)
- *
- * Secrets never live in tracked config: the API key is read on demand from the
- * environment (NEKO_API_KEY / OPENAI_API_KEY / NVIDIA_API_KEY) or the gitignored
- * ~/.neko-core/config.json "api_key" field — never stored in the printable `data`.
- */
+/** Config overlay: defaults -> profile -> global file -> project file -> environment. */
 import { existsSync, readFileSync } from "node:fs";
 import { homeDir } from "../shared/home.ts";
 import { delimiter, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
@@ -60,16 +47,9 @@ export const DEFAULTS: any = {
   base_url: "https://integrate.api.nvidia.com/v1",
   max_steps: 40,
   temperature: 0,
-  // 0 = AUTO (the correct default). On OpenAI-compat + responses APIs the field is then OMITTED, so the
-  // model uses its FULL native output budget -> a large single-shot file write is never truncated mid-tool-call.
-  // The anthropic provider (where max_tokens is REQUIRED) substitutes ANTHROPIC_DEFAULT_MAX_TOKENS and self-heals
-  // downward if a model's real cap is smaller. A hardcoded default (was 8192) silently capped EVERY provider and
-  // defeated the intended "omit -> full budget" path; set a positive value in a profile/config to cap output.
+  // Zero omits optional completion limits; providers with a required limit supply their own default.
   max_tokens: 0,
-  // IDLE timeout (resets on every streamed byte), NOT a total request cap. It only fires on genuine silence,
-  // so it must tolerate a provider that BUFFERS a large tool_use argument (e.g. z.ai/GLM composes a big
-  // write_file JSON server-side, streaming nothing for a while) — 120s killed those legitimate large writes.
-  // A real network drop is caught separately (fetch error -> offline retry), so a generous idle window is safe.
+  // Idle timeout, reset by each streamed byte; this is not a total request deadline.
   timeout_seconds: 300,
   bash_timeout_cap_ms: 600_000, // per-command ceiling; eval/sandbox profiles may fail fast with a lower cap
   max_retries: 4,
@@ -77,18 +57,11 @@ export const DEFAULTS: any = {
   retry_max_delay_seconds: 30,
   offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
   codex_keepalive: 15, // GPT-5.6 App Server idle minutes; 0 keeps it alive until logout/exit
-  // NOTE: `approval` is intentionally NOT in DEFAULTS. It is the legacy alias for `mode`, and a
-  // baked default here would make a FRESH install indistinguishable from a user who explicitly
-  // chose prompt-first. The mode getter resolves: explicit mode > approval=auto > approval=prompt
-  // > AUTO (the 2026 product default - bounded autonomy, consequence-gated).
-  // Bash OS sandbox ON by default (owner decision, 2026-07-22): machines with a primitive
-  // (bwrap / Seatbelt / srt) confine bash out of the box; "none" machines fall back to the
-  // seatbelt + gate unchanged. Opt out: "sandbox": false or NEKO_SANDBOX=0.
+  // `approval` is omitted so the mode getter can distinguish legacy user intent from the default.
   sandbox: true,
   sandbox_network: false, // egress blocked inside the sandbox by default
   sandbox_domains: [], // srt (Windows) allowlist used when sandbox_network is true (no allow-all in srt)
-  // Sandboxes confine writes/egress but intentionally retain broad host reads. Keep bash approval
-  // on by default until read-deny/redaction coverage is a verified confidentiality boundary.
+  // A live sandbox alone is not a verified read-confidentiality boundary.
   sandbox_auto_approve: false,
   effort_ceiling: "high", // highest reasoning_effort the endpoint accepts (OpenAI standard caps at high); a profile can raise it
   adaptive_effort: false, // experimental lagged proxy; keep full effort unless a workload-specific eval proves it safe
@@ -97,33 +70,17 @@ export const DEFAULTS: any = {
   auto_update_check: true, // check for a newer release at startup (daily-cached; set false to silence)
   auto_update: true, // AUTO-INSTALL that newer release in the background (claude-code style); false = notify only
   completion_sound: true, // branded native sound (terminal-bell fallback) after a durable turn
-  // READS may leave the project directory. A structured write elsewhere needs exact human consent;
-  // Bash never inherits that exception. Reading a doc, skill, or sibling repo damages nothing, while
-  // refusing it made ordinary work impossible. Credential paths stay refused either way. Set false
-  // for a hard wall around the project.
+  // Credential paths remain refused even when reads may leave the project root.
   read_outside_root: true,
-  // Structured writes and sandboxed bash may also modify these durable directory capabilities without
-  // another prompt. Neko's research ledger is built in; broader roots remain explicit policy.
   additional_write_roots: [],
   mcp_servers: {}, // name -> { command, args?, env? } for stdio MCP servers
-  // The oracle: a second opinion from a STRONGER model, consulted with a curated bundle of files and
-  // no tools. `profile` names any profile below - which model is "the strong one" is your decision, not
-  // ours, so there is no default. Empty = the feature reports how to turn it on instead of guessing.
-  // `effort` is the oracle's own reasoning tier. The whole point of the feature is ONE expensive
-  // question, so it is worth spending more there than on an ordinary turn. Empty = whatever the
-  // profile already resolves to.
   oracle: { profile: "", model: "", effort: "", max_bytes: 400_000, max_file_bytes: 128_000, max_files: 80 },
-  // Exact Chrome extension ids allowed to pair with the loopback Browser Bridge. The bundled
-  // developer id is deterministic; add the Chrome Web Store item id here after its first upload.
   browser_extension_ids: ["koalaflndbcddboachbdfmppdeblldje"],
   browser_extension_store_id: "", // owner fills this after Web Store item issuance; install then opens the listing
   active_profile: null,
   profiles: {
-    // A new model/endpoint is a data edit, not a code change. "Offline" = point a
-    // profile at a local OpenAI-compatible server (llama-server :8080, Ollama :11434).
     nvidia: { provider: "openai_compat", base_url: "https://integrate.api.nvidia.com/v1", model: "z-ai/glm-5.2", key_env: "NVIDIA_API_KEY" },
     openai: { provider: "openai_compat", family: "openai", label: "API key (pay-as-you-go)", auth: "api_key", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", key_env: "OPENAI_API_KEY" },
-    // ChatGPT Plus/Pro subscription via OAuth and the Codex Responses backend (not API billing).
     chatgpt: {
       provider: "chatgpt",
       family: "openai",
@@ -133,14 +90,10 @@ export const DEFAULTS: any = {
       model: "gpt-5.5",
       models: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"],
       model_context: { "gpt-5.5": 272_000, "gpt-5.4": 272_000, "gpt-5.4-mini": 272_000, "gpt-5.3-codex-spark": 128_000 },
-      // The live account catalog advertises low/medium/high/xhigh/max/ultra for gpt-5.6; this said xhigh
-      // and silently clamped every request for the two tiers above it. The catalog is account-aware and
-      // authoritative (see chatgpt-provider.ts), and the provider heals downward from a rejection, so a
-      // ceiling ABOVE what an account offers costs nothing while a ceiling below it hides what it paid for.
+      // The account catalog remains authoritative; rejection handling can lower this ceiling.
       effort_ceiling: "ultra",
       vision: true,
     },
-    // Gemini Code Assist Standard/Enterprise through official Gemini CLI ACP. Consumer OAuth ended 2026-06-18.
     gemini: {
       provider: "gemini_cli",
       family: "google",
@@ -164,7 +117,6 @@ export const DEFAULTS: any = {
       vision: true,
       key_env: "GEMINI_API_KEY",
     },
-    // Official Anthropic Messages API. Native Claude keeps signed thinking blocks across tool turns.
     claude: {
       provider: "anthropic",
       family: "anthropic",
@@ -196,10 +148,7 @@ export const DEFAULTS: any = {
       image_long_edge: 2576,
       image_max_bytes: 4_500_000,
     },
-    // NOTE: vision is intentionally OFF. The z.ai GLM Coding Plan endpoint is TEXT-ONLY — sending image
-    // content returns HTTP 400 ("messages.content.type ... allowed values: ['text']"). vision:true here would
-    // make read_file hand images to a model that rejects them. For document/image OCR with GLM, neko must fall
-    // back to on-screen OCR; for true image understanding, use a vision endpoint (claude/gemini/kimi profiles).
+    // GLM Coding Plan rejects image content; absence of `vision` is intentional.
     zai: {
       provider: "anthropic",
       family: "zai",
@@ -226,7 +175,6 @@ export const DEFAULTS: any = {
       effort_ceiling: "max",
       key_env: "ZAI_API_KEY",
     },
-    // Most hosted providers are OpenAI-compatible -> a profile, not new code. Set your model with /model.
     groq: { provider: "openai_compat", base_url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile", key_env: "GROQ_API_KEY" },
     deepseek: {
       provider: "openai_compat",
@@ -246,9 +194,7 @@ export const DEFAULTS: any = {
     mistral: { provider: "openai_compat", base_url: "https://api.mistral.ai/v1", model: "mistral-large-latest", key_env: "MISTRAL_API_KEY" },
     together: { provider: "openai_compat", base_url: "https://api.together.xyz/v1", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo", key_env: "TOGETHER_API_KEY" },
     fireworks: { provider: "openai_compat", base_url: "https://api.fireworks.ai/inference/v1", model: "accounts/fireworks/models/llama-v3p3-70b-instruct", key_env: "FIREWORKS_API_KEY" },
-    // xAI exposes two intentionally separate billing routes. `grok` uses the user's Grok
-    // subscription through xAI's published device-OAuth + cli-chat-proxy contract; `xai` and
-    // `grok-build` remain pay-as-you-go API-key profiles and never consume subscription tokens.
+    // Subscription OAuth and API-key billing remain separate routes.
     grok: {
       provider: "responses",
       family: "xai",
@@ -289,8 +235,7 @@ export const DEFAULTS: any = {
       vision: true,
       key_env: "XAI_API_KEY",
     },
-    // Kimi Code account OAuth is an official RFC 8628 public-client flow. Neko owns its token file;
-    // it never imports Kimi CLI or CLIProxyAPI credentials.
+    // Neko owns the RFC 8628 token file and never imports another client's credentials.
     kimi: {
       provider: "kimi",
       family: "kimi",
@@ -325,9 +270,7 @@ export const DEFAULTS: any = {
       key_env: "KIMI_API_KEY",
       key_env_fallbacks: ["MOONSHOT_API_KEY"],
     },
-    // OpenRouter exposes an OpenAI-compatible transport plus a live, heterogeneous model catalog.
-    // Leave model empty on purpose: /model discovers the current tool-capable catalog instead of
-    // pinning a vendor/model choice that can age or disappear behind the router.
+    // Empty model defers selection to the live OpenRouter catalog.
     openrouter: {
       provider: "openai_compat",
       family: "openrouter",
@@ -337,9 +280,6 @@ export const DEFAULTS: any = {
       model: "",
       key_env: "OPENROUTER_API_KEY",
     },
-    // Multi-model gateways stay ordinary OpenAI-compatible profiles. Their browser account login
-    // only manages API keys; neither service publishes a third-party OAuth/device flow for Neko.
-    // Keep a verified starter model while /model discovers the account's current catalog at runtime.
     bai: {
       provider: "openai_compat",
       family: "bai",
@@ -363,8 +303,6 @@ export const DEFAULTS: any = {
       effort_ceiling: "max",
       key_env: "TOKENROUTER_API_KEY",
     },
-    // OpenCode Console account via the official opencode-cli public-client device OAuth flow. The
-    // account-managed /api/config catalog decides the endpoint and protocol for each provider/model.
     "opencode-account": {
       provider: "opencode_account",
       family: "opencode",
@@ -374,8 +312,6 @@ export const DEFAULTS: any = {
       model: "",
       effort_ceiling: "max",
     },
-    // OpenCode Zen service-account/API key remains a separate, backwards-compatible billing route.
-    // The edge adapter selects Responses, Anthropic Messages, or Chat Completions per model.
     opencode: {
       provider: "opencode",
       family: "opencode",
@@ -388,8 +324,7 @@ export const DEFAULTS: any = {
       context_window: 131_072,
       key_env: "OPENCODE_API_KEY",
     },
-    // Cline Account uses Cline's official WorkOS device flow. Neko stores and refreshes its own
-    // Cline-scoped token; it never imports credentials from the Cline extension or CLI.
+    // Neko stores and refreshes its own Cline-scoped token.
     "cline-account": {
       provider: "cline_account",
       family: "cline",
@@ -400,7 +335,6 @@ export const DEFAULTS: any = {
       models: ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4-flash", "poolside/laguna-s-2.1:free"],
       effort_ceiling: "max",
     },
-    // Direct Cline API access is deliberately separate from the account/subscription route.
     cline: {
       provider: "openai_compat",
       family: "cline",
@@ -412,14 +346,11 @@ export const DEFAULTS: any = {
       effort_ceiling: "max",
       key_env: "CLINE_API_KEY",
     },
-    // Mixture-of-Agents: diverse advisors analyze, a strong aggregator synthesizes + acts. `neko
-    // --profile moa`. Opt-in quality mode (N+1 model calls/turn) — best where one model is weak.
     moa: {
       provider: "moa",
       base_url: "https://integrate.api.nvidia.com/v1",
       moa: { references: ["deepseek-ai/deepseek-v4-pro", "meta/llama-3.3-70b-instruct"], aggregator: "openai/gpt-oss-120b" },
     },
-    // Local servers (no API key needed):
     ollama: { provider: "openai_compat", auth: "none", base_url: "http://localhost:11434/v1", model: "llama3.2" },
     lmstudio: { provider: "openai_compat", auth: "none", base_url: "http://localhost:1234/v1", model: "local-model" },
     local: { provider: "openai_compat", auth: "none", base_url: "http://127.0.0.1:8080/v1", model: "local-model" },
@@ -585,10 +516,7 @@ export class NekoConfig {
     if (env === "0" || env === "false") return false;
     return this.data.auto_update !== false;
   }
-  /** UI frame rate cap (Ink renders + scroll-glide hops). Default 60 - matches most displays and the
-   * conpty/WT floor. High-refresh monitors (120/144Hz) can raise it via `ui_fps` (or NEKO_FPS); the
-   * render pipeline is cheap enough (sub-ms hops, ~250-byte repaints) that 120 costs nothing. Above
-   * the display's refresh the extra frames are simply never shown. Clamped 30..240. */
+  /** UI frame rate from NEKO_FPS or config, clamped to 30..240. */
   get uiFps(): number {
     const env = Number(process.env.NEKO_FPS);
     const v = Number.isFinite(env) && env > 0 ? env : Number(this.data.ui_fps ?? 60);
@@ -608,12 +536,7 @@ export class NekoConfig {
       if (v === "bar" || v === "block" || v === "underline") return v;
       return "thin-block";
     }
-  /** Fullscreen (alt-screen, scrollable viewport) is the sole interactive mode - there is no runtime
-   * toggle; it is the main experience (real scrolling, glide, hover, flicker-free), and /copy serves the
-   * copy that fullscreen's mouse-capture keeps native selection from reaching. Terminals that can't host
-   * it (non-TTY / too small) fall back to inline automatically (canFullscreen). This flag stays as an
-   * internal escape hatch for that fallback + tests (NEKO_FULLSCREEN=0 / `fullscreen: false`), not a
-   * user-facing option. */
+  /** Internal fullscreen escape hatch for unsupported terminals and tests. */
   get fullscreen(): boolean {
     const env = process.env.NEKO_FULLSCREEN;
     if (env === "1" || env === "true") return true;
@@ -820,11 +743,7 @@ export class NekoConfig {
     return v === "auto" ? "auto" : "prompt";
   }
 
-  /** Permission mode: explicit `mode` in config, else derived from legacy `approval`.
-   * The product default is now AUTO (owner decision, 2026-08-17, matching the 2026 industry
-   * shift Claude Code pioneered): bounded autonomy out of the box, and only genuinely
-   * consequential surfaces still ask — host computer control, the policy file itself,
-   * catastrophic shell (seatbelt), credential paths, and anything outside the workspace. */
+  /** Explicit mode, legacy approval mapping, then bounded-auto default. */
   get mode(): PermissionMode {
     const raw = String(this.data.mode ?? "").trim().toLowerCase();
     if (isMode(raw)) return raw;
@@ -876,8 +795,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   const cwd = opts.cwd ?? process.cwd();
   const home = opts.home ?? homeDir();
   const projectTrust = opts.path ? null : inspectProjectTrust(cwd, home);
-  // Config files, lowest precedence first. `./neko.json` (project root) is the easy, discoverable
-  // settings file (claude.json / codex style); keep secrets out of it (api_key -> ~/.neko-core or env).
+  // Project config is trust-gated; credentials stay in the global file or environment.
   const overlayEntries: { path: string; data: any }[] = opts.path
     ? [{ path: opts.path, data: readOverlay(opts.path) }]
     : [
@@ -890,13 +808,11 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const filesMerged = overlays.reduce((acc, o) => mergeDeep(acc, o), {} as any);
 
-  // Built-in profiles are always available; files may add or override individual ones (merge, not replace).
   const profiles: Record<string, Profile> = mergeDeep(
     structuredClone(DEFAULTS.profiles),
     isObjectValue(filesMerged.profiles) ? filesMerged.profiles : {},
   );
 
-  // Profile selection: explicit arg > NEKO_PROFILE > files' active_profile > built-in default.
   const selected =
     (opts.profile || process.env.NEKO_PROFILE?.trim() || filesMerged.active_profile || DEFAULTS.active_profile || "").trim() || null;
   if (selected && !(selected in profiles)) {
@@ -904,8 +820,6 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
     throw new Error(`Unknown profile '${selected}'. Available: ${available}`);
   }
 
-  // Precedence: built-in defaults -> profile PRESET -> config files -> NEKO_* env. So an explicit
-  // file (e.g. ./neko.json with a local base_url) overrides the profile, not the other way round.
   let merged: any = structuredClone(DEFAULTS);
   if (selected) merged = mergeDeep(merged, profiles[selected]);
   for (const overlay of overlays) merged = mergeDeep(merged, overlay);
@@ -920,8 +834,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
     if (Object.keys(fromMcpJson).length) merged.mcp_servers = { ...(merged.mcp_servers ?? {}), ...fromMcpJson };
   }
 
-  // Pull the file-provided key out before building the printable dict (never printed).
-  // Resolve the key. Explicit config > profile env.
+  // Remove credentials before constructing printable config data.
   const keyEnv = merged.key_env ? String(merged.key_env) : "";
   const fallbackKeyEnvs = Array.isArray(merged.key_env_fallbacks) ? merged.key_env_fallbacks.map(String) : [];
   const envKey = [keyEnv, ...fallbackKeyEnvs]
@@ -935,7 +848,6 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   delete merged.profiles;
   delete merged.active_profile;
 
-  // NEKO_* env overrides win last (except the secret/profile keys handled above).
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith("NEKO_")) continue;
     const suffix = key.slice("NEKO_".length);
@@ -944,9 +856,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
     merged[configKey] = BOOLEAN_ENV_KEYS.has(configKey) ? parseBooleanEnv(key, value ?? "") : value;
   }
 
-  // The #1 config trap: a top-level `model` in a file (or NEKO_MODEL) legitimately wins over the profile
-  // PRESET — but it wins over EVERY profile, so `--profile x` silently keeps sending the file's model.
-  // Behaviour is unchanged here; we just record the fact + its source so doctor can name it.
+  // Retain a model-shadow diagnostic when a top-level override masks a profile preset.
   const profileModel = selected ? String(profiles[selected].model ?? "").trim() : "";
   const effectiveModel = String(merged.model ?? "").trim();
   let modelShadow: { source: string; profileModel: string } | null = null;

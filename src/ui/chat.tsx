@@ -343,7 +343,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setApprovalCursorHidden(stdout, true);
     return () => setApprovalCursorHidden(stdout, false);
   }, [approval !== null, stdout]);
-  // Pointer-hovered option zone in the approval box (index into approvalOptions; null = none).
   const [approvalHover, setApprovalHover] = useState<number | null>(null);
   useEffect(() => { setApprovalHover(null); }, [approval]);
   const approvalFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -363,32 +362,28 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [elapsed, setElapsed] = useState(0);
   const [queued, setQueued] = useState(0);
   const [step, setStep] = useState(0);
-  const [reasoning, setReasoning] = useState(""); // live model thinking (shown while busy, then cleared)
+  const [reasoning, setReasoning] = useState("");
   const [voiceSnapshot, setVoiceSnapshot] = useState<VoiceSnapshot | null>(null);
   const [voiceTranscript, setVoiceTranscript] = useState<{ role: string; text: string } | null>(null);
   const [voiceControlHover, setVoiceControlHover] = useState<"mute" | "stop" | null>(null);
   const [voiceNow, setVoiceNow] = useState(Date.now());
   const reasoningRef = useRef("");
-  const toolStreamRef = useRef(""); // streamed tool-call args this turn (counted, not displayed)
-  const turnInStartRef = useRef(0); // cost.promptTokens at turn start  -> live INPUT (up) counter, this turn's delta
-  const turnOutStartRef = useRef(0); // cost.completionTokens at turn start -> live OUTPUT (down) counter, this turn's delta
-  const turnCallsStartRef = useRef(0); // usage-bearing provider calls; distinguishes a turn sum from one request
-  const liveUsageRef = useRef<Usage | null>(null); // authoritative provider snapshot while the turn is still running
-  const turnGeneratedCharsRef = useRef(0); // monotonic across tool-segment flushes inside one provider call
-  const usageSnapshotCharsRef = useRef(0); // generated chars already represented by liveUsageRef
-  const turnInputEstimateRef = useRef(0); // immediate context estimate; marked ~ until provider usage arrives
+  const toolStreamRef = useRef("");
+  const turnInStartRef = useRef(0);
+  const turnOutStartRef = useRef(0);
+  const turnCallsStartRef = useRef(0);
+  const liveUsageRef = useRef<Usage | null>(null);
+  const turnGeneratedCharsRef = useRef(0);
+  const usageSnapshotCharsRef = useRef(0);
+  const turnInputEstimateRef = useRef(0);
   const turnStartedAtRef = useRef(0);
-  // Recover the todo tracker for a session resumed AT STARTUP (--resume/--continue), so its plan shows.
   const [todos, setTodos] = useState<{ content: string; status: string }[]>(() =>
     resumedRef.current ? recoverTodos(resumedRef.current.messages) : [],
   );
   const [overlay, setOverlay] = useState<Overlay | null>(null);
-  // Start fullscreen only if configured AND the terminal can host it (a TTY with room). A non-TTY or a
-  // tiny window degrades to inline rather than corrupting the screen.
-  // Fullscreen is the sole interactive mode: on for any capable TTY, off (inline fallback) only when the
-  // terminal can't host it (non-TTY / too small). Set once at mount - there is no runtime toggle.
+  // Fullscreen is fixed at mount; incapable terminals stay inline.
   const [fullscreen] = useState<boolean>(initialFullscreen);
-  const fullscreenRef = useRef(fullscreen); // for closures that read the mode (resize debounce, mount effect)
+  const fullscreenRef = useRef(fullscreen);
   const contentColsRef = useRef(Math.max(20, (stdout?.columns ?? 80) - 4));
   useEffect(() => { fullscreenRef.current = fullscreen; }, [fullscreen]);
   // Brand the tab title on mount - AFTER Ink's first render, when VT processing is on, so the OSC 2 write
@@ -400,9 +395,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     tabTitle(titleTaskRef.current || "Neko Core", false);
     return stopTabTitle;
   }, []);
-  // Effective UI fps: env > config > /fps pref > detected display Hz > 60. Auto mode probes the display
-  // in the background on first run (subprocess, never blocks startup): the scroll glide adapts LIVE this
-  // session; Ink's render cap (fixed at instance creation) picks the value up from the cache next launch.
   const [fps, setFps] = useState(() => resolveUiFps(cfg.uiFpsConfig).fps);
   const fpsRef = useRef(fps);
   useEffect(() => { fpsRef.current = fps; }, [fps]);
@@ -582,7 +574,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setStream("");
     relayRef.current?.publish({ type: "stream", text: "" });
     bridgeHolder?.current?.pushPanel({ type: "stream", text: "" }); // end the panel's live bubble
-    reasoningRef.current = ""; // thinking is transient: it vanishes once the step produces output
+    reasoningRef.current = "";
     toolStreamRef.current = "";
     setReasoning("");
   };
@@ -614,7 +606,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       baseRegistry,
       cfg,
     );
-    if (resumedRef.current) registryRef.current.todos = recoverTodos(resumedRef.current.messages); // keep the tracker + registry in sync on startup resume
+    if (resumedRef.current) registryRef.current.todos = recoverTodos(resumedRef.current.messages);
     // Sub-agents are depth 1. Generic/custom workers inherit the parent's gated authority;
     // reviewer/explorer are intersected with an explicit read-only capability set.
     registryRef.current.subagent = async (prompt, type, signal) => {
@@ -644,7 +636,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       let child: Agent | undefined;
       try {
         applySkillPolicyForTurn(subReg, prompt, subReg.root, cfg.resolvedHome);
-        const systemPrompt = (subagentType && loadAgent(subagentType)?.body) || DEFAULT_SYSTEM_PROMPT; // named agent role, else default
+        const systemPrompt = (subagentType && loadAgent(subagentType)?.body) || DEFAULT_SYSTEM_PROMPT;
         childProvider = provider ?? getProvider(cfg);
         child = new Agent({
           provider: childProvider,
@@ -668,7 +660,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         }
       }
     };
-    // web_fetch's optional extractor: one model pass over the fetched page (Claude-style).
     registryRef.current.summarize = async (instruction, content, schema) => {
       const helperProvider = provider ?? getProvider(cfg);
       try {
@@ -750,7 +741,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
         streamRef.current += t;
-        remoteSinkRef.current?.(t); // also stream to a remote /message?SSE client driving this turn
+        remoteSinkRef.current?.(t);
         maybePump();
       },
       onEvent: (kind, data) => {
@@ -768,22 +759,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           );
         } else if (kind === "tool_call") {
           flushStream();
-          // Defer the commit: show this call LIVE with a blinking dot (RunningLine) while it runs;
-          // it commits to <Static> paired with its result below. Keyed by call id so parallel calls pair up.
           const k = data.id || data.name || `t${inflightRef.current.length}`;
           const call = describeToolCall(data.name, data.arguments);
           inflightRef.current.push({ key: k, text: call });
-          remoteActRef.current?.(call); // the phone's process ticker shows the same line the terminal does
+          remoteActRef.current?.(call);
           relayRef.current?.publish({ type: "activity", id: k, text: call });
           syncInflight();
         } else if (kind === "tool_result") {
-          // The call finished: drop its blinking line and commit tool_call + result to <Static> (solid dot).
           const k = data.call?.id || data.call?.name;
           const idx = inflightRef.current.findIndex((x) => x.key === k);
           const done = idx >= 0 ? inflightRef.current.splice(idx, 1)[0] : { text: describeToolCall(data.call?.name, data.call?.arguments) };
           syncInflight();
-          // Successful activity becomes one past-tense line. The same Line retains call + output for
-          // Ctrl+O; failures remain expanded as a call followed by its diagnostic.
           const obs = contentToText(data.observation).split("\n").slice(0, 400).join("\n");
           const summary = resultSummary(data.call?.name, obs, data.call?.arguments);
           if (summary) addLine("tool_result", `${done.text}\n${obs}`, summary);
@@ -791,7 +777,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             addLine("tool_call", done.text);
             addLine("tool_result", obs);
           }
-          setTodos([...registryRef.current!.todos]); // reflect todo_write changes
+          setTodos([...registryRef.current!.todos]);
         } else if (kind === "step") {
           setStep(data);
         } else if (kind === "recovery") {
@@ -799,8 +785,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           addLine("info", `watchdog: provider stream interrupted (${data.reason}); continuing from checkpoint (${data.attempt}/${data.max})`);
           queuePersist();
         } else if (kind === "compact") {
-          // In-loop safety-net compaction (a single huge turn). Show the same progress bar; the agent
-          // emits compact_done when its summarizer call returns.
           flushStream();
           setCompacting({ start: Date.now() });
         } else if (kind === "compact_done") {
@@ -810,7 +794,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     });
     if (resumedRef.current) {
       agentRef.current.messages = [...resumedRef.current.messages];
-      agentRef.current.refreshSystemPrompt(); // apply the current prompt to the resumed session
+      agentRef.current.refreshSystemPrompt();
     }
   }
 
@@ -838,14 +822,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       title: pinnedTitleRef.current || undefined,
       messages: agentRef.current!.messages,
     });
-  persistRef.current = persist; // onEvent (set up once) calls through this ref so mid-turn checkpoints use the latest
+  persistRef.current = persist;
 
-  // Load a session's history into the live agent AND replay it into the transcript (like opening a
-  // chat thread — you see the whole prior conversation, not just a note).
-  // Run a compaction with the visible progress bar (image #16 parity). Standalone - not tied to a
-  // turn's busy flag - so it also drives /compact, the post-turn auto-compact, and resume-from-summary.
+  // Standalone compaction also serves /compact and resume-from-summary without setting turn busy state.
   const runCompaction = async (reason: "manual" | "auto" | "resume"): Promise<string> => {
-    if (compactingRef.current) return ""; // already compacting -> don't stack two summarizer calls
+    if (compactingRef.current) return "";
     compactingRef.current = true;
     setCompacting({ start: Date.now() });
     try {
@@ -875,17 +856,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   };
 
-  // Load a session into the agent and replay it. `mode: "summary"` compacts BEFORE replaying, so a
-  // huge old session doesn't drop you straight into a near-full context window (image #16's flow:
-  // pick session -> compacting bar -> the condensed thread). Todos are recovered from the ORIGINAL
-  // messages (pre-compaction), so an interrupted plan survives even if it lived in the summarized head.
+  // Recover todos before optional compaction so plans in the summarized head survive resume.
   const doResume = async (target: Session, mode: "summary" | "full") => {
     agentRef.current!.messages = [...target.messages];
-    agentRef.current!.refreshSystemPrompt(); // apply the current prompt to the resumed session
+    agentRef.current!.refreshSystemPrompt();
     sessionIdRef.current = target.id;
     createdAtRef.current = target.createdAt;
-    // The tab follows the SWITCH: this is now the resumed session, so retitle to ITS name (saved /title
-    // name, pinned - or its first user message) instead of keeping the previous session's (image #59).
     const fu = target.messages.find((m) => m.role === "user");
     const tname = target.title || (isText(fu?.content) ? fu.content.replace(/\s+/g, " ").trim() : "");
     titleLockedRef.current = !!target.title;
@@ -893,21 +869,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     titleTaskRef.current = tname ? trunc(tname, 40) : "";
     tabTitle(titleTaskRef.current || "Neko Core", busyRef.current);
     relayRef.current?.refresh();
-    const todos = recoverTodos(target.messages); // from the FULL thread, before any compaction
+    const todos = recoverTodos(target.messages);
     registryRef.current!.todos = todos;
     setTodos(todos);
     setStarted(true);
-    // APPEND the replayed thread to the existing transcript (Static is append-only) instead of a raw
-    // screen-wipe + remount. The wipe used a raw escape that froze real terminals; appending is the
-    // framework-safe way - the resumed thread renders below, old scrollback stays.
+    // Static is append-only; a raw screen wipe would desynchronize Ink.
     if (mode === "summary") {
       setLines((prev) => [...prev, { id: idRef.current++, kind: "info", text: `-- resuming ${target.id} from a summary (${target.messages.length} messages) --` }]);
-      await runCompaction("resume"); // shows the compacting bar; rewrites agent.messages to the summary + recent tail
+      await runCompaction("resume");
     } else {
       setLines((prev) => [...prev, { id: idRef.current++, kind: "info", text: `-- resumed ${target.id} (${target.messages.length} messages) --` }]);
     }
-    // Replay from the CURRENT agent messages (post-compaction if summarized). This is a bounded screen
-    // projection with tool calls/results; agent.messages remains the full continuation source.
     const replay: Line[] = fullscreen
       ? buildReplayLines(agentRef.current!.messages, () => idRef.current++, { mode: "resume", columns: cols })
       : replaySessionLines(agentRef.current!.messages, () => idRef.current++, {
@@ -920,12 +892,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     relayRef.current?.publish({ type: "snapshot", lines: replay.map((line) => ({ ...line, text: line.text.slice(0, 200_000) })) }, { durable: true, reset: true });
   };
 
-  // Entry point for the /resume picker. For a LARGE session, first offer to resume from a summary
-  // (claude-parity, image #15) - resuming a huge thread in full immediately eats a big slice of the
-  // context window. Small sessions (or a persisted "don't ask again") resume in full silently.
-  // Open the full-thread viewer (/transcript). Built from agent.messages - the source of truth for the
-  // WHOLE conversation (resumed history + every turn since) - so it shows everything, incl. the earlier
-  // lines the bounded resume replay didn't re-print.
   const openTranscript = () => {
     const full = buildReplayLines(agentRef.current!.messages, () => idRef.current++);
     if (!full.length) { addLine("info", "(nothing in the conversation yet)"); return; }
@@ -938,14 +904,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // `/copy` = last response; `/copy all` = the whole conversation.
   const copyBoth = (text: string): boolean => {
     // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
-    if (!copyToClipboard(text, (stdout as any) ?? process.stdout)) return false; // OSC 52; false on empty
-    writeClipboardText(text); // + local OS clipboard, best-effort
+    if (!copyToClipboard(text, (stdout as any) ?? process.stdout)) return false;
+    writeClipboardText(text);
     return true;
   };
   const copyTranscript = (arg: string) => {
     if (arg.trim() === "all") {
       const text = lines.filter((l) => l.kind === "user" || l.kind === "assistant" || l.kind === "tool_result").map((l) => l.text).join("\n\n");
-      // Report what was ACTUALLY copied: OSC 52 payloads are clipped to MAX_COPY_CHARS (terminal caps).
       const note = text.length > MAX_COPY_CHARS ? `first ${MAX_COPY_CHARS} of ${text.length} chars (clipped - terminals cap the payload)` : `~${text.length} chars`;
       addLine("info", copyBoth(text) ? `copied the conversation to the clipboard - ${note}` : "(nothing to copy)");
       return;
@@ -954,18 +919,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     addLine("info", last && copyBoth(last.text) ? "copied the last response to the clipboard" : "(no response to copy yet)");
   };
 
-  // --- Mouse drag-to-select + copy (fullscreen captures the mouse, so the terminal's native
-  // select-to-copy is off; we provide our own, like Claude Code). A left-drag paints a solid highlight
-  // over the transcript; it PERSISTS after release so the "select, then Ctrl+C" habit works, and it also
-  // copies on release. The selection is anchored to CONTENT rows (indices into the transcript), so a drag
-  // can run PAST the top/bottom edge - the view auto-scrolls and the highlight keeps extending over the
-  // text above/below the fold, and scrolling afterward doesn't lose it (the differ re-maps content->screen).
-  //
-  // The PROMPT needs a second, separate model. It is not part of the transcript band, so a content-row
-  // anchor cannot describe it; a selection there is a codepoint range in the input value, rendered by
-  // TextInput itself. Both end in the same place - the text is copied on release and remembered for
-  // Ctrl+C - so from the user's side there is one gesture, not two. ---
-  const selAnchor = useRef<{ x: number; row: number } | null>(null); // where a left-drag began: 1-based screen col + CONTENT row index
+  // Fullscreen owns mouse input, so transcript selections use content-row anchors that survive scrolling.
+  // Prompt selections use codepoint ranges because the prompt lives outside the transcript band.
+  const selAnchor = useRef<{ x: number; row: number } | null>(null);
   const edgeDrag = useRef<{ dir: -1 | 1; x: number; startedAt: number } | null>(null);
   const edgeScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const edgeScrollTick = useRef<() => void>(() => {});
@@ -1055,8 +1011,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // drop the selection whenever the line count changes (a new turn, a committed reply, etc.).
   useEffect(() => { clearSelection(); }, [lines.length]);
 
-  // /title <name>: name the SESSION (persisted - shows in /resume) and pin the TAB title to it (auto
-  // per-turn updates stop). /title alone reports the current state.
   const applyTitle = (name: string) => {
     if (!name) {
       return addLine("info", titleLockedRef.current
@@ -1072,8 +1026,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     addLine("info", `session + tab named "${trunc(name, 60)}"`);
   };
 
-  // Apply a /fps choice: persist it, re-resolve (env/config still win - say so honestly), adapt the
-  // scroll glide NOW; Ink's render cap follows next launch (fixed at instance creation).
   const applyFps = (choice: number | "auto") => {
     savePrefs({ uiFps: choice === "auto" ? "auto" : clampFps(choice) });
     const r = resolveUiFps(cfg.uiFpsConfig);
@@ -1087,10 +1039,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (choice === "auto" && !r.detected) void detectRefreshRate().then((hz) => { if (hz) { setFps(clampFps(hz)); addLine("info", `display detected at ${hz}Hz - now ${clampFps(hz)}fps`); } }).catch(() => {});
   };
 
-  // Fullscreen (alt-screen scrollable viewport) is the sole interactive mode - there is no runtime toggle.
-  // A capable TTY starts fullscreen (mount effect below enters the alt-screen); a terminal that can't host
-  // it (non-TTY / too small) falls back to inline automatically. Copy that native select-to-copy can't
-  // reach in fullscreen is served by /copy (OSC 52 + native clipboard).
   const resumeInto = (target: Session) => {
     const est = estimateRequestTokens(target.messages, registryRef.current!.schemas());
     const big = est > RESUME_SUMMARY_AT * cfg.contextWindow;
@@ -1113,8 +1061,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     });
   };
 
-  // Stop the remote-control server when the app exits.
-  useEffect(() => { busyRef.current = busy; }, [busy]); // keep the ref in lockstep with the state
+  useEffect(() => { busyRef.current = busy; }, [busy]);
   useEffect(() => () => {
     rcRef.current?.stop();
     relayRef.current?.stop();
@@ -1134,12 +1081,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => {
     if (!voiceSnapshot || overlay || viewer || approval || search) setVoiceControlHover(null);
   }, [voiceSnapshot, overlay, viewer, approval, search]);
-  // Startup update check (daily-cached, non-blocking). With auto_update ON (the default, claude-code
-  // style) a newer release is INSTALLED in the background - selfUpdate stages the download and swaps the
-  // binary (Windows: rename-out-of-the-way trick), so it simply takes effect on the next launch; the
-  // session in progress is never touched. Opt out with `auto_update: false` / NEKO_AUTO_UPDATE=0 (notify
-  // only) or silence entirely with `auto_update_check: false`. selfUpdate itself refuses source (bun)
-  // runs and only ever moves forward (isNewer), so a dev build can't be clobbered by an older release.
+  // Updates are staged in the background and take effect only on the next launch.
   useEffect(() => {
     if (!cfg.autoUpdateCheck) return;
     void checkForUpdate().then(async (v) => {
@@ -1152,29 +1094,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       addLine("info", `a newer Neko (${v}) is available - run \`neko update\``);
     }).catch(() => {});
   }, []);
-  // A large startup resume defers to here so it can offer the resume-from-summary choice (the initial
-  // render skipped its replay). resumeInto opens the picker; doResume then replays (summarized or full).
   useEffect(() => {
     if (startupNeedsChoiceRef.current && resumedRef.current) resumeInto(resumedRef.current);
   }, []);
-  // Band geometry is set later in the render body, after the sticky prompt is known. Keep teardown here.
   useEffect(() => () => frameDiffer?.setBand(null), []);
-  // (Leaving fullscreen no longer reprints the thread; see toggleFullscreen + inlineBaseline. The
-  // terminal's alt-screen restore owns the primary, so there's nothing to wipe or re-emit here.)
-  // NO transcript echo on exit (claude-code-clean teardown, image #65 vs #66): the alt-screen restore
-  // returns the primary EXACTLY as it was before neko ran; dumping a raw-text tail on top of it printed
-  // unformatted markdown around the shell's old cursor - the junk of image #66. The conversation lives in
-  // the session file; runChat prints only the "Resume this session with" hint.
-  // If fullscreen was configured but the terminal can't host it, say why (we quietly stayed inline).
   useEffect(() => {
     if (cfg.fullscreen && !fullscreen) addLine("info", "(fullscreen off: needs an interactive terminal with room - staying inline)");
   }, []);
-  // Alt-screen lifecycle OWNERSHIP: runtime transitions live in toggleFullscreen (synchronous, ordered
-  // around React's renders). This effect handles ONLY the two edges the toggle can't: entering on MOUNT
-  // when fullscreen starts enabled (cfg/env), and restoring on UNMOUNT. Empty deps ON PURPOSE: an
-  // earlier version re-ran on [fullscreen] and its cleanup+reinstall fired AFTER the first fullscreen
-  // paint - leave alt, re-enter, 2J - wiping the freshly painted screen with nothing left dirty for Ink
-  // to repaint. That was the black-screen-on-entry bug (deterministically reproduced by fullscreen-sim).
+  // Mount and unmount alone own this guard; reinstalling it after paint can wipe Ink's live frame.
   useEffect(() => {
     if (fullscreenRef.current && !altDisposeRef.current) {
       // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
@@ -1318,9 +1245,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     approvalFlashRef.current = null;
   }, []);
 
-  // Global hotkeys. Ctrl+C: interrupt a running turn; else clear a non-empty input; else
-  // double-press exits. Ctrl+U clears the line, Ctrl+L clears the screen, Esc clears input when idle,
-  // Alt+C copies the current draft; Alt+V pastes a clipboard image.
   const ctrlC = useRef(false);
   useInput((char, key) => {
     if (key.ctrl && char === "c") {
@@ -1341,8 +1265,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (input) { setInput(""); ctrlC.current = false; return; }
       if (ctrlC.current) return exit();
       ctrlC.current = true;
-      // Ephemeral hint in the reserved note row (claude-style) - NOT an addLine: a transcript line would
-      // persist in the session and got dumped on exit with the old scrollback echo (image #66 junk).
+      // Exit hints are ephemeral and never enter the durable transcript.
       flashCopyNote("press ctrl+c again to exit");
       setTimeout(() => { ctrlC.current = false; }, 2000);
       return;
@@ -1351,13 +1274,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (registryRef.current?.detachRunningBash()) addLine("info", "(bash moved to background - /bashes to check)");
       return;
     }
-    // Approval keys live HERE, in the always-mounted hook, NOT in a separate
-    // `isActive: approval !== null` hook: Ink paints the frame at React commit, but a
-    // toggled hook's listener only attaches in a later passive effect — so a 'y' typed
-    // the instant the box appears fell in that gap and was silently dropped (the exact
-    // deterministic CI failure). This hook is subscribed from mount; Ink's
-    // useEffectEvent always calls the latest render's closure, so it sees `approval`
-    // the moment the box is visible.
+    // Keep approval input subscribed from mount so it cannot miss keys between commit and effects.
     if (approval) {
       if (approvalFlashRef.current || approvalFlash) return;
       // Pointer path: the option row's hit zones come from the LAST PAINTED frame (the differ
@@ -1758,11 +1675,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           : `Finish the install above, then open a NORMAL website tab (http/https, NOT chrome://) - Neko attaches it automatically and continues. Installing alone connects nothing; opening a real tab is what does it.${text ? " Your request is saved." : ""}`,
         search: false,
         showCount: false,
-        // The DEFAULT (highlighted) item must be safe: the body says "no Enter is needed", and the
-        // SelectList footer says "Enter confirm" - so Enter has to be the passive keep-waiting choice,
-        // NOT "reopen setup" (which used to relaunch Chrome + reprint instructions on every Enter, a
-        // loop that read as "confirm completion" but did the opposite). "Keep waiting" closes the
-        // guide but LEAVES the background poll running, so the flow still auto-advances / finishes.
+        // Enter defaults to passive waiting while background attachment continues.
         items: [
           { id: "wait", label: "Keep waiting - Neko attaches automatically", detail: connected ? "close this guide; it re-appears when the tab attaches" : "close this guide; Neko keeps detecting the extension in the background" },
           { id: "setup", label: "Open Chrome setup again", detail: "reopen the install surface and exact instructions" },
@@ -1773,8 +1686,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         onCancel: pause,
         onSelect: (choice) => {
           if (choice.id === "wait") {
-            // Dismiss the modal but KEEP the flow polling - the user can type meanwhile, and the
-            // guide re-appears at the next stage (step 2) or runs the saved request on attach.
             setOverlay(null);
             return;
           }
@@ -3001,7 +2912,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // tracking behind that teardown.
     return () => { if (hoverableSurface && altDisposeRef.current) setMouseHover(stdout, false); };
   }, [fullscreen, hoverableSurface, stdout]);
-  // Compute the matching row indices for a query over the flattened rows (case-insensitive).
   const findMatches = (q: string): number[] => {
     if (!q.trim()) return [];
     const ql = q.toLowerCase();
@@ -3468,14 +3378,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
         </Box>
       ) : (
-        // flexShrink 0: the input chrome must NEVER be flex-squashed. On a SHORT window, opening the slash
-        // menu (up to ~11 rows) overflows the fixed-height root and Yoga squashed THIS box - the "> /"
-        // input row vanished and the first menu items overlapped (image #61). The flexible transcript box
-        // gives up the rows instead (same fix as the /resume picker, image #60).
+        // Input chrome remains fixed while the transcript yields rows to overlays.
         <Box flexDirection="column" flexShrink={0}>
-          {/* One RESERVED row for ephemeral status ("copied N chars" on the right), always present so
-              it never shifts the transcript when a message appears (image #52). Images announce
-              themselves as inline [Image #N] tokens in the input now - no separate badge. */}
+          {/* Reserve one row so ephemeral status never shifts the transcript. */}
           <Box justifyContent="space-between">
             <Text> </Text>
             <Text color="green">{copyNote ? copyNote + " " : " "}</Text>
@@ -3483,8 +3388,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>
             <Box>
               <Text color={busy ? "gray" : awaitingKey ? "yellow" : "cyan"}>{inputPrompt}</Text>
-              {/* Column wrapper so a wrapped multiline input grows DOWNWARD (flexDirection column) rather
-                  than interacting badly with the prompt row. width caps each visual line at inputCols. */}
               <Box flexDirection="column" width={inputCols}>
                 <TextInput
                   value={input}
@@ -3575,9 +3478,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 }
 
 export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean; resumeId?: string }) {
-  // FIRST thing, before ANY await (MCP hub build, config load can take a beat): clear mouse tracking a
-  // previous session left stuck on the terminal, so it stops spamming "[<...M" the instant neko runs -
-  // not only after startup finishes. (bin/neko.ts also does this at process entry; belt + suspenders.)
+  // Clear stale mouse tracking before the first await so escape reports cannot pollute startup input.
   // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   if ((process.stdout as any).isTTY) process.stdout.write(DISABLE_MOUSE);
   if (!process.stdin.isTTY) {
@@ -3585,8 +3486,6 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     return;
   }
   ensureNekoHome();
-  // Bare `neko` starts FRESH; you pick up an interrupted task explicitly with /resume (or --resume/-c).
-  // The resumed session shows its full thread + recovers todos, and typing anything continues it.
   const resumed = opts.resumeId ? loadSession(opts.resumeId) : opts.resume ? latestSession(process.cwd()) : null;
   if (opts.resumeId && !resumed) console.error(`neko: no session '${opts.resumeId}' - starting fresh.`);
   const id = resumed?.id ?? newSessionId();
@@ -3596,9 +3495,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const showBrowserHint = !readBrowserCapability() && !loadPrefs().browserHintSeen;
   if (showBrowserHint) savePrefs({ browserHintSeen: true });
   let browserBridge = startManagedBrowserBridge({ extensionIds: cfg.browserExtensionIds });
-  // Side-panel bridge: a stable holder so ChatApp can mirror its transcript + take panel prompts even
-  // though the bridge may be (re)created later by setupBrowser. Wiring onPanelPrompt on each bridge
-  // routes panel prompts and snapshot requests to ChatApp's current handlers.
+  // The holder keeps ChatApp callbacks stable while setup replaces the browser bridge.
   const bridgeHolder: any = { current: browserBridge, onPrompt: null, onSnapshot: null };
   const wireBridge = (b: BrowserBridge | null) => {
     bridgeHolder.current = b;
@@ -3613,68 +3510,30 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
       wireBridge(browserBridge);
     }
     const setup = await openBrowserExtensionSetup({ storeId: cfg.browserExtensionStoreId });
-    // Put the unpacked folder path on the clipboard so the user can paste it into Chrome's
-    // Load-unpacked folder dialog, and warn about the profile picker when Chrome is multi-profile.
-    // (OSC 52 via process.stdout - the differ passes OSC writes through untouched.)
     const pathOnClipboard = setup.mode === "unpacked" && !!setup.path && copyToClipboard(setup.path);
     return browserExtensionSetupMessage(setup, { pathOnClipboard, profilePicker: chromeHasMultipleProfiles() });
   };
-  // Ink's own synchronized clear (app.clear) threaded in via a holder - the app instance doesn't exist
-  // until render() returns, so ChatApp calls the holder, which we point at app.clear right after.
-  // Synchronized-output support: trust the env allowlist first (fast, covers all common local terminals);
-  // only when it's inconclusive do we ask the terminal directly (DECRQM) - this catches SSH sessions where
-  // TERM_PROGRAM isn't forwarded. The probe is skipped (no startup cost) whenever the allowlist already says yes.
-  // The UNBYPASSABLE restore: process 'exit' fires on EVERY termination - normal return, process.exit,
-  // an unhandled throw that escapes, Ctrl-C after raw mode is off - and runs before the process dies.
-  // React unmount / the alt-screen guard / runChat's finally can all be short-circuited (a hard exit, a
-  // throw in teardown); this handler cannot. It only does synchronous writes (allowed in 'exit') and is
-  // idempotent, so it's safe on top of the other cleanups. This is what finally stops mouse-tracking
-  // leaking into the user's shell after neko is gone (image #34).
+  // The synchronous exit hook is the last terminal-state restore if React teardown is bypassed.
   const onProcessExit = () => {
     disposeClipboardImageReader();
     try { emergencyRestore(); } catch { /* nothing left to protect */ }
   };
   process.once("exit", onProcessExit);
-  // Tab title: save the user's title (stack push), brand the tab for the session; per-turn updates
-  // show the current task + busy state (see handle()); restored on exit.
   saveTitle();
-  // A resumed session keeps its name; a fresh one is branded "Neko Core". Set it here AND from a mount
-  // effect (below): this pre-render write reaches terminals that interpret VT before Ink turns it on
-  // (Windows Terminal), the effect covers the rest (VT is on by then), so the tab brands reliably.
+  // Pre-render and mounted title writes cover terminals that enable VT at different times.
   setTerminalTitle(brandTitle(resumed?.title || "Neko Core"));
-  // Three-state: "yes"/"no" are DECIDED (allowlist / known-bad / forced / Windows) - the DECRQM
-  // probe runs ONLY on "unknown" (e.g. SSH without TERM_PROGRAM). Probing on every "no" is what
-  // briefly killed typing on Windows Terminal: WT answers "supported" (re-enabling 2026 that WT
-  // itself corrupts - the ghost), and the probe's pre-Ink stdin handling silenced input under Bun.
+  // Probe DEC 2026 only when environment detection is inconclusive; probing known-bad Windows terminals
+  // can re-enable a mode that corrupts their input/rendering path.
   const syncDecision = syncOutputDecision();
   let syncSupported = syncDecision === "yes";
   if (syncDecision === "unknown") syncSupported = (await probeSyncOutput()) === true;
   const clearHolder = { fn: () => {} };
-  // Neko's frame differ (compositor-lite): Ink stays on its STANDARD renderer (whose payload shape is
-  // parseable), and the differ shrinks every rerender to the changed lines - or, in fullscreen, to a
-  // hardware scroll (DECSTBM+SU/SD: the terminal shifts the region, we paint only the revealed rows).
-  // This is the claude-code-class write path, built at the stdout layer instead of forking Ink.
-  //
-  // ON everywhere - on Windows it is paired with the differ's SELF-HEALING RESYNC. ConPTY displaces
-  // differ output at real write cadence (the one-row duplicated-chrome ghost, images #77/#78;
-  // mechanism inside conhost's buffer/viewport handling - our bytes replay clean through the
-  // reference VT, and absolute-seed/no-hw-scroll/no-2026 hardenings all shipped without curing it).
-  // Turning the differ OFF cured the ghost but cost the whole render economy: typing, streaming and
-  // scrolling all fell back to full Ink frames (bench: scroll first-response 15ms -> 63ms+). The
-  // resolution keeps the differ AND bounds the displacement's LIFETIME instead: a full absolute
-  // repaint (immune to displacement, erases anything stale) lands ~400ms after every write burst and
-  // at least every 2s during sustained activity - a curses ^L, automated. NEKO_INCR=0 disables.
+  // The stdout differ minimizes Ink frames; its periodic absolute repaint bounds ConPTY displacement.
   const differ = process.env.NEKO_INCR === "0" ? undefined : new FrameDiffer();
-  // Fullscreen must enter the alt-screen BEFORE Ink's first render: paint-first-switch-after wipes the
-  // paint, and Ink (believing its frame is on screen) never repaints -> black until a keypress. So enter
-  // first, then render - the first frame paints INTO the alt screen. ChatApp adopts the disposer (prop)
-  // so unmount tears it down exactly as if the mount effect had installed it.
+  // Enter the alternate screen before Ink's first paint or the switch erases a frame Ink considers live.
   const startFullscreen = cfg.fullscreen && canFullscreen(process.stdout);
   if (startFullscreen) {
-    // The fullscreen transcript normally warms rich rows after mount. The welcome line has no plain
-    // fallback text, so that ordering painted the composer immediately and left the whole header blank
-    // until the warmer ran. Prime this one tiny, fixed line before Ink's first frame; history remains
-    // lazy/windowed, and the first visible frame is complete instead of assembling in two stages.
+    // Prime the welcome row because it has no plain fallback before the asynchronous cache warms.
     const welcome: Line = { id: 0, kind: "welcome", text: "" };
     const contentCols = Math.max(20, (process.stdout.columns ?? 80) - 4);
     primeAnsiCache(welcome, contentCols, cfg);
@@ -3687,23 +3546,16 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
   const app = render(
     <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} completionAlert={completionAlert} bridgeHolder={bridgeHolder} />,
-    // Bracket each (already-minimized) write in BSU/ESU on terminals that support DEC 2026
-    // (synchronized output) so redraws are atomic - no flicker, no Windows scrollback yank.
     {
-      exitOnCtrlC: false, // we require a double Ctrl-C
+      exitOnCtrlC: false,
       // Explicit: Ink otherwise consults is-in-ci and DISABLES interactive rendering (stops writing
       // frames) whenever a CI-ish env var is set - even on a real TTY. runChat already requires a TTY,
       // so a user whose shell exports CI=true still gets the full UI instead of a frozen screen.
       interactive: true,
       stdout: wrapStdoutForSync(process.stdout, { supported: syncSupported, differ }),
-      // Ink defaults to 30fps (a ~34ms render throttle - felt as typing latency). The chrome frame is
-      // tiny (the viewport band is blank in Ink; the differ owns it), so the resolved rate - the
-      // detected display Hz in auto mode, or the user's /fps / ui_fps / NEKO_FPS choice - fits easily.
       maxFps: resolveUiFps(cfg.uiFpsConfig).fps,
     },
   );
-  // Pay PowerShell/.NET startup in the background while the first screen is idle. Alt+V then needs
-  // only the clipboard read + resize, and never blocks Ink even when the worker is still warming.
   warmClipboardImageReader();
   clearHolder.fn = () => app.clear();
   try {
@@ -3712,13 +3564,9 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     // Let the deferred React unmount disposer run after Ink's final erase writes. Without this one
     // turn, the primary shell can be restored first and then overwritten by Ink's trailing cleanup.
     await new Promise<void>((resolveDone) => setTimeout(resolveDone, 0));
-    // Claude-code-clean teardown (image #65): restore the terminal (leave alt -> the primary comes back
-    // EXACTLY as it was before neko ran), then print ONLY the resume hint at the shell's own cursor. No
-    // transcript echo - a raw-text dump interleaved with the shell prompt was the junk of image #66; the
-    // conversation lives in the session file, one `neko --resume` away.
-    differ?.dispose(); // stop the self-heal timer before the terminal is restored
+    differ?.dispose();
     disposeClipboardImageReader();
-    emergencyRestore(); // full terminal restore (cursor, mouse, main screen, title) - idempotent on clean exits
+    emergencyRestore();
     browserBridge?.close();
     await hub.close();
     // The last-resort hook must not run AFTER this handoff text: another LEAVE_ALT can restore the

@@ -39,7 +39,6 @@ function raster(size: number): Uint8Array {
   return px;
 }
 
-// --- minimal PNG encoder (RGBA8, filter 0 per row) ---
 const CRC_TABLE = new Uint32Array(256).map((_, n) => {
   let c = n;
   for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -76,7 +75,6 @@ function png(size: number): Uint8Array {
   return out;
 }
 
-// --- ICO container (PNG entries) ---
 const SIZES = [16, 32, 48, 64, 128, 256];
 const pngs = SIZES.map((s) => png(s));
 const header = new Uint8Array(6 + SIZES.length * 16);

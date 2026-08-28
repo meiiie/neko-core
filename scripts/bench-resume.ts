@@ -79,7 +79,6 @@ const app = render(
 );
 await tick(400);
 
-// Open the picker.
 t0 = performance.now();
 stdin.push("/resume"); await tick(30); stdin.push("\r");
 for (let i = 0; i < 200 && !vt.text().includes("Resume session"); i++) await tick(10);
