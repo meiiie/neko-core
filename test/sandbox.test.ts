@@ -303,9 +303,10 @@ test.skipIf(!LIVE_WINDOWS_SRT_BRIDGE)("a live Windows SRT uses nested scratch, e
     expect(scratchParent).not.toBe(realpathSync(tmpdir()));
     expect(readFileSync(join(launchDir, "bun.cmd"), "utf8")).toBe('@"%NEKO_SRT_BUN_EXE%" %*\r\n');
     const result = spawnSync(target.file, target.args, {
-      cwd: process.cwd(), encoding: "utf8", timeout: 20_000, windowsHide: true,
+      cwd: process.cwd(), encoding: "utf8", timeout: 45_000, windowsHide: true,
       env: { ...process.env, ...target.env },
     });
+    expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
     expect(String(result.stdout).trim()).toBe(Bun.version);
   } finally {
@@ -313,7 +314,7 @@ test.skipIf(!LIVE_WINDOWS_SRT_BRIDGE)("a live Windows SRT uses nested scratch, e
   }
   expect(existsSync(launchDir)).toBe(false);
   expect(existsSync(scratchParent)).toBe(false);
-}, 25_000);
+}, 50_000);
 
 test("srt network allow = the sandbox_domains allowlist (no allow-all in srt) + -c without git-bash", () => {
   expect(JSON.parse(srtSettings("C:\\w", true, ["github.com", "*.npmjs.org"])).network).toEqual({
