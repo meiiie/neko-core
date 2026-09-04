@@ -22,13 +22,15 @@ The provider-agnostic completion contract, evidence receipts, bounded validation
 included in the v1.5.0 source. The owner paused further ProgramBench campaigns until after the 1.5.0 release, so
 the existing results remain diagnostic and no general controller-lift or SOTA claim is made.
 
-The exact v1.5.0 candidate passed typecheck, anti-slop lint, 1,579 Bun tests with 14 explicit skips and zero
+The exact v1.5.0 release source passed typecheck, anti-slop lint, 1,579 Bun tests with 14 explicit skips and zero
 failures, and 44 Python tests with three platform skips plus 33 subtests. Production compile, UI render, real-PTY
 input, ACP handshake, startup/exit lifecycle, and three real-ConPTY ghost/typing runs passed. The scroll probe
 measured 11 ms first response and 141 ms settling after a 15-event wheel flick. The ghost probe previously used
 an 800 ms fixed wait and produced a false dead-input verdict under load; it now waits for the observable echo
 under a five-second ceiling and reports measured latency. A SHA-256-verified official Gitleaks 8.30.1 portable
-binary found no secret in the complete staged diff.
+binary found no secret in the complete staged diff. Hosted Windows CI then exposed a cold CLI subprocess that
+crossed Bun's generic five-second test deadline under shard load; a subprocess-specific 15-second allowance keeps
+the exact policy assertions intact without changing production behavior.
 
 ## 2026-08-30 - Completion-system campaign
 

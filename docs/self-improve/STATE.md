@@ -4,7 +4,7 @@ Updated: 2026-09-04
 
 ## Baseline
 
-Neko Core v1.5.0 is the current release candidate. The public coding and GUI smoke tiers that once guided early
+Neko Core v1.5.0 is the current release. The public coding and GUI smoke tiers that once guided early
 development are saturated or versioned historical evidence; they are regression signals, not sufficient proof
 of improvement. New harness claims require an unsaturated tier or a direct, reproducible incident regression.
 

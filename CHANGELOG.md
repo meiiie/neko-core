@@ -58,6 +58,8 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Fixed
 
+- Windows release CI now gives the real CLI policy subprocess enough cold-start headroom while preserving every
+  policy assertion. A slow hosted runner no longer turns a correct diagnostic into a five-second test timeout.
 - Independent completion supervisors now retain the parent registry's native backend. Harbor and ProgramBench
   validators therefore inspect the authoritative remote workspace instead of an empty host staging directory;
   their read-only allowlist, no-hook boundary, and inability to mutate remain unchanged.

@@ -55,7 +55,7 @@ test("policy reports exact-consent host writes without implying Bash authority",
   expect(result.output).toContain("never reaches sandboxed Bash");
   expect(result.output).toContain("System and credential paths");
   expect(result.output).not.toContain("the one consent-gated exception");
-});
+}, 15_000);
 
 test("a non-interactive agent process cannot grant project trust", () => {
   const base = mkdtempSync(join(tmpdir(), "neko-headless-trust-"));

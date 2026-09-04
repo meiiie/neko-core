@@ -23,7 +23,7 @@ The 1.0 baseline includes:
   background process support, and Computer Use reserved for visible GUI interaction;
 - an explicit provider-agnostic completion contract and independent read-only validator for closed-loop work.
 
-**Branch:** `main`. **Current release candidate: v1.5.0 (2026-09-04).** The 1.0 compatibility contract remains the
+**Branch:** `main`. **Current release: v1.5.0 (2026-09-04).** The 1.0 compatibility contract remains the
 long-term stable baseline. v1.5.0 makes host Bash the normal no-flag shell route while preserving explicit
 fail-closed sandboxing, and ships the completion-contract instrumentation gathered before the ProgramBench pause.
 Provider protocols, ACP hosts, and durable sessions remain compatible. The complete pre-1.0 history remains in
