@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-09-04) - v1.5.0
+## Current status (2026-09-04) - v1.5.1 release candidate
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The 1.0 baseline includes:
@@ -22,10 +22,13 @@ The 1.0 baseline includes:
 - direct host Bash as the zero-flag default, with hidden Windows child consoles, exact runtime/toolchain context,
   background process support, and Computer Use reserved for visible GUI interaction;
 - an explicit provider-agnostic completion contract and independent read-only validator for closed-loop work.
+- resumable, disk-streamed release downloads plus compressed transfer artifacts, with final binary digest and
+  embedded-version verification before atomic activation.
 
-**Branch:** `main`. **Current release: v1.5.0 (2026-09-04).** The 1.0 compatibility contract remains the
+**Branch:** `main`. **Current public release: v1.5.0 (2026-09-04); next candidate: v1.5.1.** The 1.0 compatibility contract remains the
 long-term stable baseline. v1.5.0 makes host Bash the normal no-flag shell route while preserving explicit
-fail-closed sandboxing, and ships the completion-contract instrumentation gathered before the ProgramBench pause.
+fail-closed sandboxing. v1.5.1 changes only release transport: resumable checkpoints and compressed assets;
+it does not change providers, tools, authority, ACP, sessions, or the completion controller.
 Provider protocols, ACP hosts, and durable sessions remain compatible. The complete pre-1.0 history remains in
 [CHANGELOG.md](../../CHANGELOG.md) and
 [WORKLOG.md](WORKLOG.md).

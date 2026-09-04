@@ -59,28 +59,33 @@ SUM_URL="$URL.sha256"
 BIN_DIR="${NEKO_BIN_DIR:-$HOME/.local/bin}"
 TARGET="$BIN_DIR/neko"
 mkdir -p "$BIN_DIR"
-STAGE="$BIN_DIR/.neko-download-$$"
-SUM_STAGE="$STAGE.sha256"
-cleanup() { rm -f "$STAGE" "$SUM_STAGE"; }
-trap cleanup EXIT HUP INT TERM
-
-if command -v curl >/dev/null 2>&1; then
-  curl -fL --retry 3 --progress-bar "$URL" -o "$STAGE"
-elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$STAGE" "$URL"
-else
-  echo "neko: need curl or wget installed" >&2; exit 1
+VERSION_NUMBER="${TAG#v}"
+MAJOR="$(printf '%s' "$VERSION_NUMBER" | cut -d. -f1)"
+MINOR="$(printf '%s' "$VERSION_NUMBER" | cut -d. -f2)"
+PATCH="$(printf '%s' "$VERSION_NUMBER" | cut -d. -f3)"
+COMPRESSED=0
+if command -v gzip >/dev/null 2>&1 && { [ "${MAJOR:-0}" -gt 1 ] || { [ "${MAJOR:-0}" -eq 1 ] && { [ "${MINOR:-0}" -gt 5 ] || { [ "${MINOR:-0}" -eq 5 ] && [ "${PATCH:-0}" -ge 1 ]; }; }; }; }; then
+  COMPRESSED=1
 fi
+if [ "$COMPRESSED" = 1 ]; then
+  DOWNLOAD_URL="$URL.gz"
+  STAGE="$BIN_DIR/.neko-download-$VERSION_NUMBER-$ASSET.gz.part"
+else
+  DOWNLOAD_URL="$URL"
+  STAGE="$BIN_DIR/.neko-download-$VERSION_NUMBER-$ASSET.part"
+fi
+CANDIDATE="$BIN_DIR/.neko-candidate-$$"
+SUM_STAGE="$BIN_DIR/.neko-checksum-$$"
+cleanup() { rm -f "$CANDIDATE" "$SUM_STAGE"; }
+trap cleanup EXIT HUP INT TERM
 
 # v0.10.0+ publishes one checksum asset beside every binary. Older pinned releases remain installable
 # through the version probe below because those historical releases predate checksum sidecars.
-MAJOR="$(printf '%s' "$TAG" | sed 's/^v//' | cut -d. -f1)"
-MINOR="$(printf '%s' "$TAG" | sed 's/^v//' | cut -d. -f2)"
 REQUIRE_SUM=0
 if [ "${MAJOR:-0}" -gt 0 ] || [ "${MINOR:-0}" -ge 10 ]; then REQUIRE_SUM=1; fi
 GOT_SUM=0
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL --retry 3 "$SUM_URL" -o "$SUM_STAGE" 2>/dev/null && GOT_SUM=1 || true
+  curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --speed-limit 1 --speed-time 30 "$SUM_URL" -o "$SUM_STAGE" 2>/dev/null && GOT_SUM=1 || true
 else
   wget -qO "$SUM_STAGE" "$SUM_URL" 2>/dev/null && GOT_SUM=1 || true
 fi
@@ -88,11 +93,8 @@ if [ "$GOT_SUM" = 1 ]; then
   EXPECTED="$(awk 'NR==1 {print $1}' "$SUM_STAGE")"
   case "$EXPECTED" in *[!0-9a-fA-F]*|'') echo "neko: release checksum is invalid" >&2; exit 1 ;; esac
   if [ "${#EXPECTED}" -ne 64 ]; then echo "neko: release checksum is invalid" >&2; exit 1; fi
-  if command -v sha256sum >/dev/null 2>&1; then ACTUAL="$(sha256sum "$STAGE" | awk '{print $1}')"
-  elif command -v shasum >/dev/null 2>&1; then ACTUAL="$(shasum -a 256 "$STAGE" | awk '{print $1}')"
-  else echo "neko: need sha256sum or shasum to verify this release" >&2; exit 1; fi
-  if [ "$(printf '%s' "$ACTUAL" | tr 'A-F' 'a-f')" != "$(printf '%s' "$EXPECTED" | tr 'A-F' 'a-f')" ]; then
-    echo "neko: downloaded SHA-256 does not match the release" >&2; exit 1
+  if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    echo "neko: need sha256sum or shasum to verify this release" >&2; exit 1
   fi
   VERIFY_NOTE="SHA-256 verified"
 elif [ "$REQUIRE_SUM" = 1 ]; then
@@ -101,16 +103,71 @@ else
   echo "  Historical release: checksum sidecar unavailable; using the signed tag + version probe."
   VERIFY_NOTE="version verified"
 fi
-chmod +x "$STAGE"
+
+CACHED=0
+if [ -f "$STAGE" ] && [ "$GOT_SUM" = 1 ]; then
+  if [ "$COMPRESSED" = 1 ]; then
+    gzip -dc "$STAGE" > "$CANDIDATE" 2>/dev/null || true
+  else
+    cp "$STAGE" "$CANDIDATE"
+  fi
+  if [ -f "$CANDIDATE" ]; then
+    if command -v sha256sum >/dev/null 2>&1; then CACHED_SUM="$(sha256sum "$CANDIDATE" | awk '{print $1}')"
+    else CACHED_SUM="$(shasum -a 256 "$CANDIDATE" | awk '{print $1}')"; fi
+    if [ "$(printf '%s' "$CACHED_SUM" | tr 'A-F' 'a-f')" = "$(printf '%s' "$EXPECTED" | tr 'A-F' 'a-f')" ]; then
+      CACHED=1
+      echo "  Reusing the complete verified download checkpoint."
+    fi
+  fi
+  if [ "$CACHED" != 1 ]; then rm -f "$CANDIDATE"; fi
+fi
+
+if [ "$CACHED" != 1 ]; then
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -fL --retry 8 --retry-all-errors --connect-timeout 20 --speed-limit 1 --speed-time 60 --continue-at - --progress-bar "$DOWNLOAD_URL" -o "$STAGE"; then
+      SIZE="$(wc -c < "$STAGE" 2>/dev/null || printf 0)"
+      echo "neko: download interrupted; $SIZE bytes are saved. Run the installer again to resume." >&2
+      exit 1
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    if ! wget -c --timeout=60 --tries=8 -O "$STAGE" "$DOWNLOAD_URL"; then
+      SIZE="$(wc -c < "$STAGE" 2>/dev/null || printf 0)"
+      echo "neko: download interrupted; $SIZE bytes are saved. Run the installer again to resume." >&2
+      exit 1
+    fi
+  else
+    echo "neko: need curl or wget installed" >&2; exit 1
+  fi
+  if [ "$COMPRESSED" = 1 ]; then
+    if ! gzip -dc "$STAGE" > "$CANDIDATE"; then
+      rm -f "$STAGE" "$CANDIDATE"
+      echo "neko: downloaded archive is corrupt" >&2; exit 1
+    fi
+  else
+    cp "$STAGE" "$CANDIDATE"
+  fi
+fi
+
+if [ "$GOT_SUM" = 1 ]; then
+  if command -v sha256sum >/dev/null 2>&1; then ACTUAL="$(sha256sum "$CANDIDATE" | awk '{print $1}')"
+  else ACTUAL="$(shasum -a 256 "$CANDIDATE" | awk '{print $1}')"; fi
+  if [ "$(printf '%s' "$ACTUAL" | tr 'A-F' 'a-f')" != "$(printf '%s' "$EXPECTED" | tr 'A-F' 'a-f')" ]; then
+    rm -f "$STAGE" "$CANDIDATE"
+    echo "neko: downloaded SHA-256 does not match the release" >&2; exit 1
+  fi
+fi
+chmod +x "$CANDIDATE"
 
 # Verify before atomically replacing the working binary. POSIX rename keeps the old install intact on
 # any download/checksum/version failure and lets an already-running old process finish safely.
-VER="$("$STAGE" version 2>/dev/null | head -1 || true)"
+VER="$("$CANDIDATE" version 2>/dev/null | head -1 || true)"
 NEWV="$(printf '%s' "$VER" | sed -n 's/^neko-core *\([0-9][0-9.]*\).*/\1/p')"
 if [ -z "$NEWV" ] || [ "v$NEWV" != "$TAG" ]; then
+  rm -f "$STAGE" "$CANDIDATE"
   echo "neko: downloaded binary failed its version probe (expected $TAG, got '$VER')" >&2; exit 1
 fi
-mv -f "$STAGE" "$TARGET"
+mv -f "$CANDIDATE" "$TARGET"
+rm -f "$STAGE"
 echo "  Installed to $TARGET"
 echo "$VER installed ($VERIFY_NOTE)"
 

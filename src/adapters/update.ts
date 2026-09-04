@@ -3,10 +3,11 @@
  * place, plus a daily-cached startup check that notifies when a newer release exists (Claude-Code style).
  * Releases are published by the `v*` tag CI (.github/workflows/release.yml); assets are per-platform.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createGunzip } from "node:zlib";
 
 import { homeDir } from "../shared/home.ts";
 import { VERSION } from "../shared/version.ts";
@@ -17,6 +18,7 @@ const REPO = "meiiie/neko-core";
 const STABLE_TAG = /^v\d+\.\d+\.\d+$/;
 const DOWNLOAD_IDLE_MS = 60_000;
 const MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024;
+const DOWNLOAD_ATTEMPTS = 6;
 
 /** The release asset for this platform/arch (matches release.yml). */
 export function assetName(platform = process.platform, arch = process.arch): string {
@@ -73,68 +75,208 @@ export function parseSha256Sidecar(text: string): string | null {
   return /^\s*([0-9a-fA-F]{64})(?:\s|$)/.exec(text)?.[1]?.toLowerCase() ?? null;
 }
 
-/** Download with a progress watchdog, not one total wall-clock deadline. A slow 93 MB release remains
- * valid while bytes keep arriving; a genuinely silent transport is aborted and every path stays bounded
- * by the published-binary size ceiling. The fetcher/idle override is a deterministic test seam. */
-export async function downloadReleaseBytes(
+type DownloadProgress = (received: number, total: number) => void;
+
+export type DownloadReleaseFileOptions = {
+  fetcher?: typeof fetch;
+  idleMs?: number;
+  maxBytes?: number;
+  attempts?: number;
+  sleep?: (ms: number) => Promise<void>;
+  onRetry?: (reason: string, attempt: number, delayMs: number) => void;
+};
+
+function transientStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function retryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  if (/^\d+$/.test(value.trim())) return Math.min(Number(value.trim()) * 1000, 60_000);
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.min(Math.max(0, at - Date.now()), 60_000) : null;
+}
+
+function rangedTotal(value: string | null): { start: number; total: number } | null {
+  const match = /^bytes\s+(\d+)-\d+\/(\d+)$/i.exec(value ?? "");
+  if (!match) return null;
+  const start = Number(match[1]);
+  const total = Number(match[2]);
+  return Number.isSafeInteger(start) && Number.isSafeInteger(total) ? { start, total } : null;
+}
+
+function unsatisfiedTotal(value: string | null): number | null {
+  const match = /^bytes\s+\*\/(\d+)$/i.exec(value ?? "");
+  const total = match ? Number(match[1]) : NaN;
+  return Number.isSafeInteger(total) ? total : null;
+}
+
+class ReleaseDownloadError extends Error {
+  constructor(message: string, readonly retryable = true, readonly delayMs?: number) {
+    super(message);
+  }
+}
+
+function downloadFailure(message: string, retryable = true, delayMs?: number): ReleaseDownloadError {
+  return new ReleaseDownloadError(message, retryable, delayMs);
+}
+
+function partialSize(path: string, maxBytes: number): number {
+  if (!existsSync(path)) return 0;
+  const size = statSync(path).size;
+  if (!Number.isSafeInteger(size) || size < 0 || size > maxBytes) {
+    rmSync(path, { force: true });
+    return 0;
+  }
+  return size;
+}
+
+export async function downloadReleaseFile(
   url: string,
-  onProgress?: (received: number, total: number) => void,
-  fetcher: typeof fetch = fetch,
-  idleMs = DOWNLOAD_IDLE_MS,
-  maxBytes = MAX_DOWNLOAD_BYTES,
-): Promise<Buffer> {
-  const controller = new AbortController();
-  const waitForProgress = async <T>(operation: Promise<T>): Promise<T> => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
+  destination: string,
+  onProgress?: DownloadProgress,
+  options: DownloadReleaseFileOptions = {},
+): Promise<{ received: number; total: number }> {
+  const fetcher = options.fetcher ?? fetch;
+  const idleMs = options.idleMs ?? DOWNLOAD_IDLE_MS;
+  const maxBytes = options.maxBytes ?? MAX_DOWNLOAD_BYTES;
+  const attempts = Math.max(1, options.attempts ?? DOWNLOAD_ATTEMPTS);
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    let offset = partialSize(destination, maxBytes);
+    const controller = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let handle: number | undefined;
+    const waitForProgress = async <T>(operation: Promise<T>): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          operation,
+          new Promise<T>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              const error = downloadFailure(`no download progress for ${Math.ceil(idleMs / 1000)}s`);
+              controller.abort(error);
+              reject(error);
+            }, idleMs);
+            // SAFETY: Node and Bun timers expose optional unref; browsers do not, and this call is best-effort.
+            (timer as any).unref?.();
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+
     try {
-      return await Promise.race([
-        operation,
-        new Promise<T>((_resolve, reject) => {
-          timer = setTimeout(() => {
-            const error = new Error("download made no progress");
-            controller.abort(error);
-            reject(error);
-          }, idleMs);
-          // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
-          (timer as any).unref?.();
-        }),
-      ]);
+      const headers = new Headers({ "user-agent": "neko-core", accept: "application/octet-stream" });
+      if (offset > 0) headers.set("range", `bytes=${offset}-`);
+      const response = await waitForProgress(fetcher(url, { headers, signal: controller.signal }));
+
+      if (response.status === 416 && offset > 0) {
+        const total = unsatisfiedTotal(response.headers.get("content-range"));
+        if (total === offset) {
+          onProgress?.(offset, total);
+          return { received: offset, total };
+        }
+        truncateSync(destination, 0);
+        throw downloadFailure("release server rejected the saved byte range; restarting", true, 0);
+      }
+      if (!response.ok) {
+        throw downloadFailure(`HTTP ${response.status} (${url})`, transientStatus(response.status), retryAfterMs(response.headers.get("retry-after")) ?? undefined);
+      }
+
+      let total = 0;
+      let append = false;
+      if (response.status === 206) {
+        const range = rangedTotal(response.headers.get("content-range"));
+        if (!range || range.start !== offset) {
+          if (existsSync(destination)) truncateSync(destination, 0);
+          throw downloadFailure("release server returned a mismatched byte range; restarting", true, 0);
+        }
+        total = range.total;
+        append = offset > 0;
+      } else {
+        if (offset > 0) offset = 0;
+        const declared = Number(response.headers.get("content-length") ?? 0);
+        total = Number.isSafeInteger(declared) && declared > 0 ? declared : 0;
+      }
+      if (total > maxBytes) throw downloadFailure("release binary exceeds the 250 MB safety limit", false);
+
+      reader = response.body?.getReader();
+      if (!reader) throw downloadFailure("release response did not contain a body");
+      handle = openSync(destination, append ? "a" : "w", 0o600);
+      let received = offset;
+      onProgress?.(received, total);
+      for (;;) {
+        const chunk = await waitForProgress(reader.read());
+        if (chunk.done) break;
+        let written = 0;
+        while (written < chunk.value.byteLength) {
+          written += writeSync(handle, chunk.value, written, chunk.value.byteLength - written);
+        }
+        received += chunk.value.byteLength;
+        if (received > maxBytes || (total > 0 && received > total)) {
+          throw downloadFailure("release binary exceeds the 250 MB safety limit", false);
+        }
+        onProgress?.(received, total);
+      }
+      if (total > 0 && received !== total) {
+        throw downloadFailure(`download ended early at ${received} of ${total} bytes`);
+      }
+      return { received, total };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (!controller.signal.aborted) controller.abort(lastError);
+      if (handle !== undefined) {
+        closeSync(handle);
+        handle = undefined;
+      }
+      void reader?.cancel().catch(() => {});
+      const retryable = !(lastError instanceof ReleaseDownloadError) || lastError.retryable;
+      if (!retryable || attempt >= attempts) throw lastError;
+      const requested = lastError instanceof ReleaseDownloadError ? lastError.delayMs : undefined;
+      const exponential = Math.min(8_000, 250 * 2 ** (attempt - 1));
+      const delay = requested ?? Math.round(exponential * (0.8 + Math.random() * 0.4));
+      options.onRetry?.(lastError.message, attempt, delay);
+      await sleep(delay);
     } finally {
-      if (timer) clearTimeout(timer);
+      if (handle !== undefined) closeSync(handle);
     }
-  };
-  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  }
+  throw lastError ?? new Error("download failed");
+}
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+export async function expandGzip(source: string, destination: string, maxBytes = MAX_DOWNLOAD_BYTES): Promise<number> {
+  const gunzip = createGunzip();
+  const input = createReadStream(source);
+  input.pipe(gunzip);
+  const handle = openSync(destination, "w", 0o755);
+  let size = 0;
   try {
-    const res = await waitForProgress(fetcher(url, {
-      headers: { "user-agent": "neko-core" },
-      signal: controller.signal,
-    }));
-    if (!res.ok) throw new Error(`HTTP ${res.status} (${url})`);
-    const declared = Number(res.headers.get("content-length") ?? 0);
-    if (Number.isFinite(declared) && declared > maxBytes) {
-      throw new Error("release binary exceeds the 250 MB safety limit");
+    try {
+      for await (const chunk of gunzip) {
+        const bytes = Buffer.from(chunk);
+        size += bytes.byteLength;
+        if (size > maxBytes) throw new Error("expanded release exceeds the 250 MB safety limit");
+        let written = 0;
+        while (written < bytes.byteLength) written += writeSync(handle, bytes, written, bytes.byteLength - written);
+      }
+      return size;
+    } finally {
+      closeSync(handle);
+      input.destroy();
     }
-    reader = res.body?.getReader();
-    if (!reader) {
-      const bytes = Buffer.from(await waitForProgress(res.arrayBuffer()));
-      if (bytes.byteLength > maxBytes) throw new Error("release binary exceeds the 250 MB safety limit");
-      onProgress?.(bytes.byteLength, declared > 0 ? declared : 0);
-      return bytes;
-    }
-    const chunks: Uint8Array[] = [];
-    let received = 0;
-    for (;;) {
-      const chunk = await waitForProgress(reader.read());
-      if (chunk.done) break;
-      received += chunk.value.byteLength;
-      if (received > maxBytes) throw new Error("release binary exceeds the 250 MB safety limit");
-      chunks.push(chunk.value);
-      onProgress?.(received, declared > 0 ? declared : 0);
-    }
-    // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
-    return Buffer.concat(chunks as any, received);
-  } finally {
-    if (controller.signal.aborted) void reader?.cancel().catch(() => {});
+  } catch (error) {
+    try { rmSync(destination, { force: true }); } catch { }
+    throw error;
   }
 }
 
@@ -165,11 +307,15 @@ export function cleanupStaleUpdate(exe = process.execPath, now = Date.now()): vo
   try { rmSync(`${exe}.old`, { force: true }); } catch { /* still locked or permission - try again next launch */ }
   try {
     const dir = dirname(exe);
-    const prefix = `${basename(exe)}.new`;
+    const stagingPrefix = `${basename(exe)}.new`;
+    const downloadPrefix = `${basename(exe)}.download-v`;
     for (const f of readdirSync(dir)) {
-      if (!f.startsWith(prefix)) continue;
       const p = join(dir, f);
-      try { if (now - statSync(p).mtimeMs > 30 * 60_000) rmSync(p, { force: true }); } catch { /* next launch */ }
+      try {
+        const age = now - statSync(p).mtimeMs;
+        if (f.startsWith(stagingPrefix) && age > 30 * 60_000) rmSync(p, { force: true });
+        if (f.startsWith(downloadPrefix) && f.endsWith(".part") && age > 7 * 24 * 3600_000) rmSync(p, { force: true });
+      } catch { /* next launch */ }
     }
   } catch { /* unreadable dir - nothing to sweep */ }
 }
@@ -393,13 +539,16 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
     }
     // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
     const showProgress = Boolean(opts.progressTty) && Boolean((process.stdout as any).isTTY);
-    let bytes: Buffer;
+    const rawPart = `${exe}.download-${tag}.part`;
+    const gzipPart = `${exe}.download-${tag}.gz.part`;
+    let downloaded = gzipPart;
+    let compressed = true;
     try {
       const mb = (n: number) => (n / 1048576).toFixed(1);
       let lastShown = 0;
       let lastHeartbeat = Date.now();
       let got = 0;
-      bytes = await downloadReleaseBytes(url, (received, total) => {
+      const progress = (received: number, total: number) => {
         got = received;
         const now = Date.now();
         if (now - lastHeartbeat >= LOCK_HEARTBEAT_MS) {
@@ -412,45 +561,62 @@ export async function selfUpdate(log: (s: string) => void, target?: string, opts
           ? `  downloading ${mb(received)} / ${mb(total)} MB (${Math.floor((100 * received) / total)}%)`
           : `  downloading ${mb(received)} MB`;
         process.stdout.write(`\r${line.padEnd(48)}`);
-      });
+      };
+      const retry = (reason: string, attempt: number) => {
+        if (!showProgress) return;
+        process.stdout.write(`\r${`  connection interrupted (${reason}); resuming ${attempt}/${DOWNLOAD_ATTEMPTS}`.padEnd(72)}\n`);
+      };
+      try {
+        await downloadReleaseFile(`${url}.gz`, gzipPart, progress, { onRetry: retry });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/^HTTP 404\b/.test(message)) throw error;
+        try { rmSync(gzipPart, { force: true }); } catch { }
+        compressed = false;
+        downloaded = rawPart;
+        await downloadReleaseFile(url, rawPart, progress, { onRetry: retry });
+      }
       if (showProgress) process.stdout.write(`\r${`  downloaded ${mb(got)} MB - verifying ...`.padEnd(48)}\n`);
     } catch (e) {
       if (showProgress) process.stdout.write("\n");
-      // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
-      log(`Download failed: ${(e as Error).message}`);
+      const message = e instanceof Error ? e.message : String(e);
+      log(`Download failed: ${message}`);
+      try {
+        const saved = statSync(downloaded).size;
+        if (saved > 0) log(`Saved ${(saved / 1048576).toFixed(1)} MB. Run \`neko update\` again to resume.`);
+      } catch { }
       return "failed";
     }
     if (!refreshUpdateLock()) {
       log("Install stopped because update lock ownership was lost.");
       return "failed";
     }
-    if (expectedSha) {
-      const actualSha = createHash("sha256").update(bytes).digest("hex");
-      if (actualSha !== expectedSha) {
+    const tmp = process.platform === "win32" ? `${exe}.new-${process.pid}.exe` : `${exe}.new-${process.pid}`;
+    const candidate = compressed ? tmp : rawPart;
+    try {
+      if (compressed) await expandGzip(gzipPart, candidate);
+      else chmodSync(candidate, 0o755);
+      if (expectedSha && await sha256File(candidate) !== expectedSha) {
+        try { rmSync(candidate, { force: true }); } catch { }
+        if (compressed) try { rmSync(gzipPart, { force: true }); } catch { }
         log(`Downloaded SHA-256 does not match the official ${tag} release.`);
         return "failed";
       }
-    }
-    // Replace the running binary. Windows can't OVERWRITE a running exe, but it CAN rename it out of
-    // the way and put the new one in place; the stale .old is cleaned up next launch. The staging file
-    // is PER-PROCESS (pid suffix): even if the lock is ever bypassed, two updaters can no longer write
-    // into each other's half-downloaded binary.
-    const tmp = process.platform === "win32" ? `${exe}.new-${process.pid}.exe` : `${exe}.new-${process.pid}`;
-    try {
-      writeFileSync(tmp, bytes, { mode: 0o755 });
-      const probed = probeBinaryVersion(tmp);
+      const probed = probeBinaryVersion(candidate);
       if (!probed || `v${probed}` !== tag) {
-        rmSync(tmp, { force: true });
+        rmSync(candidate, { force: true });
+        if (compressed) try { rmSync(gzipPart, { force: true }); } catch { }
         log(`Downloaded binary failed its version probe (expected ${tag}).`);
         return "failed";
       }
-      activateStagedBinary(exe, tmp);
+      activateStagedBinary(exe, candidate);
+      if (compressed) try { rmSync(gzipPart, { force: true }); } catch { }
       log(`Installed ${tag}. Restart neko to use it.`);
       return "updated";
     } catch (e) {
-      // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
-      log(`Install failed: ${(e as Error).message}`);
-      try { if (existsSync(tmp)) rmSync(tmp); } catch { /* */ }
+      const message = e instanceof Error ? e.message : String(e);
+      log(`Install failed: ${message}`);
+      if (compressed) try { if (existsSync(tmp)) rmSync(tmp); } catch { }
       return "failed";
     }
   } finally {

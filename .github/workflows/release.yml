@@ -108,12 +108,20 @@ jobs:
           else
             shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           fi
+          gzip -9 -c "${{ matrix.asset }}" > "${{ matrix.asset }}.gz"
+      - name: package the manual Windows download
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: Compress-Archive -LiteralPath '${{ matrix.asset }}' -DestinationPath '${{ matrix.asset }}.zip' -CompressionLevel Optimal
       - name: attach to release
         if: ${{ needs.release.outputs.state == 'draft' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" "${{ matrix.asset }}" "${{ matrix.asset }}.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+        run: |
+          assets=("${{ matrix.asset }}" "${{ matrix.asset }}.sha256" "${{ matrix.asset }}.gz")
+          test ! -f "${{ matrix.asset }}.zip" || assets+=("${{ matrix.asset }}.zip")
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
 
   publish:
     name: publish complete release
@@ -132,7 +140,7 @@ jobs:
         run: |
           test "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
           count=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')
-          test "$count" -eq 11 || { echo "::error::release has $count assets, expected 11"; exit 1; }
+          test "$count" -eq 17 || { echo "::error::release has $count assets, expected 17"; exit 1; }
 
   # The site reads the latest release from the GitHub API and rewrites its version + download sizes on
   # the way out, so a release needs no site deploy. That is only true while it actually works, and a

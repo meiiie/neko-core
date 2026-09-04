@@ -2,8 +2,13 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 
-import { acquireUpdateLockWithin, activateStagedBinary, assetName, cleanupStaleUpdate, isNewer, latestVersion, parseSha256Sidecar, refreshUpdateLock, selfUpdateSucceeded } from "../src/adapters/update.ts";
+import { acquireUpdateLockWithin, activateStagedBinary, assetName, cleanupStaleUpdate, downloadReleaseFile, expandGzip, isNewer, latestVersion, parseSha256Sidecar, refreshUpdateLock, selfUpdateSucceeded } from "../src/adapters/update.ts";
+
+function fetchStub(run: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): typeof fetch {
+  return Object.assign(run, { preconnect(_url: string | URL): void { } });
+}
 
 test("cleanupStaleUpdate removes the leftover <exe>.old; no-op when absent", () => {
   const dir = mkdtempSync(join(tmpdir(), "neko-upd-"));
@@ -141,7 +146,8 @@ test("release checksum sidecars are parsed strictly", () => {
 });
 
 test("release downloads use an idle-progress watchdog instead of one total deadline", async () => {
-  const { downloadReleaseBytes } = await import("../src/adapters/update.ts");
+  const dir = mkdtempSync(join(tmpdir(), "neko-download-idle-"));
+  const part = join(dir, "neko.part");
   const chunks = ["slow-", "but-", "moving"];
   const moving = async () => new Response(new ReadableStream({
     async start(controller) {
@@ -153,18 +159,105 @@ test("release downloads use an idle-progress watchdog instead of one total deadl
     },
   }));
   const progress: number[] = [];
-  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
-  expect((await downloadReleaseBytes("https://release.invalid/neko", (n: number) => progress.push(n), moving as any, 80)).toString())
-    .toBe(chunks.join("")); // total wall time >80ms, but each chunk resets the watchdog
-  expect(progress).toEqual([5, 9, 15]);
+  try {
+    await downloadReleaseFile("https://release.invalid/neko", part, (n: number) => progress.push(n), {
+      fetcher: fetchStub(moving),
+      idleMs: 80,
+    });
+    expect(readFileSync(part, "utf8")).toBe(chunks.join(""));
+    expect(progress).toEqual([0, 5, 9, 15]);
 
-  const stalled = async () => new Response(new ReadableStream({ start() { /* never produces bytes */ } }));
-  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
-  await expect(downloadReleaseBytes("https://release.invalid/neko", undefined, stalled as any, 40)).rejects.toThrow(/no progress/i);
+    rmSync(part, { force: true });
+    const stalled = async () => new Response(new ReadableStream({ start() { } }));
+    await expect(downloadReleaseFile("https://release.invalid/neko", part, undefined, {
+      fetcher: fetchStub(stalled),
+      idleMs: 40,
+      attempts: 1,
+    })).rejects.toThrow(/no download progress/i);
 
-  const oversized = async () => new Response("123456", { headers: { "content-length": "6" } });
-  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
-  await expect(downloadReleaseBytes("https://release.invalid/neko", undefined, oversized as any, 40, 5)).rejects.toThrow(/250 MB safety limit/i);
+    const oversized = async () => new Response("123456", { headers: { "content-length": "6" } });
+    await expect(downloadReleaseFile("https://release.invalid/neko", part, undefined, {
+      fetcher: fetchStub(oversized),
+      idleMs: 40,
+      maxBytes: 5,
+    })).rejects.toThrow(/250 MB safety limit/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("release downloads resume a persistent partial file with a validated byte range", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "neko-download-resume-"));
+  const part = join(dir, "neko.part");
+  writeFileSync(part, "abc");
+  let range = "";
+  try {
+    const fetcher = async (_url: string | URL | Request, init?: RequestInit) => {
+      range = new Headers(init?.headers).get("range") ?? "";
+      return new Response("def", {
+        status: 206,
+        headers: { "content-range": "bytes 3-5/6", "content-length": "3" },
+      });
+    };
+    const result = await downloadReleaseFile("https://release.invalid/neko", part, undefined, { fetcher: fetchStub(fetcher) });
+    expect(range).toBe("bytes=3-");
+    expect(result).toEqual({ received: 6, total: 6 });
+    expect(readFileSync(part, "utf8")).toBe("abcdef");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("release downloads recover from an early EOF without discarding received bytes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "neko-download-eof-"));
+  const part = join(dir, "neko.part");
+  const ranges: string[] = [];
+  let call = 0;
+  try {
+    const fetcher = async (_url: string | URL | Request, init?: RequestInit) => {
+      ranges.push(new Headers(init?.headers).get("range") ?? "");
+      call++;
+      return call === 1
+        ? new Response("abc", { headers: { "content-length": "6" } })
+        : new Response("def", { status: 206, headers: { "content-range": "bytes 3-5/6" } });
+    };
+    await downloadReleaseFile("https://release.invalid/neko", part, undefined, {
+      fetcher: fetchStub(fetcher),
+      sleep: async () => {},
+    });
+    expect(ranges).toEqual(["", "bytes=3-"]);
+    expect(readFileSync(part, "utf8")).toBe("abcdef");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a server that ignores Range safely restarts instead of appending duplicate bytes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "neko-download-restart-"));
+  const part = join(dir, "neko.part");
+  writeFileSync(part, "stale");
+  try {
+    const fetcher = async () => new Response("fresh", { headers: { "content-length": "5" } });
+    await downloadReleaseFile("https://release.invalid/neko", part, undefined, { fetcher: fetchStub(fetcher) });
+    expect(readFileSync(part, "utf8")).toBe("fresh");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("compressed releases expand with a strict output-size ceiling", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "neko-gzip-"));
+  const archive = join(dir, "neko.gz");
+  const binary = join(dir, "neko");
+  writeFileSync(archive, gzipSync("small verified binary"));
+  try {
+    expect(await expandGzip(archive, binary, 64)).toBe(21);
+    expect(readFileSync(binary, "utf8")).toBe("small verified binary");
+    await expect(expandGzip(archive, binary, 8)).rejects.toThrow(/safety limit/i);
+    expect(existsSync(binary)).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("setAutoUpdate writes the hold flag to the user config (rollback sticks)", () => {
@@ -270,13 +363,19 @@ test("cleanupStaleUpdate sweeps orphaned staging files but never a fresh one", (
     fs.writeFileSync(`${exe}.old`, "old");
     fs.writeFileSync(`${exe}.new-111.exe`, "orphan");   // a killed updater's debris
     fs.writeFileSync(`${exe}.new-222.exe`, "active");   // another process, mid-write
+    fs.writeFileSync(`${exe}.download-v1.5.1.gz.part`, "old partial");
+    fs.writeFileSync(`${exe}.download-v1.5.2.gz.part`, "recent partial");
     const past = (Date.now() - 45 * 60_000) / 1000;
     fs.utimesSync(`${exe}.new-111.exe`, past, past);    // 45 min old -> orphan
+    const lastWeek = (Date.now() - 8 * 24 * 3600_000) / 1000;
+    fs.utimesSync(`${exe}.download-v1.5.1.gz.part`, lastWeek, lastWeek);
     const { cleanupStaleUpdate } = require("../src/adapters/update.ts");
     cleanupStaleUpdate(exe);
     expect(fs.existsSync(`${exe}.old`)).toBe(false);        // the classic backup sweep still works
     expect(fs.existsSync(`${exe}.new-111.exe`)).toBe(false); // orphan removed
     expect(fs.existsSync(`${exe}.new-222.exe`)).toBe(true);  // fresh staging is someone's live download
+    expect(fs.existsSync(`${exe}.download-v1.5.1.gz.part`)).toBe(false);
+    expect(fs.existsSync(`${exe}.download-v1.5.2.gz.part`)).toBe(true);
     expect(fs.existsSync(exe)).toBe(true);                   // the binary itself is untouchable
   } finally {
     rmSync(dir, { recursive: true, force: true });

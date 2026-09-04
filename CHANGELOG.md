@@ -6,6 +6,23 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-09-04
+
+### Fixed
+
+- Release downloads no longer use a total wall-clock deadline or keep the whole executable in memory. The updater
+  streams to a tag-stable checkpoint, resumes an interrupted transfer with a validated HTTP byte range, retries
+  transient transport failures with bounded exponential backoff, and retains useful partial bytes across process
+  restarts. A server that ignores or returns the wrong range causes a safe restart instead of a corrupt append.
+- New releases include gzip-compressed standalone binaries while retaining the raw binaries and their SHA-256
+  sidecars. The Windows x64 artifact measured 89.5 MiB raw and 39.1 MiB compressed in the release candidate; the
+  updater and one-line installers verify the expanded binary's official digest and embedded version before the
+  existing atomic activation step. The website's manual Windows download uses an equally compressed ZIP instead
+  of forcing a 94 MB raw transfer.
+- Windows and Unix one-line installers now use persistent partial files, idle-progress detection, retry-all-errors,
+  and resume. A failed attempt reports the saved byte count so running the same one-liner continues rather than
+  discarding a slow download.
+
 ## [1.5.0] - 2026-09-04
 
 ### Added

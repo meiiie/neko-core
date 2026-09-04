@@ -36,8 +36,9 @@ follow the [stability and support policy](docs/process/STABILITY.md). See the
   pickers, multiline input, image paste, completion alerts, and clean terminal restoration on exit.
 - **Extensible everywhere.** Built-in skills ship inside the binary and work from every folder;
   `~/.neko-core/skills` adds global overrides. MCP, recipes, memory, workflows, and ACP extend the same core.
-- **Auditable delivery.** Every release is built for five targets, smoke-tested, checksummed, and published
-  by GitHub Actions. Exact-version rollback is supported by both the updater and installers.
+- **Auditable delivery.** Every release is built for five targets, smoke-tested, checksummed, compressed for
+  transfer, and published by GitHub Actions. Updates checkpoint and resume interrupted downloads; exact-version
+  rollback is supported by both the updater and installers.
 
 ## Install
 
@@ -55,8 +56,10 @@ irm https://neko.holilihu.online/install.ps1 | iex
 
 If the domain is unavailable, use the same scripts from
 `https://raw.githubusercontent.com/meiiie/neko-core/main/install.sh` or `install.ps1`.
-Direct binaries and their SHA-256 files are on the
+Direct binaries, a smaller Windows ZIP, and their SHA-256 files are on the
 [latest release](https://github.com/meiiie/neko-core/releases/latest).
+The one-line installers automatically prefer the smaller compressed asset and preserve partial progress on an
+interrupted connection.
 
 Start Neko:
 

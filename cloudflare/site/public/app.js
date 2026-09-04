@@ -159,7 +159,7 @@
   var PLATFORMS = {
     // Apple silicon cannot be told from Intel in a browser, so the default follows the overwhelmingly
     // likely case and the table directly beneath it carries the Intel build.
-    windows: { name: "Windows", file: "neko-windows-x64.exe", size: "95 MB", row: "windows" },
+    windows: { name: "Windows", file: "neko-windows-x64.exe.zip", size: "40 MB", row: "windows" },
     macos:   { name: "macOS",   file: "neko-macos-arm64",     size: "70 MB", row: "macos-arm64" },
     linux:   { name: "Linux",   file: "neko-linux-x64",       size: "89 MB", row: "linux-x64" }
   };

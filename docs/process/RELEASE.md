@@ -18,7 +18,7 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
 | Startup + exit e2e | `bun scripts/e2e-startup-lifecycle.ts` | incomplete first frame and terminal-restore byte races |
 | Ghost + typing e2e | `bun scripts/e2e-conpty-ghost.ts dist/neko.exe` ×3 | ConPTY displacement AND dead input, on a REAL terminal (typed-echo asserted — "clean" without input is hollow) |
 | Scroll bench (render changes only) | `bun scripts/bench-scroll-conpty.ts` | feel regressions; compare the baselines in the script header |
-| Secret scan | `gitleaks dir . --config .gitleaks.toml --redact` | leaked keys before a public push |
+| Secret scan | `gitleaks git . --config .gitleaks.toml --redact`, then pipe `git diff --no-ext-diff --unified=0` into `gitleaks stdin --config .gitleaks.toml --redact` | leaked keys in tracked history or the release diff, without treating ignored dependency caches as release content |
 
 ## 2. Docs — part of the release, not an afterthought
 
@@ -38,11 +38,11 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
 
 1. Commit the exact candidate and push/fast-forward `main`.
 2. WATCH the cross-platform `ci` workflow to completion. Only then create and push `vX.Y.Z`.
-3. The release workflow creates one **draft**, attaches the browser bundle, five binaries, and five SHA-256
-   sidecars, and publishes only after the complete 11-asset set exists. Users and installers never see a
+3. The release workflow creates one **draft**, attaches the browser bundle, five binaries, five SHA-256
+   sidecars, five gzip transfer artifacts, and one user-friendly Windows ZIP, and publishes only after the complete 17-asset set exists. Users and installers never see a
    half-built release.
 4. WATCH the release workflow to completion (a monitor, not hope).
-5. Verify, every time: **5/5 binaries + 5/5 SHA-256 sidecars** attached · the browser-extension ZIP when
+5. Verify, every time: **5/5 binaries + 5/5 SHA-256 sidecars + 5/5 gzip transfer artifacts + the Windows ZIP** attached · the browser-extension ZIP when
    that workflow step exists · `releases/latest` resolves to the new tag · `isDraft: false` · install
    one-liner fetches the new version end-to-end when the change warrants it.
 

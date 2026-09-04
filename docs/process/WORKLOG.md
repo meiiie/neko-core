@@ -5,6 +5,27 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-09-04 - v1.5.1 resumable compressed release transport
+
+A field upgrade from v0.19.0 to v1.5.0 repeatedly timed out on a route delivering the 89.5 MiB Windows binary at
+roughly 0.1-0.2 MiB/s. The old updater applied a total deadline and did not preserve a cross-process checkpoint;
+the one-line installers also used process-specific staging and deleted partial data on exit. Increasing the
+deadline would still discard progress after a later interruption.
+
+The release transport now follows the same primitives used by current package installers: gzip archives reduce
+the measured Windows transfer to 39.1 MiB, downloads stream to tag-stable partial files, HTTP Range and
+Content-Range resume only from a validated offset, transient connection/HTTP failures receive bounded exponential
+backoff, and a 60-second idle watchdog replaces the total wall-clock cutoff. The official raw-binary SHA-256 and
+embedded version remain the trust boundary after decompression; activation remains atomic. A live probe against
+the v1.5.0 GitHub asset returned 206 for an end-of-file range and the production downloader completed the exact
+93,849,088-byte length without fetching the prefix again. The website's Windows button now serves a conventional
+ZIP of the same binary, so manual downloads receive the same transfer reduction without requiring PowerShell.
+
+The targeted updater and installer tests cover slow continuous progress, stalled reads, early EOF recovery,
+range resume, a server ignoring Range, archive expansion bounds, persistent cleanup, and release asset accounting.
+The exact release candidate subsequently passed the full suite: 1,581 tests, 16 explicit skips, and zero failures
+across 147 files. The tracked Git history and working diff also passed the gitleaks gate.
+
 ## 2026-09-04 - v1.5.0 host-shell routing and stabilization
 
 Ordinary `neko` and `neko --yolo` sessions now route Bash directly to the same host and identity as Neko by

@@ -65,13 +65,21 @@ if ($rel) {
   }
   $assetMeta = @($rel.assets | Where-Object { $_.name -eq $asset }) | Select-Object -First 1
   if (-not $assetMeta) { throw "Release $tag does not contain $asset" }
-  $url = "$($assetMeta.browser_download_url)"
+  $compressedMeta = @($rel.assets | Where-Object { $_.name -eq "$asset.gz" }) | Select-Object -First 1
+  $downloadMeta = if ($compressedMeta) { $compressedMeta } else { $assetMeta }
+  $compressed = [bool]$compressedMeta
+  $url = "$($downloadMeta.browser_download_url)"
   $expectedUrl = "https://github.com/$repo/releases/download/$tag/$asset"
-  if ($url -ne $expectedUrl) { throw "Release $tag returned an unexpected asset URL" }
-  $expectedSize = [long]$assetMeta.size
-  $expectedSha = "$($assetMeta.digest)" -replace '^sha256:', ''
+  $expectedDownloadUrl = if ($compressed) { "$expectedUrl.gz" } else { $expectedUrl }
+  if ($url -ne $expectedDownloadUrl) { throw "Release $tag returned an unexpected asset URL" }
+  $expectedSize = [long]$downloadMeta.size
+  $expectedBinarySize = [long]$assetMeta.size
+  $expectedDownloadSha = "$($downloadMeta.digest)" -replace '^sha256:', ''
+  $expectedBinarySha = "$($assetMeta.digest)" -replace '^sha256:', ''
   if ($expectedSize -le 0 -or $expectedSize -gt 250MB) { throw "Release $tag returned an invalid asset size" }
-  if ($expectedSha -notmatch '^[0-9a-fA-F]{64}$') { throw "Release $tag does not publish a usable SHA-256 digest" }
+  if ($expectedDownloadSha -notmatch '^[0-9a-fA-F]{64}$' -or $expectedBinarySha -notmatch '^[0-9a-fA-F]{64}$') {
+    throw "Release $tag does not publish a usable SHA-256 digest"
+  }
 } else {
   # GitHub's unauthenticated API is limited to 60 requests/hour per public IP. The release redirect and
   # sidecar assets are public, official, and not subject to that API quota, so keep installs available while
@@ -91,8 +99,11 @@ if ($rel) {
     throw "Could not read the official checksum for $tag after the GitHub API failed: $($_.Exception.Message)"
   }
   if ("$checksumText" -notmatch '^\s*([0-9a-fA-F]{64})(?:\s|$)') { throw "Release $tag returned an invalid SHA-256 sidecar" }
-  $expectedSha = $Matches[1]
+  $expectedBinarySha = $Matches[1]
+  $expectedDownloadSha = $expectedBinarySha
   $expectedSize = 0
+  $expectedBinarySize = 0
+  $compressed = $false
   Write-Note "  GitHub API unavailable ($metadataError); verified-release fallback active."
 }
 $label = $tag
@@ -100,28 +111,57 @@ $label = $tag
 Write-Step "Installing Neko Core $tag (windows-x64)..."
 
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-$stage = Join-Path $dir ".neko-download-$PID.exe"
+$stageSuffix = if ($compressed) { 'exe.gz.part' } else { 'exe.part' }
+$stage = Join-Path $dir ".neko-download-$tag-$stageSuffix"
+$candidate = Join-Path $dir ".neko-candidate-$tag-$PID.exe"
+if (-not $compressed) { $candidate = $stage }
 $backup = "$dest.old"
-Remove-Item -Force $stage -ErrorAction SilentlyContinue
 
-# Download with an IN-PLACE progress line (grok/uv-style), streaming via HttpClient - full speed (no
-# Invoke-WebRequest progress tax) and no dependence on how curl renders its bar under iex.
-function Get-NekoBinary($url, $dest) {
+# Stream to a tag-stable partial file. A retry or a later installer run resumes the saved bytes.
+function Get-NekoBinary($url, $dest, [long]$knownSize) {
   Add-Type -AssemblyName System.Net.Http
-  $client = New-Object System.Net.Http.HttpClient
-  $client.Timeout = [TimeSpan]::FromMinutes(10)
-  $client.DefaultRequestHeaders.UserAgent.ParseAdd('neko-installer')
-  try {
-    $resp = $client.GetAsync($url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-    if (-not $resp.IsSuccessStatusCode) { throw "HTTP $([int]$resp.StatusCode)" }
-    $total = $resp.Content.Headers.ContentLength
-    $in  = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-    $out = [System.IO.File]::Create($dest)
+  $lastError = 'download failed'
+  for ($attempt = 1; $attempt -le 6; $attempt++) {
+    $client = New-Object System.Net.Http.HttpClient
+    $client.Timeout = [Threading.Timeout]::InfiniteTimeSpan
+    $client.DefaultRequestHeaders.UserAgent.ParseAdd('neko-installer')
+    $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, $url)
+    $resp = $null; $in = $null; $out = $null
+    $offset = if (Test-Path -LiteralPath $dest) { [long](Get-Item -LiteralPath $dest).Length } else { [long]0 }
+    if ($offset -gt 250MB) { Remove-Item -Force $dest; $offset = 0 }
+    if ($offset -gt 0) { $request.Headers.TryAddWithoutValidation('Range', "bytes=$offset-") | Out-Null }
     try {
+      $resp = $client.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+      $status = [int]$resp.StatusCode
+      if ($status -eq 416 -and $offset -gt 0 -and $knownSize -gt 0 -and $offset -eq $knownSize) { return }
+      if (-not $resp.IsSuccessStatusCode) { throw "HTTP $status" }
+
+      $append = $status -eq 206 -and $offset -gt 0
+      if ($status -eq 206) {
+        $rangeStart = $resp.Content.Headers.ContentRange.From
+        if ($null -eq $rangeStart -or [long]$rangeStart -ne $offset) {
+          Remove-Item -Force $dest -ErrorAction SilentlyContinue
+          throw 'release server returned a mismatched byte range'
+        }
+        $total = [long]$resp.Content.Headers.ContentRange.Length
+      } else {
+        $offset = 0
+        $total = if ($resp.Content.Headers.ContentLength) { [long]$resp.Content.Headers.ContentLength } else { [long]0 }
+      }
+      if ($total -gt 250MB) { throw 'release exceeds the 250 MB safety limit' }
+
+      $in = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+      $mode = if ($append) { [System.IO.FileMode]::Append } else { [System.IO.FileMode]::Create }
+      $out = New-Object System.IO.FileStream($dest, $mode, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
       $buf = New-Object byte[] 1048576
-      $done = [long]0; $lastDraw = [datetime]::MinValue
-      while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+      $done = $offset; $lastDraw = [datetime]::MinValue
+      while ($true) {
+        $read = $in.ReadAsync($buf, 0, $buf.Length)
+        if (-not $read.Wait(60000)) { throw 'no download progress for 60s' }
+        $n = $read.Result
+        if ($n -le 0) { break }
         $out.Write($buf, 0, $n); $done += $n
+        if ($done -gt 250MB -or ($total -gt 0 -and $done -gt $total)) { throw 'release exceeds the 250 MB safety limit' }
         if (([datetime]::Now - $lastDraw).TotalMilliseconds -ge 100) {
           $lastDraw = [datetime]::Now
           if ($total) {
@@ -132,44 +172,90 @@ function Get-NekoBinary($url, $dest) {
           }
         }
       }
+      if ($total -gt 0 -and $done -ne $total) { throw "download ended early at $done of $total bytes" }
       if ($total) { Write-Host ("`r  Downloading... {0:N1} MB / {0:N1} MB (100%)   " -f ($total/1MB)) }
       else        { Write-Host ("`r  Downloading... {0:N1} MB - done          " -f ($done/1MB)) }
-    } finally { $out.Dispose(); $in.Dispose() }
-  } finally { $client.Dispose() }
+      return
+    } catch {
+      $lastError = $_.Exception.Message
+      if ($attempt -lt 6) {
+        $delay = [Math]::Min(8, [Math]::Pow(2, $attempt - 1))
+        Write-Note "`n  Connection interrupted ($lastError); resuming in $delay s [$attempt/6]..."
+        Start-Sleep -Seconds $delay
+      }
+    } finally {
+      if ($out) { $out.Dispose() }
+      if ($in) { $in.Dispose() }
+      if ($resp) { $resp.Dispose() }
+      $request.Dispose(); $client.Dispose()
+    }
+  }
+  throw $lastError
 }
 
-try {
 $downloaded = $false
-try { Get-NekoBinary $url $stage; $downloaded = $true } catch {
-  Write-Note "  ($($_.Exception.Message) - falling back to curl)"
+if (Test-Path -LiteralPath $stage) {
+  $cachedSize = [long](Get-Item -LiteralPath $stage).Length
+  if (($expectedSize -eq 0 -or $cachedSize -eq $expectedSize) -and (Get-FileHash -LiteralPath $stage -Algorithm SHA256).Hash -eq $expectedDownloadSha) {
+    Write-Dim "  Reusing the complete verified download checkpoint."
+    $downloaded = $true
+  }
+}
+if (-not $downloaded) {
+  try { Get-NekoBinary $url $stage $expectedSize; $downloaded = $true } catch {
+    Write-Note "  ($($_.Exception.Message) - falling back to curl resume)"
+  }
 }
 if (-not $downloaded -and (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
-  # --ssl-no-revoke: schannel fails when the cert's OCSP/CRL host is unreachable (corporate proxy);
-  # the chain + hostname are still fully validated.
-  & curl.exe -fsSL --retry 3 --ssl-no-revoke -o $stage $url
+  & curl.exe -fL --retry 8 --retry-all-errors --connect-timeout 20 --speed-limit 1 --speed-time 60 --ssl-no-revoke -C - -o $stage $url
   if ($LASTEXITCODE -eq 0) { $downloaded = $true }
 }
 if (-not $downloaded) {
-  $ProgressPreference = 'SilentlyContinue'
-  Invoke-WebRequest -Uri $url -OutFile $stage
+  $saved = if (Test-Path -LiteralPath $stage) { [long](Get-Item -LiteralPath $stage).Length } else { 0 }
+  throw "Download failed after retries. $([Math]::Round($saved / 1MB, 1)) MB is saved; run the installer again to resume."
 }
 
-# Verify release size, digest, and REAL version before touching the working install.
 $actualSize = (Get-Item -LiteralPath $stage).Length
 if ($expectedSize -gt 0 -and $actualSize -ne $expectedSize) {
-  Remove-Item -Force $stage -ErrorAction SilentlyContinue
+  if ($actualSize -gt $expectedSize) { Remove-Item -Force $stage -ErrorAction SilentlyContinue }
   throw "Downloaded size mismatch (expected $expectedSize bytes, got $actualSize)"
 }
 $actualSha = (Get-FileHash -LiteralPath $stage -Algorithm SHA256).Hash
-if ($actualSha -ne $expectedSha) {
+if ($actualSha -ne $expectedDownloadSha) {
   Remove-Item -Force $stage -ErrorAction SilentlyContinue
   throw "Downloaded SHA-256 does not match the official GitHub release"
 }
+
+if ($compressed) {
+  Remove-Item -Force $candidate -ErrorAction SilentlyContinue
+  $source = [System.IO.File]::OpenRead($stage)
+  try {
+    $gzip = New-Object System.IO.Compression.GzipStream($source, [System.IO.Compression.CompressionMode]::Decompress)
+    try {
+      $output = [System.IO.File]::Create($candidate)
+      try { $gzip.CopyTo($output) } finally { $output.Dispose() }
+    } finally { $gzip.Dispose() }
+  } finally { $source.Dispose() }
+}
+
+$binarySize = (Get-Item -LiteralPath $candidate).Length
+if ($binarySize -gt 250MB -or ($expectedBinarySize -gt 0 -and $binarySize -ne $expectedBinarySize)) {
+  Remove-Item -Force $candidate -ErrorAction SilentlyContinue
+  Remove-Item -Force $stage -ErrorAction SilentlyContinue
+  throw "Expanded binary size mismatch"
+}
+$binarySha = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash
+if ($binarySha -ne $expectedBinarySha) {
+  Remove-Item -Force $candidate -ErrorAction SilentlyContinue
+  Remove-Item -Force $stage -ErrorAction SilentlyContinue
+  throw "Expanded binary SHA-256 does not match the official GitHub release"
+}
 $ver = ''
-try { $ver = (& $stage version 2>$null | Select-Object -First 1) } catch { }
+try { $ver = (& $candidate version 2>$null | Select-Object -First 1) } catch { }
 $newVer = if ($ver -match 'neko-core\s+([0-9][0-9.]*)') { $Matches[1] } else { '' }
 if (-not $newVer -or "v$newVer" -ne $tag) {
-  Remove-Item -Force $stage -ErrorAction SilentlyContinue
+  Remove-Item -Force $candidate -ErrorAction SilentlyContinue
+  if ($compressed) { Remove-Item -Force $stage -ErrorAction SilentlyContinue }
   throw "Downloaded binary failed its version probe (expected $tag, got '$ver')"
 }
 
@@ -178,21 +264,19 @@ if (-not $newVer -or "v$newVer" -ne $tag) {
 Remove-Item -Force $backup -ErrorAction SilentlyContinue
 try {
   if (Test-Path -LiteralPath $dest) {
-    [System.IO.File]::Replace($stage, $dest, $backup, $true)
+    [System.IO.File]::Replace($candidate, $dest, $backup, $true)
   } else {
-    Move-Item -LiteralPath $stage -Destination $dest
+    Move-Item -LiteralPath $candidate -Destination $dest
   }
   Remove-Item -Force $backup -ErrorAction SilentlyContinue
+  if ($compressed) { Remove-Item -Force $stage -ErrorAction SilentlyContinue }
 } catch {
-  Remove-Item -Force $stage -ErrorAction SilentlyContinue
+  if ($compressed) { Remove-Item -Force $candidate -ErrorAction SilentlyContinue }
   throw "Could not activate $tag; the previous Neko install was preserved. Close running Neko sessions and retry. $($_.Exception.Message)"
 }
 
 Write-Dim  "  Installed to $dest"
 Write-Ok "$ver installed (SHA-256 verified)"
-} finally {
-  Remove-Item -Force $stage -ErrorAction SilentlyContinue
-}
 
 # A PINNED install (NEKO_VERSION) is a HOLD: pause auto-update in the user config so the daily updater
 # can't drag this exact version forward again. auto_update:false is honored by every release >= 0.7.4
