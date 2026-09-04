@@ -12,7 +12,7 @@ import {
 import { ToolRegistry, type ToolTurnPolicy } from "../src/core/tool-runtime.ts";
 import type { McpTools } from "../src/core/ports.ts";
 import { detectSandbox, resolveSrtBunBridge, sandboxActive } from "../src/core/sandbox.ts";
-import { isForegroundValidatorOnlyCommand } from "../src/core/validation-command.ts";
+import { isForegroundValidatorOnlyCommand, isProtectedDifferentialValidator } from "../src/core/validation-command.ts";
 
 const tempDirs: string[] = [];
 // Windows SRT startup is serialized and can exceed a minute while the full suite exercises other
@@ -148,6 +148,7 @@ test("exact-file lease advertises its real edit and validator contract without m
   expect(bash.function.description).toContain("isolated read-only project workspace");
   expect(bash.function.parameters.properties.run_in_background).toBeUndefined();
   expect(bash.function.parameters.properties.command.description).toContain("Validator && validator");
+  expect(bash.function.parameters.properties.validator_source.description).toContain("protected stdin");
 
   lease.close();
   expect(registry.turnPolicyDescriptor()).toBeUndefined();
@@ -224,6 +225,10 @@ test("exact-file bash policy accepts only authoritative non-mutating validator i
     "npm test -- --runInBand",
     "bun test && rtk bun run typecheck",
     "FOO=1 pytest tests/unit/test_one.py -q",
+    "bun st.mjs",
+    "bun --no-env-file --no-install st.mjs",
+    "bun run ./tests/smoke.ts",
+    "rtk node \"tests/check result.mjs\"",
   ]) expect(isForegroundValidatorOnlyCommand(command)).toBe(true);
 
   for (const command of [
@@ -245,8 +250,38 @@ test("exact-file bash policy accepts only authoritative non-mutating validator i
     "cargo build",
     "dotnet build",
     "make build",
+    "bun -e \"console.log('ok')\"",
+    "node ../outside.mjs",
+    "bun C:/tmp/check.mjs",
+    "bun tests/check.mjs --write",
+    "bun tests/*.mjs",
   ]) expect(isForegroundValidatorOnlyCommand(command)).toBe(false);
   expect(isForegroundValidatorOnlyCommand("bun test", { run_in_background: true })).toBe(false);
+  expect(isProtectedDifferentialValidator("bun --no-env-file --no-install -", {
+    validator_source: "console.log('ok')",
+  })).toBe(true);
+  expect(isProtectedDifferentialValidator("bun -", { validator_source: "console.log('ok')" })).toBe(false);
+  expect(isProtectedDifferentialValidator("bun --no-env-file --no-install -", {
+    validator_source: "console.log('ok')",
+    network_domains: ["example.com"],
+  })).toBe(false);
+});
+
+test("active exact-file policy classifies a direct local script as validation evidence", () => {
+  const { root } = fixture();
+  const registry = new ToolRegistry(root, "auto", () => true);
+  expect(registry.isValidationBashCommand("bun st.mjs")).toBe(false);
+  const lease = registry.enterTurn(exactPolicy());
+  try {
+    expect(registry.isValidationBashCommand("bun st.mjs")).toBe(true);
+    expect(registry.isValidationBashCommand("bun -e \"console.log(1)\"")).toBe(false);
+    expect(registry.isValidationBashCommand("bun --no-env-file --no-install -", {
+      validator_source: "console.log('ok')",
+    })).toBe(true);
+  } finally {
+    lease.close();
+  }
+  expect(registry.isValidationBashCommand("bun st.mjs")).toBe(false);
 });
 
 test("exact-file validators fail closed before approval when read-only isolation is unavailable", async () => {
@@ -399,6 +434,31 @@ test.skipIf(!LIVE_WINDOWS_SRT_BRIDGE)("a live SRT exact validator cannot mutate 
     writeFileSync(attack, 'import { expect, test } from "bun:test";\ntest("control", () => expect(2 + 2).toBe(4));\n', "utf8");
     const controlResult = String(await registry.execute("bash", { command: "bun test" }));
     expect(controlResult).toContain("exit 0");
+    expect(readFileSync(protectedPath, "utf8")).toBe("protected\n");
+
+    writeFileSync(join(root, "direct-check.mjs"), [
+      'import { readFileSync, writeFileSync } from "node:fs";',
+      'try { writeFileSync("protected.ts", "mutated\\n"); } catch {}',
+      'if (readFileSync("protected.ts", "utf8") !== "protected\\n") process.exit(1);',
+      'console.log("direct-ok");',
+      '',
+    ].join("\n"), "utf8");
+    const directResult = String(await registry.execute("bash", { command: "bun direct-check.mjs" }));
+    expect(directResult).toContain("exit 0");
+    expect(directResult).toContain("direct-ok");
+    expect(readFileSync(protectedPath, "utf8")).toBe("protected\n");
+
+    const differentialResult = String(await registry.execute("bash", {
+      command: "bun --no-env-file --no-install -",
+      validator_source: [
+        'import { readFileSync, writeFileSync } from "node:fs";',
+        'try { writeFileSync("protected.ts", "mutated\\n"); } catch {}',
+        'if (readFileSync("protected.ts", "utf8") !== "protected\\n") process.exit(1);',
+        'console.log("differential-ok");',
+      ].join("\n"),
+    }));
+    expect(differentialResult).toContain("exit 0");
+    expect(differentialResult).toContain("differential-ok");
     expect(readFileSync(protectedPath, "utf8")).toBe("protected\n");
   } finally {
     lease.close();

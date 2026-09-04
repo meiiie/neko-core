@@ -6,6 +6,127 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-04
+
+### Added
+
+- Explicit closed-loop work now fixes a provider-agnostic completion contract before implementation and uses
+  a fresh, independently tooled read-only validator after each pass. Existing criteria cannot be deleted or
+  weakened; the validator may append a newly discovered measurable gap, but it remains unknown until a later
+  review. Missing evidence cannot pass, contract state survives session resume, and `/contract` exposes the
+  current verdict. Ordinary chat and single-shot runs incur no additional model calls.
+- Pre-work diagnosis is stored as receipt-backed `baselineFacts`, separate from final-state criteria. Exact
+  file comparisons accept one named artifact receipt only; an unrelated baseline cannot demote a conclusive
+  runtime check. Validator results carry unforgeable measurement receipts, exact file-byte hashes, and a
+  bounded no-tool label adjudication when the recorded evidence and status disagree.
+- Independent validators can run one protected Bun stdin differential through the existing read-only,
+  network-denied sandbox. The source is delivered on protected stdin rather than shell text, and a validator
+  cannot turn it into a project mutation, background process, network request, or masked exit status.
+- `neko bench contract [hard|frontier] --trials <n> --call-budget <n>` A/B tests legacy self-review against the
+  contract controller on fixed tasks under the same per-trial provider-call cap. It reports external artifact,
+  controller-ready, and strict completion separately alongside tokens, calls, and a reproducible fingerprint.
+- Completion criteria now carry an immutable behavioral `coverageArea` and case-mass `weight`. A validator must
+  declare whether its instrument covers the material surface, may expand a weak area without changing prior
+  weights, and cannot certify completion while coverage is incomplete. Reports expose weighted coverage and
+  instrument expansions; every required criterion still has to pass regardless of weight.
+- `neko bench campaign [hard|frontier] --profiles <a,b> --trials <n>` runs the matched completion A/B across
+  multiple provider/model profiles. `--task <id>` can bound a diagnostic subset, and the campaign reports
+  per-cell Wilson 95% intervals. Anthropic-compatible routes are labelled as independent provider replicates,
+  not falsely presented as controllable sampling seeds.
+- Exact-file turns and independent completion validators may execute one direct relative Bun/Node JS or TS
+  validation script inside the existing network-denied, read-only sandbox. Eval snippets, absolute/parent paths,
+  extra arguments, globbing, redirection, background work, and mutating validator flags remain refused.
+- A credential-safe ProgramBench 1.2.4 adapter runs official `task_cleanroom_v6` tasks with provider execution
+  on the host and native tools in a networkless container. It emits immutable artifacts, exact provenance,
+  aggregate provider-call accounting, privacy-bounded full trajectories, pinned Linux scoring, and bounded
+  multi-task/profile/controller/provider-replicate campaign manifests. One manifest freezes all comparison arms;
+  atomic checkpoints support explicit resume without rerunning completed, failed, or interrupted artifacts.
+- Long ProgramBench runs now emit a privacy-safe live progress snapshot every 30 seconds: remaining work-window
+  time, completion phase, coarse tool category and settlement state, artifact-checkpoint count, mutation epoch,
+  and validation state. Prompt text, model output, commands, paths, observations, and credentials never enter
+  this telemetry.
+- Contract-mode ProgramBench runs can freeze a bounded implementation-round size. Reaching the round boundary
+  checkpoints and yields to the independent validator without spending the remaining call budget on a premature
+  final answer. Normal CLI/TUI turns retain their existing step behavior.
+- Campaign cells are blocked by task/profile/replicate and rotate controller order deterministically, so provider
+  or machine drift is not systematically assigned to one comparison arm. The immutable manifest records the
+  resulting execution order before inference.
+- ProgramBench campaigns now freeze the complete non-ignored source snapshot, component SHAs, evaluator image ID,
+  and task image IDs. Each cell writes structured runner and official-score telemetry; the aggregate report keeps
+  valid missing artifacts distinct from infrastructure failures and applies a predeclared exact paired decision
+  rule before supporting an improvement claim.
+
+### Fixed
+
+- Independent completion supervisors now retain the parent registry's native backend. Harbor and ProgramBench
+  validators therefore inspect the authoritative remote workspace instead of an empty host staging directory;
+  their read-only allowlist, no-hook boundary, and inability to mutate remain unchanged.
+- Reaching the Harbor controller deadline now closes as `time_budget_exhausted` with the trajectory and artifact
+  preserved for grading. A host terminal failure received while the remote is idle is reported as the peer's
+  session failure rather than being masked as an invalid protocol ordering error.
+- Contract review no longer sends the implementer back to mutate an already-correct artifact when only a
+  measurement label is inconclusive. It performs at most one fresh validator recheck, then stops honestly if
+  the evidence is still insufficient.
+- A successful authoritative project validator is now monotonic within its source revision: a later optional
+  or exit-masked check cannot erase it. Closed-loop work also stops after one repair pass when both the artifact
+  revision and independent evidence are unchanged, preventing absent-toolchain searches from becoming false
+  nontermination.
+- Completion criteria now describe observable outcomes rather than a preferred validator executable. An
+  unavailable optional tool such as `tsc` is an instrument limitation, not an artifact defect, when a current
+  repository check already measures the required result.
+- SRT validator startup now has a bounded cold-start allowance separate from process runtime, and the refusal
+  path no longer performs the same sandbox health gate twice.
+- A missing candidate source in the hidden frontier oracle is now an ordinary artifact failure rather than an
+  infrastructure error. Canonical-file, hard-link, sandbox, and verifier-integrity failures remain fail-closed
+  infrastructure errors that invalidate a comparison.
+- ProgramBench scoring now awaits the Docker evaluator before staging cleanup, avoiding a Windows `try/finally`
+  teardown race. Long inference emits a secret-free 30-second progress heartbeat, and independent verifier branches use
+  up to four local workers without changing the immutable submission.
+- The remote evaluation bridge accepts only the advertised canonical `/workspace` absolute root and its
+  descendants, while preserving traversal and outside-root refusals. Intermediate metrics may lag a tool result
+  already in transit, but the terminal checkpoint and final frame must still reconcile every request and result.
+  An unfinished ProgramBench workspace now records `artifact_missing` instead of an infrastructure failure.
+- Remote process-quiescence attestation has Docker Desktop scheduling headroom separate from model and tool
+  deadlines. A slow cleanup still destroys the task and fails closed; ordinary read tools no longer become false
+  infrastructure failures merely because a five-second transport window was narrower than cold Docker latency.
+- Harbor `bash` process-group probes and cleanup now use the preflight-pinned external `kill` executable. POSIX
+  shells such as `dash` no longer shadow it with a builtin that rejects GNU negative-process-group syntax and
+  falsely reports long commands as failed to launch; utility identity guards and fail-closed cleanup remain intact.
+- Finalization cancellation races now have deterministic settlement semantics. A cancel processed before remote
+  settlement wins after quiescence; a result or error completed first remains terminal and the remote consumes
+  only the matching late cancel. Wrong, stale, and duplicate IDs remain protocol errors.
+- Windows Bash abort and timeout teardown now awaits trusted process-tree termination before using the expensive
+  CIM fallback, and scans only while the leader is still alive. This removes false teardown failures under suite
+  load while retaining fail-closed descendant cleanup.
+- ProgramBench scoring no longer depends on Docker Desktop's hanging post-compile `docker commit`. The pinned
+  workspace-snapshot transport compiles once and restores identical workspace bytes into each official cleanroom.
+  A per-run label covers the evaluator and every nested branch container so success, error, cancel, and interrupt
+  can remove exactly the owned process set; malformed or error-only evaluator output cannot become a false score.
+- A Docker-daemon cleanup guard now survives Windows Terminal process-group termination. It watches a
+  credential-free heartbeat and removes only the interrupted ProgramBench run's labeled containers, closing the
+  lifecycle gap that an in-process `finally` block cannot cover after Ctrl+C kills the whole host tree.
+
+### Changed
+
+- **Bash now targets the user's host by default.** `neko` and `neko --yolo` can run installed CLI tools, builds,
+  tests, package managers, and network-capable shell work without routing through Computer Use or requiring a
+  startup flag. On Windows, child console windows stay hidden; long-lived servers and watchers use the existing
+  `run_in_background` process path.
+- The model receives the exact host/sandbox execution target, detected host toolchain, and network behavior each
+  turn. Bash is the only terminal/CLI route; Computer remains a GUI tool and is never a shell, download, build, or
+  network fallback.
+- OS sandboxing remains an explicit `sandbox: true` policy. Once selected it still fails closed when unavailable
+  and never widens itself to host execution. Independent completion review remains read-only and sandboxed, while
+  ProgramBench continues to use its separate networkless cleanroom.
+
+### Compatibility
+
+- Provider wires, saved sessions, CLI commands, ACP clients, and host profiles require no migration. Configurations
+  that explicitly set `sandbox: true` or `sandbox: false` retain their prior boundary. Configurations with no
+  `sandbox` setting now use direct host Bash; set `sandbox: true` to retain the previous contained-shell default.
+  Permission gates, catastrophic-command seatbelts, credential protections, project trust, and the policy audit
+  remain active, but direct host Bash is intentionally not an OS containment boundary.
+
 ## [1.4.0] - 2026-08-28
 
 ### Added

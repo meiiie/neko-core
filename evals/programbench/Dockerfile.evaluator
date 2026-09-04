@@ -1,0 +1,11 @@
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends docker.io \
+    && uv tool install programbench==1.2.4 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY workspace_snapshot_evaluator.py /opt/neko/workspace_snapshot_evaluator.py
+
+ENV PATH="/root/.local/bin:${PATH}"
+ENTRYPOINT ["/root/.local/share/uv/tools/programbench/bin/python", "/opt/neko/workspace_snapshot_evaluator.py"]

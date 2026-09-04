@@ -567,6 +567,15 @@ test("frontier inventory is exact and hidden verification rejects a hard-linked 
   }
 });
 
+test("a missing candidate source is an ordinary model failure, not benchmark infrastructure failure", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "neko-frontier-missing-")));
+  try {
+    expect(await FRONTIER_TASKS[0].verify(root)).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("frontier verifier refuses candidate runtime inspection and early-success termination", async () => {
   const task = FRONTIER_TASKS[0];
   const root = stage(task);

@@ -405,12 +405,12 @@ test("completion sound is on by default and has a permanent config opt-out", () 
   expect(loadConfig({ path: tmpConfig({ completion_sound: false }) }).completionSound).toBe(false);
 });
 
-test("bash sandbox is ON by default, network off, with config/env rollback switches", () => {
+test("host bash is the default, with an explicit sandbox opt-in and env rollback", () => {
   const cfg = loadConfig({ path: tmpConfig({}) });
-  expect(cfg.sandbox).toBe(true);
+  expect(cfg.sandbox).toBe(false);
   expect(cfg.sandboxNetwork).toBe(false);
   expect(cfg.sandboxDomains).toEqual([]);
-  expect(loadConfig({ path: tmpConfig({ sandbox: false }) }).sandbox).toBe(false);
+  expect(loadConfig({ path: tmpConfig({ sandbox: true }) }).sandbox).toBe(true);
   expect(loadConfig({ path: tmpConfig({ sandbox_domains: ["github.com"] }) }).sandboxDomains).toEqual(["github.com"]);
 });
 

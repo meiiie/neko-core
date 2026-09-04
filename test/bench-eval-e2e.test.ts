@@ -816,10 +816,14 @@ test("runBench does not report a production-incomplete mutation as a pass", asyn
   });
 
   expect(report.results[0].passes).toBe(0);
+  expect(report.results[0].artifactPasses).toBe(1);
+  expect(report.results[0].controllerPasses).toBe(0);
   expect(report.results[0].modelFailures).toBe(1);
   expect(report.results[0].infraErrors).toBe(0);
   expect(report.comparisonValid).toBe(true);
   expect(report.passed).toBe(0);
+  expect(report.artifactPassed).toBe(1);
+  expect(report.controllerPassed).toBe(0);
 }, 30000);
 
 test("required oracle-sandbox CI gate cannot silently skip a missing primitive", () => {

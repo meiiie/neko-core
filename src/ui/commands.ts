@@ -5,6 +5,7 @@
  */
 import type { Agent } from "../core/agent.ts";
 import { COMPACT_AT, estimateRequestTokens } from "../core/agent.ts";
+import { renderCompletionContract } from "../core/completion-contract.ts";
 import { loadConfig, type NekoConfig } from "../adapters/config.ts";
 import { rememberNote, renderContext } from "../adapters/context.ts";
 import { initProject } from "../adapters/project.ts";
@@ -50,7 +51,7 @@ import { isBool, isText } from "../shared/wire.ts";
 export const HELP = [
   "Commands:",
   "  /help /cost /usage /voice /model /provider /support /browser /meeting /tools /skill(s) /init /clear /compact /transcript /reset /exit",
-  "  /goal <text> · /loop <n> <task> · /auto <goal> · /sessions · /resume · /handoff · /continue · /retry · /effort · /context",
+  "  /goal <text> · /loop <n> <task> · /auto <goal> · /contract · /sessions · /resume · /handoff · /continue · /retry · /effort · /context",
   "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /relay · /coach · /login · /logout",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
     "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line, Ctrl+G external editor.",
@@ -81,6 +82,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/goal", desc: "set an ongoing goal (/goal <text>)" },
   { name: "/loop", desc: "run a task N times (/loop <n> <task>)" },
   { name: "/auto", desc: "closed loop: work + self-review until done (/auto <goal>)" },
+  { name: "/contract", desc: "show the active completion contract and independent verdict" },
   { name: "/sessions", desc: "list saved sessions here" },
   { name: "/resume", desc: "resume a session (/resume [id|all]; Ctrl+A in the picker flips scope)" },
   { name: "/handoff", desc: "send/list summary-only messages for this session" },
@@ -1123,6 +1125,10 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       agent.appendSystem(`Ongoing goal (keep working toward it every turn): ${goal}`);
       return addLine("info", `goal set: ${goal}`);
     }
+    case "/contract": {
+      const contract = agent.completionContract;
+      return addLine("info", contract ? renderCompletionContract(contract) : "no active completion contract");
+    }
     case "/loop": {
       const m = input.match(/^\/loop\s+(\d+)\s+([\s\S]+)$/);
       if (!m) return addLine("info", "usage: /loop <count> <task>  (runs the task N times)");
@@ -1182,6 +1188,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return;
     case "/reset":
       agent.messages = [];
+      agent.restoreCompletionContract(undefined);
       return addLine("info", "(conversation reset)");
     case "/sessions": {
       const all = input.split(/\s+/)[1]?.toLowerCase() === "all";

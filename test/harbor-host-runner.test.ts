@@ -32,6 +32,7 @@ import {
   decodeHarborFrameForTest,
   encodeHarborFrame,
   runHarborHostSession,
+  sanitizeHarborTrajectoryMessages,
   verifyHarborCredentialLease,
   verifyExpectedCodexForHarbor,
   type HarborFinalMetrics,
@@ -39,6 +40,7 @@ import {
   type HarborProtocolIo,
 } from "../evals/harbor/host_runner.ts";
 import { discoverCodexSupport } from "../src/adapters/codex-app-server.ts";
+import { loadConfig } from "../src/adapters/config.ts";
 
 import { isText } from "../src/shared/wire.ts";
 
@@ -68,6 +70,39 @@ const EMPTY_METRICS = {
   hitMaxSteps: false,
   toolCalls: { requested: 0, completed: 0, productive: 0, empty: 0, failed: 0 },
 } satisfies HarborFinalMetrics;
+
+test("audit trajectory keeps model-visible facts and strips opaque continuation data", () => {
+  const secret = "opaque-provider-secret";
+  const messages = sanitizeHarborTrajectoryMessages([{
+    role: "assistant",
+    content: "working",
+    tool_calls: [{
+      id: "call-1",
+      type: "function",
+      function: { name: "read_file", arguments: JSON.stringify({ path: "README.md" }) },
+    }],
+    provider_data: [{ encrypted: secret }],
+    unexpected: secret,
+  }, {
+    role: "tool",
+    tool_call_id: "call-1",
+    content: "1: public task data",
+  }]);
+  expect(messages).toEqual([{
+    role: "assistant",
+    content: "working",
+    tool_calls: [{
+      id: "call-1",
+      type: "function",
+      function: { name: "read_file", arguments: JSON.stringify({ path: "README.md" }) },
+    }],
+  }, {
+    role: "tool",
+    tool_call_id: "call-1",
+    content: "1: public task data",
+  }]);
+  expect(JSON.stringify(messages)).not.toContain(secret);
+});
 
 class AsyncBytes implements AsyncIterable<Uint8Array> {
   private readonly queued: Uint8Array[] = [];
@@ -102,6 +137,7 @@ class AsyncBytes implements AsyncIterable<Uint8Array> {
 function hello(
   networkMode: "no-network" | "allowlist" | "public" = "no-network",
   allowedHosts: string[] = [],
+  execution: "harbor-base-environment" | "programbench-docker-environment" = "harbor-base-environment",
 ): HarborHello {
   return {
     schema: HARBOR_REMOTE_SCHEMA,
@@ -110,7 +146,7 @@ function hello(
     tools: [...HARBOR_NATIVE_TOOLS],
     attestation: { ...ATTESTATION },
     posture: {
-      execution: "harbor-base-environment",
+      execution,
       hostCredentialsInTask: false,
       hostDaemonSocketInTask: false,
       obviousHostRootMountInTask: false,
@@ -119,6 +155,17 @@ function hello(
     },
   };
 }
+
+test("the host protocol accepts the bounded ProgramBench execution posture", async () => {
+  const f = await fixture(hello("no-network", [], "programbench-docker-environment"));
+  expect(f.hello.posture).toMatchObject({
+    execution: "programbench-docker-environment",
+    networkMode: "no-network",
+    allowedHosts: [],
+  });
+  await f.protocol.finish(EMPTY_METRICS);
+  await f.protocol.quiesce();
+});
 
 type Fixture = {
   input: AsyncBytes;
@@ -323,6 +370,235 @@ test("host session exposes one copy of each native schema and preserves read-edi
   }
 });
 
+test("one aggregate provider-call budget settles normally and preserves the artifact for grading", async () => {
+  const hostRoot = mkdtempSync(join(tmpdir(), "neko-harbor-call-budget-"));
+  let providerCalls = 0;
+  const provider: Provider = {
+    async complete(_messages, _tools, _onDelta, _signal, opts) {
+      providerCalls++;
+      const call = { id: "read-once", name: "read_file", arguments: { path: "README.md" } };
+      opts?.onToolCallReady?.(call);
+      return {
+        content: null,
+        tool_calls: [call],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7, model_calls: 1 },
+      };
+    },
+  };
+  const f = await fixture(hello(), (frame, input) => {
+    if (frame.type === "request") result(input, frame.id, "1: clean-room task");
+  });
+  try {
+    const session = await runHarborHostSession({
+      protocol: f.protocol,
+      hello: f.hello,
+      provider,
+      hostRoot,
+      maxSteps: 8,
+      maxContextTokens: 100_000,
+      adaptiveEffort: false,
+      loop: true,
+      providerCallBudget: 1,
+    });
+    expect(providerCalls).toBe(1);
+    expect(session.metrics).toMatchObject({
+      completionStatus: "call_budget_exhausted",
+      providerCompleteCalls: 1,
+      providerReportedModelCalls: 1,
+      toolCalls: { requested: 1, completed: 1, productive: 1, empty: 0, failed: 0 },
+    });
+    expect(f.frames.at(-1)).toMatchObject({
+      type: "final",
+      metrics: { completionStatus: "call_budget_exhausted" },
+    });
+  } finally {
+    rmSync(hostRoot, { recursive: true, force: true });
+    await f.protocol.quiesce();
+  }
+});
+
+test("contract builder consumes the same aggregate provider-call budget as the executor", async () => {
+  const hostRoot = mkdtempSync(join(tmpdir(), "neko-harbor-contract-budget-"));
+  let providerCalls = 0;
+  const provider: Provider = {
+    async complete() {
+      providerCalls++;
+      return {
+        content: JSON.stringify({
+          baselineFacts: [],
+          criteria: [{
+            phase: "final_state",
+            requirement: "The requested artifact exists.",
+            source: "user",
+            verification: "Read the artifact.",
+            required: true,
+            coverageArea: "artifact",
+            weight: 1,
+          }],
+        }),
+        tool_calls: [],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7, model_calls: 1 },
+      };
+    },
+  };
+  const f = await fixture();
+  try {
+    const session = await runHarborHostSession({
+      protocol: f.protocol,
+      hello: f.hello,
+      provider,
+      hostRoot,
+      maxSteps: 8,
+      maxContextTokens: 100_000,
+      adaptiveEffort: false,
+      loop: true,
+      completionMode: "contract",
+      completionConfig: loadConfig({ cwd: hostRoot }),
+      providerCallBudget: 1,
+    });
+    expect(providerCalls).toBe(1);
+    expect(session.metrics).toMatchObject({
+      completionStatus: "call_budget_exhausted",
+      providerCompleteCalls: 1,
+      providerReportedModelCalls: 1,
+    });
+  } finally {
+    rmSync(hostRoot, { recursive: true, force: true });
+    await f.protocol.quiesce();
+  }
+});
+
+test("contract reviewer inspects the remote artifact when the host root is empty", async () => {
+  const hostRoot = mkdtempSync(join(tmpdir(), "neko-harbor-contract-remote-"));
+  let artifact = "";
+  const provider: Provider = {
+    async complete(messages) {
+      const system = String(messages[0]?.content ?? "");
+      if (system.includes("completion-standard author")) {
+        return {
+          content: JSON.stringify({
+            baselineFacts: [],
+            criteria: [{
+              phase: "final_state",
+              requirement: "artifact.txt contains ready.",
+              source: "user",
+              verification: "Read artifact.txt.",
+              required: true,
+              coverageArea: "artifact",
+              weight: 1,
+            }],
+          }),
+          tool_calls: [],
+        };
+      }
+      if (system.includes("completion validator")) {
+        if (!messages.some((message) => message.role === "tool")) {
+          return { content: null, tool_calls: [{ id: "review-read", name: "read_file", arguments: { path: "artifact.txt" } }] };
+        }
+        return {
+          content: JSON.stringify({
+            verdict: "pass",
+            coverageComplete: true,
+            criteria: [{ id: "C1", status: "passed", evidence: "artifact.txt contains ready", receipts: ["R1"] }],
+            findings: [],
+            additionalCriteria: [],
+          }),
+          tool_calls: [],
+        };
+      }
+      const priorTools = messages.filter((message) => message.role === "tool");
+      if (!priorTools.length) {
+        return { content: null, tool_calls: [{ id: "write", name: "write_file", arguments: { path: "artifact.txt", content: "ready\n" } }] };
+      }
+      if (priorTools.length === 1) {
+        return { content: null, tool_calls: [{ id: "verify-read", name: "read_file", arguments: { path: "artifact.txt" } }] };
+      }
+      return { content: "done", tool_calls: [] };
+    },
+  };
+  const f = await fixture(hello(), (frame, input) => {
+    if (frame.type !== "request") return;
+    if (frame.tool === "write_file") {
+      artifact = String(frame.arguments?.content ?? frame.args?.content ?? "");
+      result(input, frame.id, "Wrote artifact.txt");
+      return;
+    }
+    if (frame.tool === "read_file") result(input, frame.id, artifact ? `1: ${artifact.trim()}` : "Error: file not found");
+  });
+  try {
+    const session = await runHarborHostSession({
+      protocol: f.protocol,
+      hello: f.hello,
+      provider,
+      hostRoot,
+      maxSteps: 8,
+      maxContextTokens: 100_000,
+      adaptiveEffort: false,
+      loop: true,
+      completionMode: "contract",
+      completionConfig: loadConfig({ cwd: hostRoot }),
+    });
+
+    expect(artifact).toBe("ready\n");
+    expect(session.output).toBe("done");
+    expect(session.completionStatus).toEqual({ ok: true });
+    expect(session.metrics.toolCalls).toEqual({ requested: 3, completed: 3, productive: 3, empty: 0, failed: 0 });
+    expect(f.frames.filter((frame) => frame.type === "request").map((frame) => frame.tool))
+      .toEqual(["write_file", "read_file", "read_file"]);
+  } finally {
+    rmSync(hostRoot, { recursive: true, force: true });
+    await f.protocol.quiesce();
+  }
+});
+
+test("controller time budget preserves a terminal trajectory for artifact grading", async () => {
+  const now = 1_900_000_000_000;
+  jest.useFakeTimers({ now });
+  const hostRoot = mkdtempSync(join(tmpdir(), "neko-harbor-time-budget-"));
+  let f: Fixture | undefined;
+  let providerSawAbort = false;
+  try {
+    const provider: Provider = {
+      async complete(_messages, _tools, _onDelta, signal) {
+        return await new Promise(() => {
+          signal?.addEventListener("abort", () => { providerSawAbort = true; }, { once: true });
+        });
+      },
+    };
+    f = await fixture();
+    const running = runHarborHostSession({
+      protocol: f.protocol,
+      hello: f.hello,
+      provider,
+      hostRoot,
+      maxSteps: 8,
+      maxContextTokens: 100_000,
+      adaptiveEffort: false,
+      loop: false,
+      sessionDeadlineAt: now + HARBOR_CONTROLLER_FINALIZATION_RESERVE_MS + 1_000,
+    });
+    await flushProtocol();
+    jest.advanceTimersByTime(1_000);
+    await flushProtocol();
+    const session = await running;
+    expect(session.metrics).toMatchObject({
+      completionStatus: "time_budget_exhausted",
+      usageComplete: false,
+      providerCompleteCalls: 1,
+    });
+    expect(providerSawAbort).toBe(true);
+    expect(session.trajectory.some((message) => message.role === "user")).toBe(true);
+    expect(f.frames.at(-1)).toMatchObject({
+      type: "final",
+      metrics: { completionStatus: "time_budget_exhausted" },
+    });
+  } finally {
+    rmSync(hostRoot, { recursive: true, force: true });
+    await cleanupFakeProtocol(f);
+    jest.useRealTimers();
+  }
+});
+
 test("the Harbor finalization reserve cancels an active tool and denies later remote requests", async () => {
   const hostRoot = mkdtempSync(join(tmpdir(), "neko-harbor-finalization-reserve-"));
   const observedToolResults = new Map<string, string>();
@@ -402,14 +678,16 @@ test("the Harbor finalization reserve cancels an active tool and denies later re
   }
 });
 
-test("a protocol failure during reserve cancellation still prevents a final frame", async () => {
+test("a result completed before reserve cancellation still settles and finalizes", async () => {
   const hostRoot = mkdtempSync(join(tmpdir(), "neko-harbor-reserve-protocol-failure-"));
+  let providerCall = 0;
   const provider: Provider = {
     async complete() {
-      return {
+      providerCall++;
+      return providerCall === 1 ? {
         content: null,
         tool_calls: [{ id: "active-read", name: "read_file", arguments: { path: "src/x.ts" } }],
-      };
+      } : { content: "final after cancellation race", tool_calls: [] };
     },
   };
   const f = await fixture(hello(), (frame, input) => {
@@ -417,7 +695,7 @@ test("a protocol failure during reserve cancellation still prevents a final fram
   });
 
   try {
-    await expect(runHarborHostSession({
+    const session = await runHarborHostSession({
       protocol: f.protocol,
       hello: f.hello,
       provider,
@@ -427,9 +705,10 @@ test("a protocol failure during reserve cancellation still prevents a final fram
       adaptiveEffort: false,
       loop: false,
       sessionDeadlineAt: Date.now() + HARBOR_TOOL_FINALIZATION_RESERVE_MS + 500,
-    })).rejects.toThrow("session_failed");
-    expect(f.protocol.failureCode).toBe("late_or_duplicate_result");
-    expect(f.frames.some((frame) => frame.type === "final")).toBe(false);
+    });
+    expect(session.output).toBe("final after cancellation race");
+    expect(f.protocol.failureCode).toBeUndefined();
+    expect(f.frames.some((frame) => frame.type === "final")).toBe(true);
   } finally {
     rmSync(hostRoot, { recursive: true, force: true });
     await f.protocol.quiesce();
@@ -521,7 +800,10 @@ test("the Harbor controller cutoff prevents a new closed-loop review pass and st
     expect(providerCalls).toBe(1);
     expect(providerSawAbort).toBe(true);
     expect(f.frames.some((frame) => frame.type === "request")).toBe(false);
-    expect(f.frames.at(-1)).toMatchObject({ type: "final", metrics: { usageComplete: true } });
+    expect(f.frames.at(-1)).toMatchObject({
+      type: "final",
+      metrics: { completionStatus: "time_budget_exhausted", usageComplete: true },
+    });
     expect(f.protocol.finished).toBe(true);
   } finally {
     rmSync(hostRoot, { recursive: true, force: true });
@@ -614,11 +896,14 @@ test("final metrics reduce secret-bearing completion evidence to one fixed statu
     for (const checkpoint of checkpoints) {
       expect(Object.keys(checkpoint).sort()).toEqual(["metrics", "schema", "type"]);
       expect(Object.keys(checkpoint.metrics).sort()).toEqual([
-        "cachedTokens", "hitMaxSteps", "inputTokens", "outputTokens", "providerCompleteCalls",
+        "cachedTokens", "hitMaxSteps", "inputTokens", "outputTokens", "progress", "providerCompleteCalls",
         "providerReportedModelCalls", "providerUsageObservedCalls", "toolCalls", "totalTokens", "wallTimeMs",
       ]);
       expect(Object.keys(checkpoint.metrics.toolCalls).sort())
         .toEqual(["completed", "empty", "failed", "productive", "requested"]);
+      expect(Object.keys(checkpoint.metrics.progress).sort()).toEqual([
+        "artifactCheckpoints", "lastToolCategory", "mutationEpoch", "phase", "toolState", "validationState",
+      ]);
       const serialized = JSON.stringify(checkpoint);
       expect(serialized).not.toContain(argumentSecret);
       expect(serialized).not.toContain(observationSecret);
@@ -627,6 +912,14 @@ test("final metrics reduce secret-bearing completion evidence to one fixed statu
         expect(serialized).not.toContain(forbidden);
       }
     }
+    expect(checkpoints.at(-1)?.metrics.progress).toEqual({
+      phase: "finalization",
+      lastToolCategory: "shell",
+      toolState: "settled",
+      artifactCheckpoints: 1,
+      mutationEpoch: 1,
+      validationState: "not_started",
+    });
   } finally {
     rmSync(hostRoot, { recursive: true, force: true });
     await f.protocol.quiesce();
@@ -683,6 +976,14 @@ test("a failure before final preserves an ordered privacy-safe checkpoint", asyn
         providerReportedModelCalls: 2,
         inputTokens: 17,
         outputTokens: 4,
+        progress: {
+          phase: "implementation",
+          lastToolCategory: "inspect",
+          toolState: "active",
+          artifactCheckpoints: 0,
+          mutationEpoch: 0,
+          validationState: "not_started",
+        },
         cachedTokens: 5,
         totalTokens: 21,
         wallTimeMs: f.frames[requestIndex - 1].metrics.wallTimeMs,
@@ -1604,6 +1905,22 @@ async function sha256(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
+async function removeCompiledFixture(path: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (error: any) {
+      const code = String(error?.code ?? "");
+      if (process.platform !== "win32" || !new Set(["EPERM", "EBUSY"]).has(code)) throw error;
+      lastError = error;
+      await Bun.sleep(250);
+    }
+  }
+  throw lastError;
+}
+
 test("a deterministic single-file host artifact runs framed stdio and checkpoints a pre-final failure", async () => {
   const secret = `subprocess-secret-${crypto.randomUUID()}`;
   const tempHome = mkdtempSync(join(tmpdir(), "neko-harbor-subprocess-"));
@@ -1651,6 +1968,7 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
   const artifactName = process.platform === "win32" ? "neko-harbor-host.exe" : "neko-harbor-host";
   const runnerA = join(buildA, artifactName);
   const runnerB = join(buildB, artifactName);
+  const trajectoryPath = join(tempHome, "audit.json");
   let child: ChildProcessWithoutNullStreams | undefined;
   try {
     const build = promisify(execFile);
@@ -1682,6 +2000,7 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
         NEKO_TIMEOUT_SECONDS: "5",
         NEKO_ADAPTIVE_EFFORT: "0",
         NEKO_HARBOR_LOOP: "0",
+        NEKO_HARBOR_TRAJECTORY_PATH: trajectoryPath,
         NEKO_HARBOR_HOST_MODE: "1",
         NEKO_HARBOR_SESSION_DEADLINE_AT_MS: String(Date.now() + HARBOR_HOST_SESSION_BUDGET_MS),
         NEKO_AUTO_UPDATE: "0",
@@ -1700,7 +2019,9 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
         frames.next(),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error("subprocess frame timeout")), 10_000)),
       ]);
-      if (next.done) throw new Error("subprocess closed before final");
+      if (next.done) throw new Error(
+        `subprocess closed before final: ${stderr.trim() || "no stderr"}; frames=${JSON.stringify(protocolFrames)}`,
+      );
       const frame = next.value;
       protocolFrames.push(frame);
       if (frame.type === "request") {
@@ -1720,6 +2041,12 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
     }
     child.stdin.end();
     const [code, signal] = await exited;
+    await frames.return?.(undefined);
+    child.stdin.destroy();
+    child.stdout.destroy();
+    child.stderr.destroy();
+    child.unref();
+    child = undefined;
     expect({ code, signal }).toEqual({ code: 0, signal: null });
     expect(protocolFrames.filter((frame) => frame.type === "request").map((frame) => frame.tool))
       .toEqual(["read_file", "edit", "bash"]);
@@ -1744,6 +2071,15 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
     expect(authHeaders.every((value) => value === `Bearer ${secret}`)).toBe(true);
     expect(JSON.stringify(protocolFrames)).not.toContain(secret);
     expect(stderr).not.toContain(secret);
+    const audit = JSON.parse(readFileSync(trajectoryPath, "utf8"));
+    expect(audit).toMatchObject({
+      schemaVersion: "neko.harbor.audit-trajectory.v1",
+      provider: "openai_compat",
+      model: "fake-harbor-model",
+      metrics: { completionStatus: "ok", providerCompleteCalls: 4 },
+    });
+    expect(audit.messages.some((message: any) => message.role === "tool")).toBe(true);
+    expect(JSON.stringify(audit)).not.toContain(secret);
 
     providerCalls = 0;
     authHeaders.length = 0;
@@ -1797,6 +2133,11 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
       }
     }
     const [failureCode, failureSignal] = await failureExit;
+    child.stdin.destroy();
+    child.stdout.destroy();
+    child.stderr.destroy();
+    child.unref();
+    child = undefined;
     expect(failureSignal).toBeNull();
     expect(failureCode).not.toBe(0);
     expect(failureFrames.some((frame) => frame.type === "final")).toBe(false);
@@ -1823,8 +2164,8 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
     child?.kill();
     server.close();
     await once(server, "close").catch(() => {});
-    rmSync(tempHome, { recursive: true, force: true });
-    rmSync(buildA, { recursive: true, force: true });
-    rmSync(buildB, { recursive: true, force: true });
+    await removeCompiledFixture(tempHome);
+    await removeCompiledFixture(buildA);
+    await removeCompiledFixture(buildB);
   }
 }, 60_000);

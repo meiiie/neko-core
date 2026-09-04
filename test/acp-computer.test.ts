@@ -246,6 +246,7 @@ test("semantic lifecycle hides host secrets and sends stable operation ids", asy
       return { acquired: true, seatState: "agent_controlled" };
     }
     if (method === WIII_COMPUTER_METHODS.act) {
+      const observation = semanticSnapshot("state-2", "Send");
       return {
         environmentId: "private-environment-id",
         outcome: "completed",
@@ -256,6 +257,7 @@ test("semantic lifecycle hides host secrets and sends stable operation ids", asy
         beforeStateVersion: params.stateVersion,
         afterStateVersion: "state-2",
         verified: true,
+        observation,
       };
     }
     if (method === WIII_COMPUTER_METHODS.release) {
@@ -281,9 +283,25 @@ test("semantic lifecycle hides host secrets and sends stable operation ids", asy
     expected_role: "button",
     expected_name: "Send",
   }));
-  expect(acted).toMatchObject({ outcome: "completed", verified: true, after_state_version: "state-2" });
+  expect(acted).toMatchObject({
+    outcome: "completed",
+    verified: true,
+    after_state_version: "state-2",
+    snapshot: { stateVersion: "state-2" },
+  });
   expect(JSON.stringify(acted)).not.toContain("must-not-leak");
+  const actedAgain = JSON.parse(await tool.call({
+    action: "invoke",
+    target_ref: "button-send",
+    expected_role: "button",
+    expected_name: "Send",
+  }));
+  expect(actedAgain.outcome).toBe("completed");
   expect(JSON.parse(await tool.call({ action: "release" })).outcome).toBe("released");
+
+  expect(client.calls.filter((call) => call.method === WIII_COMPUTER_METHODS.observe)).toHaveLength(1);
+  expect(client.calls.filter((call) => call.method === WIII_COMPUTER_METHODS.act)
+    .every((call) => call.params.returnObservation === true)).toBe(true);
 
   const mutatingMethods = new Set<string>([
     WIII_COMPUTER_METHODS.acquire,

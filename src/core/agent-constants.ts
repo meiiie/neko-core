@@ -8,6 +8,7 @@
  */
 import type { DeltaHook, Provider, ToolCall } from "./ports.ts";
 import type { ToolRegistry } from "./tool-runtime.ts";
+import type { CompletionSupervisor } from "./completion-contract.ts";
 
 import { isText } from "../shared/wire.ts";
 import { isVietnamSovereigntyTopic } from "./vietnam-sovereignty.ts";
@@ -35,6 +36,7 @@ export const DEFAULT_SYSTEM_PROMPT =
   "- Use only capabilities present in the current runtime. When asked whether you can do something, or to check/find/show/run it, use available tools and report the real result — never merely print a command for the user to run. If a required capability is absent or denied, state the exact boundary and the safest viable next step.\n\n" +
   "## Tools\n" +
   "read_file/search/glob/ls inspect project files; disk_cleanup_scan performs a bounded read-only Windows cleanup inventory without bash; write_file/edit change files; bash runs shell; web_search + web_fetch reach the internet (use them — you're not offline).\n" +
+  "- Bash is the only route for terminal/CLI work: never open or drive a terminal through computer as a shell or network fallback. Computer is for visible GUI interaction only.\n" +
   "- Prefer edit (exact, unique string replace) over rewriting whole files. read_file lines are numbered for reference only — don't put the number prefix in edits.\n" +
   "- Multi-line code (Python/Node): write it to a FILE and run that (`python build.py`). Don't pack newlines into `python -c`/`bash -c`/heredocs — they break on Windows cmd. Then verify the output file exists.\n\n" +
   "## Working\n" +
@@ -236,4 +238,10 @@ export interface AgentOptions {
   /** Opt-in training-free Ares proxy: lower reasoning effort after mechanical read-only steps. The
    * configured provider effort remains the upper bound; disabled by default until benchmarked. */
   adaptiveEffort?: boolean;
+  /** Optional independent completion authority for explicit closed-loop runs. It builds its
+   * instrument before implementation and reviews the artifact in a separate context. */
+  completionSupervisor?: CompletionSupervisor;
+  /** Optional absolute end of the productive work window. Closed-loop controllers use it only for
+   * progress guidance; the host remains the authority that aborts work at the real deadline. */
+  workDeadlineAt?: number;
 }

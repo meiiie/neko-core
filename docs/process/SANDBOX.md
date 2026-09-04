@@ -9,15 +9,20 @@ Neko has layered safety for the gated tools:
 3. **Catastrophic-command seatbelt** — `bash` refuses `rm -rf /`, `mkfs`, fork bombs, `format c:`,
    `> /dev/sd*`, etc. (unless `allow_dangerous_bash: true`).
 4. **Adversarial check** (opt-in) — a model pass vets auto-approved mutating actions.
-5. **OS sandbox for bash** (ON by default) — described below.
+5. **Optional OS sandbox for bash** — described below.
 
-## Bash OS sandbox (ON by default)
+## Host Bash by default; OS sandbox by policy
 
-Like Claude Code / Codex CLI, Neko runs ordinary/full-turn `bash` under an OS sandbox: the
-filesystem is **read-only except the workspace, explicit additional write roots** (+ `/tmp`), and
-network egress is blocked by default.
-Default ON since 2026-07-22 (owner decision): machines with a primitive confine bash out of the
-box; machines without one fall back to the seatbelt + gate unchanged (doctor shows which).
+Neko routes terminal and CLI work directly to Bash on the current host by default. On Windows the
+child process is created with its console hidden, so builds, tests, package managers, and background
+servers do not open or take over another terminal window. Computer Use is never a shell fallback;
+it is reserved for visible GUI interaction.
+
+The direct host shell keeps the permission gate, credential environment scrubbing, project trust,
+structured-file boundaries, and catastrophic-command seatbelt, but it is not filesystem or network
+containment. Set `sandbox: true` when the checkout or command requires an OS boundary. A configured
+sandbox makes the filesystem read-only except the workspace, explicit additional write roots and
+temporary storage, with network egress blocked unless explicitly granted.
 
 Proof-grade exact-file turns are stricter. They expose only `read_file`, target-bound `edit`, and
 foreground-validator `bash`. The validator accepts test/typecheck/lint/check/verify shapes only and
@@ -29,15 +34,15 @@ background execution are unavailable. If no live OS primitive exists, validation
 approval or hooks rather than widening to ordinary/full-turn bash.
 
 ```json
-// ~/.neko-core/config.json (or ./neko.json) - to opt OUT or open egress:
-{ "sandbox": false }
+// ~/.neko-core/config.json (or ./neko.json) - to opt IN or open bounded egress:
+{ "sandbox": true }
 { "sandbox": true, "sandbox_network": true, "sandbox_domains": ["github.com", "*.npmjs.org"] }
 ```
 
-(Env rollback: `NEKO_SANDBOX=0`.)
+(Environment equivalent: `NEKO_SANDBOX=1`; `NEKO_SANDBOX=0` selects the host shell.)
 
-`auto` and `--yolo` automate permission decisions; they do not disable this containment or silently
-turn deny-by-default Bash egress into unrestricted standing host networking. A Bash call can instead
+`auto` and `--yolo` automate permission decisions; they do not change the selected shell boundary.
+With `sandbox: true`, a Bash call can
 declare up to 16 exact destinations in `network_domains`; this creates a capability for that call
 only, without editing user config. `auto`/`--yolo` self-approves the one-call grant. Other modes show
 the ordinary approval surface because egress is a separate consequence from filesystem confinement.
@@ -51,22 +56,22 @@ the bare `*` wildcard, invalid ports, and over-broad suffixes before a command o
 
 Network diagnosis is not forced through Bash. The gated `network_probe` tool resolves one hostname or
 IP and tests at most 16 TCP ports directly from the host with a bounded timeout. It runs outside the
-Bash sandbox, does not execute a shell, send application payloads, scan CIDRs, or fetch page content.
+Bash sandbox when one is enabled, does not execute a shell, send application payloads, scan CIDRs, or fetch page content.
 In `auto`/`--yolo` it can run without a routine prompt; `default` still asks and `plan` refuses it.
 Use `web_search`/`web_fetch` for Internet content. This separation lets an agent inspect the network
 surface the user actually named without giving arbitrary host commands unrestricted egress.
 
-The model-facing Bash schema owns the autonomous path: package installs, Git HTTPS operations, and
-similar shell workflows should declare their actual registry/download hosts in `network_domains`
-instead of telling the user to run `/sandbox`. Redirect targets must be declared too; a proxy refusal
-can be retried with the additional exact host, never by widening to `*`.
+The model-facing runtime block states whether Bash is direct-host or sandboxed and inventories common
+host toolchain names before the turn. Package installs, Git HTTPS operations, and similar sandboxed
+workflows declare their registry/download hosts in `network_domains`; direct-host Bash uses normal host
+networking. A failed capability is not retried through Computer Use.
 
 ### Outside-workspace autonomy is path-scoped
 
 Neko reads ordinary host files outside the project by default (`read_outside_root: true`), while its
 credential/device deny policy remains active. `auto`/`--yolo` removes routine in-scope approval prompts;
 it does not silently turn that read reach into a machine-wide write grant. Structured file tools and
-all three ordinary Bash sandbox backends share an explicit write-capability list:
+all three optional Bash sandbox backends share an explicit write-capability list:
 
 ```json
 {
@@ -81,21 +86,23 @@ directories. Filesystem roots, the user home, and agent or
 credential control directories such as `.ssh`, `.codex`, `.agents`, and non-research `.neko-core`
 state are refused. Neko always provisions one narrow built-in capability:
 `~/.neko-core/research`. A cross-project research ledger can therefore continue without granting
-write access to the rest of the user profile.
+write access to the rest of the user profile. Direct-host Bash is outside this structured-file
+boundary; its authority is disclosed as `UNCONFINED AUTO` by the runtime, doctor, and policy audit.
 
 When the user explicitly asks for an ordinary file elsewhere on the host, `write_file`, `edit`, and
 `multi_edit` may request one confirmation for that exact target and operation. This is a transient
 capability: it is not inherited by another path or later turn. `plan` still denies it. System locations,
 credential/browser stores, symlink or junction escapes, and multiply-linked files refuse before the
 prompt. A durable directory workflow should use `additional_write_roots` instead. Bash remains confined
-to its sandbox write roots and never inherits this structured-file exception.
+to its sandbox write roots only when `sandbox: true`; direct-host Bash is governed by the command gate
+and seatbelts instead.
 
-This mirrors the current Claude Code posture rather than an unrestricted shell: its official
-[permissions](https://code.claude.com/docs/en/permissions) and
-[sandboxing](https://code.claude.com/docs/en/sandboxing) documentation likewise separate approval
-automation from filesystem containment and use additional writable directories as explicit policy.
+This follows Claude's tool routing: shell work uses Bash and broad Computer Use is last-resort GUI
+automation. Claude's official [sandboxing](https://code.claude.com/docs/en/sandboxing) documentation
+also separates approval automation from containment and currently directs native Windows users to
+WSL2 for its supported sandbox. Neko retains SRT as an explicit native-Windows isolation option.
 
-### Sandboxed bash still asks by default
+### Permission behavior
 
 The sandbox confines writes and usually egress, but deliberately retains broad host reads. Command
 stdout is returned to the model, so a sandboxed `cat` of a credential is still a confidentiality
@@ -103,6 +110,9 @@ failure. For that reason `sandbox_auto_approve` defaults to `false`: `bash` prom
 `accept-edits` even when a primitive is live. An informed user may opt into prompt-free contained
 bash with `"sandbox_auto_approve": true`; `neko doctor` and the runtime block then disclose that host
 reads remain available. `plan` always denies and `--yolo` remains an explicit autonomy choice.
+The product-default `auto` mode runs ordinary direct-host Bash without a prompt and reports that
+authority as `UNCONFINED AUTO`; credential/system paths and catastrophic commands retain their hard
+seatbelts.
 
 **Ordinary/full-turn exception — workspace-destructive commands still confirm.** The sandbox contains the blast radius
 to the workspace, but the workspace itself (your code + `.git`) is writable, so a command that
@@ -121,8 +131,8 @@ of the whole posture, framed by the wren.wtf "Stop Using OpenCode" critique).
 | macOS | **sandbox-exec** (Seatbelt) — SBPL profile | write + network confinement; broad host reads |
 | Windows | **Anthropic sandbox-runtime** (`srt`) — dedicated `srt-sandbox` user, restricted token in a job object, NTFS ACLs, WFP egress fence | write + allowlist egress confinement; broad permitted reads; Windows support is alpha |
 
-`neko doctor` shows the resolved state, e.g. `bash_sandbox: on (bwrap)` or
-`off (available: none)`.
+`neko doctor` shows the resolved state, e.g. `bash_sandbox: off (host shell)` or
+`on (bwrap)`.
 
 ### Windows
 Windows has no bwrap/Seatbelt-style namespace primitive; the ecosystem answer (Codex CLI's
@@ -147,7 +157,7 @@ bash **fails closed**, not `UNCONFINED AUTO`. A health probe that itself reaches
 under host load is treated differently: Neko attempts the real command once through the same exact
 `srt.exe` + settings boundary. That attempt either succeeds or reports its own failure; it never falls
 back to a host shell.
-That latter label is reserved for auto mode with the sandbox disabled or with no primitive detected.
+That latter label is the normal direct-host state unless the user enables the sandbox.
 Alternatives remain: run Neko inside WSL (bwrap) or a container/dev-container.
 
 Mechanics worth knowing (verified on Windows 11 Home, srt 1.0.0):
@@ -190,4 +200,4 @@ Mechanics worth knowing (verified on Windows 11 Home, srt 1.0.0):
   refuses another structured mutation, and makes `/rewind` preserve/report the conflict. This is not
   read-to-write digest/generation CAS or filesystem transactional isolation.
 - The sandbox is what keeps ordinary/full-turn `bash` on the same workspace-plus-explicit-roots
-  boundary; disabling it makes Bash host-unconfined and is reported as such.
+  boundary; the default direct-host Bash is host-unconfined and is reported as such.

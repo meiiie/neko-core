@@ -39,6 +39,15 @@ import {
 } from "./agent-constants.ts";
 import { isJsonObject, isText } from "../shared/wire.ts";
 import {
+  applyCompletionReview,
+  completionCoverage,
+  createCompletionContract,
+  isCompletionContract,
+  type CompletionContract,
+  type CompletionReview,
+  type CompletionSupervisor,
+} from "./completion-contract.ts";
+import {
   isVietnamSovereigntyDeferral,
   isVietnamSovereigntyTopic,
 } from "./vietnam-sovereignty.ts";
@@ -71,9 +80,19 @@ const LEGACY_INTERNAL_USER_PREFIXES = [
   "NO VERIFICATION EVIDENCE YET:",
   "VERIFY BEFORE FINISHING:",
   "[budget]",
+  "[delivery]",
   "Step limit (",
   "Continue the task from where it was interrupted.",
 ];
+
+function isDeliveryArtifactEdit(call: { name: string; arguments?: any }): boolean {
+  if (!EDIT_TOOLS.has(call.name.toLowerCase())) return false;
+  const rawPath = call.arguments?.path;
+  const path = isText(rawPath) ? String(rawPath).replace(/\\/g, "/") : "";
+  if (!path) return false;
+  const parts = path.toLowerCase().split("/").filter(Boolean);
+  return !parts.some((part) => /^\.?(?:probes?|scratch|temp|tmp)(?:[-_.].*)?$/.test(part));
+}
 
 function isInternalUserMessage(message: any): boolean {
   if (message?._neko_internal === true) return true;
@@ -119,9 +138,64 @@ export type ImageAttachment = string | NumberedImageAttachment;
 
 export interface AgentCompletionStatus {
   ok: boolean;
-  reason?: "validation_failed" | "validation_missing";
+  reason?: "validation_failed" | "validation_missing" | "contract_failed" | "contract_unverified";
   command?: string;
   detail?: string;
+}
+
+function completionGapSignature(
+  contract: CompletionContract,
+  review: CompletionReview,
+  validation: AgentCompletionStatus,
+): string {
+  const measurements = (review.measurements ?? [])
+    .map((measurement) => [measurement.tool, measurement.outcome, measurement.digestKind ?? "", measurement.subject ?? "", measurement.digest])
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return JSON.stringify({
+    instrumentRevision: contract.instrumentRevision ?? 1,
+    coverageComplete: review.coverageComplete ?? true,
+    criteria: contract.criteria.map((criterion) => [criterion.id, criterion.required, criterion.coverageArea ?? "general", criterion.weight ?? 1]),
+    evidence: review.evidence.map((row) => [row.criterionId, row.status]),
+    measurements,
+    validation: validation.ok ? null : [validation.reason ?? "", validation.command ?? ""],
+  });
+}
+
+function completionImplementationInstruction(goal: string, contract: CompletionContract): string {
+  const criteria = contract.criteria.map((criterion) => {
+    const requirement = criterion.requirement.slice(0, 600);
+    const verification = criterion.verification.slice(0, 400);
+    return `- ${criterion.id} [${criterion.coverageArea ?? "general"}; weight ${criterion.weight ?? 1}]: ` +
+      `${requirement} | verify: ${verification}`;
+  });
+  return [
+    goal,
+    "",
+    "FIXED COMPLETION CONTRACT",
+    "The independent criteria below are the observable definition of done. Do not weaken or omit them.",
+    "Delivery order:",
+    "1. Bound discovery to facts needed for the next implementation decision.",
+    "2. Create the smallest buildable or runnable end-to-end artifact early, before exhaustive probing.",
+    "3. Expand behavior by highest-impact criterion and compare against independent observations.",
+    "4. Reserve the final work window for a clean build, behavioral checks, and the required deliverable state.",
+    "A partial runnable artifact with explicit remaining gaps is better than exhaustive research with no artifact.",
+    ...criteria,
+  ].join("\n");
+}
+
+function degradedCompletionContract(goal: string): CompletionContract {
+  const boundedGoal = goal.replace(/\s+/g, " ").trim().slice(0, 1_200);
+  return createCompletionContract(goal, {
+    criteria: [{
+      phase: "final_state",
+      requirement: `The final observable artifact satisfies the original request: ${boundedGoal}`,
+      source: "user",
+      verification: "Inspect the actual final artifact and exercise its user-visible behavior against the original request.",
+      required: true,
+      coverageArea: "requested outcome",
+      weight: 1,
+    }],
+  });
 }
 
 export type ToolObservationClass = "productive" | "empty" | "failed";
@@ -132,7 +206,7 @@ export function classifyToolObservation(obs: any): ToolObservationClass {
   if (!isText(obs)) return "productive";
   if (/\(exit \d+ -- command FAILED\)/.test(obs)
     || /^\(timed out/.test(obs)
-    || /^(?:Error(?: running [^:]+)?:|Blocked(?::| by)|Denied by user:|Refused:|The user did NOT approve\b|Tool '[^']+' is (?:disabled|not available)|Sub-agents? (?:are|is) not available\b|Sub-agent error:|\[denied\]|\[capability circuit\]|\[loop guard\]|\(interrupted\))/mi.test(obs)) {
+    || /^(?:Error(?: running [^:]+)?:|Blocked(?::| by)|Denied by user:|Refused:|The user did NOT approve\b|Tool '[^']+' is (?:disabled|not available|restricted)|Sub-agents? (?:are|is) not available\b|Sub-agent error:|\[denied\]|\[capability circuit\]|\[loop guard\]|\[delivery\]|\(interrupted\))/mi.test(obs)) {
     return "failed";
   }
   const match = obs.match(/###\s*Result\s*\r?\n([\s\S]*?)(?:\r?\n###|$)/i);
@@ -186,6 +260,11 @@ export class Agent {
   private readonly verifyBeforeExit: boolean;
   private readonly verifyStateChangesBeforeExit: boolean;
   private readonly adaptiveEffort: boolean;
+  private readonly completionSupervisor?: CompletionSupervisor;
+  private readonly workDeadlineAt?: number;
+  private completionContractState?: CompletionContract;
+  private completionContractFinal = false;
+  private runUntilDoneActive = false;
   /** Host-owned instructions for the active outer turn. They are projected onto provider requests,
    * never written into `messages`, so automatic skill/workflow routing cannot leak into a later turn
    * or a saved session. `runUntilDone` keeps the same projection across its internal review passes. */
@@ -218,28 +297,50 @@ export class Agent {
     this.verifyBeforeExit = Boolean(opts.verifyBeforeExit);
     this.verifyStateChangesBeforeExit = Boolean(opts.verifyStateChangesBeforeExit);
     this.adaptiveEffort = Boolean(opts.adaptiveEffort);
+    this.completionSupervisor = opts.completionSupervisor;
+    this.workDeadlineAt = Number.isSafeInteger(opts.workDeadlineAt) ? opts.workDeadlineAt : undefined;
   }
 
   /** Deterministic controller verdict for automation. It says only whether known validation debt is
    * resolved; it never pretends to judge the semantic quality of the model's prose. */
   get completionStatus(): AgentCompletionStatus {
-    if (!this.validationExpected || this.mutationEpoch === 0) return { ok: true };
-    const current = this.validationResult?.epoch === this.mutationEpoch ? this.validationResult : undefined;
-    if (current?.ok) return { ok: true };
-    if (current?.authoritative) {
+    if (this.validationExpected && this.mutationEpoch > 0) {
+      const current = this.validationResult?.epoch === this.mutationEpoch ? this.validationResult : undefined;
+      if (!current?.ok) {
+        if (current?.authoritative) {
+          return {
+            ok: false,
+            reason: "validation_failed",
+            command: current.command,
+            ...(current.detail ? { detail: current.detail } : undefined),
+          };
+        }
+        return {
+          ok: false,
+          reason: "validation_missing",
+          ...(this.validationResult?.command ? { command: this.validationResult.command } : undefined),
+          ...(this.validationResult?.detail ? { detail: this.validationResult.detail } : undefined),
+        };
+      }
+    }
+    if (this.completionContractFinal && this.completionContractState?.lastReview?.verdict !== "pass") {
+      const review = this.completionContractState?.lastReview;
       return {
         ok: false,
-        reason: "validation_failed",
-        command: current.command,
-        ...(current.detail ? { detail: current.detail } : undefined),
+        reason: review?.verdict === "fail" ? "contract_failed" : "contract_unverified",
+        ...(review?.findings[0] ? { detail: review.findings[0] } : undefined),
       };
     }
-    return {
-      ok: false,
-      reason: "validation_missing",
-      ...(this.validationResult?.command ? { command: this.validationResult.command } : undefined),
-      ...(this.validationResult?.detail ? { detail: this.validationResult.detail } : undefined),
-    };
+    return { ok: true };
+  }
+
+  get completionContract(): CompletionContract | undefined {
+    return this.completionContractState ? structuredClone(this.completionContractState) : undefined;
+  }
+
+  restoreCompletionContract(value: any): void {
+    this.completionContractState = isCompletionContract(value) ? structuredClone(value) : undefined;
+    this.completionContractFinal = Boolean(this.completionContractState?.lastReview);
   }
 
   /** Swap the LLM provider live (used by the REPL's /provider command to switch endpoint+key between turns,
@@ -452,12 +553,14 @@ export class Agent {
     internal: boolean,
     state: { count: number; max: number },
     goal: string,
+    stepLimit?: number,
+    yieldOnStepLimit = false,
   ): Promise<string> {
     let next = instruction;
     let nextImages = images;
     let nextInternal = internal;
     while (true) {
-      try { return await this.run(next, signal, nextImages, nextInternal); }
+      try { return await this.runLoop(next, signal, nextImages, nextInternal, stepLimit, yieldOnStepLimit); }
       catch (error) {
         const failure = error instanceof Error ? error : null;
         if (signal?.aborted || !failure || !isRecoverableProviderInterruption(failure) || state.count >= state.max) throw error;
@@ -485,39 +588,186 @@ export class Agent {
    * wall-clock deadline, and an explicit user abort is never retried. */
   async runUntilDone(
     goal: string,
-    opts: { maxIters?: number; signal?: AbortSignal; maxStallRecoveries?: number } = {},
+    opts: {
+      maxIters?: number;
+      signal?: AbortSignal;
+      maxStallRecoveries?: number;
+      implementationRoundSteps?: number;
+    } = {},
   ): Promise<string> {
     const maxIters = Math.max(1, Math.min(opts.maxIters ?? 6, 20));
     const maxStallRecoveries = Math.max(0, Math.min(opts.maxStallRecoveries ?? 2, 5));
     const recoveryState = { count: 0, max: maxStallRecoveries };
-    const runResumable = (instruction: string, internal = false) => this.runWithRecovery(
+    const implementationRoundSteps = opts.implementationRoundSteps === undefined
+      ? undefined
+      : Math.max(1, Math.min(this.maxSteps, Math.floor(opts.implementationRoundSteps)));
+    const runResumable = (instruction: string, internal = false, stepLimit?: number) => this.runWithRecovery(
       instruction,
       opts.signal,
       undefined,
       internal,
       recoveryState,
       goal,
+      stepLimit,
+      stepLimit !== undefined,
     );
-    let out = await runResumable(goal);
-    for (let i = 1; i < maxIters; i++) {
-      if (opts.signal?.aborted || out === "[interrupted]") return out;
-      out = await runResumable(
-        `CLOSED-LOOP REVIEW (pass ${i + 1}/${maxIters}). Goal: "${goal}".\n` +
-          `First RE-INSPECT the ACTUAL current state (re-run the check / re-read the file / re-screenshot ` +
-          `or re-read the UI) — judge what IS, not your memory of what you intended. Then compare against ` +
-          `the supplied source/docs and observable runtime output or side effects; use independent evidence, ` +
-          `not only the same happy-path check you authored. Run available repository tests from a clean state, ` +
-          `then remove disposable validation artifacts while preserving intended deliverables. If the deliverable ` +
-          `is a program, an output recreated by a clean run is disposable even when the goal names its path. Compare against ` +
-          `the goal and a high quality bar. If it is FULLY met, reply with exactly "DONE" and nothing else. ` +
-          `Otherwise, keep working: do the next concrete step now (don't stop until the goal is achieved).`,
-        true,
-      );
-      // A model word is not stronger than controller-observed evidence. Validation debt survives
-      // these internal reviews, so bare DONE cannot turn a failed/unavailable test into exit success.
-      if (/^\s*done[.!]?\s*$/i.test(out) && this.completionStatus.ok) break;
+    const outerTurnSystemContext = this.turnSystemContext;
+    const projectContract = (contract: CompletionContract) => {
+      this.turnSystemContext = [
+        outerTurnSystemContext,
+        completionImplementationInstruction(goal, contract),
+      ].filter(Boolean).join("\n\n");
+    };
+    this.completionContractFinal = false;
+    this.runUntilDoneActive = true;
+    this.emit("completion_phase", {
+      phase: this.completionSupervisor ? "contract" : "implementation",
+    });
+    try {
+      if (this.completionSupervisor) {
+        try {
+          if (!this.completionContractState || this.completionContractState.goal !== goal) {
+            const remainingMs = this.workDeadlineAt === undefined
+              ? undefined
+              : Math.max(0, this.workDeadlineAt - Date.now());
+            const creationBudgetMs = remainingMs === undefined
+              ? undefined
+              : Math.max(100, Math.min(180_000, Math.floor(remainingMs * 0.2)));
+            const phaseSignal = creationBudgetMs === undefined
+              ? opts.signal
+              : opts.signal
+                ? AbortSignal.any([opts.signal, AbortSignal.timeout(creationBudgetMs)])
+                : AbortSignal.timeout(creationBudgetMs);
+            const built = await this.completionSupervisor.create(goal, phaseSignal);
+            this.cost.add(built.usage);
+            this.completionContractState = createCompletionContract(goal, built.value);
+            this.emit("completion_contract", {
+              revision: this.completionContractState.revision,
+              criteria: this.completionContractState.criteria.length,
+            });
+            await this.durableCheckpoint();
+          }
+          if (this.completionContractState) projectContract(this.completionContractState);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          if (this.workDeadlineAt !== undefined && !opts.signal?.aborted) {
+            this.completionContractState = degradedCompletionContract(goal);
+            this.emit("completion_contract_degraded", detail);
+            await this.durableCheckpoint();
+            projectContract(this.completionContractState);
+          } else {
+            this.completionContractState = undefined;
+            this.emit("completion_contract_unavailable", detail);
+          }
+        }
+      }
+
+      this.emit("completion_phase", { phase: "implementation" });
+
+      if (this.completionSupervisor && this.completionContractState) {
+        let instruction = goal;
+        let out = "";
+        let previousGap: { artifactRevision: number; signature: string } | undefined;
+        for (let i = 0; i < maxIters; i++) {
+          out = await runResumable(instruction, i > 0, implementationRoundSteps);
+          if (opts.signal?.aborted || out === "[interrupted]") return out;
+          let contract: CompletionContract = this.completionContractState;
+          let review: CompletionReview | undefined;
+          for (let validationAttempt = 0; validationAttempt < 2; validationAttempt++) {
+            this.emit("completion_phase", { phase: "validation" });
+            try {
+              const reviewed = await this.completionSupervisor.review(contract, opts.signal);
+              this.cost.add(reviewed.usage);
+              contract = applyCompletionReview(contract, reviewed.value, this.mutationEpoch);
+            } catch (error) {
+              contract = applyCompletionReview(contract, {
+                verdict: "blocked",
+                findings: [`Independent validator unavailable: ${error instanceof Error ? error.message : String(error)}`],
+              }, this.mutationEpoch);
+            }
+            this.completionContractState = contract;
+            projectContract(contract);
+            review = contract.lastReview!;
+            this.emit("completion_review", {
+              revision: contract.revision,
+              instrumentRevision: contract.instrumentRevision ?? 1,
+              verdict: review.verdict,
+              findings: review.findings.length,
+              coverage: completionCoverage(contract),
+            });
+            await this.durableCheckpoint();
+            const measurementOnlyBlock = review.verdict === "blocked"
+              && review.evidence.some((row) => row.status !== "passed")
+              && review.evidence.every((row) => row.status !== "failed")
+              && !review.findings.some((finding) => finding.startsWith("Independent validator unavailable:"));
+            if (!measurementOnlyBlock || validationAttempt > 0) break;
+            this.emit("completion_recheck", { revision: contract.revision, reason: "inconclusive_measurement" });
+          }
+          if (!review) throw new Error("completion validator produced no review");
+          const validation = this.completionStatus;
+          if (review.verdict === "pass" && validation.ok) {
+            this.emit("completion_phase", { phase: "finalization" });
+            return out;
+          }
+          if (review.verdict === "blocked" || i === maxIters - 1
+            || review.findings.some((finding) => finding.startsWith("Independent validator unavailable:"))) {
+            this.emit("completion_phase", { phase: "finalization" });
+            return out;
+          }
+
+          const signature = completionGapSignature(contract, review, validation);
+          if (previousGap?.artifactRevision === review.artifactRevision && previousGap.signature === signature) {
+            this.emit("completion_no_progress", {
+              revision: contract.revision,
+              artifactRevision: review.artifactRevision,
+            });
+            this.emit("completion_phase", { phase: "finalization" });
+            return out;
+          }
+          previousGap = { artifactRevision: review.artifactRevision, signature };
+
+          const unresolved = review.evidence
+            .filter((row) => row.status !== "passed")
+            .map((row) => {
+              const criterion = contract.criteria.find((item) => item.id === row.criterionId)!;
+              return `- ${criterion.id} [${criterion.coverageArea ?? "general"}; weight ${criterion.weight ?? 1}]: ${criterion.requirement}`;
+            });
+          const findings = review.findings.map((finding) => `- ${finding}`);
+          if (!validation.ok) findings.push(`- Required project validation is still unresolved${validation.command ? `: ${validation.command}` : "."}`);
+          instruction = [
+            `INDEPENDENT COMPLETION REVIEW (${i + 1}/${maxIters}) found the artifact is not ready.`,
+            "Address these outcome-level gaps without weakening the original requirements. Re-inspect before changing anything, then implement and verify the next coherent fix.",
+            ...findings,
+            ...unresolved,
+          ].slice(0, 16).join("\n");
+          this.emit("completion_phase", { phase: "implementation" });
+        }
+        return out;
+      }
+
+      let out = await runResumable(goal);
+      for (let i = 1; i < maxIters; i++) {
+        if (opts.signal?.aborted || out === "[interrupted]") return out;
+        out = await runResumable(
+          `CLOSED-LOOP REVIEW (pass ${i + 1}/${maxIters}). Goal: "${goal}".\n` +
+            `First RE-INSPECT the ACTUAL current state (re-run the check / re-read the file / re-screenshot ` +
+            `or re-read the UI) — judge what IS, not your memory of what you intended. Then compare against ` +
+            `the supplied source/docs and observable runtime output or side effects; use independent evidence, ` +
+            `not only the same happy-path check you authored. Run available repository tests from a clean state, ` +
+            `then remove disposable validation artifacts while preserving intended deliverables. If the deliverable ` +
+            `is a program, an output recreated by a clean run is disposable even when the goal names its path. Compare against ` +
+            `the goal and a high quality bar. If it is FULLY met, reply with exactly "DONE" and nothing else. ` +
+            `Otherwise, keep working: do the next concrete step now (don't stop until the goal is achieved).`,
+          true,
+        );
+        if (/^\s*done[.!]?\s*$/i.test(out) && this.completionStatus.ok) break;
+      }
+      return out;
+    } finally {
+      this.turnSystemContext = outerTurnSystemContext;
+      this.runUntilDoneActive = false;
+      this.completionContractFinal = Boolean(this.completionContractState);
     }
-    return out;
   }
 
   /** Refresh the live session context (env + project + memory) held INSIDE the single base
@@ -734,6 +984,21 @@ export class Agent {
    * `images` (data: URLs) attach as OpenAI vision content — used by paste-image (needs a vision model). */
   // `internal` is local provenance for controller-generated turns; providerHistory() removes it.
   async run(instruction: string, signal?: AbortSignal, images?: ImageAttachment[], internal = false): Promise<string> {
+    return this.runLoop(instruction, signal, images, internal);
+  }
+
+  private async runLoop(
+    instruction: string,
+    signal?: AbortSignal,
+    images?: ImageAttachment[],
+    internal = false,
+    stepLimit?: number,
+    yieldOnStepLimit = false,
+  ): Promise<string> {
+    const runStepLimit = stepLimit === undefined
+      ? this.maxSteps
+      : Math.max(1, Math.min(this.maxSteps, Math.floor(stepLimit)));
+    const runMessageStart = this.messages.length;
     // These guards are scoped to one human turn. Carrying them across independent Agent.run calls
     // makes a later task inherit an unrelated failure/edit streak from an earlier conversation turn.
     this.editsPerPath.clear();
@@ -742,6 +1007,10 @@ export class Agent {
       this.mutationEpoch = 0;
       this.validationExpected = false;
       this.validationResult = undefined;
+      if (!this.runUntilDoneActive) {
+        this.completionContractState = undefined;
+        this.completionContractFinal = false;
+      }
     }
     if (!this.messages.length) {
       this.messages.push({ role: "system", content: this.systemPrompt });
@@ -774,19 +1043,27 @@ export class Agent {
     let consecutiveReadSteps = 0; // adaptive effort: only lower reasoning on a SUSTAINED all-read pattern
     let toolchainCapabilityFailures = 0;
     let toolchainCircuitOpen = false;
+    let deliveryPhase = false;
+    let deliveryEditRequired = false;
+    let nonEditStepsSinceDelivery = 0;
+    let successfulEditThisStep = false;
+    const hasFreshValidation = () => this.validationResult?.epoch === this.mutationEpoch
+      && this.validationResult.authoritative
+      && this.validationResult.ok;
     const noteTool = (call: { name: string; arguments?: any }, observation: any) => {
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
       const failed = observation == null || Agent.isUnproductiveResult(observation);
       if (!failed && isFreshFactWebTool(call.name)) freshFactVerificationEvidence = true;
       const validationCommand = call.name.toLowerCase() === "bash"
-        && isValidationBashCommand(String(call.arguments?.command ?? ""));
+        && (isValidationBashCommand(String(call.arguments?.command ?? ""))
+          || this.tools.isValidationBashCommand?.(String(call.arguments?.command ?? ""), call.arguments) === true);
       if (validationCommand) {
         const syntaxPreservesExit = hasAuthoritativeValidatorExit(String(call.arguments?.command ?? ""), call.arguments);
         const foregroundCompleted = isText(observation) && /^\(exit 0\)(?:\r?\n|$)/.test(observation);
-        const authoritative = syntaxPreservesExit && (failed || foregroundCompleted);
-        this.validationExpected = true;
-        this.validationResult = {
+        const foregroundFailed = isText(observation) && /^\(exit [1-9]\d* -- command FAILED\)(?:\r?\n|$)/.test(observation);
+        const authoritative = syntaxPreservesExit && (foregroundCompleted || foregroundFailed);
+        const candidate = {
           epoch: this.mutationEpoch,
           command: String(call.arguments?.command ?? "").trim(),
           ok: authoritative && foregroundCompleted && !failed,
@@ -795,6 +1072,9 @@ export class Agent {
             ? { detail: observation.replace(/\s+/g, " ").trim().slice(0, 500) }
             : undefined),
         };
+        const current = this.validationResult?.epoch === this.mutationEpoch ? this.validationResult : undefined;
+        this.validationExpected = true;
+        if (candidate.authoritative || !current?.authoritative) this.validationResult = candidate;
       }
       // Only a SUCCESSFUL state-changing call advances the epoch. A rejected edit or a sandbox
       // dependency error changed no known state and must not manufacture verification work.
@@ -807,18 +1087,58 @@ export class Agent {
         // Validators may create caches/build output, but they observe the current source epoch rather
         // than defining a new source state that would immediately invalidate their own result.
         if (!validationCommand) this.mutationEpoch++;
+        if (EDIT_TOOLS.has(call.name.toLowerCase())) {
+          successfulEditThisStep = true;
+          deliveryEditRequired = false;
+          nonEditStepsSinceDelivery = 0;
+        }
       } else if (verifiesState) {
         completionVerificationEvidence = true;
         if (changedRealState) stateVerificationEvidence = true;
       }
+      if (this.runUntilDoneActive && ((changesState && !failed) || validationCommand)) {
+        const currentValidation = this.validationResult?.epoch === this.mutationEpoch
+          ? this.validationResult
+          : undefined;
+        this.emit("completion_progress", {
+          mutationEpoch: this.mutationEpoch,
+          artifactCheckpoint: changesState && !failed && EDIT_TOOLS.has(call.name.toLowerCase()),
+          validationState: !this.validationExpected
+            ? "not_started"
+            : !currentValidation?.authoritative
+              ? "pending"
+              : currentValidation.ok
+                ? "passed"
+                : "failed",
+        });
+      }
     };
     let budgetNudges = 0; // SOTA "completion predicate": remind the model to LAND the deliverable near the budget edge
-    for (let step = 0; step < this.maxSteps; step++) {
+    const workStartedAt = Date.now();
+    for (let step = 0; step < runStepLimit; step++) {
+      successfulEditThisStep = false;
       this.emit("step", step + 1);
       await this.durableCheckpoint(); // user prompt / prior tool result is durable before provider work
       if (signal?.aborted) return "[interrupted]";
       // Compact before a long single turn can overflow the next provider request.
-      const toolSchemas = this.tools.schemas();
+      const availableToolSchemas = this.tools.schemas();
+      const deliverySchemas = deliveryEditRequired
+        ? availableToolSchemas.filter((schema: any) => EDIT_TOOLS.has(String(schema?.function?.name ?? "").toLowerCase()))
+        : [];
+      const deliveryGateActive = deliveryEditRequired && deliverySchemas.length > 0;
+      const toolSchemas = deliveryGateActive ? deliverySchemas : availableToolSchemas;
+      const executeAdmittedTool = (call: { id?: string; name: string; arguments: any }) => {
+        if (!deliveryGateActive) return this.safeExecute(call, signal);
+        if (!EDIT_TOOLS.has(call.name.toLowerCase())) {
+          return Promise.resolve("[delivery] This deadline-bounded step accepts only write_file, edit, or multi_edit. " +
+            "The requested tool was not executed; land one intended artifact checkpoint first.");
+        }
+        if (!isDeliveryArtifactEdit(call)) {
+          return Promise.resolve("[delivery] Disposable probe, scratch, and temp paths do not satisfy an artifact checkpoint. " +
+            "The write was not executed; edit the intended deliverable instead.");
+        }
+        return this.safeExecute(call, signal);
+      };
       let estimatedTokens = estimateRequestTokens(this.providerHistory(), toolSchemas);
       // Avoid invalidating prompt caches unless clipping saves a meaningful amount of context.
       const editAt = Math.min(50_000, 0.5 * this.maxContextTokens);
@@ -839,10 +1159,11 @@ export class Agent {
         c.id || `${c.name}:${JSON.stringify(c.arguments ?? {})}`;
       let eagerOk = true;
       const onToolCallReady = (call: { id: string; name: string; arguments: any }) => {
+        if (deliveryGateActive && !EDIT_TOOLS.has(call.name.toLowerCase())) { eagerOk = false; return; }
         const adapterSafe = this.tools.mcp?.permission?.(call.name) === "safe";
         if (!EAGER_SAFE.has(call.name) && !adapterSafe) { eagerOk = false; return; }
         if (!eagerOk || signal?.aborted || eager.has(eagerKey(call))) return;
-        eager.set(eagerKey(call), this.safeExecute(call, signal));
+        eager.set(eagerKey(call), executeAdmittedTool(call));
       };
       // Journal streamed deltas and tool results so mid-turn checkpoints contain the canonical trajectory.
       let inflightAssistant: any | null = null;
@@ -898,7 +1219,7 @@ export class Agent {
           checkpoint(true, false);
           this.emit("tool_call", call);
           await this.durableCheckpoint();
-          const observation = await this.safeExecute(call, signal);
+          const observation = await executeAdmittedTool(call);
           noteTool(call, observation);
           this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
           this.emit("tool_result", { call, observation });
@@ -972,13 +1293,22 @@ export class Agent {
           || (final && this.messages.at(-1)?.role === "tool")) {
           finalizeInflight(final, [], response.continuation);
         }
+        if (deliveryGateActive && step < runStepLimit - 1) {
+          this.messages.push({
+            role: "user",
+            _neko_internal: true,
+            content: "[delivery] The required artifact checkpoint has not landed. Do not finish or resume " +
+              "discovery yet; use one available edit tool on the intended deliverable now.",
+          });
+          continue;
+        }
         // A todo label is not proof, but an OPEN plan is proof that the controller has unfinished work.
         // Give the model one chance to reconcile it before exit: continue, mark verified items done via
         // todo_write, or report a real blocker. One-shot avoids trapping legitimate clarification turns.
         const openTodos = Array.isArray(this.tools.todos)
           ? this.tools.todos.filter((t) => t.status !== "completed")
           : [];
-        if (openTodos.length && !planExitChecked && step < this.maxSteps - 1) {
+        if (openTodos.length && !planExitChecked && step < runStepLimit - 1) {
           planExitChecked = true;
           verifiedExit = true; // this nudge already asks for real-state verification; do not stack gates
           this.messages.push({
@@ -994,7 +1324,7 @@ export class Agent {
           isFreshFactWebTool(String(schema?.function?.name ?? schema?.name ?? "")));
         if (isVietnamSovereigntyTopic(instruction) && !hasFreshFactWebTool
           && isVietnamSovereigntyDeferral(final) && !offlineSovereigntyAnswerRequested
-          && step < this.maxSteps - 1) {
+          && step < runStepLimit - 1) {
           offlineSovereigntyAnswerRequested = true;
           verifiedExit = true;
           this.messages.push({
@@ -1009,7 +1339,7 @@ export class Agent {
           continue;
         }
         if (freshFactVerificationRequired && hasFreshFactWebTool && !freshFactVerificationEvidence
-          && !freshFactVerificationRequested && step < this.maxSteps - 1) {
+          && !freshFactVerificationRequested && step < runStepLimit - 1) {
           freshFactVerificationRequested = true;
           verifiedExit = true; // this evidence gate subsumes the generic inspection-only gate
           this.messages.push({
@@ -1023,7 +1353,7 @@ export class Agent {
           continue;
         }
         const validation = this.completionStatus;
-        if (!validation.ok && !validationExitChecked && step < this.maxSteps - 1) {
+        if (!validation.ok && !validationExitChecked && step < runStepLimit - 1) {
           validationExitChecked = true;
           verifiedExit = true; // this is stronger than the generic inspection-only gate
           const command = validation.command ? ` The validator was: ${JSON.stringify(validation.command)}.` : "";
@@ -1034,12 +1364,14 @@ export class Agent {
               "the project changed, but no recognized validator has passed after the latest successful mutation." +
               command + " A read/search/diff is useful inspection, but it cannot replace this failed or stale " +
               "test/typecheck/lint/build result. Re-run a recognized validator now. If the capability is " +
-              "unavailable, report the blocker plainly; do not claim the task is verified.",
+              "unavailable, do not install it or search the host merely for this guard. Run one available direct " +
+              "foreground project validator with its exit status unmasked; avoid pipes, loops, separators, and echo " +
+              "wrappers. If none exists, report the blocker once; do not claim the task is verified.",
           });
           continue;
         }
         // A state-changing action requires fresh inspection evidence of its user-visible outcome.
-        if (this.verifyStateChangesBeforeExit && changedRealState && step < this.maxSteps - 1) {
+        if (this.verifyStateChangesBeforeExit && changedRealState && step < runStepLimit - 1) {
           if (!stateVerificationEvidence && !stateVerificationRequested) {
             stateVerificationRequested = true;
             verifiedExit = true; // stronger than the generic opt-in gate; do not stack both
@@ -1066,7 +1398,7 @@ export class Agent {
           }
         }
         // Intercept at most one unsupported final so the model can gather fresh verification evidence.
-        if (this.verifyBeforeExit && !verifiedExit && !completionVerificationEvidence && step < this.maxSteps - 1) {
+        if (this.verifyBeforeExit && !verifiedExit && !completionVerificationEvidence && step < runStepLimit - 1) {
           verifiedExit = true;
           this.messages.push({
             role: "user",
@@ -1098,7 +1430,7 @@ export class Agent {
       if (toolCalls.length > 1 && toolCalls.every(concurrencySafe)) {
         lastSig = ""; // a parallel fan-out breaks any single-call repeat chain
         toolCalls.forEach((call) => this.emit("tool_call", call));
-        const observations = await Promise.all(toolCalls.map((call) => eager.get(eagerKey(call)) ?? this.safeExecute(call, signal)));
+        const observations = await Promise.all(toolCalls.map((call) => eager.get(eagerKey(call)) ?? executeAdmittedTool(call)));
         toolCalls.forEach((call, i) => {
           noteTool(call, observations[i]);
           if (Agent.isUnproductiveResult(observations[i])) stepHadUnproductiveResult = true;
@@ -1124,7 +1456,7 @@ export class Agent {
                 "that remains possible, and report test execution as blocked by the unavailable toolchain."
               : repeats >= 2
               ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
-              : await (eager.get(eagerKey(call)) ?? this.safeExecute(call, signal));
+              : await (eager.get(eagerKey(call)) ?? executeAdmittedTool(call));
             noteTool(call, observation);
             if (Agent.isToolchainCommand(call) && !circuitBlocked) {
               if (Agent.isToolchainCapabilityFailure(call, observation)) {
@@ -1176,36 +1508,93 @@ export class Agent {
       consecutiveReadSteps = allReads ? consecutiveReadSteps + 1 : 0;
       nextReasoningEffort = this.adaptiveEffort && consecutiveReadSteps >= 2 ? "low" : undefined;
 
+      if (deliveryPhase && !hasFreshValidation()) {
+        if (successfulEditThisStep) {
+          nonEditStepsSinceDelivery = 0;
+        } else if (!deliveryEditRequired) {
+          nonEditStepsSinceDelivery++;
+          if (nonEditStepsSinceDelivery >= 2) {
+            deliveryEditRequired = true;
+            nonEditStepsSinceDelivery = 0;
+            this.messages.push({
+              role: "user",
+              _neko_internal: true,
+              content: "[delivery] The deadline-bounded completion contract now requires an artifact checkpoint. " +
+                "Use write_file, edit, or multi_edit on the intended deliverable now. Discovery tools return after " +
+                "one successful edit. Do not create another disposable probe merely to satisfy this checkpoint.",
+            });
+          }
+        }
+      }
+
       // Issue one completion nudge near each configured step-budget threshold.
-      if (this.maxSteps >= 10) {
-        const frac = (step + 1) / this.maxSteps;
-        const threshold = budgetNudges === 0 ? 0.66 : budgetNudges === 1 ? 0.85 : 2;
+      if (runStepLimit >= 10) {
+        const stepFrac = (step + 1) / runStepLimit;
+        const deadlineSpan = this.workDeadlineAt === undefined ? 0 : this.workDeadlineAt - workStartedAt;
+        const timeFrac = !internal && deadlineSpan > 0
+          ? Math.max(0, Math.min(1, (Date.now() - workStartedAt) / deadlineSpan))
+          : 0;
+        const frac = Math.max(stepFrac, timeFrac);
+        const contractThresholds = this.completionContractState ? [0.25, 0.45, 0.75] : [0.66, 0.85];
+        const threshold = contractThresholds[budgetNudges] ?? 2;
         if (frac >= threshold) {
+          const stage = budgetNudges;
           budgetNudges++;
-          const left = this.maxSteps - (step + 1);
+          const left = runStepLimit - (step + 1);
+          const remaining = this.workDeadlineAt === undefined
+            ? ""
+            : `, ~${Math.max(0, Math.ceil((this.workDeadlineAt - Date.now()) / 1000))}s in the work window`;
+          const contractDirection = stage === 0
+            ? " Stop broad discovery and create the smallest buildable or runnable baseline now."
+            : stage === 1
+              ? " Expand only the highest-impact missing behavior, then run a real check against the artifact."
+              : " Freeze scope now: build, verify, and preserve the required deliverable before the window closes.";
+          if (this.completionContractState && this.workDeadlineAt !== undefined && stage === 1
+            && !hasFreshValidation()) {
+            deliveryPhase = true;
+            deliveryEditRequired = true;
+            nonEditStepsSinceDelivery = 0;
+            this.emit("completion_phase", { phase: "delivery" });
+          } else if (this.completionContractState && this.workDeadlineAt !== undefined && stage >= 2) {
+            this.emit("completion_phase", { phase: "finalization" });
+          }
           this.messages.push({ role: "user", _neko_internal: true, content:
-            `[budget] ~${left} of ${this.maxSteps} steps left (${Math.round(frac * 100)}% used). If this task ` +
+            `[budget] ~${left} of ${runStepLimit} steps left${remaining} (${Math.round(frac * 100)}% used). If this task ` +
             "has a concrete deliverable - a file to write, code, a config, a plan - PRODUCE and finish it NOW; " +
             "don't spend the remaining budget exploring. A delivered result with its open risks named honestly " +
-            "beats a perfect one you never wrote. If you are already done, give your final answer." });
+            `beats a perfect one you never wrote.${this.completionContractState ? contractDirection : ""} ` +
+            "If you are already done, give your final answer." });
         }
       }
     }
 
+    if (yieldOnStepLimit) {
+      this.emit("completion_round_yield", { steps: runStepLimit });
+      await this.durableCheckpoint();
+      for (let index = this.messages.length - 1; index >= runMessageStart; index--) {
+        const message = this.messages[index];
+        if (message?.role === "assistant" && isText(message.content) && message.content.trim()) {
+          return message.content.trim();
+        }
+      }
+      return `[controller checkpoint after ${runStepLimit} steps]`;
+    }
+
     // Request one tool-less wrap-up after the step limit.
-    this.emit("max_steps", this.maxSteps);
+    if (this.runUntilDoneActive) this.emit("completion_phase", { phase: "finalization" });
+    this.emit("max_steps", runStepLimit);
     let final: string;
     try {
       const wrap = await this.provider.complete(
-        cleanProviderMessages([...this.providerHistory(), { role: "user", content: `Step limit (${this.maxSteps}) reached. Stop calling tools and concisely summarize what you did and what's left.`, _neko_internal: true }]),
+        cleanProviderMessages([...this.providerHistory(), { role: "user", content: `Step limit (${runStepLimit}) reached. Stop calling tools and concisely summarize what you did and what's left.`, _neko_internal: true }]),
         undefined,
         this.onDelta,
         signal,
       );
       this.cost.add(wrap.usage); // the wrap-up call costs tokens too — count it
-      final = wrap.content?.trim() || `[stopped: reached max_steps=${this.maxSteps}]`;
+      final = wrap.content?.trim() || `[stopped: reached max_steps=${runStepLimit}]`;
     } catch {
-      return `[stopped: reached max_steps=${this.maxSteps}]`;
+      return `[stopped: reached max_steps=${runStepLimit}]`;
     }
     this.messages.push({ role: "assistant", content: final });
     await this.durableCheckpoint();

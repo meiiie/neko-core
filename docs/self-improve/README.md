@@ -7,13 +7,13 @@ ships it only through the same tests and release gates as any human-authored cha
 | File | Purpose |
 |---|---|
 | [STATE.md](STATE.md) | Current baseline, measurement focus, and most recent accepted move |
-| [BACKLOG.md](BACKLOG.md) | Candidate improvements; an idea is not a commitment |
-| [RESEARCH.md](RESEARCH.md) | Dated evidence and possible mappings to Neko |
 | [HARNESS.md](HARNESS.md) | Small-change protocol for an experimental pass |
 
 The canonical product architecture is [../HARNESS-ARCHITECTURE.md](../HARNESS-ARCHITECTURE.md). The canonical
-history is [../process/WORKLOG.md](../process/WORKLOG.md). If these files disagree, code, tests, current process
-docs, and owner direction win.
+evaluation contract and active objective are [../process/EVALUATION.md](../process/EVALUATION.md) and
+[../process/HARNESS-GOAL.md](../process/HARNESS-GOAL.md). Candidate ideas live in issues or a bounded experiment,
+not an ever-growing in-repository backlog. If these files disagree, code, tests, current process docs, and owner
+direction win.
 
 ## Admission loop
 
@@ -21,6 +21,6 @@ docs, and owner direction win.
            -> run targeted evidence -> run full gate -> human review
            -> accept and record, or revert completely
 
-Research-only passes may update RESEARCH.md and BACKLOG.md but must not present an unimplemented idea as a
-current capability. The loop never deletes safety checks, weakens permissions, publishes releases, or runs
-forever without explicit owner authority.
+Research-only passes may update a dated file under `docs/research/`, but must not present an unimplemented idea
+as a current capability. Accepted decisions move into the relevant canonical process document. The loop never
+deletes safety checks, weakens permissions, publishes releases, or runs forever without explicit owner authority.

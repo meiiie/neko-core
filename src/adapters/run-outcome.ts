@@ -21,7 +21,11 @@ export function headlessRunOutcome(
   if (!status.ok) {
     const validation = status.reason === "validation_failed"
       ? "the recognized validator failed after the latest mutation"
-      : "the latest mutation was not followed by a successful recognized validator";
+      : status.reason === "validation_missing"
+        ? "the latest mutation was not followed by a successful recognized validator"
+        : status.reason === "contract_failed"
+          ? "the independent completion contract still has failed criteria"
+          : "the independent completion contract was not fully verified";
     reasons.push(validation + (status.command ? ` (command: ${JSON.stringify(status.command)})` : ""));
   }
   return {

@@ -14,6 +14,7 @@ import { homeDir } from "../shared/home.ts";
 import { isBool, isJsonNumber, isJsonObject, isText, type JsonObject } from "../shared/wire.ts";
 import { dirname, join, resolve } from "node:path";
 import type { StoredHostProfile } from "./host-profile.ts";
+import { isCompletionContract, type CompletionContract } from "../core/completion-contract.ts";
 
 export type SessionTurnStatus = "idle" | "running" | "interrupted";
 
@@ -60,6 +61,8 @@ export interface Session {
   contextFingerprint?: string;
   /** Immutable launch-authorized ACP host authority; absent for ordinary Neko sessions. */
   hostProfile?: StoredHostProfile;
+  /** Independent, pre-implementation definition of done for an active closed-loop goal. */
+  completionContract?: CompletionContract;
 }
 
 /** Lightweight session metadata for the picker/list - everything EXCEPT the (large) messages array.
@@ -201,6 +204,7 @@ function parseSession(value: any, expectedId: string): Session | null {
   if (session.usage !== undefined && !validUsage(session.usage)) return null;
   if (session.contextFingerprint !== undefined && !validMetadataText(session.contextFingerprint, MAX_SESSION_FINGERPRINT_BYTES)) return null;
   if (session.hostProfile !== undefined && !validStoredHostProfile(session.hostProfile)) return null;
+  if (session.completionContract !== undefined && !isCompletionContract(session.completionContract)) return null;
   // SAFETY: every field above is validated against the session schema before this cast.
   return value as Session;
 }

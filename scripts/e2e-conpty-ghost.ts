@@ -58,11 +58,14 @@ report("startup");
 // Emulate physical typing one key at a time. Writing the whole phrase in one PTY chunk exercises
 // Neko's intentional paste-collapsing path, so looking for the literal draft falsely reports DEAD
 // input even though Enter later submits the preserved paste correctly.
+const typeStartedAt = performance.now();
 for (const key of "xin chao") { term.write(key); await sleep(15); }
-await sleep(800);
+for (let waited = 0; waited < 5_000 && !vt.text().includes("xin chao"); waited += 50) await sleep(50);
 // INPUT check - the other field class ("renders but typing does nothing"): the echo must be visible.
 const typedEcho = vt.text().includes("xin chao");
-console.log(`typed-echo: ${typedEcho ? "OK" : "DEAD - keys do not echo"}`);
+const echoMs = Math.round(performance.now() - typeStartedAt);
+console.log(`typed-echo: ${typedEcho ? `OK (${echoMs}ms)` : "DEAD - keys do not echo"}`);
+if (!typedEcho) console.log(vt.lines().map((line, i) => `${String(i).padStart(2)}|${line}`).join("\n"));
 console.log(`decrqm-query-seen: ${answeredDecrqm}`);
 term.write("\r");
 let worst = 0;

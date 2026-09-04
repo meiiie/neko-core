@@ -24,7 +24,8 @@ follow the [stability and support policy](docs/process/STABILITY.md). See the
 ## Why Neko
 
 - **A real agent harness.** Streaming `complete -> tool calls -> observe` loop, concurrent safe reads,
-  context relief, compaction, loop recovery, verification debt, and bounded closed-loop continuation.
+  context relief, compaction, loop recovery, verification debt, and bounded closed-loop continuation. Explicit
+  closed loops fix an observable completion contract before implementation and use an independent validator.
 - **Local-first and provider-agnostic.** Use hosted APIs, supported subscription accounts, or an
   OpenAI-compatible local server. Models and endpoints are config, not product forks.
 - **Governed action.** Read tools are safe; edits, shell, browser, Office, and host-computer actions pass
@@ -113,6 +114,8 @@ neko --yolo                  # no approval waits; hard seatbelts still apply
 neko --resume                # resume the latest session in this folder
 neko run "fix the failing tests"
 neko run --loop "finish the migration and verify it"
+neko bench contract hard --trials 3 --call-budget 24
+neko bench campaign frontier --profiles zai,bai --trials 3 --call-budget 24
 neko acp                     # ACP v1 server for Zed, JetBrains, and other clients
 neko acp --host-profile nekocut # exclusive six-tool embedding profile for NekoCut
 neko update                  # install latest and resume auto-updates
@@ -124,7 +127,7 @@ Inside the TUI:
 - `Shift+Tab` cycles `default`, `accept-edits`, `plan`, and `auto`.
 - `Esc` interrupts the active turn; `Ctrl+C` clears a draft, then exits on the second press.
 - `Alt+V` pastes an image; `Alt+C` copies the full draft; `Ctrl+O` expands tool output.
-- `/model`, `/login`, `/resume`, `/memory`, `/browser`, `/meeting`, `/support`, and `/help` expose the
+- `/model`, `/login`, `/resume`, `/contract`, `/memory`, `/browser`, `/meeting`, `/support`, and `/help` expose the
   corresponding guided surfaces.
 
 Neko plays its short Bubble completion sound after successful background work. Set
@@ -136,11 +139,13 @@ The default `auto` mode is bounded autonomy: ordinary workspace work proceeds, w
 boundaries remain explicit. `--yolo` grants those prompts for the current launch, but does not disable project
 trust, credential/system path protection, catastrophic-shell refusal, or validation.
 
-Shell commands use a platform sandbox when a healthy primitive is available. The filesystem is confined to
-the workspace plus exact configured roots, and network access is denied by default or granted to exact domains.
-If a configured sandbox is unhealthy, Neko fails closed instead of pretending a host command was isolated.
-Run `neko policy` to inspect the effective boundary. See [Sandbox](docs/process/SANDBOX.md) and
-[Architecture](docs/process/ARCHITECTURE.md).
+Shell and CLI work runs directly through the current host Bash by default; on Windows its child console stays
+hidden. Neko never drives a terminal through Computer Use as a shell fallback. The permission gate, secret
+environment scrubbing, project trust, and catastrophic-command seatbelt remain active, but direct-host Bash is
+not filesystem containment. Set `"sandbox": true` to opt into the platform OS sandbox, which confines writes
+and uses bounded network grants. If an explicitly configured sandbox is unhealthy, Neko fails closed instead
+of silently widening to the host. Run `neko policy` to inspect the effective boundary. See
+[Sandbox](docs/process/SANDBOX.md) and [Architecture](docs/process/ARCHITECTURE.md).
 
 ## Browser, Office, meetings, and remote control
 

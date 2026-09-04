@@ -70,6 +70,18 @@ Tests that require Bubblewrap, Seatbelt, Windows SRT/ACL, Office engines, WPF/UI
 explicit about availability. A body-level early return is not a pass. CI uses requirement environment flags for
 the primitives it provisions; absence then fails closed.
 
+Windows SRT policy and failure semantics stay in the deterministic default suite. Its live process/ACL probes
+are an explicit lane because they depend on host provisioning and can take tens of seconds:
+
+```powershell
+$env:NEKO_TEST_LIVE_SRT = "1"
+rtk bun test test/sandbox.test.ts
+Remove-Item Env:\NEKO_TEST_LIVE_SRT
+```
+
+If that lane is required, an unavailable or unhealthy SRT is evidence to fix; it is not replaced by a passing
+default test or an unconfined fallback.
+
 No platform test may execute a workspace-local binary discovered through PATH, a symlink/junction alias, or an
 unverified support pack.
 
@@ -97,6 +109,10 @@ design under docs/research.
   green without identifying the race.
 - A flaky test is treated as possible product evidence until the product path is disproven.
 - Shared live primitives run sequentially; pure tests may run in parallel.
+
+Windows Bash lifecycle regressions must prove that a grandchild cannot act after an abort or timeout. Tests may
+wait for fixture readiness and for Windows to release handles, but must not enlarge the production command
+deadline to make teardown appear green.
 
 ## Release-only checks
 

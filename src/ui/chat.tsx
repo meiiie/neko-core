@@ -97,6 +97,7 @@ import {
   RESUME_SUMMARY_AT,
 } from "./chat-lines.ts";
 import { describeToolCall, toolSchemas } from "../core/tools.ts";
+import { createCompletionSupervisor } from "../adapters/completion-supervisor.ts";
 
 import { isText } from "../shared/wire.ts";
 
@@ -718,6 +719,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       verifyBeforeExit: cfg.verifyBeforeExit,
       verifyStateChangesBeforeExit: true,
       adaptiveEffort: cfg.adaptiveEffort,
+      completionSupervisor: provider ? undefined : createCompletionSupervisor(cfg, registryRef.current),
       onCheckpoint: () => persistRef.current(),
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
@@ -784,6 +786,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           flushStream();
           addLine("info", `watchdog: provider stream interrupted (${data.reason}); continuing from checkpoint (${data.attempt}/${data.max})`);
           queuePersist();
+        } else if (kind === "completion_contract") {
+          flushStream();
+          addLine("info", `completion contract: ${data.criteria} criterion${data.criteria === 1 ? "" : "s"} fixed before implementation`);
+        } else if (kind === "completion_review") {
+          flushStream();
+          addLine("info", `independent completion review: ${data.verdict}${data.findings ? ` (${data.findings} finding${data.findings === 1 ? "" : "s"})` : ""}`);
+        } else if (kind === "completion_contract_unavailable") {
+          flushStream();
+          addLine("info", `completion contract unavailable; using bounded self-review (${String(data).slice(0, 240)})`);
         } else if (kind === "compact") {
           flushStream();
           setCompacting({ start: Date.now() });
@@ -794,6 +805,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     });
     if (resumedRef.current) {
       agentRef.current.messages = [...resumedRef.current.messages];
+      agentRef.current.restoreCompletionContract(resumedRef.current.completionContract);
       agentRef.current.refreshSystemPrompt();
     }
   }
@@ -821,6 +833,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       model: cfg.model,
       title: pinnedTitleRef.current || undefined,
       messages: agentRef.current!.messages,
+      completionContract: agentRef.current!.completionContract,
     });
   persistRef.current = persist;
 
@@ -859,6 +872,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Recover todos before optional compaction so plans in the summarized head survive resume.
   const doResume = async (target: Session, mode: "summary" | "full") => {
     agentRef.current!.messages = [...target.messages];
+    agentRef.current!.restoreCompletionContract(target.completionContract);
     agentRef.current!.refreshSystemPrompt();
     sessionIdRef.current = target.id;
     createdAtRef.current = target.createdAt;

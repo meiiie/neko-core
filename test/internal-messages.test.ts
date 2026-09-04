@@ -131,6 +131,26 @@ test("/continue identifies its generated instruction as a controller turn", asyn
   expect(runs[0].text).toStartWith("Continue the task from where it was interrupted.");
 });
 
+test("/contract renders durable criteria and /reset clears them", async () => {
+  const agent = makeAgent();
+  agent.restoreCompletionContract({
+    schemaVersion: 1,
+    goal: "ship",
+    revision: 1,
+    createdAt: "2026-08-29T00:00:00.000Z",
+    criteria: [{ id: "C1", requirement: "Tests pass", source: "repository", verification: "bun test", required: true }],
+  });
+  const lines: string[] = [];
+  // SAFETY: these focused commands use only agent and addLine from the test fixture.
+  const ctx = { agent, addLine: (_kind: string, text: string) => lines.push(text) } as any;
+  await runSlashCommand("/contract", ctx);
+  expect(lines.at(-1)).toContain("C1 Tests pass");
+  await runSlashCommand("/reset", ctx);
+  expect(agent.completionContract).toBeUndefined();
+  await runSlashCommand("/contract", ctx);
+  expect(lines.at(-1)).toBe("no active completion contract");
+});
+
 test("controller markers persist locally but are invisible to every provider call", async () => {
   const seen: any[][] = [];
   let call = 0;

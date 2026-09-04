@@ -58,6 +58,28 @@ function hasMutatingValidatorArgument(segment: string): boolean {
   });
 }
 
+function isDirectLocalScriptValidator(segment: string): boolean {
+  const words = segment.trim().match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  while (words.length && /^[A-Za-z_]\w*=/.test(words[0] ?? "")) words.shift();
+  const unquote = (value: string) => value.replace(/^["']+|["']+$/g, "");
+  const leaf = (value: string) => {
+    const normalized = unquote(value).replace(/\\/g, "/");
+    return normalized.slice(normalized.lastIndexOf("/") + 1).replace(/\.(?:exe|cmd|bat)$/i, "").toLowerCase();
+  };
+  if (leaf(words[0] ?? "") === "rtk") words.shift();
+  const exe = leaf(words.shift() ?? "");
+  if (exe === "bun") {
+    while (["--no-env-file", "--no-install"].includes(unquote(words[0] ?? "").toLowerCase())) words.shift();
+  }
+  if (exe === "bun" && unquote(words[0] ?? "").toLowerCase() === "run") words.shift();
+  if (!(["bun", "node"].includes(exe)) || words.length !== 1) return false;
+  const path = unquote(words[0] ?? "").replace(/\\/g, "/");
+  if (!path || path.startsWith("/") || /^[a-z]:|^\/\//i.test(path) || /[$%~*?\[\]{}]/.test(path)) return false;
+  const parts = path.replace(/^\.\//, "").split("/");
+  return parts.every((part) => part && part !== "." && part !== "..")
+    && /\.(?:[cm]?[jt]s|[jt]sx)$/i.test(parts.at(-1) ?? "");
+}
+
 /** Build targets produce project artifacts by design. They remain useful validation evidence in a
  * full turn, but an exact-file lease cannot grant output-producing build authority. */
 function isBuildValidatorSegment(segment: string): boolean {
@@ -85,7 +107,20 @@ export function isForegroundValidatorOnlyCommand(raw: string, args?: any): boole
   if (!command || !hasAuthoritativeValidatorExit(command, args)) return false;
   if (/\$\(|@\(|`|<\(|>\(/.test(command)) return false;
   return command.split("&&").every((segment) => segment.trim() !== ""
-    && isValidationBashCommand(segment)
+    && (isValidationBashCommand(segment) || isDirectLocalScriptValidator(segment))
     && !isBuildValidatorSegment(segment)
     && !hasMutatingValidatorArgument(segment));
 }
+
+export function isProtectedDifferentialValidator(raw: string, args?: any): boolean {
+  const value = isJsonObject(args) ? args : {};
+  const source = value.validator_source;
+  return raw.trim() === "bun --no-env-file --no-install -"
+    && isText(source)
+    && source.length > 0
+    && Buffer.byteLength(source) <= 64 * 1024
+    && !source.includes("\0")
+    && value.run_in_background !== true
+    && !(Array.isArray(value.network_domains) && value.network_domains.length > 0);
+}
+import { isJsonObject, isText } from "../shared/wire.ts";

@@ -411,6 +411,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         reasoningEffort: session.runtime.config.effort,
         revision: (session.record.revision ?? 0) + 1,
         messages: await storedMessages(session),
+        completionContract: session.runtime.agent.completionContract,
         usage: usageSnapshot(session),
         turnState,
         contextFingerprint: createHash("sha256").update(JSON.stringify({
@@ -713,6 +714,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
 
       if (restored) {
         runtime.agent.messages = structuredClone(record.messages);
+        runtime.agent.restoreCompletionContract(record.completionContract);
         runtime.agent.messages.forEach((message: any, index: number) => {
           if ((message?.role === "user" || message?.role === "assistant") && !message._neko_acp_message_id) {
             message._neko_acp_message_id = stableMessageId(record.id, index, message.role);

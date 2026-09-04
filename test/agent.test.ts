@@ -1,18 +1,20 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Agent, clampObservation, classifyToolObservation, estimateRequestTokens, estimateTokens, isValidationBashCommand, MAX_OBS_CHARS, unwrapToolArgs } from "../src/core/agent.ts";
 import { COMPACTION_PROMPT, DEFAULT_SYSTEM_PROMPT, isFreshFactWebTool, requiresFreshFactVerification } from "../src/core/agent-constants.ts";
+import type { CompletionSupervisor } from "../src/core/completion-contract.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
-import { ProviderAttemptError } from "../src/core/ports.ts";
+import { ProviderAttemptError, type Provider } from "../src/core/ports.ts";
 
 import { isText } from "../src/shared/wire.ts";
 
 test("tool observation classification is shared by loop guards and eval telemetry", () => {
   expect(classifyToolObservation("(exit 1 -- command FAILED)\nboom")).toBe("failed");
   expect(classifyToolObservation("Blocked: approval required")).toBe("failed");
+  expect(classifyToolObservation("[measurement R1]\nTool 'bash' is restricted to a foreground validator.")).toBe("failed");
   expect(classifyToolObservation("### Result\n[]")).toBe("empty");
   expect(classifyToolObservation("(no matches)")).toBe("empty");
   expect(classifyToolObservation("(no files)")).toBe("empty");
@@ -49,7 +51,7 @@ test("volatile turn system context survives closed-loop passes but never enters 
   const seen: any[][] = [];
   const replies = ["keep working", "DONE", "next turn"];
   let dynamic = "NARROW DYNAMIC CONTEXT";
-  const provider = {
+  const provider: Provider = {
     async complete(messages: any[]) {
       seen.push(structuredClone(messages));
       return { content: replies[seen.length - 1], tool_calls: [] };
@@ -57,7 +59,7 @@ test("volatile turn system context survives closed-loop passes but never enters 
   };
   const agent = new Agent({
     // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
-    provider: provider as any,
+    provider,
     tools: new ToolRegistry(".", "auto", () => true),
     dynamicContext: () => dynamic,
   });
@@ -826,6 +828,344 @@ test("runUntilDone iterates until the model replies DONE, and caps", async () =>
     tools: new ToolRegistry(process.cwd(), "auto", () => true),
   });
   expect(await capped.runUntilDone("do X", { maxIters: 3 })).toBe("still working"); // never DONE -> cap
+});
+
+test("runUntilDone builds an independent completion contract before implementation and obeys its verdict", async () => {
+  const order: string[] = [];
+  const implementationPrompts: string[] = [];
+  const implementationContexts: string[] = [];
+  let reviews = 0;
+  const events: string[] = [];
+  const phases: string[] = [];
+  const provider: Provider = {
+    async complete(messages: any[]) {
+      order.push("implement");
+      const last = String(messages.at(-1)?.content ?? "");
+      implementationPrompts.push(last);
+      implementationContexts.push(String(messages.find((message: any) => message.role === "system")?.content ?? ""));
+      return { content: last.includes("INDEPENDENT COMPLETION REVIEW") ? "fixed missing behavior" : "implemented first pass", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({
+    provider,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    completionSupervisor: {
+      async create() {
+        order.push("contract");
+        return {
+          value: { criteria: [{ requirement: "CLI prints OK", source: "runtime", verification: "Run the CLI" }] },
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        };
+      },
+      async review() {
+        order.push("review");
+        reviews++;
+        return reviews === 1
+          ? { value: { verdict: "fail", criteria: [{ id: "C1", status: "failed", evidence: "stdout was empty" }], findings: ["CLI output is missing"] } }
+          : { value: { verdict: "pass", criteria: [{ id: "C1", status: "passed", evidence: "stdout was OK" }], findings: [] } };
+      },
+    },
+    onEvent: (kind, data) => {
+      events.push(kind);
+      if (kind === "completion_phase") phases.push(data.phase);
+    },
+  });
+
+  expect(await agent.runUntilDone("ship CLI", { maxIters: 3 })).toBe("fixed missing behavior");
+  expect(order).toEqual(["contract", "implement", "review", "implement", "review"]);
+  expect(agent.completionStatus).toEqual({ ok: true });
+  expect(agent.completionContract?.lastReview?.verdict).toBe("pass");
+  expect(agent.completionContract?.revision).toBe(3);
+  expect(agent.cost.totalTokens).toBeGreaterThanOrEqual(15);
+  expect(events).toContain("completion_contract");
+  expect(events.filter((kind) => kind === "completion_review")).toHaveLength(2);
+  expect(phases).toEqual([
+    "contract", "implementation", "validation", "implementation", "validation", "finalization",
+  ]);
+  expect(implementationPrompts[0]).toBe("ship CLI");
+  expect(implementationContexts[0]).toContain("FIXED COMPLETION CONTRACT");
+  expect(implementationContexts[0]).toContain("smallest buildable or runnable end-to-end artifact early");
+  expect(implementationContexts[0]).toContain("C1 [general; weight 1]: CLI prints OK");
+  expect(implementationContexts[0]).toContain("verify: Run the CLI");
+  expect(agent.messages.some((message: any) => String(message.content).includes("CLI output is missing"))).toBe(true);
+  expect(agent.messages.some((message: any) => String(message.content).includes("Run the CLI"))).toBe(false);
+  expect(agent.messages.some((message: any) => String(message.content).includes("stdout was empty"))).toBe(false);
+});
+
+test("contract implementation rounds yield to independent review without a max-step wrap-up", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-contract-round-"));
+  const reviewAtCalls: number[] = [];
+  const events: string[] = [];
+  let calls = 0;
+  let reviews = 0;
+  const responses = [
+    { content: null, tool_calls: [{ id: "write-v1", name: "write_file", arguments: { path: "artifact.txt", content: "v1\n" } }] },
+    { content: null, tool_calls: [{ id: "read-v1", name: "read_file", arguments: { path: "artifact.txt" } }] },
+    { content: null, tool_calls: [{ id: "edit-v2", name: "edit", arguments: { path: "artifact.txt", old_string: "v1", new_string: "v2" } }] },
+    { content: null, tool_calls: [{ id: "read-v2", name: "read_file", arguments: { path: "artifact.txt" } }] },
+  ];
+  const agent = new Agent({
+    provider: {
+      async complete() {
+        return responses[calls++];
+      },
+    },
+    tools: new ToolRegistry(root, "auto", () => true),
+    maxSteps: 8,
+    completionSupervisor: {
+      async create() {
+        return { value: { criteria: [{ requirement: "artifact is v2", source: "runtime", verification: "read artifact.txt" }] } };
+      },
+      async review() {
+        reviewAtCalls.push(calls);
+        reviews++;
+        return reviews === 1
+          ? { value: { verdict: "fail", criteria: [{ id: "C1", status: "failed", evidence: "artifact is v1" }], findings: ["artifact is still v1"] } }
+          : { value: { verdict: "pass", criteria: [{ id: "C1", status: "passed", evidence: "artifact is v2" }], findings: [] } };
+      },
+    },
+    onEvent: (kind) => events.push(kind),
+  });
+
+  try {
+    await agent.runUntilDone("ship v2", { maxIters: 3, implementationRoundSteps: 2 });
+    expect(reviewAtCalls).toEqual([2, 4]);
+    expect(readFileSync(join(root, "artifact.txt"), "utf8")).toBe("v2\n");
+    expect(events.filter((kind) => kind === "completion_round_yield")).toHaveLength(2);
+    expect(events).not.toContain("max_steps");
+    expect(agent.completionStatus).toEqual({ ok: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("contract work uses the host work window to demand an early runnable baseline", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-contract-work-window-"));
+  writeFileSync(join(root, "seed.txt"), "seed\n");
+  let calls = 0;
+  const provider: Provider = {
+    async complete() {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      calls++;
+      return calls === 1
+        ? { content: null, tool_calls: [{ id: "inspect", name: "read_file", arguments: { path: "seed.txt" } }] }
+        : { content: "bounded stop", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({
+    provider,
+    tools: new ToolRegistry(root, "auto", () => true),
+    maxSteps: 10,
+    workDeadlineAt: Date.now() + 200,
+    completionSupervisor: {
+      async create() {
+        return { value: { criteria: [{ requirement: "artifact runs", source: "runtime", verification: "run it" }] } };
+      },
+      async review() {
+        return { value: { verdict: "blocked", criteria: [{ id: "C1", status: "unknown", evidence: "not measured" }] } };
+      },
+    },
+  });
+
+  try {
+    expect(await agent.runUntilDone("ship artifact", { maxIters: 1 })).toBe("bounded stop");
+    const budget = agent.messages.find((message: any) => message._neko_internal
+      && String(message.content).startsWith("[budget]"));
+    expect(budget?.content).toContain("in the work window");
+    expect(budget?.content).toContain("smallest buildable or runnable baseline now");
+    expect(agent.lastUserMessage()?.content).toBe("ship artifact");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("deadline-bounded work degrades a slow contract builder instead of spending the implementation window", async () => {
+  const events: string[] = [];
+  let reviewedRequirement = "";
+  const agent = new Agent({
+    provider: new ScriptedProvider([{ content: "implemented within the remaining window", tool_calls: [] }]),
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    maxSteps: 10,
+    workDeadlineAt: Date.now() + 400,
+    completionSupervisor: {
+      async create(_goal, signal) {
+        return await new Promise((resolve, reject) => {
+          const aborted = () => reject(new DOMException("contract phase timed out", "AbortError"));
+          if (signal?.aborted) aborted();
+          else signal?.addEventListener("abort", aborted, { once: true });
+          void resolve;
+        });
+      },
+      async review(contract) {
+        reviewedRequirement = contract.criteria[0]?.requirement ?? "";
+        return {
+          value: {
+            verdict: "pass",
+            coverageComplete: true,
+            criteria: [{ id: "C1", status: "passed", evidence: "artifact inspected", receipts: [] }],
+            findings: [],
+            additionalCriteria: [],
+          },
+        };
+      },
+    },
+    onEvent: (kind) => events.push(kind),
+  });
+
+  const started = performance.now();
+  expect(await agent.runUntilDone("ship the requested CLI", { maxIters: 1 })).toBe("implemented within the remaining window");
+  expect(performance.now() - started).toBeLessThan(1_000);
+  expect(events).toContain("completion_contract_degraded");
+  expect(reviewedRequirement).toContain("ship the requested CLI");
+  expect(agent.completionStatus).toEqual({ ok: true });
+});
+
+test("deadline-bounded contract work lands an early artifact and then alternates checkpoints", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-contract-delivery-cadence-"));
+  writeFileSync(join(root, "seed.txt"), Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n"));
+  const schemaCalls: string[][] = [];
+  let calls = 0;
+  const provider: Provider = {
+    async complete(_messages, schemas) {
+      calls++;
+      schemaCalls.push((schemas ?? []).map((schema: any) => String(schema.function?.name ?? "")));
+      if (calls === 8) {
+        return {
+          content: null,
+          tool_calls: [{
+            id: "disposable-probe",
+            name: "write_file",
+            arguments: { path: ".probe/check.sh", content: "echo probe\n" },
+          }],
+        };
+      }
+      if (calls <= 7 || calls === 9 || calls === 11 || calls === 12) {
+        return {
+          content: null,
+          tool_calls: [{ id: `read-${calls}`, name: "read_file", arguments: { path: "seed.txt", offset: calls, limit: 1 } }],
+        };
+      }
+      if (calls === 10 || calls === 13) {
+        return {
+          content: null,
+          tool_calls: [{
+            id: `write-${calls}`,
+            name: "write_file",
+            arguments: { path: "artifact.txt", content: `checkpoint ${calls}\n` },
+          }],
+        };
+      }
+      return { content: "bounded delivery", tool_calls: [] };
+    },
+  };
+  const agent = new Agent({
+    provider,
+    tools: new ToolRegistry(root, "auto", () => true),
+    maxSteps: 14,
+    workDeadlineAt: Date.now() + 60_000,
+    completionSupervisor: {
+      async create() {
+        return { value: { criteria: [{ requirement: "artifact exists", source: "runtime", verification: "read it" }] } };
+      },
+      async review() {
+        return { value: { verdict: "blocked", criteria: [{ id: "C1", status: "unknown", evidence: "not measured" }] } };
+      },
+    },
+  });
+
+  try {
+    expect(await agent.runUntilDone("ship artifact", { maxIters: 1 })).toBe("bounded delivery");
+    expect(schemaCalls[7]).toContain("write_file");
+    expect(schemaCalls[7]).not.toContain("read_file");
+    expect(schemaCalls[8]).not.toContain("read_file");
+    expect(schemaCalls[9]).not.toContain("read_file");
+    expect(schemaCalls[10]).toContain("read_file");
+    expect(schemaCalls[12]).toContain("write_file");
+    expect(schemaCalls[12]).not.toContain("bash");
+    expect(readFileSync(join(root, "artifact.txt"), "utf8")).toBe("checkpoint 13\n");
+    expect(existsSync(join(root, ".probe", "check.sh"))).toBe(false);
+    expect(agent.messages.some((message: any) => String(message.content).includes("Disposable probe"))).toBe(true);
+    expect(agent.messages.some((message: any) => String(message.content).includes("requested tool was not executed"))).toBe(true);
+    expect(agent.messages.some((message: any) => String(message.content).startsWith("[delivery]"))).toBe(true);
+    expect(agent.lastUserMessage()?.content).toBe("ship artifact");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("runUntilDone reports contract debt when the independent review cannot establish every criterion", async () => {
+  const agent = new Agent({
+    provider: new ScriptedProvider([{ content: "claimed done", tool_calls: [] }]),
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    completionSupervisor: {
+      async create() {
+        return { value: { criteria: [
+          { requirement: "Tests pass", source: "repository", verification: "bun test" },
+          { requirement: "CLI works", source: "runtime", verification: "run CLI" },
+        ] } };
+      },
+      async review() {
+        return { value: { verdict: "pass", criteria: [{ id: "C1", status: "passed", evidence: "green" }] } };
+      },
+    },
+  });
+
+  expect(await agent.runUntilDone("ship", { maxIters: 1 })).toBe("claimed done");
+  expect(agent.completionStatus).toMatchObject({ ok: false, reason: "contract_unverified" });
+  expect(agent.completionContract?.lastReview?.evidence[1].status).toBe("unknown");
+});
+
+test("runUntilDone rechecks inconclusive measurements without sending the implementer back to work", async () => {
+  let reviews = 0;
+  const provider = new ScriptedProvider([{ content: "implemented once", tool_calls: [] }]);
+  const events: string[] = [];
+  const agent = new Agent({
+    provider,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    completionSupervisor: {
+      async create() {
+        return { value: { criteria: [{ requirement: "CLI works", source: "runtime", verification: "run CLI" }] } };
+      },
+      async review() {
+        reviews++;
+        return reviews === 1
+          ? { value: { verdict: "blocked", criteria: [{ id: "C1", status: "unknown", evidence: "instrument inconclusive" }] } }
+          : { value: { verdict: "pass", criteria: [{ id: "C1", status: "passed", evidence: "exit 0" }] } };
+      },
+    },
+    onEvent: (kind) => events.push(kind),
+  });
+
+  expect(await agent.runUntilDone("ship CLI", { maxIters: 4 })).toBe("implemented once");
+  expect(provider.index).toBe(1);
+  expect(reviews).toBe(2);
+  expect(agent.completionContract?.lastReview?.verdict).toBe("pass");
+  expect(events).toContain("completion_recheck");
+});
+
+test("a normal later user turn clears an earlier closed-loop completion contract", async () => {
+  const agent = new Agent({
+    provider: new ScriptedProvider([{ content: "ordinary answer", tool_calls: [] }]),
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  agent.restoreCompletionContract({
+    schemaVersion: 1,
+    goal: "old goal",
+    revision: 2,
+    createdAt: "2026-08-29T00:00:00.000Z",
+    criteria: [{ id: "C1", requirement: "old", source: "user", verification: "check", required: true }],
+    lastReview: {
+      verdict: "fail",
+      artifactRevision: 1,
+      reviewedAt: "2026-08-29T00:01:00.000Z",
+      evidence: [{ criterionId: "C1", status: "failed", evidence: "bad" }],
+      findings: ["old failure"],
+    },
+  });
+  expect(agent.completionStatus.reason).toBe("contract_failed");
+  expect(await agent.run("new unrelated question")).toBe("ordinary answer");
+  expect(agent.completionContract).toBeUndefined();
+  expect(agent.completionStatus).toEqual({ ok: true });
 });
 
 test("runUntilDone resumes a provider idle stall from the durable conversation checkpoint", async () => {
@@ -1970,6 +2310,61 @@ test("baseline validator debt crosses a successful edit and a later validator su
   expect(agent.completionStatus).toEqual({ ok: true });
 });
 
+test("a non-authoritative optional validator cannot erase current authoritative success", async () => {
+  const results = [
+    "Edited src/x.ts",
+    "(exit 0)\n20 pass",
+    "(exit 0)\ntranspiled all files",
+    "Error: configured SRT sandbox is unusable; bash was not executed",
+  ];
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "src/x.ts", old_string: "false", new_string: "true" } }] },
+    { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: "bun test" } }] },
+    { content: null, tool_calls: [{ id: "build", name: "bash", arguments: { command: "bun run build; echo transpiled" } }] },
+    { content: null, tool_calls: [{ id: "tsc", name: "bash", arguments: { command: "npx tsc --noEmit" } }] },
+    { content: "done", tool_calls: [] },
+    { content: "unexpected validation nudge", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+    tools: { schemas: () => [], execute: async () => results.shift()! } as any,
+    maxSteps: 6,
+  });
+
+  expect(await agent.run("fix and validate x")).toBe("done");
+  expect(provider.index).toBe(5);
+  expect(agent.completionStatus).toEqual({ ok: true });
+  expect(agent.messages.some((message: any) => String(message.content).includes("VALIDATION REQUIRED"))).toBe(false);
+});
+
+test("a protected differential is validator evidence and does not manufacture a mutation epoch", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{
+      id: "differential",
+      name: "bash",
+      arguments: {
+        command: "bun --no-env-file --no-install -",
+        validator_source: "console.log('ok')",
+      },
+    }] },
+    { content: "verified", tool_calls: [] },
+  ]);
+  const tools = new ToolRegistry(process.cwd(), "auto", () => true);
+  tools.execute = async () => "(exit 0)\nok";
+  tools.isValidationBashCommand = () => true;
+  const agent = new Agent({
+    provider,
+    tools,
+    maxSteps: 4,
+  });
+
+  expect(await agent.run("check the artifact")).toBe("verified");
+  expect(provider.index).toBe(2);
+  expect(agent.completionStatus).toEqual({ ok: true });
+  expect(agent.messages.some((message: any) => String(message.content).includes("VALIDATION REQUIRED"))).toBe(false);
+});
+
 test("validator recognition accepts package-script suffixes but remains name-bounded", () => {
   expect(isValidationBashCommand("rtk bun run test:unit")).toBe(true);
   expect(isValidationBashCommand("npm run typecheck:stable")).toBe(true);
@@ -1985,12 +2380,12 @@ test("denied, background, and exit-masked validators cannot satisfy post-mutatio
     reason: "validation_failed" | "validation_missing";
     background?: boolean;
   }> = [
-    { command: "bun test", observation: "Blocked: bash is not allowed in 'plan' mode (read-only).", reason: "validation_failed" },
-    { command: "bun test", observation: "Refused: catastrophic command is blocked.", reason: "validation_failed" },
-    { command: "bun test", observation: "Tool 'bash' is disabled (enable with /tools bash).", reason: "validation_failed" },
-    { command: "bun test", observation: "The user did NOT approve this action.", reason: "validation_failed" },
-    { command: "bun test", observation: "[capability circuit] toolchain unavailable", reason: "validation_failed" },
-    { command: "bun test", observation: "(interrupted)", reason: "validation_failed" },
+    { command: "bun test", observation: "Blocked: bash is not allowed in 'plan' mode (read-only).", reason: "validation_missing" },
+    { command: "bun test", observation: "Refused: catastrophic command is blocked.", reason: "validation_missing" },
+    { command: "bun test", observation: "Tool 'bash' is disabled (enable with /tools bash).", reason: "validation_missing" },
+    { command: "bun test", observation: "The user did NOT approve this action.", reason: "validation_missing" },
+    { command: "bun test", observation: "[capability circuit] toolchain unavailable", reason: "validation_missing" },
+    { command: "bun test", observation: "(interrupted)", reason: "validation_missing" },
     { command: "bun test", observation: "Running in background [bg1]: bun test\nCheck its output later with /bashes.", background: true, reason: "validation_missing" },
     { command: "bun test", observation: "Running in background [bg2]: bun test\nCheck output with /bashes.", reason: "validation_missing" },
     { command: "bun test || true", observation: "(exit 0)", reason: "validation_missing" },
@@ -2065,6 +2460,100 @@ test("runUntilDone keeps validation debt across controller reviews and does not 
 
   expect(await agent.runUntilDone("fix x", { maxIters: 3 })).toBe("blocked for real");
   expect(agent.completionStatus).toMatchObject({ ok: false, reason: "validation_failed", command: "bun test" });
+});
+
+test("runUntilDone stops after one repair pass with the same artifact revision and evidence", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "write", name: "write_file", arguments: { path: "artifact.txt", content: "ready" } }] },
+    { content: "implemented", tool_calls: [] },
+    { content: "re-inspected without a mutation", tool_calls: [] },
+    { content: "unexpected third implementation pass", tool_calls: [] },
+  ]);
+  let reviews = 0;
+  const completionSupervisor: CompletionSupervisor = {
+    async create() {
+      return { value: { criteria: [{ requirement: "artifact.txt is accepted", source: "user", verification: "Inspect artifact.txt" }] } };
+    },
+    async review() {
+      reviews++;
+      return { value: {
+        verdict: "fail",
+        criteria: [{ id: "C1", status: "failed", evidence: "same failing observation" }],
+        findings: ["The artifact still misses the required outcome"],
+      } };
+    },
+  };
+  const events: string[] = [];
+  const agent = new Agent({
+    provider,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+    tools: { schemas: () => [], execute: async () => "Wrote artifact.txt" } as any,
+    completionSupervisor,
+    maxSteps: 6,
+    onEvent: (kind) => events.push(kind),
+  });
+
+  expect(await agent.runUntilDone("ship artifact", { maxIters: 6 })).toBe("re-inspected without a mutation");
+  expect(provider.index).toBe(3);
+  expect(reviews).toBe(2);
+  expect(events.filter((kind) => kind === "completion_no_progress")).toEqual(["completion_no_progress"]);
+  expect(agent.completionStatus.reason).toBe("contract_failed");
+});
+
+test("runUntilDone bounds an optional-toolchain validation loop after an authoritative pass", async () => {
+  const results = [
+    "Wrote artifact.ts",
+    "(exit 0)\n20 pass",
+    "(exit 0)\ntranspiled all files",
+  ];
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "write", name: "write_file", arguments: { path: "artifact.ts", content: "export const ready = true" } }] },
+    { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: "bun test" } }] },
+    { content: null, tool_calls: [{ id: "loop", name: "bash", arguments: { command: "for f in src/*.ts; do bun build --no-bundle $f; done" } }] },
+    { content: "artifact complete", tool_calls: [] },
+    { content: "tsc is unavailable; existing test evidence is unchanged", tool_calls: [] },
+    { content: "unexpected repeated toolchain search", tool_calls: [] },
+    { content: "same unresolved optional validator", tool_calls: [] },
+  ]);
+  let reviews = 0;
+  const completionSupervisor: CompletionSupervisor = {
+    async create() {
+      return { value: { criteria: [{ requirement: "artifact behavior is accepted", source: "user", verification: "Run an available acceptance check" }] } };
+    },
+    async review() {
+      reviews++;
+      return { value: {
+        verdict: "pass",
+        criteria: [{ id: "C1", status: "passed", evidence: "current artifact passed the acceptance oracle" }],
+        findings: [],
+      } };
+    },
+  };
+  const events: string[] = [];
+  const progress: any[] = [];
+  const agent = new Agent({
+    provider,
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+    tools: { schemas: () => [], execute: async () => results.shift()! } as any,
+    completionSupervisor,
+    maxSteps: 8,
+    onEvent: (kind, data) => {
+      events.push(kind);
+      if (kind === "completion_progress") progress.push(data);
+    },
+  });
+
+  expect(await agent.runUntilDone("ship artifact", { maxIters: 6 })).toBe("same unresolved optional validator");
+  expect(provider.index).toBe(7);
+  expect(reviews).toBe(2);
+  expect(events.filter((kind) => kind === "completion_no_progress")).toEqual(["completion_no_progress"]);
+  expect(progress).toContainEqual({
+    mutationEpoch: 1,
+    artifactCheckpoint: true,
+    validationState: "not_started",
+  });
+  expect(progress.some((event) => event.validationState === "passed")).toBe(true);
+  expect(agent.completionStatus.reason).toBe("validation_missing");
 });
 
 test("adaptive effort is opt-in and keeps full effort after a single read-then-mutate (the synthesis step is protected)", async () => {

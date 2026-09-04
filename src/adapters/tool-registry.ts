@@ -4,7 +4,7 @@ import { platform } from "node:os";
 import { resolve } from "node:path";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { subagentToolAllowlist } from "../core/tools.ts";
-import { detectSandbox, findWindowsBash, resolveSrtBunBridge, srtHealthSnapshot, transientSrtHealthFailure } from "../core/sandbox.ts";
+import { detectSandbox, executableOnPath, findWindowsBash, resolveSrtBunBridge, srtHealthSnapshot, transientSrtHealthFailure } from "../core/sandbox.ts";
 import type { NekoConfig } from "./config.ts";
 import { withBrowserBridge } from "./browser-bridge.ts";
 import { withOfficeTools } from "./office-tools.ts";
@@ -74,10 +74,13 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
   const unconfinedAuto = registry.mode === "auto" && bashCallable &&
     !exactReadOnlyValidator && (!registry.sandboxBash || detected === "none");
   const sandboxedBash = liveSandbox && registry.sandboxAutoApprove;
+  const hostBash = !exactReadOnlyValidator && (!registry.sandboxBash || detected === "none");
   const shell = platform() === "win32"
     ? (findWindowsBash() ? "GIT BASH (POSIX)" : "cmd.exe")
     : (liveSandbox ? "bash (POSIX)" : "/bin/sh (POSIX)");
-  const network = !registry.sandboxAllowNetwork
+  const network = hostBash
+    ? "host networking available (not filtered by the optional Neko OS sandbox)"
+    : !registry.sandboxAllowNetwork
     ? "blocked by standing policy (a bash call may request one-shot egress with network_domains; no config change is needed)"
     : detected === "srt"
       ? (registry.sandboxDomains.length ? "allowlisted by sandbox_domains" : "blocked (SRT needs explicit sandbox_domains)")
@@ -85,12 +88,20 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
         ? "allowed (sandbox_domains are not enforced by this primitive)"
         : "host policy unknown";
   const bunBridge = detected === "srt" ? resolveSrtBunBridge(registry.root) : null;
+  const detectedHostTools = hostBash
+    ? ["bun", "node", "python", "python3", "git", "npm", "pnpm", "yarn", "go", "cargo", "rustc", "docker"]
+      .filter((name) => executableOnPath(name, process.env.PATH ?? "", registry.root))
+    : [];
   const toolchain = detected === "srt"
     ? bunBridge
       ? `bun available in sandbox (bridged from ${bunBridge.source} with an exact-file read grant); node/python resolve from host`
       : "bun NOT available in sandbox (no bun.exe bridge on this machine) - use node or python for scripts/tests and say so; do not retry bun or try installing it (network in the sandbox is policy-bound)"
-    : "host toolchain";
-  const oneShotNetwork = detected === "srt"
+    : hostBash
+      ? `host PATH tools detected now: ${detectedHostTools.join(", ") || "none of the common toolchain names"}`
+      : "host toolchain";
+  const oneShotNetwork = hostBash
+    ? "The host shell already has ordinary host networking; network_domains is optional and grants no additional authority."
+    : detected === "srt"
     ? "SRT enforces each network_domains entry as an exact per-call destination allowlist."
     : detected === "bwrap" || detected === "sandbox-exec"
       ? "This primitive cannot filter domains; a non-empty network_domains request is a one-call full-network grant."
@@ -126,13 +137,20 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
       ? `Neko bash dynamic tool: callable; shell=${shell}; sandbox=${sandbox}. Docker/podman host-daemon access is refused or contained unless allow_dangerous_bash explicitly grants that capability.`
       : "Neko bash dynamic tool: unavailable in this request.",
     bashCallable
-      ? `Sandbox toolchain: ${toolchain}. Treat this as authoritative - do not probe for bun/network inside the sandbox; if a required capability is absent, state the boundary and continue with what is available.`
+      ? `Shell execution target: ${hostBash ? "this same host and current Neko process identity (not a VM or Computer Use)" : `${detected} OS sandbox on this host`}; cwd=${JSON.stringify(registry.root)}; Windows child consoles stay hidden. Shell toolchain: ${toolchain}. Treat this as authoritative; do not repeat probes for a capability already reported absent.`
       : "",
     bashCallable
-      ? `Bash egress capability: declare the exact destination hosts in the bash call's network_domains field. ${oneShotNetwork} Auto/yolo approves that bounded one-call request; other modes ask the user. Prefer this over asking the user to run /sandbox; /sandbox is only for a persistent standing policy.`
+      ? hostBash
+        ? `Bash networking: ${network}. ${oneShotNetwork}`
+        : `Bash egress capability: declare the exact destination hosts in the bash call's network_domains field. ${oneShotNetwork} Auto/yolo approves that bounded one-call request; other modes ask the user. Prefer this over asking the user to run /sandbox; /sandbox is only for a persistent standing policy.`
       : "",
     networkProbeCallable
-      ? "Host network diagnostics: network_probe can resolve one host and test bounded TCP ports outside the Bash sandbox; web_search/web_fetch handle web traffic. Prefer these structured tools when Bash egress is blocked."
+      ? hostBash
+        ? "Bounded network diagnostics: network_probe can resolve one host and test bounded TCP ports without shell syntax; web_search/web_fetch handle web content."
+        : "Host network diagnostics: network_probe can resolve one host and test bounded TCP ports outside the Bash sandbox; web_search/web_fetch handle web traffic. Prefer these structured tools when Bash egress is blocked."
+      : "",
+    bashCallable
+      ? "Tool routing: use Neko bash for shell, CLI, build, test, package, and process work. Never open or drive a terminal through computer as a Bash/network fallback. Use computer only for visible GUI interaction that has no precise tool. Long-lived servers/watchers use bash run_in_background=true plus bounded status checks."
       : "",
     failClosedBash
       ? "Do not create a shell script whose only purpose is to wait for unavailable bash. Prefer an independent safe native tool that directly covers the task; otherwise state the boundary or request explicit computer consent before changing files."
@@ -203,7 +221,7 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
 }
 
 /** Copy every runtime boundary/capability a child must inherit, deliberately excluding subagent recursion. */
-export function inheritToolRegistrySettings(target: ToolRegistry, source: ToolRegistry): ToolRegistry {
+export function inheritToolRegistrySettings<T extends ToolRegistry>(target: T, source: ToolRegistry): T {
   target.disabled = new Set(source.disabled);
   target.toolAllowlist = source.toolAllowlist ? new Set(source.toolAllowlist) : undefined;
   target.mcp = source.mcp;

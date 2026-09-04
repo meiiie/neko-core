@@ -40,6 +40,7 @@ output/
 traces-*/
 task-runs*/
 eval-runs/
+/results/
 data/
 *.log
 
@@ -67,6 +68,7 @@ rtk/
 _codex-tasks/
 scripts/_caret_probe.tsx
 /.artifacts/
+/.yt-dlp-tmp/
 **/.wrangler/
 
 # perf/trace artifacts

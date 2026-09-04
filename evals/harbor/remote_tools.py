@@ -41,7 +41,9 @@ REMOTE_STATE_ROOT = "/tmp/neko-harbor-remote-tools"
 # compose subprocess after the task command times out.  Keep that transport
 # settlement outside the command deadline, with a small scheduling margin.
 TRANSPORT_SETTLEMENT_RESERVE_SECONDS = 7.0
-QUIESCENCE_ATTEMPT_TIMEOUT_MS = 5_000
+PROCESS_CONTAINMENT_PREFLIGHT_SECONDS = 60
+QUIESCENCE_ATTEMPT_TIMEOUT_MS = 15_000
+REMOTE_STATE_CLEANUP_TIMEOUT_MS = 30_000
 TOOLS = (
     "read_file",
     "search",
@@ -71,6 +73,7 @@ TASK_COMMAND_NAMES = (
     "tr",
     "env",
     "sleep",
+    "kill",
 )
 TASK_UTILITY_DIRS = frozenset(
     {"/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin"}
@@ -183,12 +186,13 @@ class RemoteToolError(RuntimeError):
 
 @dataclass(frozen=True)
 class HostPosture:
+    execution: str
     network_mode: str
     allowed_hosts: tuple[str, ...]
 
     def frame(self) -> dict[str, Any]:
         return {
-            "execution": "harbor-base-environment",
+            "execution": self.execution,
             "hostCredentialsInTask": False,
             "hostDaemonSocketInTask": False,
             "obviousHostRootMountInTask": False,
@@ -211,6 +215,12 @@ class TaskCommandProfile:
     search_name: str
     search_path: str
     utilities: tuple[TaskUtilityBinding, ...]
+
+    def executable(self, name: str) -> str:
+        for binding in self.utilities:
+            if binding.name == name:
+                return binding.canonical
+        raise RuntimeError(f"task command profile has no {name} binding")
 
     def wrap(self, command: str) -> str:
         frozen_path = ":".join(self.path)
@@ -340,7 +350,9 @@ def _remaining_seconds(deadline_at: int) -> float:
     return remaining
 
 
-def _normalize_path(value: Any, *, allow_dot: bool = False) -> str:
+def _normalize_path(
+    value: Any, *, allow_dot: bool = False, root: str | None = None
+) -> str:
     if not isinstance(value, str) or not value:
         raise RemoteToolError("invalid-path", "path must be a non-empty string")
     if (
@@ -352,6 +364,13 @@ def _normalize_path(value: Any, *, allow_dot: bool = False) -> str:
             "invalid-path", "path is not a bounded canonical POSIX spelling"
         )
     path = PurePosixPath(value)
+    if path.is_absolute():
+        if root is None or (value != root and not value.startswith(root + "/")):
+            raise RemoteToolError("path-escape", "path escapes the project root")
+        value = "." if value == root else value[len(root) + 1 :]
+        if not value:
+            raise RemoteToolError("invalid-path", "path must be a canonical workspace path")
+        path = PurePosixPath(value)
     if path.is_absolute() or ".." in path.parts:
         raise RemoteToolError("path-escape", "path escapes the project root")
     normalized = str(path)
@@ -412,6 +431,14 @@ class RemoteToolDispatcher:
 
     @classmethod
     async def create(cls, environment: EnvironmentLike) -> RemoteToolDispatcher:
+        execution = str(
+            getattr(environment, "execution_identity", "harbor-base-environment")
+        )
+        if execution not in {
+            "harbor-base-environment",
+            "programbench-docker-environment",
+        }:
+            raise RuntimeError("Remote tool environment identity is unsupported")
         root_result = await environment.exec(
             "pwd -P",
             cwd=None,
@@ -445,7 +472,11 @@ class RemoteToolDispatcher:
             "set -eu; "
             "profile_path=''; "
             f"for command_name in {required_commands}; do "
-            'command_path=$(command -v "$command_name") || exit 61; '
+            'if test "$command_name" = kill; then command_path=\'\'; old_ifs=$IFS; IFS=:; '
+            'for command_dir in $PATH; do candidate=$command_dir/kill; '
+            'if test -f "$candidate" && test -x "$candidate"; then command_path=$candidate; break; fi; done; '
+            'IFS=$old_ifs; test -n "$command_path" || exit 61; kill_path=$command_path; '
+            'else command_path=$(command -v "$command_name") || exit 61; fi; '
             'case "$command_path" in /*) ;; *) exit 68;; esac; '
             'test -f "$command_path" && test -x "$command_path" || exit 68; '
             "command_dir=${command_path%/*}; "
@@ -480,13 +511,14 @@ class RemoteToolDispatcher:
             "find \"$probe_root\" -maxdepth 1 -printf '%p\\t%y\\n' >/dev/null || exit 68; "
             'grep -Fqx x "$probe_root/a" || exit 68; '
             "printf 'x\\000' | tr '\\000' '\\n' | grep -Fqx x || exit 68; "
-            "setsid sh -c 'exit 0' || exit 68; kill -0 \"$$\" || exit 68; "
+            "setsid sh -c 'exit 0' || exit 68; \"$kill_path\" -0 \"$$\" || exit 68; "
             'rm -rf -- "$probe_root"; trap - EXIT; '
             'printf \'OK\\n%s\\n%s\\n%s\\n\' "$profile_path" "$search_name" "$search_path"; '
             f"manifest_names={shlex.quote(required_commands)}; "
             'test "$search_name" = grep || manifest_names="$manifest_names $search_name"; '
             "for command_name in $manifest_names; do "
-            'lookup=$(command -v "$command_name") || exit 68; '
+            'if test "$command_name" = kill; then lookup=$kill_path; '
+            'else lookup=$(command -v "$command_name") || exit 68; fi; '
             'canonical=$(realpath -e -- "$lookup") || exit 68; '
             "identity=$(stat -Lc '%d:%i:%s:%Y:%h' -- \"$canonical\") || exit 68; "
             "printf 'BIND\\t%s\\t%s\\t%s\\t%s\\n' "
@@ -616,7 +648,11 @@ class RemoteToolDispatcher:
         dispatcher = cls(
             environment,
             root,
-            HostPosture(network_mode=network_mode, allowed_hosts=allowed_hosts),
+            HostPosture(
+                execution=execution,
+                network_mode=network_mode,
+                allowed_hosts=allowed_hosts,
+            ),
             command_profile=command_profile,
         )
         try:
@@ -677,9 +713,9 @@ class RemoteToolDispatcher:
             raise RuntimeError(
                 "Harbor task was destroyed after process quiescence could not be proven"
             )
-        cleanup = await self._exec(
+        cleanup = await self._raw_exec(
             f"rm -rf -- {shlex.quote(REMOTE_STATE_ROOT)}",
-            int(time.time() * 1000) + 10_000,
+            int(time.time() * 1000) + REMOTE_STATE_CLEANUP_TIMEOUT_MS,
         )
         if cleanup.return_code != 0:
             raise RuntimeError("Harbor remote-tool state cleanup failed")
@@ -905,7 +941,7 @@ class RemoteToolDispatcher:
     async def _probe(
         self, raw: Any, deadline_at: int, *, allow_dir: bool = False
     ) -> PathProbe:
-        requested = _normalize_path(raw, allow_dot=allow_dir)
+        requested = _normalize_path(raw, allow_dot=allow_dir, root=self.root)
         absolute = self.root if requested == "." else f"{self.root}/{requested}"
         reason = _credential_reason(requested) or _credential_reason(absolute)
         if reason:
@@ -1230,7 +1266,7 @@ class RemoteToolDispatcher:
     async def _prepare_write_path(
         self, raw: Any, deadline_at: int
     ) -> tuple[str, PathProbe | None]:
-        requested = _normalize_path(raw)
+        requested = _normalize_path(raw, root=self.root)
         absolute = f"{self.root}/{requested}"
         if _credential_reason(requested) or _credential_reason(absolute):
             raise RemoteToolError(
@@ -1351,7 +1387,7 @@ class RemoteToolDispatcher:
         exact_target: str | None,
     ) -> str:
         _strict_args(args, {"path", "old_string", "new_string"})
-        requested = _normalize_path(args["path"])
+        requested = _normalize_path(args["path"], root=self.root)
         old = _require_string(args, "old_string")
         new = _require_string(args, "new_string", allow_empty=True)
         probe = await self._probe(requested, deadline_at)
@@ -1361,7 +1397,9 @@ class RemoteToolDispatcher:
                 "edit target is not a direct single-link regular file",
             )
         if exact_target is not None:
-            exact = await self._probe(_normalize_path(exact_target), deadline_at)
+            exact = await self._probe(
+                _normalize_path(exact_target, root=self.root), deadline_at
+            )
             if (
                 exact.canonical != probe.canonical
                 or not exact.direct
@@ -1393,7 +1431,7 @@ class RemoteToolDispatcher:
             raise RemoteToolError(
                 "invalid-arguments", "multi_edit needs 1 to 100 edits"
             )
-        requested = _normalize_path(args["path"])
+        requested = _normalize_path(args["path"], root=self.root)
         probe = await self._probe(requested, deadline_at)
         if not probe.direct or probe.kind != "file" or probe.links != 1:
             raise RemoteToolError(
@@ -1475,7 +1513,7 @@ class RemoteToolDispatcher:
         return tuple(sorted(identities))
 
     async def _preflight_process_containment(self) -> None:
-        deadline = int(time.time() * 1000) + 10_000
+        deadline = int(time.time() * 1000) + PROCESS_CONTAINMENT_PREFLIGHT_SECONDS * 1000
         baseline = await self._process_snapshot(deadline)
         await asyncio.sleep(0.05)
         if await self._process_snapshot(deadline) != baseline:
@@ -1571,6 +1609,7 @@ class RemoteToolDispatcher:
         remote_output = f"{state}/output"
         remote_status = f"{state}/status"
         remote_pid = f"{state}/pid"
+        kill_command = shlex.quote(self.command_profile.executable("kill"))
         try:
             with tempfile.TemporaryDirectory(prefix="neko-harbor-bash-") as temp_dir:
                 local = Path(temp_dir) / "command.sh"
@@ -1609,7 +1648,7 @@ class RemoteToolDispatcher:
                 f"env NEKO_REMOTE_CALL_TOKEN={shlex.quote(token)} setsid sh -c {shlex.quote(wrapper)} >/dev/null 2>&1 & leader=$!; "
                 f"printf '%s\\n' \"$leader\" > {shlex.quote(remote_pid)}; "
                 'attempt=0; while test "$attempt" -lt 20; do '
-                f"if kill -0 -- -\"$leader\" 2>/dev/null || test -s {shlex.quote(remote_status)}; then printf 'OK\\n'; exit 0; fi; "
+                f"if {kill_command} -0 -- -\"$leader\" 2>/dev/null || test -s {shlex.quote(remote_status)}; then printf 'OK\\n'; exit 0; fi; "
                 "sleep 0.01; attempt=$((attempt+1)); done; exit 71"
             )
             try:
@@ -1721,21 +1760,22 @@ class RemoteToolDispatcher:
         pid_file = f"{state}/pid"
         scan = self._token_scan_shell(token)
         scan_new = self._new_pid_scan_shell(baseline)
+        kill_command = shlex.quote(self.command_profile.executable("kill"))
         cleanup = (
             "set -eu; "
             f"state={shlex.quote(state)}; pid_file={shlex.quote(pid_file)}; "
             'leader=\'\'; test ! -s "$pid_file" || leader=$(cat "$pid_file"); '
             f'pids=$({scan}); new_pids=$({scan_new}); pids="$pids $new_pids"; '
-            'if test -n "$leader"; then kill -TERM -- -"$leader" 2>/dev/null || true; fi; '
-            'for pid in $pids; do kill -TERM "$pid" 2>/dev/null || true; done; '
+            f'if test -n "$leader"; then {kill_command} -TERM -- -"$leader" 2>/dev/null || true; fi; '
+            f'for pid in $pids; do {kill_command} -TERM "$pid" 2>/dev/null || true; done; '
             "step=0; while test \"$step\" -lt 10; do alive=''; "
             f'alive=$({scan}); new_alive=$({scan_new}); alive="$alive $new_alive"; '
             'test -z "$alive" && break; sleep 0.05; step=$((step+1)); done; '
-            'if test -n "$leader"; then kill -KILL -- -"$leader" 2>/dev/null || true; fi; '
-            'for pid in $alive; do kill -KILL "$pid" 2>/dev/null || true; done; sleep 0.05; '
+            f'if test -n "$leader"; then {kill_command} -KILL -- -"$leader" 2>/dev/null || true; fi; '
+            f'for pid in $alive; do {kill_command} -KILL "$pid" 2>/dev/null || true; done; sleep 0.05; '
             f"remaining=$({scan}); new_remaining=$({scan_new}); "
             'test -z "$remaining$new_remaining" || exit 82; '
-            'if test -n "$leader"; then kill -0 -- -"$leader" 2>/dev/null && exit 83 || true; fi; '
+            f'if test -n "$leader"; then {kill_command} -0 -- -"$leader" 2>/dev/null && exit 83 || true; fi; '
             "rm -rf -- \"$state\"; printf 'QUIESCENT\\n'"
         )
         cleanup_deadline = (
@@ -1758,6 +1798,23 @@ def _validate_peer_frame(frame: dict[str, Any]) -> str:
     return frame["type"]
 
 
+def _raise_peer_terminal_error(frame: dict[str, Any]) -> None:
+    value = _strict_object(frame, {"schema", "type", "id", "code", "message"})
+    code = value["code"]
+    message = value["message"]
+    if (
+        value["schema"] != FRAME_SCHEMA
+        or value["type"] != "error"
+        or value["id"] is not None
+        or not isinstance(code, str)
+        or not _ID_RE.fullmatch(code)
+        or not isinstance(message, str)
+        or len(message.encode("utf-8")) > 2048
+    ):
+        raise ProtocolError("invalid-terminal-error", "host terminal error is invalid")
+    raise ProtocolError("peer-session-failure", f"host runner failed ({code})")
+
+
 def _metric_count(value: Any) -> int:
     if (
         isinstance(value, bool)
@@ -1774,7 +1831,6 @@ def _validate_metrics_checkpoint(
     previous: dict[str, Any] | None,
     *,
     minimum_requested: int = 0,
-    minimum_completed: int = 0,
 ) -> dict[str, Any]:
     value = _strict_object(frame, {"schema", "type", "metrics"})
     if value["schema"] != FRAME_SCHEMA or value["type"] != "metrics_checkpoint":
@@ -1793,6 +1849,7 @@ def _validate_metrics_checkpoint(
             "hitMaxSteps",
             "toolCalls",
         },
+        {"progress"},
     )
     try:
         provider_complete_calls = _metric_count(metrics["providerCompleteCalls"])
@@ -1848,7 +1905,6 @@ def _validate_metrics_checkpoint(
         or completed > requested
         or completed != productive + empty + failed
         or requested < minimum_requested
-        or completed < minimum_completed
     ):
         raise ProtocolError(
             "invalid-checkpoint", "metrics checkpoint values are inconsistent"
@@ -1871,6 +1927,51 @@ def _validate_metrics_checkpoint(
             "failed": failed,
         },
     }
+    if "progress" in metrics:
+        progress = _strict_object(
+            metrics["progress"],
+            {
+                "phase",
+                "lastToolCategory",
+                "toolState",
+                "artifactCheckpoints",
+                "mutationEpoch",
+                "validationState",
+            },
+        )
+        if progress["phase"] not in {
+            "contract",
+            "implementation",
+            "delivery",
+            "validation",
+            "finalization",
+        } or progress["lastToolCategory"] not in {
+            "none",
+            "inspect",
+            "edit",
+            "shell",
+            "other",
+        } or progress["toolState"] not in {"idle", "active", "settled"} or progress[
+            "validationState"
+        ] not in {"not_started", "pending", "passed", "failed", "blocked"}:
+            raise ProtocolError(
+                "invalid-checkpoint", "metrics checkpoint progress is invalid"
+            )
+        try:
+            artifact_checkpoints = _metric_count(progress["artifactCheckpoints"])
+            mutation_epoch = _metric_count(progress["mutationEpoch"])
+        except ProtocolError as error:
+            raise ProtocolError(
+                "invalid-checkpoint", "metrics checkpoint progress is invalid"
+            ) from error
+        checkpoint["progress"] = {
+            "phase": progress["phase"],
+            "lastToolCategory": progress["lastToolCategory"],
+            "toolState": progress["toolState"],
+            "artifactCheckpoints": artifact_checkpoints,
+            "mutationEpoch": mutation_epoch,
+            "validationState": progress["validationState"],
+        }
     if previous is not None:
         current_counts = (
             provider_complete_calls,
@@ -1910,6 +2011,20 @@ def _validate_metrics_checkpoint(
             raise ProtocolError(
                 "invalid-checkpoint", "metrics checkpoint max-step status regressed"
             )
+        prior_progress = previous.get("progress")
+        current_progress = checkpoint.get("progress")
+        if prior_progress is not None and current_progress is None:
+            raise ProtocolError(
+                "invalid-checkpoint", "metrics checkpoint progress disappeared"
+            )
+        if prior_progress is not None and current_progress is not None and (
+            current_progress["artifactCheckpoints"]
+            < prior_progress["artifactCheckpoints"]
+            or current_progress["mutationEpoch"] < prior_progress["mutationEpoch"]
+        ):
+            raise ProtocolError(
+                "invalid-checkpoint", "metrics checkpoint progress regressed"
+            )
     return checkpoint
 
 
@@ -1938,6 +2053,8 @@ def _validate_final(frame: dict[str, Any]) -> dict[str, Any]:
         "ok",
         "validation_failed",
         "validation_missing",
+        "call_budget_exhausted",
+        "time_budget_exhausted",
     }:
         raise ProtocolError("invalid-final", "final completion status is invalid")
     if not isinstance(metrics["usageComplete"], bool):
@@ -2103,6 +2220,7 @@ async def serve_protocol(
     active: asyncio.Task[str] | None = None
     active_id: str | None = None
     read_task: asyncio.Task[dict[str, Any]] | None = None
+    late_cancel_id: str | None = None
     latest_checkpoint: dict[str, Any] | None = None
     served_requests = 0
     settled_requests = 0
@@ -2124,7 +2242,6 @@ async def serve_protocol(
                         frame,
                         latest_checkpoint,
                         minimum_requested=served_requests,
-                        minimum_completed=settled_requests,
                     )
                     if on_metrics_checkpoint is not None:
                         on_metrics_checkpoint(latest_checkpoint)
@@ -2138,12 +2255,20 @@ async def serve_protocol(
                         minimum_completed=settled_requests,
                     )
                     return final
+                if frame_type == "error":
+                    _raise_peer_terminal_error(frame)
+                if frame_type == "cancel":
+                    cancel = _strict_object(frame, {"schema", "type", "id"})
+                    if cancel["id"] == late_cancel_id:
+                        late_cancel_id = None
+                        continue
                 if frame_type != "request":
                     raise ProtocolError(
                         "invalid-order",
                         "runner may only request a tool or finish while idle",
                     )
                 active_id, tool, args, context = _validate_request(frame, seen_ids)
+                late_cancel_id = None
                 served_requests += 1
                 active = asyncio.create_task(dispatcher.execute(tool, args, context))
                 continue
@@ -2151,10 +2276,11 @@ async def serve_protocol(
             done, _ = await asyncio.wait(
                 {active, read_task}, return_when=asyncio.FIRST_COMPLETED
             )
-            if active in done:
+            if active in done and read_task not in done:
                 request_id = active_id
                 assert request_id is not None
                 settled_requests += 1
+                accepts_late_cancel = True
                 try:
                     result = active.result()
                     await write_frame(
@@ -2167,6 +2293,7 @@ async def serve_protocol(
                         },
                     )
                 except asyncio.CancelledError:
+                    accepts_late_cancel = False
                     await write_frame(
                         writer,
                         {
@@ -2202,6 +2329,7 @@ async def serve_protocol(
                     )
                 active = None
                 active_id = None
+                late_cancel_id = request_id if accepts_late_cancel else None
                 continue
 
             try:
@@ -2217,11 +2345,12 @@ async def serve_protocol(
                     frame,
                     latest_checkpoint,
                     minimum_requested=served_requests,
-                    minimum_completed=settled_requests,
                 )
                 if on_metrics_checkpoint is not None:
                     on_metrics_checkpoint(latest_checkpoint)
                 continue
+            if frame_type == "error":
+                _raise_peer_terminal_error(frame)
             cancel = _strict_object(frame, {"schema", "type", "id"})
             if cancel["type"] != "cancel" or cancel["id"] != active_id:
                 raise ProtocolError(
@@ -2250,6 +2379,7 @@ async def serve_protocol(
             )
             active = None
             active_id = None
+            late_cancel_id = None
     except BaseException as error:
         containment_error: ProtocolError | None = None
         if active is not None:

@@ -1,6 +1,6 @@
 {
   "name": "neko-core",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Mot chu meo trong terminal, chi muon meo meo - va lam viec. Local-first, config-first, offline-capable.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -30,6 +30,8 @@
   "scripts": {
     "neko": "node bin/neko-source.cjs",
     "eval:terminal": "bun scripts/harbor-eval.ts",
+    "eval:programbench": "bun scripts/programbench-eval.ts",
+    "eval:programbench:campaign": "bun scripts/programbench-campaign.ts",
     "lab:antigravity-contract": "bun scripts/antigravity-contract-lab.ts",
     "build": "bun scripts/build.ts && dist/neko __uiprobe && bun scripts/input-probe.ts && bun scripts/acp-smoke.ts && bun scripts/e2e-startup-lifecycle.ts",
     "test": "bun test",

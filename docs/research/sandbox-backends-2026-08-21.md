@@ -1,5 +1,9 @@
 # Stateful sandbox backends - 2026-08-21
 
+> Historical decision record. Its default-policy recommendation was superseded by Neko Core v1.5.0 on
+> 2026-09-04: ordinary Bash now targets the host by default, while `sandbox: true` remains an explicit fail-closed
+> option. The backend research below is preserved as evidence rather than current product guidance.
+
 ## Decision
 
 Keep Neko's local Bash sandbox enabled by default. Do not make `auto` or `--yolo` mean an

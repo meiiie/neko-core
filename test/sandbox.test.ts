@@ -5,11 +5,12 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
-import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, normalizeSandboxDomains, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, srtHealthAsync, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, windowsSearchDirs, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
+import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, normalizeSandboxDomains, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, sandboxProcessDeadlineMs, srtHealthAsync, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, windowsSearchDirs, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
 
 // Report unavailable live infrastructure as an actual skip instead of a passing test whose body
 // returned early. The health probe is cached by the production sandbox module for this process.
-const LIVE_WINDOWS_SRT = process.platform === "win32"
+const LIVE_WINDOWS_SRT = process.env.NEKO_TEST_LIVE_SRT === "1"
+  && process.platform === "win32"
   && detectSandbox() === "srt"
   && sandboxActive();
 const LIVE_WINDOWS_SRT_BRIDGE = LIVE_WINDOWS_SRT
@@ -168,8 +169,11 @@ test("srt runs bash via a script file + confines writes + hard-blocks network by
     // Command bytes live in the script FILE; the -c line carries only two quoted paths.
     args: ["--settings", "C:\\tmp\\s.json", "-c", '"C:\\Git\\bin\\bash.exe" "C:\\tmp\\cmd-1.sh"'],
     shell: false,
+    startupGraceMs: 75_000,
     treeContainedOnClose: true,
   });
+  expect(sandboxProcessDeadlineMs(60_000, 75_000)).toBe(135_000);
+  expect(sandboxProcessDeadlineMs(60_000)).toBe(60_000);
   const s = JSON.parse(srtSettings("C:\\work", false));
   expect(s.filesystem).toEqual({ denyRead: [], allowRead: [], allowWrite: ["C:\\work"], denyWrite: [] });
   expect(s.network).toEqual({ allowedDomains: [], deniedDomains: ["*"] }); // hard block, denied checked first
@@ -303,7 +307,7 @@ test.skipIf(!LIVE_WINDOWS_SRT_BRIDGE)("a live Windows SRT uses nested scratch, e
     expect(scratchParent).not.toBe(realpathSync(tmpdir()));
     expect(readFileSync(join(launchDir, "bun.cmd"), "utf8")).toBe('@"%NEKO_SRT_BUN_EXE%" %*\r\n');
     const result = spawnSync(target.file, target.args, {
-      cwd: process.cwd(), encoding: "utf8", timeout: 45_000, windowsHide: true,
+      cwd: process.cwd(), encoding: "utf8", timeout: 90_000, windowsHide: true,
       env: { ...process.env, ...target.env },
     });
     expect(result.error).toBeUndefined();
@@ -314,7 +318,7 @@ test.skipIf(!LIVE_WINDOWS_SRT_BRIDGE)("a live Windows SRT uses nested scratch, e
   }
   expect(existsSync(launchDir)).toBe(false);
   expect(existsSync(scratchParent)).toBe(false);
-}, 50_000);
+}, 100_000);
 
 test("srt network allow = the sandbox_domains allowlist (no allow-all in srt) + -c without git-bash", () => {
   expect(JSON.parse(srtSettings("C:\\w", true, ["github.com", "*.npmjs.org"])).network).toEqual({

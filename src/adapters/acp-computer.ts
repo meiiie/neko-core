@@ -380,7 +380,7 @@ export class WiiiComputerTool implements ComputerToolPort {
       type: "function",
       function: {
         name: "computer",
-        description: "Use your persistent Wiii work computer when a task needs its browser, terminal, files, or desktop. Follow status -> observe -> acquire -> focus/invoke/set_text -> observe -> release. Use observe max_nodes=4 to discover workstation:main and the app:browser/app:terminal/app:files launchers, then a larger observation for dynamic controls. Act only on the latest exact ref, role, and name. Never guess coordinates, handle CAPTCHA, or enter secrets; stop for human takeover.",
+        description: "Use your persistent Wiii work computer when a task needs its browser, terminal, files, or desktop. Follow status -> observe -> acquire -> focus/invoke/set_text -> release. A successful action may include the next verified snapshot, so continue from it instead of observing again. Use observe max_nodes=4 to discover workstation:main and the app:browser/app:terminal/app:files launchers, then a larger observation for dynamic controls. Act only on the latest exact ref, role, and name. Never guess coordinates, handle CAPTCHA, or enter secrets; stop for human takeover.",
         parameters: {
           type: "object",
           properties: {
@@ -605,6 +605,7 @@ export class WiiiComputerTool implements ComputerToolPort {
       expectedRole: target.role,
       expectedName: target.name,
       action,
+      returnObservation: true,
     };
     if (action === "set_text") {
       const text = args.text;
@@ -623,6 +624,12 @@ export class WiiiComputerTool implements ComputerToolPort {
         || (result.outcome !== "completed" && result.outcome !== "rejected")) {
         throw new Error("invalid_host_response");
       }
+      const nextSnapshot = result.observation === undefined || result.observation === null
+        ? null
+        : parseSnapshot(result.observation);
+      if (nextSnapshot && nextSnapshot.stateVersion !== afterStateVersion) {
+        throw new Error("invalid_host_response");
+      }
       this.unknownAct = null;
       if (result.outcome === "rejected" || result.verified !== true) {
         const code = errorCode(new Error(String(result.code ?? "rejected")));
@@ -630,15 +637,21 @@ export class WiiiComputerTool implements ComputerToolPort {
         this.snapshot = null;
         return blocked(code === "host_unavailable" ? "action_rejected" : code);
       }
-      this.snapshot = null;
-      return json({
+      if (nextSnapshot?.nodes.some((node) => HUMAN_CHECK.test(`${node.role} ${node.name}`))) {
+        this.snapshot = null;
+        await this.releaseControl(undefined, true);
+        return blocked("human_verification", { snapshot: nextSnapshot, next: "hand_over_to_human" });
+      }
+      this.snapshot = nextSnapshot;
+      const completed = {
         outcome: "completed",
         action,
         target_ref: target.ref,
         verified: true,
         before_state_version: snapshot.stateVersion,
         after_state_version: afterStateVersion,
-      });
+      };
+      return json(nextSnapshot ? { ...completed, snapshot: nextSnapshot } : completed);
     } catch (error) {
       const code = errorCode(error);
       if (code === "stale_snapshot") {

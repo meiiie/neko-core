@@ -1,10 +1,10 @@
 /** Credential-safe Harbor runner: the provider stays on the host while native tools run remotely. */
 import { createHash } from "node:crypto";
 import {
-  closeSync, fstatSync, mkdtempSync, openSync, readSync, realpathSync, rmSync, statSync, type Stats,
+  closeSync, fstatSync, mkdtempSync, openSync, readSync, realpathSync, rmSync, statSync, writeFileSync, type Stats,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import {
@@ -24,6 +24,7 @@ import {
   type NativeToolName,
 } from "../../src/core/tool-runtime.ts";
 import { loadConfig, type NekoConfig } from "../../src/adapters/config.ts";
+import { createCompletionSupervisor } from "../../src/adapters/completion-supervisor.ts";
 import { getProvider } from "../../src/adapters/providers.ts";
 import { discoverCodexSupport, type CodexSupportStatus } from "../../src/adapters/codex-app-server.ts";
 import { loadChatGptCredentials, type ChatGptCredentials } from "../../src/adapters/chatgpt-auth.ts";
@@ -64,7 +65,7 @@ export const HARBOR_FRAME_LIMITS = Object.freeze({
 type NetworkMode = "no-network" | "allowlist" | "public";
 
 export interface HarborPosture {
-  execution: "harbor-base-environment";
+  execution: "harbor-base-environment" | "programbench-docker-environment";
   hostCredentialsInTask: false;
   hostDaemonSocketInTask: false;
   obviousHostRootMountInTask: false;
@@ -81,7 +82,12 @@ export interface HarborHello {
   posture: HarborPosture;
 }
 
-export type HarborSanitizedCompletionStatus = "ok" | "validation_failed" | "validation_missing";
+export type HarborSanitizedCompletionStatus =
+  | "ok"
+  | "validation_failed"
+  | "validation_missing"
+  | "call_budget_exhausted"
+  | "time_budget_exhausted";
 
 export interface HarborFinalMetrics {
   /** Agent validation-debt gate only; this is not the Harbor verifier or task-success verdict. */
@@ -125,6 +131,16 @@ export interface HarborPartialMetrics {
     empty: number;
     failed: number;
   };
+  progress: HarborLiveProgress;
+}
+
+export interface HarborLiveProgress {
+  phase: "contract" | "implementation" | "delivery" | "validation" | "finalization";
+  lastToolCategory: "none" | "inspect" | "edit" | "shell" | "other";
+  toolState: "idle" | "active" | "settled";
+  artifactCheckpoints: number;
+  mutationEpoch: number;
+  validationState: "not_started" | "pending" | "passed" | "failed" | "blocked";
 }
 
 export interface HarborProtocolIo {
@@ -170,6 +186,55 @@ function byteLength(value: string): number {
 function isPlainObject(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function trajectoryContent(value: unknown): string | null | Array<{ type: "text"; text: string }> {
+  if (typeof value === "string") return value;
+  if (value === null) return null;
+  if (!Array.isArray(value)) return "";
+  const text = value.flatMap((part) => isPlainObject(part) && part.type === "text" && typeof part.text === "string"
+    ? [{ type: "text" as const, text: part.text }]
+    : []);
+  return text.length ? text : [{ type: "text", text: "[non-text content omitted from audit trajectory]" }];
+}
+
+export function sanitizeHarborTrajectoryMessages(messages: unknown[]): Array<Record<string, unknown>> {
+  return messages.flatMap((message) => {
+    if (!isPlainObject(message) || !new Set(["system", "user", "assistant", "tool"]).has(message.role)) return [];
+    const row: Record<string, unknown> = {
+      role: message.role,
+      content: trajectoryContent(message.content),
+    };
+    if (message.role === "tool" && typeof message.tool_call_id === "string") {
+      row.tool_call_id = message.tool_call_id;
+    }
+    if (message.role === "assistant" && Array.isArray(message.tool_calls)) {
+      const calls = message.tool_calls.flatMap((call) => {
+        if (!isPlainObject(call) || typeof call.id !== "string" || !isPlainObject(call.function)
+          || typeof call.function.name !== "string" || typeof call.function.arguments !== "string") return [];
+        return [{
+          id: call.id,
+          type: "function",
+          function: { name: call.function.name, arguments: call.function.arguments },
+        }];
+      });
+      if (calls.length) row.tool_calls = calls;
+    }
+    return [row];
+  });
+}
+
+function writeHarborAuditTrajectory(
+  target: string,
+  home: string,
+  payload: Record<string, unknown>,
+): void {
+  if (!isAbsolute(target) || realpathSync(dirname(resolve(target))) !== realpathSync(resolve(home))) {
+    throw new Error("Harbor audit trajectory path is invalid");
+  }
+  const serialized = `${JSON.stringify(payload, null, 2)}\n`;
+  if (byteLength(serialized) > 128 * 1024 * 1024) throw new Error("Harbor audit trajectory is too large");
+  writeFileSync(target, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
 }
 
 function exactKeys(value: Record<string, any>, required: readonly string[], optional: readonly string[] = []): boolean {
@@ -252,7 +317,8 @@ function validatePosture(raw: unknown): HarborPosture {
     "execution", "hostCredentialsInTask", "hostDaemonSocketInTask", "obviousHostRootMountInTask",
     "networkMode", "allowedHosts",
   ])) throw new HostProtocolError("invalid_posture");
-  if (raw.execution !== "harbor-base-environment" || raw.hostCredentialsInTask !== false
+  if (!new Set<unknown>(["harbor-base-environment", "programbench-docker-environment"]).has(raw.execution)
+    || raw.hostCredentialsInTask !== false
     || raw.hostDaemonSocketInTask !== false || raw.obviousHostRootMountInTask !== false
     || !new Set<unknown>(["no-network", "allowlist", "public"]).has(raw.networkMode)) {
     throw new HostProtocolError("posture_mismatch");
@@ -260,7 +326,7 @@ function validatePosture(raw: unknown): HarborPosture {
   const networkMode = raw.networkMode as NetworkMode;
   const allowedHosts = validateAllowedHosts(networkMode, raw.allowedHosts);
   return Object.freeze({
-    execution: "harbor-base-environment",
+    execution: raw.execution as HarborPosture["execution"],
     hostCredentialsInTask: false,
     hostDaemonSocketInTask: false,
     obviousHostRootMountInTask: false,
@@ -298,6 +364,26 @@ function completeUsageSnapshot(value: Usage | undefined): value is Usage {
   return count(value.prompt_tokens) && count(value.completion_tokens) && count(value.total_tokens);
 }
 
+function validateLiveProgress(raw: unknown): HarborLiveProgress {
+  if (!isPlainObject(raw) || !exactKeys(raw, [
+    "phase", "lastToolCategory", "toolState", "artifactCheckpoints", "mutationEpoch", "validationState",
+  ]) || !new Set(["contract", "implementation", "delivery", "validation", "finalization"]).has(raw.phase)
+    || !new Set(["none", "inspect", "edit", "shell", "other"]).has(raw.lastToolCategory)
+    || !new Set(["idle", "active", "settled"]).has(raw.toolState)
+    || !safeMetricCount(raw.artifactCheckpoints) || !safeMetricCount(raw.mutationEpoch)
+    || !new Set(["not_started", "pending", "passed", "failed", "blocked"]).has(raw.validationState)) {
+    throw new HostProtocolError("invalid_partial_metrics");
+  }
+  return Object.freeze({
+    phase: raw.phase,
+    lastToolCategory: raw.lastToolCategory,
+    toolState: raw.toolState,
+    artifactCheckpoints: raw.artifactCheckpoints,
+    mutationEpoch: raw.mutationEpoch,
+    validationState: raw.validationState,
+  }) as HarborLiveProgress;
+}
+
 function validateFinalMetrics(raw: unknown): HarborFinalMetrics {
   if (!isPlainObject(raw) || !exactKeys(raw, [
     "completionStatus", "usageComplete", "providerCompleteCalls", "providerReportedModelCalls",
@@ -305,7 +391,9 @@ function validateFinalMetrics(raw: unknown): HarborFinalMetrics {
   ])) {
     throw new HostProtocolError("invalid_final_metrics");
   }
-  if (!new Set<unknown>(["ok", "validation_failed", "validation_missing"]).has(raw.completionStatus)
+  if (!new Set<unknown>([
+    "ok", "validation_failed", "validation_missing", "call_budget_exhausted", "time_budget_exhausted",
+  ]).has(raw.completionStatus)
     || typeof raw.usageComplete !== "boolean" || !safeMetricCount(raw.providerCompleteCalls)
     || !safeMetricCount(raw.wallTimeMs) || typeof raw.hitMaxSteps !== "boolean"
     || !isPlainObject(raw.toolCalls)
@@ -362,7 +450,7 @@ function validatePartialMetrics(raw: unknown): HarborPartialMetrics {
   if (!isPlainObject(raw) || !exactKeys(raw, [
     "providerCompleteCalls", "providerUsageObservedCalls", "providerReportedModelCalls",
     "inputTokens", "outputTokens", "cachedTokens", "totalTokens", "wallTimeMs",
-    "hitMaxSteps", "toolCalls",
+    "hitMaxSteps", "toolCalls", "progress",
   ]) || typeof raw.hitMaxSteps !== "boolean" || !isPlainObject(raw.toolCalls)
     || !exactKeys(raw.toolCalls, ["requested", "completed", "productive", "empty", "failed"])) {
     throw new HostProtocolError("invalid_partial_metrics");
@@ -411,6 +499,7 @@ function validatePartialMetrics(raw: unknown): HarborPartialMetrics {
       empty: raw.toolCalls.empty,
       failed: raw.toolCalls.failed,
     }),
+    progress: validateLiveProgress(raw.progress),
   }) as HarborPartialMetrics;
 }
 
@@ -725,7 +814,7 @@ export class HarborHostProtocol {
       return;
     }
     const call = this.active;
-    if (!call || call.id !== raw.id || call.cancelSent) {
+    if (!call || call.id !== raw.id) {
       this.fail("late_or_duplicate_result", true);
       return;
     }
@@ -758,7 +847,7 @@ export class HarborHostProtocol {
       return;
     }
     const call = this.active;
-    if (!call || call.id !== raw.id || call.cancelSent) {
+    if (!call || call.id !== raw.id) {
       this.fail("late_or_duplicate_error", true);
       return;
     }
@@ -1101,17 +1190,40 @@ class FinalizationReservedHarborNativeBackend implements NativeToolBackend {
   }
 }
 
+async function providerCallUntilAbort<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return await operation;
+  if (signal.aborted) throw new HostProtocolError("provider_cancelled");
+  let onAbort: (() => void) | undefined;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(new HostProtocolError("provider_cancelled"));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([operation, cancelled]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 export interface HarborHostSessionOptions {
   protocol: HarborHostProtocol;
   hello: HarborHello;
   provider: Provider;
   hostRoot: string;
   maxSteps: number;
+  implementationRoundSteps?: number;
   maxContextTokens: number;
   adaptiveEffort: boolean;
   loop: boolean;
+  completionMode?: "single" | "self-review" | "contract";
+  completionConfig?: NekoConfig;
+  providerCallBudget?: number;
   /** Test/embedding overrides may only shorten the production active-session budget. */
   sessionDeadlineAt?: number;
+}
+
+class HarborProviderCallBudgetError extends Error {
+  override name = "HarborProviderCallBudgetError";
 }
 
 export interface HarborHostSessionResult {
@@ -1119,6 +1231,7 @@ export interface HarborHostSessionResult {
   completionStatus: AgentCompletionStatus;
   schemaNames: string[];
   metrics: HarborFinalMetrics;
+  trajectory: Array<Record<string, unknown>>;
 }
 
 function remoteEnvironmentTail(hello: HarborHello): string {
@@ -1126,10 +1239,11 @@ function remoteEnvironmentTail(hello: HarborHello): string {
     ? `allowlist (${hello.posture.allowedHosts.join(", ")})`
     : hello.posture.networkMode;
   return [
-    "# HARBOR REMOTE ENVIRONMENT",
+    "# REMOTE EVALUATION ENVIRONMENT",
     `Canonical POSIX workspace: ${hello.attestation.canonicalPosixRoot}`,
     `Network policy: ${network}`,
-    "The attached native tools are authoritative and execute only in Harbor's task environment.",
+    `Execution surface: ${hello.posture.execution}`,
+    "The attached native tools are authoritative and execute only in the isolated task environment.",
     "The host filesystem, host credentials, project context, identity, memory, hooks, MCP, web, computer control, and subagents are unavailable.",
   ].join("\n");
 }
@@ -1237,18 +1351,44 @@ export async function runHarborHostSession(options: HarborHostSessionOptions): P
     throw new HostProtocolError("session_failed");
   }
   const sessionDeadlineAt = options.sessionDeadlineAt ?? productionDeadlineAt;
+  if (options.providerCallBudget !== undefined && (!Number.isSafeInteger(options.providerCallBudget)
+    || options.providerCallBudget < 1 || options.providerCallBudget > 10_000)) {
+    await protocol.failSession("session_failed");
+    throw new HostProtocolError("session_failed");
+  }
+  if (options.implementationRoundSteps !== undefined
+    && (!Number.isSafeInteger(options.implementationRoundSteps)
+      || options.implementationRoundSteps < 1 || options.implementationRoundSteps > options.maxSteps)) {
+    await protocol.failSession("session_failed");
+    throw new HostProtocolError("session_failed");
+  }
   const toolAdmissionDeadlineAt = sessionDeadlineAt - HARBOR_TOOL_FINALIZATION_RESERVE_MS;
   const controllerDeadlineAt = sessionDeadlineAt - HARBOR_CONTROLLER_FINALIZATION_RESERVE_MS;
   const controllerAbort = new AbortController();
+  let timeBudgetExhausted = false;
   const onProtocolAbort = () => controllerAbort.abort();
   if (protocol.signal.aborted) controllerAbort.abort();
   else protocol.signal.addEventListener("abort", onProtocolAbort, { once: true });
   const controllerDelay = Math.max(0, Math.min(2_147_483_647, controllerDeadlineAt - Date.now()));
-  const controllerTimer = setTimeout(() => controllerAbort.abort(), controllerDelay);
+  const controllerTimer = setTimeout(() => {
+    timeBudgetExhausted = true;
+    controllerAbort.abort();
+  }, controllerDelay);
   const toolCalls = { requested: 0, completed: 0, productive: 0, empty: 0, failed: 0 };
   const usageByProviderCall: Array<Usage | undefined> = [];
   let providerCompleteCalls = 0;
+  let providerCallBudgetExhausted = false;
   let hitMaxSteps = false;
+  const completionMode = options.completionMode ?? (options.loop ? "self-review" : "single");
+  const progress: HarborLiveProgress = {
+    phase: completionMode === "contract" ? "contract" : "implementation",
+    lastToolCategory: "none",
+    toolState: "idle",
+    artifactCheckpoints: 0,
+    mutationEpoch: 0,
+    validationState: "not_started",
+  };
+  let activeTools = 0;
   const usageTotals = () => {
     const tracker = new CostTracker();
     for (const usage of usageByProviderCall) tracker.add(usage);
@@ -1267,6 +1407,7 @@ export async function runHarborHostSession(options: HarborHostSessionOptions): P
       wallTimeMs: Math.max(0, Math.floor(performance.now() - startedAt)),
       hitMaxSteps,
       toolCalls: { ...toolCalls },
+      progress: { ...progress },
     });
   };
   const recordUsage = (callIndex: number, usage: Usage | undefined): boolean => {
@@ -1296,26 +1437,43 @@ export async function runHarborHostSession(options: HarborHostSessionOptions): P
       // Timers are cooperative. A synchronous provider can delay their callback, so every provider
       // admission also checks the absolute cutoff before a new Agent step or closed-loop review starts.
       if (Date.now() >= controllerDeadlineAt) {
+        timeBudgetExhausted = true;
         controllerAbort.abort();
         throw new HostProtocolError("controller_deadline_reached");
+      }
+      if (options.providerCallBudget !== undefined && providerCompleteCalls >= options.providerCallBudget) {
+        providerCallBudgetExhausted = true;
+        throw new HarborProviderCallBudgetError(`provider-call budget exhausted (${options.providerCallBudget})`);
       }
       const callIndex = providerCompleteCalls++;
       usageByProviderCall.push(undefined);
       await protocol.checkpoint(partialMetrics());
+      let acceptingEvents = true;
       const measuredOptions = {
         ...(opts ?? {}),
         onUsage: (usage: Usage) => {
+          if (!acceptingEvents) return;
           if (recordUsage(callIndex, usage)) {
             void protocol.checkpoint(partialMetrics()).catch(() => {});
           }
           opts?.onUsage?.(usage);
         },
       };
-      const response = await provider.complete(messages, tools, onDelta, signal, measuredOptions);
-      if (recordUsage(callIndex, response.usage)) {
-        await protocol.checkpoint(partialMetrics());
+      const measuredDelta = onDelta
+        ? (delta: Parameters<NonNullable<typeof onDelta>>[0]) => {
+            if (acceptingEvents) onDelta(delta);
+          }
+        : undefined;
+      const operation = provider.complete(messages, tools, measuredDelta, signal, measuredOptions);
+      try {
+        const response = await providerCallUntilAbort(operation, signal);
+        if (recordUsage(callIndex, response.usage)) {
+          await protocol.checkpoint(partialMetrics());
+        }
+        return response;
+      } finally {
+        acceptingEvents = false;
       }
-      return response;
     },
   };
   const toolMeter = new HarborToolCallMeter(async () => {
@@ -1357,39 +1515,101 @@ export async function runHarborHostSession(options: HarborHostSessionOptions): P
       allowBackgroundBash: false,
       reason: "Harbor evaluation exposes only the remote native workspace.",
     });
+    const onAgentEvent = (kind: string, data: any) => {
+      if (kind === "tool_call") {
+        const name = String(data?.name ?? "").toLowerCase();
+        progress.lastToolCategory = new Set(["read_file", "search", "glob", "ls"]).has(name)
+          ? "inspect"
+          : new Set(["write_file", "edit", "multi_edit"]).has(name)
+            ? "edit"
+            : name === "bash"
+              ? "shell"
+              : "other";
+        activeTools++;
+        progress.toolState = "active";
+        toolMeter.onAgentCall(data);
+        return;
+      }
+      if (kind === "completion_phase") {
+        const phase = data?.phase;
+        if (new Set(["contract", "implementation", "delivery", "validation", "finalization"]).has(phase)) {
+          progress.phase = phase;
+          if (phase === "validation") progress.validationState = "pending";
+          void protocol.checkpoint(partialMetrics()).catch(() => {});
+        }
+        return;
+      }
+      if (kind === "completion_progress") {
+        if (safeMetricCount(data?.mutationEpoch) && data.mutationEpoch >= progress.mutationEpoch) {
+          progress.mutationEpoch = data.mutationEpoch;
+        }
+        if (new Set(["not_started", "pending", "passed", "failed", "blocked"]).has(data?.validationState)) {
+          progress.validationState = data.validationState;
+        }
+        void protocol.checkpoint(partialMetrics()).catch(() => {});
+        return;
+      }
+      if (kind === "completion_review") {
+        progress.validationState = data?.verdict === "pass"
+          ? "passed"
+          : data?.verdict === "fail"
+            ? "failed"
+            : "blocked";
+        void protocol.checkpoint(partialMetrics()).catch(() => {});
+        return;
+      }
+      if (kind === "max_steps") {
+        hitMaxSteps = true;
+        progress.phase = "finalization";
+        void protocol.checkpoint(partialMetrics()).catch(() => {});
+        return;
+      }
+      if (kind !== "tool_result") return;
+      toolMeter.onAgentResult(data.call);
+      const result = classifyToolObservation(data?.observation);
+      toolCalls.completed++;
+      toolCalls[result]++;
+      const completedName = String(data?.call?.name ?? "").toLowerCase();
+      if (result === "productive" && new Set(["write_file", "edit", "multi_edit"]).has(completedName)) {
+        progress.artifactCheckpoints++;
+        progress.mutationEpoch = Math.max(progress.mutationEpoch, progress.artifactCheckpoints);
+      }
+      activeTools = Math.max(0, activeTools - 1);
+      progress.toolState = activeTools > 0 ? "active" : "settled";
+      void protocol.checkpoint(partialMetrics()).catch(() => {});
+    };
+    const completionSupervisor = completionMode === "contract" && options.completionConfig
+      ? createCompletionSupervisor(options.completionConfig, registry, {
+          providerFactory: () => ({
+            complete: (...args) => measuredProvider.complete(...args),
+          }),
+          onEvent: onAgentEvent,
+        })
+      : undefined;
     agent = new Agent({
       provider: measuredProvider,
       tools: registry,
       maxSteps: options.maxSteps,
       maxContextTokens: options.maxContextTokens,
       adaptiveEffort: options.adaptiveEffort,
+      completionSupervisor,
+      workDeadlineAt: completionSupervisor ? toolAdmissionDeadlineAt : undefined,
       verifyBeforeExit: true,
       verifyStateChangesBeforeExit: true,
       systemPrompt: `${DEFAULT_SYSTEM_PROMPT}\n\n${remoteEnvironmentTail(hello)}`,
-      onEvent: (kind, data) => {
-        if (kind === "tool_call") {
-          toolMeter.onAgentCall(data);
-          return;
-        }
-        if (kind === "max_steps") {
-          hitMaxSteps = true;
-          void protocol.checkpoint(partialMetrics()).catch(() => {});
-          return;
-        }
-        if (kind !== "tool_result") return;
-        toolMeter.onAgentResult(data.call);
-        const result = classifyToolObservation(data?.observation);
-        toolCalls.completed++;
-        toolCalls[result]++;
-        void protocol.checkpoint(partialMetrics()).catch(() => {});
-      },
+      onEvent: onAgentEvent,
     });
-    output = options.loop
-      ? await agent.runUntilDone(hello.instruction, { signal: controllerAbort.signal })
+    output = completionMode !== "single"
+      ? await agent.runUntilDone(hello.instruction, {
+          signal: controllerAbort.signal,
+          implementationRoundSteps: completionMode === "contract" ? options.implementationRoundSteps : undefined,
+        })
       : await agent.run(hello.instruction, controllerAbort.signal);
     if (protocol.failed) throw new HostProtocolError(protocol.failureCode ?? "transport_failed");
   } catch (error) {
-    failure = error;
+    if (error instanceof HarborProviderCallBudgetError) providerCallBudgetExhausted = true;
+    else if (timeBudgetExhausted && !protocol.failed) failure = undefined;
+    else failure = error;
   } finally {
     lease?.close();
     try {
@@ -1428,9 +1648,16 @@ export async function runHarborHostSession(options: HarborHostSessionOptions): P
         cachedTokens: null,
         totalTokens: null,
       };
+  progress.phase = "finalization";
+  if (activeTools === 0) progress.toolState = "settled";
   const terminalCheckpoint = partialMetrics();
+  const budgetStatus = providerCallBudgetExhausted
+    ? "call_budget_exhausted"
+    : timeBudgetExhausted
+      ? "time_budget_exhausted"
+      : undefined;
   const metrics = validateFinalMetrics({
-    completionStatus: sanitizeCompletionStatus(completionStatus),
+    completionStatus: budgetStatus ?? sanitizeCompletionStatus(completionStatus),
     usageComplete,
     providerCompleteCalls,
     ...reported,
@@ -1443,6 +1670,7 @@ export async function runHarborHostSession(options: HarborHostSessionOptions): P
     completionStatus,
     schemaNames: registry.schemas().map((schema) => String(schema.function.name)),
     metrics,
+    trajectory: sanitizeHarborTrajectoryMessages(agent.providerHistory()),
   };
   await protocol.checkpoint(terminalCheckpoint);
   await protocol.finish(metrics);
@@ -1455,6 +1683,21 @@ function envBoolean(name: string, fallback: boolean): boolean {
   if (["1", "true", "yes", "on"].includes(raw)) return true;
   if (["0", "false", "no", "off"].includes(raw)) return false;
   throw new HostProtocolError("invalid_host_setting");
+}
+
+function envOptionalPositiveInteger(name: string, max: number): number | undefined {
+  const raw = String(process.env[name] ?? "").trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > max) throw new Error(`${name} is invalid`);
+  return value;
+}
+
+function envCompletionMode(loop: boolean): "single" | "self-review" | "contract" {
+  const raw = String(process.env.NEKO_HARBOR_COMPLETION_MODE ?? "").trim().toLowerCase();
+  if (!raw) return loop ? "self-review" : "single";
+  if (raw === "single" || raw === "self-review" || raw === "contract") return raw;
+  throw new Error("NEKO_HARBOR_COMPLETION_MODE is invalid");
 }
 
 function envAbsoluteDeadline(name: string): number {
@@ -1513,21 +1756,38 @@ export async function runHarborHostMain(io: HarborProtocolIo = stdioIo()): Promi
     verifyHarborCredentialLease(cfg);
     verifyExpectedCodexForHarbor(cfg);
     const sessionDeadlineAt = envAbsoluteDeadline("NEKO_HARBOR_SESSION_DEADLINE_AT_MS");
+    const loop = envBoolean("NEKO_HARBOR_LOOP", true);
     const sessionOptions = {
       maxSteps: cfg.maxSteps,
+      implementationRoundSteps: envOptionalPositiveInteger("NEKO_HARBOR_IMPLEMENTATION_ROUND_STEPS", 1_000),
       maxContextTokens: cfg.contextWindow,
       adaptiveEffort: cfg.adaptiveEffort,
-      loop: envBoolean("NEKO_HARBOR_LOOP", true),
+      loop,
+      completionMode: envCompletionMode(loop),
+      completionConfig: cfg,
+      providerCallBudget: envOptionalPositiveInteger("NEKO_HARBOR_PROVIDER_CALL_BUDGET", 10_000),
       sessionDeadlineAt,
     };
     const provider = getProvider(cfg);
-    await runHarborHostSession({
+    const session = await runHarborHostSession({
       protocol,
       hello,
       provider,
       hostRoot,
       ...sessionOptions,
     });
+    const trajectoryPath = String(process.env.NEKO_HARBOR_TRAJECTORY_PATH ?? "").trim();
+    if (trajectoryPath) {
+      writeHarborAuditTrajectory(trajectoryPath, String(process.env.HOME ?? ""), {
+        schemaVersion: "neko.harbor.audit-trajectory.v1",
+        profile: cfg.profile,
+        provider: cfg.provider,
+        model: cfg.model,
+        reasoningEffort: cfg.effort,
+        metrics: session.metrics,
+        messages: session.trajectory,
+      });
+    }
     return 0;
   } catch {
     if (!protocol.failed && !protocol.finished) await protocol.failSession("session_failed");

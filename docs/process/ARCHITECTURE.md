@@ -97,6 +97,13 @@ effective registry. It names Neko's permission mode, actual shell, live sandbox 
 policy, while explicitly separating provider-native tools, approvals, sandbox, and skills. The Neko
 skill catalog contains only skills the wired Neko `skill` tool can load.
 
+Ordinary terminal work is Bash-first. The default native Windows route is the current host Git Bash
+process with hidden child consoles; Computer is GUI-only and never a terminal, network, build, test,
+package-manager, or file-operation fallback. The runtime block inventories common PATH toolchains and
+states whether networking is direct-host or sandbox-governed, so a missing capability is replanned
+rather than repeatedly probed through another surface. `run_in_background` owns long-lived servers and
+watchers without opening a visible console; foreground commands stream into the current Neko turn.
+
 Sandbox availability is behavioral, not inferred from config or an executable name. Windows SRT is
 accepted only from explicit/PATH or Bun-global locations and must pass a bounded launch probe after its
 dedicated account is provisioned. It remains an upstream alpha boundary. Docker and Podman reach a
@@ -112,8 +119,10 @@ post-write JSON validation. Explicit CLI/TUI `--yolo` is tracked separately from
 pre-authorizes computer, exact host-write, policy-write, and plan-exit prompts only while the live mode
 remains auto. Shift+Tab revokes that authority immediately. Filesystem-wide grants, credential/agent-control targets,
 system locations, symlink/junction escapes, and hardlink aliases are refused at the structured boundary.
-Ordinary sandboxed Bash remains confined to the project and canonical additional roots. A timed-out SRT health probe may retry one real launch
-through the same exact SRT settings, but never authorizes an unconfined fallback.
+When explicitly enabled, ordinary sandboxed Bash remains confined to the project and canonical additional
+roots. A timed-out SRT health probe may retry one real launch through the same exact SRT settings, but never
+authorizes an unconfined fallback. With the product default `sandbox:false`, Bash executes directly under
+the current Neko process identity and the runtime, doctor, and policy audit disclose `UNCONFINED AUTO`.
 
 Buffered foreground Bash rejects explicit sleep/poll loops whose declared wait budget exceeds 30 seconds.
 Servers and watchers use the existing background-job lifecycle followed by short bounded probes; long
@@ -124,6 +133,71 @@ allowlists and may run concurrently; generic/custom tasks retain only inherited 
 serialized because they can mutate the shared worktree. Cancellation propagates into the child agent,
 and providers owned by a one-shot helper or child are disposed when that operation ends. This is
 capability-bounded delegation, not an isolated multi-writer workspace.
+
+## Completion contract boundary
+
+Explicit closed-loop work (`/auto`, `neko run --loop`, or `auto_loop`) may use the optional
+`CompletionSupervisor` core port. Before implementation, its adapter creates a bounded, observable
+definition of done from the request and read-only project evidence. Criteria receive stable IDs and become
+immutable for the run. Each criterion names a stable behavioral coverage area and an approximate case-mass
+weight. Weight is diagnostic only: every required criterion remains mandatory. A validator reassesses whether
+the instrument covers the material observable surface after each candidate. It may append a bounded new
+criterion when a weak area is discovered; this increments the instrument revision, starts unknown, and cannot
+pass in the review that introduced it. Existing criteria, areas, and weights can never be removed or weakened,
+and incomplete coverage cannot produce a pass. The implementation agent receives the goal and clustered
+outcome gaps, not the validator's detailed procedure, raw cases, commands, or outputs.
+
+Pre-work observations and final gates are different data. Receipt-backed `baselineFacts` hold inventories,
+reproduced failures, and diagnosis; they inform the implementer but never become historical process criteria
+such as "understand this before fixing." Criteria describe final observable state only. An exact changed or
+preserved-file comparison is atomic: it names one file and one exact pre-work artifact receipt. Baselines from
+search output, runtime prose, or an unrelated file cannot affect that criterion.
+
+After each implementation pass, a fresh validator agent inspects current state through `read_file`, `search`,
+`glob`, `ls`, and foreground validation-only `bash`. It cannot edit, delegate, use Computer, inherit global
+hooks, read outside the workspace, or widen permission mode. Missing evidence stays `unknown`; one failed or
+unverified required criterion prevents a pass. Outcome-level findings may return to the implementer, while
+raw cases, commands, and evidence stay on the validation side. Contract and verdict checkpoint with the durable session and are visible
+through `/contract`. Ordinary chat and single-shot `neko run` do not create a supervisor or spend extra model
+calls.
+
+The validator retains the parent registry's native backend as part of that authority projection. In a remote
+Harbor/ProgramBench run, reads and validators therefore execute against the canonical task workspace rather than
+the host runner's empty staging root. The projection still intersects the parent capability set with the
+validator's read-only tool list; retaining execution location does not retain mutation authority.
+
+Remote evaluation checkpoints also carry a bounded live-progress projection. It contains only enum-valued phase,
+tool category, settlement and validation state plus monotonic artifact/mutation counters. The remote protocol
+validates the exact field set and rejects counter regression. Task text, assistant content, tool arguments,
+commands, paths, observations, provider data, and credentials remain outside this projection.
+
+The evaluation adapter exposes the same boundary as a matrix rather than a new agent architecture.
+`bench campaign` repeats the matched legacy-versus-contract experiment over a selected task set and multiple
+provider profiles, preserving each cell's model identity, artifact/controller split, call cap, weighted
+coverage, expansion count, cost, latency, and uncertainty interval. Repeated calls are described as provider
+replicates unless a wire protocol actually supplies a controllable seed.
+
+Every validator tool result receives a private receipt, outcome class, and SHA-256. `read_file` hashes the
+exact bounded file bytes; other tools hash the bounded observation. A conclusive row must cite a current
+receipt. If a no-failure review contains productive evidence but inconsistent labels, one no-tool adjudicator
+may relabel the fixed rows at the configured effort; it cannot add evidence, receipts, criteria, or authority.
+If the review remains measurement-only blocked, core performs at most one fresh independent recheck without
+returning the implementer to an already-correct artifact.
+
+Validator commands are evidence instruments, not completion outcomes. A current authoritative success is
+monotonic for its source-mutation epoch; a later composed, optional, or exit-masked probe cannot erase it.
+Core still treats unknown shell composition as potentially state-changing and never broadens execution
+authority merely to classify evidence. If a repair pass produces neither a new artifact revision nor a new
+independent evidence signature, the controller emits `completion_no_progress` and stops instead of repeatedly
+searching for an absent preferred toolchain.
+
+Targeted JS/TS differentials use exactly `bun --no-env-file --no-install -`. Source enters the sandbox through
+protected stdin, not an inline shell expression or project file. The process remains foreground-only,
+network-denied, and project-read-only; its result counts as validator evidence rather than a mutation.
+
+The port is provider-agnostic: builder, implementer, and validator may use any configured `Provider`. The
+production adapter currently uses fresh instances of the active route so provider state and tool authority do
+not leak between roles. This is an external completion instrument, not a second source of mutation authority.
 
 ## Provider, web, and MCP effect integrity
 

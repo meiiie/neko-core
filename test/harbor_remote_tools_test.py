@@ -24,6 +24,7 @@ from evals.harbor.remote_tools import (
     RemoteToolDispatcher,
     RemoteToolError,
     _bounded_observation,
+    _normalize_path,
     serve_protocol,
 )
 
@@ -315,6 +316,19 @@ class RemoteToolTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.01)
         self.fail(f"expected {count} protocol frames")
 
+    async def test_canonical_workspace_absolute_paths_normalize_without_broadening(self) -> None:
+        self.assertEqual(
+            _normalize_path("/workspace", allow_dot=True, root="/workspace"), "."
+        )
+        self.assertEqual(
+            _normalize_path("/workspace/src/main.ts", root="/workspace"),
+            "src/main.ts",
+        )
+        with self.assertRaisesRegex(RemoteToolError, "escapes"):
+            _normalize_path("/workspace/../secret", root="/workspace")
+        with self.assertRaisesRegex(RemoteToolError, "escapes"):
+            _normalize_path("/workspace-other/file", root="/workspace")
+
     async def test_hello_and_task_frames_never_contain_host_secret(self) -> None:
         hello = self.dispatcher.hello("repair the fixture")
         serialized = json.dumps(hello, sort_keys=True)
@@ -351,6 +365,57 @@ class RemoteToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("identity=$pid:$start", cleanup)
         self.assertIn("kill -TERM", cleanup)
         self.assertIn("kill -KILL", cleanup)
+        self.assertIn("/usr/bin/kill -TERM --", cleanup)
+        launch = next(
+            call["command"]
+            for call in self.environment.calls
+            if "leader=$!" in call["command"]
+        )
+        self.assertIn('/usr/bin/kill -0 -- -"$leader"', launch)
+        cleanup_call = next(
+            call for call in self.environment.calls if call["command"] == cleanup
+        )
+        self.assertGreaterEqual(cleanup_call["timeout_sec"], 15)
+
+    async def test_programbench_environment_identity_is_preserved(self) -> None:
+        environment = MockEnvironment()
+        environment.execution_identity = "programbench-docker-environment"
+        dispatcher = await RemoteToolDispatcher.create(environment)
+        try:
+            self.assertEqual(
+                dispatcher.hello("rebuild the program")["posture"]["execution"],
+                "programbench-docker-environment",
+            )
+        finally:
+            await dispatcher.close()
+
+    async def test_close_uses_a_fresh_cleanup_budget_without_creating_a_new_token(self) -> None:
+        snapshots_before = sum(
+            "read -r self_line < /proc/self/stat" in call["command"]
+            for call in self.environment.calls
+        )
+        await self.dispatcher.close()
+        snapshots_after = sum(
+            "read -r self_line < /proc/self/stat" in call["command"]
+            for call in self.environment.calls
+        )
+        cleanup = next(
+            call
+            for call in reversed(self.environment.calls)
+            if "rm -rf -- /tmp/neko-harbor-remote-tools" in call["command"]
+        )
+        self.assertEqual(snapshots_after, snapshots_before)
+        self.assertGreaterEqual(
+            cleanup["timeout_sec"],
+            remote_tools.REMOTE_STATE_CLEANUP_TIMEOUT_MS // 1000,
+        )
+        self.assertFalse(self.dispatcher._tokens)
+
+    async def test_unknown_environment_identity_is_rejected(self) -> None:
+        environment = MockEnvironment()
+        environment.execution_identity = "untrusted-host"
+        with self.assertRaisesRegex(RuntimeError, "identity is unsupported"):
+            await RemoteToolDispatcher.create(environment)
 
     async def test_preflight_probes_a_detached_child_that_explicitly_unsets_token(
         self,
@@ -362,6 +427,12 @@ class RemoteToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("setsid env -u NEKO_REMOTE_CALL_TOKEN", canary)
         self.assertIn("sleep 30", canary)
+        snapshot_calls = [
+            call for call in self.environment.calls
+            if "read -r self_line < /proc/self/stat" in call["command"]
+        ]
+        self.assertTrue(snapshot_calls)
+        self.assertGreaterEqual(max(call["timeout_sec"] for call in snapshot_calls), 50)
         cleanup = next(
             call["command"]
             for call in self.environment.calls
@@ -464,6 +535,124 @@ class RemoteToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.environment.quiescent)
         self.assertEqual(metrics, final["metrics"])
         self.assertNotIn(self.secret, json.dumps(frames))
+
+    async def test_cancel_wins_when_request_and_read_complete_together(self) -> None:
+        class ImmediateDispatcher:
+            def __init__(self, hello: dict[str, Any]) -> None:
+                self.hello_frame = hello
+
+            def hello(self, _instruction: str) -> dict[str, Any]:
+                return self.hello_frame
+
+            async def execute(
+                self,
+                _tool: str,
+                _args: dict[str, Any],
+                _context: dict[str, Any],
+            ) -> str:
+                return "fixture-result"
+
+        tool_calls = {
+            "requested": 1,
+            "completed": 1,
+            "productive": 0,
+            "empty": 0,
+            "failed": 1,
+        }
+        reader = asyncio.StreamReader()
+        for frame in (
+            {
+                "schema": FRAME_SCHEMA,
+                "type": "request",
+                "id": "boundary-cancel",
+                "tool": "ls",
+                "args": {},
+                "context": context(),
+            },
+            {"schema": FRAME_SCHEMA, "type": "cancel", "id": "boundary-cancel"},
+            checkpoint_frame(toolCalls=tool_calls),
+            final_frame(toolCalls=tool_calls),
+        ):
+            reader.feed_data(encoded(frame))
+        reader.feed_eof()
+        writer = CaptureWriter()
+        metrics = await serve_protocol(
+            reader,
+            writer,
+            ImmediateDispatcher(self.dispatcher.hello("fixture")),  # type: ignore[arg-type]
+            "fixture",
+        )
+
+        self.assertEqual(metrics["toolCalls"], tool_calls)
+        frames = writer.frames()
+        self.assertEqual([frame["type"] for frame in frames], ["hello", "cancelled"])
+        self.assertEqual(frames[1]["id"], "boundary-cancel")
+
+    async def test_result_wins_when_cancel_arrives_after_remote_settlement(self) -> None:
+        class ImmediateDispatcher:
+            def __init__(self, hello: dict[str, Any]) -> None:
+                self.hello_frame = hello
+
+            def hello(self, _instruction: str) -> dict[str, Any]:
+                return self.hello_frame
+
+            async def execute(
+                self,
+                _tool: str,
+                _args: dict[str, Any],
+                _context: dict[str, Any],
+            ) -> str:
+                return "completed-before-cancel"
+
+        tool_calls = {
+            "requested": 1,
+            "completed": 1,
+            "productive": 1,
+            "empty": 0,
+            "failed": 0,
+        }
+        reader = asyncio.StreamReader()
+        reader.feed_data(
+            encoded(
+                {
+                    "schema": FRAME_SCHEMA,
+                    "type": "request",
+                    "id": "late-cancel",
+                    "tool": "ls",
+                    "args": {},
+                    "context": context(),
+                }
+            )
+        )
+        writer = CaptureWriter()
+        serving = asyncio.create_task(
+            serve_protocol(
+                reader,
+                writer,
+                ImmediateDispatcher(self.dispatcher.hello("fixture")),  # type: ignore[arg-type]
+                "fixture",
+            )
+        )
+        for _ in range(100):
+            if any(frame["type"] == "result" for frame in writer.frames()):
+                break
+            await asyncio.sleep(0.001)
+        else:
+            self.fail("remote result was not written")
+
+        for frame in (
+            {"schema": FRAME_SCHEMA, "type": "cancel", "id": "late-cancel"},
+            checkpoint_frame(toolCalls=tool_calls),
+            final_frame(toolCalls=tool_calls),
+        ):
+            reader.feed_data(encoded(frame))
+        reader.feed_eof()
+
+        metrics = await serving
+        self.assertEqual(metrics["toolCalls"], tool_calls)
+        frames = writer.frames()
+        self.assertEqual([frame["type"] for frame in frames], ["hello", "result"])
+        self.assertEqual(frames[1]["result"], "completed-before-cancel")
 
     async def test_post_token_exceptions_always_discharge_quiescence(self) -> None:
         for failure in ("fail_upload", "fail_bash_launch"):
@@ -646,8 +835,29 @@ class RemoteToolTests(unittest.IsolatedAsyncioTestCase):
             await task
         self.assertTrue(self.environment.destroyed)
 
+    async def test_host_terminal_failure_is_not_misreported_as_invalid_order(self) -> None:
+        reader = asyncio.StreamReader()
+        reader.feed_data(
+            encoded(
+                {
+                    "schema": FRAME_SCHEMA,
+                    "type": "error",
+                    "id": None,
+                    "code": "session_failed",
+                    "message": "protocol failure",
+                }
+            )
+        )
+        reader.feed_eof()
+        with self.assertRaisesRegex(
+            ProtocolError, r"host runner failed \(session_failed\)"
+        ):
+            await serve_protocol(
+                reader, CaptureWriter(), self.dispatcher, "fixture"
+            )  # type: ignore[arg-type]
+
     async def test_final_metrics_are_exact_bounded_and_reconstructed(self) -> None:
-        valid = final_frame()
+        valid = final_frame(completionStatus="call_budget_exhausted")
         reader = asyncio.StreamReader()
         reader.feed_data(encoded(checkpoint_frame()))
         reader.feed_data(encoded(valid))
@@ -657,6 +867,16 @@ class RemoteToolTests(unittest.IsolatedAsyncioTestCase):
         )  # type: ignore[arg-type]
         self.assertEqual(metrics, valid["metrics"])
         self.assertIsNot(metrics, valid["metrics"])
+
+        timed = final_frame(completionStatus="time_budget_exhausted")
+        timed_reader = asyncio.StreamReader()
+        timed_reader.feed_data(encoded(checkpoint_frame()))
+        timed_reader.feed_data(encoded(timed))
+        timed_reader.feed_eof()
+        timed_metrics = await serve_protocol(
+            timed_reader, CaptureWriter(), self.dispatcher, "fixture"
+        )  # type: ignore[arg-type]
+        self.assertEqual(timed_metrics, timed["metrics"])
 
         outer_extra = final_frame()
         outer_extra["surprise"] = True
@@ -838,6 +1058,52 @@ class RemoteToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.environment.quiescent)
         self.assertTrue(all(item is not source["metrics"] for item, source in zip(observed, (idle, active, terminal))))
 
+    async def test_metrics_checkpoint_accepts_only_bounded_live_progress(self) -> None:
+        progress = {
+            "phase": "delivery",
+            "lastToolCategory": "edit",
+            "toolState": "settled",
+            "artifactCheckpoints": 2,
+            "mutationEpoch": 3,
+            "validationState": "pending",
+        }
+        observed: list[dict[str, Any]] = []
+        reader = asyncio.StreamReader()
+        reader.feed_data(encoded(checkpoint_frame(progress=progress)))
+        reader.feed_data(encoded(final_frame()))
+        reader.feed_eof()
+        await serve_protocol(
+            reader,
+            CaptureWriter(),
+            self.dispatcher,
+            "fixture",
+            observed.append,
+        )  # type: ignore[arg-type]
+        self.assertEqual(observed[0]["progress"], progress)
+
+        malformed = checkpoint_frame(progress={**progress, "path": "/secret"})
+        reader = asyncio.StreamReader()
+        reader.feed_data(encoded(malformed))
+        reader.feed_eof()
+        with self.assertRaises(ProtocolError):
+            await serve_protocol(
+                reader, CaptureWriter(), self.dispatcher, "fixture"
+            )  # type: ignore[arg-type]
+
+        first = checkpoint_frame(progress=progress)
+        regressed = checkpoint_frame(
+            wallTimeMs=251,
+            progress={**progress, "artifactCheckpoints": 1},
+        )
+        reader = asyncio.StreamReader()
+        reader.feed_data(encoded(first))
+        reader.feed_data(encoded(regressed))
+        reader.feed_eof()
+        with self.assertRaisesRegex(ProtocolError, "regressed"):
+            await serve_protocol(
+                reader, CaptureWriter(), self.dispatcher, "fixture"
+            )  # type: ignore[arg-type]
+
     async def test_metrics_checkpoint_rejects_malformed_and_regressing_data(self) -> None:
         malformed = checkpoint_frame()
         malformed["metrics"]["rawCommand"] = "must-not-cross"
@@ -937,7 +1203,7 @@ class RemoteToolTests(unittest.IsolatedAsyncioTestCase):
         environment.fail_stop = False
         await dispatcher.close()
 
-    async def test_checkpoint_and_final_cannot_undercount_remote_requests(self) -> None:
+    async def test_requests_and_final_cannot_undercount_while_intermediate_completion_may_lag(self) -> None:
         request = {
             "schema": FRAME_SCHEMA,
             "type": "request",
@@ -992,9 +1258,22 @@ class RemoteToolTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
         )
+        settled_tool_calls = {
+            "requested": 1,
+            "completed": 1,
+            "productive": 1,
+            "empty": 0,
+            "failed": 0,
+        }
+        settled_reader.feed_data(
+            encoded(checkpoint_frame(toolCalls=settled_tool_calls))
+        )
+        settled_reader.feed_data(
+            encoded(final_frame(toolCalls=settled_tool_calls))
+        )
         settled_reader.feed_eof()
-        with self.assertRaisesRegex(ProtocolError, "inconsistent"):
-            await settled_serving
+        settled_final = await settled_serving
+        self.assertEqual(settled_final["toolCalls"]["completed"], 1)
 
         idle_checkpoint = checkpoint_frame(
             toolCalls={

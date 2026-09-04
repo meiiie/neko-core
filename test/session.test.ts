@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { acquireSessionLease, AsyncSessionWriter, isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, saveSessionAsync, setSessionsDir } from "../src/adapters/session.ts";
 import { isJsonNumber } from "../src/shared/wire.ts";
+import { createCompletionContract } from "../src/core/completion-contract.ts";
 
 // Isolate from the user's real ~/.neko-core: these tests WRITE session files. Pointing HOME at a
 // temp dir was the old way, but env mutation across bun test files is racy (see bun-test-env-races)
@@ -46,6 +47,37 @@ test("save / load / list round-trip", () => {
     expect(loaded?.id).toBe(id);
     expect(loaded?.messages.length).toBe(1);
     expect(listSessions().some((s) => s.id === id)).toBe(true);
+  } finally {
+    rmSync(join(TEST_DIR, `${id}.json`), { force: true });
+  }
+});
+
+test("session round-trips a bounded completion contract and rejects malformed criteria", () => {
+  const id = newSessionId();
+  const completionContract = createCompletionContract("ship", { criteria: [
+    { requirement: "Tests pass", source: "repository", verification: "bun test" },
+  ] }, "2026-08-29T00:00:00.000Z");
+  saveSession({
+    id,
+    createdAt: new Date().toISOString(),
+    updatedAt: "",
+    cwd: "/tmp/neko-contract-session",
+    model: "m",
+    messages: [],
+    completionContract,
+  });
+  try {
+    expect(loadSession(id)?.completionContract).toEqual(completionContract);
+    // SAFETY: deliberately malformed test payload exercises the runtime session parser.
+    expect(() => saveSession({
+      id: `${id}-bad`,
+      createdAt: new Date().toISOString(),
+      updatedAt: "",
+      cwd: "/tmp/neko-contract-session",
+      model: "m",
+      messages: [],
+      completionContract: { ...completionContract, criteria: [] },
+    } as any)).toThrow("Invalid session");
   } finally {
     rmSync(join(TEST_DIR, `${id}.json`), { force: true });
   }

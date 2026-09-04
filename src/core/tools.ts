@@ -153,13 +153,13 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "bash",
     permission: GATED,
-    summary: "Run a shell command in the project root (approval-gated). The <env> block states which shell executes it - match its syntax and never wrap commands in another shell yourself. For networked commands, declare the exact destination hosts in network_domains; auto/yolo grants them for this call without changing standing policy. For multi-line or quote-heavy commands, write_file a script first and run that (no nested-escaping spiral). Set a longer timeout for slow builds/tests, or run_in_background for long-lived processes (servers, watchers).",
+    summary: "Run a shell command in the project root (approval-gated). The runtime block states whether it executes directly on the host or in the optional OS sandbox; match its shell syntax and never use computer to open a terminal as a shell fallback. Windows child consoles stay hidden. For sandboxed network commands, declare exact destinations in network_domains. For multi-line or quote-heavy commands, write_file a script first and run it. Set a longer timeout for builds/tests, or run_in_background for long-lived processes.",
     parameters: {
       command: { type: "string", description: "The shell command to run." },
       network_domains: {
         type: "array",
         maxItems: 16,
-        description: "Exact destination hosts this one command needs (optional :port; *.example.com allowed). No URL schemes or paths. In auto/yolo Neko grants this egress for only this call; other modes ask for approval. Include redirect/download hosts used by package managers.",
+        description: "When the optional sandbox is active, exact destination hosts this command needs (optional :port; *.example.com allowed). No URL schemes or paths. Auto/yolo grants the bounded request for this call; other modes ask. The direct host shell already has host networking, so this field is optional there.",
         items: { type: "string" },
       },
       timeout: { type: "number", description: "Timeout in milliseconds (default 60000, max 600000)." },
@@ -171,7 +171,7 @@ export const TOOL_SPECS: ToolSpec[] = [
     name: "computer",
     permission: GATED,
     summary:
-      "Drive the Windows desktop/GUI through the accessibility tree plus human input. Use bash first for files, downloads, installs, and other programmatic work; use this for apps that require a GUI. Set `window` to a title substring; omit = foreground. Pointer acts use touch injection and do not move the user's mouse. `watch` waits locally for readable UI changes without model polling. Re-perceive after actions that cannot self-verify.",
+      "Drive the Windows desktop/GUI through the accessibility tree plus human input. This is GUI-only: never open a terminal or use Computer as a fallback for shell, network, files, downloads, installs, builds, or tests; use bash or the precise native tool. Set `window` to a title substring; omit = foreground. Pointer acts use touch injection and do not move the user's mouse. `watch` waits locally for readable UI changes without model polling. Re-perceive after actions that cannot self-verify.",
     parameters: {
       action: {
         type: "string",

@@ -162,6 +162,19 @@ effect path from a provider to the host.
 
 ## Evidence and release bar
 
+The current long-horizon experiment is governed by
+[process/HARNESS-GOAL.md](process/HARNESS-GOAL.md) and
+[process/EVALUATION.md](process/EVALUATION.md). The architecture follows a validator wall: an independent
+completion instrument is defined before implementation, raw cases stay private to the validator, and only
+clustered outcome gaps cross back to the implementer. This is an experimental controller layer, not authority
+to weaken tools, sandboxing, or normal CLI behavior.
+
+ProgramBench comparison state is content-addressed. The campaign manifest freezes the non-ignored source
+snapshot, runner/shim hashes, evaluator image ID, and task image IDs. Each evaluator owns its outer and nested
+containers through one random label, and each cell writes a terminal run record before the campaign assigns a
+status. Aggregate scoring treats a valid missing artifact as zero while refusing to convert runner, evaluator,
+or Docker infrastructure failures into controller scores.
+
 Harness changes require targeted regression tests plus the full gate:
 
 ```bash

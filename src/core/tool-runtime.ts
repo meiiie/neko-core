@@ -36,7 +36,7 @@ import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
 import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
-import { destructiveInWorkspace, detectSandbox, executableOnPath, isDockerCommand, normalizeSandboxDomains, sandboxActiveAsync, srtHealthAsync, srtLaunchRefusal, withSrtStateVolumeGuidance, wrapBash } from "./sandbox.ts";
+import { destructiveInWorkspace, detectSandbox, executableOnPath, isDockerCommand, normalizeSandboxDomains, sandboxActiveAsync, sandboxProcessDeadlineMs, srtHealthAsync, srtLaunchRefusal, withSrtStateVolumeGuidance, wrapBash } from "./sandbox.ts";
 import { effectivePermission, GATED, resolveTool, SAFE, taskDelegatesReadOnly, toolSchemas, type ToolSpec } from "./tools.ts";
 import { residentUiaHost } from "./windows-uia-host.ts";
 import { debug, messageOf } from "../shared/debug.ts";
@@ -44,7 +44,7 @@ import { scrubChildEnv } from "../shared/child-env.ts";
 import { minimalWindowsSystemEnv, resolveWindowsSystemExecutable } from "../shared/windows-system.ts";
 import { MAX_OBS_PAGE_CHARS } from "./agent-constants.ts";
 import { deniedCredentialPath } from "./read-policy.ts";
-import { isForegroundValidatorOnlyCommand } from "./validation-command.ts";
+import { isForegroundValidatorOnlyCommand, isProtectedDifferentialValidator, isValidationBashCommand as isKnownValidationBashCommand } from "./validation-command.ts";
 import { runDiskCleanupScan } from "./disk-cleanup.ts";
 import { runNetworkProbe } from "./network-probe.ts";
 
@@ -150,7 +150,7 @@ const MAX_OUTPUT_CHARS = 20_000;
 const BASH_TIMEOUT_MS = 60_000;
 const BASH_TERMINATE_GRACE_MS = 250;
 const BASH_FORCE_WAIT_MS = 750;
-const WINDOWS_TASKKILL_TIMEOUT_MS = 2_000;
+const WINDOWS_TASKKILL_TIMEOUT_MS = 5_000;
 // CIM startup alone can exceed two seconds on a busy Windows workstation. Keep cancellation
 // bounded, but leave enough time to capture the descendant set that makes the kill verifiable.
 const WINDOWS_PROCESS_SNAPSHOT_TIMEOUT_MS = 5_000;
@@ -257,21 +257,35 @@ function snapshotWindowsBashTree(rootPid: number): any {
 
 /** Windows tree signal through the trusted System32 executable. No PATH/cwd lookup or ambient
  * provider/harness credential reaches the helper. */
-function taskkillBashTree(pids: number[], force: boolean): boolean {
+async function taskkillBashTree(pids: number[], force: boolean): Promise<boolean> {
   if (!pids.length || !WINDOWS_TASKKILL) return false;
+  const targets = [...new Set(pids)].flatMap((pid) => ["/pid", String(pid)]);
+  let helper: BashChild;
   try {
-    const targets = [...new Set(pids)].flatMap((pid) => ["/pid", String(pid)]);
-    const result = spawnSync(WINDOWS_TASKKILL, [...targets, "/t", ...(force ? ["/f"] : [])], {
+    helper = spawn(WINDOWS_TASKKILL, [...targets, "/t", ...(force ? ["/f"] : [])], {
       cwd: dirname(WINDOWS_TASKKILL),
       env: minimalWindowsSystemEnv(),
       stdio: "ignore",
-      timeout: WINDOWS_TASKKILL_TIMEOUT_MS,
       windowsHide: true,
     });
-    return __taskkillResultSucceededForTest(result);
   } catch {
     return false;
   }
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    helper.once("close", (status) => finish(status === 0));
+    helper.once("error", () => finish(false));
+    const timer = setTimeout(() => {
+      try { helper.kill("SIGKILL"); } catch {}
+      finish(false);
+    }, WINDOWS_TASKKILL_TIMEOUT_MS);
+  });
 }
 
 /** Return captured PIDs that still exist without spawning another helper under cancellation load. */
@@ -329,18 +343,27 @@ export async function terminateProcessTree(child: BashChild): Promise<boolean> {
   if (process.platform === "win32") {
     const pid = child.pid;
     if (!pid) return false;
-    const snapshot = snapshotWindowsBashTree(pid);
-    // Force the live root tree immediately. A graceful first pass can remove the leader before the
-    // force pass, severing the only ancestry taskkill has for a descendant omitted by the CIM snapshot.
-    const forced = taskkillBashTree([pid], true);
-    if (!forced) {
-      try { child.kill("SIGKILL"); } catch { /* already gone; tree cleanup remains unconfirmed */ }
-    }
+    // taskkill /T is the primary tree primitive. Run it before the expensive CIM fallback: querying
+    // every Windows process can take several seconds under load and made Esc appear frozen even when
+    // taskkill had already removed the complete tree. A zero taskkill status is accepted only after
+    // the direct child is independently observed gone.
+    const forced = await taskkillBashTree([pid], true);
     await waitForBashClose(child, BASH_FORCE_WAIT_MS);
+    if (forced && liveWindowsProcesses([pid]).length === 0) return true;
+
+    // If taskkill failed while the leader is still alive, preserve every visible descendant before
+    // another signal can sever the ancestry. This slower path keeps the fail-closed evidence contract.
+    // Git Bash commonly exits its leader while taskkill is walking `/T`, which makes taskkill return
+    // 128 even after it has addressed the tree. Once the helper has settled and the direct process is
+    // independently gone, the documented `/T` operation is the available Windows tree attestation.
+    if (liveWindowsProcesses([pid]).length === 0) return true;
+    const snapshot = snapshotWindowsBashTree(pid);
+    try { child.kill("SIGKILL"); } catch { /* already gone; captured descendants are still addressed below */ }
     const survivors = liveWindowsProcesses(snapshot.pids);
-    if (survivors.length) taskkillBashTree(survivors, true);
+    if (survivors.length) await taskkillBashTree(survivors, true);
+    await waitForBashClose(child, BASH_FORCE_WAIT_MS);
     const remaining = liveWindowsProcesses(snapshot.pids);
-    return remaining.length === 0 && (snapshot.complete || forced);
+    return remaining.length === 0 && snapshot.complete;
   }
 
   if (posixProcessGroupGone(child)) return true;
@@ -835,6 +858,13 @@ export class ToolRegistry {
     });
   }
 
+  isValidationBashCommand(command: string, args?: any): boolean {
+    return isKnownValidationBashCommand(command)
+      || (this.turnToolPolicy?.bashPolicy === "foreground-validator-only"
+        && (isForegroundValidatorOnlyCommand(command, args)
+          || isProtectedDifferentialValidator(command, args)));
+  }
+
   setSkillPolicyForTurn(policy?: (name: string) => string | null, toolUnavailableReason = ""): void {
     this.skillTurnPolicy = policy;
     this.skillToolUnavailable = toolUnavailableReason;
@@ -893,6 +923,7 @@ export class ToolRegistry {
       if (signal?.aborted) return "(interrupted)";
       const unhealthy = srtLaunchRefusal(true, kind, health);
       if (unhealthy) return unhealthy;
+      return null;
     }
     if (kind === "none" || !(await sandboxActiveAsync(signal))) {
       if (signal?.aborted) return "(interrupted)";
@@ -933,7 +964,9 @@ export class ToolRegistry {
       readOnlyWorkspace: exactValidator,
       denyReadFiles: this.sandboxDenyReadFiles,
       additionalWriteRoots: this.additionalWriteRoots,
+      stdinSource: exactValidator && isText(args.validator_source) ? args.validator_source : undefined,
     });
+    const processDeadlineMs = sandboxProcessDeadlineMs(timeoutMs, sb.startupGraceMs);
     const env: NodeJS.ProcessEnv = scrubChildEnv(process.env, this.childSecretEnvNames);
     Object.assign(env, sb.env);
     if (this.presence) env.NEKO_PRESENCE = "1";
@@ -947,6 +980,7 @@ export class ToolRegistry {
         detached: process.platform !== "win32",
         windowsHide: true,
       });
+      if (sb.protectedStdin !== undefined) child.stdin?.end(sb.protectedStdin);
     } catch (error) {
       sb.cleanup?.();
       throw error;
@@ -985,7 +1019,7 @@ export class ToolRegistry {
     const outcome = await Promise.race([
       new Promise<{ kind: "exit"; code: number | null; signal: NodeJS.Signals | null }>((res) => child.on("close", (code, signal) => res({ kind: "exit", code, signal }))),
       new Promise<{ kind: "error"; err: Error }>((res) => child.on("error", (err) => res({ kind: "error", err }))),
-      new Promise<{ kind: "timeout" }>((res) => { timeoutHandle = setTimeout(() => res({ kind: "timeout" }), timeoutMs); }),
+      new Promise<{ kind: "timeout" }>((res) => { timeoutHandle = setTimeout(() => res({ kind: "timeout" }), processDeadlineMs); }),
       new Promise<{ kind: "detach" }>((res) => { detach = () => res({ kind: "detach" }); this.detachCurrent = detach; }),
       new Promise<{ kind: "abort" }>((res) => {
         if (!signal) return;
@@ -1148,12 +1182,13 @@ export class ToolRegistry {
         ...schema,
         function: {
           ...fn,
-          description: "Run foreground validators only (test, typecheck, lint, check, verify) in an isolated read-only project workspace. Project test code may write only to a unique temporary directory. Every && segment must be a validator; build targets, fix/write/snapshot-update flags, masking, redirection, substitution, and background execution are unavailable.",
+          description: "Run foreground validators only (test, typecheck, lint, check, verify) in an isolated read-only project workspace. A narrow differential check may use the fixed Bun stdin command with validator_source. Project test code may write only to a unique temporary directory. Every && segment must be a validator; build targets, fix/write/snapshot-update flags, masking, redirection, substitution, and background execution are unavailable.",
           parameters: {
             ...parameters,
             properties: {
               ...validatorProperties,
               command: { ...properties.command, description: "Foreground validator command in a read-only project workspace. Validator && validator is allowed; build targets, ordinary shell probes, and mutating flags are not." },
+              validator_source: { type: "string", maxLength: 65536, description: "Optional private JavaScript/TypeScript differential assertion. Requires command exactly 'bun --no-env-file --no-install -'. Runs through protected stdin in the read-only, no-network sandbox and is not written into the project." },
             },
           },
         },
@@ -1209,10 +1244,11 @@ export class ToolRegistry {
       }
     }
     if (name === "bash" && this.turnToolPolicy?.bashPolicy === "foreground-validator-only"
-      && (!isForegroundValidatorOnlyCommand(String(args.command ?? ""), args)
+      && (!(isForegroundValidatorOnlyCommand(String(args.command ?? ""), args)
+          || (!nativeBackend && isProtectedDifferentialValidator(String(args.command ?? ""), args)))
         || requestedBashNetworkDomains.length > 0)) {
       return `Tool 'bash' is restricted to a foreground validator in an isolated read-only project workspace for this turn (${this.turnToolPolicy.name}). ` +
-        "Run one or more recognized test/typecheck/lint/check/verify commands joined only by &&; build targets, source-fixing flags, shell substitution, redirection, masking, and background execution are unavailable.";
+        "Run a recognized test/typecheck/lint/check/verify command, one direct local JS/TS validation script, or the fixed protected Bun stdin differential check; build targets, source-fixing flags, shell substitution, redirection, masking, and background execution are unavailable.";
     }
     if (name === "bash" && this.turnToolPolicy?.bashPolicy === "foreground-validator-only") {
       const refusal = await this.exactValidatorSandboxRefusal(nativeBackend, signal);

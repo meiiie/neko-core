@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-08-28) - v1.4.0
+## Current status (2026-09-04) - v1.5.0
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The 1.0 baseline includes:
@@ -19,11 +19,14 @@ The 1.0 baseline includes:
   guards, bounded persistent-workstation awareness, and fast stable launcher discovery rather than
   coordinate-blind host control;
 - separate Cline Account OAuth and API-key routes, plus config-first B.AI and TokenRouter gateways.
+- direct host Bash as the zero-flag default, with hidden Windows child consoles, exact runtime/toolchain context,
+  background process support, and Computer Use reserved for visible GUI interaction;
+- an explicit provider-agnostic completion contract and independent read-only validator for closed-loop work.
 
-**Branch:** `main`. **Current release: v1.4.0 (2026-08-28).** The 1.0 compatibility contract remains the
-long-term stable baseline; v1.4.0 adds the globally bundled `no-comments` hygiene skill and removes an obsolete
-Bun 1.3 build override that produced an internal Bun 1.4.0 Windows diagnostic. Ordinary CLI composition,
-providers, ACP hosts, and durable sessions remain compatible. The complete pre-1.0 history remains in
+**Branch:** `main`. **Current release candidate: v1.5.0 (2026-09-04).** The 1.0 compatibility contract remains the
+long-term stable baseline. v1.5.0 makes host Bash the normal no-flag shell route while preserving explicit
+fail-closed sandboxing, and ships the completion-contract instrumentation gathered before the ProgramBench pause.
+Provider protocols, ACP hosts, and durable sessions remain compatible. The complete pre-1.0 history remains in
 [CHANGELOG.md](../../CHANGELOG.md) and
 [WORKLOG.md](WORKLOG.md).
 
@@ -51,7 +54,20 @@ silently narrow them.
 
 ### Harness quality
 
+- ProgramBench is paused by owner direction for the v1.5.0 stabilization window. Preserve its immutable runs and
+  resume only after the 1.5.0 release is closed; do not launch a campaign as part of ordinary verification.
+- When resumed, execute the falsifiable completion-system objective in [HARNESS-GOAL.md](HARNESS-GOAL.md). Keep
+  one canonical evidence ledger in [EVALUATION.md](EVALUATION.md); do not grow a second speculative backlog or
+  tune from hidden-test failures.
 - Improve tool selection, context relevance, and completion verification on unsaturated public eval tiers.
+- Evaluate the provider-agnostic pre-work completion contract and independent read-only validator with the
+  fixed call-budget-matched multi-trial benchmark before making it the default outside explicit closed loops.
+- Use the multi-profile completion campaign beyond the saturated `layered-bug` fixture: multiple hard/frontier
+  tasks, at least three provider replicates, actual sampling seeds only where the provider exposes them, and an
+  official unsaturated external tier before any general lift claim.
+- After the pause, complete a newly frozen `fx`/`srgn`/`figlet` ProgramBench matrix with three provider replicates
+  for both `single` and `contract`. The content-addressed campaign must have no infrastructure-invalid cells before
+  its exact paired decision rule can support controller lift; the current `fx` pilot results remain diagnostics only.
 - Prefer deterministic preprocessing and targeted test-surfacing over larger prompts.
 - Admit self-improvement changes only when a frozen benchmark or direct regression demonstrates lift.
 

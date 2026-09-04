@@ -20,6 +20,11 @@ running journal of what was done and why.
   A new model/endpoint is a profile, not a code change.
 - **Provider-agnostic, auto-by-default (owner, 2026-08-17).** The default mode is `auto` - bounded autonomy out of the box, matching the 2026 industry shift (Claude Code ships auto-default). Only consequential surfaces ask: host computer control, the policy file, catastrophic shell, credential paths, outside-workspace targets. Set `"mode": "default"` in config to restore the classic prompt-first posture. `--yolo`
   (`approval=auto`) is a *named* bounded-autonomous state, audited by `neko policy`.
+- **Bash-first host routing (owner, 2026-09-04).** Ordinary `neko` and `neko --yolo` run Bash on the same host
+  and identity as Neko, with hidden Windows child consoles and explicit background-process support. Computer Use
+  is GUI-only and never a shell fallback. `sandbox: true` is an explicit fail-closed containment policy; it must
+  never silently widen to host execution. Completion reviewers remain read-only and sandboxed, and ProgramBench
+  retains its separate cleanroom.
 - **`bang_c` is FROZEN.** Read it to port; never edit it. Drop MCQ/contest cruft
   (`rag_*`, `tiered_*`, `rubric`, `profiling`, `pred.csv`).
 

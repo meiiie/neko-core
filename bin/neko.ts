@@ -31,7 +31,7 @@ import { discoverMeetingSupport, installMeetingSupportPack, readMeetingSupportPa
 import { deleteMeeting, latestMeeting, listMeetings, readMeeting, readMeetingTranscript } from "../src/adapters/meeting.ts";
 import { transcribeMeeting } from "../src/adapters/meeting-transcription.ts";
 import { evaluateMeetingAsr, renderMeetingEval } from "../src/adapters/meeting-eval.ts";
-import { FRONTIER_TASKS, HARD_TASKS, renderBenchReport, renderLiftReport, runBench, runEval, renderEvalReport, runHarnessLift } from "../src/adapters/bench.ts";
+import { FRONTIER_TASKS, HARD_TASKS, renderBenchReport, renderCompletionCampaignReport, renderCompletionLiftReport, renderLiftReport, runBench, runCompletionCampaign, runCompletionLift, runEval, renderEvalReport, runHarnessLift } from "../src/adapters/bench.ts";
 import { sandboxActive } from "../src/core/sandbox.ts";
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setActiveProfile, setApiKey } from "../src/adapters/project.ts";
 import { renderSessions } from "../src/adapters/session.ts";
@@ -83,6 +83,9 @@ interface Args {
   device: boolean;
   trials?: number;
   maxSteps?: number;
+  callBudget?: number;
+  profiles?: string[];
+  taskIds?: string[];
   images?: string[];
   /** Split the meeting channel into numbered voices. Opt-in: see src/adapters/meeting-diarize.ts. */
   diarize: boolean;
@@ -111,6 +114,9 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--no-tools") args.noTools = true;
     else if (a === "--trials") args.trials = Number(argv[++i]) || 1;
     else if (a === "--max-steps") args.maxSteps = Number(argv[++i]) || undefined;
+    else if (a === "--call-budget") args.callBudget = Number(argv[++i]);
+    else if (a === "--profiles") args.profiles = String(argv[++i] ?? "").split(/[\s,]+/).map((value) => value.trim()).filter(Boolean);
+    else if (a === "--task") { const id = String(argv[++i] ?? "").trim(); if (id) (args.taskIds ??= []).push(id); }
     else if (a === "--image" || a === "--img") { const p = argv[++i]; if (p) (args.images ??= []).push(p); }
     else if (a === "--prompt" || a === "-p") args.prompt = argv[++i];
     else if (a === "--file" || a === "-f") { const p = argv[++i]; if (p) (args.files ??= []).push(p); }
@@ -260,6 +266,8 @@ Commands:
   bench gui     long-horizon computer-use eval on a simulated desktop (grounding/recovery/constraint)
   bench gui hard  + cross-screen memory, paged lists, decoys, interrupts, guarded submits
   bench lift    measure the HARNESS LIFT: the same tasks raw (model only) vs +Neko (tools+loop)
+  bench contract [hard|frontier]  A/B legacy self-review vs a pre-work contract + independent validator
+  bench campaign [hard|frontier]  run the completion A/B across multiple provider profiles
 
 Options:
   --profile <name>   named runtime profile (see 'neko profiles')
@@ -267,6 +275,10 @@ Options:
   --yolo             disable approval prompts; hard credential/system/catastrophic seatbelts remain
   --loop             run "run" as a closed loop: work + self-review until done
   --once             force a single-shot run (overrides config "auto_loop": true)
+  --trials <n>       (bench) repeated independent trials per fixed task
+  --call-budget <n>  (bench contract) equal provider-call cap per task trial in both variants
+  --profiles <a,b>   (bench campaign) comma-separated named provider profiles
+  --task <id>        (bench campaign) select one task; repeat for a bounded subset
   --no-tools         (run) expose no tools; a pure text completion (e.g. a judgment/review pass)
   --image <path>     (run) attach an image (repeatable); perception mode, no tools. Use a vision profile,
                      e.g. neko run --profile nvidia --image pkg.jpg "what is this?"
@@ -1365,6 +1377,49 @@ async function cmdBench(args: Args): Promise<number> {
     console.log(`Measuring harness lift against ${cfg.model} (raw model vs +Neko, auto-approve)...`);
     console.log("\n" + renderLiftReport(await runHarnessLift(cfg, (m) => console.log(m))));
     return 0;
+  }
+  if (args.positionals[0] === "contract") {
+    const selected = codingSuite(args.positionals[1] ?? "hard");
+    const trials = args.trials ?? 3;
+    const callBudget = args.callBudget ?? 24;
+    console.log(`Running completion-contract A/B${selected.label} against ${cfg.model} (${trials} trial(s)/task, ${callBudget} provider calls/trial/variant)...`);
+    const report = await runCompletionLift(cfg, (message) => console.log(message), {
+      trials,
+      modelCallBudget: callBudget,
+      maxSteps: args.maxSteps,
+      ...(selected.tasks ? { tasks: selected.tasks } : undefined),
+      suite: selected.suite,
+    });
+    console.log("\n" + renderCompletionLiftReport(report));
+    return report.comparisonValid ? 0 : 1;
+  }
+  if (args.positionals[0] === "campaign") {
+    const selected = codingSuite(args.positionals[1] ?? "frontier");
+    const profileNames = args.profiles?.length ? [...new Set(args.profiles)] : cfg.profile ? [cfg.profile] : [];
+    if (!profileNames.length) throw new Error("bench campaign needs --profiles <name,name> or an active profile");
+    const unknown = profileNames.filter((profile) => !cfg.profiles[profile]);
+    if (unknown.length) throw new Error(`unknown benchmark profile(s): ${unknown.join(", ")}`);
+    const trials = args.trials ?? 3;
+    const callBudget = args.callBudget ?? 24;
+    const entries = profileNames.map((profile) => ({ profile, config: loadConfig({ profile }) }));
+    const campaignTasks = args.taskIds?.length
+      ? (selected.tasks ?? []).filter((task) => args.taskIds!.includes(task.id))
+      : selected.tasks;
+    if (args.taskIds?.length) {
+      const found = new Set(campaignTasks?.map((task) => task.id));
+      const missing = args.taskIds.filter((id) => !found.has(id));
+      if (missing.length) throw new Error(`unknown ${selected.suite} benchmark task(s): ${missing.join(", ")}`);
+    }
+    console.log(`Running completion campaign${selected.label} across ${profileNames.join(", ")} (${trials} provider replicate(s)/task, ${callBudget} calls/trial/controller)...`);
+    const report = await runCompletionCampaign(entries, (message) => console.log(message), {
+      trials,
+      modelCallBudget: callBudget,
+      maxSteps: args.maxSteps,
+      ...(campaignTasks ? { tasks: campaignTasks } : undefined),
+      suite: selected.suite,
+    });
+    console.log("\n" + renderCompletionCampaignReport(report));
+    return report.comparisonValid ? 0 : 1;
   }
   // `neko bench eval [hard|frontier]`: the MULTI-DIMENSIONAL eval — CLEAR (Cost/Latency/Efficacy/Assurance/
   // Reliability) + τ-bench pass^k + RedundancyBench execution-efficiency. Same tasks/trials as `bench`,

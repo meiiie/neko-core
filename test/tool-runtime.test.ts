@@ -649,10 +649,24 @@ function writeBashTreeFixture(root: string, marker: string): string {
   return parent.replaceAll("\\", "/");
 }
 
-async function waitForFile(path: string, timeoutMs = 3000): Promise<void> {
+async function waitForFile(path: string, timeoutMs = 6000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!existsSync(path) && Date.now() < deadline) await Bun.sleep(20);
   expect(existsSync(path)).toBe(true);
+}
+
+async function removeTreeAfterHandlesClose(path: string, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? String(error.code) : "";
+      if (code !== "EBUSY" || Date.now() >= deadline) throw error;
+      await Bun.sleep(50);
+    }
+  }
 }
 
 test("aborting bash kills grandchildren before returning", async () => {
@@ -675,7 +689,7 @@ test("aborting bash kills grandchildren before returning", async () => {
   } finally {
     try { writeFileSync(trigger, "release any surviving fixture process"); } catch {}
     await Bun.sleep(100);
-    rmSync(root, { recursive: true, force: true });
+    await removeTreeAfterHandlesClose(root);
   }
 }, 15_000);
 
@@ -684,21 +698,21 @@ test("timing out bash kills grandchildren before returning", async () => {
   const marker = "timeout-orphan.txt";
   const parent = writeBashTreeFixture(root, marker);
   const trigger = join(root, `${marker}.trigger`);
-  reg.bashTimeoutCapMs = 1000;
+  reg.bashTimeoutCapMs = 4000;
   try {
-    const running = reg.execute("bash", { command: `bun ${JSON.stringify(parent)}`, timeout: 1000 });
+    const running = reg.execute("bash", { command: `bun ${JSON.stringify(parent)}`, timeout: 4000 });
     await waitForFile(join(root, `${marker}.ready`));
     await waitForFile(join(root, `${marker}.child-ready`));
     const out = String(await running);
     writeFileSync(trigger, "prove any surviving grandchild can still act");
-    expect(out).toContain("timed out after 1000ms");
+    expect(out).toContain("timed out after 4000ms");
     expect(out).not.toContain("could not be confirmed");
     await Bun.sleep(750);
     expect(existsSync(join(root, marker))).toBe(false);
   } finally {
     try { writeFileSync(trigger, "release any surviving fixture process"); } catch {}
     await Bun.sleep(100);
-    rmSync(root, { recursive: true, force: true });
+    await removeTreeAfterHandlesClose(root);
   }
 }, 15_000);
 

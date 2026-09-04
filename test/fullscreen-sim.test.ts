@@ -454,7 +454,7 @@ test("approval decision keys never leak into the prompt", async () => {
     for (let waited = 0; waited < 2000 && !vt.text().includes("Approve bash?"); waited += 25) await tick(25);
     expect(vt.text()).toContain("Approve bash?");
     stdin.push("n");
-    await tick(500);
+    for (let waited = 0; waited < 2000 && !vt.text().includes("denied safely"); waited += 25) await tick(25);
     expect(vt.text()).toContain("denied safely");
     expect(vt.lines().some((line) => /^\s*>\s*n\s*$/.test(line))).toBe(false);
     app.unmount();

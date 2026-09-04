@@ -15,12 +15,14 @@ import { homeDir } from "../shared/home.ts";
 import { isJsonArray, isJsonObject, isText, type JsonValue } from "../shared/wire.ts";
 
 import { Agent, classifyToolObservation, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
+import { completionCoverage, type CompletionSupervisor } from "../core/completion-contract.ts";
 import type { Provider } from "../core/ports.ts";
 import { terminateProcessTree, ToolRegistry, type ToolTurnLease } from "../core/tool-runtime.ts";
 import { detectSandbox, executableOnPath, findWindowsBash, resolveSrtBunBridge, sandboxActive, wrapBash } from "../core/sandbox.ts";
 import { redactSecrets, type NekoConfig } from "./config.ts";
 import { createFrontierTasks, type HiddenBenchProgram } from "./frontier-bench.ts";
 import { getProvider } from "./providers.ts";
+import { createCompletionSupervisor } from "./completion-supervisor.ts";
 import { configureToolRegistry } from "./tool-registry.ts";
 import { matchedTurnContext, productionTurnContext } from "./turn-context.ts";
 import { planTurnCapabilities } from "./turn-capabilities.ts";
@@ -211,7 +213,7 @@ function benchmarkRunFingerprint(
   tasks: readonly BenchTask[],
   maxSteps: number,
   environment = benchmarkEnvironmentIdentity(),
-  scorecard: { slaMs?: number } = {},
+  scorecard: { slaMs?: number; experiment?: JsonValue } = {},
 ): string {
   const taskIdentity = tasks.map((task) => ({
     id: task.id,
@@ -829,14 +831,28 @@ async function runHiddenJsPasses(dir: string, program: HiddenBenchProgram, sourc
       if (seen.has(name)) throw new BenchInfrastructureError(`duplicate hidden-oracle source: ${name}`);
       seen.add(name);
       const lexical = confinedTaskPath(root, name);
-      const before = lstatSync(lexical);
-      const canonical = realpathSync(lexical);
+      let before: ReturnType<typeof lstatSync>;
+      let canonical: string;
+      try {
+        before = lstatSync(lexical);
+        canonical = realpathSync(lexical);
+      } catch {
+        return false;
+      }
       if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || !pathInside(root, canonical)) {
         throw new BenchInfrastructureError(`hidden-oracle source is not a canonical single-link file: ${name}`);
       }
-      const bytes = readFileSync(canonical);
-      const after = lstatSync(lexical);
-      if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1 || realpathSync(lexical) !== canonical
+      let bytes: Buffer;
+      let after: ReturnType<typeof lstatSync>;
+      let canonicalAfter: string;
+      try {
+        bytes = readFileSync(canonical);
+        after = lstatSync(lexical);
+        canonicalAfter = realpathSync(lexical);
+      } catch {
+        return false;
+      }
+      if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1 || canonicalAfter !== canonical
         || after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
         throw new BenchInfrastructureError(`hidden-oracle source changed while it was copied: ${name}`);
       }
@@ -1122,6 +1138,8 @@ export const HARD_TASKS: BenchTask[] = [
 export interface BenchResult {
   id: string;
   passes: number;
+  artifactPasses?: number;
+  controllerPasses?: number;
   modelFailures: number;
   infraErrors: number;
   trials: number;
@@ -1131,6 +1149,10 @@ export interface BenchResult {
   outTok: number;
   calls: number;
   ms: number;
+  budgetExhaustions?: number;
+  coveragePassedWeight?: number;
+  coverageTotalWeight?: number;
+  instrumentExpansions?: number;
 }
 export interface BenchReport {
   model: string;
@@ -1140,6 +1162,8 @@ export interface BenchReport {
   trials: number;
   results: BenchResult[];
   passed: number;
+  artifactPassed?: number;
+  controllerPassed?: number;
   modelFailures: number;
   infraErrors: number;
   comparisonValid: boolean;
@@ -1150,8 +1174,32 @@ export interface BenchReport {
   outTok: number;
   calls: number;
   seconds: number;
+  completionMode?: "single" | "self-review" | "contract";
+  modelCallBudget?: number;
 }
 export type BenchProviderFactory = () => Provider;
+
+class BenchmarkCallBudgetError extends Error {
+  override name = "BenchmarkCallBudgetError";
+}
+
+interface BenchmarkCallBudget {
+  max: number;
+  used: number;
+}
+
+function withBenchmarkCallBudget(provider: Provider, budget: BenchmarkCallBudget): Provider {
+  return {
+    async complete(messages, tools, onDelta, signal, opts) {
+      if (budget.used >= budget.max) throw new BenchmarkCallBudgetError(`model-call budget exhausted (${budget.max})`);
+      budget.used++;
+      return provider.complete(messages, tools, onDelta, signal, opts);
+    },
+    dispose: () => provider.dispose?.(),
+  };
+}
+
+export const __withBenchmarkCallBudgetForTest = withBenchmarkCallBudget;
 
 function confinedTaskPath(root: string, name: string): string {
   if (!name || name.includes("\0") || isAbsolute(name)) {
@@ -1253,6 +1301,7 @@ function buildBenchTrialAgent(
   prompt: string,
   maxSteps: number,
   onEvent?: (kind: string, data: any) => void,
+  completionSupervisorFactory?: (registry: ToolRegistry) => CompletionSupervisor,
 ): BenchTrialAgent {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "neko-bench-home-")));
   let lease: ToolTurnLease | undefined;
@@ -1304,6 +1353,7 @@ function buildBenchTrialAgent(
       verifyStateChangesBeforeExit: true,
       adaptiveEffort: cfg.adaptiveEffort,
       onEvent,
+      completionSupervisor: completionSupervisorFactory?.(registry),
     });
     agent.setTurnSystemContext([matchedTurnContext(prompt, registry, home).text, BENCH_IMPLEMENTATION_CONTRACT].filter(Boolean).join("\n\n"));
     let closed = false;
@@ -1328,12 +1378,28 @@ function buildBenchTrialAgent(
 
 /** Run the benchmark against the configured model. Each task runs `trials` times (single-run pass@1
  * is noisy — reliability science), each in its own temp dir. */
-export async function runBench(cfg: NekoConfig, opts: { trials?: number; tasks?: BenchTask[]; suite?: string; maxSteps?: number; providerFactory?: BenchProviderFactory } = {}, onProgress?: (msg: string) => void): Promise<BenchReport> {
+export async function runBench(cfg: NekoConfig, opts: {
+  trials?: number;
+  tasks?: BenchTask[];
+  suite?: string;
+  maxSteps?: number;
+  providerFactory?: BenchProviderFactory;
+  completionMode?: "single" | "self-review" | "contract";
+  modelCallBudget?: number;
+} = {}, onProgress?: (msg: string) => void): Promise<BenchReport> {
   const trials = Math.max(1, opts.trials ?? 1);
   const tasks = opts.tasks ?? TASKS;
   const suite = opts.suite ?? "easy";
   const maxSteps = Math.max(1, opts.maxSteps ?? 25);
-  const fingerprint = benchmarkRunFingerprint(cfg, tasks, maxSteps);
+  const completionMode = opts.completionMode ?? "single";
+  const modelCallBudget = opts.modelCallBudget;
+  if (modelCallBudget !== undefined && (!Number.isSafeInteger(modelCallBudget) || modelCallBudget < 1 || modelCallBudget > 512)) {
+    throw new RangeError("modelCallBudget must be an integer from 1 to 512");
+  }
+  const fingerprintOptions = completionMode === "single" && modelCallBudget === undefined
+    ? {}
+    : { experiment: { completionMode, modelCallBudget: modelCallBudget ?? null } };
+  const fingerprint = benchmarkRunFingerprint(cfg, tasks, maxSteps, benchmarkEnvironmentIdentity(), fingerprintOptions);
   const providerFactory = opts.providerFactory ?? (() => getProvider(cfg));
   const seenProviders = new Set<Provider>();
   const t0 = Date.now();
@@ -1341,42 +1407,102 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number; tasks?:
   const results: BenchResult[] = [];
   try {
     for (const task of tasks) {
-      let passes = 0, modelFailures = 0, infraErrors = 0;
-      let tokens = 0, inTok = 0, cachedTok = 0, outTok = 0, calls = 0, ms = 0;
+      let passes = 0, artifactPasses = 0, controllerPasses = 0, modelFailures = 0, infraErrors = 0;
+      let tokens = 0, inTok = 0, cachedTok = 0, outTok = 0, calls = 0, ms = 0, budgetExhaustions = 0;
+      let coveragePassedWeight = 0, coverageTotalWeight = 0, instrumentExpansions = 0;
       for (let t = 0; t < trials; t++) {
         const dir = join(root, `${task.id}-${t}`);
         mkdirSync(dir, { recursive: true });
         materializeTaskFiles(dir, task.files);
         onProgress?.(`  ${task.id}${trials > 1 ? ` [${t + 1}/${trials}]` : ""} ...`);
-        const provider = freshProvider(providerFactory, seenProviders);
+        const budget = modelCallBudget === undefined ? undefined : { max: modelCallBudget, used: 0 };
+        const nextProvider = () => {
+          const provider = freshProvider(providerFactory, seenProviders);
+          return budget ? withBenchmarkCallBudget(provider, budget) : provider;
+        };
+        const provider = nextProvider();
         let trial: BenchTrialAgent | undefined;
         try {
-          trial = buildBenchTrialAgent(cfg, provider, dir, task.prompt, maxSteps);
+          trial = buildBenchTrialAgent(
+            cfg,
+            provider,
+            dir,
+            task.prompt,
+            maxSteps,
+            undefined,
+            completionMode === "contract"
+              ? (registry) => createCompletionSupervisor(cfg, registry, { providerFactory: nextProvider })
+              : undefined,
+          );
           const { agent } = trial;
           const tStart = Date.now();
-          let pass = false, outcome: TrialOutcome = "model_failure", err = "";
+          let pass = false, artifactPass = false, controllerPass = false, outcome: TrialOutcome = "model_failure", err = "";
+          let campaignFailure = false;
+          let infrastructureFailure = false;
           try {
-            await agent.run(task.prompt);
-            pass = (await verifyTaskEndState(task, dir)).pass && agent.completionStatus.ok;
-            outcome = pass ? "pass" : "model_failure";
+            if (completionMode === "single") await agent.run(task.prompt);
+            else await agent.runUntilDone(task.prompt);
           } catch (e) {
+            campaignFailure = true;
             err = e instanceof Error ? e.message : String(e);
-            outcome = "infra_error";
+            infrastructureFailure = !(e instanceof BenchmarkCallBudgetError);
           }
+          try {
+            artifactPass = (await verifyTaskEndState(task, dir)).pass;
+          } catch (e) {
+            if (!err) err = e instanceof Error ? e.message : String(e);
+            infrastructureFailure = true;
+          }
+          const contractPassed = completionMode !== "contract" || agent.completionContract?.lastReview?.verdict === "pass";
+          if (completionMode === "contract" && agent.completionContract) {
+            const coverage = completionCoverage(agent.completionContract);
+            coveragePassedWeight += coverage.passedWeight;
+            coverageTotalWeight += coverage.totalWeight;
+            instrumentExpansions += Math.max(0, (agent.completionContract.instrumentRevision ?? 1) - 1);
+          }
+          controllerPass = !campaignFailure && agent.completionStatus.ok && contractPassed;
+          if (completionMode === "contract" && !controllerPass && agent.completionContract?.lastReview) {
+            const review = agent.completionContract.lastReview;
+            const statuses = review.evidence.map((row) => `${row.criterionId}:${row.status}`).join(",");
+            const unresolved = review.evidence
+              .filter((row) => row.status !== "passed")
+              .map((row) => {
+                const criterion = agent.completionContract?.criteria.find((item) => item.id === row.criterionId);
+                return `${row.criterionId}=${String(criterion?.requirement ?? "unknown criterion").replace(/\s+/g, " ").slice(0, 140)}`;
+              })
+              .join(" | ");
+            const findings = review.findings.slice(0, 3)
+              .map((finding) => finding.replace(/\s+/g, " ").slice(0, 160))
+              .join(" | ");
+            onProgress?.(`    ! ${task.id} CONTRACT ${review.verdict} [${statuses}]${unresolved ? ` ${unresolved}` : ""}${findings ? ` ${findings}` : ""}`);
+          }
+          pass = !campaignFailure && artifactPass && controllerPass;
+          outcome = infrastructureFailure ? "infra_error" : pass ? "pass" : "model_failure";
           ms += Date.now() - tStart;
+          if (artifactPass) artifactPasses++;
+          if (controllerPass) controllerPasses++;
           if (outcome === "pass") passes++;
           else if (outcome === "model_failure") modelFailures++;
           else infraErrors++;
-          tokens += agent.cost.totalTokens; inTok += agent.cost.promptTokens; cachedTok += agent.cost.cachedTokens; outTok += agent.cost.completionTokens; calls += agent.cost.calls;
+          if (!pass && budget && budget.used >= budget.max) budgetExhaustions++;
+          tokens += agent.cost.totalTokens; inTok += agent.cost.promptTokens; cachedTok += agent.cost.cachedTokens; outTok += agent.cost.completionTokens;
+          calls += budget ? budget.used : agent.cost.calls;
           // Infrastructure errors must remain distinct from model failures.
           if (err) onProgress?.(`    ! ${task.id} ERRORED: ${err.replace(/\s+/g, " ").slice(0, 140)}`);
         } finally {
           try { trial?.close(); } finally { await provider.dispose?.(); }
         }
       }
-      results.push({ id: task.id, passes, modelFailures, infraErrors, trials, tokens, inTok, cachedTok, outTok, calls, ms });
+      const result: BenchResult = { id: task.id, passes, artifactPasses, controllerPasses, modelFailures, infraErrors, trials, tokens, inTok, cachedTok, outTok, calls, ms };
+      if (modelCallBudget !== undefined) result.budgetExhaustions = budgetExhaustions;
+      if (completionMode === "contract") {
+        result.coveragePassedWeight = coveragePassedWeight;
+        result.coverageTotalWeight = coverageTotalWeight;
+        result.instrumentExpansions = instrumentExpansions;
+      }
+      results.push(result);
       const tps = ms > 0 ? Math.round((outTok / ms) * 1000) : 0;
-      onProgress?.(`  ${task.id} -> ${passes}/${trials}  infra=${infraErrors}  ${(ms / trials / 1000).toFixed(1)}s  ${tokens} tok (${outTok} out, ${tps} tok/s)  ${(calls / trials).toFixed(0)} calls`);
+      onProgress?.(`  ${task.id} -> artifact=${artifactPasses}/${trials} ready=${controllerPasses}/${trials} strict=${passes}/${trials}  infra=${infraErrors}  ${(ms / trials / 1000).toFixed(1)}s  ${tokens} tok (${outTok} out, ${tps} tok/s)  ${(calls / trials).toFixed(0)} calls`);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1385,12 +1511,15 @@ export async function runBench(cfg: NekoConfig, opts: { trials?: number; tasks?:
   const report: BenchReport = {
     model: cfg.model, effort: cfg.effort || "off", fingerprint, maxSteps, trials, results,
     passed: sum((r) => r.passes), total: sum((r) => r.trials),
+    artifactPassed: sum((r) => r.artifactPasses ?? 0), controllerPassed: sum((r) => r.controllerPasses ?? 0),
     modelFailures: sum((r) => r.modelFailures), infraErrors: sum((r) => r.infraErrors),
     comparisonValid: results.every((r) => r.infraErrors === 0),
     tokens: sum((r) => r.tokens), inTok: sum((r) => r.inTok), cachedTok: sum((r) => r.cachedTok), outTok: sum((r) => r.outTok), calls: sum((r) => r.calls),
     seconds: (Date.now() - t0) / 1000,
   };
-  if (benchmarkRunFingerprint(cfg, tasks, maxSteps) !== fingerprint) {
+  if (completionMode !== "single") report.completionMode = completionMode;
+  if (modelCallBudget !== undefined) report.modelCallBudget = modelCallBudget;
+  if (benchmarkRunFingerprint(cfg, tasks, maxSteps, benchmarkEnvironmentIdentity(), fingerprintOptions) !== fingerprint) {
     throw new BenchInfrastructureError("benchmark source or task definition changed during the run");
   }
   appendBenchLog(report, suite);
@@ -2090,10 +2219,12 @@ function appendBenchLog(r: BenchReport, suite = "easy"): void {
     mkdirSync(dir, { recursive: true });
     const rec = {
       ts: new Date().toISOString(), suite, model: r.model, effort: r.effort, fingerprint: r.fingerprint, maxSteps: r.maxSteps, pass: r.passed, total: r.total,
+      artifactPass: r.artifactPassed ?? 0, controllerPass: r.controllerPassed ?? 0,
       modelFailures: r.modelFailures, infraErrors: r.infraErrors, comparisonValid: r.comparisonValid,
+      completionMode: r.completionMode ?? "single", modelCallBudget: r.modelCallBudget ?? null,
       seconds: Math.round(r.seconds), tokens: r.tokens, inTok: r.inTok, cachedTok: r.cachedTok, outTok: r.outTok, calls: r.calls,
       tokPerSec: r.seconds > 0 ? Math.round(r.outTok / r.seconds) : 0,
-      tasks: r.results.map((x) => ({ id: x.id, pass: x.passes, modelFailures: x.modelFailures, infraErrors: x.infraErrors, trials: x.trials, ms: x.ms, inTok: x.inTok, cachedTok: x.cachedTok, outTok: x.outTok, calls: x.calls })),
+      tasks: r.results.map((x) => ({ id: x.id, artifactPass: x.artifactPasses ?? 0, controllerPass: x.controllerPasses ?? 0, pass: x.passes, modelFailures: x.modelFailures, infraErrors: x.infraErrors, budgetExhaustions: x.budgetExhaustions ?? 0, coveragePassedWeight: x.coveragePassedWeight ?? null, coverageTotalWeight: x.coverageTotalWeight ?? null, instrumentExpansions: x.instrumentExpansions ?? null, trials: x.trials, ms: x.ms, inTok: x.inTok, cachedTok: x.cachedTok, outTok: x.outTok, calls: x.calls })),
     };
     appendFileSync(join(dir, "bench-log.jsonl"), JSON.stringify(rec) + "\n", "utf8");
   } catch { /* a logging failure must never break the bench */ }
@@ -2101,6 +2232,36 @@ function appendBenchLog(r: BenchReport, suite = "easy"): void {
 
 export interface LiftRow { id: string; raw: boolean; harness: boolean; }
 export interface LiftReport { model: string; fingerprint: string; maxSteps: number; rows: LiftRow[]; rawPass: number; harnessPass: number; total: number; seconds: number; }
+
+export interface CompletionLiftReport {
+  model: string;
+  fingerprint: string;
+  trials: number;
+  modelCallBudget: number;
+  maxSteps: number;
+  baseline: BenchReport;
+  contract: BenchReport;
+  comparisonValid: boolean;
+  seconds: number;
+}
+
+export interface CompletionCampaignCell {
+  profile: string;
+  model: string;
+  report: CompletionLiftReport;
+}
+
+export interface CompletionCampaignReport {
+  suite: string;
+  trials: number;
+  modelCallBudget: number;
+  maxSteps: number;
+  cells: CompletionCampaignCell[];
+  comparisonValid: boolean;
+  seconds: number;
+  /** Anthropic-style routes do not expose a sampling seed; trials are independent provider replicates. */
+  sampling: "provider-replicates";
+}
 
 /** Pull ```filename\n...``` fenced blocks out of a raw model reply (it has no tools, so it must emit files). */
 function parseFileBlocks(text: string) {
@@ -2194,6 +2355,178 @@ export async function runHarnessLift(
     throw new BenchInfrastructureError("benchmark source or task definition changed during the run");
   }
   return { model: cfg.model, fingerprint, maxSteps, rows, rawPass: rows.filter((r) => r.raw).length, harnessPass: rows.filter((r) => r.harness).length, total: rows.length, seconds: (Date.now() - t0) / 1000 };
+}
+
+export async function runCompletionLift(
+  cfg: NekoConfig,
+  onProgress?: (msg: string) => void,
+  opts: {
+    tasks?: BenchTask[];
+    suite?: string;
+    trials?: number;
+    modelCallBudget?: number;
+    maxSteps?: number;
+    providerFactory?: BenchProviderFactory;
+  } = {},
+): Promise<CompletionLiftReport> {
+  const tasks = opts.tasks ?? HARD_TASKS;
+  const suite = opts.suite ?? "hard";
+  const trials = opts.trials ?? 3;
+  const modelCallBudget = opts.modelCallBudget ?? 24;
+  const maxSteps = opts.maxSteps ?? cfg.maxSteps;
+  if (!Number.isSafeInteger(trials) || trials < 1 || trials > 64) throw new RangeError("trials must be an integer from 1 to 64");
+  if (!Number.isSafeInteger(modelCallBudget) || modelCallBudget < 1 || modelCallBudget > 512) throw new RangeError("modelCallBudget must be an integer from 1 to 512");
+  if (!Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > 512) throw new RangeError("maxSteps must be an integer from 1 to 512");
+  const sourceFactory = opts.providerFactory ?? (() => getProvider(cfg));
+  const seenProviders = new Set<Provider>();
+  const providerFactory = () => freshProvider(sourceFactory, seenProviders);
+  const t0 = Date.now();
+  const fingerprint = benchmarkRunFingerprint(cfg, tasks, maxSteps, benchmarkEnvironmentIdentity(), {
+    experiment: { name: "completion-contract-ab", suite, trials, modelCallBudget },
+  });
+
+  onProgress?.("Baseline: legacy self-review controller");
+  const baseline = await runBench(cfg, {
+    tasks,
+    trials,
+    maxSteps,
+    modelCallBudget,
+    completionMode: "self-review",
+    suite: `${suite}-completion-baseline`,
+    providerFactory,
+  }, onProgress);
+  onProgress?.("Treatment: pre-work contract plus independent validator");
+  const contract = await runBench(cfg, {
+    tasks,
+    trials,
+    maxSteps,
+    modelCallBudget,
+    completionMode: "contract",
+    suite: `${suite}-completion-contract`,
+    providerFactory,
+  }, onProgress);
+  if (benchmarkRunFingerprint(cfg, tasks, maxSteps, benchmarkEnvironmentIdentity(), {
+    experiment: { name: "completion-contract-ab", suite, trials, modelCallBudget },
+  }) !== fingerprint) {
+    throw new BenchInfrastructureError("completion experiment source or task definition changed during the run");
+  }
+  return {
+    model: cfg.model,
+    fingerprint,
+    trials,
+    modelCallBudget,
+    maxSteps,
+    baseline,
+    contract,
+    comparisonValid: baseline.comparisonValid && contract.comparisonValid,
+    seconds: (Date.now() - t0) / 1000,
+  };
+}
+
+export async function runCompletionCampaign(
+  entries: readonly { profile: string; config: NekoConfig }[],
+  onProgress?: (message: string) => void,
+  opts: {
+    tasks?: BenchTask[];
+    suite?: string;
+    trials?: number;
+    modelCallBudget?: number;
+    maxSteps?: number;
+    providerFactory?: (profile: string, config: NekoConfig) => BenchProviderFactory;
+  } = {},
+): Promise<CompletionCampaignReport> {
+  if (!entries.length) throw new Error("completion campaign needs at least one profile");
+  const profiles = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.profile.trim() || profiles.has(entry.profile)) throw new Error("completion campaign profiles must be unique and non-empty");
+    profiles.add(entry.profile);
+  }
+  const suite = opts.suite ?? "hard";
+  const trials = opts.trials ?? 3;
+  const modelCallBudget = opts.modelCallBudget ?? 24;
+  const maxSteps = opts.maxSteps ?? Math.max(...entries.map((entry) => entry.config.maxSteps));
+  const started = Date.now();
+  const cells: CompletionCampaignCell[] = [];
+  for (const entry of entries) {
+    onProgress?.(`[${entry.profile}/${entry.config.model}]`);
+    const report = await runCompletionLift(entry.config, (message) => onProgress?.(`  ${message}`), {
+      ...(opts.tasks ? { tasks: opts.tasks } : undefined),
+      suite,
+      trials,
+      modelCallBudget,
+      maxSteps,
+      ...(opts.providerFactory ? { providerFactory: opts.providerFactory(entry.profile, entry.config) } : undefined),
+    });
+    cells.push({ profile: entry.profile, model: entry.config.model, report });
+  }
+  return {
+    suite,
+    trials,
+    modelCallBudget,
+    maxSteps,
+    cells,
+    comparisonValid: cells.every((cell) => cell.report.comparisonValid),
+    seconds: (Date.now() - started) / 1000,
+    sampling: "provider-replicates",
+  };
+}
+
+function wilson95(passes: number, total: number): [number, number] {
+  if (!total) return [0, 0];
+  const z = 1.959963984540054;
+  const p = passes / total;
+  const z2 = z * z;
+  const denominator = 1 + z2 / total;
+  const center = (p + z2 / (2 * total)) / denominator;
+  const margin = (z / denominator) * Math.sqrt((p * (1 - p) + z2 / (4 * total)) / total);
+  return [Math.max(0, center - margin), Math.min(1, center + margin)];
+}
+
+export function renderCompletionCampaignReport(report: CompletionCampaignReport): string {
+  const rows = report.cells.map((cell) => {
+    const baselinePass = cell.report.baseline.artifactPassed ?? 0;
+    const contractPass = cell.report.contract.artifactPassed ?? 0;
+    const total = cell.report.baseline.total;
+    const [baseLow, baseHigh] = wilson95(baselinePass, total);
+    const [contractLow, contractHigh] = wilson95(contractPass, total);
+    const coveragePassed = cell.report.contract.results.reduce((sum, row) => sum + (row.coveragePassedWeight ?? 0), 0);
+    const coverageTotal = cell.report.contract.results.reduce((sum, row) => sum + (row.coverageTotalWeight ?? 0), 0);
+    const expansions = cell.report.contract.results.reduce((sum, row) => sum + (row.instrumentExpansions ?? 0), 0);
+    const pct = (value: number) => `${Math.round(value * 100)}%`;
+    const delta = contractPass - baselinePass;
+    return `  ${cell.profile}/${cell.model}: legacy ${baselinePass}/${total} [${pct(baseLow)}, ${pct(baseHigh)}] -> contract ${contractPass}/${total} [${pct(contractLow)}, ${pct(contractHigh)}], delta ${delta >= 0 ? "+" : ""}${delta}, coverage ${coveragePassed}/${coverageTotal}, expansions ${expansions}`;
+  });
+  return [
+    `Completion campaign :: ${report.suite}`,
+    ...rows,
+    `  matrix: ${report.cells.length} model/profile cell(s) x ${report.trials} provider replicate(s)/task x 2 controllers`,
+    `  matched cap: ${report.modelCallBudget} provider calls/trial/controller; maxSteps=${report.maxSteps}`,
+    `  sampling: independent provider replicates (not a controllable API seed on Anthropic-compatible routes)`,
+    `  comparison: ${report.comparisonValid ? "VALID" : "NOT COMPARABLE - infrastructure errors occurred"}  ${report.seconds.toFixed(0)}s`,
+  ].join("\n");
+}
+
+export function renderCompletionLiftReport(report: CompletionLiftReport): string {
+  const rows = report.baseline.results.map((base) => {
+    const treatment = report.contract.results.find((row) => row.id === base.id);
+    const coverage = treatment?.coverageTotalWeight
+      ? `, coverage ${treatment.coveragePassedWeight ?? 0}/${treatment.coverageTotalWeight}, expansions ${treatment.instrumentExpansions ?? 0}`
+      : "";
+    return `  ${base.id.padEnd(18)} self artifact ${base.artifactPasses ?? 0}/${base.trials}, ready ${base.controllerPasses ?? 0}/${base.trials}, strict ${base.passes}/${base.trials} (${base.calls} calls)  contract artifact ${treatment?.artifactPasses ?? 0}/${treatment?.trials ?? 0}, ready ${treatment?.controllerPasses ?? 0}/${treatment?.trials ?? 0}, strict ${treatment?.passes ?? 0}/${treatment?.trials ?? 0} (${treatment?.calls ?? 0} calls${coverage})`;
+  }).join("\n");
+  const delta = (report.contract.artifactPassed ?? 0) - (report.baseline.artifactPassed ?? 0);
+  const validity = report.comparisonValid ? "VALID" : "NOT COMPARABLE - infrastructure errors occurred";
+  return [
+    `Completion-contract A/B :: ${report.model}`,
+    rows,
+    "  ----------------------------------------------------------------",
+    `  legacy self-review: artifact ${report.baseline.artifactPassed ?? 0}/${report.baseline.total}, ready ${report.baseline.controllerPassed ?? 0}/${report.baseline.total}, strict ${report.baseline.passed}/${report.baseline.total}  ${report.baseline.tokens} tokens  ${report.baseline.calls} calls`,
+    `  contract+validator: artifact ${report.contract.artifactPassed ?? 0}/${report.contract.total}, ready ${report.contract.controllerPassed ?? 0}/${report.contract.total}, strict ${report.contract.passed}/${report.contract.total}  ${report.contract.tokens} tokens  ${report.contract.calls} calls`,
+    `  external-artifact delta: ${delta >= 0 ? "+" : ""}${delta} pass(es)  comparison: ${validity}`,
+    `  matched cap: ${report.modelCallBudget} provider calls/trial; token use is reported, not forced equal`,
+    `  trials: ${report.trials}/task  maxSteps=${report.maxSteps}  ${report.seconds.toFixed(0)}s`,
+    `  fingerprint: ${report.fingerprint}`,
+  ].join("\n");
 }
 
 export function renderLiftReport(r: LiftReport): string {

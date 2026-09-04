@@ -13,6 +13,7 @@ import { planTurnCapabilities } from "./turn-capabilities.ts";
 import { configureToolRegistry, inheritToolRegistrySettings, restrictToolRegistryForSubagent } from "./tool-registry.ts";
 import { matchedTurnContext, productionTurnContext, subagentTurnContext } from "./turn-context.ts";
 import { WEB_EXTRACT_PROMPT } from "./web.ts";
+import { createCompletionSupervisor } from "./completion-supervisor.ts";
 
 export interface AgentRuntime {
   agent: Agent;
@@ -195,6 +196,7 @@ export async function buildAgentRuntime(
     verifyBeforeExit: options.noTools ? cfg.verifyBeforeExit : cfg.data.verify_before_exit !== false,
     verifyStateChangesBeforeExit: true,
     adaptiveEffort: cfg.adaptiveEffort,
+    completionSupervisor: createCompletionSupervisor(cfg, registry),
   });
 
   return {

@@ -58,8 +58,10 @@ export const DEFAULTS: any = {
   offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
   codex_keepalive: 15, // GPT-5.6 App Server idle minutes; 0 keeps it alive until logout/exit
   // `approval` is omitted so the mode getter can distinguish legacy user intent from the default.
-  sandbox: true,
-  sandbox_network: false, // egress blocked inside the sandbox by default
+  // Native Windows has no Claude-supported local sandbox. Run the user's host shell directly by
+  // default; users and restricted validator profiles can still opt into the OS sandbox explicitly.
+  sandbox: false,
+  sandbox_network: false, // applies only when the optional OS sandbox is enabled
   sandbox_domains: [], // srt (Windows) allowlist used when sandbox_network is true (no allow-all in srt)
   // A live sandbox alone is not a verified read-confidentiality boundary.
   sandbox_auto_approve: false,

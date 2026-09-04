@@ -20,10 +20,11 @@ test("runtime block makes Neko mode and provider-native separation authoritative
   expect(block).toContain("host computer control still requires explicit consent");
   expect(block).toContain("Provider-native shell, apply_patch/edit, approvals, sandbox, and skills are a separate transport runtime");
   expect(block).toContain("Neko bash dynamic tool: callable");
-  expect(block).toContain("network_probe can resolve one host and test bounded TCP ports outside the Bash sandbox");
-  expect(block).toContain("declare the exact destination hosts in the bash call's network_domains field");
-  expect(block).toContain("Auto/yolo approves that bounded one-call request");
-  expect(block).toContain("/sandbox is only for a persistent standing policy");
+  expect(block).toContain("this same host and current Neko process identity");
+  expect(block).toContain("host networking available");
+  expect(block).toContain("network_domains is optional");
+  expect(block).toContain("Never open or drive a terminal through computer");
+  expect(block).toContain("run_in_background=true");
   expect(block).toContain("sandbox=off (host/unconfined)");
   expect(block).toMatch(/shell=(?:GIT BASH \(POSIX\)|cmd\.exe|\/bin\/sh \(POSIX\))/);
   expect(block).not.toMatch(/[^\x00-\x7f]/);

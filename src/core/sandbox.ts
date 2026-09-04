@@ -28,6 +28,9 @@ export interface SpawnTarget {
   file: string;
   args: string[];
   shell: boolean;
+  startupGraceMs?: number;
+  /** Launch-private input for a restricted validator. It is never interpolated into shell syntax. */
+  protectedStdin?: string;
   /** Host-owned environment overrides required by this confinement profile. */
   env?: Record<string, string>;
   /** Remove per-launch material after the child closes. Must be safe to call more than once. */
@@ -37,6 +40,13 @@ export interface SpawnTarget {
 }
 
 const MAX_SANDBOX_DOMAINS_PER_CALL = 16;
+const SRT_STARTUP_GRACE_MS = 75_000;
+
+export function sandboxProcessDeadlineMs(commandTimeoutMs: number, startupGraceMs = 0): number {
+  const command = Math.max(0, Math.floor(commandTimeoutMs));
+  const startup = Math.max(0, Math.floor(startupGraceMs));
+  return Math.min(Number.MAX_SAFE_INTEGER, command + startup);
+}
 
 /** Validate and canonicalize an SRT-compatible destination allowlist. This is deliberately
  * narrower than URL parsing: a grant names only a host pattern and optional destination port,
@@ -898,6 +908,7 @@ export function buildSandbox(
       file: srt.exe,
       args: ["--settings", srt.settingsPath, "-c", inner],
       shell: false,
+      startupGraceMs: SRT_STARTUP_GRACE_MS,
       treeContainedOnClose: true,
       ...(srt.cleanup ? { cleanup: srt.cleanup } : undefined),
     };
@@ -960,25 +971,27 @@ export function wrapBash(command: string, root: string, opts: { enabled: boolean
     if (opts.readOnlyWorkspace) validationTemp = createValidationTemp(root, kind === "srt");
     let sandboxCommand = command;
     if (opts.stdinSource !== undefined) {
-      if (kind !== "srt" || !validationTemp) {
-        throw new Error("protected stdin source requires the Windows SRT read-only profile");
+      if (!opts.readOnlyWorkspace || !validationTemp || kind === "none") {
+        throw new Error("protected stdin source requires a live read-only sandbox");
       }
       const bytes = Buffer.byteLength(opts.stdinSource);
       if (bytes > 8 * 1024 * 1024 || opts.stdinSource.includes("\0")) {
         throw new Error("protected stdin source exceeded its bounded text contract");
       }
-      const inputPath = join(validationTemp.path, `stdin-${process.pid}-${randomUUID()}.mjs`);
-      writeFileSync(inputPath, opts.stdinSource, { encoding: "utf8", flag: "wx", mode: 0o600 });
-      const written = statSync(inputPath);
-      if (!written.isFile() || written.size !== bytes) throw new Error("protected stdin source was not written atomically");
-      const shellPath = inputPath
-        .replace(/^([A-Za-z]):[\\/]/, (_all, drive: string) => `/${drive.toLowerCase()}/`)
-        .replace(/\\/g, "/");
-      const quoted = `'${shellPath.replace(/'/g, "'\\''")}'`;
-      // SRT's broker does not forward the parent stdin pipe. Open and unlink the launch-private file,
-      // then copy it through Git's fixed cat into a pipe. A direct fd redirect stays seekable on
-      // Windows and Bun.stdin could reread the runner after module initialization.
-      sandboxCommand = `exec 3<${quoted} || exit 97\nrm -- ${quoted} || exit 98\n/usr/bin/cat <&3 | ${command}`;
+      if (kind === "srt") {
+        const inputPath = join(validationTemp.path, `stdin-${process.pid}-${randomUUID()}.mjs`);
+        writeFileSync(inputPath, opts.stdinSource, { encoding: "utf8", flag: "wx", mode: 0o600 });
+        const written = statSync(inputPath);
+        if (!written.isFile() || written.size !== bytes) throw new Error("protected stdin source was not written atomically");
+        const shellPath = inputPath
+          .replace(/^([A-Za-z]):[\\/]/, (_all, drive: string) => `/${drive.toLowerCase()}/`)
+          .replace(/\\/g, "/");
+        const quoted = `'${shellPath.replace(/'/g, "'\\''")}'`;
+        // SRT's broker does not forward the parent stdin pipe. Open and unlink the launch-private file,
+        // then copy it through Git's fixed cat into a pipe. A direct fd redirect stays seekable on
+        // Windows and Bun.stdin could reread the runner after module initialization.
+        sandboxCommand = `exec 3<${quoted} || exit 97\nrm -- ${quoted} || exit 98\n/usr/bin/cat <&3 | ${command}`;
+      }
     }
     script = bash ? writeSrtScript(root, sandboxCommand, bunPath) : null;
     settings = exe
@@ -1032,9 +1045,13 @@ export function wrapBash(command: string, root: string, opts: { enabled: boolean
           NoDefaultCurrentDirectoryInExePath: "1",
         }
       : {};
+    const protectedStdin = opts.stdinSource !== undefined && kind !== "srt"
+      ? { protectedStdin: opts.stdinSource }
+      : {};
     return opts.readOnlyWorkspace
       ? {
           ...target,
+          ...protectedStdin,
           env: {
             ...srtBridgeEnv,
             TEMP: validationTemp!.path,

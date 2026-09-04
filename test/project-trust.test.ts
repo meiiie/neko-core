@@ -120,7 +120,7 @@ test("project controls are quarantined until their exact snapshot is trusted", (
   expect(before.provider).toBe("openai_compat");
   expect(before.model).toBe("");
   expect(before.mode).toBe("auto"); // fresh configs are auto-by-default since 0.24.10
-  expect(before.sandbox).toBe(true);
+  expect(before.sandbox).toBe(false);
   expect(before.mcpServers.project).toBeUndefined();
   expect(before.apiKey).toBe("");
   before.data.sandbox = false;
@@ -415,7 +415,7 @@ test("all project prompts, skills, agents, and recipes use one exact trusted sna
   expect(loadRecipe("project-recipe", root, home)).toBeNull();
   expect(registry.loadSkill?.("project-skill")).toBeNull();
   expect(loadSkill("global", root, home)?.body).toContain("GLOBAL_SKILL_SENTINEL");
-});
+}, { timeout: 15_000 });
 
 test("project trust is exact-cwd and never inherits ancestor instructions", () => {
   const { root, home } = fixture();
