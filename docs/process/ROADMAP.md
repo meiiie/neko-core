@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-09-08) - v1.6.0 release candidate
+## Current status (2026-09-08) - v1.6.0 released
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The current 1.x platform includes:
@@ -26,9 +26,10 @@ The current 1.x platform includes:
   embedded-version verification before atomic activation.
 
 **Branch:** `main`. **Current release:** [v1.6.0](https://github.com/meiiie/neko-core/releases/tag/v1.6.0)
-is the candidate for this source tree; publication requires the CI/release gates below.
-Last verified public release before tagging: v1.5.1, published 2026-09-04, commit
-`c03012af31b81d04b13b8f65757f0f23d3cafe51`. Confirm the live release and assets on GitHub.
+is public, published 2026-09-07 18:05 UTC (2026-09-08 in Vietnam), commit
+`adbb74cd518ce60d85bb8d80b186066c9b529420`. Cross-platform CI and the release workflow
+passed; all 17 assets, latest-release routing, the downloaded Windows binary's SHA-256
+and version, and the public website were verified. See the [release record](WORKLOG.md).
 The 1.0 compatibility contract remains the long-term stable baseline. v1.5.0 makes host Bash the normal
 no-flag shell route while preserving explicit fail-closed sandboxing. v1.5.1 changes only release transport:
 resumable checkpoints and compressed assets;

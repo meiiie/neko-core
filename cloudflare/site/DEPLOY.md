@@ -13,34 +13,29 @@ cloudflare/site/
   wrangler.toml         the deploy config
 ```
 
-## Before you start: there is already something on this hostname
+## Current deployment
 
-`neko.holilihu.online` currently resolves to Cloudflare and serves **redirects**, not a site:
+`neko.holilihu.online` is already attached to the `neko-site` Worker. The landing page
+returns HTTP 200; `/install.sh` and `/install.ps1` redirect to the matching installer
+in `meiiie/neko-core/main`. Verified 2026-09-08 for v1.6.0, Worker version
+`308c76e7-7a8f-4944-bca6-301d16046805`.
 
-| Path | Today | After this deploy |
-|---|---|---|
-| `/install.sh` | 302 -> `raw.githubusercontent.com/meiiie/neko-core/main/install.sh` | unchanged (the Worker does the same 302) |
-| `/install.ps1` | 302 -> `.../install.ps1` | unchanged |
-| `/` | 302 -> `github.com/meiiie/bang_c` | the landing page |
-
-That last row is a live bug: the root of the public install domain points at the **frozen predecessor
-repo**. Deploying this fixes it — but only if the old rule is removed, because **Cloudflare Redirect
-Rules run before Workers**. If a redirect rule still matches `/`, visitors keep landing on GitHub and the
-Worker never runs.
-
-So: find the existing rule first, in the dashboard under **holilihu.online -> Rules -> Redirect Rules**
-(also check **Bulk Redirects** and **Page Rules**). Note exactly what it matches, then delete or narrow
-it to leave `/` alone. Keep or delete the `/install.*` rules as you like — the Worker handles those two
-paths either way, and a surviving rule simply wins first with the same result.
+Ordinary release deploys must not remove DNS records or change redirect rules.
+The old root redirect to `bang_c` was a historical bootstrap issue, not a current
+deployment step. If a redirect regresses, inspect the exact matching rule before
+proposing a scoped change; Cloudflare Redirect Rules run before Workers.
 
 ## Deploy
 
-Wrangler needs an interactive browser login, so run these yourself:
+Use an already authenticated Wrangler session for the account owning
+`holilihu.online`. Only run `wrangler login` when authentication is missing.
+From this repository, the feedback package provides the pinned Wrangler tool:
 
 ```bash
-cd cloudflare/site
-npx wrangler login      # opens a browser; authorize the account that owns holilihu.online
-npx wrangler deploy
+cd cloudflare/feedback
+bun install --frozen-lockfile
+cd ../site
+node ../feedback/node_modules/wrangler/bin/wrangler.js deploy
 ```
 
 It prints a `https://neko-site.<your-subdomain>.workers.dev` URL. Check that first — it bypasses every
@@ -51,7 +46,7 @@ curl -sI https://neko-site.<subdomain>.workers.dev/ | head -1          # HTTP/2 
 curl -sI https://neko-site.<subdomain>.workers.dev/install.sh | head -2 # 302 -> raw.githubusercontent
 ```
 
-## Attach the domain
+## Attach the domain (new installations only)
 
 Dashboard -> **Workers & Pages** -> `neko-site` -> **Settings** -> **Domains & Routes** -> **Add** ->
 **Custom domain** -> `neko.holilihu.online`. Cloudflare replaces the existing DNS record for that
@@ -72,8 +67,8 @@ scripts, and in every release note: if it ever returns HTML, every new user's fi
 ## The version on the page comes from the release, not from this repo
 
 The Worker reads `releases/latest` from the GitHub API and rewrites `[data-release]` spots — the version
-in the announce bar and the footer, and the five download sizes — so shipping a release needs no site
-deploy. Three things keep that safe: it is cached ten minutes, it fails open to whatever was baked in at
+in the announce bar and the footer, and the five download sizes. Update the baked fallback and redeploy
+at release time even though the live lookup updates automatically. Three things keep that safe: it is cached ten minutes, it fails open to whatever was baked in at
 deploy time, and it only fills in elements the markup marked for it.
 
 Two traps, both paid for:
@@ -126,7 +121,7 @@ inside 312px of usable width at 360px — where the wordmark and the CTA were ov
 
 ## Changing the page
 
-Edit `public/index.html` and run `npx wrangler deploy` again. Two things to keep in mind:
+Edit `public/index.html` and run the pinned deployment command above again. Things to keep in mind:
 
 - **English lives in the markup, Vietnamese lives in `app.js`.** Add a `data-i18n="some.key"` to the
   element with the English text inside it, then add `"some.key"` to the `VI` object. A key with no
@@ -139,9 +134,8 @@ Edit `public/index.html` and run `npx wrangler deploy` again. Two things to keep
   [...document.querySelectorAll("[data-i18n]")].filter(n => !n.innerHTML.trim())
   ```
 
-- **Download links use GitHub's `releases/latest/download/` permalinks**, so a new release needs no site
-  change. The file *sizes* printed next to them are hardcoded — update them when a build's size moves
-  by more than a few MB, or drop them.
+- **Download links use GitHub's `releases/latest/download/` permalinks.** Live sizes come from the
+  release API; update baked fallback sizes when they materially change.
 - **Claims on this page are checkable.** Everything it says about tools, gating, offline use and the
   oracle is true of the shipped binary. Keep it that way; a landing page that oversells is a support
   burden, not marketing.

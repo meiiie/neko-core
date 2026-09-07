@@ -5,7 +5,37 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
-## 2026-09-08 - v1.6.0 release candidate
+## 2026-09-08 - v1.6.0 released
+
+Published [v1.6.0](https://github.com/meiiie/neko-core/releases/tag/v1.6.0) at
+2026-09-07 18:05:14 UTC from `adbb74cd518ce60d85bb8d80b186066c9b529420`.
+[CI](https://github.com/meiiie/neko-core/actions/runs/34149740541) and the
+[release workflow](https://github.com/meiiie/neko-core/actions/runs/34150128559)
+completed successfully, including Linux/macOS/Windows, the feedback Worker,
+native input/ACP probes and both startup renderers. All 17 assets are public and
+`releases/latest` resolves to v1.6.0. The Windows gzip was downloaded, decompressed,
+verified against its SHA-256 sidecar and executed: `neko-core 1.6.0`.
+
+Final local UI checks: 27 pass, 185 assertions; production build: 946 modules;
+real ConPTY ghost/typing: three passes using three synthetic localhost requests,
+no external model calls. Final scroll probe: 12 ms first response / 189 ms settle,
+with startup, resize, slash menu and keyboard checks passing. Doctor/policy retain
+the expected local untrusted-project, unconfined-auto, offline-bridge and non-TTY
+warnings. No new root runtime dependency was added.
+
+Local aggregate runs also reproduced benchmark-supervisor timeouts during heavy
+host load (94% total CPU observed). All three supervisor cases later passed in a
+fresh targeted process, but this does not establish the full cause of their
+combined-run variability. Failed logs were retained alongside passing runs;
+cross-platform CI on the tagged commit is the complete clean-suite record.
+ProgramBench remains paused, and none of these test runs is a benchmark score.
+
+Deployed the website fallback with Worker version
+`308c76e7-7a8f-4944-bca6-301d16046805`; its HTML and `/__release` both report 1.6.0.
+The feedback backend remains the previously verified deployment below. Inbox
+placement of feedback emails is still not independently verified.
+
+### Candidate investigation
 
 Owner authorized release of the provider repairs, dynamic ChatGPT catalog, private
 feedback flow and repository-documentation refresh. No completion-controller,
