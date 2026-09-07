@@ -101,6 +101,10 @@ jobs:
         run: node bin/neko-source.cjs policy
       - name: build the single binary (bakes NODE_ENV=production - see package.json)
         run: bun run build
+      - name: fallback renderer startup and exit lifecycle
+        env:
+          NEKO_INCR: "0"
+        run: bun scripts/e2e-startup-lifecycle.ts
       - name: verify the prebuilt binary ignores cwd autoload files
         shell: pwsh
         run: |

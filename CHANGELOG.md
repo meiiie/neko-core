@@ -30,6 +30,9 @@ All notable changes to Neko Core are documented here. The format follows
   can update an older managed pack while preserving sign-in.
 - The completed-turn resize regression now isolates personal configuration, waits for the actual idle frame,
   and cleans up even on assertion failure, rather than assuming every turn finishes within 450 ms.
+- The fallback terminal renderer now strips disallowed Ink sync-output controls and internal caret markers,
+  just like the default renderer. This fixes a reproduced Windows startup frame that lost the welcome header.
+  CI and native release builds exercise startup/exit with both renderers.
 
 ### Documentation
 

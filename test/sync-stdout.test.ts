@@ -65,10 +65,18 @@ test("wrapStdoutForSync: brackets each write in BSU..ESU when supported", () => 
   expect(wrapped.columns).toBe(120); // non-write props read through
 });
 
-test("wrapStdoutForSync: no-op when unsupported or not a TTY; probe override wins", () => {
+test("wrapStdoutForSync: unsupported TTY strips Ink sync brackets and caret sentinel without a differ", () => {
   const a = fakeTty(true);
-  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
-  expect(wrapStdoutForSync(a.stream, { env: { TERM: "dumb" } as any })).toBe(a.stream); // unsupported -> same object
+  const wrapped = wrapStdoutForSync(a.stream, { supported: false });
+  wrapped.write(BSU);
+  wrapped.write("frame\u2060");
+  wrapped.write(ESU);
+  wrapped.write(BSU + "next" + ESU);
+  expect(a.writes).toEqual(["frame", "next"]);
+  expect(wrapped.columns).toBe(120);
+});
+
+test("wrapStdoutForSync: non-TTY is unchanged; probe override wins", () => {
   const b = fakeTty(false);
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   expect(wrapStdoutForSync(b.stream, { env: { TERM_PROGRAM: "WezTerm" } as any })).toBe(b.stream); // not a TTY -> same object

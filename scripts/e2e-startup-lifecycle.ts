@@ -33,6 +33,7 @@ const vt = new VirtualTerminal(118, 30);
 let raw = "";
 let composerSeen = false;
 let headerPresentAtComposer = false;
+let firstComposerFrame = "";
 
 // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
 const term = new (Bun as any).Terminal({
@@ -44,6 +45,7 @@ const term = new (Bun as any).Terminal({
     vt.write(text);
     if (!composerSeen && vt.text().includes('Try: "explain src/agent.ts"')) {
       composerSeen = true;
+      firstComposerFrame = vt.text();
       headerPresentAtComposer = vt.text().includes("Neko Core v");
     }
   },
@@ -74,7 +76,7 @@ const waitFor = async (predicate: () => boolean, timeoutMs: number): Promise<boo
 let ok = false;
 try {
   if (!(await waitFor(() => composerSeen, 15_000))) throw new Error("composer did not appear");
-  if (!headerPresentAtComposer) throw new Error("composer appeared before the welcome header");
+  if (!headerPresentAtComposer) throw new Error(`composer appeared before the welcome header: ${JSON.stringify(firstComposerFrame)}`);
 
   await sleep(500); // allow Ink's input effect to attach; this test targets paint/teardown, not key-race timing
   for (const key of "/exit") { term.write(key); await sleep(15); }

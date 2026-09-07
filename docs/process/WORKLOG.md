@@ -25,6 +25,16 @@ intact. The output-cap fixture yields between writes instead of saturating the
 event loop, and temporary-directory cleanup retries short Windows handle-release
 delays. These are fixture changes, not production timing or benchmark-score changes.
 
+The initial candidate passed all 1,606 local tests (14 existing skips), typecheck,
+lint, doctor/policy and production build. Its real ConPTY fallback-renderer gate
+then reproduced a missing first header row. `wrapStdoutForSync` returned the raw TTY
+when both sync support and the differ were disabled, bypassing its own filtering
+of Ink's sync brackets and the internal caret sentinel. The wrapper now applies
+that filtering to all TTY renderers; non-TTY streams remain unchanged. Added a
+targeted regression, first-frame diagnostic output, and a fallback-renderer gate
+in CI and every native release build. The source lifecycle probe passes after
+the fix; the complete candidate gate must be rerun before tagging.
+
 The Worker typecheck and local real D1/email-binding integration pass. Added a
 dedicated Linux CI job for them, without credentials or live email. Full local,
 cross-platform CI and release artifact results are authoritative in the release

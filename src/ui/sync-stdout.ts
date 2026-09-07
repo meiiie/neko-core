@@ -140,9 +140,8 @@ function isSyncAllowlisted(env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
- * Wrap a stdout stream so each string write is bracketed BSU..ESU. Returns the stream UNCHANGED when
- * synchronized output isn't supported (or the stream isn't a TTY), so there is zero overhead and zero
- * risk off the happy path. The wrapper is a Proxy that overrides only `write`; every other property
+ * Wrap TTY writes to enforce the sync-output decision, including Ink's own brackets. Non-TTY streams
+ * remain unchanged. The wrapper is a Proxy that overrides only `write`; every other property
  * (columns/rows/isTTY) reads through, and every forwarded method is bound to the real stream so
  * EventEmitter calls like `on("resize")` register on the actual stdout (not the Proxy).
  */
@@ -153,7 +152,7 @@ export function wrapStdoutForSync<T extends Writable>(base: T, opts: { env?: Nod
   const differ = opts.differ;
   // SAFETY: sync wrappers reach the raw stream surface (isTTY/write) that Node's Writable union hides.
   const rawBase = base as any;
-  if (!rawBase.isTTY || (!supported && !differ)) return base;
+  if (!rawBase.isTTY) return base;
   // Imperative band repaints (scroll/append/warm) bypass Ink entirely: the differ writes straight to
   // the base stream, atomically bracketed like everything else.
   // SAFETY: the differ's writer hook is an imperative Ink bypass; guarded by the optional call.
