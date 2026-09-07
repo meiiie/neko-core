@@ -35,6 +35,13 @@ targeted regression, first-frame diagnostic output, and a fallback-renderer gate
 in CI and every native release build. The source lifecycle probe passes after
 the fix; the complete candidate gate must be rerun before tagging.
 
+The subsequent full rerun exposed the known handoff-spool fixture timeout. A
+separate timing probe measured 10,443 ms creating 1,025 files versus 711 ms listing
+the spool. Moved mass file preparation into a separately bounded 30-second setup
+hook and a distinct fixture directory. The actual scan still has its original
+5-second test timeout and all 1,024-entry/truncation assertions; no store code or
+production limit changed. Temporary timing instrumentation was removed.
+
 The Worker typecheck and local real D1/email-binding integration pass. Added a
 dedicated Linux CI job for them, without credentials or live email. Full local,
 cross-platform CI and release artifact results are authoritative in the release

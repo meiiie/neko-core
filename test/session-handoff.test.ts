@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -185,15 +185,22 @@ test("immutable publication never overwrites an existing destination", () => {
   expect(readFileSync(path, "utf8")).toBe(sentinel);
 });
 
-test("listPending caps spool work and reports truncation", () => {
-  const target = session("target-budget");
-  mkdirSync(PENDING, { recursive: true });
-  for (let index = 0; index < 1025; index++) writeFileSync(join(PENDING, `invalid-${index}.txt`), "{}");
+describe("handoff spool entry budget", () => {
+  const budgetHome = join(ROOT, "budget-home");
+  const pending = join(budgetHome, ".neko-core", "handoffs", "v1", "pending");
 
-  const result = new SessionHandoffStore(TEST_HOME).listPending(target);
-  expect(result.items).toEqual([]);
-  expect(result.rejected.length).toBe(1024);
-  expect(result.truncated).toBe(true);
+  beforeAll(() => {
+    mkdirSync(pending, { recursive: true });
+    for (let index = 0; index < 1025; index++) writeFileSync(join(pending, `invalid-${index}.txt`), "{}");
+  }, 30_000);
+
+  test("listPending caps spool work and reports truncation", () => {
+    const target = session("target-budget");
+    const result = new SessionHandoffStore(budgetHome).listPending(target);
+    expect(result.items).toEqual([]);
+    expect(result.rejected.length).toBe(1024);
+    expect(result.truncated).toBe(true);
+  });
 });
 
 test("send rejects a handoff store redirected through a symlink or junction", () => {
