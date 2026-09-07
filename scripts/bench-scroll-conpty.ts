@@ -108,7 +108,7 @@ if (!menuOk) {
   console.log(lines.map((line, i) => `${String(i).padStart(2)}|${line}`).join("\n"));
 }
 term.write("\x1b[B"); await sleep(80); term.write("\t");
-const keyboardOk = await until(() => vt.text().includes("> /cost"), 2000);
+const keyboardOk = await until(() => vt.text().includes("> /feedback"), 2000);
 console.log(`[${label}] startup=${startupOk ? "OK" : "FAIL"} resize=${resizeOk ? "OK" : "FAIL"} slash-menu=${menuOk ? "OK" : "FAIL"} keyboard=${keyboardOk ? "OK" : "FAIL"}`);
 
 term.write("\x03"); await sleep(200); term.write("\x03");

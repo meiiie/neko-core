@@ -33,6 +33,8 @@ All notable changes to Neko Core are documented here. The format follows
 - The fallback terminal renderer now strips disallowed Ink sync-output controls and internal caret markers,
   just like the default renderer. This fixes a reproduced Windows startup frame that lost the welcome header.
   CI and native release builds exercise startup/exit with both renderers.
+- Slash-command suggestions stay within narrow/short terminals: descriptions truncate to one row and the
+  visible item count follows terminal height, preserving the composer and keyboard selection after resize.
 
 ### Documentation
 

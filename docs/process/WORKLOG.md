@@ -42,6 +42,16 @@ hook and a distinct fixture directory. The actual scan still has its original
 5-second test timeout and all 1,024-entry/truncation assertions; no store code or
 production limit changed. Temporary timing instrumentation was removed.
 
+The real scroll probe then found a narrow-window slash menu overflowing the
+viewport: multiline descriptions exceeded the fixed ten-item height estimate.
+Suggestions and their footer now truncate to single rows, and item count respects
+terminal height. Extended the existing short-window simulation to 72x20 and 40x10,
+including keyboard selection/completion. Updated the probe's stale second-item
+expectation from `/cost` to the newly added `/feedback`; it only completes the
+command and never submits a report. The normal scroll metric itself was
+27 ms first response / 180 ms settle; this is a workstation observation, not a
+compute-matched performance claim.
+
 The Worker typecheck and local real D1/email-binding integration pass. Added a
 dedicated Linux CI job for them, without credentials or live email. Full local,
 cross-platform CI and release artifact results are authoritative in the release

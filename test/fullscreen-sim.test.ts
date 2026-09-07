@@ -633,6 +633,19 @@ test("slash menu on a SHORT window keeps the input row + first items (chrome nev
   const t = vt.text();
   expect(t).toMatch(/> \S?\//);            // the input row with the typed "/" is ON SCREEN (was squashed away)
   expect(t).toContain("/help");             // the FIRST (selected) menu entry survived too
+  out.setSize(72, 20); await tick(400);
+  expect(vt.text()).toContain("up/down to select, tab to complete");
+  expect(vt.text()).toMatch(/> \S?\//);
+  expect(vt.lines()[19]).toBe("");
+  for (let i = 0; i < 5; i++) { stdin.push("\x1b[B"); await tick(30); }
+  out.setSize(40, 10); await tick(400);
+  expect(vt.text()).toContain("/help");
+  expect(vt.text()).toMatch(/> \S?\//);
+  expect(vt.lines()[9]).toBe("");
+  expect(vt.text()).toContain("> /feedback");
+  stdin.push("\x1b[A"); await tick(60);
+  stdin.push("\x1b[B"); await tick(60); stdin.push("\t"); await tick(120);
+  expect(vt.text()).toContain("> /feedback");
   app.unmount();
   await tick(50);
 }, 30000);
